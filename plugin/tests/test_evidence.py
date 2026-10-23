@@ -133,10 +133,11 @@ def test_quote_in_a_decoded_jsonl_line_and_a_range(tmp_path: Path):
     assert code["status"] == "verified" and code["evidence"]["kind"] == "code"
 
 
-def test_a_failed_mark_keeps_its_reason_and_a_missing_one_stays_unchecked():
+def test_a_failed_mark_keeps_its_reason_and_a_missing_one_fails_as_not_run():
     out = check_all([mark("a", 1), mark("b", 2)], '```json\n[{"mark": 1, "status": "wrong", "reason": "no record says so"}]\n```', [], "/data")
     assert out["parsed"] is True
-    assert [(r["status"], r["reason"]) for r in out["results"]] == [("failed", "no record says so"), ("unchecked", "the check gave no answer for this citation")]
+    assert [(r["status"], r.get("failedBy"), r["reason"]) for r in out["results"]] == [
+        ("failed", "check", "no record says so"), ("failed", "none", "The check did not run. Its answer left this citation out.")]
     assert check_all([mark("a")], "I could not check it.", [], "/data")["parsed"] is False
 
 
@@ -415,7 +416,8 @@ def test_one_mark_the_validator_cannot_judge_leaves_the_others_judged(monkeypatc
     real = E.check_mark
     monkeypatch.setattr(E, "check_mark", lambda m, *a: (_ for _ in ()).throw(ValueError("made up")) if m["n"] == 1 else real(m, *a))
     out = E.check_all([mark(big, 1), mark("12", 2)], answer, [call(code, f"{big} 12")], "/data")["results"]
-    assert [r["status"] for r in out] == ["unchecked", "verified"] and "made up" in out[0]["reason"]
+    assert [(r["status"], r.get("failedBy")) for r in out] == [("failed", "none"), ("verified", None)]
+    assert out[0]["reason"].startswith("The check did not run.") and "made up" in out[0]["reason"]
 
 
 def test_a_link_to_a_file_outside_the_folder_and_a_pipe_are_no_evidence(tmp_path: Path):

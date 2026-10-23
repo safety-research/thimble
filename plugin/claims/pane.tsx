@@ -23,7 +23,7 @@ import { failNotice } from '../bar/notice'
 import { openPane, paneNow } from '../core/pane'
 import { launchRepair, repairOf } from '../marks/checker'
 import { CITE_LOOK } from '../marks/evidence'
-import { rowMarks, type MarkItem } from '../marks/store'
+import { NOT_RUN, rowMarks, type MarkItem } from '../marks/store'
 import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
 import { claimsBright, claimsStore, placeText, showClaims, type ClaimsArgs } from './term'
 
@@ -92,7 +92,8 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
       if (!s.row) return s
       if (!rows.has(s.row)) rows.set(s.row, await rowMarks($, s.row).catch(() => null))
       const r = rows.get(s.row)
-      if (!r) return { ...s, status: 'unchecked' }
+      // a reply with no check in the store: its check did not run (marks/store.ts notRun)
+      if (!r) return { ...s, status: 'failed', failedBy: 'none', reason: NOT_RUN }
       const m = r.items.find(x => x.start === s.at) ?? r.items.find(x => x.words.replace(/\*\*|`/g, '') === s.label)
       if (!m) return { ...s, status: 'gone' }
       return {
@@ -197,7 +198,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (!s?.row || !s.n) return
     await openPane($, 'evidence', { row: s.row, n: s.n }, `citation ${s.n}`, { focus: true })
     const m = await messageOf($, s.row)
-    await tellOpened($, { kind: 'citation', row: s.row, n: s.n, words: s.label, status: s.status }, m?.text ?? '')
+    await tellOpened($, { kind: 'citation', row: s.row, n: s.n, words: s.label, status: s.status, failedBy: s.failedBy }, m?.text ?? '')
   }
   const at = claim ? { claim: claim.id, at: data.last } : null
   const cite = Math.max(0, Math.min(view.cites - 1, Number(a.cite) || 0))

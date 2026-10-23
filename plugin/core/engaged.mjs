@@ -4,7 +4,7 @@
 // session too: both learn what this analyst knows and cares about as the session goes on. Pure: no `$`.
 //
 //   openedLine(mark, message)  -> {key, text} for a mark the person opened, or null:
-//                                 {kind: 'citation', row, n, words, status}       a citation (marks/store.ts MarkItem)
+//                                 {kind: 'citation', row, n, words, status, failedBy?}  a citation (marks/store.ts MarkItem)
 //                                 {kind: 'explain', row, term}                    an explainer
 //                                 {kind: 'heads', row, term, title}               an important detail (a heads-up)
 //   askedLine(ask)             -> {key, text} for a question asked in a side thread ({text, about}), or null
@@ -22,12 +22,11 @@ function inMessage(message) {
 }
 
 /** What the check found for a citation, in words; '' while it has not ended. */
-function checkWords(status) {
+function checkWords(status, failedBy) {
   switch (status) {
     case 'verified': return 'the check verified it as written'
     case 'corrected': return 'the check corrected it'
-    case 'failed': return 'the check flagged it'
-    case 'unchecked': return 'it was not checked'
+    case 'failed': return failedBy === 'none' ? 'its check did not run' : 'the check flagged it'
     default: return ''
   }
 }
@@ -44,7 +43,7 @@ export function openedLine(mark, message = '') {
   if (mark.kind !== 'citation') return null
   const words = oneLine(mark.words, 80)
   if (!words) return null
-  const found = checkWords(mark.status)
+  const found = checkWords(mark.status, mark.failedBy)
   return { key: `cite|${mark.row ?? ''}|${mark.n ?? words}`, text: `- They opened the citation "${words}"${where}${found ? `; ${found}` : ''}.` }
 }
 

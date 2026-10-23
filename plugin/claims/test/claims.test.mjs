@@ -124,7 +124,7 @@ test('the map takes the top of the pane; at rest nothing is chosen and no detail
     // a claim: the cluster's list stays, the claim ▸ and bold in the cluster's color, the others dim, and under it one
     // line of chips: its citations' checks and its turn; no evidence until e. A long list keeps a window round it
     const p = panel(sel)
-    assert.match(p, /^─+\n● group 5 · \d+ claims\n( {2}↑ \d+ earlier\n)?( {2}– Wiki .*\n)* {2}▸ Wiki 40 had 50 saves\.\n {4}· 1 citation not checked {2}turn 2\n {2}– Wiki /)
+    assert.match(p, /^─+\n● group 5 · \d+ claims\n( {2}↑ \d+ earlier\n)?( {2}– Wiki .*\n)* {2}▸ Wiki 40 had 50 saves\.\n {4}\? 1 citation failed {2}turn 2\n {2}– Wiki /)
     // a list too long for the rows under the map keeps a window round the claim, and says which claims it shows
     if (sel.windowed) assert.match(p, /\n {2}(↓ \d+ more · )?claims \d+–\d+ of \d+$/)
     // above a claim the cluster's name is bold and plain, its dot in the color
@@ -238,6 +238,10 @@ test("a claim picked: its whole sentence wrapped under its first word, its chips
   assert.equal(rowText(checkChips({ sources: [{ status: 'verified' }, { status: 'corrected' }, { status: 'failed', failedBy: 'check' }, { status: 'failed', failedBy: 'evidence' }, { status: 'checking' }] })), '✓ 2 verified  ? 2 failed  … 1 checking')
   assert.match(rowText(citationRows({ label: '9', shown: '9', status: 'failed', failedBy: 'check', reason: 'Line 4 says 12.' }, 60)[0]), /\? failed · cite$/)
   assert.equal(rowText(checkChips({ sources: [{ status: 'verified' }, { status: 'verified' }] })), '✓ 2 citations verified')
+  // a check that did not run is failed, with its plain reason, whatever status it came with
+  assert.equal(rowText(checkChips({ sources: [{ status: 'failed', failedBy: 'none' }, {}, { status: 'unchecked' }] })), '? 3 citations failed')
+  assert.deepEqual(citationRows({ label: '9', shown: '9', status: 'failed', failedBy: 'none', reason: 'The check did not run. The reply was interrupted.' }, 60).map(rowText), ['9   ? failed · cite', 'The check did not run.'])
+  assert.equal(repairable({ row: 'r1', n: 2, status: 'failed', failedBy: 'none' }), true)
   const was = citationRows({ label: '12', shown: '12', was: '15', status: 'corrected', evidence: computed }, 60).map(rowText)
   assert.deepEqual(was.slice(0, 2), ['12   ✓ verified · cite', 'corrected; was 15'])
   const long = snippetOf({ kind: 'computed', code: 'print(x)', output: `${'a'.repeat(80)} 42 ${'b'.repeat(80)}`, highlight: [[81, 83]] }, 30)

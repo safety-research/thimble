@@ -2,7 +2,7 @@
 // requests`); after each reply one checker fork verifies each mark with evidence, and a deterministic validator checks
 // that evidence (checker.ts). The reply is drawn with its marks (view.ts): purple underline, a turning glyph while
 // checking, corrected words in place (purple, as a verified one), the warning color with ? when the check could not
-// confirm it (failed), a note under the block whose words the check found false, and a footer under the reply while it is
+// confirm it or did not run (failed), a note under the block whose words the check found false, and a footer under the reply while it is
 // checked. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
@@ -27,7 +27,7 @@ import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
-import { checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { marksIn, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { footerEl, messageEl, type MarkLook } from './view'
@@ -39,7 +39,8 @@ type Any = any
 const BUSY = { plugin: 'thimble', key: 'busy' } as const
 
 /** The looks of the marks of a text a row shows in place of Claude's words (a squeezed version): each mark that has the
- *  words of one of the row's checked marks looks as that one does, and opens its evidence; any other is unchecked. */
+ *  words of one of the row's checked marks looks as that one does, and opens its evidence; any other is words no check
+ *  is for (view.ts `unchecked`). */
 export function looksByWords(marks: { words: string }[], items: MarkItem[], runs: boolean): MarkLook[] {
   const norm = (w: string) => w.replace(/\s+/g, ' ').trim().toLowerCase()
   const free = [...items]
@@ -57,7 +58,7 @@ const denial = (e: { agentId?: string; tool: unknown }) => (forkOf(e.agentId)?.k
 export const registerMarks: Register = on => {
   on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
     const r = await next(e)
-    try { await restoreMarks($) } catch { /* the marks of earlier replies draw unchecked */ }
+    try { await restoreMarks($) } catch { /* the marks of earlier replies draw failed: their check did not run */ }
     try { await resumeChecks($) } catch { /* the checks that run end as they would */ }
     return r
   }).catch(($, e, next) => next(e))
@@ -154,11 +155,14 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
   const spin = SPIN[frame % SPIN.length]!
   const runs = await mainRuns($)
+  // a mark of Claude's own words with no check in the store: pending while its turn runs or its check starts, else
+  // failed, since its check did not run (the tray has no record of it to check)
+  const waits = runs || (!reply && (await awaitsCheck($, row)))
   // the marks of Claude's own words by their place; those of a text shown in their place by their words
   const looks: MarkLook[] = own
     ? marks.map((_m: Any, k: number) => {
       const it = reply?.items[k]
-      return it ? { n: it.n, status: it.status, shown: it.shown } : { n: k + 1, status: runs ? 'pending' : 'unchecked' }
+      return it ? { n: it.n, status: it.status, shown: it.shown } : { n: k + 1, status: waits ? 'pending' : 'failed' }
     })
     : looksByWords(marks, reply?.items ?? [], runs)
   const focusN = await markFocus($, row)

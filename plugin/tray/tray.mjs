@@ -19,7 +19,8 @@
 //   stopWhat(stop), stepWords(ends), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
 //   scopeText(frame, info)                 what a question asked with the tray open carries for Claude
-//   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it)
+//   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it, or
+//                                          did not run: x starts it)
 //   saidOf(gloss)                          what an explainer or an important detail says, in words for an agent
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
@@ -198,7 +199,7 @@ export function scopeText(f, info = {}) {
   const begins = cut(String(info.begins || '').replace(/\s+/g, ' ').trim(), 80)
   const where = begins ? ` in your reply that begins "${begins}"` : ''
   if (f.kind === 'citation') {
-    const st = info.status === 'corrected' ? ' The check corrected it.' : info.status === 'failed' ? ' The check flagged it.' : info.status === 'verified' ? ' The check verified it.' : ''
+    const st = info.status === 'corrected' ? ' The check corrected it.' : info.status === 'failed' ? (info.failedBy === 'none' ? ' Its check did not run.' : ' The check flagged it.') : info.status === 'verified' ? ' The check verified it.' : ''
     return `The analyst asked this with a citation of your reply open in the tray: "${plain(info.words)}"${where}. "This" may mean that value.${st}${evidenceWords(info.evidence)}`
   }
   const g = info.gloss || {}
@@ -208,7 +209,7 @@ export function scopeText(f, info = {}) {
   return `The analyst asked this with an explainer of your reply open in the tray: the term "${plain(g.term)}"${where}. The explainer said: ${plain(g.body || g.title)}${g.here ? ` ${plain(g.here)}` : ''} "This" or "it" may mean that term.`
 }
 
-/** Whether a citation can be repaired (x): it failed (the check could not confirm it). */
+/** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run). */
 export const canRepair = m => !!m && m.status === 'failed'
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where

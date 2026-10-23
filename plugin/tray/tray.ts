@@ -14,7 +14,8 @@
 //   e expand    an explainer written again at more length, in its place (explain/seam.ts expandExplainer)
 //   2–9         a citation inside an explainer's words, over it (a click on it too), unnamed
 //   x repair    on a failed citation: a check of that one claim again in the background, which looks in
-//               the records for the right value and corrects the cited words (marks/checker.ts launchRepair); the
+//               the records for the right value and corrects the cited words (marks/checker.ts launchRepair), or
+//               for one whose check did not run, its check; the
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
 //               card or the bar too (this module's ui.press hook, so the fork starts inside a hook)
 //   0 close     back to the mark under it, or close
@@ -198,7 +199,7 @@ export async function stepEnds($: Engine): Promise<{ next: boolean; prev: boolea
 
 // ------------------------------------------------------------------------------------------------ what a mark is
 
-type Info = { begins: string; words?: string; status?: string; evidence?: MarkItem['evidence']; item?: MarkItem; gloss?: Gloss }
+type Info = { begins: string; words?: string; status?: string; failedBy?: string; evidence?: MarkItem['evidence']; item?: MarkItem; gloss?: Gloss }
 
 async function itemOf($: Engine, row: string, n: number): Promise<MarkItem | null> {
   return (await rowMarks($, row))?.items.find(x => x.n === n) ?? null
@@ -213,14 +214,14 @@ async function infoOf($: Engine, f: Frame): Promise<Info> {
   const begins = (await shownOf($, f.row))?.text ?? (await messageOf($, f.row))?.text ?? ''
   if (f.kind === 'citation') {
     const item = await itemOf($, f.row, f.n)
-    return { begins: withoutMarks(begins), words: item?.shown ?? item?.words ?? '', status: item?.status, evidence: item?.evidence, ...(item ? { item } : {}) }
+    return { begins: withoutMarks(begins), words: item?.shown ?? item?.words ?? '', status: item?.status, failedBy: item?.failedBy, evidence: item?.evidence, ...(item ? { item } : {}) }
   }
   return { begins: withoutMarks(begins), gloss: (await glossOf($, f.row, f.id)) ?? undefined }
 }
 
 /** The mark as core/engaged.ts tells it. */
 function engagedMark(f: Frame, info: Info): Any {
-  if (f.kind === 'citation') return { kind: 'citation', row: f.row, n: f.n, words: info.words ?? '', status: info.status }
+  if (f.kind === 'citation') return { kind: 'citation', row: f.row, n: f.n, words: info.words ?? '', status: info.status, failedBy: info.failedBy }
   const g = info.gloss
   return f.kind === 'heads' ? { kind: 'heads', row: f.row, term: g?.term ?? '', title: g?.title ?? '' } : { kind: 'explain', row: f.row, term: g?.term ?? '' }
 }
@@ -507,10 +508,11 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   verified: { word: '✓ verified', color: 'success' },
   corrected: { word: '✓ verified', color: 'success' },
   failed: { word: '? failed', color: 'warning' },
-  unchecked: { word: 'not checked', dim: true },
 }
 
-const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status] : null) ?? STATUS.unchecked!
+/** A citation's status: the store's, and failed for one with no check (marks/store.ts notRun; one the store no longer
+ *  holds, whose reply the reply draws failed too, says so under it). */
+const statusOf = (m: MarkItem | null) => (m ? STATUS[m.status] : null) ?? STATUS.failed!
 
 /** The color of a line of code: the theme key thimble draws inline code in (marks/view.ts), a blue Claude Code shades
  *  for the theme it draws in. */
@@ -550,12 +552,13 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)
   else if (m.status === 'checking') dim('why', m.repair ? 'The repair is running: the check reads the records again.' : 'The check is running.')
   else if (m.repair && m.status === 'verified') dim('why', `verified as written${m.reason ? `: ${firstSentence(m.reason)}` : ''}`)
-  else if (m.repair && m.status === 'unchecked') dim('why', `${notFixed}${m.reason || 'the check gave no answer'}`)
-  if (canRepair(m)) rows.push({ h: 1, el: els.Button({ key: 'repair', plain: true, label: 'repair this citation', hover: { bold: true }, onPress: () => undefined, children: [
-    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: 'suggestion', children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: ': check it again and correct the cited words' })] }),
+  // a check that did not run: x starts it
+  const unrun = m.status === 'failed' && m.failedBy === 'none'
+  if (canRepair(m)) rows.push({ h: 1, el: els.Button({ key: 'repair', plain: true, label: unrun ? 'check this citation' : 'repair this citation', hover: { bold: true }, onPress: () => undefined, children: [
+    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: 'suggestion', children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: unrun ? ': start its check' : ': check it again and correct the cited words' })] }),
   ] }) })
   if (!ev) {
-    if (m.status !== 'checking') dim('none', 'The check gave no evidence for it.')
+    if (m.status !== 'checking' && !unrun) dim('none', 'The check gave no evidence for it.')
     return rows
   }
   if (m.status === 'checking') return rows

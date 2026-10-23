@@ -188,7 +188,7 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a p
   const picked = await draw(one)
   const pt = textOf(picked)
   expect(pt).toContain('● failures · 2 claims')
-  expect(pt).toContain('  ▸ Run 4 failed on the p95 check.    · 1 citation not checked  turn 1  – Run 9 failed on a timeout.')
+  expect(pt).toContain('  ▸ Run 4 failed on the p95 check.    ? 1 citation failed  turn 1  – Run 9 failed on a timeout.')
   expect(keysOf(picked)).toEqual([['p', 'previous'], ['n', 'next'], ['e', 'evidence']])
   // the claim is bold in its cluster's color; its dot again chooses its cluster
   expect(JSON.stringify(picked)).toMatch(/"color":"#[0-9a-f]{6}","bold":true,"children":"Run 4 failed on the p95 check\."/)
@@ -210,7 +210,9 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a p
   await buttons(picked).find(b => b.hotkey === 'e').onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c1', open: true, cite: 0 })
   const open = await draw(paneNow(s).args)
-  expect(textOf(open)).toContain('p95 check   not checked · cite')
+  // its reply has no check in the store: it did not run, so the citation is failed
+  expect(textOf(open)).toContain('p95 check   ? failed · cite')
+  expect(textOf(open)).toContain('The check did not run.')
   expect(textOf(open)).toContain('‹ 1 of 1 ›')
   expect(textOf(open)).not.toContain('Run 9 failed')
   expect(textOf(open)).not.toContain('said in')

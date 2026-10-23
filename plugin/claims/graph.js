@@ -461,15 +461,16 @@ function layOf(claims, groups, edges, W, h, cols) {
 
 // a citation's check as the citation's card says it beside `cite`: the sign and word, its tone; and as a chip under a
 // claim counts it. Two outcomes: verified (a value the check corrected counts as verified; the claim says corrected),
-// and failed (the check could not confirm it); and the states before an outcome
+// and failed (the check could not confirm it, or did not run); and the states before an outcome
 const STATUS = {
   verified: ['✓ verified', 'good'], corrected: ['✓ verified', 'good'], failed: ['? failed', 'warn'],
-  checking: ['checking', 'dim'], unchecked: ['not checked', 'dim'], gone: ['no longer in the session', 'dim'],
+  checking: ['checking', 'dim'], gone: ['no longer in the session', 'dim'],
 }
 const CHIP = [['good', '✓', 'verified'], ['warn', '?', 'failed'], ['checking', '…', 'checking'], ['dim', '·', 'not checked']]
-const statusKey = s => (STATUS[s.status] ? s.status : 'unchecked')
+// a status without an outcome (no check of it ran) is failed
+const statusKey = s => (STATUS[s.status] ? s.status : 'failed')
 
-/** Whether x can repair a citation: the check could not confirm it (tray/tray.mjs canRepair). */
+/** Whether x can repair a citation: the check could not confirm it, or did not run (tray/tray.mjs canRepair). */
 export const repairable = s => !!s && s.status === 'failed' && !!s.row && !!s.n
 
 /** A line with spans of it tinted (the cited words), as runs; `rest` the look of the words outside them. */

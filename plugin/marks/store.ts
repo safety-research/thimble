@@ -9,7 +9,8 @@
 //   rowMarks($, row)         what one row of the reply draws: its marks, and the reply's counts on its last row
 //   replyKeyOf($, row)       the key of the reply a row belongs to
 //   restoreMarks($)          the replies a resumed session's transcript holds, back in the state; a check that ran
-//                            when the session ended is not checked
+//                            when the session ended did not run (notRun)
+//   notRun(m, why)           a mark whose check did not run or gave no answer: failed, with why
 import { update, type EngineInterface } from 'claude-code'
 
 import { keptDir } from '../core/env'
@@ -17,7 +18,7 @@ import { safeName } from '../core/layout.mjs'
 
 type Engine = EngineInterface
 
-export type MarkStatus = 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked'
+export type MarkStatus = 'checking' | 'verified' | 'corrected' | 'failed'
 /** A cited place of a file: its path from the folder the session started in, the cited line or range, and those lines
  *  with a line around them, the words found highlighted. */
 export type Place = { file: string; line: string; lines: { n: number; text: string; highlight?: [number, number]; decoded?: true }[] }
@@ -33,19 +34,21 @@ export type Evidence =
 /** One mark: its number in the reply, its words, the row and place it stands at, its sentence, and its check. The
  *  person sees two outcomes: verified (`verified`, or `corrected`: the right words in place) and `failed`. `failedBy`
  *  says who failed it, for main alone: the checker (`check`: the claim is false and the check found no right words),
- *  or thimble, when the checker's evidence did not hold (`evidence`: the claim is not confirmed). `note` is what the check found wrong in the sentence outside the mark.
+ *  thimble, when the checker's evidence did not hold (`evidence`: the claim is not confirmed), or no check
+ *  (`none`: the check did not run or gave no answer, notRun; x starts it). `note` is what the check found wrong in the
+ *  sentence outside the mark.
  *  `repair`: the person pressed x on it, and this check is the one x started (checker.ts startRepair). */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
-  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence'; evidence?: Evidence; note?: string; repair?: true
+  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true
 }
 export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[] }
 /** What one row draws: its own marks, and the reply's counts (the last row draws them in the footer). */
 export type RowMarks = { row: string; last: boolean; items: MarkItem[] } & Counts
 /** A reply's marks by what the person sees: `checking` the marks still checked, `verified` those the check confirmed
  *  or corrected in place (`corrected` counts the corrections among them), `failed` those it could not confirm, by
- *  either cause (a failed mark looks one way, whoever failed it). */
-export type Counts = { total: number; checking: number; verified: number; corrected: number; failed: number; unchecked: number }
+ *  any cause, a check that did not run too (a failed mark looks one way, whoever failed it). */
+export type Counts = { total: number; checking: number; verified: number; corrected: number; failed: number }
 
 const MARKS = { plugin: 'thimble', key: 'marks' } as const
 const ROW = { plugin: 'thimble', key: 'marksRow' } as const
@@ -105,8 +108,18 @@ export function counts(r: Reply): Counts {
     verified: n(m => m.status === 'verified' || m.status === 'corrected'),
     corrected: n(m => m.status === 'corrected'),
     failed: n(m => m.status === 'failed'),
-    unchecked: n(m => m.status === 'unchecked'),
   }
+}
+
+/** The words the person reads when a mark's check did not run, or ran and gave no answer for it: the tray and the
+ *  claims pane show this first sentence, the evidence pane the cause after it. */
+export const NOT_RUN = 'The check did not run.'
+
+/** A mark whose check did not run or gave no answer (`why`, a sentence or none): failed, as the person sees it, and x
+ *  starts its check (checker.ts repairOf). Its earlier result goes, its place and words stay. */
+export function notRun(m: MarkItem, why = ''): MarkItem {
+  const { was: _w, evidence: _e, note: _n, ...base } = m
+  return { ...base, status: 'failed', failedBy: 'none', shown: m.words, reason: why ? `${NOT_RUN} ${why}` : NOT_RUN }
 }
 
 export async function replyKeyOf($: Engine, row: string): Promise<string | null> {
@@ -121,7 +134,8 @@ export async function rowMarks($: Engine, row: string): Promise<RowMarks | null>
 }
 
 /** The replies kept for this conversation that the state does not hold (a resumed session), back in it. Their marks
- *  that were still checked stay unchecked: the check ended with the session that ran it. */
+ *  that were still checked did not run: the check ended with the session that ran it. A mark an earlier thimble kept
+ *  as `unchecked` is failed too. */
 export async function restoreMarks($: Engine): Promise<void> {
   const dir = `${await keptDir($)}/marks`
   let entries: { name: string; kind: string }[] = []
@@ -131,9 +145,10 @@ export async function restoreMarks($: Engine): Promise<void> {
     let r: Reply
     try { r = JSON.parse(String(await $.fs.read(`${dir}/${x.name}`))) as Reply } catch { continue }
     if (!r?.key || !Array.isArray(r.items) || (await replyOf($, r.key))) continue
-    const ended = r.items.some(m => m.status === 'checking')
+    const open = (m: MarkItem) => m.status === 'checking' || (m.status as string) === 'unchecked'
+    const ended = r.items.some(open)
     await setReply($, ended
-      ? { ...r, items: r.items.map(m => (m.status === 'checking' ? { ...m, status: 'unchecked', reason: 'the session ended before the check did' } : m)) }
+      ? { ...r, items: r.items.map(m => (open(m) ? notRun(m, m.status === 'checking' ? 'The session ended before it did.' : '') : m)) }
       : r)
     if (ended) await persist($, r.key)
   }
