@@ -37,6 +37,9 @@ const OUTPUT_LINES = 7
 /** the label waits this long for the pointer to settle, and this long before it goes (RefChip's) */
 const HOVER_DELAY_MS = 90
 const HIDE_DELAY_MS = 160
+/** How a place in a mark's label opens: teleport, after the label closes, so it does not stay over the chat while the
+ * pointer rests where it was */
+const OpenPlace = createContext<(ref: string) => void>(teleport)
 
 /** A mark: the k-th of its text's marks (MarkItems), or `item` when the caller has it (an old card citation). */
 export function Mark({ k, item: given, children }: { k: number; item?: MarkItem; children: ReactNode }) {
@@ -104,6 +107,13 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
     setPop((p) => (p?.pinned ? null : r ? { rect: r, pinned: true } : null))
   }
 
+  const openPlace = (ref: string) => {
+    window.clearTimeout(showTimer.current)
+    cancelHide()
+    setPop(null)
+    teleport(ref)
+  }
+
   const corrected = item?.status === 'corrected' && item.shown
   return (
     <span className={`mark is-${look}${pop ? ' is-open' : ''}`} data-mark-look={look} data-ref={cardRef(item)}>
@@ -131,7 +141,9 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
       {pop &&
         createPortal(
           <div ref={popEl} className="refchip-pop overlay mark-pop" role="note" style={{ position: 'fixed', left: 8, top: 0 }} onMouseEnter={cancelHide} onMouseLeave={() => !pop.pinned && scheduleHide()} onMouseDown={(e) => e.stopPropagation()}>
-            <MarkEvidence item={item} look={look} />
+            <OpenPlace.Provider value={openPlace}>
+              <MarkEvidence item={item} look={look} />
+            </OpenPlace.Provider>
           </div>,
           document.body,
         )}
@@ -172,6 +184,7 @@ function MarkEvidence({ item, look }: { item: MarkItem | undefined; look: MarkLo
 }
 
 function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
+  const open = useContext(OpenPlace)
   if (ev.kind === 'card') return <CardEvidence ev={ev} value={value} />
   const printed = ev.kind === 'computed' ? printedTable(ev.table, value) : null
   if (printed)
@@ -208,7 +221,7 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
         return (
           <div key={i} className="mark-ev">
             <div className="refchip-pop-head">
-              <Chip kind="ref" tone="evidence" icon={glyphOf(String(p.file ?? ''))} className="refchip-pop-chip" onClick={() => teleport(at)}>
+              <Chip kind="ref" tone="evidence" icon={glyphOf(String(p.file ?? ''))} className="refchip-pop-chip" onClick={() => open(at)}>
                 {`${p.file}:${p.line}`}
               </Chip>
               {i === 0 && <span className="refchip-pop-value">{value}</span>}
@@ -241,6 +254,7 @@ type Resolved = { state: 'loading' } | { state: 'gone' } | { state: 'table'; gri
 /** A value a card shows: the card's chip over the table around the cited cell, or the printed lines around the cited
  * one. Evidence that names only the place is read when the label opens (api.resolveRef), as RefChip reads it. */
 function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
+  const open = useContext(OpenPlace)
   const own = printedTable(ev.table, value)
   const [got, setGot] = useState<Resolved>({ state: 'loading' })
   const ref = ev.ref ?? `card:${ev.card}`
@@ -275,7 +289,7 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
   return (
     <div className="mark-ev">
       <div className="refchip-pop-head">
-        <Chip kind="ref" tone="evidence" icon="cell" face="sans" className="refchip-pop-chip" onClick={() => teleport(ref)}>
+        <Chip kind="ref" tone="evidence" icon="cell" face="sans" className="refchip-pop-chip" onClick={() => open(ref)}>
           {title}
         </Chip>
         {!table ? <span className="refchip-pop-value">{value}</span> : null}

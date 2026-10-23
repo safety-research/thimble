@@ -445,6 +445,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
     if ('metaKey' in e && pointKeyHeld(e)) return
     e.stopPropagation()
     window.clearTimeout(showTimer.current)
+    reqSeq.current++ // a label still loading stays shut once it lands
     setPop(null)
     unmark()
     if (unresolved) return

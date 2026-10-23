@@ -5,6 +5,7 @@
 import { act } from 'react'
 import { afterEach, expect, test } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
+import { bus } from '../../src/lib/bus.ts'
 import { MarksFooter } from '../../src/marks/MarksFooter.tsx'
 import type { MarkItem } from '../../src/marks/marks.ts'
 import { withMarkHrefs } from '../../src/marks/marks.ts'
@@ -47,6 +48,24 @@ test("a mark's label shows its evidence as a citation's label does: the output l
   expect(pop?.querySelector('.refchip-pop-head')?.textContent).toContain('code Claude ran')
   expect(pop?.querySelector('.refchip-lines .cite-cell')?.textContent).toBe('12')
   expect(pop?.querySelector('.mark-pop-why')).toBeNull()
+})
+
+test("a place in a mark's label opens its file and the label closes at once, hovered or pinned", async () => {
+  const ev = { kind: 'quote' as const, file: 'runs/a.jsonl', line: 5880, lines: [{ n: 5880, text: '11 passed, 819 deselected', highlight: [0, 25] as [number, number] }] }
+  const el = await mount(<ChatMarkdown text="[11 passed, 819 deselected](#) on the branch" checks={[item(0, '11 passed, 819 deselected', { evidence: ev })]} />)
+  const opened: unknown[] = []
+  const off = bus.on('openRef', (e) => opened.push(e))
+  try {
+    await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await settle()
+    const chip = document.querySelector<HTMLElement>('.mark-pop .refchip-pop-chip')
+    expect(chip?.textContent).toBe('runs/a.jsonl:5880')
+    await act(async () => chip!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(opened).toEqual([{ ref: 'runs/a.jsonl#L5880' }])
+    expect(document.querySelector('.mark-pop')).toBeNull()
+  } finally {
+    off()
+  }
 })
 
 test('while the reply streams its marks wait, whatever an earlier check said', async () => {

@@ -21,10 +21,12 @@ The cards are evidence too: before the forks start, every place of the workspace
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
 validator's card_index), and the validator confirms a card's place by reading it (check_card).
 
-A card's takeaway is checked the same way: its marks, `[words](#)`, are checked with main's next reply (the takeaways
-no check has started on, notebook.takeaways_to_check), their line naming the card, so the check looks in its output
-first; what the check found is kept on the card (`takeaway_marks`, notebook.set_takeaway_marks), and the page draws the
-takeaway's marks as it draws the chat's.
+A card's takeaway is checked the same way: its marks, `[words](#)`, are checked as soon as the card's write lands
+(card_written: after the add_card or edit_card call that wrote it, after the card check that may rewrite it, after the
+analyst's edit), and any takeaway still waiting is checked with main's reply (the takeaways no check has started on,
+notebook.takeaways_to_check); their line names the card, so the check looks in its output first. A takeaway a check
+has claimed (_claimed) is never checked twice. What the check found is kept on the card (`takeaway_marks`,
+notebook.set_takeaway_marks), and the page draws the takeaway's marks as it draws the chat's.
 
 Every way a check ends (an answer, an error, a timeout) leaves none of its marks `checking`. A reply's marks are kept in
 `<workspace>/marks/<turn>.json`, and each change is written to main's log as a `marks` record {turn, items}, which the
@@ -74,6 +76,9 @@ ALLOWED = ("Read", "Grep", "Glob", "Bash(python3:*)", "Bash(python:*)")
 TELL_KIND = "citations"
 
 _locks: dict[tuple[str, str], asyncio.Lock] = {}
+# (workspace, card, takeaway) of the takeaways a check has taken until their marks are on the card, so a check that
+# starts meanwhile (main's reply ending as the card's write lands) leaves them alone
+_claimed: set[tuple[str, str, str]] = set()
 _procs: set[asyncio.subprocess.Process] = set()
 
 
@@ -290,9 +295,13 @@ def turn_ended(c: str, main: dict[str, Any], turn: str, texts: list[str], cut: s
                 return
         except Exception:  # noqa: BLE001 — no takeaway to check
             return
-    coro = start_check(c, main, turn, list(texts), cut)
+    _spawn(start_check(c, main, turn, list(texts), cut))
+
+
+def _spawn(coro: Awaitable[None]) -> None:
+    """Run `coro` on the server's loop: the running one, else the one notices keeps; nothing without one."""
     try:
-        asyncio.get_running_loop().create_task(coro)
+        asyncio.get_running_loop().create_task(coro)  # type: ignore[arg-type]
         return
     except RuntimeError:
         pass
@@ -300,13 +309,49 @@ def turn_ended(c: str, main: dict[str, Any], turn: str, texts: list[str], cut: s
 
     loop = notices._loop
     if loop is not None and loop.is_running() and not loop.is_closed():
-        asyncio.run_coroutine_threadsafe(coro, loop)
+        asyncio.run_coroutine_threadsafe(coro, loop)  # type: ignore[arg-type]
     else:
-        coro.close()
+        coro.close()  # type: ignore[attr-defined]
+
+
+def card_written(c: str, cid: str | None) -> None:
+    """Card `cid`'s write landed (an add_card or edit_card call, the end of its card check, the analyst's edit): the
+    marks of its takeaway that no check has started on are checked now, from a fork of main, rather than with main's
+    next reply. Not while the card runs, nor while its card check may still rewrite the takeaway (that check's end
+    calls this again). Never raises."""
+    if not cid:
+        return
+    try:
+        from . import card_check, notebook, runtime, session  # noqa: PLC0415
+
+        cell = notebook.get_cell(c, cid)
+        if not cell or cell.get("status") == "running" or "](#)" not in str(cell.get("takeaway") or ""):
+            return
+        run = card_check._runs.get((c, cid))
+        if run is not None and run.task is not None and not run.task.done():
+            return
+        if not any(t[0] == cid for t in notebook.takeaways_to_check(c)):
+            return
+        lv = session.current(c)
+        if lv is None:
+            return  # no main to fork: main's next reply checks it
+        # the fork resumes main at its last finished turn; the runtime's forks take main's conversation as it stands
+        cut = lv.last_cut or ("" if runtime.enabled() else None)
+        if cut is None:
+            return
+        main = {"sid": lv.sid, "cwd": lv.cwd, "config": lv.config, "config_known": lv.config_known,
+                "transcript_path": lv.transcript_path, "model": lv.model, "effort": lv.effort,
+                "context_tokens": lv.context_tokens}
+        _spawn(start_check(c, main, new_turn(), [], cut, cards={cid}))
+    except Exception:  # noqa: BLE001 — a takeaway not checked now is checked with main's next reply
+        log.exception("%s: the check of card %s's takeaway did not start", c, cid)
 
 
 async def start_check(c: str, main: dict[str, Any], turn: str, texts: list[str], cut: str | None,
-                      fork: Callable[..., Awaitable[dict[str, Any]]] | None = None) -> None:
+                      fork: Callable[..., Awaitable[dict[str, Any]]] | None = None,
+                      cards: set[str] | None = None) -> None:
+    """Check the marks of main's `texts` and of the takeaways waiting for a check (only those of `cards` when given,
+    with no reply's record when there are no texts), each takeaway claimed until its marks are on its card."""
     from . import notebook  # noqa: PLC0415
 
     try:
@@ -314,6 +359,20 @@ async def start_check(c: str, main: dict[str, Any], turn: str, texts: list[str],
     except Exception:  # noqa: BLE001 — the reply's marks are checked without the takeaways
         log.exception("%s: the takeaways to check could not be read", c)
         takeaways = []
+    takeaways = [t for t in takeaways if (c, t[0], t[2]) not in _claimed and (cards is None or t[0] in cards)]
+    claims = {(c, cid, text) for cid, _, text in takeaways}
+    _claimed.update(claims)  # before the first await, so a check starting meanwhile leaves them alone
+    try:
+        await _start_check(c, main, turn, texts, cut, fork, takeaways, claims, saved=cards is None or bool(texts))
+    finally:
+        _claimed.difference_update(claims)
+
+
+async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str], cut: str | None,
+                       fork: Callable[..., Awaitable[dict[str, Any]]] | None, takeaways: list[tuple[str, str, str]],
+                       claims: set[tuple[str, str, str]], saved: bool) -> None:
+    from . import notebook  # noqa: PLC0415
+
     try:
         found = await marks_of(list(texts) + [t for _, _, t in takeaways])
     except (OSError, RuntimeError, ValueError) as e:
@@ -328,11 +387,12 @@ async def start_check(c: str, main: dict[str, Any], turn: str, texts: list[str],
         if m["piece"] >= len(texts):
             cid, title, text = takeaways[m["piece"] - len(texts)]
             takes.append({**m, "card": cid, "title": title, "takeaway": text})
-    if chat or takes:
+    if chat or (takes and saved):
         _save(c, {"turn": turn, "items": chat, "times": {"reply_end": time.time()}})
     for cid, text in dict.fromkeys((m["card"], m["takeaway"]) for m in takes):
         mine = [_takeaway_item(m) for m in takes if m["card"] == cid]
         notebook.set_takeaway_marks(c, cid, text, lambda _old, mine=mine: mine)
+    _claimed.difference_update(claims)  # their marks are on their cards: takeaways_to_check passes them by now
     if cut is None:
         await _give_up(c, turn, {m["n"] for m in chat}, "the reply was stopped before its citations were checked")
         return

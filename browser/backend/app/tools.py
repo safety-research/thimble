@@ -660,6 +660,11 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
         from . import card_check  # noqa: PLC0415 — card_check imports the harness
 
         res = await card_check.after_tool(c, name, args, res, session=session, anchor=anchor)
+        # the citations of the card's takeaway are checked as the write lands, not with main's next reply (marks.py)
+        if name in card_check.CHECK_TOOLS and not res.is_error:
+            from . import marks  # noqa: PLC0415
+
+            marks.card_written(c, card_check.card_of(name, args, res.text, anchor))
     return with_call_line(name, args, res)
 
 
