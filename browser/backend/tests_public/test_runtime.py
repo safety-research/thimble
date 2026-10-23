@@ -4,13 +4,14 @@ the Agent SDK (runtime_cc.py). Both write the same records into the chats, throu
 Messages API is a fake client and the Agent SDK a fake ClaudeSDKClient: no model is called and no `claude` starts."""
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from app import agents, claude_access, config, events, llm, runtime, runtime_cc, subagents, write_session
+from app import agents, claude_access, config, events, llm, runtime, runtime_cc, session, subagents, write_session
 
 CORPUS = "mini"
 
@@ -422,6 +423,46 @@ async def test_typed_start_tools_start_at_once(on, monkeypatch):
     for c in list(runtime._spaces[CORPUS].convs.values()):
         if c.task is not None:
             await c.task
+
+
+class Hang(FakeStream):
+    """A reply that never comes, as a long turn's: the turn waits on it until it is stopped."""
+
+    async def __anext__(self) -> Any:
+        await asyncio.Event().wait()
+        raise StopAsyncIteration
+
+
+async def test_the_server_s_stop_ends_its_agents_stopped_and_the_next_start_runs_none(on, monkeypatch):
+    """Ctrl-C in thimble-browser stops the server, which stops every agent it runs first (runtime.stop_all): a writer's
+    run ends `stopped`, a thread's fork ends, main's turn ends with a line that says why, and the mirror keeps them
+    ended, so the next start under the same chat (thimble-browser --continue) shows nothing running."""
+    client = api_key(monkeypatch, [])
+    client.stream = lambda **body: Hang(Final([], "end_turn"))
+    runtime.ensure(CORPUS)
+    ans = await write_session.start(CORPUS, "report", "Write it up.")
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    events.post(CORPUS, "main", {"text": "What happened?"})
+    await asyncio.sleep(0.3)
+    sp = runtime._spaces[CORPUS]
+    writer = sp.convs[str(ans.agent_id)]
+    assert sp.main.running and writer.running and agents.running(CORPUS, tid)
+    assert len(await runtime.stop_all(wait_s=5)) == 3
+    assert not any(c.running for c in [sp.main, *sp.convs.values()])
+    assert (subagents.agent(CORPUS, str(ans.agent_id)) or {}).get("status") == "stopped"
+    assert not agents.running(CORPUS, tid)
+    assert ("chip", session.QUIT_TEXT) in shape(main_records())
+    # the next start: a new server attaches main's same chat, with none of this one's state in memory
+    runtime._spaces.clear()
+    session._live.pop(CORPUS, None)
+    agents._busy.clear()
+    runtime.ensure(CORPUS)
+    try:
+        assert not agents.running(CORPUS, tid), "the thread's fork is not taken up again"
+        assert not agents.running(CORPUS, agents.MAIN_ID) and not session._live[CORPUS].turn_open
+    finally:
+        await session.shutdown()
 
 
 # --------------------------------------------------------------------------- one-shot calls
