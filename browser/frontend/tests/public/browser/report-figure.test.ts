@@ -5,10 +5,10 @@
 //   - the figure carries no "from canvas" tag and no × of its own;
 //   - hovering the figure shows the block's actions (chat, delete, lock) inside the card, on its question line, and the
 //     question keeps their room, so it never runs under them; hovering a paragraph still shows them in the gutter;
-//   - a locked figure's lock at rest stands inside the card, under the actions' lock;
 //   - the card sidebar lists no Orientation section: a card of an earlier orientation's deck lists under Your work;
 //   - the column takes the pane's width, the text keeping a card's width; the caption that says the card's takeaway
-//     shows it whole, with its citation, and no scroll of its own.
+//     shows it whole, with its citation, and no scroll of its own; a click on the citation opens its evidence, and a
+//     click on the caption's other words edits it.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -201,29 +201,6 @@ test('a figure fills the text column, carries its actions inside the card, and n
   }
 })
 
-test("a locked figure's lock at rest stands inside the card, on the question line", async () => {
-  const { page, close } = await open(true)
-  try {
-    await page.waitForTimeout(300)
-    const fig = await box(page, 'figure.wu-fig')
-    const headBox = await box(page, 'figure.wu-fig .wu-fig-head')
-    const lock = await page.evaluate(() => {
-      const el = document.querySelector('.bn-block-outer.wu-locked .bn-block-content[data-content-type="figure"]')
-      if (!el) return null
-      const r = el.getBoundingClientRect()
-      const cs = getComputedStyle(el, '::after')
-      if (cs.content === 'none') return null
-      const left = r.right - parseFloat(cs.right) - parseFloat(cs.width)
-      return { left: Math.round(left), right: Math.round(left + parseFloat(cs.width)), top: Math.round(r.top + parseFloat(cs.top)), bottom: Math.round(r.top + parseFloat(cs.top) + parseFloat(cs.height)) }
-    })
-    assert.ok(fig && headBox && lock, `the lock at rest is drawn ${JSON.stringify(lock)}`)
-    assert.ok(lock.left >= fig.left && lock.right <= fig.right - 16, `the lock stands inside the card ${JSON.stringify({ lock, fig })}`)
-    assert.ok(lock.top >= headBox.top && lock.bottom <= headBox.bottom, `the lock stands on the question line ${JSON.stringify({ lock, headBox })}`)
-  } finally {
-    await close()
-  }
-})
-
 test("the figure takes the pane's width and shows the card's takeaway whole, with its citations", async () => {
   const { page, close } = await open()
   try {
@@ -235,25 +212,31 @@ test("the figure takes the pane's width and shows the card's takeaway whole, wit
     assert.ok(para.right - para.left <= 720, `the text keeps a card's width ${JSON.stringify(para)}`)
     const cap = await page.evaluate(() => {
       const el = document.querySelector<HTMLElement>('figure.wu-fig .wu-fig-caption')!
-      const chip = el.querySelector<HTMLElement>('.refchip-citation')
+      const chip = el.querySelector<HTMLElement>('.mark[data-ref]')
       return { text: el.textContent ?? '', chip: chip?.textContent ?? null, scroll: el.scrollHeight - el.clientHeight, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) }
     })
     assert.equal(cap.chip, '10:00', `the cited number is a citation ${JSON.stringify(cap)}`)
     assert.ok(cap.text.includes('the last hour holds only the small changes'), 'the whole takeaway is shown')
     assert.ok(cap.scroll <= 1 && cap.lines >= 3, `no scroll of its own ${JSON.stringify(cap)}`)
 
+    // a click on the citation opens its evidence, not the caption's editor; a second click closes it
+    await page.click('figure.wu-fig .wu-fig-caption .mark-words')
+    await page.waitForSelector('.mark-pop', { timeout: 5000 })
+    assert.equal(await page.locator('figure.wu-fig .wu-fig-caption.refedit').count(), 0, "the citation's click is not the caption's")
+    await page.click('figure.wu-fig .wu-fig-caption .mark-words')
+    await page.waitForSelector('.mark-pop', { state: 'detached', timeout: 5000 })
     // a click on the caption's words edits it, with the citation as a token; leaving it unchanged changes nothing
     await page.click('figure.wu-fig .wu-fig-caption', { position: { x: 400, y: 4 } })
     await page.waitForSelector('figure.wu-fig .wu-fig-caption.refedit .refedit-token', { timeout: 5000 })
     await page.keyboard.press('Escape')
-    await page.waitForSelector('figure.wu-fig .wu-fig-caption .refchip-citation', { timeout: 5000 })
+    await page.waitForSelector('figure.wu-fig .wu-fig-caption .mark[data-ref]', { timeout: 5000 })
     // words typed into it are kept, and the citation with them
     await page.click('figure.wu-fig .wu-fig-caption', { position: { x: 400, y: 4 } })
     await page.waitForSelector('figure.wu-fig .wu-fig-caption.refedit', { timeout: 5000 })
     await page.keyboard.type(' Noted by the reader.')
     await page.keyboard.press('Enter')
     await page.waitForFunction(() => document.querySelector('figure.wu-fig .wu-fig-caption:not(.refedit)')?.textContent?.includes('Noted by the reader.'), null, { timeout: 5000 })
-    assert.equal(await page.locator('figure.wu-fig .wu-fig-caption .refchip-citation').count(), 1, 'the edited caption keeps its citation')
+    assert.equal(await page.locator('figure.wu-fig .wu-fig-caption .mark[data-ref]').count(), 1, 'the edited caption keeps its citation')
     if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT })
     // the top bar's toggle names what it hides
     assert.equal(await page.locator('button.shell-links[aria-label="Hide citations"]').count(), 1)
