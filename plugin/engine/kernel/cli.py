@@ -124,6 +124,13 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
     --limit N           a trial: N records at random; the same label without --limit then labels the rest
     --reason            the model also gives a one-line reason per record
 
+A record is one line of a JSONL or text file, one row of a CSV file or of a database table (`--in 'x.db#table'`), or
+one item of the largest list in a JSON document. For records deeper in a JSON document, put a JSON pointer after # in
+the glob: `--in 'runs/*.json#/result/findings'` labels each item of that list, and a `*` in the pointer stands for
+every item or key at its level, as in `--in 'chats.json#/*/messages'`. A label over the files themselves keeps each
+record's place in its file as its ref (`chats.json#/3/messages/12`), so the analyst can open the record, and a quote
+from it is checked against the file. A copy of the records in another file loses that place.
+
 A --prompt label over more than 300 records does not start at once: the analyst is asked first, in the terminal, to
 run all, run on a random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks. The
 choices leave the screen once the analyst answers. After a sample, the same command again asks them to run the rest.
