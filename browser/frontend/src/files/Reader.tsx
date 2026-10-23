@@ -706,6 +706,9 @@ export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color:
   return { line: rec.line, who, when, text: first(body), color }
 }
 
+/** ms the records' first paint waits at most for Color by's keys (the file's keys, GET /source/keys) */
+export const COLORS_HOLD_MS = 1500
+
 const NO_LANES: Concept[] = []
 const NO_OFF: ReadonlySet<string> = new Set()
 
@@ -1266,6 +1269,16 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const viewRecords = isTranscript && shown?.path === path ? shown.records : null
   const colorRecords = useMemo(() => viewRecords ?? (delimit ? delimit(records) : records), [viewRecords, delimit, records])
   const color = useColorBy(workspace, path, colored && !binary && !isDatabase, labels, colorRecords, readerLabels.rows, total, quiet, filterHolds)
+  // the records' first paint waits for Color by's keys, which the records' colors come from, so they are drawn with
+  // their colors from the first frame rather than plain and then tinted; at most COLORS_HOLD_MS after the records came
+  const colorsPending = colored && !binary && !isDatabase && color.keys == null
+  const [waitedFor, setWaitedFor] = useState<string | null>(null)
+  useEffect(() => {
+    if (!colorsPending || !loaded) return
+    const t = window.setTimeout(() => setWaitedFor(path), COLORS_HOLD_MS)
+    return () => window.clearTimeout(t)
+  }, [colorsPending, loaded, path])
+  const holdPaint = colorsPending && waitedFor !== path
   const filter = useFilterBy(workspace, path, isTranscript && !binary && !isDatabase, labels, color.fileLabels, color.keys, viewRecords ?? records, readerLabels.rows, total, quiet)
   const filterLabel = isTranscript && filter.choice.by === 'label' ? filter.choice.id : null
   useEffect(() => {
@@ -1525,7 +1538,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                       <div className="reader-noview-reason dim">{noViewReason}</div>
                     </div>
                   )}
-                  {ViewComponent && loaded && !noViewReason && (
+                  {ViewComponent && loaded && !noViewReason && !holdPaint && (
                     <ColorContext.Provider value={colored ? color.colors : null}>
                       <FilterContext.Provider value={isTranscript ? filter.verdict : null}>
                         <FoldContext.Provider value={isTranscript ? fold : null}>
@@ -1536,7 +1549,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                       </FilterContext.Provider>
                     </ColorContext.Provider>
                   )}
-                  {loading && (
+                  {(loading || (loaded && holdPaint && !noViewReason)) && (
                     <div className="reader-more">
                       <Spinner size={14} label="Loading" />
                     </div>

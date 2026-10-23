@@ -576,6 +576,24 @@ describe('Color by and Filter by over a whole-file JSON transcript', () => {
     expect([5, 9, 15, 21].map((l) => band(el, l))).toEqual([null, keyColor(0), keyColor(1), null])
   })
 
+  test("the turns are first drawn with their colors: none is drawn plain while Color by's keys are on their way", async () => {
+    vi.stubGlobal('fetch', async () => new Response('{"detail":"not found"}', { status: 404, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    const page: SourcePage = { path: P, kind: 'text', total_lines: 30, start: 1, records: [line(1, '{'), line(2, '  "schema_version": "ATIF-v1.7",')], transcript: { format: 'json', score: 0.5 } }
+    vi.spyOn(api, 'source').mockResolvedValue(page)
+    vi.spyOn(api, 'sourceTurns').mockResolvedValue({ path: P, total: 4, start: 0, n_groups: 1, groups: { '0': { title: 'toy-agent', first: 0 } }, turns: TURNS })
+    let give: (k: SourceKeys) => void = () => {}
+    vi.spyOn(api, 'sourceKeys').mockReturnValue(new Promise<SourceKeys>((r) => (give = r)))
+    localStorage.setItem(pickKey('w', P), JSON.stringify('transcript'))
+    const el = await mount(<Reader workspace="w" path={P} kind="text" labels={NO_LABELS} lead={<span />} />)
+    await settle()
+    await settle()
+    expect(el.querySelectorAll('.reader-card').length).toBe(0)
+    await act(async () => give(KEYS))
+    await settle()
+    expect([5, 9, 15, 21].map((l) => band(el, l))).toEqual([keyColor(0), keyColor(1), keyColor(1), keyColor(0)])
+  })
+
   test('Filter by hides the turns whose value of a field is off', async () => {
     const el = await open({ 'thimble:w:filterBy:run/trajectory.json': { by: 'k:tool', off: { 'k:tool': ['bash'] } } })
     expect([...el.querySelectorAll('.reader-turns .reader-card')].map((c) => c.getAttribute('data-line'))).toEqual(['5', '9', '21'])
