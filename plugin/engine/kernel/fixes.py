@@ -59,7 +59,7 @@ from . import privacy as P
 from .store import Store, thimble_home
 
 PLUGIN = Path(__file__).resolve().parents[2]
-STATES = ("working", "ready", "failed", "on", "off", "redo", "request", "sent", "saved", "released", "removed")
+STATES = ("working", "ready", "failed", "on", "off", "redo", "pending", "request", "sent", "saved", "released", "removed")
 PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 
 # the files a fix may not change, by what each one is: what keeps undo, off, the sandbox and the scan working (fnmatch
@@ -669,10 +669,13 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     and has Claude Code copy live; the plugin then runs /reload-plugins."""
     rec = get(fid)
     check_ask(rec["id"], secret)
-    if rec.get("state") not in ("ready", "off", "redo") or not rec.get("commit"):
+    if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}, so there is nothing to apply")
     if rec.get("state") == "redo":
         raise FixError(f"fix {rec['id']} does not fit your thimble any more; r asks Claude to redo it")
+    if rec.get("state") == "pending":
+        raise FixError(f"fix {rec['id']} did not fit thimble {release_name()}; run the command thimble update printed "
+                       "(thimble fix show " + str(rec["id"]) + " shows it), or r asks Claude to redo it")
 
     def change():
         live = live_dir()
@@ -716,7 +719,7 @@ def redo(fid: int | str, words: str = "") -> dict[str, Any]:
     """r: a new copy, cut from mine as it is now, for the same fix: the fixer gets the person's words again, and the
     earlier change (tmp/<id>/earlier.patch) to start from."""
     rec = get(fid)
-    if rec.get("state") not in ("redo", "failed", "off", "ready", "request"):
+    if rec.get("state") not in ("redo", "pending", "failed", "off", "ready", "request"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}")
     with Lock():
         ensure_live()
@@ -804,109 +807,449 @@ def all_on() -> dict[str, Any]:
     return _move(change)
 
 
-# ------------------------------------------------------------------ a new release
+# ------------------------------------------------------------------ a new release: thimble update
 
 
-def newest() -> str:
-    """The newest release commit: a clone install's clone's HEAD; a GitHub install's default branch, fetched."""
+RELEASE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+# the browser workbench's packages: (folder, its lock file, the packages it installs)
+BROWSER_LOCKS = (("backend", "uv.lock", ".venv"), ("frontend", "package-lock.json", "node_modules"))
+PROMPT_PENDING = PLUGIN / "prompts" / "update-pending.md"
+
+
+def update_url() -> str:
+    """Where thimble's releases come from: its repository on GitHub. THIMBLE_UPDATE_URL (any git URL or folder) points
+    elsewhere, for tests."""
+    return os.environ.get("THIMBLE_UPDATE_URL") or f"https://github.com/{upstream()}.git"
+
+
+def _vtuple(tag: str) -> tuple[int, ...]:
+    m = RELEASE_TAG.match(tag if tag.startswith("v") else "v" + tag)
+    return tuple(int(x) for x in m.groups()) if m else ()
+
+
+def latest_release() -> dict[str, str]:
+    """The newest release, {tag, version, commit, url}: the highest vX.Y.Z tag of thimble's repository. A tag with more
+    after the numbers (v0.11.0-rc1) is not a release."""
+    url = update_url()
+    p = run(["git", "ls-remote", "--tags", url, "refs/tags/v*"], check=False, timeout=120)
+    if p.returncode != 0:
+        err = (p.stderr or p.stdout).strip().splitlines()
+        raise FixError(f"thimble could not read its releases from {url} ({err[-1] if err else 'no message'}); "
+                       "check the network, then run thimble update again")
+    tags: dict[str, str] = {}
+    for line in p.stdout.splitlines():
+        sha, _, ref = line.partition("\t")
+        name = ref.removeprefix("refs/tags/")
+        peeled = name.endswith("^{}")
+        name = name.removesuffix("^{}")
+        if RELEASE_TAG.match(name) and (peeled or name not in tags):
+            tags[name] = sha  # an annotated tag's commit (its ^{} line) wins over the tag object
+    if not tags:
+        raise FixError(f"{url} has no release (no tag such as v0.10.3)")
+    tag = max(tags, key=_vtuple)
+    return {"tag": tag, "version": tag[1:], "commit": tags[tag], "url": url}
+
+
+def release_name(rel: dict[str, Any] | None = None) -> str:
+    """The release live is on, as the person reads it: 0.10.3, else the plugin's version, else the commit."""
+    rel = release() if rel is None else rel
+    return str(rel.get("tag") or "").removeprefix("v") or str(rel.get("version") or "") or str(rel.get("base") or "")[:7]
+
+
+def _has(repo: Path, commit: str) -> bool:
+    return run(["git", "cat-file", "-e", commit + "^{commit}"], cwd=repo, check=False).returncode == 0
+
+
+def _described(repo: Path, commit: str) -> str:
+    """The release tag nearest before `commit`, when the repository has thimble's tags: v0.10.2 → 0.10.2."""
+    t = git("describe", "--tags", "--abbrev=0", "--match", "v*", commit, cwd=repo, check=False)
+    return t[1:] if RELEASE_TAG.match(t) else ""
+
+
+def _is_newer(repo: Path, latest: dict[str, str], base: str, now: str) -> bool:
+    """Whether the release is newer than the thimble that runs (base): not base, not in base's history, and not an
+    older version (no step back from a branch ahead of the release)."""
+    new = latest["commit"]
+    if new == base or (_has(repo, new) and run(["git", "merge-base", "--is-ancestor", new, base], cwd=repo,
+                                                  check=False).returncode == 0):
+        return False
+    have = _vtuple(now)
+    return not (have and have >= _vtuple(latest["tag"]))
+
+
+def _replay_order(recs: dict[int, dict[str, Any]]) -> list[int]:
+    """The fixes in mine, in mine's order (each commit after the release that is a fix's own), then any fix that says
+    on and was not found there. A sent fix is in mine too, so it moves with the rest."""
+    live = live_dir()
+    by_commit: dict[str, int] = {}
+    for line in git("for-each-ref", "--format=%(objectname) %(refname)", "refs/thimble/fixes/", cwd=live).splitlines():
+        sha, _, ref = line.partition(" ")
+        try:
+            by_commit[sha] = int(ref.rsplit("/", 1)[1])
+        except ValueError:
+            continue
+    order: list[int] = []
+    for c in git("rev-list", "--reverse", f"{release()['base']}..mine", cwd=live, check=False).splitlines():
+        fid = by_commit.get(c)
+        if fid is not None and fid in recs and recs[fid].get("state") != "removed" and fid not in order:
+            order.append(fid)
+    return order + [i for i in _on_ids(recs) if i not in order]
+
+
+def _q(p: Path | str) -> str:
+    """A path for a command the person pastes: ~ for their home when the rest needs no quotes."""
+    t = _tilde(str(p))
+    return t if t.startswith("~/") and re.fullmatch(r"~/[\w./+-]*", t) else shlex.quote(str(p))
+
+
+def pending_command(prompt: Path) -> str:
+    return f'cd {_q(live_dir())} && claude "$(cat {_q(prompt)})"'
+
+
+def _why_text(why: dict[str, Any], version: str) -> str:
+    if why.get("why") == "tests":
+        return f"its tests failed on thimble {version}"
+    files = why.get("files") or []
+    return f"it conflicts with thimble {version} in {_and(files)}" if files else f"it does not apply to thimble {version}"
+
+
+def _fill(text: str, vals: dict[str, str]) -> str:
+    return re.sub(r"\{\{([A-Z_]+)\}\}", lambda m: vals.get(m.group(1), m.group(0)), text)
+
+
+def _pending_prompt(version: str, ids: list[int]) -> Path:
+    """pending/<version>.md: the prompt that opens Claude Code in live to apply the pending fixes on top of the release
+    (prompts/update-pending.md, with one section per fix), and pending/current.json for --continue."""
+    recs = records()
+    parts = []
+    for fid in ids:
+        r = recs[fid]
+        p = r.get("pending") or {}
+        sec = [f"## Fix {fid}: {r['title']}", ""]
+        for i, w in enumerate(r.get("words") or [], 1):
+            sec.append(f"The person asked{f' (round {i})' if len(r.get('words') or []) > 1 else ''}: {w.strip()}")
+        if r.get("summary"):
+            sec.append(f"What it did: {r['summary'].strip()}")
+        if p.get("old"):
+            sec.append(f"Its change on thimble {p.get('from') or 'before'}: {p['old']}")
+        sec.append(f"What failed: {r.get('error') or _why_text(p, version)}.")
+        if p.get("tests"):
+            sec += ["", "The end of the test output:", "", "```", str(p["tests"]).strip(), "```"]
+        parts.append("\n".join(sec))
+    try:
+        frame = PROMPT_PENDING.read_text()
+    except OSError:
+        raise FixError(f"thimble's prompt {PROMPT_PENDING} is missing; install thimble again")
+    text = _fill(frame, {"VERSION": version, "LIVE": _tilde(str(live_dir())), "COUNT": str(len(ids)),
+                         "FIXES": "\n\n".join(parts)}).rstrip() + "\n"
+    d = home() / "pending"
+    d.mkdir(parents=True, exist_ok=True)
+    prompt = d / f"{version}.md"
+    prompt.write_text(text)
+    write_json(d / "current.json", {"version": version, "ids": ids, "tip": head(), "prompt": str(prompt),
+                                    "made": time.time()})
+    return prompt
+
+
+def browser_home() -> Path:
+    return Path(os.environ.get("THIMBLE_BROWSER_HOME") or Path.home() / ".thimble-browser")
+
+
+def _sha_of(p: Path) -> str:
+    try:
+        return hashlib.sha256(p.read_bytes()).hexdigest()
+    except OSError:
+        return ""
+
+
+def _browser_seed() -> Path | None:
+    """The checkout scripts/install.sh installed the workbench in (it writes its path to the workbench's home): its
+    packages are linked into live, with no download, while their lock files are the same."""
+    try:
+        p = Path((browser_home() / "checkout").read_text().strip())
+    except OSError:
+        return None
+    return p if (p / "backend").is_dir() else None
+
+
+def _link_copy(src: Path, dest: Path) -> None:
+    """A copy made of hard links: no disk, no download. The installers replace files rather than write into them."""
+    if platform.system() == "Linux":
+        run(["cp", "-al", str(src), str(dest)], timeout=900)
+    else:
+        shutil.copytree(src, dest, symlinks=True, copy_function=os.link)
+
+
+def browser_on_live() -> dict[str, Any]:
+    """The browser workbench on live, when it is installed (its home exists): its Python and JS packages again only when
+    their lock files changed, then the page. thimble-browser runs from live while fixes/browser-ready is there."""
+    b = live_dir() / "browser"
+    if not b.is_dir() or not browser_home().is_dir():
+        return {"browser": "none"}
+    ready = home() / "browser-ready"
+    ready.unlink(missing_ok=True)
+    stamps = read_json(home() / "browser.json") or {}
+    seed = _browser_seed()
+    env = {**os.environ, "NPM_CONFIG_UPDATE_NOTIFIER": "false"}
+    did: list[str] = []
+    try:
+        for part, lock, pkgs in BROWSER_LOCKS:
+            want, dest = _sha_of(b / part / lock), b / part / pkgs
+            if dest.exists() and stamps.get(lock) == want:
+                continue
+            src = seed / part / pkgs if seed else None
+            if not dest.exists() and src and src.is_dir() and _sha_of(seed / part / lock) == want:
+                _link_copy(src, dest)
+                did.append(f"{part} packages linked")
+            elif part == "backend":
+                run(["uv", "sync", "--project", str(b / part), "--frozen", "--no-dev", "--no-install-project", "--extra",
+                     "dev"], env=env, timeout=1800)
+                did.append("backend packages installed")
+            else:
+                run(["npm", "--prefix", str(b / part), "ci", "--no-audit", "--no-fund"], env=env, timeout=1800)
+                did.append("frontend packages installed")
+            stamps[lock] = want
+            write_json(home() / "browser.json", stamps)
+        run(["npm", "--prefix", str(b / "frontend"), "run", "build"], env=env, timeout=900)
+    except FixError as e:
+        return {"browser": "failed", "browser_error": str(e)}
+    ready.write_text(str(b) + "\n")
+    return {"browser": "ready", "browser_dir": str(b), "browser_did": did}
+
+
+def update(tests: bool = True, check: bool = False) -> dict[str, Any]:
+    """thimble update: the newest release for both modes, with the person's fixes on it.
+
+    Each fix in mine is replayed on the release in a scratch copy, the quick tests after each. A fix whose replay
+    changes nothing is in the release (released, "in 0.10.3"); one that conflicts or fails its tests is pending: its
+    words, its old change (pending/<version>/fix-<id>.diff) and what failed go into pending/<version>.md, a prompt that
+    opens Claude Code in live to apply it on top of the release, and `thimble update --continue` records what Claude
+    committed. The rest are carried. Then mine is the release plus the carried fixes; Claude Code loads the plugin from
+    live, and thimble-browser runs from live/browser. With check, only whether a newer release is out."""
+    latest = latest_release()
     rel = release()
-    if rel.get("kind") == "clone":
-        return git("rev-parse", "HEAD", cwd=rel["repo"], check=False)
-    p = run(["git", "fetch", "-q", "--no-tags", "origin", "HEAD"], cwd=live_dir(), check=False, timeout=120)
-    return git("rev-parse", "FETCH_HEAD", cwd=live_dir(), check=False) if p.returncode == 0 else ""
-
-
-def update(tests: bool = True) -> dict[str, Any]:
-    """At session start: when a newer release is out, each fix that is on is replayed on it in a scratch copy, the quick
-    tests after each. A fix whose change the release has is released; one that does not apply, or fails its tests,
-    needs a redo (its words and old change are kept); the rest are carried. Then mine is the new release plus the
-    carried fixes, and Claude Code copies it. {said, reload}: one line for the bar, empty when nothing changed."""
-    rel = release()
-    if not rel or not (live_dir() / ".git").exists():
-        return {"said": "", "reload": False}
-    new = newest()
-    base = rel["base"]
-    if not new or new == base or run(["git", "merge-base", "--is-ancestor", new, base], cwd=live_dir(), check=False).returncode == 0:
-        return {"said": "", "reload": False}
+    has_live = bool(rel) and (live_dir() / ".git").exists()
+    if has_live:
+        repo, base, now = live_dir(), str(rel["base"]), release_name(rel)
+        if not rel.get("tag"):
+            now = _described(repo, base) or now
+    else:
+        src = find_source()
+        repo, base = Path(src["repo"]), str(src["commit"])
+        now = _described(repo, base) or base[:7]
+    if latest["commit"] == base:
+        now = latest["version"]
+    out: dict[str, Any] = {"from": now, "to": latest["version"], "newer": _is_newer(repo, latest, base, now),
+                           "said": "", "reload": False}
+    if check or not out["newer"]:
+        same = now == latest["version"]
+        return {**out, "lines": [] if check else [f"thimble {now} is the newest release." if same else
+                                                  f"thimble {now} is up to date; the newest release is {latest['version']}."]}
     with Lock():
+        ensure_live()
+        live, rel = live_dir(), release()
+        ref = f"refs/thimble/releases/{latest['tag']}"
+        run(["git", "fetch", "-q", "--no-tags", latest["url"], f"+refs/tags/{latest['tag']}:{ref}"], cwd=live, timeout=600)
+        new = git("rev-parse", f"{ref}^{{commit}}", cwd=live)
+        version = latest["version"]
         recs = records()
-        order = _on_ids(recs)
+        order = _replay_order(recs)
         wt = home() / "work" / "update"
         if wt.exists():
-            run(["git", "worktree", "remove", "--force", str(wt)], cwd=live_dir(), check=False)
+            run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
             shutil.rmtree(wt, ignore_errors=True)
-        git("worktree", "add", "-q", "--detach", str(wt), new, cwd=live_dir())
-        version = _version_at(live_dir(), new) or new[:7]
-        carried, released, redo = [], [], []
+        git("worktree", "add", "-q", "--detach", str(wt), new, cwd=live)
+        carried: list[int] = []
+        released: list[int] = []
+        pending: dict[int, dict[str, Any]] = {}
         try:
             for fid in order:
                 before = git("rev-parse", "HEAD", cwd=wt)
-                p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{fid}"], cwd=wt, check=False,
-                        env=as_thimble())
+                p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{fid}"],
+                        cwd=wt, check=False, env=as_thimble())
                 if p.returncode != 0:
+                    files = git("-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=U", cwd=wt,
+                                check=False).split("\n")
                     run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
-                    redo.append(fid)
+                    git("reset", "-q", "--hard", before, cwd=wt)
+                    pending[fid] = {"why": "conflict", "files": [f for f in files if f]}
                     continue
                 if run(["git", "diff", "--quiet", before, "HEAD"], cwd=wt, check=False).returncode == 0:
                     git("reset", "-q", "--hard", before, cwd=wt)
                     released.append(fid)
                     continue
-                if tests and not run_tests("update")[0]:
-                    git("reset", "-q", "--hard", before, cwd=wt)
-                    redo.append(fid)
-                    continue
+                if tests:
+                    ok, tail = run_tests("update")
+                    if not ok:
+                        git("reset", "-q", "--hard", before, cwd=wt)
+                        pending[fid] = {"why": "tests", "tests": tail}
+                        continue
                 git("update-ref", f"refs/thimble/fixes/{fid}", "HEAD", cwd=wt)
                 carried.append(fid)
             tip = git("rev-parse", "HEAD", cwd=wt)
         finally:
-            run(["git", "worktree", "remove", "--force", str(wt)], cwd=live_dir(), check=False)
+            run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
             shutil.rmtree(wt, ignore_errors=True)
         _unstamp()
         if is_on():
-            git("checkout", "-q", "-B", "mine", tip, cwd=live_dir())
+            git("checkout", "-q", "-B", "mine", tip, cwd=live)
         else:
-            git("branch", "-f", "mine", tip, cwd=live_dir())
-            git("checkout", "-q", "--detach", new, cwd=live_dir())
-        rel.update(base=new, version=_version_at(live_dir(), new))
+            git("branch", "-f", "mine", tip, cwd=live)
+            git("checkout", "-q", "--detach", new, cwd=live)
+        was = now
+        rel.update(base=new, version=_version_at(live, new), tag=latest["tag"], updated=time.time())
         write_json(home() / "release.json", rel)
         _write_off_sh(rel)
-        for fid in redo:
-            r = recs[fid]
-            r.update(state="redo", error=f"it did not fit thimble {version}")
-            put(r)
         for fid in released:
             r = recs[fid]
-            r.update(state="released", note=f"in {version}")
+            r.update(state="released", released_in=version, note=f"in {version}", error=None, pending=None)
             put(r)
         for fid in carried:
             r = recs[fid]
-            r.update(commit=git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live_dir()))
+            r.update(commit=git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live))
             put(r)
+        for fid, why in pending.items():
+            old = home() / "pending" / version / f"fix-{fid}.diff"
+            old.parent.mkdir(parents=True, exist_ok=True)
+            old.write_text(run(["git", "-c", "core.quotePath=false", "show", "--no-color", "--no-ext-diff",
+                                f"refs/thimble/fixes/{fid}"], cwd=live).stdout)
+            r = recs[fid]
+            r.update(state="pending", pending={**why, "version": version, "from": was, "old": str(old)},
+                     error=_why_text(why, version))
+            put(r)
+        # every fix that waits, also one an earlier update set aside, goes on top of this release
+        waiting = [i for i, r in sorted(records().items()) if r.get("state") == "pending"]
+        prompt = _pending_prompt(version, waiting) if waiting else None
+        if not waiting:
+            (home() / "pending" / "current.json").unlink(missing_ok=True)
+        _repoint()
         synced = _sync()
+    browser = browser_on_live()
+    recs = records()
+    d = {**out, "from": was, "carried": carried, "released": released, "pending": waiting,
+         "prompt": str(prompt) if prompt else None, "command": pending_command(prompt) if prompt else None,
+         **synced, **browser}
+    d["lines"] = _summary(d, recs)
     parts = [f"thimble {version}"]
     if carried:
         parts.append(f"{len(carried)} fix{'' if len(carried) == 1 else 'es'} carried")
     if released:
         parts.append(f"{len(released)} in the release")
-    if redo:
-        parts.append(f"{len(redo)} need{'s' if len(redo) == 1 else ''} redo")
-    return {"said": " · ".join(parts), "carried": carried, "released": released, "redo": redo, **synced}
+    if waiting:
+        parts.append(f"{len(waiting)} pending")
+    d["said"] = " · ".join(parts)
+    return d
+
+
+def _summary(d: dict[str, Any], recs: dict[int, dict[str, Any]]) -> list[str]:
+    """What thimble update prints: the versions, the fixes by outcome with their titles, where both modes run now, and
+    the one command for the pending fixes."""
+    def titles(ids: list[int]) -> str:
+        return "; ".join(recs[i]["title"] for i in ids)
+
+    n = lambda k, w="fix": f"{k} {w}{'' if k == 1 else 'es'}"  # noqa: E731
+    out = [f"thimble {d['from']} → {d['to']}"]
+    out.append(f"  carried         {n(len(d['carried']))}" + (f": {titles(d['carried'])}" if d["carried"] else ""))
+    if d["released"]:
+        out.append(f"  in {d['to']:<12} {titles(d['released'])}")
+    if d["pending"]:
+        out.append(f"  pending         {titles(d['pending'])}")
+    modes = "The terminal plugin and the browser workbench run" if d.get("browser") == "ready" else "The terminal plugin runs"
+    out.append(f"{modes} it from {_tilde(str(live_dir()))}.")
+    if d.get("browser") == "failed":
+        out.append(f"The browser workbench stays on the release it had: {d.get('browser_error')}. Run thimble update "
+                   "again after the fix.")
+    if d.get("command"):
+        k = len(d["pending"])
+        out += ["", f"{'This fix' if k == 1 else f'These {k} fixes'} did not fit {d['to']}. To have Claude apply "
+                f"{'it' if k == 1 else 'them'} on top of {d['to']}, run:", "", f"  {d['command']}"]
+    return out
+
+
+def continue_() -> dict[str, Any]:
+    """thimble update --continue: Claude applied the pending fixes on top of the new release in live, one commit per
+    fix with the fix's title. Each such commit becomes its fix's new version, and the fix is on. A commit that is no
+    pending fix's, or that changes a safety file, stops it with nothing recorded, so mine holds only recorded fixes."""
+    cur = read_json(home() / "pending" / "current.json")
+    if not cur:
+        raise FixError("no fixes wait for --continue; thimble update looks for a new release")
+    live = live_dir()
+    with Lock():
+        dirty = [x[3:] for x in run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=live).stdout.splitlines()
+                 if x[3:] != PLUGIN_JSON]
+        if dirty:
+            raise FixError(f"{_tilde(str(live))} has changes that are not committed ({_and(dirty[:3])}): commit each "
+                           "fix with its title, or undo the rest, then run thimble update --continue again")
+        if git("rev-parse", "--abbrev-ref", "HEAD", cwd=live, check=False) != "mine":
+            raise FixError(f"{_tilde(str(live))} is not on its branch mine: git -C {_q(live)} checkout mine, then run "
+                           "thimble update --continue again")
+        tip = str(cur["tip"])
+        if run(["git", "merge-base", "--is-ancestor", tip, "mine"], cwd=live, check=False).returncode != 0:
+            raise FixError("mine no longer starts where thimble update left it; apply the fixes on top of it again")
+        commits = [x.split("\t", 1) for x in git("log", "--reverse", "--format=%H%x09%s", f"{tip}..mine",
+                                                  cwd=live).splitlines() if x]
+        recs = records()
+        waiting = {recs[i]["title"].strip(): i for i in cur.get("ids") or [] if recs.get(i, {}).get("state") == "pending"}
+        found: list[tuple[int, str, list[dict[str, Any]]]] = []
+        for c, subject in commits:
+            fid = waiting.get(subject.strip())
+            if fid is None or any(f == fid for f, _, _ in found):
+                raise FixError(f"commit {c[:7]} (“{short(subject, 50)}”) is not one pending fix: give each fix one "
+                               f"commit with its title ({_and([f'“{t}”' for t in waiting])}), then run thimble update "
+                               "--continue again")
+            files = _numstat(live, f"{c}^", c)
+            bad = protected_of([f["path"] for f in files])
+            if bad:
+                raise FixError(f"commit {c[:7]} (“{short(subject, 50)}”) {protected_why(bad)}; take that part out, then "
+                               "run thimble update --continue again")
+            if any(f["add"] is None for f in files):
+                raise FixError(f"commit {c[:7]} adds or changes a binary file; a fix changes text only")
+            found.append((fid, c, files))
+        for fid, c, files in found:
+            git("update-ref", f"refs/thimble/fixes/{fid}", c, cwd=live)
+            r = records()[fid]
+            r.update(state="on", on_at=time.time(), commit=c, files=files, error=None, pending=None, note=None)
+            put(r)
+        left = [i for i in cur.get("ids") or [] if records().get(i, {}).get("state") == "pending"]
+        if left:
+            write_json(home() / "pending" / "current.json", {**cur, "ids": left, "tip": head()})
+        else:
+            (home() / "pending" / "current.json").unlink(missing_ok=True)
+        synced = _sync() if found else {"reload": False}
+    browser = browser_on_live() if found else {}
+    recs = records()
+    on = "; ".join(f"{recs[f]['title']} ({c[:7]})" for f, c, _ in found)
+    said = (f"Recorded {len(found)} fix{'' if len(found) == 1 else 'es'} on thimble {cur['version']}, now on: {on}."
+            if found else f"No commit to record: each pending fix needs one commit with its title on mine.")
+    if left:
+        said += f" Still pending: {'; '.join(recs[i]['title'] for i in left)}."
+    if browser.get("browser") == "failed":
+        said += f" The browser workbench was not rebuilt: {browser.get('browser_error')}."
+    return {"said": said, "recorded": [f for f, _, _ in found], "pending": left, **synced, **browser}
 
 
 # ------------------------------------------------------------------ list, show, export
 
 
 WORD = {"working": "working", "ready": "ready", "failed": "failed", "on": "on", "off": "off", "redo": "redo",
-        "request": "request", "sent": "sent", "saved": "saved", "released": "released"}
+        "pending": "pending", "request": "request", "sent": "sent", "saved": "saved", "released": "released"}
+
+
+def state_word(r: dict[str, Any]) -> str:
+    """A fix's state in one word, as the list shows it: a fix the release took is "in 0.10.3"."""
+    if r.get("state") == "released" and (r.get("released_in") or str(r.get("note") or "").startswith("in ")):
+        return f"in {r.get('released_in') or str(r['note'])[3:]}"
+    return WORD.get(str(r.get("state")), str(r.get("state")))
 
 
 def listing() -> dict[str, Any]:
     recs = [r for r in records().values() if r.get("state") != "removed"]
     recs.sort(key=lambda r: -float(r.get("created") or 0))
     rel = release()
-    return {"fixes": recs, "on": is_on(), "live": str(live_dir()), "version": rel.get("version") or str(rel.get("base") or "")[:7],
+    return {"fixes": recs, "on": is_on(), "live": str(live_dir()), "version": release_name(rel),
             "base": rel.get("base") or "", "kind": rel.get("kind") or "", "pointed": bool(rel.get("pointed")),
-            "count_on": sum(r.get("state") == "on" for r in recs)}
+            "count_on": sum(r.get("state") == "on" for r in recs),
+            "pending": (read_json(home() / "pending" / "current.json") or {}).get("prompt")}
 
 
 def _date(t: Any) -> str:
@@ -924,7 +1267,7 @@ def note_of(r: dict[str, Any]) -> str:
         return "waits for y" if r.get("tests") != "failed" else ""
     if s == "failed":
         return str(r.get("error") or "")
-    if s == "redo":
+    if s in ("redo", "pending"):
         return str(r.get("error") or "did not fit")
     if s == "request":
         return "no code"
@@ -944,17 +1287,30 @@ def _tilde(p: str) -> str:
     return "~" + p[len(h):] if p.startswith(h + os.sep) else p
 
 
-def list_lines() -> list[str]:
+def _first_line(r: dict[str, Any]) -> str:
+    words = r.get("words") or [""]
+    return next((x.strip() for x in str(words[0]).splitlines() if x.strip()), "")
+
+
+def list_lines(width: int | None = None) -> list[str]:
+    """thimble fix list: one row per fix (number, state, title, date, the first line of the person's words), in plain
+    text that reads the same without color."""
     d = listing()
     if not d["fixes"]:
         return ["No fixes yet. In thimble: /thimble-fix <what should work differently>."]
-    head_ = f"Your fixes · thimble {d['version'] or ''} + {d['count_on']} on".replace("  ", " ")
+    width = width or shutil.get_terminal_size((100, 24)).columns
+    head_ = f"Your fixes · thimble {d['version']} + {d['count_on']} on · {_tilde(d['live'])}"
     if not d["on"]:
-        head_ = f"Your fixes · thimble {d['version'] or ''} alone · {d['count_on']} kept off (thimble fix on brings them back)"
-    out = [head_, f"{_tilde(d['live'])} · branch mine", ""]
+        head_ = f"Your fixes · thimble {d['version']} alone · {d['count_on']} kept off (thimble fix on brings them back)"
+    sw = max(7, *(len(state_word(r)) for r in d["fixes"]))
+    tw = min(40, max(5, *(len(r["title"]) for r in d["fixes"])))
+    out = [head_, "", f"  {'#':>3}  {'state':<{sw}}  {'title':<{tw}}  date   you asked"]
     for r in d["fixes"]:
-        out.append(f"  {r['id']:>3}  {WORD.get(r['state'], r['state']):<8}  {short(r['title'], 40):<40}  "
-                   f"{_date(r.get('created'))}  {note_of(r)}".rstrip())
+        row = f"  {r['id']:>3}  {state_word(r):<{sw}}  {short(r['title'], tw):<{tw}}  {_date(r.get('created')):<5}  "
+        out.append((row + short(_first_line(r), max(16, width - len(row) - 1))).rstrip())
+    if d.get("pending"):
+        out += ["", f"Pending fixes wait for Claude: {pending_command(Path(d['pending']))}"]
+    out += ["", "thimble fix show N: one fix whole · thimble fix diff N: its change"]
     return out
 
 
@@ -969,22 +1325,43 @@ def diff_of(rec: dict[str, Any]) -> str:
 
 
 def show_lines(fid: int | str) -> list[str]:
+    """thimble fix show N: the whole record, with the diff stat."""
     r = get(fid)
-    add = sum(f.get("add") or 0 for f in r.get("files") or [])
-    dele = sum(f.get("del") or 0 for f in r.get("files") or [])
-    out = [f"{r['title']}  · fix {r['id']} · {WORD.get(r['state'], r['state'])} · made in {r.get('made_in', 'terminal')}"]
+    files = r.get("files") or []
+    add = sum(f.get("add") or 0 for f in files)
+    dele = sum(f.get("del") or 0 for f in files)
+    out = [f"Fix {r['id']}: {r['title']}", f"  state     {state_word(r)}" + (f" · {note_of(r)}" if note_of(r) and r.get("state") != "released" else ""),
+           f"  made      {time.strftime('%Y-%m-%d %H:%M', time.localtime(float(r.get('created') or 0)))} in the "
+           f"{r.get('made_in', 'terminal')}" + (f" · {r['rounds']} rounds" if int(r.get("rounds") or 1) > 1 else ""), ""]
     for i, w in enumerate(r.get("words") or [], 1):
-        out.append(f"You asked{f' (round {i})' if len(r.get('words') or []) > 1 else ''}: “{w}”")
+        out.append(f"You asked{f' (round {i})' if len(r.get('words') or []) > 1 else ''}:")
+        out += [f"  {x}" for x in str(w).strip().splitlines()]
     if r.get("summary"):
-        out.append(f"What it does: {r['summary']}")
-    if r.get("files"):
-        out.append(f"{len(r['files'])} file{'' if len(r['files']) == 1 else 's'} +{add} −{dele} · tests {r.get('tests') or 'not run'}")
-        for f in r["files"]:
-            out.append(f"  {f['path']}  +{f.get('add') or 0} −{f.get('del') or 0}")
-    if r.get("error"):
+        out += ["What it does:", *[f"  {x}" for x in r["summary"].splitlines()]]
+    p = r.get("pending") or {}
+    if r.get("state") == "pending":
+        out += ["", f"Why it waits: {r.get('error') or _why_text(p, p.get('version') or '')}"]
+        if p.get("old"):
+            out.append(f"  its change before: {_tilde(str(p['old']))}")
+        if p.get("tests"):
+            out += [f"  {x}" for x in str(p["tests"]).splitlines()[-6:]]
+        cur = (read_json(home() / "pending" / "current.json") or {}).get("prompt")
+        if cur:
+            out.append(f"  Claude applies it: {pending_command(Path(cur))}")
+    elif r.get("error"):
         out.append(f"Why: {r['error']}")
+    if files:
+        out += ["", f"{len(files)} file{'' if len(files) == 1 else 's'} changed, +{add} −{dele} · tests {r.get('tests') or 'not run'}"]
+        pw = max(len(f["path"]) for f in files)
+        for f in files:
+            if f.get("add") is None:
+                out.append(f"  {f['path']:<{pw}}  binary")
+            else:
+                out.append(f"  {f['path']:<{pw}}  +{f.get('add') or 0} −{f.get('del') or 0}")
     if r.get("commit"):
-        out.append(f"commit {r['commit'][:9]} · refs/thimble/fixes/{r['id']}")
+        out += ["", f"commit {r['commit'][:9]} · refs/thimble/fixes/{r['id']} · thimble fix diff {r['id']} shows it"]
+    if r.get("pr"):
+        out.append(f"sent: {r['pr']}")
     return out
 
 
@@ -1404,13 +1781,7 @@ def cmd(a) -> int:
             if r.get("reload"):
                 print("In Claude Code, type /reload-plugins to load it.")
         elif verb == "update":
-            r = update(not a.no_tests)
-            if a.json:
-                out_json(r)
-            else:
-                print(r.get("said") or "Your thimble is the newest release.")
-                if r.get("reload"):
-                    print("In Claude Code, type /reload-plugins to load it.")
+            return cmd_update(a)
         elif verb == "on":
             r = all_on()
             print(r.get("said", ""))
@@ -1449,4 +1820,30 @@ def cmd(a) -> int:
     except FixError as e:
         print(f"thimble fix {verb}: {e}", file=sys.stderr)
         return 1
+    return 0
+
+
+def cmd_update(a) -> int:
+    """thimble update [--continue] [--check]: see cli.py."""
+    from .cli import out_json  # noqa: PLC0415
+
+    try:
+        if getattr(a, "cont", False):
+            r = continue_()
+            lines = [r["said"]]
+        else:
+            r = update(not getattr(a, "no_tests", False), check=getattr(a, "check", False))
+            lines = r.get("lines") or []
+            if getattr(a, "check", False):
+                lines = [f"thimble {r['to']} is out (you have {r['from']}): thimble update" if r["newer"]
+                         else f"thimble {r['from']} is the newest release."]
+    except FixError as e:
+        print(f"thimble update: {e}", file=sys.stderr)
+        return 1
+    if a.json:
+        out_json(r)
+        return 0
+    print("\n".join(lines))
+    if r.get("reload"):
+        print("In Claude Code, type /reload-plugins to load it.")
     return 0

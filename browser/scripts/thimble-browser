@@ -16,8 +16,18 @@
 #
 # The workbench keeps its workspaces and its choice in ~/.thimble-browser, or in THIMBLE_BROWSER_HOME, apart from the
 # terminal plugin's ~/.thimble. The server listens on 127.0.0.1, on port 8300 or the next free one (--port N takes N alone).
+# Once `thimble update` has put the workbench on ~/.thimble/fixes/live (the newest release with your fixes), this runs
+# the workbench from there.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+fixes="${THIMBLE_HOME:-$HOME/.thimble}/fixes"
+if [ -z "${THIMBLE_BROWSER_LIVE:-}" ] && [ -f "$fixes/browser-ready" ] && [ -x "$fixes/live/browser/scripts/thimble-browser" ] \
+   && [ "$(cd "$fixes/live/browser" && pwd -P)" != "$root" ]; then
+  export THIMBLE_BROWSER_LIVE=1
+  echo "thimble-browser: from ${fixes/#$HOME/\~}/live, the release thimble update installed, with your fixes" >&2
+  exec "$fixes/live/browser/scripts/thimble-browser" "$@"
+fi
 
 folder="" setup=0 setup_args=() session=new
 while [ $# -gt 0 ]; do
@@ -31,7 +41,7 @@ while [ $# -gt 0 ]; do
     --port) [ $# -ge 2 ] || { echo "thimble-browser: --port needs a number" >&2; exit 2; }; export THIMBLE_PORT="$2"; shift 2 ;;
     --port=*) export THIMBLE_PORT="${1#--port=}"; shift ;;
     --setup) setup=1; shift; setup_args=("$@"); break ;;
-    -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "thimble-browser: unknown option $1 (see --help)" >&2; exit 2 ;;
     *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else echo "thimble-browser: $1 is not a folder" >&2; exit 2; fi; shift ;;
   esac

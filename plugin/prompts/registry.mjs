@@ -82,6 +82,11 @@ export const TEXTS = {
     reader: 'fix/submit.ts',
     use: 'one model call per fix the person submits',
   },
+  'update-pending': {
+    about: 'apply the fixes that did not fit a new release on top of it, one commit per fix, then record them',
+    reader: 'engine/kernel/fixes.py',
+    use: 'the prompt of the Claude Code session that the command thimble update prints opens in live',
+  },
 }
 
 /** A text's file, as a path from the plugin's root. */

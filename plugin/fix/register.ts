@@ -9,17 +9,20 @@
 //                          calls of those verbs, and its writes into the fixes' folder, are refused
 //   the fixer's end        thimble commits and tests the change; the line above the bar offers y apply · d diff · n
 //   the person's prompt    a line that only told something goes (line.ts)
-//   session start          a newer release: the fixes that are on replay on it, and one line says what came of it
+//   session start          a newer release is out: one line says so (thimble update moves to it)
+//   /thimble-fix update    the same as `thimble update`: the newest release for both modes, with the fixes on it
+//   Claude's thimble update  a reload at the end of its turn (the pending fixes' session runs --continue)
 //
 // The kernel (engine/kernel/fixes.py) holds the records and makes every change to live; nothing here edits a file of
 // thimble's or of Claude Code's.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
+import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { fixerCall, fixerCheck, fixerEnded, fixOfAgent, FIXER, recoverFixers } from './fixer'
-import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloadIfDue, setFixLine, updateFixes } from './fixes'
+import { checkUpdate, fixesDir, fixesNow, fixLineNow, refreshFixes, reloadIfDue, setFixLine, updateFixes, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
 import { requestFix } from './request'
@@ -41,6 +44,16 @@ async function knowFixers($: Engine): Promise<void> {
   for (const id of Object.keys(((await $.state.get({ plugin: 'thimble', key: 'fixers' })).value ?? {}) as Record<string, number>)) fixerAgents.add(id)
 }
 
+/** An absolute path with its . and .. parts resolved, so that live/../asks is asks. */
+export function normal(p: string): string {
+  const out: string[] = []
+  for (const part of p.split('/')) {
+    if (part === '..') out.pop()
+    else if (part && part !== '.') out.push(part)
+  }
+  return p.startsWith('/') ? `/${out.join('/')}` : out.join('/')
+}
+
 /** A call of Claude's (main's, or any agent's but a fixer's) that would do what only thimble or the person's key does. */
 async function refusal($: Engine, e: Any): Promise<string | null> {
   if (e.tool === 'Bash') {
@@ -48,10 +61,14 @@ async function refusal($: Engine, e: Any): Promise<string | null> {
       ? 'Only thimble and the person do that: /thimble-fix asks for a fix, and the person applies or submits it with a key in thimble. `thimble fix list`, `show`, `diff`, `export`, `off` and `on` are yours to run.'
       : null
   }
-  const p = String(e.file_path ?? e.notebook_path ?? '')
+  const p = normal(String(e.file_path ?? e.notebook_path ?? ''))
   const dir = fixesDir(await thimbleHome($))
-  if (p.startsWith(`${dir}/`) && !p.startsWith(`${dir}/work/`)) return "thimble's fixes are changed by thimble alone; /thimble-fix asks for a change."
-  return null
+  if (!p.startsWith(`${dir}/`) || p.startsWith(`${dir}/work/`)) return null
+  // the session the person opened in live with the pending fixes' prompt (thimble update printed its command) edits
+  // live's code; thimble update --continue then checks each commit before it records it
+  const start = await startDir($)
+  if (p.startsWith(`${dir}/live/`) && (start === `${dir}/live` || start.startsWith(`${dir}/live/`))) return null
+  return "thimble's fixes are changed by thimble alone; /thimble-fix asks for a change."
 }
 
 export const registerFix: Register = on => {
@@ -73,10 +90,10 @@ export const registerFix: Register = on => {
       const working = (list?.fixes ?? []).filter(f => f.state === 'working')
       for (const f of working) void busyWhile($, `fixing: ${cut(f.title, 36)} · in a copy`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
       await recoverFixers($, working)
-      // a newer release: the fixes that are on replay on it, once per session (a reload starts the module again)
+      // a newer release: one line says so, once per session (a reload starts the module again)
       if (list?.pointed && !(await $.state.get(UPDATED)).value) {
         await $.state.set(UPDATED, true as never)
-        await updateFixes($)
+        await checkUpdate($)
       }
     })().catch(() => undefined)
     return r
@@ -84,7 +101,7 @@ export const registerFix: Register = on => {
 
   on('command.run', { command: 'thimble-fix' }, async ($, e) => {
     const words = String(e.args || '').trim()
-    if (/^update$/i.test(words)) return { text: (await updateFixes($)) || 'Your thimble is the newest release.' }
+    if (/^update$/i.test(words)) return { text: await updateFixes($) }
     if (!words) {
       const placed = await openFixes($)
       return placed ? {} : { text: 'Your fixes open in a pane in a wider terminal. In a shell: thimble fix list' }
@@ -105,11 +122,14 @@ export const registerFix: Register = on => {
     return r?.command ? next({ ...e, command: r.command } as never) : next(e)
   }).catch(($, e, next) => (next.called ? next(e) : fixerAgents.has(String(e.agentId)) ? { deny: 'thimble could not check this call of the fixer.' } : next(e)))
 
-  // everyone else's: the verbs and the folder that are thimble's own
+  // everyone else's: the verbs and the folder that are thimble's own; after Claude's `thimble update`, a reload
   on('tool.call', { tool: /^(?:Bash|Write|Edit|MultiEdit|NotebookEdit)$/ }, async ($, e, next) => {
     if (e.agentId && (await fixOfAgent($, e.agentId)) != null) return next(e)
     const no = await refusal($, e)
-    return no ? { deny: no } : next(e)
+    if (no) return { deny: no }
+    const r = await next(e)
+    if (e.tool === 'Bash' && /\bthimble\s+(?:fix\s+)?update\b/.test(String(e.command ?? ''))) await updateRan($).catch(() => undefined)
+    return r
   }).catch(($, e, next) => next(e))
 
   // the fixer's calls need no dialog: thimble put them in the sandbox, or in its copy

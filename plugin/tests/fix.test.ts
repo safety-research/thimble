@@ -84,9 +84,15 @@ function setup() {
     if (verb === 'undo') { fix.state = 'off'; return ok({ id: 1, reload: true }) }
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
     if (verb === 'diff') return ok('diff --git a/plugin/bar/bar.tsx b/plugin/bar/bar.tsx\n-  coverage\n+  read\n')
-    if (verb === 'update') return ok(fix.state === 'on' ? { said: 'thimble 0.10.3 · 1 fix carried', carried: [1], reload: true } : { said: '', reload: false })
+    if (verb === 'update' && argv.includes('--check')) return ok({ from: '0.10.2', to: '0.10.3', newer: fix.state === 'on' })
+    if (verb === 'update') {
+      return ok(fix.state === 'on'
+        ? { said: 'thimble 0.10.3 · 1 pending', pending: [1], reload: true, lines: ['thimble 0.10.2 → 0.10.3', '  pending         make the bar say read', '', `  cd ${HOME}/fixes/live && claude "$(cat ${HOME}/fixes/pending/0.10.3.md)"`] }
+        : { said: '', reload: false, lines: ['thimble 0.10.3 is the newest release (0.10.3).'] })
+    }
     return ok({})
   }
+  const where = { root: '/made-up/data' }
   const $: Any = {
     plugin: { root: '/made-up/plugin', name: 'thimble' },
     env: { get: async (k: string) => ({ THIMBLE_HOME: HOME, HOME: '/made-up/home', THIMBLE_ROOT: '/made-up/data' } as Record<string, string>)[k] },
@@ -102,7 +108,7 @@ function setup() {
     },
     clock: { now: async () => (now += 1000), sleep: async () => undefined, after: (_ms: number, fn: () => unknown) => { timers.push(fn); return { cancel() {} } }, every: () => ({ cancel() {} }) },
     agent: { register: async () => ({ agent: 'thimble:fixer' }), spawn: async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-fixer-${spawns.length}` } } },
-    session: { id: async () => 's-fix', cwd: async () => '/made-up/data', root: async () => '/made-up/data' },
+    session: { id: async () => 's-fix', cwd: async () => where.root, root: async () => where.root },
     process: { run: async (argv: string[], o: Any = {}) => { ran.push({ argv, ...(o.stdin != null ? { stdin: o.stdin } : {}) }); return argv.includes('fix') ? kernel(argv, o.stdin) : { exitCode: 0, stdout: '', stderr: '' } } },
     command: { run: async (c: Any) => { commands.push(c.command); return {} }, register: async () => ({ command: 'thimble-fix' }) },
     ui: { toast: (t: string) => { toasts.push(t) }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: () => undefined },
@@ -119,7 +125,7 @@ function setup() {
     await new Promise(r => setTimeout(r, 5))
   }
   const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).join(' ')).filter(Boolean)
-  return { $, call, tick, ran, spawns, commands, files, fix, opened, toasts, verbs }
+  return { $, call, tick, ran, spawns, commands, files, fix, opened, toasts, verbs, where }
 }
 
 /** A request, and the fixer's end with what it says. */
@@ -246,18 +252,48 @@ test("/thimble-fix alone lists the fixes; d shows the selected fix's diff; u on 
   expect(s.verbs()).toContain('apply 1 --ask -')
 })
 
-test('at session start a newer release replays the fixes that are on, once a session, and one line says what came of it', async () => {
+test('at session start one line says a newer release is out, once a session; /thimble-fix update moves to it and gives the command for the pending fixes', async () => {
   const s = setup()
   s.fix.state = 'on'
   await s.call('session.start', { cwd: '/made-up/data' })
   await s.tick()
-  expect(s.verbs()).toContain('update --json')
-  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 · 1 fix carried · thimble reloaded')
-  expect(s.commands).toEqual(['reload-plugins'])
-  // the reload starts the module again: no second update in this session
+  expect(s.verbs()).toContain('update --check --json')
+  expect(s.verbs()).not.toContain('update --json')
+  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 is out (you have 0.10.2) · /thimble-fix update')
+  expect(s.commands).toEqual([])
+  // the reload starts the module again: no second look in this session
   await s.call('session.start', { cwd: '/made-up/data' })
   await s.tick()
-  expect(s.verbs().filter(v => v === 'update --json').length).toBe(1)
+  expect(s.verbs().filter(v => v === 'update --check --json').length).toBe(1)
   await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
   expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  // the person's /thimble-fix update: the release with the fixes on it, the summary, and the session reloads
+  const r = await s.call('command.run', { command: 'thimble-fix', args: 'update' })
+  await s.tick()
+  expect(s.verbs()).toContain('update --json')
+  expect(String(r.text)).toContain('thimble 0.10.2 → 0.10.3')
+  expect(String(r.text)).toContain(`cd ${HOME}/fixes/live && claude "$(cat ${HOME}/fixes/pending/0.10.3.md)"`)
+  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 · 1 pending')
+  expect(s.commands).toEqual(['reload-plugins'])
+})
+
+test("the session opened in live edits live's code, and its thimble update --continue reloads at the end of the turn; other sessions may not", async () => {
+  const ran = async (e: Any) => ({ result: { ran: e.command ?? e.file_path ?? '' } })
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  expect(String((await s.call('tool.call', { tool: 'Edit', tool_use_id: 'tu-l1', file_path: `${HOME}/fixes/live/plugin/bar/bar.tsx` }, ran)).deny)).toContain('thimble alone')
+  const t = setup()
+  t.where.root = `${HOME}/fixes/live`
+  await t.call('session.start', { cwd: t.where.root })
+  expect((await t.call('tool.call', { tool: 'Edit', tool_use_id: 'tu-l2', file_path: `${HOME}/fixes/live/plugin/bar/bar.tsx` }, ran)).result.ran).toBe(`${HOME}/fixes/live/plugin/bar/bar.tsx`)
+  // never the records or the key presses, also by way of ..
+  expect(String((await t.call('tool.call', { tool: 'Write', tool_use_id: 'tu-l3', file_path: `${HOME}/fixes/live/../asks/1.json` }, ran)).deny)).toContain('thimble alone')
+  expect(String((await t.call('tool.call', { tool: 'Write', tool_use_id: 'tu-l4', file_path: `${HOME}/fixes/fixes.jsonl` }, ran)).deny)).toContain('thimble alone')
+  expect(String((await t.call('tool.call', { tool: 'Write', tool_use_id: 'tu-l5', file_path: `${HOME}/fixes/work/../asks/1.json` }, ran)).deny)).toContain('thimble alone')
+  // Claude's thimble update --continue: the plugins load again when its turn ends
+  await t.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-l6', command: 'thimble update --continue' }, ran)
+  expect(t.commands).toEqual([])
+  await t.call('turn.complete', { turnId: 't-1', reason: 'answer', answer: 'Done.', durationMs: 9, isAborted: false }, async () => ({}))
+  await t.tick()
+  expect(t.commands).toEqual(['reload-plugins'])
 })

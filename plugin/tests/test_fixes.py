@@ -205,7 +205,8 @@ def test_failed_tests_no_change_and_not_now(world, monkeypatch):
     assert n["state"] == "off" and n["note"] == "not now" and n["work"] is None
     assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == world["base"]
     lines = FX.list_lines()
-    assert any("request" in x and "no code" in x for x in lines) and any("failed" in x for x in lines)
+    states = [x.split()[1] for x in lines[3:] if x[:5].strip().isdigit()]
+    assert sorted(states) == ["failed", "off", "request"]
 
 
 def test_redo_makes_a_new_copy_with_the_earlier_change(world, monkeypatch):
@@ -307,49 +308,270 @@ def test_a_request_with_no_code_goes_as_an_issue(world, monkeypatch, tmp_path):
     assert not any(x.startswith(("repo fork", "pr create")) for x in ghlog.read_text().splitlines())
 
 
-def release_commit(w, path: str, text: str, msg: str) -> str:
-    """A newer release in the person's clone (a clone install moves when they pull)."""
-    p = w["rel"] / path
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text)
-    sh("git", "add", "-A", cwd=w["rel"])
-    sh("git", "commit", "-q", "-m", msg, cwd=w["rel"])
-    return sh("git", "rev-parse", "HEAD", cwd=w["rel"])
+@pytest.fixture
+def upstream(world, tmp_path, monkeypatch):
+    """thimble's repository as a made-up upstream: a bare repository whose tag v0.10.2 is the installed release, and
+    publish(files, tag) adds a release on top of the newest one."""
+    bare = tmp_path / "upstream.git"
+    sh("git", "clone", "-q", "--bare", str(world["rel"]), str(bare))
+    sh("git", "tag", "v0.10.2", world["base"], cwd=bare)
+    work = tmp_path / "upstream-work"
+    sh("git", "clone", "-q", str(bare), str(work))
+    monkeypatch.setenv("THIMBLE_UPDATE_URL", str(bare))
+
+    def publish(files: dict[str, str], tag: str, version: str | None = None) -> str:
+        for path, text in files.items():
+            p = work / path
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(text)
+        if version:
+            (work / "plugin" / ".claude-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "thimble", "version": version}, indent=2) + "\n")
+        sh("git", "add", "-A", cwd=work)
+        sh("git", "commit", "-q", "-m", f"thimble {tag}", cwd=work)
+        sh("git", "tag", "-a", tag, "-m", tag, cwd=work)
+        sh("git", "push", "-q", "origin", "HEAD:refs/heads/main", tag, cwd=work)
+        return sh("git", "rev-parse", "HEAD", cwd=work)
+
+    return publish
 
 
-def test_a_new_release_carries_the_fixes_that_fit_and_marks_the_rest(world, monkeypatch):
-    a = made(world)
-    FX.done(a["id"], "Bar says read", "")
+def three_fixes(world) -> tuple[int, int, int]:
+    """Three fixes that are on: the bar's word, a new note, and the legend's count."""
+    a = made(world, "the bar should say read, not coverage")
+    FX.done(a["id"], "Bar says read", "The bar's coverage item says read.")
     FX.apply(a["id"], press(a["id"]))
-    b = FX.new("a note")
+    b = FX.new("a note for the people I work with")
     (Path(b["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
     FX.done(b["id"], "A note", "")
     FX.apply(b["id"], press(b["id"]))
-    assert FX.update(tests=False)["said"] == ""  # nothing newer yet
-    # the release takes the note as it is, and changes something else
-    new = release_commit(world, "plugin/notes.md", "made-up note\n", "the note, released")
-    new = release_commit(world, "plugin/other.md", "x\n", "another change")
-    out = FX.update()
-    assert out["said"] == f"thimble {new[:7]} · 1 fix carried · 1 in the release" or out["said"].endswith("1 fix carried · 1 in the release")
-    assert FX.get(a["id"])["state"] == "on" and FX.get(b["id"])["state"] == "released"
-    assert FX.get(a["id"])["commit"] == sh("git", "rev-parse", "mine", cwd=FX.live_dir())
-    assert FX.release()["base"] == new and new in (FX.home() / "off.sh").read_text()
-    log = sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines()
-    assert log[:2] == ["Bar says read", "another change"]
-    assert "read ${n}" in live_file("plugin/bar/bar.tsx") and (FX.live_dir() / "plugin" / "other.md").exists()
-    # a release that rewrote the same line: the fix needs a redo, and mine is the release alone
-    release_commit(world, "plugin/bar/bar.tsx", "const words = `seen ${n}`\n", "the bar rewritten")
-    out = FX.update()
-    assert out["redo"] == [a["id"]] and FX.get(a["id"])["state"] == "redo" and "did not fit" in FX.get(a["id"])["error"]
-    assert "seen ${n}" in live_file("plugin/bar/bar.tsx")
-    # a fix whose tests fail on the new release needs a redo too
-    c = FX.new("a second note")
-    (Path(c["work"]) / "plugin" / "more.md").write_text("more\n")
-    FX.done(c["id"], "More", "")
+    c = FX.new("the legend should count the files nobody read\nlike the untouched ones")
+    (Path(c["work"]) / "plugin" / "legend.ts").write_text("const legend = `untouched ${n}`\n")
+    FX.done(c["id"], "Legend counts untouched", "The coverage legend says how many files are untouched.")
     FX.apply(c["id"], press(c["id"]))
-    release_commit(world, "plugin/third.md", "y\n", "a third change")
-    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
-    assert FX.update()["redo"] == [c["id"]] and not (FX.live_dir() / "plugin" / "more.md").exists()
+    return a["id"], b["id"], c["id"]
+
+
+def test_update_carries_a_fix_drops_one_the_release_has_and_sets_aside_one_that_conflicts(world, upstream):
+    a, b, c = three_fixes(world)
+    assert FX.update(tests=False)["newer"] is False  # v0.10.2 is what runs
+    # 0.10.3 takes the note as it is, and writes its own legend on the line fix c changed
+    new = upstream({"plugin/notes.md": "made-up note\n", "plugin/legend.ts": "const legend = `quiet ${n} files`\n"},
+                   "v0.10.3", version="0.10.3")
+    calls_before = len(calls(world))
+    out = FX.update()
+    assert (out["from"], out["to"]) == ("0.10.2", "0.10.3")
+    assert out["carried"] == [a] and out["released"] == [b] and out["pending"] == [c]
+    live = FX.live_dir()
+    assert sh("git", "rev-parse", "mine~1", cwd=live) == new
+    assert sh("git", "log", "-1", "--format=%s", "mine", cwd=live) == "Bar says read"
+    assert "read ${n}" in live_file("plugin/bar/bar.tsx") and "quiet" in live_file("plugin/legend.ts")
+    assert FX.release()["tag"] == "v0.10.3" and FX.release()["base"] == new and new in (FX.home() / "off.sh").read_text()
+    # each outcome in its record and in thimble fix list
+    assert FX.get(a)["state"] == "on" and FX.get(a)["commit"] == sh("git", "rev-parse", "mine", cwd=live)
+    assert FX.get(b)["state"] == "released" and FX.get(b)["released_in"] == "0.10.3"
+    rc = FX.get(c)
+    assert rc["state"] == "pending" and rc["error"] == "it conflicts with thimble 0.10.3 in plugin/legend.ts"
+    rows = "\n".join(FX.list_lines(120))
+    assert "in 0.10.3" in rows and "pending" in rows and "the legend should count the files nobody read" in rows
+    assert "like the untouched ones" not in rows  # the first line of the person's words
+    # the prompt for Claude: the person's words, title, summary, the old change and what failed
+    prompt = Path(out["prompt"])
+    assert prompt == FX.home() / "pending" / "0.10.3.md"
+    text = prompt.read_text()
+    assert "## Fix 3: Legend counts untouched" in text and "like the untouched ones" in text
+    assert "The coverage legend says how many files are untouched." in text
+    old = FX.home() / "pending" / "0.10.3" / "fix-3.diff"
+    assert str(old) in text and "+const legend = `untouched ${n}`" in old.read_text()
+    assert "it conflicts with thimble 0.10.3 in plugin/legend.ts" in text and "thimble update --continue" in text
+    assert "{{" not in text
+    # one command, printed last
+    cmd = f'cd {FX.live_dir()} && claude "$(cat {prompt})"'
+    assert out["command"] == cmd and out["lines"][-1] == f"  {cmd}"
+    assert out["lines"][0] == "thimble 0.10.2 → 0.10.3"
+    assert any(x.startswith("  in 0.10.3") and "A note" in x for x in out["lines"])
+    # Claude Code loads it from live: pointed once, and copied
+    assert out["reload"] is True and "plugin update thimble@thimble" in calls(world)[calls_before:]
+    # Claude applies the pending fix on top of the release in live, one commit with its title; --continue records it
+    (live / "plugin" / "legend.ts").write_text("const legend = `quiet ${n} files · untouched ${m}`\n")
+    sh("git", "add", "plugin/legend.ts", cwd=live)
+    sh("git", "commit", "-q", "-m", "Legend counts untouched", cwd=live)
+    done = FX.continue_()
+    assert done["recorded"] == [c] and done["pending"] == [] and done["reload"] is True
+    assert done["said"].startswith("Recorded 1 fix on thimble 0.10.3, now on: Legend counts untouched (")
+    rc = FX.get(c)
+    assert rc["state"] == "on" and rc["commit"] == sh("git", "rev-parse", "mine", cwd=live) and rc["pending"] is None
+    assert sh("git", "rev-parse", f"refs/thimble/fixes/{c}", cwd=live) == rc["commit"]
+    assert not (FX.home() / "pending" / "current.json").exists()
+    with pytest.raises(FX.FixError, match="no fixes wait"):
+        FX.continue_()
+    # the next update finds nothing newer; an undo keeps the recorded fix, now part of mine
+    assert FX.update()["newer"] is False
+    FX.undo(a)
+    assert "untouched ${m}" in live_file("plugin/legend.ts") and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
+
+
+def test_continue_records_only_commits_that_are_pending_fixes_and_safe(world, upstream):
+    a, b, c = three_fixes(world)
+    upstream({"plugin/legend.ts": "const legend = `quiet`\n", "plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "v0.10.3")
+    out = FX.update(tests=False)
+    assert out["pending"] == [a, c] and out["released"] == [] and "These 2 fixes did not fit 0.10.3" in "\n".join(out["lines"])
+    live = FX.live_dir()
+    tip = sh("git", "rev-parse", "mine", cwd=live)
+    # not committed yet
+    (live / "plugin" / "bar" / "bar.tsx").write_text("const words = `read ${n}`\n")
+    with pytest.raises(FX.FixError, match="not committed"):
+        FX.continue_()
+    sh("git", "commit", "-q", "-am", "Bar says read", cwd=live)
+    # a commit that is no pending fix's: nothing is recorded
+    (live / "plugin" / "extra.md").write_text("x\n")
+    sh("git", "add", "plugin/extra.md", cwd=live)
+    sh("git", "commit", "-q", "-m", "Tidy up", cwd=live)
+    with pytest.raises(FX.FixError, match="is not one pending fix"):
+        FX.continue_()
+    assert FX.get(a)["state"] == "pending"
+    sh("git", "reset", "-q", "--hard", "HEAD~1", cwd=live)
+    # a commit that changes a safety file: nothing is recorded
+    (live / "plugin" / "engine" / "kernel").mkdir(parents=True, exist_ok=True)
+    (live / "plugin" / "engine" / "kernel" / "privacy.py").write_text("def scan(*a): return [], []\n")
+    (live / "plugin" / "legend.ts").write_text("const legend = `quiet · untouched`\n")
+    sh("git", "add", "plugin/legend.ts", "plugin/engine/kernel/privacy.py", cwd=live)
+    sh("git", "commit", "-q", "-m", "Legend counts untouched", cwd=live)
+    with pytest.raises(FX.FixError, match=r"privacy\.py \(the privacy scan\)"):
+        FX.continue_()
+    sh("git", "reset", "-q", "--hard", "HEAD~1", cwd=live)
+    # one fix done, one left: it stays pending, and the prompt's next --continue starts after the recorded one
+    done = FX.continue_()
+    assert done["recorded"] == [a] and done["pending"] == [c] and "Still pending: Legend counts untouched." in done["said"]
+    assert FX.get(a)["state"] == "on" and FX.get(c)["state"] == "pending"
+    cur = json.loads((FX.home() / "pending" / "current.json").read_text())
+    assert cur["ids"] == [c] and cur["tip"] != tip
+    # the person's key cannot turn on a pending fix's old commit
+    with pytest.raises(FX.FixError, match="did not fit thimble 0.10.3"):
+        FX.apply(c, press(c))
+
+
+def test_a_fix_whose_tests_fail_on_the_release_waits_with_the_test_output(world, upstream, monkeypatch):
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    FX.apply(a["id"], press(a["id"]))
+    upstream({"plugin/other.md": "x\n"}, "v0.10.3")
+    # a release candidate is not a release, and --check only looks
+    upstream({"plugin/rc.md": "x\n"}, "v0.10.4-rc1")
+    check = FX.update(check=True)
+    assert (check["newer"], check["to"]) == (True, "0.10.3") and FX.release()["base"] == world["base"]
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "echo 'bar.test.ts: 1 failed'; false")
+    out = FX.update()
+    assert out["pending"] == [a["id"]] and not (FX.live_dir() / "plugin" / "rc.md").exists()
+    r = FX.get(a["id"])
+    assert r["error"] == "its tests failed on thimble 0.10.3" and "1 failed" in r["pending"]["tests"]
+    assert "bar.test.ts: 1 failed" in Path(out["prompt"]).read_text()
+    shown = "\n".join(FX.show_lines(a["id"]))
+    assert "Why it waits: its tests failed on thimble 0.10.3" in shown and "claude \"$(cat" in shown
+    assert "plugin/bar/bar.tsx  +1 −1" in shown
+
+
+def test_update_with_no_fixes_puts_thimble_on_live_and_never_steps_back(world, upstream, monkeypatch):
+    assert FX.update()["lines"] == ["thimble 0.10.2 is the newest release."]
+    assert not FX.live_dir().exists()
+    upstream({"plugin/other.md": "x\n"}, "v0.10.3")
+    out = FX.update()
+    assert out["carried"] == [] and out["pending"] == [] and out["command"] is None
+    assert FX.release()["pointed"] is True and "other.md" in sh("git", "ls-files", cwd=FX.live_dir())
+    assert out["lines"][-1] == f"The terminal plugin runs it from {FX._tilde(str(FX.live_dir()))}."
+    # a branch ahead of every release: no step back
+    FX.write_json(FX.home() / "release.json", {**FX.release(), "tag": "v0.11.0"})
+    upstream({"plugin/more.md": "x\n"}, "v0.10.4")
+    assert FX.update()["newer"] is False
+
+
+def test_update_puts_the_browser_on_live_and_links_packages_while_the_lock_files_match(world, upstream, monkeypatch, tmp_path):
+    for part, lock in (("backend", "uv.lock"), ("frontend", "package-lock.json")):
+        p = world["rel"] / "browser" / part / lock
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f"made-up {lock}\n")
+    sh("git", "add", "-A", cwd=world["rel"])
+    sh("git", "commit", "-q", "-m", "the browser", cwd=world["rel"])
+    world["base"] = sh("git", "rev-parse", "HEAD", cwd=world["rel"])
+    installed = json.loads((world["cc"] / "plugins" / "installed_plugins.json").read_text())
+    installed["plugins"]["thimble@thimble"][0]["gitCommitSha"] = world["base"]
+    (world["cc"] / "plugins" / "installed_plugins.json").write_text(json.dumps(installed))
+    # the checkout the install built: its packages, and the workbench's home that names it
+    seed = tmp_path / "checkout" / "browser"
+    for part, lock, pkgs in FX.BROWSER_LOCKS:
+        (seed / part / pkgs).mkdir(parents=True)
+        (seed / part / pkgs / "made-up-package.txt").write_text("x\n")
+        (seed / part / lock).write_text(f"made-up {lock}\n")
+    bh = tmp_path / "browser-home"
+    bh.mkdir()
+    (bh / "checkout").write_text(f"{seed}\n")
+    monkeypatch.setenv("THIMBLE_BROWSER_HOME", str(bh))
+    log = tmp_path / "pkg.log"
+    for name in ("uv", "npm"):
+        fake(world["bin"] / name, log)
+    monkeypatch.setenv("PATH", f"{world['bin']}:{os.environ['PATH']}")
+    sh("git", "clone", "-q", "--bare", str(world["rel"]), str(tmp_path / "upstream2.git"))
+    sh("git", "tag", "v0.10.2", world["base"], cwd=tmp_path / "upstream2.git")
+    monkeypatch.setenv("THIMBLE_UPDATE_URL", str(tmp_path / "upstream2.git"))
+    work = tmp_path / "w2"
+    sh("git", "clone", "-q", str(tmp_path / "upstream2.git"), str(work))
+    (work / "plugin" / "other.md").write_text("x\n")
+    sh("git", "add", "-A", cwd=work)
+    sh("git", "commit", "-q", "-m", "0.10.3", cwd=work)
+    sh("git", "tag", "v0.10.3", cwd=work)
+    sh("git", "push", "-q", "origin", "HEAD:refs/heads/main", "v0.10.3", cwd=work)
+    out = FX.update(tests=False)
+    b = FX.live_dir() / "browser"
+    assert out["browser"] == "ready" and (FX.home() / "browser-ready").read_text().strip() == str(b)
+    assert out["lines"][-1].startswith("The terminal plugin and the browser workbench run it from ")
+    # same lock files: hard links of the install's packages, no download; then the page is built
+    venv = b / "backend" / ".venv" / "made-up-package.txt"
+    assert venv.exists() and os.stat(venv).st_ino == os.stat(seed / "backend" / ".venv" / "made-up-package.txt").st_ino
+    assert log.read_text().splitlines() == [f"--prefix {b / 'frontend'} run build"]
+    # a release whose JS lock file changed: npm ci for the page's packages only
+    (work / "browser" / "frontend" / "package-lock.json").write_text("made-up package-lock.json, newer\n")
+    sh("git", "commit", "-q", "-am", "0.10.4", cwd=work)
+    sh("git", "tag", "v0.10.4", cwd=work)
+    sh("git", "push", "-q", "origin", "HEAD:refs/heads/main", "v0.10.4", cwd=work)
+    log.write_text("")
+    FX.update(tests=False)
+    assert log.read_text().splitlines() == [f"--prefix {b / 'frontend'} ci --no-audit --no-fund", f"--prefix {b / 'frontend'} run build"]
+    # thimble-browser runs from live once it is ready
+    fakelive = b / "scripts" / "thimble-browser"
+    fakelive.parent.mkdir(parents=True, exist_ok=True)
+    fakelive.write_text("#!/bin/sh\necho \"live $*\"\n")
+    fakelive.chmod(0o755)
+    launcher = Path(__file__).resolve().parents[2] / "browser" / "scripts" / "thimble-browser"
+    p = subprocess.run(["bash", str(launcher), "--help"], capture_output=True, text=True, env={**os.environ})
+    assert p.stdout == "live --help\n" and "the release thimble update installed" in p.stderr
+    (FX.home() / "browser-ready").unlink()
+    p = subprocess.run(["bash", str(launcher), "--help"], capture_output=True, text=True, env={**os.environ})
+    assert p.stdout.startswith("thimble-browser: starts thimble's browser workbench")
+
+
+def test_thimble_fixes_and_fix_show_print_plain_text(world, upstream, capsys):
+    from kernel import cli  # noqa: PLC0415
+
+    a, b, c = three_fixes(world)
+    upstream({"plugin/notes.md": "made-up note\n", "plugin/legend.ts": "const legend = `quiet`\n"}, "v0.10.3")
+    FX.update(tests=False)
+    assert cli.main(["fixes"]) == 0
+    rows = capsys.readouterr().out.splitlines()
+    assert rows[0].startswith("Your fixes · thimble 0.10.3 + 1 on · ")
+    assert rows[2].split() == ["#", "state", "title", "date", "you", "asked"]
+    by_id = {int(x.split()[0]): x for x in rows[3:6]}
+    assert by_id[a].split()[1] == "on" and " in 0.10.3 " in by_id[b] and by_id[c].split()[1] == "pending"
+    assert "\x1b[" not in "\n".join(rows)
+    assert any(x.startswith("Pending fixes wait for Claude: cd ") for x in rows)
+    assert cli.main(["fix", "show", str(c)]) == 0
+    shown = capsys.readouterr().out
+    assert shown.startswith("Fix 3: Legend counts untouched\n  state     pending")
+    assert "You asked:\n  the legend should count the files nobody read\n  like the untouched ones" in shown
+    assert "plugin/legend.ts  +1 −0" in shown and "its change before:" in shown
+    assert cli.main(["fix", "diff", str(c)]) == 0 and "+const legend = `untouched ${n}`" in capsys.readouterr().out
+    assert cli.main(["--help"]) == 0
+    help_ = capsys.readouterr().out
+    assert "thimble fixes " in help_ and "thimble update [--continue]" in help_
 
 
 def test_a_data_file_named_like_one_of_thimbles_goes_from_the_words_and_stays_in_the_diff(world, monkeypatch):

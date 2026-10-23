@@ -30,13 +30,14 @@ export type FixFile = { path: string; add: number | null; del: number | null }
 export type Fix = {
   id: number; title: string; words: string[]; rounds: number; made_in: string; created: number; state: string
   work: string | null; commit: string | null; files: FixFile[]; tests: string | null; summary: string; error: string | null
-  note?: string; pr?: string; saved?: string; tests_tail?: string
+  note?: string; pr?: string; saved?: string; tests_tail?: string; released_in?: string
+  pending?: { why: string; version: string; files?: string[]; tests?: string; old?: string } | null
 }
-export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number }
+export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y apply · d diff · n not now), applied (u undo), off (after u),
  *  failed (d diff · r redo · n not now), request (no code), a new release with the fixes replayed on it (update), or a
  *  problem with what to do. */
-export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string }
+export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release'; said?: string }
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
 
@@ -195,21 +196,39 @@ export async function diffText($: Engine, id: number): Promise<string> {
   return r?.ok ? r.out : ''
 }
 
-/** A newer release, and the fixes replayed on it (at session start, and /thimble-fix update): the line says what came
- *  of it, and the session loads it. The words, or '' when nothing changed. */
+/** /thimble-fix update, the same as `thimble update` in a shell: the newest release for both modes, the fixes replayed
+ *  on it. The line says what came of it, and the session loads it. The words it prints (with the one command for the
+ *  pending fixes), for the command's reply. */
 export async function updateFixes($: Engine): Promise<string> {
-  const r = await kernelFix($, ['update', '--json'], { timeoutMs: 600000, doing: 'replaying your fixes on a new thimble' })
+  const r = await kernelFix($, ['update', '--json'], { timeoutMs: 600000, doing: 'moving thimble to its newest release' })
   if (!r.ok) {
-    await setFixLine($, { id: 0, kind: 'problem', said: `Your fixes could not move to the new thimble: ${cut(r.err || 'thimble fix update gave nothing', 200)}. They stay as they were.` })
-    return ''
+    const said = `thimble did not update: ${cut(r.err.replace(/^thimble update: /, '') || 'thimble update gave nothing', 200)}. Your fixes stay as they were.`
+    await setFixLine($, { id: 0, kind: 'problem', said })
+    return said
   }
   const d = jsonOf<Any>(r.out) ?? {}
   await refreshFixes($)
-  if (!d.said) return ''
+  const lines = (Array.isArray(d.lines) ? d.lines : []).map(String).join('\n')
+  if (!d.said) return lines || 'thimble is the newest release.'
   await setFixLine($, { id: 0, kind: 'update', said: String(d.said) })
-  await tellAtNextPrompt($, 'fix-update', `thimble moved to a new release and replayed the person's fixes on it: ${d.said}.`)
+  await tellAtNextPrompt($, 'fix-update', `thimble moved to a new release with the person's fixes:\n${lines}`)
   await load($, d)
-  return String(d.said)
+  return lines
+}
+
+/** At session start, while thimble runs from live: one line when a newer release is out. Nothing moves until the
+ *  person runs thimble update (it can take minutes, and a fix that does not fit needs them). */
+export async function checkUpdate($: Engine): Promise<void> {
+  const r = await kernelFix($, ['update', '--check', '--json'], { timeoutMs: 60000 }).catch(() => null)
+  const d = r?.ok ? jsonOf<Any>(r.out) : null
+  if (d?.newer) await setFixLine($, { id: 0, kind: 'release', said: `thimble ${d.to} is out (you have ${d.from}) · /thimble-fix update, or thimble update in a shell` })
+}
+
+/** Claude ran `thimble update` (the pending fixes' prompt asks for --continue): the session loads what it changed at the
+ *  end of the turn, and the list shows the fixes as they are now. */
+export async function updateRan($: Engine): Promise<void> {
+  reloadDue = true
+  await refreshFixes($)
 }
 
 /** The path of the fixes' home, as the person reads it (~ for the home folder). */
