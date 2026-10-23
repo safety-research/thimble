@@ -1977,7 +1977,10 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if given.strip() and status in ("verified", "corrected", "narrowed", "wrong"):
         got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words)
         if isinstance(got, str):
-            return judged("evidence", f"The check reworded the sentence, but {got}.")
+            # a rewording that cannot stand still leaves what the check found wrong, which the person reads in its
+            # own reason (the records show it false); with no such reason, why the rewording could not stand
+            found = reason if status in ("corrected", "wrong") else ""
+            return judged("evidence", found or f"The check reworded the sentence, but {got}.")
         corr = {**corr, "words": got["cited"]}
         if loose(got["rest"]) == loose(got["was_rest"]):
             # only the cited words change: a correction of them, or no change

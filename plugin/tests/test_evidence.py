@@ -861,8 +861,8 @@ def test_a_rewrite_stays_within_its_sentence_and_keeps_the_other_citations():
     m = {"n": 2, "words": "13", "sentence": "Of the [40] pull requests, [13] were merged by agent-07."}
     calls = [call(CODE, "12 merged by agent-07\n")]
 
-    def one(sentence: str) -> dict:
-        item = {"mark": 2, **computed("12 merged by agent-07", status="corrected", correction={"sentence": sentence})}
+    def one(sentence: str, reason: str = "") -> dict:
+        item = {"mark": 2, **computed("12 merged by agent-07", status="corrected", correction={"sentence": sentence}), "reason": reason}
         return validated("/data", [m], [item], calls)[0]
 
     r = one("Of the [40] pull requests, agent-07 merged [12].")
@@ -874,6 +874,9 @@ def test_a_rewrite_stays_within_its_sentence_and_keeps_the_other_citations():
                           ("Of the [40] pull requests, [12] were merged by agent-07, not 13.", "leaves “not 13.” out of the citation")):
         r = one(sentence)
         assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", "13") and why in r["reason"], (sentence, r["reason"])
+    # a rewording that cannot stand still says what the check found wrong, in the check's own reason
+    r = one("Of the [41] pull requests, agent-07 merged [12].", "agent-07 merged 12 of them, not 13")
+    assert (r["status"], r["failedBy"], r["shown"], r["reason"]) == ("failed", "evidence", "13", "agent-07 merged 12 of them, not 13.")
 
 
 def test_a_sentence_is_rewritten_once():
