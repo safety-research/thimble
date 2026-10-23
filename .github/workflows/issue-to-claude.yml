@@ -16,7 +16,7 @@ jobs:
       - name: Ask Claude for a draft PR
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-          CLAUDE_MEMBER_ID: ${{ secrets.CLAUDE_SLACK_MEMBER_ID }}
+          CLAUDE_MEMBER_ID: ${{ secrets.CLAUDE_MEMBER_ID }}
           REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           ISSUE_URL: ${{ github.event.issue.html_url }}
