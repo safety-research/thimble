@@ -30,7 +30,7 @@ import { featureOn } from '../settings/features.mjs'
 import { restoreCardsShown } from './cards'
 import { ownWords } from './chips.mjs'
 import { promptSent, recOf } from './term'
-import { addOwn, barItems, catchUpEl, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, squeezeKeyTake, targetNow, underCardLine, underRow, viewOf } from './ui'
+import { addOwn, barItems, catchUpEl, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -68,6 +68,13 @@ export async function squeezeKey($: Engine, key: string, _until: number): Promis
 
 export async function squeezeBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   return barItems($, on, preview)
+}
+
+/** A /clear or a /resume (hooks/turnover.ts): the chips close, the person's own chips of the earlier conversation are
+ *  not offered, and the cards show the versions the new conversation's squeezes left. */
+export async function turnSqueeze($: Engine): Promise<void> {
+  await turnChips($)
+  await restoreCardsShown($, true)
 }
 
 export const registerSqueeze: Register = on => {

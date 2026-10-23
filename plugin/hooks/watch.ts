@@ -12,16 +12,20 @@
 //                                       row refs the output named (`revisions.jsonl#L4111`), a row's identity and not
 //                                       its content (coverage leaves out a `thimble` command: a label keeps what it went over)
 //
-// It also sets THIMBLE_SESSION for the session's commands, so `thimble` files its records under the same session, and
-// THIMBLE_START, the folder the session started in ($.session.root(), which a shell `cd` does not move), so a command
-// run after `cd src` keeps its records in the start folder's thimble/ (kernel/store.py find_root). At the
-// conversation's first turn it notes the conversation's key (conversation.ts), so a continuation keeps its records.
+// It also sets THIMBLE_SESSION and THIMBLE_CONVERSATION for the session's commands, so `thimble` files its records
+// under the same session and keeps its labels in the conversation's own folder, and THIMBLE_START, the folder the
+// session started in ($.session.root(), which a shell `cd` does not move), so a command run after `cd src` keeps the
+// start folder's labels (kernel/store.py find_root). At the conversation's first turn it notes the conversation's key
+// (conversation.ts), so a continuation keeps its records. It asks whether the conversation changed (a /clear, a
+// /resume) at the end of a session, at each prompt, at each turn of main's and before each Bash call
+// (turnover.ts followConversation), so a command never runs under the conversation before.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { forkOf } from '../core/forks'
 import { thimbleHome } from '../core/home'
 import { seenFile } from '../core/layout.mjs'
 import { noteConversation, sessionKey } from './conversation'
+import { followConversation } from './turnover'
 
 type Row = Record<string, unknown>
 type Engine = EngineInterface
@@ -89,6 +93,17 @@ async function bind($: Engine): Promise<void> {
   if (!S.home) S.home = await thimbleHome($)
   S.file = seenFile(S.home, id)
   await $.env.set('THIMBLE_SESSION', id)
+  await $.env.set('THIMBLE_CONVERSATION', id)
+}
+
+/** The conversation may have changed: the modules turn over to it (turnover.ts), and the commands get its key. */
+async function follow($: Engine): Promise<void> {
+  try {
+    await followConversation($)
+    await bind($)
+  } catch {
+    // the commands keep the key they had
+  }
 }
 
 async function keep($: Engine, row: Row): Promise<void> {
@@ -141,6 +156,7 @@ export const registerWatch: Register = on => {
     const r = await next(e)
     try {
       await bind($)
+      await followConversation($)
     } catch {
       // the module only watches; a session it cannot bind is left as it is
     }
@@ -152,15 +168,30 @@ export const registerWatch: Register = on => {
     return r
   })
 
+  // a /clear or a /resume: the process goes on under another session, with no session.start; the modules turn over to
+  // its conversation as soon as the new id is known (and at the next prompt, whichever comes first)
+  on('session.end', { reason: /^(clear|resume)$/ }, async ($, e, next) => {
+    const r = await next(e)
+    for (const ms of [0, 1000]) $.clock.after(ms, () => { void follow($) })
+    return r
+  }).catch(($, e, next) => next(e))
+
+  on('prompt.submit', { origin: { kind: /^.*$/ } }, async ($, e, next) => {
+    await follow($)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   // the conversation's first turn: a later session that continues it finds its records under the same key
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
+      await follow($)
       try { await noteConversation($) } catch { /* a continuation then starts its own records */ }
     }
     return next(e)
   }).catch(($, e, next) => next(e))
 
   on('tool.call', async ($, e, next) => {
+    if (String(e.tool) === 'Bash') await follow($)
     const r = await next(e)
     const tool = String(e.tool)
     if (tool !== 'Read' && tool !== 'Grep' && tool !== 'Bash') return r

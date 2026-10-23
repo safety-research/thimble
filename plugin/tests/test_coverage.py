@@ -16,6 +16,7 @@ sys.path.insert(0, str(ENGINE))
 
 from kernel import coverage as CV  # noqa: E402
 from kernel import sources as S  # noqa: E402
+from kernel import store as STORE  # noqa: E402
 from kernel.store import Store  # noqa: E402
 
 NAMES = "abcdefghijkl"
@@ -192,9 +193,10 @@ def test_each_file_and_folder_has_two_measures_read_and_counted(code: Path, tmp_
     # files of one unit says the same in that unit
     (code / "logs").mkdir()
     (code / "logs" / "events.jsonl").write_text("".join(json.dumps({"i": i}) + "\n" for i in range(40)))
-    (code / "thimble" / "labels").mkdir(parents=True)
+    labels = STORE.kept_dir(code) / "labels"
+    labels.mkdir(parents=True)
     units = {f"logs/events.jsonl#L{i}": {"v": "yes", "c": 1.0, "by": "code"} for i in range(1, 41)}
-    (code / "thimble" / "labels" / "even.json").write_text(json.dumps({"name": "even", "kind": "code", "units": units, "sessions": ["s-cov"]}))
+    (labels / "even.json").write_text(json.dumps({"name": "even", "kind": "code", "units": units, "sessions": ["s-cov"]}))
     saw(tmp_path, code, [{"tool": "Read", "file": str(code / "logs" / "events.jsonl"), "from": 1, "to": 8}])
     cov = CV.coverage(Store(code))
     f = next(o for o in cov["files"] if o["path"] == "logs/events.jsonl")

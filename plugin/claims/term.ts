@@ -60,7 +60,9 @@ async function reloadClaims($: Engine): Promise<Store> {
   const kept = await readKept<unknown>($, FILE)
   const store = (kept ? readStore(kept, session) : emptyStore(session)) as Store
   store.session = session
-  await $.state.set(CLAIMS, store)
+  // (a drawing may ask first, and a drawing cannot write the state: it reads the kept claims again until a hook holds
+  // them)
+  try { await $.state.set(CLAIMS, store) } catch { /* held at the session's start, or at the next change */ }
   return JSON.parse(JSON.stringify(store))
 }
 
@@ -74,6 +76,13 @@ export async function saveClaims($: Engine, store: Store): Promise<void> {
     $.clock.after(BRIGHT_MS + 50, () => { void (async () => { await $.state.set(BRIGHT, null) })().catch(() => undefined) })
   }
   await writeKept($, FILE, store).catch(() => undefined)
+}
+
+/** A /clear or a /resume (hooks/turnover.ts): the new conversation's claims are held before anything draws their
+ *  count. */
+export async function turnClaims($: Engine): Promise<void> {
+  await $.state.set(BRIGHT, null)
+  await claimsStore($)
 }
 
 /** How many claims the conversation holds, for the bar. */
@@ -183,9 +192,10 @@ export async function showClaims($: Engine, args: ClaimsArgs): Promise<void> {
 // ------------------------------------------------------------------------------------------------ hooks
 
 export const registerClaimsTerm: Register = on => {
-  // /claims: the pane
+  // /claims: the pane; a resumed conversation's claims, held before the bar draws their count
   on('session.start', { cwd: /\// }, async ($, e, next) => {
     const r = await next(e)
+    try { await turnClaims($) } catch { /* read from the kept folder when drawn */ }
     try {
       await $.command.register({ name: 'claims', description: 'Open the Claims pane (c)', immediate: true })
     } catch {

@@ -253,8 +253,9 @@ export async function noteText($: Engine, row: string, text: string): Promise<vo
   await editTurn($, turnId, t => (t.rows.includes(row) ? t : { ...t, rows: [...t.rows, row] }))
 }
 
-/** The turns this conversation kept that the state does not hold (a resumed session), back in it. */
-export async function restoreAnswers($: Engine): Promise<void> {
+/** The turns this conversation kept that the state does not hold (a resumed session), back in it; `all`, every turn it
+ *  kept, the state's copy of a turn replaced (a /resume back to a conversation this process held before). */
+export async function restoreAnswers($: Engine, all = false): Promise<void> {
   const dir = `${await keptDir($)}/answers`
   let entries: { name: string; kind: string }[] = []
   try { entries = (await $.fs.list(dir)) as { name: string; kind: string }[] } catch { return }
@@ -264,7 +265,7 @@ export async function restoreAnswers($: Engine): Promise<void> {
     let kept: { turn?: TurnRec; msgs?: Msg[] }
     try { kept = JSON.parse(String(await $.fs.read(`${dir}/${x.name}`))) } catch { continue }
     const t = kept?.turn
-    if (!t?.turnId || (await turnOf($, t.turnId))) continue
+    if (!t?.turnId || (!all && (await turnOf($, t.turnId)))) continue
     // a turn the session ended in: it ended with it
     const turn = t.endedAt == null ? { ...t, endedAt: t.startedAt, reason: t.reason ?? 'aborted' } : t
     await $.state.set({ ...TURN, id: t.turnId }, turn)
@@ -281,6 +282,15 @@ export async function restoreAnswers($: Engine): Promise<void> {
     const all = [...got.filter(t => !have.has(t.turnId))]
     return [...all.sort((a, b) => a.n - b.n).map(t => t.turnId), ...have]
   })
+}
+
+/** A /clear or a /resume (hooks/turnover.ts): the answers are the new conversation's, none of the earlier one's; the
+ *  keys act on its newest. */
+export async function turnAnswers($: Engine): Promise<void> {
+  waiting = []
+  await $.state.set(TURNS, [])
+  await $.state.set(SEL, null)
+  await restoreAnswers($, true)
 }
 
 // ------------------------------------------------------------------------------------------------ the keys { }

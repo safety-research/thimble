@@ -66,6 +66,13 @@ export async function paneNow($: Engine): Promise<PaneNow | null> {
   return ((await $.state.get(NOW)).value ?? null) as PaneNow | null
 }
 
+/** A /clear or a /resume (hooks/turnover.ts): a pane on the earlier conversation's records closes (thimble's settings
+ *  and a fix's share are no conversation's). */
+export async function turnPane($: Engine): Promise<void> {
+  const now = await paneNow($)
+  if (now && now.kind !== 'settings' && now.kind !== 'fixshare') await closePane($)
+}
+
 /** A pane's drawing with its side thread under it (threads/seam.ts threadUnder); the drawing alone when the thread
  *  cannot be drawn. */
 async function withThread($: Engine, e: Any, now: { kind: string; args: unknown }, els: Any, drawn: unknown): Promise<unknown> {

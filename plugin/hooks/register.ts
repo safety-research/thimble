@@ -5,7 +5,9 @@
 //   telemetry   ../telemetry/telemetry.ts  each model call and turn in the session's events; registered first and last,
 //                                       so its two hooks of each event bracket thimble's others and time them
 //   path        ./path.ts               the session's environment: the plugin's bin/ first on PATH, and a TMPDIR
-//   watch       ./watch.ts              which files Claude's Read, Grep and Bash calls touched, for `thimble coverage`
+//   watch       ./watch.ts              which files Claude's Read, Grep and Bash calls touched, for `thimble coverage`;
+//                                       a /clear or a /resume turns every module over to the new conversation
+//                                       (./turnover.ts)
 //   prompts     ../prompts/prompts.ts   the prompt registry: one file per text a model reads
 //   guidance    ../guidance/guidance.ts guidance.md beside the prompt, once in every conversation
 //   turn        ../core/turn.ts         whether main's turn runs

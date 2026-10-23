@@ -167,6 +167,15 @@ export async function labelsUnderCard($: Engine, els: Any, id: string, _cols: nu
 /** The asks already shown, by id: an ask the person answered never comes back. */
 const asksSeen = new Set<string>()
 
+/** A /clear or a /resume (hooks/turnover.ts): the label rows read the new conversation's labels, and an ask about a
+ *  label of the earlier one leaves the screen (its label keeps it: the same command in that conversation asks
+ *  again). */
+export async function turnLabelUse($: Engine): Promise<void> {
+  lists.clear()
+  reading.clear()
+  await setLabelAsk($, null)
+}
+
 export async function labelAskNow($: Engine): Promise<LabelAsk | null> {
   return ((await $.state.get(LABELASK)).value ?? null) as LabelAsk | null
 }

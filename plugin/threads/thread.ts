@@ -68,6 +68,8 @@ let inFlight = 0
 // while a thread answers, its turns are read again every few seconds, so its steps show as they come
 let poll: (() => void) | null = null
 let restoredFor = ''
+// the threads of a conversation the session left (a /clear, a /resume): a fork that still answers one keeps nothing
+const retired = new WeakSet<Thread>()
 
 /** This conversation's side threads that were asked, the newest first (a thread opened with no question yet is
  *  not listed). */
@@ -112,6 +114,19 @@ export async function restoreThreads($: Engine): Promise<void> {
   if (got) await bump($)
 }
 
+/** A /clear or a /resume (hooks/turnover.ts): the threads are the new conversation's, read back from its kept
+ *  folder; the earlier one's stay in its own. */
+export async function turnThreads($: Engine): Promise<void> {
+  for (const t of threads.values()) retired.add(t)
+  threads.clear()
+  byAgent.clear()
+  sending.clear()
+  restoredFor = ''
+  lastCount = -1
+  await restoreThreads($)
+  await bump($)
+}
+
 /** The list and the bar draw again. */
 // when the count of threads last changed: the bar's count is bold for a moment after, as in 0.10
 const BRIGHT_MS = 1600
@@ -135,6 +150,7 @@ export function threadsBright(): boolean {
 }
 
 async function keep($: Engine, t: Thread): Promise<void> {
+  if (retired.has(t)) return
   t.at = new Date().toISOString()
   threads.set(t.key, t)
   if (t.agentId) byAgent.set(t.agentId, t.key)

@@ -48,10 +48,12 @@ async function setState($: Engine, edit: (s: Shown) => Shown): Promise<void> {
   await writeKept($, FILE, next).catch(() => undefined)
 }
 
-/** A resumed session: the cards' versions as the squeezes left them. */
-export async function restoreCardsShown($: Engine): Promise<void> {
+/** A resumed session: the cards' versions as the squeezes left them. `turn`: a /clear or a /resume inside the running
+ *  plugin, whose state held the earlier conversation's: the new one's as it kept them, or none. */
+export async function restoreCardsShown($: Engine, turn = false): Promise<void> {
   const kept = await readKept<Shown>($, FILE)
-  if (kept && !(await $.state.get(STATE)).value) await $.state.set(STATE, kept)
+  if (turn) await $.state.set(STATE, kept ?? { shown: {}, hidden: [], did: {} })
+  else if (kept && !(await $.state.get(STATE)).value) await $.state.set(STATE, kept)
 }
 
 async function copyDir($: Engine, id: string, copy: string): Promise<string> {

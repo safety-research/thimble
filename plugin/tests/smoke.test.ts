@@ -2,6 +2,8 @@
 // prompt draws, with a failure line on it, without throwing. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { labelsDirOf } from '../core/layout.mjs'
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
@@ -26,8 +28,9 @@ function world(on: Any) {
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   on('env.set', () => ({ value: {} }))
   on('ui.toast', () => ({ value: undefined }))
-  // a folder of data (made up) whose coverage cannot be counted: the bar's failure line says so
-  on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path === '/made-up/data/thimble/labels' }))
+  // a folder of data (made up) with labels of this conversation's, whose coverage cannot be counted: the bar's failure
+  // line says so
+  on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path === labelsDirOf('/made-up/.thimble', 's-smoke', '/made-up/data') }))
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: e.argv.includes('coverage')
     ? { exitCode: 1, stdout: '', stderr: 'a made-up reason', isStdoutTruncated: false, isStderrTruncated: false }
     : { exitCode: 0, stdout: '{}', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))

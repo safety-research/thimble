@@ -83,10 +83,15 @@ one call per 50 records. All calls go through your Claude Code login and show in
 
 ### What it stores
 
-- `~/.thimble/` (or the folder in `THIMBLE_HOME`): per data folder, the labels, with every version of their values;
-  per session, the cards with their rows and state, the citations and their checks, the files Claude read (for coverage),
-  and a log of thimble's own model calls; and in `srt/`, the sandbox runtime the cards run in. thimble writes nothing in your data folder (one whose `thimble/labels` an
-  earlier thimble made keeps its labels there).
+- `~/.thimble/` (or the folder in `THIMBLE_HOME`): per Claude Code conversation, the labels it made in each folder, with
+  every version of their values, the cards with their rows and state, the citations and their checks, the files Claude
+  read (for coverage), and a log of thimble's own model calls; and in `srt/`, the sandbox runtime the cards run in. A
+  new conversation (a new `claude`, or `/clear`) starts with none of an earlier one's; `claude --resume`, `--continue`
+  and `/resume` bring a conversation's own back. Per data folder, only the files' row counts, for speed; and a
+  `--prompt` label made again with the same name and definition in another conversation reuses the model's reads of its
+  records from there, and shows nothing else of it. thimble writes nothing in your data folder. Labels an earlier
+  thimble kept per folder (in `folders/`) stay there: no new conversation shows them, and a conversation that made one
+  finds it again when resumed.
 
 The plugin sends nothing anywhere except through your Claude Code session, and starts no other Claude Code process.
 

@@ -4,16 +4,19 @@
 //
 // Under $THIMBLE_HOME (default ~/.thimble):
 //
-//   conversations/<conversation>/   what thimble keeps of one conversation, for a resumed session
+//   conversations/<conversation>/   what thimble keeps of one conversation, for a resumed session: a new conversation
+//                                   shows nothing of another's, and a resumed one shows its own again
 //       marks/<reply>.json            a reply's marks and their check (marks/store.ts)
 //       cards/<card>/                 a card: meta.json, v<version>/{view.js, rows.json}, state.json (cards/store.ts)
 //       tell.json                     what Claude reads with the person's next prompt (core/tell.ts)
 //       answer.json                   the answer v draws under (designer/v.ts)
+//       folders/<folder>/labels/      the labels it made in a folder (engine/kernel/store.py kept_dir)
 //   starts/<first launch>.json      the conversation a first launch belongs to (hooks/conversation.ts)
 //   events/<conversation>.jsonl     the kernel's change feed and the telemetry's lines (core/feed.ts, telemetry/)
 //   seen/<conversation>.jsonl       what Claude's calls touched, for coverage (hooks/watch.ts)
-//   folders/<folder>/labels/        a folder's labels (engine/kernel/store.py)
-//   cache/<folder>/                 a folder's row counts (engine/kernel/store.py)
+//   cache/<folder>/                 a folder's row counts, and what coverage reads of the labels: speed only
+//                                   (engine/kernel/store.py)
+//   folders/<folder>/labels/        the labels of thimble 0.10 and before, one set per folder: kept, never shown
 //   fixes/                          the fixes (engine/kernel/fix.py)
 //   run/                            the card runner's socket (cards/ask.ts)
 //   tmp/                            the temp folder of a session that has no TMPDIR (core/home.ts tempDir)
@@ -48,7 +51,8 @@ export const conversationDir = (home, key) => `${at(home)}/conversations/${safeN
 export const startsFile = (home, launch) => `${at(home)}/starts/${safeName(launch)}.json`
 export const eventsFile = (home, key) => `${at(home)}/events/${safeName(key)}.jsonl`
 export const seenFile = (home, key, part = 1) => `${at(home)}/seen/${safeName(key)}${part > 1 ? `.${part}` : ''}.jsonl`
-export const labelsDirOf = (home, realPath) => `${at(home)}/folders/${folderName(realPath)}/labels`
+/** The folder of the labels a conversation made in a folder (its real path). */
+export const labelsDirOf = (home, key, realPath) => `${conversationDir(home, key)}/folders/${folderName(realPath)}/labels`
 export const runDir = home => `${at(home)}/run`
 export const tmpDir = home => `${at(home)}/tmp`
 export const fixesDir = home => `${at(home)}/fixes`

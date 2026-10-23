@@ -1,6 +1,12 @@
 """Labels: a category given to every record of a scope, kept with each record's ref.
 
-    thimble/labels/<name>.json    one label: its definition, each record's value, the person's checks, and its runs
+    <conversation's labels of the root>/<name>.json    one label: its definition, each record's value, the person's
+                                                       checks, and its runs (store.py kept_dir)
+
+A label belongs to the Claude Code conversation that made it: a new conversation in the same folder has none, and a
+resumed one has its own again. Only the model's reads of a --prompt label are shared, and only as speed: the same label
+(its name and definition) made again in another conversation of the folder takes the values the model already gave
+its records there (reads_elsewhere), and the model reads only the others.
 
 A label is defined once and applied to every record of the files a glob names (or a sample of them, a trial), after
 `--where` and `--within` narrow them. Each record gets one of its values (positive first) by its predicate:
@@ -46,7 +52,7 @@ from typing import Any, Iterator
 from . import refs as R
 from . import regextext as RT
 from . import sources as S
-from .store import Store
+from .store import Store, conversation_dir, folder_name, legacy_dir, safe_name, thimble_home
 
 DEFAULT_VALUES = ["yes", "no"]
 BATCH_ITEMS = 50  # records per model call, at most
@@ -108,7 +114,7 @@ def write(st: Store, lab: dict[str, Any], change: bool = True) -> None:
 
 # ------------------------------------------------------------------ what coverage reads of the labels
 
-SUMMARIES = "labels.json"  # in the folder's cache
+SUMMARIES = "labels.json"  # in the folder's cache: thimble 0.10's labels of the folder (legacy_summaries)
 
 
 def _summary(p: Path, lab: dict[str, Any]) -> dict[str, Any]:
@@ -124,17 +130,22 @@ def _summary(p: Path, lab: dict[str, Any]) -> dict[str, Any]:
             "files": files}
 
 
+def _summary_file(st: Store, conversation: str | None = None) -> Path:
+    """Where the summaries of a conversation's labels of the folder are kept: the folder's cache, one file each."""
+    return st.cache / "labels" / f"{safe_name(conversation or st.conversation)}.json"
+
+
 def _keep_summary(st: Store, fresh: dict[str, dict[str, Any]]) -> None:
-    kept = st.read_json(st.cache / SUMMARIES)
-    st.write_json(st.cache / SUMMARIES, {**(kept if isinstance(kept, dict) else {}), **fresh})
+    f = _summary_file(st)
+    kept = st.read_json(f)
+    st.write_json(f, {**(kept if isinstance(kept, dict) else {}), **fresh})
 
 
-def summaries(st: Store) -> list[dict[str, Any]]:
-    """Each label of the folder as coverage reads it (`_summary`). A label of millions of records is a file of
-    hundreds of megabytes, so its summary is kept in the folder's cache: `write` keeps it, and a label file that
-    changed in another way is read once again here."""
-    d = st.dir / "labels"
-    kept = st.read_json(st.cache / SUMMARIES)
+def _summaries_of(st: Store, d: Path, cache: Path) -> dict[str, dict[str, Any]]:
+    """Each label in the folder `d` as coverage reads it (`_summary`), by its file's name. A label of millions of
+    records is a file of hundreds of megabytes, so its summary is kept in `cache`: `write` keeps it, and a label file
+    that changed in another way is read once again here."""
+    kept = st.read_json(cache)
     kept = kept if isinstance(kept, dict) else {}
     out: dict[str, dict[str, Any]] = {}
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
@@ -150,8 +161,56 @@ def summaries(st: Store) -> list[dict[str, Any]]:
             got = _summary(p, lab)
         out[p.name] = got
     if out != kept:
-        st.write_json(st.cache / SUMMARIES, out)
-    return list(out.values())
+        try:
+            st.write_json(cache, out)
+        except OSError:
+            pass
+    return out
+
+
+def summaries(st: Store, every: bool = False) -> list[dict[str, Any]]:
+    """Each label of the conversation's in the folder as coverage reads it (`_summary`); with `every`, those of every
+    conversation that labeled the folder (`thimble coverage --all`)."""
+    if not every:
+        return list(_summaries_of(st, st.dir / "labels", _summary_file(st)).values())
+    out: list[dict[str, Any]] = []
+    for d in sorted((thimble_home() / "conversations").glob(f"*/folders/{folder_name(str(st.root))}/labels")):
+        out += _summaries_of(st, d, _summary_file(st, d.parents[2].name)).values()
+    return out
+
+
+def legacy_summaries(st: Store) -> list[dict[str, Any]]:
+    """The labels thimble 0.10 and before kept for the whole folder (store.legacy_dir, or the root's own thimble/labels
+    folder an earlier thimble wrote), as `_summary` reads them, each with its `path`: what Store._migrate reads to find
+    a resumed conversation's own."""
+    out: list[dict[str, Any]] = []
+    for d, cache in ((legacy_dir(st.root) / "labels", st.cache / SUMMARIES),
+                     (st.root / "thimble" / "labels", st.cache / "labels-own.json")):
+        out += [{**v, "path": d / k} for k, v in _summaries_of(st, d, cache).items()]
+    return out
+
+
+def reads_elsewhere(st: Store, name: str, d: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """The values a model gave records of the same label (its name and definition `d`) that another conversation of the
+    folder made, or thimble 0.10 kept for the folder, by ref: the model's reads are the same reads, so they are not made
+    again. Only the model's values: no check of a person's, nothing a rule or Claude gave."""
+    mine = (st.dir / "labels").resolve()
+    found = sorted((thimble_home() / "conversations").glob(f"*/folders/{folder_name(str(st.root))}/labels/{slug(name)}.json"))
+    found.append(legacy_dir(st.root) / "labels" / f"{slug(name)}.json")
+    out: dict[str, dict[str, Any]] = {}
+    for p in found:
+        try:
+            if p.parent.resolve() == mine or not p.is_file():
+                continue
+        except OSError:
+            continue
+        lab = st.read_json(p)
+        if not (isinstance(lab, dict) and all(lab.get(k) == v for k, v in d.items())):
+            continue
+        for ref, u in (lab.get("units") or {}).items():
+            if ref not in out and u.get("by") == "model" and u.get("v") is not None and not u.get("wait"):
+                out[ref] = {k: u[k] for k in ("v", "c", "by", "why") if k in u}
+    return out
 
 
 # ------------------------------------------------------------------ values
@@ -466,8 +525,10 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
     rows, matched, files = records(st, glob, where, within, limit, seed)
     # the values are computed outside the lock, which other writers wait on; when one of them changed the label
     # meanwhile, they are computed again on its newer state, under the lock
+    # a prompt label another conversation of the folder made the same: the model's reads it holds are not made again
+    reuse = reads_elsewhere(st, name, _definition(kind, rule, glob, values, where, within)) if kind == "prompt" else {}
     job = {"kind": kind, "rule": rule, "glob": glob, "values": values, "given": given, "where": where, "within": within,
-           "limit": limit, "reason": reason, "fn": fn, "rows": rows, "matched": matched, "files": files}
+           "limit": limit, "reason": reason, "fn": fn, "rows": rows, "matched": matched, "files": files, "reuse": reuse}
     old = load(st, name)
     lab, added, errors, same = _apply(st, old, name, job)
     with locked(st, name):
@@ -531,7 +592,8 @@ def _apply(st: Store, old: dict[str, Any] | None, name: str,
                 if len(errors) < 3:
                     errors.append(f"{row.ref}: {type(e).__name__}: {e}")
         else:
-            units[row.ref] = {"v": None, "wait": True}
+            got = job["reuse"].get(row.ref)
+            units[row.ref] = dict(got) if got else {"v": None, "wait": True}
     if kind == "code" and not lab.get("given"):
         _values_by_count(lab)
     if kind == "prompt":

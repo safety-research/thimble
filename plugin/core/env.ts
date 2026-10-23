@@ -3,9 +3,11 @@
 //   keptDir($), readKept, writeKept  what thimble keeps of this conversation for a resumed session, as JSON files
 //   startDir($)             the folder the session started in, which a shell `cd` does not move
 //   rootHere($)             the folder under analysis as the kernel finds it (engine/kernel/store.py find_root), or null
-//   labelsDir($, root)      the folder that holds a root's labels, or null (engine/kernel/store.py records_dir)
+//   labelsDir($, root)      the folder that holds the labels this conversation made in a root, or null
+//                           (engine/kernel/store.py kept_dir)
 //   runThimble($, root, args, o)  `thimble …` as the person's own command: its records go under a session of the
-//                           person's (`person-…`), so nothing it reads counts as what Claude read
+//                           person's (`person-…`), so nothing it reads counts as what Claude read, and it reads and
+//                           writes this conversation's labels
 import type { EngineInterface } from 'claude-code'
 
 import { sessionKey } from '../hooks/conversation'
@@ -49,19 +51,18 @@ export async function startDir($: Engine): Promise<string> {
   return start.replace(/\/+$/, '')
 }
 
-/** The folder that holds the labels of `root`: the one kept under $THIMBLE_HOME/folders/ for the folder's real path
- *  (core/layout.mjs), else <root>/thimble/labels when the folder holds labels of its own. Null when neither is there. */
+/** The folder that holds the labels this conversation made in `root`: the one kept in the conversation's folder for
+ *  the root's real path (core/layout.mjs). Null when there is none: a new conversation shows no folder's labels, not
+ *  even those an earlier conversation made there. */
 export async function labelsDir($: Engine, root: string): Promise<string | null> {
   const real = (await $.fs.stat(root, { resolve: true }).catch(() => null))?.realPath ?? root
-  const kept = labelsDirOf(await thimbleHome($), real)
-  if (await $.fs.exists(kept)) return kept
-  const own = `${root.replace(/\/+$/, '')}/thimble/labels`
-  return (await $.fs.exists(own)) ? own : null
+  const kept = labelsDirOf(await thimbleHome($), await sessionKey($), real)
+  return (await $.fs.exists(kept)) ? kept : null
 }
 
-/** The folder under analysis: THIMBLE_ROOT, else the nearest folder at or above the session's start folder that holds
- *  a thimble/ record folder (so a `cd` does not move it); with none there, the nearest at or above a working folder
- *  inside the start folder, or at or above a working folder outside it. Null when no folder holds records. */
+/** The folder under analysis: THIMBLE_ROOT, else the nearest folder at or above the session's start folder for which
+ *  this conversation keeps labels (so a `cd` does not move it); with none there, the nearest at or above a working
+ *  folder inside the start folder, or at or above a working folder outside it. Null when no folder holds records. */
 export async function rootHere($: Engine): Promise<string | null> {
   const env = await $.env.get('THIMBLE_ROOT')
   if (env) return env
@@ -80,13 +81,15 @@ export async function rootHere($: Engine): Promise<string | null> {
 
 export type Ran = { code: number; stdout: string; stderr: string }
 
-/** `thimble …` in `root`, as the person's own command. `stdin`: what it reads (the secret of a key press, the
- *  model's answers); `session`: the session its records go under (coverage counts Claude's own session). */
+/** `thimble …` in `root`, as the person's own command, over this conversation's labels. `stdin`: what it reads (the
+ *  secret of a key press, the model's answers); `session`: the session its records go under (coverage counts Claude's
+ *  own session). */
 export async function runThimble($: Engine, root: string, args: string[], o: { stdin?: string; session?: string; timeoutMs?: number } = {}): Promise<Ran> {
   const dir = $.plugin.root.replace(/\/+$/, '')
-  const session = o.session ?? `person-${(await sessionKey($)).slice(0, 8)}`
+  const key = await sessionKey($)
+  const session = o.session ?? `person-${key.slice(0, 8)}`
   const r = await $.process.run([`${dir}/bin/thimble`, ...args], {
-    cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: session }, timeoutMs: o.timeoutMs ?? 120000,
+    cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: session, THIMBLE_CONVERSATION: key }, timeoutMs: o.timeoutMs ?? 120000,
     ...(o.stdin != null ? { stdin: o.stdin } : {}),
   })
   return { code: r.exitCode ?? 1, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') }

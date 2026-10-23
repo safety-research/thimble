@@ -4,22 +4,32 @@ the same names (safe_name, folder_name; a test on each side checks one name).
 The folder under analysis (the root) is the person's record, and thimble writes nothing in it. Under $THIMBLE_HOME
 (default ~/.thimble):
 
-    folders/<folder>/labels/<name>.json   each label of a root with every version of its values (labels.py)
-    cache/<folder>/                       the root's files' row counts, safe to delete
+    conversations/<conversation>/folders/<folder>/labels/<name>.json
+                                          each label a conversation made in a root, with every version of its values
+                                          (labels.py): a label belongs to the Claude Code conversation that made it, so
+                                          a new conversation in the same folder starts with none, and a resumed one
+                                          finds its own again
+    cache/<folder>/                       the root's files' row counts, and what coverage reads of each conversation's
+                                          labels: speed only, safe to delete, never shown on its own
     events/<conversation>.jsonl           the session's change feed: one line per change the plugin acts on (a label
                                           whose records wait for the model, a fix's share that waits for the person),
                                           so the plugin learns of it from the kernel, not from what a command printed
     seen/<conversation>.jsonl             the files that Claude's own Read, Grep and Bash calls touched (the hooks
                                           module writes it, coverage reads it)
+    folders/<folder>/labels/              the labels of thimble 0.10 and before, one set per folder: kept on disk and
+                                          never shown; a conversation that applied one of them finds it again when it
+                                          resumes (Store._migrate)
 
-<folder> is folder_name of the root's real path. A root that already holds a thimble/labels folder of its own (the
-person made it, or an earlier thimble wrote it there) keeps its labels there. Nothing here writes into a source file.
+<conversation> is safe_name of the conversation's key (conversation_id); <folder> is folder_name of the root's real
+path. A root's own thimble/labels folder (an earlier thimble wrote it there) is left as it is and, like folders/, read
+only for a resumed conversation's own labels. Nothing here writes into a source file.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -54,28 +64,34 @@ def folder_name(real: str) -> str:
     return f"{tail or 'root'}-{short_hash(real)}"
 
 
-def kept_dir(root: Path) -> Path:
-    """Where a root's labels are kept: folders/<folder_name of its real path>/ (the plugin's core/home.ts finds them by
-    the same name)."""
+def conversation_id() -> str:
+    """The Claude Code conversation whose labels a command reads and writes: THIMBLE_CONVERSATION (the plugin sets it to
+    the conversation's key, for Claude's commands and for its own), else the session (session_id)."""
+    return os.environ.get("THIMBLE_CONVERSATION") or session_id()
+
+
+def conversation_dir(conversation: str) -> Path:
+    """What thimble keeps of one conversation: conversations/<safe_name of its key>/ (layout.mjs conversationDir)."""
+    return thimble_home() / "conversations" / safe_name(conversation)
+
+
+def kept_dir(root: Path, conversation: str | None = None) -> Path:
+    """Where a conversation keeps its labels of a root: conversations/<conversation>/folders/<folder_name of the root's
+    real path>/ (the plugin's core/env.ts finds them by the same names)."""
+    return conversation_dir(conversation or conversation_id()) / "folders" / folder_name(str(Path(root).resolve()))
+
+
+def legacy_dir(root: Path) -> Path:
+    """Where thimble 0.10 and before kept a root's labels, one set for every session: folders/<folder_name>/. Kept on
+    disk, never shown (Store._migrate)."""
     return thimble_home() / "folders" / folder_name(str(Path(root).resolve()))
 
 
-def records_dir(root: Path) -> Path:
-    """The root's record folder: kept_dir(root), or root/thimble/ when the root holds labels of its own there and none
-    are kept, so a root's labels never split between two folders. A folder the person can write in may still be a
-    record no tool should change (a shared dataset), so writing in it is never the default."""
-    own, kept = root / DIR, kept_dir(root)
-    if not kept.is_dir() and (own / "labels").is_dir():
-        return own
-    return kept
-
-
-def _holding(start: Path) -> Path | None:
-    """The nearest folder at or above `start` that holds a thimble/ record folder (its own, or one kept for it under
-    THIMBLE_HOME), or None."""
+def _holding(start: Path, conversation: str | None = None) -> Path | None:
+    """The nearest folder at or above `start` for which this conversation keeps labels, or None."""
     d = start
     while True:
-        if (d / DIR / "labels").is_dir() or (kept_dir(d) / "labels").is_dir():
+        if (kept_dir(d, conversation) / "labels").is_dir():
             return d
         if d.parent == d:
             return None
@@ -108,13 +124,13 @@ def in_temp(path: str | Path) -> bool:
     return any(p == t or t in p.parents for t in temp_folders())
 
 
-def find_root(start: str | Path | None = None) -> Path:
-    """The folder under analysis: THIMBLE_ROOT, else the nearest folder at or above `start` (the working folder) that
-    holds a thimble/ record folder, else `start` itself.
+def find_root(start: str | Path | None = None, conversation: str | None = None) -> Path:
+    """The folder under analysis: THIMBLE_ROOT, else the nearest folder at or above `start` (the working folder) for
+    which this conversation keeps labels, else `start` itself.
 
     In a Claude Code session the hooks set THIMBLE_START to the folder the session started in. A `cd` inside that folder
-    does not move the records: they stay in the start folder's thimble/ (or one above it), so a session whose first
-    command is `cd src` keeps one record folder, not a second one inside the source tree. When no folder at or above
+    does not move the records: they stay the start folder's (or those of a folder above it), so a session whose first
+    command is `cd src` keeps one set of labels, not a second one for the source tree. When no folder at or above
     the start folder holds records, a folder between it and the working folder that holds them is used. A working
     folder in thimble's temp folder (Claude derived a file there and labels it) is the start folder's too: its labels
     belong to the session's root, so they show in the session's answers and bar. Any other working folder outside the
@@ -127,10 +143,10 @@ def find_root(start: str | Path | None = None) -> Path:
     if anchor:
         a = Path(anchor).resolve()
         if here == a or a in here.parents:
-            return _holding(a) or _holding(here) or a
+            return _holding(a, conversation) or _holding(here, conversation) or a
         if in_temp(here):
-            return _holding(a) or a
-    return _holding(here) or here
+            return _holding(a, conversation) or a
+    return _holding(here, conversation) or here
 
 
 def session_id() -> str:
@@ -138,11 +154,43 @@ def session_id() -> str:
 
 
 class Store:
-    def __init__(self, root: str | Path | None = None, session: str | None = None):
-        self.root = Path(root).resolve() if root else find_root()
+    """A root's records as one conversation has them. `session` is who acts (coverage counts what Claude's own session
+    did; the plugin's own reads run as `person-…`), `conversation` whose labels they are: given, else
+    THIMBLE_CONVERSATION, else the session given, else the environment's session."""
+
+    def __init__(self, root: str | Path | None = None, session: str | None = None, conversation: str | None = None):
         self.session = session or session_id()
-        self.dir = records_dir(self.root)
+        self.conversation = conversation or os.environ.get("THIMBLE_CONVERSATION") or session or session_id()
+        self.root = Path(root).resolve() if root else find_root(conversation=self.conversation)
+        self.dir = kept_dir(self.root, self.conversation)
         self.cache = thimble_home() / "cache" / folder_name(str(self.root))
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """thimble 0.10 kept one set of labels per folder, which every session showed. They stay where they are, and a
+        new conversation shows none of them; a conversation that applied one (a label keeps the sessions that applied
+        it) finds it again in its own labels, once, when it has none of its own yet. A link where the disk allows it,
+        else a copy: a later write replaces the conversation's file and leaves the old one as it was."""
+        mine = self.dir / "labels"
+        if mine.is_dir() or not ((legacy_dir(self.root) / "labels").is_dir() or (self.root / DIR / "labels").is_dir()):
+            return
+        from . import labels as LB  # noqa: PLC0415 — labels imports this module
+
+        for got in LB.legacy_summaries(self):
+            if self.conversation not in (got.get("sessions") or []):
+                continue
+            src = got["path"]
+            dst = mine / src.name
+            try:
+                mine.mkdir(parents=True, exist_ok=True)
+                if dst.exists():
+                    continue
+                try:
+                    os.link(src, dst)
+                except OSError:
+                    shutil.copyfile(src, dst)
+            except OSError:
+                continue
 
     def sub(self, name: str) -> Path:
         d = self.dir / name
