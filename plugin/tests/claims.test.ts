@@ -10,6 +10,7 @@ import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
 import { claimsStore } from '../claims/term'
+import { failLineNow } from '../bar/notice'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -269,6 +270,24 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   expect(paneNow(s).args).toMatchObject({ group: 'k1' })
   await buttons(onMap).find(b => /^g\d+:d:c3$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c3' })
+})
+
+test('c in a terminal too narrow for the pane says to type /claims; once /claims opens the pane, that line goes', async () => {
+  setOptions({})
+  const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['[Run 4 failed](#).'] })
+  const line = async () => ((await failLineNow(s.$)) as Any)?.text ?? ''
+  s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
+  await (await claimsKey(s.$, 'c', 0))!.later!()
+  await settle()
+  expect(await line()).toContain('Type /claims to open it')
+  // a command's pane is placed at any width
+  s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
+  await s.call('command.run', { command: 'claims' }, async () => ({}))
+  await settle()
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims' })
+  expect(await line()).toBe('')
 })
 
 test('a corrected claim says corrected under it; e opens its history: what it said before and why it changed, as the claims look gave it', async () => {

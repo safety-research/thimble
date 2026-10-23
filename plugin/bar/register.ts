@@ -14,7 +14,7 @@ import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
-import { failCleared, noticeLine, promptTyped } from './notice'
+import { noticeLine, promptTyped } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,8 +38,7 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void>
   if (await paneShows($, kind)) { await closePane($); return }
   if (kind === 'coverage') void recount($).catch(() => undefined)
   const placed = kind === 'labels' ? await openLabels($) : await openPane($, kind, {}, TITLES[kind], { focus: true })
-  if (placed) await failCleared($, `pane:${kind}`)
-  else {
+  if (!placed) {
     // the words the bar shows for it, which a click opens
     const n = (await countsNow($))?.labels ?? 0
     const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'

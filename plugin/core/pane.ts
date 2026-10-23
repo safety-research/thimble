@@ -16,6 +16,7 @@
 // imports, so a list of draws that take `$` cannot be called from here.)
 import type { EngineInterface, Register } from 'claude-code'
 
+import { failCleared } from '../bar/notice'
 import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
@@ -31,7 +32,7 @@ export const PANE_ID = 'thimble'
 const NOW = { plugin: 'thimble', key: 'pane' } as const
 
 /** `focus`: the person opened it (a key, a click, a command), so it takes the keyboard and Esc closes it. Answers
- *  whether the pane is on screen. Claude Code places a pane at any width only when the person's own command, prompt
+ *  whether the pane is on screen; once it is, the notice that said it could not open (`pane:<kind>`) goes. Claude Code places a pane at any width only when the person's own command, prompt
  *  or click opened it; a key at the prompt is none of these, so below 144 columns (110 once the person opened the
  *  pane before) the pane would wait unseen until the terminal grows. Such a pane is closed, and the caller says why. */
 /** Claude Code sets `closeOnEscape` and `rows` anew on each open, so an open that only redraws the pane with other
@@ -43,7 +44,11 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   const rows = o.rows ?? (open && was?.kind === kind ? was?.rows : undefined)
   await $.state.set(NOW, { kind, args, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}) })
   const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
-  if (r.isPlaced) return true
+  if (r.isPlaced) {
+    // the line that said this kind could not open (a narrow terminal: `pane:<kind>`) goes once it is open
+    await failCleared($, `pane:${kind === 'thread' ? 'threads' : kind}`)
+    return true
+  }
   await closePane($)
   return false
 }

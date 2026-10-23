@@ -181,7 +181,7 @@ export async function claimsLit($: Engine): Promise<boolean> {
 export async function openClaims($: Engine, args: ClaimsArgs = {}): Promise<void> {
   await reloadClaims($)
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims', { focus: true, rows: 36 })
-  if (!placed) noticeLine($, 'Claude Code did not open the Claims pane here: the terminal is too narrow. Type /claims to open it.')
+  if (!placed) noticeLine($, 'Claude Code did not open the Claims pane here: the terminal is too narrow. Type /claims to open it.', 'pane:claims')
 }
 
 /** The pane shows other arguments (the person moved in it, by a key or a click), and holds the keyboard: Claude Code
