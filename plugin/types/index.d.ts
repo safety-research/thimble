@@ -7,7 +7,7 @@ declare module 'claude-code' {
       /** a reply's marks and their checks, by the reply's key, its last text row (a session.append uuid of main's; the
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
        *  sentence, status: 'checking' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
-       *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair? }] } (marks/store.ts Reply), kept on disk too */
+       *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair?, narrowed? }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
       /** the reply each text row with marks belongs to, by the row: the reply's key */
       marksRow: StateFamily<string>

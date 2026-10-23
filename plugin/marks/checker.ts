@@ -154,11 +154,15 @@ function settle(r: Reply, now: number, items: MarkItem[]): Reply {
  *  reason, its note) are quoted, since they may quote the records. */
 const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
 const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
+/** A correction as main reads it: a narrowing keeps the rest of the words in the reply, uncited. */
+const fixedLine = (m: MarkItem) => (m.narrowed
+  ? `- ${q(m.was ?? m.words)} is narrowed: only ${q(m.shown)} is cited, and the rest reads as your own words${why(m)}`
+  : `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`)
 
 export function tellText(items: MarkItem[]): string {
   // a mark whose check did not run is no finding of the check's
   const said = items.filter(m => m.status === 'corrected' || (m.status === 'failed' && m.failedBy !== 'none')).map(m => {
-    if (m.status === 'corrected') return `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`
+    if (m.status === 'corrected') return fixedLine(m)
     if (m.failedBy === 'evidence') return `- ${q(m.words)} is flagged as not confirmed${why(m)}`
     return `- ${q(m.words)} is flagged as wrong${why(m)}`
   })
@@ -174,7 +178,7 @@ export function tellText(items: MarkItem[]): string {
 /** What main reads with the person's next prompt when a repair (x) ended: how its mark ended, as the person reads it. */
 export function repairTellText(items: MarkItem[]): string {
   const lines = items.map(m => {
-    if (m.status === 'corrected') return `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`
+    if (m.status === 'corrected') return fixedLine(m)
     if (m.status === 'verified') return `- ${q(m.words)} is verified as written${why(m)}`
     if (m.status === 'failed' && m.failedBy === 'none') return `- ${q(m.words)} could not be checked${why(m)}`
     if (m.status === 'failed') return `- ${q(m.words)} is still flagged as ${m.failedBy === 'evidence' ? 'not confirmed' : 'wrong'}${why(m)}`
@@ -326,6 +330,7 @@ export function repairRequest(m: MarkItem): string {
   return [
     `The analyst pressed x to repair citation ${m.n}. It may stand in an earlier reply than your last. The first check ${found}${m.reason ? `: ${q(m.reason)}` : '.'}`,
     'Check it again from the start, and look in the records for the right value. When you find it, answer `corrected` with the true words and the evidence that shows them.',
+    'When the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.',
   ].join('\n')
 }
 
@@ -367,7 +372,7 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
       ...rep, settledAt: null,
       items: rep.items.map(m => {
         if (m.n !== r.n) return m
-        const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, ...base } = m
+        const { status: _s, was: _w, reason: _r, failedBy: _f, evidence: _e, note: _n, narrowed: _x, ...base } = m
         return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const }
       }),
     }))

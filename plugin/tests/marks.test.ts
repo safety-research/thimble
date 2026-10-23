@@ -298,6 +298,21 @@ test('a corrected citation draws as a settled one (purple, underlined); a failed
   expect(textOf(footerEl(ELS, { key: 'f', spin: '⠋', checking: 1 }))).toBe('⠋ checking 1 citation')
 })
 
+test("a narrowed citation: only the part the check cited is the mark; Claude's own words around it stay, as plain words", () => {
+  const text = 'Most are by [one user, "Kalmbot", with the summary "Seite gelöscht." ("page deleted")](#).'
+  const marks = marksIn(text)
+  const looks = [{ n: 1, status: 'corrected', shown: 'one user, “Kalmbot”, with the summary “Seite gelöscht.”', narrowed: true }] as Any
+  const els = all(messageEl(ELS, { text, marks, looks, key: 'k', cols: 200, first: true, spin: '', onMark: () => undefined }))
+  const texts = els.filter(n => n.type === 'Text' && typeof n.props.children === 'string')
+  const cited = texts.find(n => n.props.children === 'one user, "Kalmbot", with the summary "Seite gelöscht."')
+  expect(cited?.props).toMatchObject({ color: 'merged', underline: true })
+  const rest = texts.find(n => String(n.props.children).includes('("page deleted")'))
+  expect(rest).toBeDefined()
+  expect(rest!.props.underline).toBeUndefined()
+  expect(rest!.props.color).toBeUndefined()
+  expect(textOf(messageEl(ELS, { text, marks, looks, key: 'k', cols: 200, first: true, spin: '', onMark: () => undefined }))).toContain('Most are by one user, "Kalmbot", with the summary "Seite gelöscht." ("page deleted").')
+})
+
 test('x on a wrong citation checks it again in a fork of its own; its answer corrects it in place and main reads how it ended', async () => {
   let runs = 0
   const repaired = { parsed: true, results: [{ n: 3, status: 'corrected', shown: '"ship it now"', was: '"ship it"', reason: 'line 9 holds these words' }] }
@@ -312,7 +327,7 @@ test('x on a wrong citation checks it again in a fork of its own; its answer cor
   expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
   expect(seen.spawned.length).toBe(2)
   expect(seen.spawned[1].description).toBe('checking a citation again (x)')
-  expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start, and look in the records for the right value. When you find it, answer `corrected` with the true words and the evidence that shows them.')
+  expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start, and look in the records for the right value. When you find it, answer `corrected` with the true words and the evidence that shows them.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.')
   // while it runs the citation spins; the other marks keep their results; no second repair of it starts
   expect(await drawn($)).toContain('"ship it" ⠋')
   expect(await drawn($)).toContain('merged 12 of 40.')

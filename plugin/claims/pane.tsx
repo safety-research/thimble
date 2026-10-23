@@ -100,7 +100,7 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
       if (!m) return { ...s, status: 'gone' }
       return {
         ...s, n: m.n, status: m.status, failedBy: m.failedBy, shown: m.shown.replace(/\*\*|`/g, ''), ...placeOf(m),
-        ...(m.was ? { was: m.was.replace(/\*\*|`/g, '') } : {}), ...(m.reason ? { reason: m.reason } : {}), ...(m.evidence ? { evidence: m.evidence } : {}),
+        ...(m.was ? { was: m.was.replace(/\*\*|`/g, '') } : {}), ...(m.narrowed ? { narrowed: true } : {}), ...(m.reason ? { reason: m.reason } : {}), ...(m.evidence ? { evidence: m.evidence } : {}),
       }
     }))
   }

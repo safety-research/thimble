@@ -48,7 +48,7 @@ export function looksByWords(marks: { words: string }[], items: MarkItem[], runs
     const k = free.findIndex(it => norm(it.words) === norm(m.words))
     if (k < 0) return { n: 0, status: runs ? 'pending' : 'unchecked' }
     const it = free.splice(k, 1)[0]!
-    return { n: it.n, status: it.status, shown: it.shown }
+    return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
   })
 }
 
@@ -162,7 +162,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const looks: MarkLook[] = own
     ? marks.map((_m: Any, k: number) => {
       const it = reply?.items[k]
-      return it ? { n: it.n, status: it.status, shown: it.shown } : { n: k + 1, status: waits ? 'pending' : 'failed' }
+      return it ? { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) } : { n: k + 1, status: waits ? 'pending' : 'failed' }
     })
     : looksByWords(marks, reply?.items ?? [], runs)
   const focusN = await markFocus($, row)
