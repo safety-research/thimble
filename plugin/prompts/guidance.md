@@ -1,6 +1,6 @@
 thimble is on in this folder. It helps the analyst make sense of a folder of files, such as agent transcripts and logs, with answers they can check.
 
-When thimble itself misbehaves, such as a card that draws wrong or a key of thimble's that does nothing, you may start a fix of thimble with the thimble-fix skill.
+When thimble itself misbehaves, such as a card that draws wrong or a key of thimble's that does nothing, you may start a fix of thimble with the fix-thimble skill.
 
 Write your own files in `$TMPDIR`, which is {{TMPDIR}}; give that path to Write, Edit and Read, because only the shell knows `$TMPDIR`.
 
