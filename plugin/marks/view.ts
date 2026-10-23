@@ -4,8 +4,6 @@
 //   messageEl(els, o)  one text block of a reply: each block of its markdown that holds marks laid out here, each mark a
 //                      press with its status drawn on it; every other run of blocks drawn by Claude Code's own Markdown,
 //                      so paragraphs, lists, code and tables look as in any reply
-//   footerEl(els, o)   the line under a reply's last block while its marks are checked (each mark shows its own
-//                      status once the check settled, so nothing counts them after)
 //
 // The check's notes (it found words around a mark false) are not drawn: main reads them with the next prompt
 // (checker.ts tellText), and a detail the person must see is a heads-up's.
@@ -15,7 +13,7 @@
 // (any piece of it, when it wraps: one hover group per citation) puts its tint behind all of it, as does the tray
 // showing it:
 //   pending      the turn still runs: the text's own color, underlined; the citations' light purple tint on hover
-//   checking     as pending, and a turning glyph right after it
+//   checking     as pending, and a turning glyph (purple) right after it, until its own verdict arrives
 //   verified     as pending
 //   corrected    the corrected words in place of the marked ones, as pending: once corrected it holds, so it
 //                looks as a verified one does (its tray card says it was corrected). A narrowed one (`narrowed`) keeps
@@ -26,6 +24,10 @@
 //                look whatever the cause
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
+//
+// The sign after a mark (the turning glyph, ×) takes two cells, and every other mark keeps those two cells when the
+// lines are cut (withLooks, a `gap` run that is not drawn), so the lines break at the same words whether a glyph shows
+// or not: no line wraps again when a check starts, nor as each verdict arrives.
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
 // explainer highlighted teal or a heads-up orange (a fill behind the words); a span inside a mark's words keeps the
@@ -87,6 +89,8 @@ export type Passage = { text: string; label: string }
 
 /** A purple that follows the person's theme (Claude Code's color for a merged pull request): the turning glyph. */
 const PURPLE = 'merged'
+/** The turning glyph's cell when no frame is given: one cell, as every frame is. */
+const SPIN_CELL = '⠋'
 
 /** The citations' tint, behind their words on hover and while the tray shows one. A background takes no theme key, so
  *  it is one hex per theme set (core/theme.ts): the light purple rgba(179,107,255,.24) over a dark terminal's #1e1e1e,
@@ -168,7 +172,9 @@ function narrowRuns(runs: Run[], shown: string): Run[] {
 }
 
 /** Each mark's runs as its status draws them: a correction's words in place of the marked ones (a narrowing's part of
- *  them), and the glyph after a mark that is checked or failed as a run of the mark's own. */
+ *  them), and the glyph after a mark that is checked or failed as a run of the mark's own; after any other mark, a
+ *  `gap` run as wide, which the lines are cut with and which is not drawn (lineEl), so the glyph's coming and going
+ *  moves no word to another line. */
 function withLooks(runs: Run[], o: MessageOpts): Run[] {
   const out: Run[] = []
   for (let k = 0; k < runs.length; k++) {
@@ -185,12 +191,16 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     if (look?.status === 'corrected' && look.shown && look.narrowed) out.push(...narrowRuns(own, look.shown))
     else if (fixed && runsText(fixed) !== runsText(own)) out.push(...fixed)
     else out.push(...own)
-    if (look?.status === 'checking') out.push({ s: ` ${o.spin}`, mark: r.mark, tag: 'spin' })
-    if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
+    if (look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
+    else if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
+    else out.push({ s: '  ', mark: r.mark, tag: 'gap' })
     k = e
   }
   return out
 }
+
+/** The runs of a line as drawn: no `gap` run (withLooks). */
+const drawnRuns = (runs: Run[]): Run[] => runs.filter(r => r.tag !== 'gap')
 
 /** A run as a Text: Claude Code's styles for bold, italic and inline code. */
 function runText(els: Any, r: Run, wrap?: string, dim = false) {
@@ -256,7 +266,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
  *  break the text into columns). */
 function lineEl(els: Any, o: MessageOpts, runs: Run[], key: string, lead: Any[] = []) {
   const kids: Any[] = [...lead]
-  runs.forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : r.span !== undefined ? spanEl(els, o, r, `${key}-s${r.span}-${j}`) : runText(els, r, 'truncate-end', !!o.dim)))
+  drawnRuns(runs).forEach((r, j) => kids.push(r.mark !== undefined ? markEl(els, o, r, `${key}-m${r.mark}-${j}`) : r.span !== undefined ? spanEl(els, o, r, `${key}-s${r.span}-${j}`) : runText(els, r, 'truncate-end', !!o.dim)))
   return els.Box({ key, flexDirection: 'row', children: kids })
 }
 
@@ -315,7 +325,8 @@ function tableLines(els: Any, o: MessageOpts, b: Any, key: string, w: number): A
   rows.forEach((cells, k) => {
     const kids: Any[] = [els.Text({ children: '│' })]
     for (let c = 0; c < n; c++) {
-      const runs = (cells[c] || []).map(r => (k === 0 ? { ...r, b: true } : r))
+      // the column is as wide as its cells with their gaps (withLooks); a cell is drawn without them, padded to it
+      const runs = drawnRuns(cells[c] || []).map(r => (k === 0 ? { ...r, b: true } : r))
       const pad = widths[c]! - textWidth(runsText(runs))
       const left = k === 0 ? Math.floor(pad / 2) : 0
       kids.push(els.Text({ children: ' ' + ' '.repeat(left) }))
@@ -413,14 +424,4 @@ export function lostSpansEl(els: Any, lost: LostSpan[], key: string): Any | null
       ? Button({ key: `${key}-${i}`, plain: true, label: `${l.label} (the check changed its words)`.slice(0, 120), hover: { scope: hover.scope, inverse: false }, onPress: () => l.onPress!(), children: [Text({ key: 't', children: words })] })
       : Text({ key: `${key}-${i}`, children: words })
   }) })
-}
-
-export type FooterOpts = { key: string; checking: number; spin: string }
-
-/** The line under a reply's last block while the check runs: `checking 12 citations`. Nothing once it settled: each
- *  citation shows its own status where it stands. */
-export function footerEl(els: Any, o: FooterOpts): Any | null {
-  if (!o.checking) return null
-  const { Box, Text } = els
-  return Box({ key: o.key, marginLeft: 2, flexDirection: 'row', children: [Text({ key: 'c', dimColor: true, children: `${o.spin} checking ${o.checking} citation${o.checking === 1 ? '' : 's'}` })] })
 }

@@ -1,9 +1,9 @@
 // register.ts: marks. Claude marks the claims of its reply as markdown links to `#` (`[352](#) of the [410](#) refund
 // requests`); after each reply one checker fork verifies each mark with evidence, and a deterministic validator checks
 // that evidence (checker.ts). The reply is drawn with its marks (view.ts): underlined, a purple tint on hover, a turning glyph
-// while checking, corrected words in place (as a verified one), Claude Code's error red with × when the check could not
-// confirm it or did not run (failed), a note under the block whose words the check found false, and a footer under the reply while it is
-// checked. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
+// after each mark until its own verdict arrives, corrected words in place (as a verified one), Claude Code's error red
+// with × when the check could not confirm it or did not run (failed). The bar's busy line says the check runs; nothing
+// under the reply counts the marks. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
 //
 // Hooks (each with a matcher of its own: one hooks module holds every module's hooks):
 //   session.start    the marks a resumed session's replies hold, as their check left them (store.ts); the checks a
@@ -31,7 +31,7 @@ import { featureOn } from '../settings/features.mjs'
 import { awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { marksIn, rewritesIn, withCorrections, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
-import { footerEl, lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
+import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -172,7 +172,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length) {
     return own ? below() : below({ ...e, props: { ...e.props, text } })
   }
-  // the turning glyph follows the bar's busy line, which ticks while `checking N marks` runs
+  // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations` runs
   const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
   const spin = SPIN[frame % SPIN.length]!
   const runs = await mainRuns($)
@@ -207,8 +207,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
       },
     })
     : await (own ? below() : below({ ...e, props: { ...e.props, text } }))
-  const foot = reply?.last ? footerEl(els, { key: `mf-${row}`, spin, checking: reply.checking }) : null
   const gone = lostSpansEl(els, lost, `ml-${row}`)
-  const parts = [body, ...(gone ? [gone] : []), ...(foot ? [foot] : []), ...under]
+  const parts = [body, ...(gone ? [gone] : []), ...under]
   return parts.length === 1 ? body : els.Box({ key: `ans-${row}`, flexDirection: 'column', children: parts })
 }

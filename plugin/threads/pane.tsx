@@ -42,7 +42,7 @@ import { cut, textWidth } from '../core/text.js'
 import { themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
-import { citeHeat, citeLook, footerEl, messageEl, type MarkLook } from '../marks/view'
+import { citeHeat, citeLook, messageEl, type MarkLook } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import type { ThreadScope } from './seam'
 import { askThread, cardsOfTurn, isSending, listThreads, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
@@ -176,8 +176,7 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
 }
 
 /** An answer of the thread with its citations as main's reply draws them (marks/register.ts): pending while the thread
- *  answers, a turning glyph while they are checked, corrected words in place, verified or failed, and the footer under
- *  it while it is checked; a press opens a citation's evidence. Its check is the answer's own (threads.mjs answerRow). */
+ *  answers, a turning glyph after each until its verdict arrives, corrected words in place, verified or failed; a press opens a citation's evidence. Its check is the answer's own (threads.mjs answerRow). */
 async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, w: number, key: string): Promise<Any> {
   const row = answerRow(t, i)
   const on = featureOn('marks')
@@ -200,8 +199,7 @@ async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, 
     text, marks, looks, key, cols: w - 2, first: true, spin,
     onMark: async (j: number) => { const n = looks[j]!.n; if (n > 0 && reply) await openPane($, 'evidence', { row, n }, `citation ${n}`) },
   })
-  const foot = reply?.last && reply.checking ? footerEl(els, { key: `${key}-f`, spin, checking: reply.checking }) : null
-  return els.Box({ key, flexDirection: 'column', children: foot ? [body, foot] : [body] })
+  return els.Box({ key, flexDirection: 'column', children: [body] })
 }
 
 /** The thread's last answer: 'send' once it answered and m may send it to main, 'sent' once it did, else null. */

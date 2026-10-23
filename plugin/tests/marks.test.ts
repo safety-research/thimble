@@ -1,5 +1,5 @@
 // Marks across one reply (marks/checker.ts, view.ts): a reply with marks starts one checker fork with the marks filled
-// into its text; the fork's answer, once validated, gives each mark its status, the footer and what main reads next; a
+// into its text; the fork's answer, once validated, gives each mark its status and what main reads next; a
 // refusal, a validator that fails, a fork that is gone and an interrupted reply leave the marks failed (the check did
 // not run) with one failure line, and x starts their check; the checker may only read, and run code as one Python
 // script. All data is made up.
@@ -11,7 +11,7 @@ import { awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, endCheck, launc
 import { marksIn, withRewrites } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { highlighted } from '../marks/evidence'
-import { citeLook, citeScope, citeTint, footerEl, messageEl } from '../marks/view'
+import { citeLook, citeScope, citeTint, messageEl } from '../marks/view'
 import { tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -97,8 +97,7 @@ async function drawn($: Any): Promise<string> {
   const marks = marksIn(REPLY)
   const looks = marks.map((_m: Any, k: number) => ({ n: k + 1, status: reply!.items[k]!.status, shown: reply!.items[k]!.shown }))
   const body = messageEl(ELS, { text: REPLY, marks, looks, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined })
-  const foot = footerEl(ELS, { key: 'f', spin: '⠋', checking: reply!.checking })
-  return textOf(body) + '\n' + textOf(foot)
+  return textOf(body)
 }
 
 test('a reply with marks starts one checker fork with its marks filled in, and its answer settles them', async () => {
@@ -109,8 +108,10 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(seen.spawned[0].subagentType).toBe('fork')
   expect(seen.spawned[0].prompt).toBe('CHECK\n1. [40] in: Of the [40] pull requests, agent-07 merged [15 of 40].\n2. [15 of 40] in: Of the [40] pull requests, agent-07 merged [15 of 40].\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data')
   const checking = await drawn($)
-  expect(checking).toContain('15 of 40 ⠋')
-  expect(checking).toContain('checking 3 citations')
+  // each citation turns after its words until its own verdict arrives; no line under the reply counts them
+  expect(checking).toContain('Of the 40 ⠋ pull requests, agent-07 merged 15 of 40 ⠋.')
+  expect(checking).toContain('"ship it" ⠋')
+  expect(checking).not.toContain('checking 3 citations')
   expect(checking).not.toContain('(#)')
 
   await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
@@ -321,9 +322,23 @@ test('a corrected citation draws as a settled one (underlined, the purple tint o
   expect(rowsOf()[0].props.children[0].props.width).toBe(2)
   expect(rowsOf(false)[0].props.children.length).toBe(1)
   expect(rowsOf(false)[0].props.children[0].props.width).toBe(100)
-  // the footer says only that the check runs
-  expect(footerEl(ELS, { key: 'f', spin: '⠋', checking: 0 })).toBe(null)
-  expect(textOf(footerEl(ELS, { key: 'f', spin: '⠋', checking: 1 }))).toBe('⠋ checking 1 citation')
+})
+
+test('the turning glyph after a citation moves no word to another line as it comes and goes', () => {
+  const text = 'aaaa bbbb cccc dddd eeeee [fff](#) gggg. Of the [40](#) pull requests, agent-07 merged [15 of 40](#) and agent-02 approved [every one of them](#) before noon.\n\n| run | merged |\n|---|---|\n| a | [12 of 40](#) |\n| b | 3 |'
+  const marks = marksIn(text)
+  const draw = (status: string) => messageEl(ELS, { text, marks, looks: marks.map((_m: Any, k: number) => ({ n: k + 1, status: status as Any })), key: 'k', cols: 30, first: true, spin: '⠋', onMark: () => undefined })
+  // each line's words, its glyphs left out, and each table rule
+  const lines = (status: string) => all(draw(status)).filter(n => /^k-l\d+-\d+$/.test(String(n.props.key)) || /^k-l\d+-r\d+$/.test(String(n.props.key)) || (n.type === 'Text' && /^[┌├└]/.test(String(n.props.children))))
+    .map(n => textOf(n).replace(/ [⠋×]/g, '').replace(/\s+│/g, ' │').trimEnd())
+  const pending = lines('pending')
+  // a line full but for the glyph's cells, and a column as wide as its cited cell
+  expect(pending[0]).toBe('aaaa bbbb cccc dddd eeeee')
+  expect(pending.length).toBeGreaterThan(8)
+  for (const s of ['checking', 'verified', 'failed', 'unchecked']) expect(lines(s)).toEqual(pending)
+  // the glyph shows only while its citation is checked; a verified one has nothing after it
+  expect(textOf(draw('checking'))).toContain('40 ⠋ pull')
+  expect(textOf(draw('verified'))).toContain('40 pull')
 })
 
 test('a citation lights on hover as one, on every line it wraps to: one hover group per citation, no tint at rest, its tint kept while the tray shows it', () => {
