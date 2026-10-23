@@ -9,7 +9,8 @@
 // Claude Code's levels, and a model that runs with no effort shows none. An agent's row applies to its next start. A
 // save sends only the changed fields so defaults stay defaults (thimble's config, backend userconf.py). Choices that
 // cannot take effect are dimmed with the reason in a tooltip. Every row names its model exactly, never `default`.
-// Under the table, the View proposals switch, which a view proposal's Don't ask again turns off; the
+// Under the table, "Claude can edit files in this folder", whether main and its thread forks may write the corpus
+// folder of this workspace (on by default; thimble's other agents never write it); the View proposals switch, which a view proposal's Don't ask again turns off; the
 // Ask key choice, ⌘-click or ⌥-click (Ctrl-click or Alt-click off a Mac), whose other key places a card freely on the
 // canvas (thimble's config `askKey`, lib/platform); then thimble's rules for main and its agents, the subagents of the
 // analyst's Claude Code session (web, edits of the data, and whether the session's shell runs in Claude Code's
@@ -252,6 +253,8 @@ export const cardWaitLine = (minutes: number): string =>
 export const NEXT_START_LINE = "An agent's row applies to its next start; a run that goes on keeps its own model and effort."
 /** The View proposals switch's name. */
 export const PROPOSE_LABEL = 'View proposals'
+/** The switch that lets main and its thread forks write the corpus folder, per workspace (backend ledger.EDITS_KEY). */
+export const EDITS_LABEL = 'Claude can edit files in this folder'
 
 /** The Ask key choice's name and its options as the platform writes them (⌘-click and ⌥-click on a Mac, Ctrl-click and
  * Alt-click elsewhere). */
@@ -269,6 +272,12 @@ export function changedAskKey(loaded: Settings | null, key: AskKey): { ask_key?:
  * switch did not change. Pure. */
 export function changedPropose(loaded: Settings | null, on: boolean): { propose_views?: false | null } {
   return (loaded?.propose_views !== false) === on ? {} : { propose_views: on ? null : false }
+}
+
+/** What a save sends for "Claude can edit files in this folder": false to turn it off, null to put back the default
+ * (on), nothing when the switch did not change. Pure. */
+export function changedEdits(loaded: Settings | null, on: boolean): { corpus_edits?: false | null } {
+  return (loaded?.corpus_edits !== false) === on ? {} : { corpus_edits: on ? null : false }
 }
 
 /** An extension's agent, whose row is keyed `<extension>:<agent>` as thimble's config keys it. */
@@ -388,6 +397,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [runAnswers, setRunAnswers] = useState<Record<string, boolean>>({})
   // View proposals (thimble's config `views.propose`)
   const [propose, setPropose] = useState(true)
+  // Claude can edit files in this folder (the workspace's settings.json `corpus_edits`)
+  const [edits, setEdits] = useState(true)
   // the ask key (thimble's config `askKey`)
   const [ask, setAsk] = useState<AskKey>('meta')
   const mac = isMacPlatform()
@@ -410,6 +421,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setModeRows(s.permission_modes ?? {})
         setWeb(webRows(s))
         setPropose(s.propose_views !== false)
+        setEdits(s.corpus_edits !== false)
         setAsk(s.ask_key === 'alt' ? 'alt' : 'meta')
         setAttached(a)
         const fast = mainFast(a)
@@ -432,13 +444,15 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       const webs = changedWeb(webRows(settings), web)
       const proposeNow = changedPropose(settings, propose)
       const askNow = changedAskKey(settings, ask)
-      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow)
+      const editsNow = changedEdits(settings, edits)
+      if (Object.keys(changed).length || Object.keys(modes).length || Object.keys(webs).length || 'propose_views' in proposeNow || 'ask_key' in askNow || 'corpus_edits' in editsNow)
         await api.putSettings(ws, {
           ...(Object.keys(changed).length ? { models: changed } : {}),
           ...(Object.keys(modes).length ? { permission_modes: modes } : {}),
           ...(Object.keys(webs).length ? { web: webs } : {}),
           ...proposeNow,
           ...askNow,
+          ...editsNow,
         })
       // the pointer, the canvas, the tour and the views' frames take the key at once
       if ('ask_key' in askNow) setAskKey(ask)
@@ -603,6 +617,19 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             <p className="settings-agent-main settings-next-start" role="note">
               {NEXT_START_LINE}
             </p>
+          </div>
+        )}
+        {settings && (
+          <div className="settings-grid settings-modes settings-auto" role="table" aria-label={EDITS_LABEL}>
+            <div className="settings-row settings-headrow" role="row">
+              <span className="label">files</span>
+            </div>
+            <div className="settings-row" role="row" data-auto="corpus-edits">
+              <span className="settings-role">{EDITS_LABEL}</span>
+              <span className="settings-web" data-on={edits}>
+                <Switch checked={edits} onChange={() => setEdits(!edits)} aria-label={EDITS_LABEL} />
+              </span>
+            </div>
           </div>
         )}
         {settings && (

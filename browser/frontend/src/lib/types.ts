@@ -1246,6 +1246,9 @@ export interface Settings {
   /** the key held with a click to ask in the browser (thimble's config `askKey`, lib/platform): "meta" (⌘, Ctrl off a
    * Mac) or "alt" (⌥, Alt) */
   ask_key?: 'meta' | 'alt'
+  /** "Claude can edit files in this folder": whether main and its thread forks may write the corpus folder (the
+   * workspace's settings.json `corpus_edits`, on by default) */
+  corpus_edits?: boolean
   [k: string]: unknown
 }
 
@@ -1306,6 +1309,8 @@ export interface SettingsPatch {
   propose_views?: boolean | null
   /** the ask key: "alt", or null to put back the default ("meta") */
   ask_key?: 'meta' | 'alt' | null
+  /** "Claude can edit files in this folder": false turns it off, null puts back the default (on) */
+  corpus_edits?: boolean | null
   [k: string]: unknown
 }
 

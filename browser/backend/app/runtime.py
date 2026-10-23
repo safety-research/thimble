@@ -13,6 +13,12 @@ it read 0.8's interactive session. Main's is <workspace>/runtime/<sid>.jsonl, at
 fork's or an agent's is <workspace>/runtime/<sid>/subagents/agent-<id>.jsonl with its meta json, where the mirror
 finds a subagent's. So the page cannot tell the two ways apart.
 
+Writes (spec_of). Main and its thread forks write the corpus folder, as Claude Code does in its own folder, unless the
+analyst turns Settings' "Claude can edit files in this folder" off for the workspace (ledger.corpus_edits); their
+prompt and their Bash, Write and Edit descriptions say which, and name that switch when it is off. thimble's other
+agents (writers, view builds and reviews, checks) and the checker's and proposer's forks never write it. No agent
+writes thimble's private files (PRIVATE_FILES) or the workspace's protected files (protected).
+
 What 0.8 did through Claude Code's interactive session and thimble's plugin, the server now does in its place:
 - a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end;
 - a `thread` event starts a fork of main's conversation that answers the thread, or a new turn of its fork;
@@ -153,6 +159,10 @@ class Spec:
     private: list[Path]
     home: Path
     fast: bool = False
+    # whether the corpus is among write_roots (Settings' "Claude can edit files in this folder"): True or False for
+    # main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
+    corpus_edits: bool | None = None
+    no_write: list[Path] = field(default_factory=list)  # the workspace's protected files, never written (protected)
 
 
 @dataclass
@@ -371,21 +381,24 @@ class Space:
         return [home / n for n in PRIVATE_FILES]
 
     def spec_of(self, conv: Conv) -> Spec:
-        from . import config, events, runtime_tools, subagents, tools, userconf  # noqa: PLC0415
+        from . import config, events, ledger, runtime_tools, subagents, tools, userconf  # noqa: PLC0415
 
         tmp = self.dir / "tmp" / conv.id
         tmp.mkdir(parents=True, exist_ok=True)
         reads = [self.corpus, self.ws, config.REPO_ROOT / "docs", config.REPO_ROOT / "plugin" / "viewers",
                  config.REPO_ROOT / "frontend" / "src" / "kit"]
         if conv.kind in ("main", "fork"):
-            system = events.session_prompt(str(self.corpus), terminal=False)
+            # main and its thread forks write the corpus, as Claude Code does in its folder, unless the analyst turned
+            # "Claude can edit files in this folder" off in Settings (ledger.corpus_edits)
+            edits: bool | None = ledger.corpus_edits(self.c)
+            system = events.session_prompt(str(self.corpus), terminal=False, edits=edits)
             names = [s.name for s in tools.REGISTRY.values()
                      if tools.ANALYST in s.roles and (not s.sessions or None in s.sessions)]
             builtins = list(MAIN_BUILTINS)
             choice = _main_choice(self.ws)
             model = str(choice.get("model") or MAIN_MODEL)
             effort = str(choice.get("effort") or MAIN_EFFORT)
-            writes = [self.ws / "card-libs", tmp]
+            writes = [*([self.corpus] if edits else []), self.ws / "card-libs", tmp]
             fast = bool(choice.get("fast"))
         else:
             role = subagents.roles(self.c).get(conv.role) or {}
@@ -404,6 +417,7 @@ class Space:
             model = str(conv.values.get("model") or role.get("model") or MAIN_MODEL)
             effort = str(conv.values.get("effort") or role.get("effort") or "")
             writes = [*subagents.write_dirs(self.c), tmp]
+            edits = None  # writers, view builds and reviews, and checks keep the corpus read-only
             fast = False
             with contextlib.suppress(Exception):
                 for d in writes:
@@ -413,7 +427,18 @@ class Space:
                 builtins = [b for b in builtins if b not in WEB]
         return Spec(system=system, builtins=runtime_tools.available(builtins) if engine() == "api" else builtins,
                     thimble=names, model=model, effort=effort, cwd=self.corpus, workspace=self.ws,
-                    read_roots=reads, write_roots=writes, private=self.private(), home=tmp, fast=fast)
+                    read_roots=reads, write_roots=writes, private=self.private(), home=tmp, fast=fast,
+                    corpus_edits=edits, no_write=protected(self.ws))
+
+
+def protected(ws: Path) -> list[Path]:
+    """The workspace's files no agent writes, as the kernels' sandbox keeps them (kernel_wrap.srt_rules): its hidden
+    files and lock, and its read-only files and folders. They matter where a write root holds the workspace, as a
+    corpus folder that holds thimble's home would."""
+    from . import kernel_wrap  # noqa: PLC0415
+
+    return [ws / n for n in (*kernel_wrap.HIDDEN_FILES, *kernel_wrap.LOCK_FILES, *kernel_wrap.READ_ONLY_FILES,
+                             *kernel_wrap.READ_ONLY_DIRS)]
 
 
 def _read_json(p: Path) -> dict[str, Any]:
