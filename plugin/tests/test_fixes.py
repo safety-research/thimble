@@ -687,6 +687,7 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
         f"  thimble fix off {a}       turn a fix off; thimble fix on {a} turns it back on",
         f"  thimble file issue {a}    post fix {a} as a GitHub issue (you check it before it goes)",
         f"  thimble file pr {a}       open a pull request with fix {a}'s code (asks first)",
+        f"  thimble fix remove {a}    delete a fix",
         "  thimble update          get the newest thimble and keep your fixes"]
     assert "fix diff" not in "\n".join(rows)
     assert cli.main(["fix", "show", str(c)]) == 0

@@ -1947,6 +1947,7 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
         code = [r["id"] for r in fixes if r.get("state") in ("on", "ready") and r.get("commit") and not r.get("pr")]
         if code:
             nxt.append((f"thimble file pr {code[0]}", f"open a pull request with fix {code[0]}'s code (asks first)"))
+    nxt.append((f"thimble fix remove {first}", "delete a fix"))
     if not d["aside"]:
         nxt.append(("thimble update", "get the newest thimble and keep your fixes"))
     cw = max(len(k) for k, _ in nxt) + 4
@@ -2518,10 +2519,18 @@ def cmd(a) -> int:
             out_json(not_now(a.id))
         elif verb == "redo":
             out_json(redo(a.id, stdin_text() or a.words or "", a.session))
-        elif verb == "undo":
-            out_json(undo(a.id))
-        elif verb == "remove":
-            out_json(remove(a.id))
+        elif verb in ("undo", "remove"):
+            r = undo(a.id) if verb == "undo" else remove(a.id)
+            # the plugin's keys read JSON; a person in a terminal reads a sentence
+            if a.json or not sys.stdout.isatty():
+                out_json(r)
+            else:
+                f = get(a.id) if verb == "undo" else None
+                print(f"Removed fix {r['id']}, “{r['title']}”." if verb == "remove" else
+                      f"Fix {r['id']}, “{r['title']}”, is back to its version before." if f and f.get("state") == "on" else
+                      f"Fix {r['id']}, “{r['title']}”, is off; thimble fix on {r['id']} turns it back on.")
+                if r.get("reload"):
+                    print(RELOAD)
         elif verb == "sandbox":
             out_json(sandbox_argv(int(a.id)))
         elif verb == "draft":
