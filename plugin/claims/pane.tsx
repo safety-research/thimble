@@ -1,6 +1,6 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
 // out: the head (how many claims), the map of clusters (its cells shorter when the detail needs the rows; a list in a
-// narrow pane), the detail under it (the cluster chosen and its claims, or the claim picked in that list with its
+// narrow pane; none in a short session, whose clusters are listed with their claims), the detail under it (the cluster chosen and its claims, or the claim picked in that list with its
 // chips, and with e its history and evidence), and the keys. A pane taller than Claude Code gives it scrolls. A click is
 // the main way to move: a cluster's name chooses the cluster, a dot or a claim in the list picks that claim (its dot
 // again, the cluster); `↑ N earlier` and `↓ N more` page the list; ‹ › step through the citations; a citation opens its
@@ -257,7 +257,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const rule: Run[] = [{ s: '─'.repeat(W), tone: 'dim-faint' }]
   return Box({ flexDirection: 'column', children: [
     ...(view.head as Run[][]).map((r, i) => row(r, `h${i}`)),
-    ...((view.graph as Run[][]).length ? [row([], 'gap')] : []),
+    ...((view.graph as Run[][]).length || view.listed ? [row([], 'gap')] : []),
     ...(view.graph as Run[][]).map((r, i) => row(r, `g${i}`)),
     ...(view.panel as Run[][]).map((r, i) => row(r, `p${i}`)),
     ...(keys.length ? [row(rule, 'rule'), keysRow(els, keys)] : []),
