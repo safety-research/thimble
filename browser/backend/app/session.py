@@ -35,12 +35,7 @@ the start tool, or got the `start_agent` event that carries a thread's fork's st
 the request when it did not happen; a start_agent event a turn missed is posted once more first (_ask_again). A Workflow
 call is one agent chat whose members are the run's agent transcripts.
 
-Terminal mode (launch.json names a session in terminal mode, subagent_files.session_mode) has no server to follow main.
-Main is the session launch.json names, followed through the moves --rekey recorded, and current() gives every process a
-Live of it that reads nothing. The mirror runs in passes, from the hooks' backend calls (local_hooks.py): catch_up
-attaches main from sessions.json's cursor as a restarted server would, reads main's and every subagent's transcript to
-their ends and saves the cursor, with no tail task, grace or waits. The cursor keeps what R2 and R3 need across passes. Main ends a turn with
-nothing for the analyst without text, or with END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat
+Main ends a turn with nothing for the analyst without text, or with END_TOKEN where Claude Code asks for text (terminal_tools.py); no chat
 shows END_TOKEN, nor a line that opens with TERMINAL_ONLY."""
 from __future__ import annotations
 
@@ -546,15 +541,6 @@ def _learn_config(lv: Live, reported: str | None) -> bool:
 # --------------------------------------------------------------------------- attach and detach
 
 
-def _terminal_ws(c: str) -> Path | None:
-    """The workspace folder of `c` when the session launch.json names runs in terminal mode (module note), else None."""
-    try:
-        ws = config.workspace_path(c)
-    except ValueError:
-        return None
-    return ws if sfiles.terminal(ws) else None
-
-
 def attached_workspaces() -> list[str]:
     """The workspaces whose main this server follows now."""
     return list(_live)
@@ -588,38 +574,8 @@ def tell_terminal(c: str, line: str) -> bool:
 
 
 def current(c: str) -> Live | None:
-    """The session that is main in workspace `c`: the one this server follows, or in terminal mode the one launch.json
-    names, followed through the moves --rekey recorded (_terminal_main), when no pass of the mirror in this process
-    attached it (catch_up)."""
-    lv = _live.get(c)
-    if lv is None and (ws := _terminal_ws(c)) is not None:
-        return _terminal_main(c, ws)
-    return lv
-
-
-_shadows: dict[str, Live] = {}  # workspace -> main as current() gives it in terminal mode, which reads nothing
-
-
-def _terminal_main(c: str, ws: Path) -> Live | None:
-    """Main in terminal mode as a Live that reads nothing (no tail, not in _live): its id, its folder, its transcript and
-    its `claude` process (launch.json's pid), for the code that asks which session is main. None while launch.json names
-    none."""
-    sid = sfiles.main_session(ws)
-    if not sid:
-        return None
-    lv = _shadows.get(c)
-    if lv is None or lv.sid != sid:
-        rec = sessions(c).get(sid) or {}
-        try:
-            cwd = str(rec.get("cwd") or config.corpus_dir(c))
-        except ValueError:
-            cwd = str(rec.get("cwd") or "")
-        lv = Live(c, sid, cwd, rec.get("transcript_path") or find_transcript(sid), sfiles.main_pid(ws))
-        lv.since = str(rec.get("since") or sfiles.launch(ws).get("at") or lv.since)
-        _shadows[c] = lv
-    elif not lv.transcript_path:
-        lv.transcript_path = find_transcript(sid)
-    return lv
+    """The session that is main in workspace `c`: the one this server follows."""
+    return _live.get(c)
 
 
 def attach(c: str, sid: Any, cwd: Any, transcript_path: str | None = None, pid: int | None = None,
@@ -818,10 +774,7 @@ def note_plan(c: str, sid: str | None, plan: bool) -> None:
 
 def main_mode(c: str) -> str | None:
     """The permission mode main's hooks last reported (note_mode), by Claude Code's name, to this server or, for the
-    session it restarted under, to the one before it; None before the first report. In terminal mode, as the files say
-    (subagent_files.main_mode: the mode hook's record, and the module's plan poll)."""
-    if (ws := _terminal_ws(c)) is not None:
-        return sfiles.main_mode(ws)
+    session it restarted under, to the one before it; None before the first report."""
     lv, got = _live.get(c), _modes.get(c)
     return got[1] if lv is not None and got is not None and got[0] == lv.sid else None
 
@@ -995,8 +948,6 @@ def _moved_main(c: str, sid: str) -> Live | None:
 def main_pid(c: str) -> int | None:
     """The pid of the `claude` process main's session runs in: what its shim reported, else (after a restart, before
     that shim came back) what sessions.json recorded for the session main's meta names."""
-    if (ws := _terminal_ws(c)) is not None:
-        return sfiles.main_pid(ws)  # main's `claude`, which the launcher wrote there, for the session's life
     cur = _live.get(c)
     if cur is not None:
         return cur.pid or _shim_pids.get((c, cur.sid))
@@ -1144,11 +1095,9 @@ def _stop_agents(c: str) -> None:
 
 def _resume_work(c: str) -> None:
     """A session is main in workspace `c`: the view builds a server restart left are attached again (dev.resume_views).
-    Nothing main's quit stopped starts again by itself. Nothing in terminal mode, where no server restarts."""
+    Nothing main's quit stopped starts again by itself."""
     from . import dev  # noqa: PLC0415 — dev imports this module
 
-    if _terminal_ws(c) is not None:
-        return
     for fn in (dev.resume_views,):
         try:
             fn(c)
@@ -1515,11 +1464,6 @@ def _browser_event(lv: Live, raw: str, *, mid_turn: bool) -> None:
     if event_id and event_id in _expected:
         _expected.discard(event_id)
         return
-    if event_id and (ws := _terminal_ws(lv.c)) is not None:
-        from . import event_files  # noqa: PLC0415
-
-        if event_files.posted(ws, event_id):  # posted by another process of the session, which logged it (events.post)
-            return
     if kind == "main" or not kind:
         lv.wrote = True
         agents.mirror(lv.c, "user", by=BROWSER, text=body.strip(), event=event_id or None)
@@ -2224,17 +2168,13 @@ def agent_answer(c: str, agent_id: str) -> str | None:
 
 def main_quit(c: str, sid: str) -> None:
     """Main's SessionEnd hook said it quit (subagents.end_route): main detaches now and the workspace's jobs stop at
-    once (_stop_agents), without the grace a lost subscription waits. In terminal mode main detaches alone: the jobs of
-    the session ran in its own processes, which end with it."""
+    once (_stop_agents), without the grace a lost subscription waits."""
     lv = _live.get(c)
-    if lv is None and (ws := _terminal_ws(c)) is not None and sid and sid == sfiles.main_session(ws):
-        detach(c, sid, "ended")  # terminal mode: no pass attached main in this process; its record ends all the same
-        return
     if lv is None or (sid and lv.sid != sid):
         return
     _cancel_grace(c)
     detach(c, lv.sid, "ended")
-    if _live.get(c) is None and _terminal_ws(c) is None:  # in terminal mode no server's jobs run, and none stops
+    if _live.get(c) is None:
         _stop_agents(c)
 
 
@@ -3405,8 +3345,7 @@ def _tail_once(lv: Live) -> None:
         if sub.finish and not sub.done and time.monotonic() - sub.quiet_since >= SUB_QUIET_S:
             _finish_sub(lv, sub, *sub.finish)
     _save_cursor(lv)  # the subagents' places, and the runs that ended
-    if _terminal_ws(lv.c) is None:  # in terminal mode the analyst sees the wait in the terminal itself
-        _watch_wait(lv)
+    _watch_wait(lv)
 
 
 def _sessions_dir(config_dir: Path | None = None) -> Path:
@@ -3570,97 +3509,13 @@ async def _tail(lv: Live) -> None:
 
 
 def _ensure_tail(lv: Live) -> None:
-    if lv.degraded or (lv.task is not None and not lv.task.done()) or _terminal_ws(lv.c) is not None:
-        return  # in terminal mode the mirror reads in passes (catch_up), never as a task
+    if lv.degraded or (lv.task is not None and not lv.task.done()):
+        return
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return  # no loop (a synchronous test): tail_once drives it
     lv.task = loop.create_task(_tail(lv), name=f"tail:{lv.c}:{lv.sid}")
-
-
-# --------------------------------------------------------------------------- terminal mode
-
-
-def catch_up(c: str) -> Live | None:
-    """Terminal mode (module note): one pass of the mirror. Main is attached in this process when it is not yet, from
-    sessions.json's cursor as a restarted server attaches it (a session no pass read yet is read from launch.json's
-    time, so a new session's first turn is read too); a move of main since the cursor's session (/clear, /resume) is
-    followed as _follow follows it; then main's transcript and every subagent's are read to their ends (tail_once,
-    with a look for new subagent files) and the cursor is saved. No tail task, grace or wait. The Live, or None outside
-    terminal mode or while launch.json names no session."""
-    ws = _terminal_ws(c)
-    if ws is None:
-        return None
-    sid = sfiles.main_session(ws)
-    if not sid:
-        return None
-    lv = _live.get(c)
-    if lv is None:
-        held = str(((agents.meta_or_none(c, agents.MAIN_ID) or {}).get("attached") or {}).get("session") or "")
-        state = sfiles.read(ws)
-        if held and held != sid and sfiles.moved_to(state, held) == sid and sessions(c).get(held):
-            lv = _attach_pass(c, ws, held)  # the session the cursor knows, read to its end, then followed
-            if lv is not None:
-                tail_once(lv)
-        else:
-            lv = _attach_pass(c, ws, sid)
-    if lv is not None and lv.sid != sid:
-        _follow(c, lv.sid, sid, lv.cwd, sfiles.main_pid(ws))
-        lv = _live.get(c)
-    if lv is None:
-        return None
-    lv.pid = sfiles.main_pid(ws) or lv.pid
-    tail_once(lv)
-    if lv.transcript_path:
-        _scan_subs(lv)  # a subagent's file that appeared since, though main's turn ended (tail_once looks only while busy)
-        for sub in lv.subs:
-            if sub.path is not None and sub.offset < _size(sub.path):
-                _tail_sub(lv, sub)
-        _save_cursor(lv)
-    return lv
-
-
-def _attach_pass(c: str, ws: Path, sid: str) -> Live | None:
-    """attach() for a pass of the mirror in terminal mode: main's session `sid` in its `claude` process (launch.json's
-    pid); a session no pass read yet starts at the first record written since launch.json's time (_offset_since)."""
-    try:
-        cwd = str(config.corpus_dir(c))
-    except ValueError:
-        return None
-    lv = attach(c, sid, cwd, None, sfiles.main_pid(ws))
-    if lv is None:
-        return None
-    if lv.offset < 0:
-        at = str(sfiles.launch(ws).get("at") or "")
-        lv.offset = _offset_since(lv.transcript_path, at)
-        lv.since = at or lv.since
-    return lv
-
-
-def _offset_since(path: str | None, since: str) -> int:
-    """The byte offset in the transcript at `path` of its first record written since `since` (an ISO time, less
-    STAMP_SLACK_S): 0 for a transcript that began since then, or that is not written yet; its end when no record is that
-    new."""
-    if not path or _began_since(path, since):
-        return 0
-    try:
-        start = datetime.fromisoformat(since.replace("Z", "+00:00")).timestamp() - STAMP_SLACK_S
-    except ValueError:
-        return _size(Path(path))
-    at = 0
-    try:
-        with open(path, "rb") as f:
-            for line in f:
-                if _stamp(line) >= start:
-                    return at
-                at += len(line)
-    except OSError:
-        return 0
-    return at
-
-
-STAMP_SLACK_S = 2.0  # launch.json's time and Claude Code's first record of a resumed session may be this far apart
 
 
 # --------------------------------------------------------------------------- the startup sweep

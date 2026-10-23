@@ -31,14 +31,7 @@ view_check and finishes with finish_view, where the server runs `gate` (the file
 stamps `built` and `version` (mark_built) and keeps the files as they passed (VERSIONS_SUBDIR), a failure goes back to
 the builder up to dev.MAX_ATTEMPTS times. Readers see only what a gate passed (read_built's digest rule): a write into
 the view's folder after its pass reaches them only once a gate passes it. A change to a built view (revise) copies its
-files aside and restores them if the change fails. Progress is `view {slug, status, chat?}` on the workspace stream.
-
-In terminal mode (terminal) the builder writes view.term.js in place of view.html: a program on the terminal view kit
-(term_views.py) that thimble-term's panel draws. Its gate runs the same reader checks, then draws the program as text
-at 120 and 200 columns, in light and dark, and opened at the first place that resolved, then with the test label on
-and every choice of its Color by, Filter by and Rows tried (term_draws), with no browser: it fails on a program error, a
-timeout, a draw past the panel's rows or columns, or a choice that gives an error. The page's checks (the label marks,
-the layout, the page on a damaged copy of the files) are the browser's alone."""
+files aside and restores them if the change fails. Progress is `view {slug, status, chat?}` on the workspace stream."""
 from __future__ import annotations
 
 import asyncio
@@ -93,9 +86,6 @@ KEY_REFS_FILE = "key-refs.json"  # view:<slug>/<key> -> {refs, excerpt, label, n
 # indexes of the card types (cardtypes.py, extensions.card_types)
 INDEXES_SUBDIR = view_indexes.INDEXES_SUBDIR
 VIEW_JSON, READER_PY, VIEW_HTML = "view.json", "reader.py", "view.html"
-VIEW_TERM = "view.term.js"  # a view's terminal program, beside its page (term_views.py)
-NOT_BROWSER = ("This view was built in terminal mode, so only the terminal draws it. To see it, quit, run "
-               "`thimble mode terminal`, and start `thimble` again in this folder.")
 TOOLS_PROMPT = "tools"  # prompts/tools.md, whose lowercase sections are the lines the view tools' results carry
 # a view ticket's status on its proposal row; `dropped` is the proposal of an orientation from before 0.8.0 left out
 # when the analyst stopped the orientation before its view was built, or a view proposal the analyst rejected
@@ -616,10 +606,8 @@ def _normalize_view(slug: str, raw: Any, *, where: Path | None = None, origin: s
         # a workspace view the server has not stamped `built` is a view ticket's work in progress, which only its
         # checks read (module note); a file-type viewer thimble ships is never one
         "draft": origin == "workspace" and not raw.get("built"),
-        # a view whose reader or page is missing is listed so it can be deleted, and never opens a citation; the page is
-        # view.html, or view.term.js for a view built in terminal mode
-        "ok": bool(d is not None and (d / READER_PY).is_file()
-                   and ((d / VIEW_HTML).is_file() or (d / VIEW_TERM).is_file()) and claims),
+        # a view whose reader or page is missing is listed so it can be deleted, and never opens a citation
+        "ok": bool(d is not None and (d / READER_PY).is_file() and (d / VIEW_HTML).is_file() and claims),
         "dir": str(d) if d else None,
     }
 
@@ -941,7 +929,7 @@ def _check_slug(slug: str) -> str:
 
 def source_problems(claims: Any, reader: str, html: str, libs: Any, page: str = VIEW_HTML) -> list[str]:
     """What makes a view's files unable to run, as lines for whoever wrote them: no claims, an empty reader or page (the
-    file `page` names: view.html, or view.term.js in terminal mode), a reader that does not parse or lacks one of its
+    file `page` names), a reader that does not parse or lacks one of its
     three functions, a library that is no package."""
     out: list[str] = []
     if not _str_list(claims):
@@ -964,10 +952,10 @@ def source_problems(claims: Any, reader: str, html: str, libs: Any, page: str = 
 
 def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = None, accepts: Any = None,
                units: Any = None, derived: Any = None, libs: Any = None, reader: str, html: str, unit: Any = None,
-               records: Any = None, compare: bool = False, scope: Any = None, term: str | None = None) -> dict[str, Any]:
+               records: Any = None, compare: bool = False, scope: Any = None) -> dict[str, Any]:
     """Write or replace a view's three files, validated (source_problems), and register it built (mark_built): a view
     of thimble's own making, as the tests make theirs; a view ticket's session writes the files itself. `scope` is
-    view.json's name for `claims`; `term`, its terminal program (view.term.js), written beside them when given."""
+    view.json's name for `claims`."""
     slug = _check_slug(slug)
     claims = claims if claims is not None else scope
     reader_src = str(reader or "").replace("\r\n", "\n")
@@ -990,8 +978,6 @@ def write_view(c: str, slug: str, *, name: str, description: str, claims: Any = 
     d.mkdir(parents=True, exist_ok=True)
     atomic_write_text(d / READER_PY, reader_src.rstrip("\n") + "\n")
     atomic_write_text(d / VIEW_HTML, html_src.rstrip("\n") + "\n")
-    if term is not None:
-        atomic_write_text(d / VIEW_TERM, str(term).replace("\r\n", "\n").rstrip("\n") + "\n")
     write_json(d / VIEW_JSON, stored)
     return mark_built(c, slug)
 
@@ -1066,8 +1052,6 @@ def install_view(ws: Path, src: Path, slug: str | None = None) -> str:
     try:
         for name in (READER_PY, VIEW_HTML):
             shutil.copyfile(src / name, tmp / name)
-        if (src / VIEW_TERM).is_file():  # its terminal program, which thimble-term draws (term_views.py)
-            shutil.copyfile(src / VIEW_TERM, tmp / VIEW_TERM)
         view_libs.copy_lib(src, tmp)
         raw = {k: v for k, v in _view_json(src).items() if k not in ("built", "version")}
         write_json(tmp / VIEW_JSON, raw)
@@ -3167,9 +3151,8 @@ async def gate(c: str, slug: str, locators: list[str] | None = None, *, shot_dir
     """Whether the view in the slug's folder may be registered: its files' own problems (source_problems; view.json
     written by thimble alone once it names `built`), then, when there are none, check() with `locators` beside the
     sampled lines. The report check() returns, with the files' problems among its `problems`. With `picture` the page
-    as it opens is pictured for the session, or in terminal mode drawn as text (`drawing`). Each reader call of the
-    gate may take CHECK_CALL_S, so a reader that never answers fails the checks rather than holding its kernel. In
-    terminal mode the page is view.term.js, which needs no libraries and gets none of the page's notes."""
+    as it opens is pictured for the session. Each reader call of the gate may take CHECK_CALL_S, so a reader that never
+    answers fails the checks rather than holding its kernel."""
     token = _call_limit.set(CHECK_CALL_S)
     try:
         return await _gate(c, slug, locators, shot_dir=shot_dir, picture=picture)
@@ -3183,11 +3166,9 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
     if not (d / VIEW_JSON).is_file():
         return {"ok": False, "view": None, "problems": [f"{d / VIEW_JSON} does not exist yet"], "checks": [], "page": None}
     raw = _view_json(d)
-    term = terminal(c)
-    page = VIEW_TERM if term else VIEW_HTML
-    text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, page)}
+    text = {n: (d / n).read_text("utf-8", errors="replace") if (d / n).is_file() else "" for n in (READER_PY, VIEW_HTML)}
     problems = source_problems(raw.get("claims") if raw.get("claims") is not None else raw.get("scope"),
-                               text[READER_PY], text[page], raw.get("libs"), page)
+                               text[READER_PY], text[VIEW_HTML], raw.get("libs"))
     # a change to a built view starts from files that carry thimble's own stamp, so it is no sign of a builder's
     # writing there (a session that removes it is fine too; mark_built stamps the view again)
     if raw.get("built") and (prop := read_proposal(c, slug)) is not None and prop.get("status") != "built" \
@@ -3195,11 +3176,6 @@ async def _gate(c: str, slug: str, locators: list[str] | None, *, shot_dir: Path
         problems.append("view.json names `built`, which thimble adds when the view passes; remove it")
     if problems:
         return {"ok": False, "view": read_view(c, slug), "problems": problems, "checks": [], "page": None}
-    if term:
-        report = await check(c, slug, locators, shot_dir=shot_dir, picture=picture, term=True)
-        _gate_notes[(c, slug)] = [ln for ln in gate_lines(report)
-                                  if ln.startswith(("unread: ", "files: ", "draw: ", "note: "))]
-        return report
     vendored = await view_libs.ensure(c, slug, d, raw.get("libs"))
     if vendored["problems"]:
         return {"ok": False, "view": read_view(c, slug), "problems": vendored["problems"], "checks": [], "page": None,
@@ -3271,14 +3247,6 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
             lines.append(f"bad {r['locator']}: {r.get('why')}")
     page = report.get("page") or {}
     shots = report.get("shots") or []
-    draws = report.get("draws") or []
-    for d in draws:
-        missed = f", no control shows {', '.join(map(repr, d['missed']))}" if d.get("missed") else ""
-        tried = d.get("choices") or []
-        swept = (f", {len(tried)} choice(s) of its controls tried, {sum(1 for x in tried if x.get('errors'))} with an "
-                 "error" if d.get("state") == "choices" and d.get("ok") else "")
-        lines.append(f"draw: {draw_where(d)}: {'ok' if d.get('ok') else 'failed'}, {int(d.get('fetches') or 0)} "
-                     f"fetch(es){missed}{swept}")
     if page.get("unavailable"):
         lines.append("note: " + _hint("view-no-screenshots"))
     for s in shots:
@@ -3297,7 +3265,7 @@ def gate_lines(report: dict[str, Any]) -> list[str]:
             lines.append(f"page: {s.get('state')}: " + "; ".join(s.get("errors") or ["did not load"]))
         if s.get("png"):
             lines.append(f"png: {s['png']}")
-    if page and not shots and not draws and not page.get("unavailable"):
+    if page and not shots and not page.get("unavailable"):
         if page.get("ok"):
             lines.append(f"page: loaded, {page.get('fetches', 0)} fetch(es), no errors")
         else:
@@ -3378,9 +3346,7 @@ def frame_document(view: dict[str, Any], media: str | None = None, *, card: bool
     page = Path(view["dir"]) / (view.get("page") or VIEW_HTML)
     if page.is_symlink() or Path(view["dir"]).is_symlink():
         raise HTTPException(404, f"the page of {view['slug']!r} is a symlink")
-    # a view built in terminal mode has no page: the frame says so (as term_views.NOT_TERMINAL says the reverse)
-    html = page.read_text("utf-8") if page.is_file() or not (Path(view["dir"]) / VIEW_TERM).is_file() else \
-        f"<p class=muted style='padding:16px'>{NOT_BROWSER}</p>"
+    html = page.read_text("utf-8")
     fields = (view.get("derived") or []) if derived is None else derived
     who = json.dumps({"slug": view["slug"], "name": view["name"], "media": media, **({"card": True} if card else {}),
                       **({"derived": fields} if fields else {})}, ensure_ascii=False)
@@ -3468,21 +3434,8 @@ def _node_version(node: str, mtime_ns: int) -> str:
         return ""
 
 
-def terminal(c: str) -> bool:
-    """Whether workspace `c`'s session runs in terminal mode (local.terminal), where a view's page is its view.term.js
-    and its checks draw it as text (term_draws)."""
-    from . import local  # noqa: PLC0415
-
-    return local.terminal(c)
-
-
 def build_problem_for(c: str) -> str:
-    """Why a view cannot be built and checked in workspace `c`, '' when it can: build_problem, but in terminal mode,
-    whose checks draw the view's program as text rather than load a page, only Node (term_views.node_problem)."""
-    if terminal(c):
-        from . import term_views  # noqa: PLC0415
-
-        return term_views.node_problem()
+    """Why a view cannot be built and checked in workspace `c`, '' when it can (build_problem)."""
     return build_problem()
 
 
@@ -3843,32 +3796,28 @@ def _is_line_form(form: str) -> bool:
 
 
 async def check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
-                picture: bool = False, need_locators: bool = True, term: bool = False) -> dict[str, Any]:
+                picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
     """_check on the view's live folder (live_reads): what the gates check is the draft, not the view as it last passed."""
     with live_reads():
-        return await _check(c, slug, locators, shot_dir=shot_dir, picture=picture, need_locators=need_locators,
-                            term=term)
+        return await _check(c, slug, locators, shot_dir=shot_dir, picture=picture, need_locators=need_locators)
 
 
 async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_dir: Path | None = None,
-                 picture: bool = False, need_locators: bool = True, term: bool = False) -> dict[str, Any]:
+                 picture: bool = False, need_locators: bool = True) -> dict[str, Any]:
     """A view's checks, all by code: the index builds, every claimed file is read or hidden with a why, locators and
     sampled lines round-trip (the answer cites the line back and its excerpt is literal source), declared keys resolve,
     the page loads headless without errors, and the test label's marks show on the records it shows (label_problems).
     Fields of the fetched records that the lines they cite do not hold and `derived` does not list are noted
     (unlisted_derived). Without the headless browser the page is not loaded (its `page` is `unavailable`) and the other
     checks decide. With `picture` the page as it opens is pictured. Without `need_locators`, a view that no locator
-    or sampled line opens passes the rest. With `term`, a view built in terminal mode: its program is drawn as text
-    (term_draws) in place of the page's loads, which fails on a program error, a timeout or a draw past the panel, and
-    the page's label, layout and damaged-copy checks are left out (the reader's run on the damaged copy is not). Returns
-    {ok, view, index, checks, page, shots, coverage, unread, problems, notes}, and with `term` `draws` in place of
-    `shots` and `drawing`, the text of the first draw, with `picture`."""
+    or sampled line opens passes the rest. Returns {ok, view, index, checks, page, shots, coverage, unread, problems,
+    notes}."""
     view = read_view(c, slug)
     if view is None:
         return {"ok": False, "view": None, "problems": [f"no view {slug!r}"], "checks": [], "page": None}
     report: dict[str, Any] = {"ok": False, "view": view, "problems": [], "notes": [], "checks": [], "page": None}
     if not view["ok"]:
-        report["problems"].append(f"the view has no reader.py, no {VIEW_TERM if term else VIEW_HTML} or no claims")
+        report["problems"].append(f"the view has no reader.py, no {VIEW_HTML} or no claims")
         return report
     files = await asyncio.to_thread(claimed_files, c, view)
     if not files:
@@ -3977,8 +3926,6 @@ async def _check(c: str, slug: str, locators: list[str] | None = None, *, shot_d
             report["checks"].append(await check_one(f"view:{slug}/{key}"))
     if not report["checks"] and need_locators:
         report["problems"].append("no locator was checked: pass `locators` with refs the view should open")
-    if term:
-        return await _term_check(c, slug, view, files, report, picture)
 
     base = shot_dir or (cache_dir(c, view) / "shots")
     shots = await shoot_checks(c, slug, view, files, report["checks"], base, f"check-{int(time.time())}", picture=picture)
@@ -4011,100 +3958,6 @@ async def _derived_check(c: str, view: dict[str, Any], shots: list[dict[str, Any
     if unlisted := await asyncio.to_thread(unlisted_derived, c, shots, declared):
         report["problems"].append(_hint("view-derived-unlisted", fields="; ".join(
             f"{x['field']} ({x['value']!r} on {x['ref']})" for x in unlisted)))
-
-
-async def _term_check(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
-                      report: dict[str, Any], picture: bool) -> dict[str, Any]:
-    """The rest of _check for a view built in terminal mode, after its reader's checks: its program drawn as text
-    (term_draws), each failed draw a problem (draw_problems), as each choice of the kit's parts that gave an error
-    (choice_problems), the reader run on a damaged copy of the files (robust_check without the page), and the fields of
-    the answers its draws got that are not listed as derived."""
-    draws = await term_draws(c, slug, report["checks"])
-    report["draws"], report["shots"] = draws, []
-    report["page"] = {"ok": all(d["ok"] for d in draws), "errors": [], "fetches": sum(int(d["fetches"]) for d in draws)}
-    report["problems"] += draw_problems(draws) + choice_problems(draws)
-    if picture and draws:
-        report["drawing"] = draws[0]["text"]
-    if not report["problems"] and all(r["ok"] for r in report["checks"]) and report["page"]["ok"]:
-        problems, notes = await robust_check(c, slug, view, files, None, page=False)
-        report["problems"] += problems
-        report["notes"] += notes
-    await _derived_check(c, view, draws, report)
-    report["ok"] = not report["problems"] and all(r["ok"] for r in report["checks"]) and report["page"]["ok"]
-    return report
-
-
-async def term_draws(c: str, slug: str, checks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The draws of a view's program that its checks run in terminal mode (term_views.draw_check): as it opens at each
-    columns and theme of term_views.CHECK_DRAWS, then opened at the first place that resolved, at the first of them,
-    then, where the first drew, as it opens there with the test label on and every choice of the kit's parts it drew
-    tried in turn (`choices`, choice_problems), as the browser's checks' `choices` state tries a page's. Each carries
-    its `state`, `opens`, `detail` or `choices`, and the first ANSWERS_KEPT reader answers it got."""
-    from . import term_views  # noqa: PLC0415
-
-    out = []
-    for cols, theme in term_views.CHECK_DRAWS:
-        d = await term_views.draw_check(c, slug, cols=cols, theme=theme, answers=ANSWERS_KEPT)
-        out.append({**d, "state": "opens"})
-    first = next((r for r in checks if r["ok"]), None)
-    cols, theme = term_views.CHECK_DRAWS[0]
-    if first is not None:
-        d = await term_views.draw_check(c, slug, cols=cols, theme=theme, ref=first["locator"], answers=ANSWERS_KEPT)
-        out.append({**d, "state": "detail"})
-    if out[0]["ok"]:
-        d = await term_views.draw_check(c, slug, cols=cols, theme=theme, answers=ANSWERS_KEPT, sweep=True)
-        out.append({**d, "state": "choices", "choices": d.get("choices") or []})
-    return out
-
-
-def draw_where(d: dict[str, Any]) -> str:
-    """Which draw of a view's program `d` is, in words: as it opens, or opened at a place, at its columns and theme."""
-    return draws_where([d])
-
-
-def draws_where(draws: list[dict[str, Any]]) -> str:
-    """Which draws of a view's program these are, in words: those as it opens by their columns and themes, then each
-    opened at a place, then the one with the test label on (`choices`)."""
-    def themes(ts: list[str]) -> str:
-        return f"the {ts[0]} theme" if len(ts) == 1 else f"the {' and '.join(ts)} themes"
-
-    by_cols: dict[Any, list[str]] = {}
-    placed = []
-    labelled = []
-    for d in draws:
-        if d.get("ref"):
-            placed.append(f"opened at {d['ref']}, at {d.get('cols')} columns in {themes([str(d.get('theme'))])}")
-        elif d.get("state") == "choices":
-            labelled.append(f"as it opens with the test label on, at {d.get('cols')} columns in "
-                            f"{themes([str(d.get('theme'))])}")
-        else:
-            by_cols.setdefault(d.get("cols"), []).append(str(d.get("theme")))
-    opens = " and ".join(f"at {cols} columns in {themes(ts)}" for cols, ts in by_cols.items())
-    return "; ".join([*([f"as it opens {opens}"] if by_cols else []), *placed, *labelled])
-
-
-def draw_problems(draws: list[dict[str, Any]]) -> list[str]:
-    """The checks' problems with the draws of a view's program (term_draws): one per failure, a program error, a
-    timeout or a draw past the panel, naming every draw it showed in."""
-    found: dict[tuple[str, str], list[dict[str, Any]]] = {}
-    for d in draws:
-        if d.get("ok"):
-            continue
-        if d.get("error"):
-            key = ("view-term-error", str(d["error"]))
-        elif d.get("timeout"):
-            key = ("view-term-timeout", str(d["timeout"]))
-        else:
-            o = d.get("overflow") or {}
-            first = _cut(str(o.get("first") or ""), 100)
-            parts = [*([f"{int(o['rows'])} rows past its {d.get('rows')} rows"] if o.get("rows") else []),
-                     *([f"{int(o['cols'])} rows wider than its columns, such as {first!r}"] if o.get("cols") else [])]
-            key = ("view-term-overflow", "; ".join(parts) or "it draws past the panel")
-        found.setdefault(key, []).append(d)
-    from . import term_views  # noqa: PLC0415
-
-    return [_hint(name, where=draws_where(ds), what=what, s=f"{term_views.SETTLE_MAX_S:.0f}")
-            for (name, what), ds in found.items()]
 
 
 # the states the checks load the page in: with the test label on, in the pane beside the Labels pane, the page as the
@@ -4416,13 +4269,12 @@ def robust_copy(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, 
 
 
 async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tuple[str, int, int]],
-                       shown: dict[str, Any] | None, page: bool = True) -> tuple[list[str], list[str]]:
+                       shown: dict[str, Any] | None) -> tuple[list[str], list[str]]:
     """(problems, notes) of the view run on a copy of its files with one missing and a torn line (robust_copy), as a
     real corpus may be: build_index and problems() must not fail, problems() must report the torn line, and the page
     must load without errors and, when `shown` (what the overview showed over the whole corpus) anchored records or
     units and the copy left nothing else out, show some too. The torn line goes in a file the reader reads to the end
-    and does not hide, since one it leaves out has no line to report. Without `page` (a view built in terminal mode)
-    only the reader runs on the copy."""
+    and does not hide, since one it leaves out has no line to report."""
     try:
         _, req = await asyncio.to_thread(_prepare, c, slug)
         ans = await _call(c, req, "shown")
@@ -4454,8 +4306,6 @@ async def robust_check(c: str, slug: str, view: dict[str, Any], files: list[tupl
         problems: list[str] = []
         if copy["torn"] and not got["count"]:
             problems.append(_hint("view-robust-torn", ref=copy["torn"]))
-        if not page:
-            return problems, []
         overview = {"ref": None, "path": copy["files"][0][0]}
         s = (await shoot_states(c, slug, [{"out": None, "open": overview, "labels": probe_context()}], prepared=req))[0]
         if s.get("unavailable"):
@@ -5839,14 +5689,12 @@ async def resolve_route(c: str, slug: str, ref: str, v: str | None = None) -> di
 
 async def check_answer(c: str, slug: str, locators: list[str], picture: bool) -> dict[str, Any]:
     """A builder's or reviewer's check of its draft (view_tools.tool_view_check): the gate with `locators` beside the
-    sampled lines, the locators kept on the proposal for the gates of record (finish_view). {ok, lines, png, drawing},
-    `png` the path of a picture of the page as it opens when `picture` asks for one, or in terminal mode `drawing` the
-    view drawn as text as it opens."""
+    sampled lines, the locators kept on the proposal for the gates of record (finish_view). {ok, lines, png}, `png` the
+    path of a picture of the page as it opens when `picture` asks for one."""
     if locators and read_proposal(c, slug) is not None:
         update_proposal(c, slug, locators=locators)
     report = await gate(c, slug, locators or _kept_locators(c, slug), picture=picture)
-    return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png"),
-            "drawing": report.get("drawing")}
+    return {"ok": bool(report.get("ok")), "lines": gate_lines(report), "png": (report.get("page") or {}).get("png")}
 
 
 def _kept_locators(c: str, slug: str) -> list[str] | None:
