@@ -6,11 +6,29 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from test_delivery import CORPUS, _cwd, _fresh  # noqa: F401 — the fixture, used by name
 
-from app import config, main, session
+from app import agents, config, events, main, session
 
+CORPUS = "mini"
 FIRST = "11111111-aaaa-4aaa-8aaa-000000000001"
+
+
+@pytest.fixture(autouse=True)
+def _fresh(workspaces_tmp, tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    for table in (events._subs, events._pending, events._taken, events._asks, events._waiters, events._lines,
+                  events._notices, session._live, session._expected, session._event_threads, session._came_back,
+                  session._shim_pids, session._shim_configs):
+        table.clear()
+    agents._busy.clear()
+    yield
+    for table in (events._subs, events._pending, events._taken, events._asks, events._waiters, events._notices,
+                  session._live):
+        table.clear()
+
+
+def _cwd() -> str:
+    return str(config.corpus_dir(CORPUS))
 
 
 @pytest.fixture()

@@ -3305,8 +3305,6 @@ def gate_step(c: str, slug: str, report: dict[str, Any], chat: str | None = None
     if not chat or agents.meta_or_none(c, str(chat)) is None:
         return
     loaded = "the page loaded" if (report.get("page") or {}).get("ok") else "the page was not loaded"
-    if report.get("draws") is not None:  # a view built in terminal mode: its program drawn as text (views.term_draws)
-        loaded = "the program drew" if (report.get("page") or {}).get("ok") else "the program did not draw"
     Log(agents.Recorder(c, str(chat))).stage(
         f"checks passed: {len(report.get('checks') or [])} ref(s), {loaded}" if report.get("ok")
         else f"checks failed: {views.first_failure(report) or 'the page did not load'}")

@@ -82,7 +82,6 @@ AGENT = "Card check"  # the check's name on its notices
 FAILED_TEXT = "The card check of the card \"{card}\" failed: {why}."
 FALLBACK_TEXT = "Claude's safeguards switched the card check's reading of \"{card}\" from {model} to {fallback}."
 CARD_WORDS = 80  # of the card's question or title a notice quotes
-UNTRIED = "its revision could not be tried"  # an `error` whose card runner gave no result (notebook.TrialUnavailable)
 READ_IDLE_S = 60.0  # a reading with no sign of life this long is stalled (model.structured's idle clock)
 PAUSE_POLL_S = 0.05  # how often a check waiting for a reading slot looks at its clock again (_within)
 MAX_EDGE = 2576  # the longest edge of an image the model reads at full resolution
@@ -847,12 +846,11 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
                    timing: dict[str, Any]) -> None:
     """Apply the replacement once, kept only when its code runs clean and the replaced card draws; otherwise the card stays,
     the replacement is recorded as a rejected fix and the check ends `error`. The fix's reason is the problem of the first
-    criterion the card failed. A replacement whose code could not be tried at all (terminal mode's card runner gave no
-    result: notebook.TrialUnavailable) is no rejected fix: the check ends `error` saying so (UNTRIED).
+    criterion the card failed.
 
     The trial on the card's kernel is settled however the check ends: a check stopped or past its time mid-trial leaves it
     running to its end in a task of its own, which then puts back the names it bound."""
-    from . import checkstore, notebook  # noqa: PLC0415
+    from . import checkstore  # noqa: PLC0415
 
     c, cid = run.c, run.cid
     t0 = time.perf_counter()
@@ -866,12 +864,6 @@ async def _replace(run: _Run, cell: dict[str, Any], patch: dict[str, Any], faile
     except asyncio.CancelledError:
         _spawn(_settle_after(c, cid, trial))
         raise
-    except notebook.TrialUnavailable as e:  # the revision was not tried, so nothing is known of it: no rejected fix
-        timing["replace_ms"] = _ms(t0)
-        timing["replacement"] = "untried"
-        log.warning("card check: the replacement of card:%s could not be tried (%s)", cid, e)
-        _end(run, "error", f"{UNTRIED}: {e}", tell=True)
-        return
     except Exception as e:  # noqa: BLE001 — a card gone meanwhile, or code on a card that runs none
         cand = None
         log.info("card check: the replacement of card:%s cannot be applied (%s)", cid, e)

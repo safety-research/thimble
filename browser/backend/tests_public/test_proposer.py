@@ -246,53 +246,6 @@ async def test_a_side_thread_question_main_answers_itself_runs_one_fork_after_ma
     assert f["cut"] == "cut-t" and cards[0]["offered"]["after"] == f"thread:{tid}"
 
 
-async def test_a_side_thread_question_typed_with_thimble_ask_runs_one_fork_after_the_thread_answers(cwd, tmp_path,
-                                                                                                  cards, forks):
-    """/thimble:ask in main's terminal sends a side thread's question as the thread's composer in the browser does:
-    main's turn that hands it to the thread's fork is no analyst's turn of main either, so the proposer runs once,
-    after the thread answers, also when that run shows no card. A line the analyst types to main still is their turn."""
-    forks.answer = stream("```json\n" + json.dumps({"show": False, "why": "Nothing new to show."}) + "\n```")
-    lv, p = _attach(cwd, tmp_path)
-    tid = agents.new_thread(CORPUS, None, None, "Replies")["id"]
-    agents.Recorder(CORPUS, tid).record("user", text="Which agent replies most?")
-    ask = ("<command-message>thimble:ask</command-message>\n<command-name>/thimble:ask</command-name>\n"
-           "<command-args>Replies Which agent replies most?</command-args>")
-    _append(p, lv, [_human(ask), _assistant(_say("I asked the thread's fork.")), _end("cut-a")])
-    await _settle()
-    assert forks == [] and proposer.pending(CORPUS) is None, "main's relay turn runs nothing"
-    session._proposer_after_thread(lv, tid)  # the thread's fork answered
-    await _settle()
-    assert [f["cut"] for f in forks] == ["cut-a"]
-    _append(p, lv, _turn("Who replies to whom on the board?", "cut-m"))
-    await _settle()
-    assert [f["cut"] for f in forks] == ["cut-a", "cut-m"]
-
-
-async def test_a_thread_and_an_orientation_wait_for_main_and_run_once_with_both_sentences(cwd, tmp_path, cards,
-                                                                                       forks):
-    """A side thread's answer and an orientation's end that come while main works on something else (here a
-    start_agent event) run once, after that turn, at its cut, and the prompt says both happened."""
-    lv, p = _attach(cwd, tmp_path)
-    tid = agents.new_thread(CORPUS, None, None, "Replies")["id"]
-    agents.Recorder(CORPUS, tid).record("user", text="Which agent replies most?")
-    note = '<thimble-event kind="start_agent" event="ev3">Start it.</thimble-event>'
-    _append(p, lv, [{"type": "user", "origin": {"kind": "task-notification"}, "message": {"content": note}},
-                    _assistant(_say("Starting it."))])
-    assert lv.turn_open and not lv.turn_analyst
-    proposer.trigger(CORPUS, f"thread:{tid}")
-    proposer.trigger(CORPUS, "orientation")
-    await _settle()
-    assert forks == [] and proposer.pending(CORPUS)["after"] == [f"thread:{tid}", "orientation"]
-    _append(p, lv, [_end("cut-1")])
-    await _settle()
-    (f,) = forks
-    assert f["cut"] == "cut-1", "no cut of an analyst's turn in the job: main's last"
-    now = f["prompt"].split("## Now", 1)[1]
-    assert "The orientation has just finished." in now
-    assert 'A side thread has just answered the analyst: "Which agent replies most?"' in now
-    assert cards[0]["offered"]["after"] == "orientation"
-
-
 async def test_a_pending_job_survives_the_process_and_runs_at_the_next_turn_end(cwd, tmp_path, cards, forks):
     lv, p = _attach(cwd, tmp_path)
     _append(p, lv, _turn("Who replies?", "cut-1"))
@@ -526,14 +479,6 @@ async def test_a_fork_that_cannot_start_fails_with_its_reason(monkeypatch, tmp_p
 
 
 # ----------------------------------------------------------------------------- the prompt and the answer
-
-
-def test_the_terminal_prompt_names_the_row_above_the_prompt():
-    from app import prompts
-
-    browser, terminal = prompts.load("view-propose", "browser"), prompts.load("view-propose", "terminal")
-    assert "as a card above the chat's composer" in browser and "in Files" in browser
-    assert "as a row above Claude Code's prompt" in terminal and "in thimble's panel in the terminal" in terminal
 
 
 def test_parse_takes_a_fenced_object_a_no_and_a_missing_why():

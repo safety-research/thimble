@@ -21,6 +21,9 @@ from app import card_libs, config, notebook, render, subagents, tools, view_libs
 CORPUS = "mini"
 
 needs_vega = pytest.mark.skipif(not all(p.is_file() for p in views.LIBS.values()), reason="needs the frontend's vega builds")
+# add_card bundles a package with the frontend's esbuild, as test_view_libs' bundles do
+needs_esbuild = pytest.mark.skipif(not view_libs.ESBUILD.is_file() or shutil.which("node") is None,
+                                   reason="needs the frontend's esbuild and Node")
 
 
 async def call(name: str, **args):
@@ -53,6 +56,7 @@ async def test_a_card_naming_vega_embed_gets_thimble_s_vega_builds_in_order(work
     assert "cardLibs" not in render.request_for(CORPUS, {**cell, "payload": {"html": "<p>x</p>"}})
 
 
+@needs_esbuild
 async def test_main_installs_a_package_in_card_libs_and_add_card_bundles_it_with_its_version_and_hash(workspaces_tmp,
                                                                                                     no_npm):
     folder = config.workspace_path(CORPUS) / card_libs.FOLDER

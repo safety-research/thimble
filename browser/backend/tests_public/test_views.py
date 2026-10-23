@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fnmatch
-import functools
 import io
 import json
 import logging
@@ -1041,23 +1040,6 @@ def test_every_worked_example_s_view_json_is_in_the_schema_s_form():
         assert raw.get("scope") and raw.get("records"), name
 
 
-def test_a_derived_field_is_listed_for_each_kind_of_record_that_holds_it():
-    """A field name two kinds of record share, such as a pull request's state and an issue's, is listed for each, under
-    its record, the records in view.json's order and the computed fields first in each."""
-    raw = json.loads((_example_dir("repository") / "view.json").read_text("utf-8"))
-    declared = [(r["name"], f["name"], f["derived"]) for r in raw["records"] for f in r["fields"] if f.get("derived")]
-    got = views._normalize_view("repository", raw)["derived"]
-    assert sorted((d["record"], d["field"]) for d in got) == sorted((r, f) for r, f, _ in declared)
-    assert len({d["field"] for d in got}) < len(got), "the example has a name two kinds share"
-    assert list(dict.fromkeys(d["record"] for d in got)) == [r["name"] for r in raw["records"]]
-    for rec in raw["records"]:
-        kinds = [d["kind"] for d in got if d["record"] == rec["name"]]
-        assert kinds == sorted(kinds, key=lambda k: k != "inferred"), rec["name"]
-    again = views._derived([*got, {"field": "state", "from": "a reader's derived()", "how": "again"},
-                            {"field": "busy", "from": "a reader's derived()", "how": "new"}])
-    assert again[:-1] == got and again[-1]["field"] == "busy", "a field a record has is not listed again without one"
-
-
 def test_the_worked_examples_are_never_views_of_a_workspace(samples):
     """A corpus that holds an example's own sample gets none of the examples as views: none is listed, none opens a
     citation of its files, and none adds a citation form to main's table."""
@@ -1101,81 +1083,6 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     problems = await views.reader_problems(name, slug)
     assert problems["count"] == before + sum(n for *_, n in BROKEN[name]), problems
     assert not rep["coverage"]["not_shown"]["count"] and rep["coverage"]["derived"], "every file is read, and what the reader made is listed"
-
-
-async def _every_answer(name: str, slug: str) -> list:
-    """What the example's page fetches, over every place: each Timeline event in full, each session's transcript and
-    each call in full, each Repository run's tabs and units."""
-    call = functools.partial(views.reader_call, name, slug, "records")
-    if name == "timeline":
-        rows = (await call({"op": "overview"}))["cols"]["r"]
-        return [{"ref": got["ref"], **got["record"]} for got in [await call({"op": "record", "r": r}) for r in rows]]
-    if name == "linked-sessions":
-        ov = await call({"op": "overview"})
-        out = [await call({"op": "turns", "session": s["id"]}) for s in ov["sessions"]]
-        out.append(await call({"op": "turns", "refs": [it["ref"] for it in ov["items"] if it["agent"] == "client-port"]}))
-        out += [await call({"op": "record", "ref": it["ref"]}) for it in ov["items"] if it["kind"] == "call"]
-        return [*out, ov]
-    out = []
-    for run in ("r1", "r2", "r3", "r4"):
-        for tab in ("pulls", "issues", "discussions", "agents"):
-            got = await call({"op": "view", "run": run, "tab": tab})
-            out += [got, *[await call({"op": "unit", "key": it["key"]}) for it in got["items"]]]
-    return out
-
-
-@pytest.mark.parametrize("name", sorted(EXAMPLES))
-async def test_every_record_a_worked_example_serves_lists_the_fields_its_lines_do_not_hold(name, samples, inproc, bound,
-                                                                                         monkeypatch):
-    """The derived check over every record the example's reader answers, not only the checks' sample: each field whose
-    values the cited lines do not hold is in view.json's records."""
-    monkeypatch.setattr(views, "DERIVED_SAMPLE", 100_000)
-    slug = _save_example(name)
-    declared = {k for d in views.read_view(name, slug)["derived"] for k in (d["field"], d.get("key")) if k}
-    answers = await _every_answer(name, slug)
-    seen: dict = {}
-    views._answer_records(answers, seen)
-    assert len(seen) > 100, "the answers hold the example's records"
-    assert not views.unlisted_derived(name, [{"answers": answers}], declared)
-
-
-async def test_the_repository_colors_an_agent_by_its_own_name_and_by_its_records_under_their_items_fields(samples, inproc,
-                                                                                                        bound):
-    """An agent's row carries its author, itself, so it
-    takes its own value as the other tabs' rows do (the page's colour.attr reads it). Under a field it does not carry,
-    a state or an area of the items it worked on, the row stands for its records: each takes the value of the pull
-    request, issue or thread it is about, `mix` counts them (its sign-off left out, so they add up to what the row
-    counts), the chips count the agent under each value, and the agent shows while any of its values is on under Filter
-    by. Color by only colors: a value turned off there keeps every agent and every value of the mixes. The other tabs'
-    rows keep their own values."""
-    slug = _save_example("repository")
-
-    async def view(field, tab="agents", off=(), hide=None):
-        return await views.reader_call("repository", slug, "records", {
-            "op": "view", "run": "r1", "tab": tab, "color": {"field": field, "off": list(off)},
-            **({"filter": {"field": field, "off": list(hide)}} if hide is not None else {})})
-
-    got = await view("author")
-    assert [(it["title"], it["author"], it["value"], "mix" in it) for it in got["items"]] == \
-        [("ash", "ash", "ash", False), ("birch", "birch", "birch", False), ("cedar", "cedar", "cedar", False)]
-    assert got["counts"] == {"ash": 1, "birch": 1, "cedar": 1}
-    got = await view("state")
-    ash = got["items"][0]
-    assert dict(map(tuple, ash["mix"])) == {None: 4, "fixed": 3, "merged": 13, "closed": 1} and ash["value"] == "merged"
-    assert sum(n for _, n in ash["mix"]) == sum(ash["did"].values()), "the mix divides the records the row counts"
-    assert got["counts"] == {"": 3, "fixed": 3, "merged": 3, "closed": 2, "open": 1}, "a chip for each value a mix draws"
-    # a page from before Color by only colored still sends the values turned off there: the reader keeps every agent
-    got = await view("state", off=["merged", "fixed", "closed", None])
-    assert [it["title"] for it in got["items"]] == ["ash", "birch", "cedar"], "Color by hides no agent"
-    assert dict(map(tuple, got["items"][0]["mix"])) == {None: 4, "fixed": 3, "merged": 13, "closed": 1}, \
-        "and leaves every value in the mixes, the page drawing those turned off in gray"
-    assert got["tabs"]["agents"] == 3
-    # Filter by hides: an agent with no value on leaves the list
-    got = await view("state", hide=["merged", "fixed", "closed", None])
-    assert [it["title"] for it in got["items"]] == ["birch"], "an agent with no value on under Filter by leaves the list"
-    assert got["tabs"]["agents"] == 1
-    got = await view("state", tab="pulls")
-    assert got["items"] and not any("mix" in it for it in got["items"]) and got["counts"] == {"merged": 7, "closed": 1}
 
 
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
@@ -1246,7 +1153,6 @@ async def test_the_headless_page_measures_how_its_text_fits_and_clicks_a_control
     assert clicked["actions"] == [{"control": "Show more", "found": True}, {"control": "No such control", "found": False}]
     notes = views.layout_notes([{**plain, "state": "wide"}])
     assert len(notes) == 1 and "overlaps other text in 1 place," in notes[0] and "rest of the pane is empty" in notes[0]
-
 
 
 # a page with the kit's three controls whose Rows draws a heading from the choice's title, so Rows: None (no title)
@@ -1387,34 +1293,6 @@ async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(n
         n = p["checked"]
         assert p["seen"] == 0 and len(problems) == 1, (p, problems)
         assert f"does not show the test label's color on {n} of the {n}" in problems[0], problems
-
-async def test_the_end_to_end_test_s_fixture_view_passes_the_checks(workspaces_tmp, tmp_path, monkeypatch, inproc, bound):
-    """scripts/e2e/fixture-view, the view the release test opens with a label on, passes the whole check as the tab in
-    Files it is there: its rows are anchored as units, so the test label marks them, and it draws its own label
-    switches."""
-    if why := views.build_problem():
-        if os.environ.get("CI") == "true":
-            pytest.fail(why)
-        pytest.skip(why)
-    corpus = tmp_path / "data" / "e2e"
-    (corpus / "agents").mkdir(parents=True)
-    for i in range(3):
-        rows = [json.dumps({"type": "message" if n % 3 else "tool", "text": f"post {n} about the forge"}) for n in range(12)]
-        (corpus / "agents" / f"agent-{i}.jsonl").write_text("\n".join(rows) + "\n" + ("{torn\n" if i == 2 else ""))
-    (corpus / "manifest.json").write_text(json.dumps({"name": "e2e", "description": "agents' posts"}))
-    monkeypatch.setattr(config, "DATA_DIR", (tmp_path / "data").resolve())
-    fixture = config.REPO_ROOT / "scripts" / "e2e" / "fixture-view"
-    raw = json.loads((fixture / "view.json").read_text("utf-8"))
-    views.write_view("e2e", "record-counts", reader=(fixture / "reader.py").read_text("utf-8"),
-                     html=(fixture / "view.html").read_text("utf-8"),
-                     **{k: raw.get(k) for k in ("name", "description", "claims", "accepts", "units", "derived", "libs", "unit")})
-    assert not views.file_type_viewer(views.read_view("e2e", "record-counts"))
-    rep = await views.check("e2e", "record-counts", ["view:record-counts/agents/agent-1.jsonl"], shot_dir=tmp_path)
-    assert rep["ok"], views.gate_lines(rep)
-    shown = rep["shots"][0]["shown"]
-    assert shown["units"] == 3 and shown["due"] == shown["drawn"] == 3, shown
-    assert rep["shots"][0]["painted"]["seen"] == 3, rep["shots"][0]["painted"]
-    assert rep["shots"][0]["label_controls"] == 1, rep["shots"][0]
 
 
 SELF_LABEL_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>

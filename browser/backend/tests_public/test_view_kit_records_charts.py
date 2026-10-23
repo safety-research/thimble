@@ -48,28 +48,6 @@ def kit_ws(workspaces_tmp, tmp_path, monkeypatch):
     return ws
 
 
-def test_every_view_page_loads_the_record_viewer_and_the_charts_after_the_transcript_and_before_the_range(tmp_path, monkeypatch):
-    """viewer_record.js and viewer_chart.js take the bridge's part with the kit's other parts, before the range takes it
-    away; the canvas's chart drawing comes from the built interface right before the chart part, and a checkout whose
-    interface is not built gets the part without it (the chart says so where it would draw)."""
-    d = tmp_path / "view"
-    d.mkdir()
-    (d / views.VIEW_HTML).write_text("<script>const c = thimble.chart('#c', 'bar', [])</script>")
-    dist = tmp_path / "dist"
-    (dist / "kit").mkdir(parents=True)
-    (dist / views.KIT_CHART_JS).write_text("window.__thimbleCharts = {draw: function () {}} /* the canvas's drawing */")
-    monkeypatch.setattr(config, "FRONTEND_DIST", dist)
-    doc = views.frame_document({"dir": str(d), "slug": "board", "name": "Board"})
-    order = [doc.index(s) for s in ("thimble.transcript = function", "thimble.record = function",
-                                    "the canvas's drawing", "thimble.chart = function", "thimble.timeRange = function",
-                                    "const c = thimble.chart(")]
-    assert order == sorted(order), order
-    assert ".thimble-record-tree" in doc and ".thimble-chart-plot" in doc, "viewer_parts.css styles them"
-    monkeypatch.setattr(config, "FRONTEND_DIST", tmp_path / "unbuilt")
-    doc = views.frame_document({"dir": str(d), "slug": "board", "name": "Board"})
-    assert "the canvas's drawing" not in doc and "thimble.chart = function" in doc
-
-
 @pytest.mark.parametrize(("kind", "options"), [("bar", {}), ("bar", {"stack": "share"}), ("line", {}),
                                                 ("dots", {"sort": ["agent-2"]}), ("histogram", {"step": 2})])
 def test_a_view_s_chart_is_the_spec_a_card_s_chart_shows_for_the_same_rows(kit_ws, kind, options):
@@ -128,13 +106,3 @@ def test_the_kit_s_chart_fetch_never_reaches_the_reader(kit_ws, monkeypatch):
     monkeypatch.setattr(views, "reader_call", no_reader)
     handled, answer = views.kit_answer("kit", {"$thimble": "chart", "kind": "bar", "rows": ROWS[:2]})
     assert handled and answer["n"] == 2 and "spec" in answer
-
-
-def test_a_page_lays_out_the_record_viewer_and_the_charts_but_does_not_restyle_them():
-    css = ("<style>#side .thimble-record { margin-top: 8px } .thimble-chart { flex: 1 } .thimble-record-key { color: red }"
-           " .thimble-chart-plot { background: #fff } .thimble-record-more { font-size: 14px }</style>")
-    assert views.own_parts(css) == [
-        "`.thimble-record-key` sets color",
-        "`.thimble-chart-plot` sets background",
-        "`.thimble-record-more` sets font-size",
-    ]

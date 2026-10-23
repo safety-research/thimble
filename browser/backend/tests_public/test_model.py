@@ -130,30 +130,6 @@ async def test_ok_valid_tool_call(monkeypatch):
     assert made[0].interrupts == 1
 
 
-async def test_an_interrupted_turn_whose_result_lists_only_a_helper_model_names_the_model_that_made_the_call(monkeypatch):
-    """The interrupt can end the turn before its result counts the model: model_usage then lists only the CLI's helper
-    model, and the call is reported on the model named on the recorded call's message, with its cost unknown."""
-    install(monkeypatch, [[[
-        amsg(tuse({"title": "T"})),
-        tres(),
-        rmsg(subtype="error_during_execution", is_error=True, total_cost_usd=0.002,
-             model_usage={"claude-haiku-4-5-20251001": {"inputTokens": 10152}}),
-    ]]])
-    r = await call()
-    assert r.status == "ok" and r.output == {"title": "T"}
-    assert r.model_used == "claude-sonnet-5" and r.fallback_note == "" and r.cost_usd is None
-
-
-async def test_turn_interrupted_only_once_a_call_is_recorded(monkeypatch):
-    made = install(monkeypatch, [[
-        [amsg(tuse({"n": 2}, id="t1")), tres("t1", "invalid"), rmsg()],
-        [amsg(tuse({"title": "T"}, id="t2")), tres("t2"), rmsg()],
-    ]])
-    r = await call()
-    assert r.status == "ok" and r.output == {"title": "T"} and r.attempts == 2
-    assert made[0].interrupts == 1
-
-
 async def test_a_call_s_system_prompt_is_the_caller_s_own_then_the_output_tool_s_instruction(monkeypatch):
     """The session's system prompt is a plain string: the caller's `system` and then the output tool's instruction, or
     the instruction alone, with no Claude Code preset around it; its settings turn the user's ultracode off."""

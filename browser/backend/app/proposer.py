@@ -64,8 +64,6 @@ JOB_FILE = views.PROPOSER_FILE
 NOTICE_KEY = "proposals"  # the key of the proposer's notices (notices.post)
 AGENT = "View proposals"  # the proposer's name on its notices
 BUILTIN = "Files shows every file in its built-in views: Raw, Table, Text, Transcript and Timeline, as fit its type."
-TERMINAL_BUILTIN = ("thimble's panel shows every file in its built-in views: Raw, Table, Text, Transcript and Timeline, "
-                    "as fit its type.")
 MAIN, ORIENTATION, THREAD = "main", "orientation", "thread:"
 REPLY_CHARS = 1_500  # of a thread's question quoted in the Now section
 # the words of an error that says the model's safeguards refused the request, of one that says Claude Code has no
@@ -317,7 +315,7 @@ def _suffix(claims: Any) -> str:
 def _views_section(c: str) -> str:
     """The views the analyst has: each proposal row by how it stands, then each built view without a row, then each
     deleted one."""
-    out = ["## Views the analyst has", "", TERMINAL_BUILTIN if views.terminal(c) else BUILTIN]
+    out = ["## Views the analyst has", "", BUILTIN]
     rows = views.list_proposals(c)
     built = {v["slug"]: v for v in views.list_views(c)}
     state = {"built": "built", "queued": "building", "building": "building", "failed": "the build failed"}
@@ -371,8 +369,7 @@ def _now_section(c: str, after: list[str]) -> str:
 def assemble(c: str, job: dict[str, Any]) -> str:
     """The fork's message (module note): the proposer prompt, the threads, the orientation, the views the analyst has
     and what just happened (job's `after`)."""
-    mode = "terminal" if views.terminal(c) else "browser"
-    parts = [prompts.load(PROMPT, mode).strip(), _threads_section(c), _views_section(c),
+    parts = [prompts.load(PROMPT, "browser").strip(), _threads_section(c), _views_section(c),
              _now_section(c, list(job.get("after") or []))]
     return "\n\n".join(p for p in parts if p) + "\n"
 

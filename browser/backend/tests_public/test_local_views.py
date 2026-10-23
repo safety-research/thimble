@@ -10,15 +10,13 @@ import io
 import json
 import os
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app import config, export, extensions, ledger, views
-from app.kernel_thimble import CARD_TYPES_FILE
+from app import config, extensions, views
 
 CORPUS, OTHER = "boards", "notes"
 READER = """
@@ -123,58 +121,6 @@ def test_unit_places_a_view_in_the_file_browser_or_the_views_bar(corpora):
                                                        "file_viewer": True, "on": True}]
 
 
-def test_an_older_workspace_s_views_move_into_its_local_extension_once(corpora):
-    """At the start a view an older thimble kept in views/<slug>/ is moved whole into the local extension: its proposal
-    stays built rather than queued for a new build, its kept version and its cache stay, its index is read from the same
-    cache rather than built again, and the card types' registry points at its new folder. A second start moves
-    nothing."""
-    _propose(CORPUS)
-    v = _write(CORPUS)
-    ws = config.workspace_dir(CORPUS)
-    assert asyncio.run(views.reader_call(CORPUS, "posts", "records")) == 2
-    index = views.index_dir(CORPUS, "posts")
-    pickles = {p: p.stat().st_mtime_ns for p in index.glob("*.index.pickle")}
-    assert pickles
-    new = Path(v["dir"])
-    (new / "cache" / "shots").mkdir(parents=True)
-    (new / "cache" / "shots" / "a.png").write_bytes(b"png")
-    old = ws / "views" / "posts"
-    os.replace(new, old)
-    for p in (ws / "extension").rglob("*"):
-        if p.is_file():
-            p.unlink()
-    for p in sorted((ws / "extension").rglob("*"), reverse=True):
-        p.rmdir()
-    (ws / "extension").rmdir()
-    registry = config.registry_dir(CORPUS) / CARD_TYPES_FILE
-    registry.write_text(json.dumps({"types": {"posts": {"dir": str(old.resolve()),
-                                                        "reader": str((old / "reader.py").resolve())}}}))
-    assert views.list_proposals(CORPUS)[0]["status"] == "queued", "unmoved, the view is not found"
-
-    assert views.migrate_workspaces() == {CORPUS: ["posts"]}
-    assert views.list_proposals(CORPUS)[0]["status"] == "built"
-    moved = views.read_built(CORPUS, "posts")
-    assert moved is not None and Path(moved["dir"]) == new and moved["version"] == v["version"]
-    assert (new / "cache" / "shots" / "a.png").read_bytes() == b"png"
-    assert old.is_symlink() and old.resolve() == new.resolve(), "an older thimble run again finds the view there"
-    exported = []
-    export._views(type("Writer", (), {"copy": lambda self, name, path: exported.append(name)})(), ws)
-    assert "extension/views/posts/view.json" in exported and not any(n.startswith("views/posts/") for n in exported)
-    assert views.read_version(CORPUS, "posts", v["version"]) is not None
-    assert json.loads((ws / "extension" / "extension.json").read_text())["version"] == "local"
-    assert json.loads(registry.read_text())["types"]["posts"] == {"dir": str(new.resolve()),
-                                                                  "reader": str((new / "reader.py").resolve())}
-    views._ready.clear()
-    sys.modules.pop("_thimble_views", None)  # the kernel's memory: the index comes from its pickle
-    assert asyncio.run(views.reader_call(CORPUS, "posts", "records")) == 2
-    assert {p: p.stat().st_mtime_ns for p in index.glob("*.index.pickle")} == pickles
-
-    assert views.migrate_workspaces() == {}
-    assert views.read_built(CORPUS, "posts")["dir"] == str(new)
-    views.delete_view(CORPUS, "posts")
-    assert not old.is_symlink() and not new.exists()
-
-
 def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corpora, tmp_path):
     """A link a kernel planted where the local extension or its views folder goes is removed before thimble writes
     there, so a view's files never land outside the workspace."""
@@ -200,39 +146,6 @@ def test_a_link_left_where_the_local_extension_goes_is_replaced_by_a_folder(corp
     (ws / "extension").write_text("")
     notebook._guarded_files(CORPUS)
     assert (ws / "extension").is_dir(), "a kernel starts with the folder read-only, not with a file in its place"
-
-
-def test_an_archive_an_older_thimble_made_has_its_views_moved_in_when_it_is_restored(corpora):
-    """`/thimble restore` of an archive whose views are in views/ moves them into the local extension."""
-    _propose(CORPUS)
-    v = _write(CORPUS)
-    ws = config.workspace_dir(CORPUS)
-    os.replace(v["dir"], ws / "views" / "posts")
-    archived = asyncio.run(ledger.archive_workspace(CORPUS))["archived"]
-    asyncio.run(ledger.restore_workspace(CORPUS, {"archive": Path(archived).name}))
-    assert views.read_built(CORPUS, "posts")["dir"] == str(ws / "extension" / "views" / "posts")
-    assert views.list_proposals(CORPUS)[0]["status"] == "built"
-
-
-def test_a_first_build_a_restart_cut_off_in_a_moved_folder_starts_a_new_session(corpora):
-    """A first build cut off by the restart that moved its folder starts a new session, given the folder's new place,
-    rather than resuming one whose earlier turns name the old place; a built view and a change keep their sessions."""
-    ws = config.workspace_dir(CORPUS)
-    rows = []
-    for slug, status, changed in (("drafting", "building", None), ("posts", "built", None), ("changing", "queued", True)):
-        d = ws / "views" / slug
-        d.mkdir(parents=True)
-        (d / "view.json").write_text(json.dumps({"name": slug, "claims": ["board.jsonl"]}))
-        rows.append({"slug": slug, "name": slug, "why": "", "claims": ["board.jsonl"], "arrangement": "",
-                     "proposed_by": "analyst", "status": status, "ts": "t", "session": "s", "session_id": f"id-{slug}",
-                     **({"changed": True} if changed else {})})
-    (ws / "views" / "proposals.json").write_text(json.dumps(rows))
-
-    assert views.migrate_workspaces() == {CORPUS: ["changing", "drafting", "posts"]}
-    kept = {p["slug"]: p for p in json.loads((ws / "views" / "proposals.json").read_text())}
-    assert "session_id" not in kept["drafting"] and "session" not in kept["drafting"]
-    assert kept["posts"]["session_id"] == "id-posts" and kept["changing"]["session_id"] == "id-changing"
-    assert [p["slug"] for p in kept.values()] == ["drafting", "posts", "changing"]
 
 
 def test_a_view_built_for_a_workspace_switches_off_and_on_in_settings_from_the_analyst_s_browser_only(

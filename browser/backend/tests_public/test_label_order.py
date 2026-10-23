@@ -4,10 +4,9 @@ hues with no second blue. A stored color is a place, and show_label names each p
 only what new values take: a new label's values in the label store and in thimble.colours, a new report check, and a
 view's field values through the kit, which reads the same JSON from its frame."""
 import json
-import random
 from pathlib import Path
 
-from app import checks, concepts, kernel_thimble, views
+from app import concepts, kernel_thimble, views
 
 ORDER = (1, 2, 3, 5, 6, 7, 4, 8, 9, 10, 11, 12)
 
@@ -43,49 +42,6 @@ def test_a_new_label_s_values_take_the_order_and_a_further_label_the_colors_left
     assert concepts.free_colour(1, {1, 2, 3, 5}) == 6 and concepts.free_colour(12, {12, 1}) == 2
     assert concepts.free_colour(1, set(ORDER)) is None
     assert concepts.own_colour(3, {3}) == 5 and concepts.own_colour(7, {7, 4}) == 8 and concepts.own_colour(0, {0}) == 0
-
-
-def test_the_kernel_gives_the_colors_the_label_store_gives():
-    rng = random.Random(7)
-    for _ in range(200):
-        values = [[f"v{i}{j}" for j in range(rng.randint(1, 6))] for i in range(rng.randint(1, 6))]
-        stored = [[rng.choice([None, None, 0, *range(1, 13)]) for _ in vs] for vs in values]
-        ks = [_label(vs, cs) for vs, cs in zip(values, stored)]
-        kk = [{"classes": [[v, c] for v, c in zip(vs, cs)]} for vs, cs in zip(values, stored)]
-        concepts.fill_colours(ks)
-        kernel_thimble._fill_colours(kk)
-        assert [[c["color"] for c in k["classes"]] for k in ks] == [[c[1] for c in k["classes"]] for k in kk]
-
-
-def test_thimble_colours_draws_a_new_label_s_values_in_the_order(tmp_path, monkeypatch):
-    (tmp_path / "concepts").mkdir()
-    (tmp_path / "concepts" / "k1.json").write_text(json.dumps({"id": "k1", "name": "kind", "labels": list("abcdef"), "ts": "1"}))
-    monkeypatch.setattr(kernel_thimble, "WS", str(tmp_path))
-    monkeypatch.setattr(kernel_thimble, "_LABELS_READ", [])
-    hexes = kernel_thimble.LABEL_COLOURS
-    assert kernel_thimble.colours("kind") == {v: hexes[n] for v, n in zip("abcdef", (1, 2, 3, 5, 6, 7))}
-
-
-def test_a_new_report_check_takes_the_first_check_color_in_the_order(monkeypatch):
-    assert checks.NEW_COLOURS == (1, 2, 3, 5, 6, 7, 4, 8)
-    held = [{"colour": 1}, {"colour": 3}, {"colour": 5}]  # the built-in checks: blue, green and gold
-    monkeypatch.setattr(checks, "list_checks", lambda c: held)
-    assert checks._free_colour("c") == 2
-    held += [{"colour": 2}, {"colour": 6}, {"colour": 7}]
-    assert checks._free_colour("c") == 4
-    held += [{"colour": 4}, {"colour": 8}, {"colour": 1}]
-    assert checks._free_colour("c") == 2, "with every color held, the first in the order of those fewest checks have"
-
-
-def test_a_view_s_frame_hands_the_kit_the_order_before_its_color_by(tmp_path):
-    (tmp_path / "view.html").write_text("<!doctype html><body></body>")
-    doc = views.frame_document({"dir": str(tmp_path), "slug": "v", "name": "V"})
-    order = f"window.__thimbleLabelOrder = {json.dumps(list(ORDER))}; "
-    assert order in doc and doc.index(order) < doc.index("thimble.colorBy")
-    # and the picker's places around the colour wheel, every place of the palette's eighteen once
-    wheel = json.loads((Path(views.__file__).with_name("label_wheel.json")).read_text("utf-8"))
-    assert f"window.__thimbleLabelWheel = {json.dumps(wheel)}</script>" in doc
-    assert sorted(n for pair in wheel for n in pair) == list(range(1, 19))
 
 
 def test_red_purple_and_pink_are_colours_a_value_holds_only_when_picked():

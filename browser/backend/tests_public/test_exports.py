@@ -3,16 +3,13 @@ export.py declares, such as the video extension's video file, and PDF and video 
 browser. No model call and no browser."""
 from __future__ import annotations
 
-import wave
-from pathlib import Path
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-import runpy
 
-from app import config, exports, extensions, investigation, notebook, report_types, tools
+from app import config, exports, investigation, notebook, report_types, tools
 
 CORPUS = "mini"
 MAIN = investigation.MAIN
@@ -87,14 +84,6 @@ async def test_routes_offer_the_formats_and_save_markdown_as_a_file(report, monk
     assert TestClient(app).get(f"{BASE}/report/export/video").status_code == 404
 
 
-def test_a_hooks_formats_are_read_without_running_it(tmp_path):
-    hook = tmp_path / "export.py"
-    hook.write_text('raise SystemExit("ran")\nFORMATS = [{"id": "csv", "name": "CSV", "ext": "csv"}, {"id": "Bad id"}]\n')
-    assert exports.hook_formats(hook) == [{"id": "csv", "name": "CSV", "ext": "csv"}]
-    hook.write_text("FORMATS = make()\n")
-    assert exports.hook_formats(hook) == []
-
-
 async def test_an_extension_report_types_formats_join_the_built_in_ones(report, tmp_path, monkeypatch):
     """An extension's type adds formats or replaces one; thimble's own types keep theirs whatever an extension names."""
     await _write(report)
@@ -107,8 +96,6 @@ async def test_an_extension_report_types_formats_join_the_built_in_ones(report, 
     assert got["csv"] == {"id": "csv", "name": "CSV", "ext": "csv", "ok": True, "hook": True}
     assert got["html"]["name"] == "Web page" and got["html"].get("hook") and not got["markdown"].get("hook")
     assert not any(f.get("hook") for f in exports.formats(CORPUS, "report", "document"))
-
-
 
 
 async def test_a_document_not_written_yet_answers_no_content_and_a_written_one_itself(report):

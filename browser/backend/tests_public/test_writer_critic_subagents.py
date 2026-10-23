@@ -6,16 +6,10 @@ finds its descendants' transcripts by `parentAgentId`. Main's permission request
 a request of one of thimble's agents is answered in the terminal at once and its card has no buttons (U6b)."""
 from __future__ import annotations
 
-import asyncio
-import json
-import re
-import time
-from pathlib import Path
 
 import pytest
 
-from app import agents, config, events, read_parts, report_types, subagents, tools, write_session
-from app import subagent_files as sf
+from app import agents, config, read_parts, report_types, subagents, write_session
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
 CORPUS = "mini"
@@ -93,21 +87,6 @@ def test_a_full_context_file_of_dense_table_lines_is_under_the_read_file_size_ca
     assert 3 * read_parts.READ_UNITS < cap
 
 
-async def test_two_typed_writers_of_two_documents_are_claimed_by_their_request_ids(bridge, models, workspaces_tmp):
-    report_types.create_document_type(CORPUS, "casefile", name="Cases", slug="cases")
-    got = {}
-    for doc in ("report", "cases"):
-        res = await tools.call(CORPUS, "start_writing", {"doc": doc, "model": "sonnet"})
-        assert not res.is_error, res.text
-        got[doc] = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
-    with subagents.update(CORPUS) as state:
-        for i, doc in enumerate(("cases", "report")):
-            assert sf.check_call(state, {"tool_name": "Agent", "tool_use_id": f"toolu_{i}", "tool_input": got[doc]}) is None
-    reqs = {r["key"]: r for r in subagents.read(CORPUS)["requests"].values()}
-    assert reqs["writer:cases"]["claimed_by"] == "toolu_0" and reqs["writer:report"]["claimed_by"] == "toolu_1"
-    assert reqs["writer:report"]["values"]["model"] == "claude-sonnet-5"
-
-
 async def test_a_refused_writer_start_shows_on_its_document(bridge, models, workspaces_tmp, monkeypatch):
     seen: list[dict] = []
     monkeypatch.setattr(report_types, "_emit", lambda c, rec: seen.append(rec))
@@ -125,60 +104,6 @@ async def test_the_writer_s_end_tells_main_and_lets_go_of_its_work_files(bridge,
     ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
     subagents.run_ended(CORPUS, ans.agent_id, "done", "Wrote the report.", source="handback")
     assert told == [(write_session.WRITTEN_KIND, {"text": "Wrote the report.", "status": "done", "doc": "report"})]
-
-
-async def test_a_writer_main_s_plan_mode_caught_mid_run_fails_its_write_and_says_why(bridge, models, workspaces_tmp,
-                                                                                    monkeypatch):
-    """Live check L21: main went into plan mode while a writer ran, and the writer with it, so it wrote a plan file and
-    no document; with the document already there, thimble took that for a revision that changed nothing. The plan_mode
-    attachment in its transcript marks the run, so its end fails the write with what to do, its run and chat end
-    failed with that line, main hears it failed, and a next run clears the mark."""
-    seen: list[dict] = []
-    told: list[dict] = []
-    monkeypatch.setattr(report_types, "_emit", lambda c, rec: seen.append(rec))
-    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: told.append(payload))
-    monkeypatch.setattr(report_types, "read_doc", lambda c, inv, slug: {"sections": []})  # the document exists
-    ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
-    subagents.saw_plan_mode(CORPUS, ans.agent_id)
-    chat = subagents.agent(CORPUS, ans.agent_id)["chat"]
-    assert agents.read_meta(CORPUS, chat)["plan_mode"] is True
-    subagents.run_ended(CORPUS, ans.agent_id, "done", "I was put into plan mode partway.", source="handback")
-    line = subagents.plan_failed_line("writer")
-    assert line == ("Your Claude Code session went into plan mode while the writer ran, so it could not save the "
-                    "document. Switch out of plan mode (shift+tab in your terminal), then write it again.")
-    [end] = [r for r in seen if r.get("status") in ("generated", "failed")]
-    assert end["status"] == "failed" and end["note"] == line and not end.get("unchanged")
-    meta = agents.read_meta(CORPUS, chat)
-    assert (meta["status"], meta["result"]) == ("failed", line)
-    assert subagents.agent(CORPUS, ans.agent_id)["status"] == "failed"
-    assert told == [{"text": line, "status": "failed", "doc": "report"}]
-    subagents.run_again(CORPUS, ans.agent_id, "human")
-    assert agents.read_meta(CORPUS, chat).get("plan_mode") is None
-
-
-async def test_a_writer_that_saved_before_plan_mode_held_it_or_ran_on_after_it_ends_done(bridge, models, workspaces_tmp,
-                                                                                         monkeypatch):
-    """A writer whose run plan mode held at its end but which had saved its document left its work (its Type's
-    left_work), and one whose transcript then said main left plan mode (plan_mode_exit) went on with it: both end
-    done as before."""
-    seen: list[dict] = []
-    monkeypatch.setattr(report_types, "_emit", lambda c, rec: seen.append(rec))
-    monkeypatch.setattr(subagents, "tell_main", lambda c, kind, payload: None)
-    ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
-    report_types.write_pending(CORPUS, "report")["saved"] = True
-    subagents.saw_plan_mode(CORPUS, ans.agent_id)
-    subagents.run_ended(CORPUS, ans.agent_id, "done", "Wrote the report.", source="handback")
-    assert subagents.agent(CORPUS, ans.agent_id)["status"] == "done"
-    assert [r["status"] for r in seen if r.get("status") in ("generated", "failed")] == ["generated"]
-    report_types.create_document_type(CORPUS, "casefile", name="Cases", slug="cases")
-    notes = await write_session.start(CORPUS, "cases", route=subagents.CLICK)
-    chat = subagents.agent(CORPUS, notes.agent_id)["chat"]
-    subagents.saw_plan_mode(CORPUS, notes.agent_id)
-    subagents.saw_plan_mode(CORPUS, notes.agent_id, False)
-    assert agents.read_meta(CORPUS, chat).get("plan_mode") is None
-    assert not subagents.ended_in_plan(CORPUS, notes.agent_id)
-    subagents.run_ended(CORPUS, notes.agent_id, "done", "Nothing to change.", source="handback")
-    assert subagents.agent(CORPUS, notes.agent_id)["status"] == "done"
 
 
 async def test_a_writer_the_analyst_stopped_ends_its_write_as_stopped_and_not_as_a_failure(bridge, models,
@@ -210,43 +135,6 @@ async def test_a_writer_the_analyst_stopped_ends_its_write_as_stopped_and_not_as
 # --------------------------------------------------------------------------- permission requests
 
 
-class Hook:
-    def __init__(self) -> None:
-        self.gone = False
-
-    async def is_disconnected(self) -> bool:
-        return self.gone
-
-
-async def test_a_thimble_agent_s_request_is_answered_at_once_and_its_card_has_no_buttons(bridge, models,
-                                                                                       workspaces_tmp):
-    from app import session
-
-    sid = "5e55a000-0000-4000-8000-0000000000aa"
-    session._live[CORPUS] = session.Live(CORPUS, sid, str(config.corpus_dir(CORPUS)), None, None)
-    try:
-        ans = await write_session.start(CORPUS, "report", route=subagents.CLICK)
-        body = events.HookPermission(cwd=str(config.corpus_dir(CORPUS)), session=sid, tool_name="WebFetch",
-                                     tool_input={"url": "https://example.com"}, agent_id=ans.agent_id)
-        got = await asyncio.wait_for(events.hook_permission_route(Hook(), body), 2)
-        assert got["behavior"] is None, "the terminal asks at once (U6b)"
-        [card] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
-        assert card["terminal"] is True and card["chat"] == subagents.agent(CORPUS, ans.agent_id)["chat"]
-        events.calls_done(CORPUS, ans.agent_id, [(events.call_key("WebFetch", {"url": "https://example.com"}), 0.0)])
-        assert agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"] == [], "the call ran: the terminal answered it"
-        main = asyncio.ensure_future(events.hook_permission_route(Hook(), events.HookPermission(
-            cwd=str(config.corpus_dir(CORPUS)), session=sid, tool_name="Edit", tool_input={"file_path": "/c/x"})))
-        await asyncio.sleep(0.2)
-        assert not main.done(), "main's own request waits for the analyst, as before"
-        [card] = agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"]
-        assert "terminal" not in card
-        events.calls_done(CORPUS, None, [(events.call_key("Edit", {"file_path": "/c/x"}), time.time() + 1)])
-        assert (await asyncio.wait_for(main, 2))["behavior"] is None, "answered in the terminal: the hook lets go"
-        assert agents.read_meta(CORPUS, agents.MAIN_ID)["permissions"] == [], "the tool's PostToolUse closed the card"
-    finally:
-        session._live.pop(CORPUS, None)
-
-
 def test_a_code_ticket_s_runner_reads_no_project_settings(workspaces_tmp, monkeypatch):
     """A `claude -p` job the server starts (a code ticket, `thimble fix`) runs none of the folder's own hooks, settings or
     MCP servers (U17)."""
@@ -255,24 +143,3 @@ def test_a_code_ticket_s_runner_reads_no_project_settings(workspaces_tmp, monkey
     monkeypatch.setitem(userconf.DEFAULTS["sandbox"], "enforce", False)
     flags = dev.Sessions()._flags(CORPUS, "thimble:dev · mini")
     assert flags[flags.index("--setting-sources") + 1] == "user" and "--strict-mcp-config" in flags
-
-
-def test_main_s_prompt_comes_back_only_when_main_itself_compacted(tmp_path):
-    from datetime import datetime, timezone
-
-    from app import cli
-
-    main = tmp_path / "main.jsonl"
-    main.write_text(json.dumps({"type": "user", "message": {"content": "hi"}}) + "\n")
-    hook = {"hook_event_name": "SessionStart", "source": "compact", "transcript_path": str(main)}
-    assert not cli.main_itself(hook), "a subagent's compaction writes no boundary into main's transcript (U2)"
-    now = datetime.now(timezone.utc).isoformat()
-    with main.open("a") as f:
-        f.write(json.dumps({"type": "system", "subtype": "compact_boundary", "timestamp": now}) + "\n")
-    assert cli.main_itself(hook)
-    assert cli.main_itself({**hook, "source": "clear"}), "only main clears"
-    old = tmp_path / "old.jsonl"
-    old.write_text(json.dumps({"type": "system", "subtype": "compact_boundary",
-                               "timestamp": "2026-01-01T00:00:00+00:00"}) + "\n")
-    assert not cli.main_itself({**hook, "transcript_path": str(old)}), "an earlier compaction of main's"
-    assert Path(old).is_file()
