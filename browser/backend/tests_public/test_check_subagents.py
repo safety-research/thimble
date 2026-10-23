@@ -23,11 +23,11 @@ TEXT = ("# One account did it\n\n## One account\n\nAll the deletions came from o
 
 @pytest.fixture()
 def doc(workspaces_tmp, monkeypatch):
-    """The checks `unverified` and `judgment` on, on Settings' checks row; each test writes the report (_write)."""
+    """The checks `explainers` and `judgment` on, on Settings' checks row; each test writes the report (_write)."""
     _checks_row(monkeypatch)
-    for cid in ("unverified", "judgment"):
+    for cid in ("explainers", "judgment"):
         checks.edit(CORPUS, cid, shown=True)
-    checks.edit(CORPUS, "important-details", shown=False)  # Important details starts on: these two are the shown checks
+    checks.edit(CORPUS, "heads-up", shown=False)  # Heads up starts on: these two are the shown checks
 
 
 def _checks_row(monkeypatch) -> None:
@@ -76,8 +76,8 @@ async def test_a_writer_s_end_starts_each_shown_check_through_the_module_with_it
     await asyncio.sleep(0.05)
     assert len(bridge.ops("spawn")) == 1, "at most MAX_SESSIONS run at once"
     [spawn] = bridge.ops("spawn")
-    cid = "unverified" if "unverified" in spawn["what"] else "judgment"
-    other = "judgment" if cid == "unverified" else "unverified"
+    cid = "explainers" if "explainers" in spawn["what"] else "judgment"
+    other = "judgment" if cid == "explainers" else "explainers"
     path = checks.work_dir(CORPUS, cid, "report") / checks.TASK_FILE
     assert path.is_file() and "report:report" in path.read_text()
     assert str(path) in spawn["prompt"] and spawn["role"] == "check"
@@ -100,9 +100,9 @@ async def test_a_large_workspace_s_task_is_written_in_files_a_read_call_returns_
     paras = "\n\n".join(f"Account a{i:04d} deleted {i % 97} files on night {i % 7} from host h{i % 13}, as line {i} of "
                          f"the log shows." for i in range(900))
     await _write("# A long report\n\n## Findings\n\n" + paras + "\n")
-    await _started("unverified")
+    await _started("explainers")
     [spawn] = bridge.ops("spawn")
-    work = checks.work_dir(CORPUS, "unverified", "report")
+    work = checks.work_dir(CORPUS, "explainers", "report")
     paths = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
     text = "".join(p.read_text() for p in paths)
     assert len(text) > 100_000, "one file would fail a Read call whole"
@@ -119,42 +119,43 @@ async def test_a_check_on_a_report_in_chinese_gets_task_files_one_read_call_retu
     from test_read_parts import ZH, read_returns_whole
 
     await _write("# 报告\n\n## 发现\n\n" + "\n\n".join(f"第{i}条：{ZH}" for i in range(900)) + "\n")
-    await _started("unverified")
+    await _started("explainers")
     [spawn] = bridge.ops("spawn")
-    work = checks.work_dir(CORPUS, "unverified", "report")
+    work = checks.work_dir(CORPUS, "explainers", "report")
     paths = read_parts.paths(work / checks.TASK_FILE, len(list(work.glob("task*.md"))))
     assert len(paths) >= 2 and all(str(p) in spawn["prompt"] for p in paths)
     over = [(p.name, len(p.read_text("utf-8"))) for p in paths if not read_returns_whole(p.read_text("utf-8"), "zh")]
     assert not over, f"task files past Read's token cap: {over}"
 
 
-async def test_in_a_new_workspace_a_writer_s_end_starts_important_details_alone_and_each_switch_the_analyst_sets_stays(
+async def test_in_a_new_workspace_a_writer_s_end_starts_heads_up_and_explainers_and_each_switch_the_analyst_sets_stays(
         workspaces_tmp, bridge, monkeypatch):
-    """Of the built-ins only Important details is on in a workspace that stored none of them: a writer's end starts it
-    alone on its document, and Judgment calls and Unverifiable stay off. One the analyst turns on runs at the next
-    writer's end, and one they turn off is stored so and starts no run."""
+    """Of the built-ins Heads up and Explainers are on in a workspace that stored none of them: a writer's end starts
+    both on its document, and Judgment calls stays off. One the analyst turns on runs at the next writer's end, and one
+    they turn off is stored so and starts no run."""
     _checks_row(monkeypatch)
     await _write()
     assert not bridge.ops("spawn"), "a save starts nothing"
-    assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == [
-        ("judgment", False), ("unverified", False), ("important-details", True)]
+    defaults = [("heads-up", True), ("explainers", True), ("judgment", False)]
+    assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == defaults
     _writer_done()
-    await _until(lambda: len(bridge.ops("spawn")) == 1, "Important details never started at the writer's end")
+    await _until(lambda: len(bridge.ops("spawn")) == 2, "Heads up and Explainers never started at the writer's end")
     await asyncio.sleep(0.05)
-    assert [s["what"] for s in bridge.ops("spawn")] == ["important-details on report"]
-    subagents.run_ended(CORPUS, _run("important-details")["agent_id"], "done", "Done.", source="handback")
-    await _until(lambda: _run("important-details")["status"] == "done", "the run never ended")
-    assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == [
-        ("judgment", False), ("unverified", False), ("important-details", True)], "a run's save keeps the defaults"
+    assert sorted(s["what"] for s in bridge.ops("spawn")) == ["explainers on report", "heads-up on report"]
+    for cid in ("heads-up", "explainers"):
+        subagents.run_ended(CORPUS, _run(cid)["agent_id"], "done", "Done.", source="handback")
+        await _until(lambda: _run(cid)["status"] == "done", "the run never ended")
+    assert [(x["id"], x["shown"]) for x in checks.list_checks(CORPUS)] == defaults, "a run's save keeps the defaults"
     checks.edit(CORPUS, "judgment", shown=True)
-    checks.edit(CORPUS, "important-details", shown=False)
+    checks.edit(CORPUS, "heads-up", shown=False)
+    checks.edit(CORPUS, "explainers", shown=False)
     assert checks.read(CORPUS, "judgment")["shown"] is True, "the analyst's choice is stored and wins"
-    assert checks.read(CORPUS, "important-details")["shown"] is False, "the analyst's choice is stored and wins"
+    assert checks.read(CORPUS, "heads-up")["shown"] is False, "the analyst's choice is stored and wins"
     await _write(TEXT.replace("It ran at night.", "It ran in the morning."))
     _writer_done()
-    await _until(lambda: len(bridge.ops("spawn")) == 2, "the check turned on never started")
+    await _until(lambda: len(bridge.ops("spawn")) == 3, "the check turned on never started")
     await asyncio.sleep(0.05)
-    assert [s["what"] for s in bridge.ops("spawn")[1:]] == ["judgment on report"]
+    assert [s["what"] for s in bridge.ops("spawn")[2:]] == ["judgment on report"]
 
 
 async def test_in_plan_mode_a_writer_s_end_holds_its_checks_which_say_so_and_start_after(doc, bridge, monkeypatch):
@@ -172,24 +173,24 @@ async def test_in_plan_mode_a_writer_s_end_holds_its_checks_which_say_so_and_sta
     monkeypatch.setattr(subagents, "out_of_plan", out_of_plan)
     await _write()
     _writer_done()
-    await _until(lambda: _run("unverified").get("waiting") == checks.WAITING_PLAN, "the run did not say it waits")
+    await _until(lambda: _run("explainers").get("waiting") == checks.WAITING_PLAN, "the run did not say it waits")
     await asyncio.sleep(0.05)
     assert not bridge.ops("spawn"), "nothing starts in plan mode"
     mode["now"] = "auto"
     await _until(lambda: len(bridge.ops("spawn")) == 2, "the held checks never started")
-    assert "waiting" not in _run("unverified") or _run("unverified")["waiting"] != checks.WAITING_PLAN
+    assert "waiting" not in _run("explainers") or _run("explainers")["waiting"] != checks.WAITING_PLAN
 
 
 async def test_the_analyst_s_edit_starts_nothing_and_marks_the_checks_stale_with_the_count(doc, bridge):
     await _write()
     _writer_done()
     await _until(lambda: len(bridge.ops("spawn")) == 2, "the checks never started")
-    for cid in ("unverified", "judgment"):
+    for cid in ("explainers", "judgment"):
         subagents.run_ended(CORPUS, _run(cid)["agent_id"], "done", "Done.", source="handback")
-    await _until(lambda: all(_run(c)["status"] == "done" for c in ("unverified", "judgment")), "the runs never ended")
+    await _until(lambda: all(_run(c)["status"] == "done" for c in ("explainers", "judgment")), "the runs never ended")
     await _write(TEXT.replace("It ran at night.", "It ran in the morning."))
     assert len(bridge.ops("spawn")) == 2, "an edit starts no run"
-    assert _run("unverified")["stale"] == 1 and _run("judgment")["stale"] == 1, "one paragraph changed"
+    assert _run("explainers")["stale"] == 1 and _run("judgment")["stale"] == 1, "one paragraph changed"
 
 
 async def test_run_is_a_click_that_starts_one_and_stop_goes_through_the_module(doc, bridge):
@@ -266,8 +267,8 @@ async def test_a_run_s_task_lists_its_check_s_open_comments_its_end_replaces(doc
     [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
     listed = task_of("judgment").split(replaces, 1)[1]
     assert f"- comment {cm['id']} on report:report#{sid} · No card shows this. — The log has no account field." in listed
-    await _started("unverified")
-    assert replaces not in task_of("unverified"), "a run replaces only its own check's comments"
+    await _started("explainers")
+    assert replaces not in task_of("explainers"), "a run replaces only its own check's comments"
 
 
 async def test_a_run_main_started_that_ran_as_its_subagent_ends_with_one_line_its_hand_back(doc, bridge, monkeypatch):
@@ -288,10 +289,10 @@ async def test_a_run_main_started_that_ran_as_its_subagent_ends_with_one_line_it
     await _until(lambda: _run("judgment")["status"] == "done", "the run never ended")
     assert [k for k, _ in posted if k == checks.CHECKED_KIND] == [], "the hand-back alone tells main"
     bridge.answers.append({"deny": "PreToolUse:Agent hook error: refused"})
-    await checks.start_run(CORPUS, "unverified", "report", force=True, notify=True, route="click")
-    await _until(lambda: _run("unverified").get("status") == "failed", "the refused run never ended")
+    await checks.start_run(CORPUS, "explainers", "report", force=True, notify=True, route="click")
+    await _until(lambda: _run("explainers").get("status") == "failed", "the refused run never ended")
     checked = [p for k, p in posted if k == checks.CHECKED_KIND]
-    assert len(checked) == 1 and checked[0]["check"] == "unverified" and checked[0]["status"] == "failed"
+    assert len(checked) == 1 and checked[0]["check"] == "explainers" and checked[0]["status"] == "failed"
 
 
 async def test_a_run_main_s_plan_mode_held_at_its_end_fails_saying_why_and_supersedes_nothing(doc, bridge):
@@ -328,8 +329,8 @@ async def test_a_start_at_the_subagent_limit_waits_and_a_refused_one_fails_with_
     await _until(lambda: len(bridge.ops("spawn")) == 2, "the start was never tried again")
     assert _run("judgment")["status"] == "running" and _run("judgment")["agent_id"]
     bridge.answers.append({"deny": "PreToolUse:Agent hook error: PLAN MODE"})
-    await _started("unverified")
-    assert _run("unverified")["status"] == "failed" and _run("unverified")["refused"]["kind"] == "hook"
+    await _started("explainers")
+    assert _run("explainers")["status"] == "failed" and _run("explainers")["refused"]["kind"] == "hook"
 
 
 async def test_a_run_whose_agent_runs_on_across_a_server_restart_takes_its_place_again(doc, bridge, monkeypatch):
@@ -349,11 +350,11 @@ async def test_main_s_quit_stops_a_queued_run_and_its_agent_s_end_stops_a_runnin
     monkeypatch.setattr(checks, "MAX_SESSIONS", 1)
     await _write()
     await _started("judgment")
-    await checks.start_run(CORPUS, "unverified", "report", force=True, route="click")
-    assert _run("unverified").get("waiting") == checks.WAITING_QUEUED
+    await checks.start_run(CORPUS, "explainers", "report", force=True, route="click")
+    assert _run("explainers").get("waiting") == checks.WAITING_QUEUED
     assert checks.stop_workspace(CORPUS) == 1
     subagents.close_running(CORPUS)
-    assert _run("judgment")["status"] == "stopped" and _run("unverified")["status"] == "stopped"
+    assert _run("judgment")["status"] == "stopped" and _run("explainers")["status"] == "stopped"
     await asyncio.sleep(0.05)
     assert len(bridge.ops("spawn")) == 1, "nothing starts in a stopped run's place"
 
@@ -368,10 +369,10 @@ async def test_a_run_s_task_file_is_never_written_through_a_link(doc, bridge, tm
     await _write()
     outside = tmp_path / "outside.txt"
     outside.write_text("keep me")
-    task = checks.work_dir(CORPUS, "unverified", "report") / checks.TASK_FILE
+    task = checks.work_dir(CORPUS, "explainers", "report") / checks.TASK_FILE
     task.parent.mkdir(parents=True, exist_ok=True)
     task.symlink_to(outside)
-    await _started("unverified")
+    await _started("explainers")
     assert outside.read_text() == "keep me" and not task.is_symlink() and task.read_text().strip()
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -382,8 +383,8 @@ async def test_a_run_s_task_file_is_never_written_through_a_link(doc, bridge, tm
         ledger.write_under(config.workspace_dir(CORPUS), checks.work_dir(CORPUS, "judgment", "report") / "x.md", "x")
 
 
-CHECK_CLICKS = [("post", "/api/ws/mini/checks/unverified/run", {"doc": "report"}),
-                ("post", "/api/ws/mini/checks/unverified/runs", {"doc": "report"}),
+CHECK_CLICKS = [("post", "/api/ws/mini/checks/explainers/run", {"doc": "report"}),
+                ("post", "/api/ws/mini/checks/explainers/runs", {"doc": "report"}),
                 ("post", "/api/ws/mini/checks", {"name": "Dates", "prompt": "Mark the dates."}),
                 ("patch", "/api/ws/mini/checks/judgment", {"shown": True})]
 

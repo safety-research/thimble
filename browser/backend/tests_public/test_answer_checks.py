@@ -1,8 +1,8 @@
 """Checks on Claude's answers in the chat (checks.py's run target ANSWERS, answer_comments.py): an answer's passages are
 its sentences, split from paragraphs and list items and never inside a link or a code span, each with its offsets in its
 row's text; when main's turn ends with an answer each shown check that covers answers runs on it, a follow-on start
-through the fake module, and its add_comment stores the passage's quote and offsets; Important details covers answers
-by default and a stored copy from before reads so, unless the analyst set its Show in; a check turned off, or whose Chat
+through the fake module, and its add_comment stores the passage's quote and offsets; Heads up and Explainers cover
+answers by default and a stored copy of Heads up from before reads so, unless the analyst set its Show in; a check turned off, or whose Chat
 is unchecked, leaves nothing in the chat; a run over answers tells main nothing when it ends and supersedes its
 check's earlier comments; the routes."""
 from __future__ import annotations
@@ -19,7 +19,7 @@ from app.ledger import write_json
 from subagent_fakes import bridge  # noqa: F401 — a fixture
 
 CORPUS = "mini"
-IMPORTANT = "important-details"
+IMPORTANT = "heads-up"
 TURN = "a1b2c3d4"
 
 ANSWER = ("The board holds 18 posts. Most came from agent-02, see [the log](events.jsonl#L4). The rest are\n"
@@ -39,11 +39,13 @@ def _turn(text: str = ANSWER, turn: str = TURN) -> dict:
 
 @pytest.fixture()
 def board(workspaces_tmp, monkeypatch):
-    """Settings' checks row; the built-ins as in a new workspace: Important details on, the other two off."""
+    """Settings' checks row; the built-ins as in a new workspace, Heads up on and Judgment calls off, with Explainers
+    turned off so that Heads up runs alone."""
     rows = {"checks": {"model": "claude-opus-5-5", "effort": "high", "fast": False}}
     real = config.models_for
     monkeypatch.setattr(config, "models_for", lambda c=None: {**real(c), **{k: dict(v) for k, v in rows.items()}})
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
+    checks.edit(CORPUS, "explainers", shown=False)
 
 
 def _run(cid: str = IMPORTANT) -> dict:
@@ -86,15 +88,15 @@ def test_an_answer_s_passages_are_its_sentences_with_their_offsets():
     assert all(ANSWER[p["start"]:p["end"]] == p["text"] for p in ps if p["row"] == "0")
 
 
-def test_important_details_covers_the_chat_and_the_other_built_ins_do_not(board):
+def test_heads_up_and_explainers_cover_the_chat_and_judgment_calls_does_not(board):
     assert checks.covers(checks.read(CORPUS, IMPORTANT), "answers")
+    assert checks.covers(checks.read(CORPUS, "explainers"), "answers")
     assert not checks.covers(checks.read(CORPUS, "judgment"), "answers")
-    assert not checks.covers(checks.read(CORPUS, "unverified"), "answers")
     # a copy stored before the chat was covered reads as covering it, until the analyst sets its Show in
     stored = {**checks.builtin(IMPORTANT), "covers": ["documents", "cards"], "shown": True}
     checks._path(CORPUS, IMPORTANT).parent.mkdir(parents=True, exist_ok=True)
     write_json(checks._path(CORPUS, IMPORTANT), stored)
-    assert checks.read(CORPUS, IMPORTANT)["covers"] == ["documents", "cards", "answers"]
+    assert checks.read(CORPUS, IMPORTANT)["covers"] == ["documents", "answers"]
     checks.edit(CORPUS, IMPORTANT, covers=["documents", "cards"])
     assert checks.read(CORPUS, IMPORTANT)["covers"] == ["documents", "cards"]
 
@@ -105,12 +107,12 @@ async def test_an_answer_starts_the_shown_checks_that_cover_answers(board, bridg
     assert subagents.request(CORPUS, spawn["request"])["route"] == "follow-on"
     assert not act.notify
     assert _run()["covered"] == [p["ref"] for p in answer_comments.passages(_turn())]
-    assert not _run("judgment") and not _run("unverified"), "the checks that are off do not run"
+    assert not _run("judgment") and not _run("explainers"), "the checks that are off do not run"
     task = (checks.work_dir(CORPUS, IMPORTANT, checks.ANSWERS) / checks.TASK_FILE).read_text()
     assert answer_comments.TASK_HEADING in task
     assert f"- answer:{TURN}#s1 The board holds 18 posts." in task
-    assert "Comment on a passage only when the reader would likely miss" in task
-    assert answer_comments.state(CORPUS)["running"] == [{"check": IMPORTANT, "check_name": "Important details",
+    assert "A heads-up is a detail the analyst should know before they rely on the text." in task
+    assert answer_comments.state(CORPUS)["running"] == [{"check": IMPORTANT, "check_name": "Heads up",
                                                          "turn": TURN}]
 
 
@@ -182,7 +184,7 @@ def test_the_routes_list_dismiss_and_reopen_a_comment(board):
     assert new
     with TestClient(app) as client:
         got = client.get(f"/api/ws/{CORPUS}/answer-comments").json()
-        assert [(x["id"], x["check_name"], x["quote"]) for x in got["comments"]] == [(cm["id"], "Important details",
+        assert [(x["id"], x["check_name"], x["quote"]) for x in got["comments"]] == [(cm["id"], "Heads up",
                                                                                       p["text"])]
         assert client.post(f"/api/ws/{CORPUS}/answer-comments/{cm['id']}/dismiss").status_code == 200
         assert client.get(f"/api/ws/{CORPUS}/answer-comments").json()["comments"] == []

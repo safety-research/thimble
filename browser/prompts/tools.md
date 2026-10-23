@@ -430,7 +430,7 @@ Run a report check over the written documents or the cards, a question asked of 
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "The check's name, such as Unverifiable, or a new one."},
+    "name": {"type": "string", "description": "The check's name, such as Judgment calls, or a new one."},
     "instructions": {"type": "string", "description": "What to comment on, in the analyst's words. Needed for a new check, and it replaces the instructions of an existing one."},
     "passages": {"type": "array", "items": {"type": "string"}, "description": "Passages to check again, report:<doc>#<id>. Default every passage but the locked ones already checked."},
     "on": {"type": "string", "enum": ["documents", "cards"], "description": "Run it on the documents or on the cards alone. A new check then covers that alone. Default what the check covers."}
@@ -447,7 +447,7 @@ Turn a report check off, {{if:browser}}as the switch in the Comments pane does, 
 {
   "type": "object",
   "properties": {
-    "name": {"type": "string", "description": "The check's name, such as Unverifiable."}
+    "name": {"type": "string", "description": "The check's name, such as Judgment calls."}
   },
   "required": ["name"]
 }

@@ -89,7 +89,7 @@ def parse_note(text: str, name: str = "") -> dict[str, str]:
 
 
 def _untagged(text: str, name: str = "") -> str:
-    """`text` on one line without a leading copy of its check's name `name` and a colon, such as "Unverifiable: …" (in
+    """`text` on one line without a leading copy of its check's name `name` and a colon, such as "Judgment calls: …" (in
     bold or not), its first letter capitalized when the name stood before it."""
     text, name = _collapse(text), _collapse(name)
     m = re.match(r"\**\s*" + re.escape(name) + r"\s*\**\s*:\s*\**\s*", text, re.I) if name else None

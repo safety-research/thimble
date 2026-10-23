@@ -3,18 +3,21 @@ the context, can do work, and can be created and run from the chat. A check runs
 document, but is cached: a passage whose text did not change, or that is locked, is not checked again.
 
 A check is `workspaces/<c>/checks/<id>.json` = {id, name, prompt, colour, shown, shown_set, builtin, created_by, ts,
-version, runs: {doc: Run}}. The built-ins (`judgment`, `unverified`, `important-details`: Judgment calls, Unverifiable
-and Important details) are prompts/checks/<id>.md, read from the prompt file until first changed: each covers the
-documents and the cards, and its front matter's `shown` says whether it is on until the analyst turns it on or off
-(Important details on, the other two off). A stored copy still holding a name, a prompt or covers its built-in had
-before reads as the built-in is now (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), since thimble stores a built-in
-whole when it is turned on or off or runs. Its `shown` stays as stored once the analyst set it (`shown_set`, which edit
-records for the analyst's switch and for main's run_check and stop_check) or when it is off; one stored on without
-`shown_set` reads as its built-in is now (_shown_now), since 0.7.0 and 0.8.0 turned every built-in on and stored it on
-when it ran or a save marked it stale. A stored copy under an id its built-in had before (FORMER_IDS) is renamed to
-the id now when the checks are read (_migrate), and a comment that names a former id reads as naming the id now,
-written so on the store's next write. `verified`, a built-in before 0.7.0 (RETIRED), is listed only where the
-workspace stored it, as any stored check is, so its comments stay readable there; no new check takes its id. An active
+version, runs: {doc: Run}}. The built-ins (`heads-up`, `explainers`, `judgment`: Heads up, Explainers and Judgment
+calls) are prompts/checks/<id>.md, read from the prompt file until first changed: Heads up and Explainers are the
+terminal's heads-up and explainer lenses (plugin/prompts/lens-heads.md, lens-explain.md) as checks, and cover the
+documents and Claude's answers; Judgment calls covers the documents and the cards. The front matter's `shown` says
+whether a built-in is on until the analyst turns it on or off (Heads up and Explainers on, Judgment calls off). A stored
+copy still holding a name, a prompt or covers its built-in had before reads as the built-in is now (FORMER_NAMES,
+FORMER_PROMPTS, FORMER_COVERS, FORMER_DEFAULT_COVERS), since thimble stores a built-in whole when it is turned on or off
+or runs. Its `shown` stays as stored once the analyst set it (`shown_set`, which edit records for the analyst's switch
+and for main's run_check and stop_check) or when it is off; one stored on without `shown_set` reads as its built-in is
+now (_shown_now), since 0.7.0 and 0.8.0 turned every built-in on and stored it on when it ran or a save marked it
+stale. A stored copy under an id its built-in had before (FORMER_IDS: Important details and, before it, You should
+know, now Heads up) is renamed to the id now when the checks are read (_migrate), and a comment that names a former id
+reads as naming the id now, written so on the store's next write. A former built-in (RETIRED: `verified`, before 0.7.0,
+and `unverified`, Unverifiable) is listed only where the workspace stored it, as any stored check is, so its comments
+stay readable there; it never runs again, and no new check takes its id. An active
 extension's report checks, checks/<slug>/check.json (its name and colour)
 and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<slug>`, read from the extension until
 first changed as the built-ins are, and off. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
@@ -50,7 +53,7 @@ there and that it has not seen; Run on its row in the canvas's Comments pane and
 one too.
 
 Claude's answers. A check also covers Claude's answers in the chat (`answers` in COVERS, the sidebar's Show in: Chat;
-Important details by default), a third run target, ANSWERS (`@answers`), whose passages are the sentences of the
+Heads up and Explainers by default), a third run target, ANSWERS (`@answers`), whose passages are the sentences of the
 answers answer_comments.py keeps. When main's turn ends with an answer (session._end_turn) answer_ended keeps the answer
 and starts each shown check that covers answers, a follow-on start, on the passages of the answers since that check's
 last run there that it has not seen (the new answer alone at its first run). A check turned on, or whose Chat is
@@ -93,23 +96,24 @@ DIR = "checks"  # workspaces/<c>/checks/<id>.json
 WORK_DIR = "check-work"  # workspaces/<c>/check-work/<id>-<doc>/, a run's own folder, where its Bash may write
 TASK_FILE = "task.md"  # in a run's own folder: what its agent reads first, with task-2.md… when one file is too large
 OWN_TOOLS = ("read_ref", "list_cards", "add_comment")  # a check's thimble tools
-BUILTINS = ("judgment", "unverified", "important-details")  # prompts/checks/<id>.md, listed first in this order
-RETIRED = ("verified",)  # a former built-in: listed only where the workspace stored it, and no new check takes its id
+BUILTINS = ("heads-up", "explainers", "judgment")  # prompts/checks/<id>.md, listed first in this order
+# former built-ins: listed only where the workspace stored them, never run again, and no new check takes their ids
+RETIRED = ("verified", "unverified")
 # the ids the built-ins had before, each with its id now: a workspace's stored copy, and a comment, under a former id
-# reads under the id now (_migrate, current_id). Internal only: no surface shows a former id.
-FORMER_IDS = {"you-should-know": "important-details"}
+# reads under the id now (_migrate, current_id); the first one stored wins. Internal only: no surface shows a former id.
+FORMER_IDS = {"important-details": "heads-up", "you-should-know": "heads-up"}
 # what the built-ins were named before, the sha1 of the words (collapsed) of each prompt they shipped with before, and
 # what they covered before: a workspace's stored copy of a built-in that still holds one reads as the built-in is now
 # (_as_now)
-FORMER_NAMES = {"unverified": ("Unverified",), "important-details": ("You should know",)}
-FORMER_COVERS = {"judgment": (["documents"],), "unverified": (["documents"],)}
-# what a built-in covered before it covered Claude's answers: a stored copy that holds it, and whose covers the analyst
-# never set (`covers_set`), reads as covering what its built-in covers now (_as_now)
-COVERS_BEFORE_ANSWERS = {"important-details": (["documents", "cards"],)}
+FORMER_NAMES = {"heads-up": ("You should know", "Important details")}
+FORMER_COVERS = {"judgment": (["documents"],)}
+# what a built-in covered by default before: a stored copy that holds it, and whose covers the analyst never set
+# (`covers_set`), reads as covering what its built-in covers now (_as_now)
+FORMER_DEFAULT_COVERS = {"heads-up": (["documents", "cards"], ["documents", "cards", "answers"])}
 FORMER_PROMPTS = {
     "judgment": ("20b914af87f96860649651e3c44b4a1217752e90",),
-    "unverified": ("fd652c0e32dafbfda58932a0e2cc1e5acb7898e6",),
-    "important-details": ("af5c7de4b07f80efaa866258cc65be5a34a91981", "f3bce900c61feda9b38b72f34d5e8fdc34e5dec5"),
+    "heads-up": ("af5c7de4b07f80efaa866258cc65be5a34a91981", "f3bce900c61feda9b38b72f34d5e8fdc34e5dec5",
+                 "0829a23430817c86bc793d3a14a4cac5f644a93b"),
 }
 CANVAS = canvas_comments.CANVAS  # the run target of a check over the cards, among `runs` beside the documents' slugs
 CANVAS_NAME = "cards"  # how a line, a chat and main's `checked` event name that target
@@ -233,8 +237,11 @@ def _shown_now(stored: dict[str, Any], now: dict[str, Any], *, before_cards: boo
 def _as_now(stored: dict[str, Any], *, before_cards: bool = False) -> dict[str, Any]:
     """A stored built-in with the name, the prompt and the covers its built-in has now in place of a former one it still
     holds (FORMER_NAMES, FORMER_PROMPTS, FORMER_COVERS), and `shown` as _shown_now reads it; one the analyst changed
-    stays."""
+    stays. A former built-in (RETIRED) reads as stored, but on only where the analyst turned it on."""
     cid = str(stored.get("id") or "")
+    if cid in RETIRED:
+        stored["shown"] = _shown_now(stored, {"shown": False}, before_cards=before_cards)
+        return stored
     now = builtin(cid) if cid in BUILTINS else None
     if now is None:
         return stored
@@ -244,7 +251,7 @@ def _as_now(stored: dict[str, Any], *, before_cards: bool = False) -> dict[str, 
     if _words_key(stored.get("prompt")) in FORMER_PROMPTS.get(cid, ()):
         stored["prompt"] = now["prompt"]
     if stored.get("covers") in FORMER_COVERS.get(cid, ()) or (
-            not stored.get("covers_set") and stored.get("covers") in COVERS_BEFORE_ANSWERS.get(cid, ())):
+            not stored.get("covers_set") and stored.get("covers") in FORMER_DEFAULT_COVERS.get(cid, ())):
         stored["covers"] = now["covers"]
     return stored
 
@@ -318,7 +325,7 @@ def list_checks(c: str) -> list[dict[str, Any]]:
     for p in sorted(d.glob("*.json")) if d.is_dir() else []:
         if p.stem in BUILTINS or p.stem in theirs or p.stem in FORMER_IDS:
             continue
-        x = read_json(p, None)
+        x = read(c, p.stem) if p.stem in RETIRED else read_json(p, None)
         if isinstance(x, dict) and x.get("id") == p.stem:
             x.setdefault("runs", {})
             x["covers"] = covers_of(x.get("covers"))
@@ -817,8 +824,8 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
                     since: str | float | None = None) -> dict[str, Any] | None:
     """Start a run of check `cid` on the written document `doc`, on the cards (CANVAS, canvas_cover, of the cards that
     changed since `since` when it is given), or on Claude's answers (ANSWERS, answer_cover, of the answers kept since
-    `since`, a time), and return its record, or None when it has nothing to cover, the document is not written or the
-    check does not cover the cards or the answers. A running run of it on `doc` is stopped first. `notify` tells main
+    `since`, a time), and return its record, or None when it has nothing to cover, the document is not written, the
+    check does not cover the cards or the answers, or it is a former built-in (RETIRED). A running run of it on `doc` is stopped first. `notify` tells main
     when it ends, never for a run over answers. Its agent starts as `route` says (subagents.start_job): a click (Run) or a follow-on start (a
     writer's end, main's turn end) through main's module when a place is free (MAX_SESSIONS), queued otherwise; a typed
     start (main's run_check) at once, as the exact Agent call main makes, which the record's `_answer` holds for the
@@ -828,6 +835,8 @@ async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None =
     check = read(c, cid)
     if check is None:
         raise ValueError(f"no check {cid!r}")
+    if check["id"] in RETIRED:  # a former built-in keeps its comments but never runs again
+        return None
     if doc == CANVAS:
         cover = canvas_cover(c, check, passages_, force, since) if covers(check, "cards") else []  # type: ignore[arg-type]
     elif doc == ANSWERS:
