@@ -98,7 +98,8 @@
 }
 .lside-title { flex: 1; min-width: 0; font: 600 var(--text-ui-sm) / 1.4 var(--font-body); }
 .lside-kind { font: var(--type-mono-sm); font-weight: 400; color: var(--text-tertiary); }
-.lside-question { margin: 0 0 0 20px; font: var(--type-body-sm); color: var(--text-secondary); }
+/* a definition written as a list keeps its line breaks */
+.lside-question { margin: 0 0 0 20px; font: var(--type-body-sm); color: var(--text-secondary); white-space: pre-line; }
 .lside-detail .lside-question { margin-left: 0; }
 .lside-showin { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: 20px; }
 .lside-detail .lside-showin { margin-left: 0; }
