@@ -225,6 +225,31 @@ def test_a_takeaway_s_marks_are_checked_with_main_s_reply_and_a_card_s_cell_is_t
     assert notebook.takeaways_to_check(CORPUS) == []
 
 
+def test_a_check_s_index_is_its_own_while_another_check_writes_one(_fresh):
+    """A card rewritten while a reply's check runs starts a check of its own, which writes the cards' index as the card
+    now stands. The reply's checker keeps reading the index of the cards its validator holds, so a place it finds there
+    is one the validator can read back; each index goes when its check ends."""
+    cid = _seed_card("", [TABLE])
+    seen: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        index = next(w for w in prompt.split("`") if w.endswith("cards-index.tsv"))
+        seen.append(index)
+        other = marks.cards_index(CORPUS, [])  # the rewritten card's own check, meanwhile
+        assert other != index
+        assert f"card:{cid}#merged/agent-07\t12" in Path(index).read_text(encoding="utf-8")
+        out = [{"mark": 1, "kind": "card", "evidence": {"ref": f"card:{cid}#merged/agent-07"}, "status": "verified",
+                "correction": None, "reason": "the table says 12"}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    turn = marks.new_turn()
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+    asyncio.run(marks.start_check(CORPUS, main, turn, ["Merged: [12](#) for agent-07."], "cut", fork=fork))
+    (chat,) = marks.stored(CORPUS, turn)["items"]
+    assert chat["status"] == "verified", chat
+    assert not Path(seen[0]).exists()
+
+
 def _main_at(monkeypatch, cut: str | None):
     from types import SimpleNamespace
 
