@@ -130,11 +130,22 @@ def session_cards(c: str) -> list[dict[str, Any]]:
 
 
 def cards_index(c: str, cards: list[dict[str, Any]]) -> str:
-    """The file the checker greps for a value a card shows (the validator's card_index), in the workspace's temp
-    folder; its path."""
-    p = _temp_dir(c) / "cards-index.tsv"
+    """The file the checker greps for a value a card shows (the validator's card_index), in a folder of its own in the
+    workspace's temp folder; its path. Each check has its own: a card rewritten while a check runs starts another
+    check, whose index must not take the place of the one this check's validator reads `cards` as."""
+    folder = _temp_dir(c) / f"check-{secrets.token_hex(4)}"
+    folder.mkdir()
+    p = folder / "cards-index.tsv"
     p.write_text(evidence().card_index(cards), encoding="utf-8")
     return str(p)
+
+
+def _drop_index(index: str) -> None:
+    """A check's index, gone with its folder once the check ended."""
+    if index:
+        with contextlib.suppress(OSError):
+            Path(index).unlink()
+            Path(index).parent.rmdir()
 
 
 def evidence() -> ModuleType:
@@ -407,8 +418,11 @@ async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str]
         return
     folder = str(main.get("cwd") or config.corpus_dir(c))
     cards, index = await _cards_and_index(c)
-    await asyncio.gather(*(_check_share(c, main, turn, cut, share, folder, fork or run_fork, cards, index)
-                           for share in split_marks(chat + takes)))
+    try:
+        await asyncio.gather(*(_check_share(c, main, turn, cut, share, folder, fork or run_fork, cards, index)
+                               for share in split_marks(chat + takes)))
+    finally:
+        _drop_index(index)
 
 
 async def _cards_and_index(c: str) -> tuple[list[dict[str, Any]], str]:
@@ -592,7 +606,7 @@ def _q(w: str) -> str:
 REPAIR_NOT_RUN = "The analyst pressed x to check citation {n}, whose first check did not run. It may stand in an earlier reply than your last."
 REPAIR_FIRST = "The analyst pressed x to repair citation {n}. It may stand in an earlier reply than your last. The first check {found}"
 REPAIR_TASK = (
-    "Check it again from the start, and make the citation correct: change the cited words, the sentence or the evidence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.",
+    "Check it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.",
     "When the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.",
 )
 
@@ -699,7 +713,10 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
     async def run() -> None:
         cards, index = await _cards_and_index(c)
         folder = str(main.get("cwd") or config.corpus_dir(c))
-        await _check_share(c, main, str(turn), cut, [share], folder, fork or run_fork, cards, index, request)
+        try:
+            await _check_share(c, main, str(turn), cut, [share], folder, fork or run_fork, cards, index, request)
+        finally:
+            _drop_index(index)
 
     _spawn(run())
     return ""
