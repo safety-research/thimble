@@ -71,3 +71,12 @@ test('a text that wraps onto more rows than its own lines is named by its first 
   assert.deepEqual(layoutLines(tree, 30).wrapped, [])
   assert.deepEqual(layoutLines(tree, 12).wrapped, [{ line: 3, text: 'a row of cells too wide' }])
 })
+
+test('a wrapped text in a row of parts side by side, or padded into columns, is a row; a sentence alone is not', () => {
+  const tree = { t: 'Box', p: { flexDirection: 'column' }, c: [
+    { t: 'Text', p: {}, c: ['a sentence that wraps'] },
+    { t: 'Text', p: {}, c: ['ada     3 of 9 merged'] },
+    { t: 'Box', p: {}, c: [{ t: 'Text', p: {}, c: ['bram'] }, { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: [' 5 of 9 merged'] }] }] },
+  ] }
+  assert.deepEqual(layoutLines(tree, 12).wrapped.map(w => [w.text, !!w.row]), [['a sentence that wraps', false], ['ada     3 of 9 merged', true], [' 5 of 9 merged', true]])
+})

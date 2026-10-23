@@ -192,6 +192,24 @@ test('a row laid out wider than the width a side pane leaves the card comes back
   assert.equal(fits.r.beside, undefined)
 })
 
+// A sentence that fits the card and wraps on its own line where a side pane narrows the card reads the same there: the
+// call brings no narrower copy back for it, so the answer gives no reason for a new version. Parts side by side that
+// wrap do (a row of Texts in a Box laid across).
+test('a sentence that wraps at the narrower width alone brings no copy back; parts side by side that wrap there do', async () => {
+  const sentence = `function view(p, s) { const { Box, Text } = s.elements
+  return Box({ flexDirection: 'column', children: [
+    Text({ children: 'Failures jump after the change on the 21st, from five of twenty to all of them.' }),
+    Text({ children: 'ada 3' }),
+  ] }) }`
+  const one = await load(sentence, { width: 90, beside: 40 })
+  assert.equal(one.r.ok, true)
+  assert.equal(one.r.beside, undefined)
+  const parts = sentence.replace("Text({ children: 'ada 3' }),", "Box({ children: [Text({ children: 'ada' }), Text({ children: ' 3 of 9 merged, the longest run of the afternoon by far' })] }),")
+  const two = await load(parts, { width: 90, beside: 40 })
+  assert.equal(two.r.beside.wrapped.length, 1)
+  assert.match(two.r.beside.lines[two.r.beside.wrapped[0] - 1], /3 of 9 merged/)
+})
+
 test('a Button around lines is a Box that a click anywhere on its lines presses', async () => {
   const group = `function view(p, s) { const { Box, Text, Button } = s.elements
   const st = s.state || { n: 0 }

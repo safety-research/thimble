@@ -569,17 +569,19 @@ function load(a) {
   return { ...r, ...own, ...besideOf(card, own, Number(a.beside) || 0) }
 }
 
-/** The copy at `width`, the narrower width a side pane leaves the card, when texts that fit on their rows at the
- *  card's width wrap there: `beside: {width, lines, cut, wrapped}`, `wrapped` the numbers of the lines they start on.
- *  A row laid out for the wider card (fixed columns, a long details line) wraps there, and Claude sees it before the
- *  person does. Nothing when none does, or the view fails at that width (it is told when the card draws there). */
+/** The copy at `width`, the narrower width a side pane leaves the card, when a row that fits at the card's width wraps
+ *  there: `beside: {width, lines, cut, wrapped}`, `wrapped` the numbers of the lines they start on. A row laid out for
+ *  the wider card (fixed columns, parts side by side: layout.js `row`) breaks its columns there, and Claude sees it
+ *  before the person does. A sentence that wraps on its own line reads the same at either width, so it alone brings
+ *  nothing back, and no reason for a new version. Nothing when no row wraps, or the view fails at that width (it is
+ *  told when the card draws there). */
 function besideOf(card, own, width) {
   if (!width || width >= card.width) return {}
   const r = inContext(card, 'copy', { width }, EVENT_MS)
   if (!r.ok) return {}
   const c = copy(r.tree, width)
   const before = new Set(own.wrapped.map(w => w.text))
-  const wrapped = [...new Set(c.wrapped.filter(w => !before.has(w.text)).map(w => w.line))]
+  const wrapped = [...new Set(c.wrapped.filter(w => w.row && !before.has(w.text)).map(w => w.line))]
   return wrapped.length ? { beside: { width, lines: c.lines, cut: c.cut, wrapped } } : {}
 }
 
