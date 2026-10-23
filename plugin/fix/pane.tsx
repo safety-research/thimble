@@ -95,7 +95,7 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
   const v = await viewNow($)
   const say = (said: string | null | void) => { if (said) $.ui.toast(said) }
   const head = Box({ key: 'head', flexDirection: 'column', children: [
-    Text({ key: 'h1', children: [Text({ key: 'a', bold: true, children: 'Your fixes' }), Text({ key: 'b', dimColor: true, children: ` · thimble ${list?.version || ''}${list?.version ? ' ' : ''}+ ${list?.count_on ?? 0} on${list && !list.on ? ' · all off' : ''}` })] }),
+    Text({ key: 'h1', children: [Text({ key: 'a', bold: true, children: 'Your fixes' }), Text({ key: 'b', dimColor: true, children: list && !list.on ? ` · thimble ${list.version} alone · ${list.count_on} kept off` : ` · thimble ${list?.version || ''}${list?.version ? ' ' : ''}+ ${list?.count_on ?? 0} on` })] }),
     Text({ key: 'h2', dimColor: true, children: list?.live ? `${await shownPath($, list.live)} · branch mine` : 'No fixes yet.' }),
   ] })
   if (!fixes.length) {

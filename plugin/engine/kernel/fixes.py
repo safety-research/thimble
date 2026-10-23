@@ -931,7 +931,7 @@ def list_lines() -> list[str]:
         return ["No fixes yet. In thimble: /thimble-fix <what should work differently>."]
     head_ = f"Your fixes · thimble {d['version'] or ''} + {d['count_on']} on".replace("  ", " ")
     if not d["on"]:
-        head_ += " · all off (thimble fix on brings them back)"
+        head_ = f"Your fixes · thimble {d['version'] or ''} alone · {d['count_on']} kept off (thimble fix on brings them back)"
     out = [head_, f"{_tilde(d['live'])} · branch mine", ""]
     for r in d["fixes"]:
         out.append(f"  {r['id']:>3}  {WORD.get(r['state'], r['state']):<8}  {short(r['title'], 40):<40}  "
