@@ -34,7 +34,7 @@ export interface FixStatus {
 }
 
 const PHASE_WORDS: Record<NonNullable<FixRow['phase']>, (r: FixRow) => string> = {
-  fixing: (r) => `Fixing: ${r.words || r.title} · Claude works in a copy of thimble`,
+  fixing: (r) => `Fixing: ${r.title || r.words} · Claude works in a copy of thimble`,
   testing: (r) => `Testing fix ${r.id}: ${r.title}`,
   applying: (r) => `Putting fix ${r.id} on: ${r.title}`,
   restarting: (r) => `thimble restarts with fix ${r.id}: ${r.title}`,

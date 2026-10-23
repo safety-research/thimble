@@ -288,8 +288,17 @@ def lend(root: Path, src: Path | None = None) -> None:
         have, want = root / part / name, src / part / name
         if have.exists() or have.is_symlink() or not want.exists():
             continue
+        real = Path(os.path.realpath(want))
         with contextlib.suppress(OSError):
-            have.symlink_to(Path(os.path.realpath(want)), target_is_directory=True)
+            if name != "node_modules":
+                have.symlink_to(real, target_is_directory=True)
+                continue
+            # a folder of links, one per package: the page's tools write their temp files in it (.vite, .vite-temp),
+            # and the installed packages stay as they are
+            have.mkdir()
+            for entry in real.iterdir():
+                if not entry.name.startswith(".vite"):
+                    (have / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
     exclude = fixes_home() / "live" / ".git" / "info" / "exclude"
     with contextlib.suppress(OSError):
         lines = exclude.read_text().splitlines() if exclude.is_file() else []

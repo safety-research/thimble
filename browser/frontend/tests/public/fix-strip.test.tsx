@@ -38,7 +38,7 @@ describe('the command and the page', () => {
 
 describe('the row', () => {
   test('its words: the step while Claude works, how it went after', () => {
-    expect(fixText(row({ phase: 'fixing', kind: null, said: null }))).toBe("Fixing: make this card's title say how many rows · Claude works in a copy of thimble")
+    expect(fixText(row({ phase: 'fixing', kind: null, said: null }))).toBe('Fixing: Card says how many rows · Claude works in a copy of thimble')
     expect(fixText(row({ phase: 'testing' }))).toBe('Testing fix 3: Card says how many rows')
     expect(fixText(row({ phase: 'restarting' }))).toBe('thimble restarts with fix 3: Card says how many rows')
     expect(fixText(row())).toBe('thimble fixed: Card says how many rows · tests pass')

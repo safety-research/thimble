@@ -204,3 +204,18 @@ def test_fixes_off_leave_the_code_tickets_their_entry_points(monkeypatch):
     monkeypatch.setenv("THIMBLE_FIXES", "off")
     assert fixes.problem() == fixes.OFF_LINE
     assert fixes.status() == {"problem": fixes.OFF_LINE, "fixes": []}
+
+
+def test_a_copy_gets_the_installed_packages_and_a_folder_of_its_own_for_the_page_s_temp_files(tmp_path):
+    src, copy = tmp_path / "install", tmp_path / "copy"
+    (src / "backend" / ".venv" / "bin").mkdir(parents=True)
+    (src / "frontend" / "node_modules" / "vite").mkdir(parents=True)
+    (src / "frontend" / "node_modules" / ".vite").mkdir()
+    (copy / "backend").mkdir(parents=True)
+    (copy / "frontend").mkdir()
+    fixes.lend(copy, src)
+    assert (copy / "backend" / ".venv").resolve() == (src / "backend" / ".venv").resolve()
+    nm = copy / "frontend" / "node_modules"
+    assert nm.is_dir() and not nm.is_symlink()
+    assert (nm / "vite").resolve() == (src / "frontend" / "node_modules" / "vite").resolve()
+    assert not (nm / ".vite").exists()
