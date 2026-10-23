@@ -546,7 +546,7 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const ev = m.evidence
   const rows: Unit[] = []
   const dim = (key: string, text: string) => rows.push({ h: rowsOf(text, w), el: Text({ key, dimColor: true, wrap: 'wrap', children: text }) })
-  const fixed = m.repair ? 'repaired; ' : 'corrected; '
+  const fixed = m.narrowed ? (m.repair ? 'repaired by narrowing; ' : 'narrowed; ') : m.repair ? 'repaired; ' : 'corrected; '
   const notFixed = m.repair ? 'not repaired: ' : ''
   if (m.status === 'corrected' && m.was) dim('was', `${fixed}was ${m.was.replace(/\*\*|`/g, '')}`)
   else if (m.status === 'failed' && m.reason) dim('why', `${notFixed}${firstSentence(m.reason)}`)

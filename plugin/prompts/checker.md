@@ -34,6 +34,7 @@ When your result differs from the reply, read your code once for an error, then 
 `status` is `verified` (the evidence shows the words) or one of these:
 
 - `corrected`: `correction.words` holds only the true words that replace the cited words ("13" becomes "12", not "12 records"), as printed, rounded as the reply rounds; for a quote, the right line or exact words. The evidence must show them.
+- `narrowed`: the cited words add your own words to what the evidence shows, such as a translation or an explanation, and those words state no fact of the data: `correction.words` holds only the part of the cited words that the evidence shows, copied from them.
 - `wrong`: the records show the claim false, and no words can replace the cited words.
 - `unconfirmed`: the records you can read do not show it true or false. First follow each value to the record that sets it, such as an earlier command's variable or a file that an earlier step wrote.
 

@@ -2,7 +2,7 @@
 import it too.
 
 A reply marks its claims as `[words](#)`. After the reply, the checker (a fork of the session, prompts/checker.md) gives
-one answer per mark: a status (`verified`, `corrected`, `wrong`, `unconfirmed`), the evidence, and for a correction
+one answer per mark: a status (`verified`, `corrected`, `narrowed`, `wrong`, `unconfirmed`), the evidence, and for a correction
 the new words. check_mark() decides what the person sees of that mark; its result wins over the checker's status.
 
 What it guarantees. The checker judges what a claim means; this module makes sure the evidence it gave is real and
@@ -67,12 +67,16 @@ A mark the checker verified whose evidence does not hold here fails as not confi
 checker found wrong stays failed, with its reason: the checker finds a mark wrong also for the words around it (a wrong
 condition), which evidence that prints the marked words does not answer; one it found wrong and gave the right words for
 is a correction. A correction whose evidence does not show its
-new words is not confirmed: its evidence confirms neither the new words nor the marked ones. A mark the checker could
+new words is not confirmed: its evidence confirms neither the new words nor the marked ones. A narrowing (`narrowed`)
+cites only a part of the marked words, which the evidence shows, and leaves the rest as the reply's own words (a
+translation, a gloss): it holds only when its words are a part of the marked ones, the evidence shows them, and the
+words it leaves out state no number or day, which would be a claim of the data. A mark the checker could
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
 module cannot judge, fails as a check that did not run (`failedBy` `none`), which x in the tray starts again. A checker's note on the rest of the sentence stays beside the mark.
 
   check_all(marks, answer, calls, cwd, root, tmp, cards)  -> {parsed, results}: every mark of a reply
-  check_mark(mark, item, calls, cwd, root, tmp, cards)    -> {n, status, shown, reason, failedBy?, evidence?, note?}
+  check_mark(mark, item, calls, cwd, root, tmp, cards)    -> {n, status, shown, reason, failedBy?, evidence?, note?,
+                                                              was?, narrowed?}
   card_index(cards)                                       -> the cards' places and values, one per line, for the checker
   terminal_cards(folder)                                  -> the terminal's cards (cards/<id>/meta.json, rows.json) as `cards`
   parse_answer(text)                               -> the last ```json array of the checker's answer, or None
@@ -1537,13 +1541,35 @@ def own_words(new: str, mark: dict[str, Any]) -> str:
     return norm_ws(new[at[start]:at[end - 1] + 1])
 
 
+def narrowed_part(new: str, words: str) -> tuple[str, str] | None:
+    """A narrowing's words as a part of the marked words: that part as the words write it (formatting aside), and the
+    words it leaves out; None when the new words are no part of the marked ones that starts and ends at a word's edge.
+    Quote marks compare as one mark, white space loosely."""
+    plain = plain_map(words)[0]
+    part = plain_map(new)[0].strip()
+    if not part:
+        return None
+    hay, needle = one_quote(plain), one_quote(part)
+    i = hay.find(needle)
+    while i >= 0:
+        j = i + len(needle)
+        # a word's edge, and no part of a longer number (217 of 5,217)
+        inner_a = needle[0].isalnum() and i > 0 and (hay[i - 1].isalnum() or (needle[0].isdigit() and hay[i - 1] in ".," and hay[i - 2:i - 1].isdigit()))
+        inner_b = needle[-1].isalnum() and j < len(hay) and (hay[j].isalnum() or (needle[-1].isdigit() and hay[j] in ".," and hay[j + 1:j + 2].isdigit()))
+        if not inner_a and not inner_b:
+            return plain[i:j], norm_ws(f"{plain[:i]} {plain[j:]}")
+        i = hay.find(needle, i + 1)
+    return None
+
+
 def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?}. `mark` is {n, words,
     sentence?}; `item` the checker's object for it (or None); `calls` the real Bash calls of the session ({command,
     output, by}).
 
-    The checker's status is `verified`, `corrected`, `wrong` (the data show the claim false) or `unconfirmed` (the
-    check could not see what shows it true or false). This module checks the evidence of the words it shows: it never
+    The checker's status is `verified`, `corrected`, `narrowed` (only a part of the words is cited: a correction whose
+    `narrowed` result keeps the rest as the reply's own words), `wrong` (the data show the claim false) or
+    `unconfirmed` (the check could not see what shows it true or false). This module checks the evidence of the words it shows: it never
     turns the checker's verdict that a claim is wrong into verified, so a correction whose evidence does not show the
     new words is not confirmed. A mark the checker judged wrong or unconfirmed keeps the evidence it gave, when that
     evidence is real, so the person sees what the check found. `failedBy` is `check` when the checker found the claim
@@ -1586,13 +1612,25 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
                 res["evidence"] = evidence
         return res
 
+    narrow = status == "narrowed"
+    if narrow:
+        part = narrowed_part(norm_ws(corr.get("words") or ""), words) if corr else None
+        if not part:
+            return judged("evidence", "Not confirmed: the check narrowed the citation to words that are not part of it.")
+        new, left = part
+        if left and (marked_numbers(wordnums(left, counts=True)) or calendar_days(left)):
+            # a number or a day is a claim of the data, which the citation cannot leave out
+            return judged("evidence", f"Not confirmed: the check cited only “{short(new, 60)}”, but the words it left out (“{short(left, 60)}”) state a value of the data.")
+        status, narrow = ("corrected", True) if re.search(r"\w", left) else ("verified", False)
+        new = new if narrow else ""
     if status == "wrong":
         return judged("check", reason or "the data do not show this claim")
     if status == "unconfirmed":
         return judged("evidence", reason or "the check could not show this claim from the data")
     if status not in ("verified", "corrected"):
         return {**out, "reason": f"{NOT_RUN} It gave the status {status!r}."}
-    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if new else "", cards)
+    # a narrowing puts no words in: the evidence shows the part it keeps
+    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if new and not narrow else "", cards)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or words, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
@@ -1600,11 +1638,13 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         # the check's verdict that the words are wrong rests on evidence that does not show its new words: neither the
         # old words nor the new ones are confirmed (a match of the old words there, such as the 250 of a test that
         # printed False, is no sign that they hold)
-        res.update(status="failed", shown=words, failedBy="evidence", reason=f"Not confirmed: the check gave other words, but {problems[0]}.")
+        res.update(status="failed", shown=words, failedBy="evidence", reason=f"Not confirmed: the check {'cited only a part of the words' if narrow else 'gave other words'}, but {problems[0]}.")
     elif problems:
         res.update(status="failed", failedBy="evidence", reason=f"Not confirmed: {problems[0]}. The claim may still be true.")
     elif new:
         res["was"] = words
+        if narrow:
+            res["narrowed"] = True
     return res
 
 

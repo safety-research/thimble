@@ -166,7 +166,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     Text({ key: 'w', children: `  ${m.shown.replace(/\*\*|`/g, '')}` }),
   ] })
   const rows: Any[] = [head]
-  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `corrected; was ${m.was.replace(/\*\*|`/g, '')}` }))
+  if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `${m.narrowed ? 'narrowed' : 'corrected'}; was ${m.was.replace(/\*\*|`/g, '')}` }))
   if (m.reason) rows.push(Text({ key: 'why', wrap: 'wrap', ...(m.status === 'failed' ? { color: st.color } : { dimColor: true }), children: m.reason }))
   if (m.note) rows.push(Text({ key: 'note', wrap: 'wrap', color: 'error', children: `Also false in this sentence: ${m.note}` }))
   // the sentence as the person read it, the mark's own words in bold

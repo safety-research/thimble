@@ -16,7 +16,8 @@
 //   checking     purple, underlined, and a turning glyph right after it
 //   verified     purple, underlined
 //   corrected    the corrected words in place of the marked ones, purple, underlined: once corrected it holds, so it
-//                looks as a verified one does (its tray card says it was corrected)
+//                looks as a verified one does (its tray card says it was corrected). A narrowed one (`narrowed`) keeps
+//                its words: only the part the check cited is the mark, the rest reads as the reply's plain words
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
 //                did not show them), or it did not run or gave no answer: the warning color, underlined, with ` ?`
 //                after it. One look whatever the cause
@@ -45,7 +46,7 @@ export type ViewSpan = { start: number; end: number; look: SpanLook; label: stri
 type Mark = { start: number; end: number; words: string }
 
 export type MarkStatus = 'pending' | 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked'
-export type MarkLook = { n: number; status: MarkStatus; shown?: string }
+export type MarkLook = { n: number; status: MarkStatus; shown?: string; narrowed?: boolean }
 
 export type MessageOpts = {
   text: string
@@ -81,8 +82,39 @@ export type Passage = { text: string; label: string }
 /** A purple that follows the person's theme (Claude Code's color for a merged pull request). */
 const PURPLE = 'merged'
 
-/** Each mark's runs as its status draws them: a correction's words in place of the marked ones, and the glyph after a
- *  mark that is checked or failed as a run of the mark's own. */
+/** A narrowed mark's runs: the part of its words the check cited (`shown`) stays the mark's, the words before and after
+ *  it are plain words. White space compares loosely and every quote mark as one; the runs as they are when the part is
+ *  not found. */
+function narrowRuns(runs: Run[], shown: string): Run[] {
+  const q = (c: string) => (/["“”‘’']/.test(c) ? '"' : c)
+  const text = runsText(runs)
+  let flat = ''
+  const at: number[] = []
+  for (let i = 0; i < text.length; i++) {
+    const c = /\s/.test(text[i]!) ? ' ' : q(text[i]!)
+    if (c === ' ' && (!flat || flat.endsWith(' '))) continue
+    flat += c
+    at.push(i)
+  }
+  const want = [...shown.replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim()].map(q).join('')
+  const k = want ? flat.indexOf(want) : -1
+  if (k < 0) return runs
+  const a = at[k]!, b = at[k + want.length - 1]! + 1
+  const out: Run[] = []
+  let pos = 0
+  for (const r of runs) {
+    const end = pos + r.s.length
+    const { mark: _m, ...plain } = r
+    for (const [x, y, cited] of [[pos, Math.min(end, a), false], [Math.max(pos, a), Math.min(end, b), true], [Math.max(pos, b), end, false]] as const) {
+      if (y > x) out.push({ ...(cited ? r : plain), s: r.s.slice(x - pos, y - pos) })
+    }
+    pos = end
+  }
+  return out
+}
+
+/** Each mark's runs as its status draws them: a correction's words in place of the marked ones (a narrowing's part of
+ *  them), and the glyph after a mark that is checked or failed as a run of the mark's own. */
 function withLooks(runs: Run[], o: MessageOpts): Run[] {
   const out: Run[] = []
   for (let k = 0; k < runs.length; k++) {
@@ -92,7 +124,9 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     while (e + 1 < runs.length && runs[e + 1]!.mark === r.mark) e++
     const look = o.looks[r.mark]
     // a correction may hold markdown (a file's line as written): it draws as the reply's own words would
-    out.push(...(look?.status === 'corrected' && look.shown ? inline(look.shown, 0, look.shown.length).map((x: Run) => ({ ...x, mark: r.mark })) : runs.slice(k, e + 1)))
+    const own = runs.slice(k, e + 1)
+    if (look?.status === 'corrected' && look.shown) out.push(...(look.narrowed ? narrowRuns(own, look.shown) : inline(look.shown, 0, look.shown.length).map((x: Run) => ({ ...x, mark: r.mark }))))
+    else out.push(...own)
     if (look?.status === 'checking') out.push({ s: ` ${o.spin}`, mark: r.mark, tag: 'spin' })
     if (look?.status === 'failed') out.push({ s: ' ?', mark: r.mark, tag: 'x' })
     k = e

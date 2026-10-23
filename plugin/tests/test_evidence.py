@@ -653,3 +653,46 @@ def test_the_checker_s_index_lists_each_place_with_its_value_and_the_terminal_s_
     answer = "```json\n" + json.dumps([{"mark": 1, **card("card:cab12cd34#runs/06-24")}]) + "\n```"
     ran = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps({"marks": [{"n": 1, "words": "9"}], "answer": answer, "calls": [], "cwd": "/data", "cards_dir": str(tmp_path / "cards")}), capture_output=True, text=True, check=True)
     assert json.loads(ran.stdout)["results"][0]["status"] == "verified"
+
+
+def test_a_narrowing_cites_only_the_part_of_the_words_the_evidence_shows_and_leaves_claudes_own_words_out():
+    # the reply glossed a German summary in English; the check's code printed the value without the gloss
+    words = '5,217 deletions are by one username, "Kalmbot", with the summary "Seite gelöscht." ("page deleted")'
+    out = '5,217 deletions are by one username, "Kalmbot", with the summary "Seite gelöscht."\n'
+    code = ('import json\nd = [r for r in map(json.loads, open("events.jsonl")) if r["action"] == "delete"]\n'
+            'users, sums = {r["user"] for r in d}, {r["summary"] for r in d}\n'
+            'print(f\'{len(d):,} deletions are by one username, "{min(users)}", with the summary "{min(sums)}"\')')
+    m = {"n": 1, "words": words, "sentence": f"[{words}](#)."}
+    calls = [call(code, out)]
+
+    def answer(status: str, kept: str | None = None) -> dict:
+        return check_mark(m, computed(out.strip(), status=status, correction={"words": kept} if kept is not None else None), calls, "/data")
+
+    kept = '5,217 deletions are by one username, "Kalmbot", with the summary "Seite gelöscht."'
+    # as written, the gloss is in no output: not confirmed, the same answer again on a repair
+    assert answer("verified")["status"] == "failed" and "page deleted" in answer("verified")["reason"]
+    # narrowed to the part the output shows: corrected in place, the rest stays in the reply as plain words
+    r = answer("narrowed", kept)
+    assert (r["status"], r["shown"], r["was"], r["narrowed"]) == ("corrected", kept, words, True)
+    assert r["evidence"]["output"] == out
+    # curly quotes for straight ones are the same words; the part is given as the reply writes it
+    assert answer("narrowed", kept.replace('"', "“", 1).replace('"', "”", 1))["shown"] == kept
+    # a part the cited words do not hold, or one cut inside a word, is no narrowing
+    for bad in ('5,217 deletions are by one user, "Kalmbot"', '217 deletions'):
+        r = answer("narrowed", bad)
+        assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", words) and "not part of it" in r["reason"]
+    # words left out that state a value of the data stay a claim: not confirmed
+    r = answer("narrowed", '"Seite gelöscht."')
+    assert (r["status"], r["failedBy"]) == ("failed", "evidence") and "state a value of the data" in r["reason"]
+    # the part must still be shown by the evidence
+    other = check_mark(m, computed(out.strip(), status="narrowed", correction={"words": kept}), [call(code, out.replace("5,217", "5,216"))], "/data")
+    assert other["status"] == "failed" and other["reason"].startswith("Not confirmed: the check cited only a part of the words")
+    # a plain correction that drops words still takes them out of the reply: no narrowing
+    assert "narrowed" not in answer("corrected", kept)
+    # through the validator, as the plugin runs it
+    req = {"cwd": "/data", "marks": [m], "calls": calls,
+           "answer": "```json\n" + json.dumps([{"mark": 1, "kind": "computed", "evidence": {"output": out.strip()}, "status": "narrowed",
+                                                 "correction": {"words": kept}, "reason": "the English gloss is the reply's own"}]) + "\n```"}
+    ran = subprocess.run([sys.executable, str(VALIDATE)], input=json.dumps(req), capture_output=True, text=True, check=True)
+    res = json.loads(ran.stdout)["results"][0]
+    assert (res["status"], res["shown"], res["was"], res["narrowed"]) == ("corrected", kept, words, True)

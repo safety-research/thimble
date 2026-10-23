@@ -127,7 +127,8 @@ async function forkAlive($: Engine, d: Design): Promise<boolean> {
  *  ends at that answer: a card must not repeat a value the check corrected or flagged. */
 async function checkedSince($: Engine, row: string): Promise<string> {
   const reply = await replyOf($, row)
-  const changed = (reply?.items ?? []).filter(m => m.status === 'corrected' || m.status === 'failed')
+  // a narrowing changes no value: it cites fewer of the words
+  const changed = (reply?.items ?? []).filter(m => (m.status === 'corrected' && !m.narrowed) || m.status === 'failed')
   if (!changed.length) return ''
   const lines = changed.map(m => (m.status === 'corrected' ? `- "${m.was ?? m.words}" is wrong; it is "${m.shown}"`
     : m.failedBy === 'check' ? `- "${m.words}" is wrong${m.reason ? `: ${m.reason}` : ''}` : `- "${m.words}" is not confirmed${m.reason ? `: ${m.reason}` : ''}`))
