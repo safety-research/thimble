@@ -242,8 +242,9 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   if (r.it) p.italic = true
   // the words underlined in every status; the turning glyph (purple) and the sign after them (failed: red) are not words.
   // Every piece of the citation, its sign too, joins one hover group (`<key>:<n>`), so the pointer over any of them
-  // lights all its words, on every line it wraps to
-  const id = `${o.key}:${look.n}`
+  // lights all its words, on every line it wraps to. A mark no check is for (n 0: new words in a squeezed version) is a
+  // group of its own by its place, so the pointer over it lights it alone
+  const id = look.n > 0 ? `${o.key}:${look.n}` : `${o.key}:at${r.mark as number}`
   const tint = citeHover(id, look.status)
   if (r.tag === 'spin') p.color = PURPLE
   else if (r.tag) p.color = 'error'

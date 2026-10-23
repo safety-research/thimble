@@ -40,19 +40,44 @@ type Any = any
 const BUSY = { plugin: 'thimble', key: 'busy' } as const
 
 /** The looks of the marks of a text a row shows in place of Claude's words (a squeezed version): each mark that has the
- *  words of one of the row's checked marks looks as that one does, and opens its evidence; any other is words no check
- *  is for (view.ts `unchecked`). */
+ *  words of one of the row's checked marks looks as that one does, and opens its evidence. A rewrite may word a
+ *  citation anew (`[3 of 12](#)` as `[3 of the 12 nightly runs](#)`): a mark left over then stands for a checked mark
+ *  left over that states the same values (or, with no number in either, whose words hold the other's), and opens its
+ *  evidence; its look is that check's for the values it states, not its corrected words. Any other is words no check
+ *  is for (view.ts `unchecked`, n 0). */
 export function looksByWords(marks: { words: string }[], items: MarkItem[], runs: boolean): MarkLook[] {
   const norm = (w: string) => w.replace(/\s+/g, ' ').trim().toLowerCase()
   const free = [...items]
-  return marks.map(m => {
+  const looks: (MarkLook | null)[] = marks.map(m => {
     const k = free.findIndex(it => norm(it.words) === norm(m.words))
-    if (k < 0) return { n: 0, status: runs ? 'pending' : 'unchecked' }
+    if (k < 0) return null
     const it = free.splice(k, 1)[0]!
     // a rewrite's cited words belong to its own sentence, not to the one this text says them in
     if (it.status === 'corrected' && it.rewrite) return { n: it.n, status: 'failed' }
     return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
   })
+  return marks.map((m, i) => {
+    const done = looks[i]
+    if (done) return done
+    const k = free.findIndex(it => sameClaim(m.words, it.words) || (it.status === 'corrected' && sameClaim(m.words, it.shown)))
+    if (k < 0) return { n: 0, status: runs ? 'pending' : 'unchecked' }
+    const it = free.splice(k, 1)[0]!
+    if (it.status !== 'corrected') return { n: it.n, status: it.status }
+    // a corrected mark: the corrected values confirmed, the values Claude first wrote not
+    return { n: it.n, status: !it.rewrite && sameClaim(m.words, it.shown) ? 'verified' : 'failed' }
+  })
+}
+
+/** Whether two cited words state the same claim: the same numbers, or, with no number in either, each word of one
+ *  among the other's (formatting and case aside: `slow mirror` in `the slow package mirror`). */
+function sameClaim(a: string, b: string): boolean {
+  const nums = (w: string) => [...new Set((w.match(/\d[\d,]*(?:\.\d+)?/g) ?? []).map(x => x.replace(/,/g, '')))].sort().join(' ')
+  const na = nums(a)
+  const nb = nums(b)
+  if (na || nb) return na === nb
+  const words = (w: string) => w.toLowerCase().match(/[\p{L}\p{N}'-]+/gu) ?? []
+  const [few, many] = [words(a), words(b)].sort((x, y) => x.length - y.length) as [string[], string[]]
+  return few.some(w => w.length >= 3) && few.every(w => many.includes(w))
 }
 
 /** The spans placed on the words Claude wrote (`was`, on `words`) that stand nowhere on the words shown (`now`): each

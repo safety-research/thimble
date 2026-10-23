@@ -5,6 +5,7 @@
 // message it covers, which keeps its look at every chip level, and 0 dismisses it. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { citeScope } from '../marks/view'
 import { resetSqueeze } from '../squeeze/term'
 import Chips from '../squeeze/chips.tsx'
 import { promptStub, tempRun } from './stubs'
@@ -336,4 +337,29 @@ test('a catch-up keeps its look at every chip: Length, Interpretation, Backgroun
   await $.command.run({ command: 'squeeze', args: 'for my manager' } as never).catch(() => undefined)
   await change(['4', ']'], 'For your manager: the build is fixed.')
   expect(t.asked.length).toBe(5)
+})
+
+test('a squeezed version that words its citations anew: each citation its own hover group, and a press on one opens the tray on its own', async ($, on) => {
+  const text = 'Of the [12 runs](#), [3 failed](#) on the [slow mirror](#).'
+  const t = await setup($, on, ['Of all [12 nightly runs](#), exactly [3 of them failed](#), each on the [slow package mirror](#).'])
+  await t.turn('t1', text)
+  await t.press('s')
+  await t.press(']')
+  await t.clock.advance(5000)
+  const all = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : [n, ...[n.props?.children, n.children].flat(Infinity).flatMap(all)])
+  const cites = all(await $.ui.render(answer('row-t1', text))).filter(n => n.type === 'Button' && /^citation /.test(String(n.props.label)))
+  // (no check ran here, so each is failed, its × a press of its own in its group)
+  const labels = [...new Set(cites.map(b => String(b.props.label)))]
+  expect(labels).toEqual(['citation 1: 12 nightly runs', 'citation 2: 3 of them failed', 'citation 3: slow package mirror'])
+  // three hover groups, as the reply's own citations have (one shared group before, all of them lit at once)
+  const scopes = labels.map(l => [...new Set(cites.filter(b => b.props.label === l).map(b => b.hover.scope))])
+  expect(scopes).toEqual([1, 2, 3].map(n => [citeScope(`mk-row-t1:${n}`)]))
+  await t.press('s')
+  const ui = await $.ui.mount(answer('row-t1', text))
+  await ui.press({ key: cites.find(b => b.props.label === labels[1])!.props.key })
+  await ui.unmount()
+  // the tray stands on the second citation, as a press on it in Claude's own words does
+  const band = await t.bar()
+  expect(band).toContain('3 failed')
+  expect(band).not.toContain('12 runs')
 })
