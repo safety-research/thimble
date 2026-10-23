@@ -13,6 +13,7 @@ In a shell:
     thimble fix share N [--open]   a link that posts fix N as a GitHub issue; you check it on GitHub first
     thimble fix off [N]            one fix off, or all of them (the plain release)
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
+    thimble fix merge A B C        fixes B and C become part of fix A: one change, one title (asks y/N first)
 
 In Claude Code, /thimble-fix <what should work differently> asks Claude for a new fix.
 
