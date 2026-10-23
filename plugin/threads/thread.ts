@@ -28,7 +28,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { failNotice, noticeLine } from '../bar/notice'
+import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { cardText, revealCard } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { partOf } from '../core/answers'
@@ -319,7 +319,11 @@ async function refresh($: Engine, agentId: string, status: Thread['status']): Pr
   } catch {
     // the turns stay as they were; the status still moves
   }
-  await keep($, { ...t, turns, status })
+  // the thread as it stands after the read: a poll's read that the fork's end overtook (status done) leaves it done, so
+  // the pane does not show the thread answering for ever, without m
+  const now = threads.get(key!)
+  if (!now || (status === 'running' && now.status !== 'running')) return
+  await keep($, { ...now, turns, status })
 }
 
 /** Read the running threads' turns again every few seconds until none runs: only after a question the person asked. */
@@ -400,8 +404,10 @@ export function takeAskNext(key: string): boolean {
 }
 
 /** The thread about `scope`: an existing one, or a new one with no turns yet, opened in the side pane, its input bar
- *  taking the keys. */
-export async function openThreadOn($: Engine, scope: ThreadScope): Promise<boolean> {
+ *  taking the keys. `key`: a key at the prompt opened it, and these are the bar's words a click on which opens it
+ *  where the key cannot: Claude Code places a pane at any width only for the person's press or command, never for a
+ *  key at the prompt (core/pane.ts). */
+export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string } = {}): Promise<boolean> {
   await restoreThreads($)
   // a card: the line it selects now, which the pane shows in place of the whole card
   if (scope.card && !scope.part) {
@@ -421,9 +427,13 @@ export async function openThreadOn($: Engine, scope: ThreadScope): Promise<boole
   // for the a key
   if (scope.card) await revealCard($, scope.card, 'start')
   const placed = await showThread($, key, { ask: true })
+  // open: a notice that a key could not open it goes
+  if (placed) await failCleared($, 'pane:threads')
   if (!placed) {
     pendingKey = key
-    noticeLine($, 'Claude Code opens the side pane from a key only in a wider terminal. Type /threads to open it here.', 'pane:threads')
+    noticeLine($, o.key
+      ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${o.key}” in the bar below, or type /threads, to open it here.`
+      : 'Claude Code did not open the side pane here. Type /threads to open it.', 'pane:threads')
   }
   return placed
 }
@@ -432,6 +442,7 @@ export async function openThreadOn($: Engine, scope: ThreadScope): Promise<boole
 export async function listThreads($: Engine, o: { fromKey?: boolean } = {}): Promise<boolean> {
   await restoreThreads($)
   const placed = await openPane($, 'threads', {}, 'Threads', { focus: true })
+  if (placed) await failCleared($, 'pane:threads')
   if (!placed && o.fromKey) {
     pendingKey = ''
     noticeLine($, `Claude Code opens the side pane from a key only in a wider terminal. Click “${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” in the bar below, or type /threads, to open it here.`, 'pane:threads')

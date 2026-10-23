@@ -420,7 +420,10 @@ export async function viewOf($: Engine, row: string): Promise<{ text?: string | 
 /** The catch-up drawn at the newest message it covers (term.ts drawnAt), in place of that message's words, once a
  *  version of it is written, and as it stands at every level of its chips: a rule down its left side beside its
  *  head line and its text (its first characters while a version writes itself in, dim while one is written). Its
- *  citations look as the checked citations of the replies with the same words, and open their evidence. */
+ *  citations look as the checked citations of the replies they stand for (marks/register.ts looksByWords: the same
+ *  words, else the same claim in new words), and a press on one acts as a press on that citation in its reply. The
+ *  replies' citations are numbered across the catch-up, since each reply numbers its own from 1: so citations of two
+ *  replies never share a hover group, and a press finds the reply's citation it stands for. */
 export async function catchUpEl($: Engine, els: Any, row: string, cols: number): Promise<Any | null> {
   if (!featureOn('squeeze')) return null
   const cu = await catchUpAt($, row)
@@ -429,7 +432,13 @@ export async function catchUpEl($: Engine, els: Any, row: string, cols: number):
   const ui = await uiOf($, cu.id)
   const text = ui.reveal ? revealCut(cu.shown, ui.reveal.n) : cu.shown
   const items: MarkItem[] = []
-  for (const r of cu.catchup?.rows ?? []) items.push(...((await rowMarks($, r))?.items ?? []))
+  const from: { row: string; n: number }[] = []
+  for (const r of cu.catchup?.rows ?? []) {
+    for (const it of (await rowMarks($, r))?.items ?? []) {
+      from.push({ row: it.row, n: it.n })
+      items.push({ ...it, n: from.length })
+    }
+  }
   const marks = marksIn(text)
   const looks = looksByWords(marks, items, await mainRuns($))
   const replies = Number(cu.catchup?.replies) || 0
@@ -437,7 +446,7 @@ export async function catchUpEl($: Engine, els: Any, row: string, cols: number):
   const body = messageEl(els, {
     text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: !!ui.running,
     onMark: async (k: number) => {
-      const it = items.find(x => x.n === looks[k]?.n && x.words.replace(/\s+/g, ' ').trim().toLowerCase() === marks[k]!.words.replace(/\s+/g, ' ').trim().toLowerCase())
+      const it = from[(looks[k]?.n ?? 0) - 1]
       if (!it) return
       if (await markPressed($, it.row, it.n)) return
       await openPane($, 'evidence', { row: it.row, n: it.n }, `citation ${it.n}`)

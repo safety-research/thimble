@@ -145,6 +145,10 @@ test('the labels pane: the list, a label with its definition and its records at 
   tree = await draw()
   expect(tree.some(n => n.type === 'Text' && words(n) === '(?i)sorry|apolog')).toBe(true)
   expect(tree.filter(n => n.type === 'Button' && /chat\.jsonl:\d/.test(words(n))).map(words)).toEqual(['▸ chat.jsonl:1  wren', '  chat.jsonl:3  moss'])
+  // the keys' row: under the pointer a key's words brighten, never Claude Code's inverse of a plain Button
+  const keyRow = tree.filter(n => n.type === 'Button' && /^key-/.test(String(n.props.key)))
+  expect(keyRow.length).toBeGreaterThan(0)
+  expect(keyRow.every(n => n.props.hover?.inverse === false)).toBe(true)
   // 2 (no) is the person's check of the record the ▸ points at; the ▸ moves to the next record
   await tree.find(n => n.type === 'Button' && n.props.hotkey === '2' && n.props.label === 'no').props.onPress()
   expect(ran.find(a => a.includes('--check'))).toEqual(['label', 'sorry', '--check', 'chat.jsonl#L1', 'no', '--json'])

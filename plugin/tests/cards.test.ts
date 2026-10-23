@@ -299,7 +299,7 @@ test('a card at each width: in a side pane the card and its copy each draw at th
     const plain = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
     expect(String(plain.result)).not.toContain('side pane')
     const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_18', title: 'Scores', data: 'runs.json', view: `${VIEW}\n// WIDE_ROW` } as never)) as Any
-    expect(String(r.result)).toMatch(/When a side pane opens beside the conversation, the card is \d+ columns wide, and texts that fit on their rows at \d+ columns wrap onto more rows there \(line 1\):\nada 3 of 9\nmerged\nbram 5/)
+    expect(String(r.result)).toMatch(/When a side pane opens beside the conversation, the card is \d+ columns wide, and rows that fit at \d+ columns wrap there, out of their columns \(line 1\):\nada 3 of 9\nmerged\nbram 5/)
   }
 })
 

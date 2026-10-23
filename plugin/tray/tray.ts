@@ -334,17 +334,21 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
   else await openMark($, refOf(next) as Frame, { reveal: true })
 }
 
-/** a: a side thread about the mark the tray shows; the tray gives way to it when it opened. */
-async function askAbout($: Engine, f: Frame): Promise<void> {
+/** The bar's words that open a side thread where the a key cannot: Claude Code places the pane at any width only for a
+ *  press (`a ask` in the bar), never for a key at the prompt. */
+const ASK_WORDS = 'a ask'
+
+/** a, or a press on `a ask`: a side thread about the mark the tray shows; the tray gives way to it when it opened. */
+async function askAbout($: Engine, f: Frame, byKey = false): Promise<void> {
   const info = await infoOf($, f)
-  const placed = await openThread($, { about: aboutOf(f, info), mark: refOf(f) as MarkRef })
+  const placed = await openThread($, { about: aboutOf(f, info), mark: refOf(f) as MarkRef }, byKey ? { key: ASK_WORDS } : {})
   if (placed) await setTray($, null)
 }
 
-/** a on the card ] reached: a side thread about it. */
-async function askCard($: Engine, stand: NonNullable<Stand>): Promise<void> {
+/** a, or a press on `a ask`, on the card ] reached: a side thread about it. */
+async function askCard($: Engine, stand: NonNullable<Stand>, byKey = false): Promise<void> {
   const meta = await metaOf($, stand.card)
-  await openThread($, { about: `the card "${meta?.title ?? stand.card}"`, card: stand.card })
+  await openThread($, { about: `the card "${meta?.title ?? stand.card}"`, card: stand.card }, byKey ? { key: ASK_WORDS } : {})
 }
 
 /** The Button keys of `x repair`: in the citation's card, and in the bar (bar.tsx draws an item as `bar-<id>`). */
@@ -384,7 +388,7 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
     return { now: () => stepMark($, key === ']' ? 1 : -1) }
   }
   if (stand) {
-    if (key === 'a') return { later: () => askCard($, stand) }
+    if (key === 'a') return { later: () => askCard($, stand, true) }
     if (key === '0') return { now: () => $.state.set(STAND, null as never) }
     return null
   }
@@ -396,8 +400,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
     const to = paged.next
     return { now: () => setPage($, to), undo: () => setPage($, was) }
   }
-  if (key === 'a') return { later: () => askAbout($, f) }
-  if (key === '1') return { now: () => askAbout($, f) }
+  if (key === 'a') return { later: () => askAbout($, f, true) }
+  if (key === '1') return { now: () => askAbout($, f, true) }
   if (f.kind === 'citation') {
     const ev = (await itemOf($, f.row, f.n))?.evidence
     if (key === 'c' && ev?.kind === 'computed') return { now: () => toggleCode($), undo: () => toggleCode($) }
@@ -634,11 +638,12 @@ function drawUnits(els: Any, units: Unit[]): Any[] {
 /** The press on a citation's file place: the citation's evidence in the side pane. The open is awaited inside the
  *  handler, so it is made while the person's press runs: Claude Code places a pane at any width only for such an open,
  *  and one left to run after the handler returned (`void openPane(...)`) is unasked and waits undrawn below 144
- *  columns (110 for a pane the person opened before), which the notice then reports. */
+ *  columns (110 for a pane the person opened before). When Claude Code still places none (no surface here draws
+ *  panes), the notice says so; the tray keeps showing the cited line. */
 export function evidenceOpener($: Engine, f: { row: string; n: number }): () => Promise<void> {
   return async () => {
     const placed = await openPane($, 'evidence', { row: f.row, n: f.n }, `citation ${f.n}`).catch(() => true)
-    if (!placed) noticeLine($, 'Claude Code did not open the side pane here. Click the citation in the reply to see its evidence.', 'tray')
+    if (!placed) noticeLine($, 'Claude Code did not open the side pane here. The tray above still shows the cited line.', 'tray')
   }
 }
 

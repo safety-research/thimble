@@ -214,6 +214,38 @@ test('the margin of a passage or a card opens its thread; it says asked (↳) on
   expect(threadOf(key)!.scope).toEqual({ about: '"Tuesday 41" in the card "Runs per day"', card: 'c00000000000b1', part: '▸ Tuesday  ██████ 41' })
 })
 
+// Claude Code places a pane at any width only for an open made while the person's press runs: one the press leaves to
+// run after it returned is unasked and waits undrawn below 144 columns. So each press that opens the side pane (the
+// margin of a passage or a card, a row of the thread list, the way back to it) returns the open, and the open is made
+// by the time what it returns settles, as Claude Code calls a press
+test('each press that opens the side pane makes the open inside the press', async () => {
+  const s = setup()
+  const opens: string[] = []
+  const later = <T>(v: T) => new Promise<T>(r => setTimeout(() => r(v), 1))
+  s.$.ui.open = (a: Any) => later((opens.push(a.id), { isPlaced: true }))
+  const pressed = async (press: () => unknown) => {
+    const before = opens.length
+    const r = press()
+    expect(r).toBeInstanceOf(Promise)
+    await r
+    return opens.length - before
+  }
+  const p = { text: 'Two runs failed.', label: '"Two runs failed."' }
+  const margin = await threadPassages(s.$, 'row-made-up-5')
+  expect(await pressed(() => margin.ask(p))).toBe(1)
+  const card = await threadOnCard(s.$, 'c00000000000b2', 'Runs per day')
+  expect(await pressed(card.press)).toBe(1)
+  // a thread the list shows, and the way back from it
+  const asked = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await asked
+  const list = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'threads', {}, els))
+  expect(await pressed(list.find(n => n.type === 'Button' && n.props?.key === 'thread-0').props.onPress)).toBe(1)
+  const one = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY, from: 'threads' }, els))
+  expect(await pressed(one.find(n => n.type === 'Button' && n.props?.key === 'back').props.onPress)).toBe(1)
+})
+
 test('the thread pane: its steps without the folders they ran in, and m drawn once as Claude Code draws a key', async () => {
   const s = setup()
   const asked = askHere(s.$, SCOPE, 'why so many?')
@@ -250,6 +282,8 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   expect(m.props.label).toBe('send this answer to Claude')
   expect(m.props.dimColor).toBe(true)
   expect(m.props.children).toBe(undefined)
+  // under the pointer its words brighten, never Claude Code's inverse of a plain Button
+  expect(m.props.hover?.inverse).toBe(false)
   const kids = tree.props.children as Any[]
   expect(kids.indexOf(all.find(n => n.props?.key === 'thread-keys'))).toBe(kids.findIndex((n: Any) => n.props?.key === 'entry-gap') - 1)
 })
@@ -302,4 +336,30 @@ test("a passage's thread shows the passage as the reply reads, under one label: 
   // each cited words underlined as in the reply
   expect(nodes(subject).filter(n => n.props?.underline).map(textOf)).toEqual(['June 18, with 6,543 saves under 906 names', 'after noon'])
   expect(passageRuns('a [b](#) c', 4).map(r => r.s).join('')).toBe('a b…')
+})
+
+// The pane reads a running thread's turns every few seconds. A read that started before the fork ended, and ends after
+// the end marked the thread done, leaves it done: else the pane shows it answering for ever, without m
+test("a read of a running thread's turns that the fork's end overtakes leaves the thread done", async () => {
+  const s = setup()
+  let poll: (() => void) | null = null
+  s.$.clock.every = (_ms: number, f: () => void) => { poll = f; return () => undefined }
+  const asked = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await asked
+  expect(threadOf(KEY)!.status).toBe('running')
+  expect(poll).not.toBe(null)
+  s.answer('agent-1', 'The config gives the timeout in minutes (ci.yml:12).')
+  // the poll's read waits; the fork's end reads at once
+  const read = s.$.session.messages
+  let release: (() => void) | null = null
+  s.$.session.messages = async (a: Any) => { s.$.session.messages = read; await new Promise<void>(r => { release = r }); return read(a) }
+  poll!()
+  await settle()
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  expect(threadOf(KEY)!.status).toBe('done')
+  release!()
+  await settle()
+  expect(threadOf(KEY)!.status).toBe('done')
 })
