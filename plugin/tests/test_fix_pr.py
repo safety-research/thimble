@@ -46,6 +46,9 @@ def gh(world, monkeypatch, tmp_path):
     remotes = tmp_path / "remotes"
     for owner in ("made-up", "safety-research"):
         sh("git", "init", "-q", "--bare", str(remotes / f"{owner}.git"))
+    # the repository's main is the release the world runs, until a test moves the person's checkout on
+    sh("git", "push", "-q", str(remotes / "safety-research.git"), "main", cwd=world["rel"])
+    monkeypatch.setenv("THIMBLE_UPDATE_URL", str(remotes / "safety-research.git"))
     monkeypatch.setenv("THIMBLE_GH", str(exe))
     monkeypatch.setenv("THIMBLE_FIX_PUSH_URL", str(remotes / "{owner}.git"))
     monkeypatch.delenv("CLAUDECODE", raising=False)
@@ -78,7 +81,23 @@ def answer(monkeypatch, said: str | None) -> list[str]:
 
 
 def branches(g, owner: str) -> list[str]:
-    return sh("git", "for-each-ref", "--format=%(refname)", "refs/heads/", cwd=g["remotes"] / f"{owner}.git").split()
+    """The branches a pull request pushed (the repository's own main left out)."""
+    refs = sh("git", "for-each-ref", "--format=%(refname)", "refs/heads/", cwd=g["remotes"] / f"{owner}.git").split()
+    return [r for r in refs if r != "refs/heads/main"]
+
+
+def ahead(w, path: str = "plugin/notes.md", text: str = "made-up notes\n" * 400) -> str:
+    """The person's checkout moves on past main (a dev install): a commit that is not on the repository's main, which
+    the thimble they run is made from. Its commit."""
+    f = w["rel"] / path
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text)
+    sh("git", "add", "-A", cwd=w["rel"])
+    sh("git", "commit", "-q", "-m", "work not on main", cwd=w["rel"])
+    head = sh("git", "rev-parse", "HEAD", cwd=w["rel"])
+    p = w["cc"] / "plugins" / "installed_plugins.json"
+    p.write_text(p.read_text().replace(w["base"], head))
+    return head
 
 
 def test_it_warns_shows_what_would_go_and_no_sends_nothing(world, gh, monkeypatch, capsys):
@@ -151,6 +170,86 @@ def test_yes_forks_pushes_and_opens_the_pr_then_records_its_link(world, gh, monk
     # a second pull request for the same fix is refused with the first one's link
     assert CLI.main(["file", "pr", str(rec["id"]), "--yes"]) == 1
     assert f"fix 1 has a pull request already: {PR_URL}" in capsys.readouterr().err
+
+
+def test_on_a_checkout_ahead_of_main_the_pr_holds_only_the_fix_on_main_s_tip(world, gh, monkeypatch, capsys):
+    head = ahead(world)
+    rec = fix_on(world)
+    assert sh("git", "rev-parse", "mine^", cwd=FX.live_dir()) == head  # the fix sits on the person's checkout
+    answer(monkeypatch, "y")
+    assert CLI.main(["file", "pr", str(rec["id"]), "--yes"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert f"  Branch   thimble-fix-1-bar-says-read-for-coverage, on thimble 0.10.2 ({world['base'][:7]})" in out
+    assert out[-1] == f"✓ Opened the pull request: {PR_URL}"
+    (ref,) = branches(gh, "made-up")
+    fork = gh["remotes"] / "made-up.git"
+    # one commit on main's tip, not on the checkout: the pull request's diff against main is the fix alone
+    assert sh("git", "rev-parse", f"{ref}^", cwd=fork) == world["base"]
+    assert sh("git", "diff", "--stat", world["base"], ref, cwd=fork).splitlines()[-1].strip() == \
+        "1 file changed, 1 insertion(+), 1 deletion(-)"
+    assert "plugin/notes.md" not in sh("git", "show", "--stat", ref, cwd=fork)
+    # live and the person's clone are as they were
+    assert sh("git", "rev-parse", "mine^", cwd=FX.live_dir()) == head
+    assert sh("git", "rev-parse", "HEAD", cwd=world["rel"]) == head
+
+
+def test_a_newer_main_takes_the_fix_named_by_its_version(world, gh, monkeypatch, capsys):
+    # main moves on (a release after the one the person runs): the fix goes onto it, named by its version
+    up = world["tmp"] / "up"
+    sh("git", "clone", "-q", "-b", "main", str(gh["remotes"] / "safety-research.git"), str(up))
+    pj = up / "plugin" / ".claude-plugin" / "plugin.json"
+    pj.write_text(pj.read_text().replace("0.10.2", "0.10.3"))
+    sh("git", "commit", "-q", "-am", "thimble 0.10.3", cwd=up)
+    sh("git", "push", "-q", "origin", "main", cwd=up)
+    tip = sh("git", "rev-parse", "HEAD", cwd=up)
+    rec = fix_on(world)
+    answer(monkeypatch, "y")
+    assert CLI.main(["file", "pr", str(rec["id"]), "--yes"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert f"  Branch   thimble-fix-1-bar-says-read-for-coverage, on thimble 0.10.3 ({tip[:7]})" in out
+    (ref,) = branches(gh, "made-up")
+    assert sh("git", "rev-parse", f"{ref}^", cwd=gh["remotes"] / "made-up.git") == tip
+
+
+def test_a_change_that_does_not_apply_on_main_is_refused_before_anything_goes(world, gh, monkeypatch, capsys):
+    # the checkout changed the line the fix changes, and main never had that change
+    ahead(world, "plugin/bar/bar.tsx", "const words = `coverage ${n} files`\n")
+    rec = fix_on(world)
+    asked = answer(monkeypatch, "y")
+    assert CLI.main(["file", "pr", str(rec["id"])]) == 1
+    cap = capsys.readouterr()
+    assert cap.err.strip() == (
+        f"thimble file pr: fix 1's change does not apply to the newest thimble (0.10.2, {world['base'][:7]} on main), "
+        "which a pull request goes onto: the lines it changes are different there. Ask /thimble-fix to make it work on "
+        "the newest thimble (thimble update moves you to it), then try again")
+    assert asked == [] and cap.out == "" and calls(gh) == ["auth status", "api user"]
+    assert branches(gh, "made-up") == [] and "pr" not in FX.get(rec["id"])
+
+
+def test_a_fix_that_builds_on_another_fix_says_so(world, gh, monkeypatch, capsys):
+    fix_on(world)
+    b = FX.new("say files read")
+    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("read ${n}", "read ${n} files"))
+    FX.done(b["id"], "Bar says files read", "The bar says files read.")
+    FX.apply(b["id"], press(b["id"]))
+    FX.write_json(SH.share_dir(b["id"]) / "given.json", DRAFT)
+    answer(monkeypatch, "y")
+    assert CLI.main(["file", "pr", str(b["id"]), "--yes"]) == 1
+    assert capsys.readouterr().err.strip() == (
+        "thimble file pr: fix 2's change does not apply to thimble 0.10.2 alone: it builds on another of your fixes. "
+        "Ask /thimble-fix to make it work on the release by itself")
+    assert branches(gh, "made-up") == []
+
+
+def test_main_out_of_reach_refuses_with_the_reason(world, gh, monkeypatch, capsys):
+    rec = fix_on(world)
+    monkeypatch.setenv("THIMBLE_UPDATE_URL", str(gh["remotes"] / "no-such.git"))
+    answer(monkeypatch, "y")
+    assert CLI.main(["file", "pr", str(rec["id"]), "--yes"]) == 1
+    err = capsys.readouterr().err
+    assert "thimble file pr: thimble could not read main from" in err and "check the network, then try again" in err
+    assert branches(gh, "made-up") == []
 
 
 def test_with_push_access_the_branch_goes_on_the_repository_with_no_fork(world, gh, monkeypatch, capsys):
