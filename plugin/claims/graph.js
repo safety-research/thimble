@@ -5,8 +5,8 @@
 //   the head        Claims, how many and in how many clusters (`no claims yet` before the first); `+N new` bold for a
 //                   moment after claims came in
 //   the map         every cluster, each a loose group of dots in its own color in a cell of the map, its name under
-//                   them (three lines at most, then …); a hollow dot is a claim a later one corrected, a heavier one a
-//                   claim said twice or more, a ◆ a claim that came in while the person browsed (until the next look).
+//                   them (three lines at most, then …); a heavier dot is a claim said twice or more,
+//                   a ◆ a claim that came in while the person browsed (until the next look).
 //                   No lines join the dots, which keep their places while the person walks them. The map has two
 //                   columns of cells (three in a wide pane) and as many rows of cells as fit over the room the detail
 //                   keeps (cells of 4 rows); clusters beyond that, smallest first, join a near cluster (linked or
@@ -72,8 +72,8 @@ export const wrapName = (name, n) => wrap(one(name).replace(/ …$/, '\u2060…'
 
 /** A cluster's color: the six categorical tones in turn. */
 export const toneOf = i => `c${(Math.max(0, i) % 6) + 1}`
-/** A claim's dot: hollow once corrected, heavier when said twice or more. */
-export const dotOf = c => (c.revised_by ? '○' : (c.n || 1) >= 2 ? '◉' : '●')
+/** A claim's dot: filled, heavier when said twice or more (a claim a later one corrected stays filled). */
+export const dotOf = c => ((c.n || 1) >= 2 ? '◉' : '●')
 
 /** Who said a claim and when, in a few words, for a side thread: `turn 2`, `turn 2 · you`. */
 export function whenOf(c) {
