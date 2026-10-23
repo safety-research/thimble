@@ -16,12 +16,17 @@
 // forkOf(e.agentId) names the kind. (Claude Code follows `$` only into functions a file declares or imports, so a
 // list of handlers that take `$` cannot be called from here.)
 // A fork's end never reaches main's conversation: its task notification or hand-back is dropped at prompt.submit.
+// Claude Code counts a fork as a background agent of the session, and the line that closes a turn of main's that ended
+// while forks still ran says `Waiting for 5 background agents to finish`, then counts their time in the next turn's
+// (`Cooked for 6m 11s` under a 5 s reply). The person's next prompt does not wait for them. So the line that waits only
+// on thimble's forks reads as a finished turn of its own time (turnLine), and the next turn's line its own time.
 // Each fork's turns are filed under its kind in the session's events (telemetry claimAgent). Which agent is which fork
 // is kept in $.state as soon as Claude Code names the agent, so a reload of the plugin still knows them; the newest
 // KEPT forks are kept, long enough for any report of theirs to come.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { claimAgent } from '../telemetry/telemetry'
+import { turnsNow } from './answers'
 
 type Engine = EngineInterface
 
@@ -84,4 +89,39 @@ export const registerForks: Register = on => {
     const id = reportOf(e.text)
     return id ? { drop: `thimble's ${known.get(id)} finished` } : next(e)
   }).catch(($, e, next) => next(e))
+
+  // the line that closes a turn (fails safe: a throw leaves Claude Code's line)
+  on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const p = (e as any).props as { word: string; durationMs: number; waitingFor?: { agents: readonly { id: string }[]; workflows: number } }
+    const w = p.waitingFor
+    if (w) {
+      if (w.workflows || !w.agents.length || !w.agents.every(a => forkOf(a.id))) return next(e)
+      waited = true
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return ($.ui.resolve(e) as any).Text({ dimColor: true, children: turnLine(p.word, p.durationMs) })
+    }
+    let ms = ownTime.get(e.requestId)
+    if (ms === undefined && waited && !lines.has(e.requestId)) {
+      // the first line drawn after one that waited on thimble's forks: its turn's own time, from main's newest turn
+      waited = false
+      const t = (await turnsNow($)).at(-1)
+      if (t?.endedAt && t.endedAt - t.startedAt >= 0 && Number(await $.clock.now()) - t.endedAt < 15 * 60000) ownTime.set(e.requestId, (ms = t.endedAt - t.startedAt))
+    }
+    lines.add(e.requestId)
+    return ms !== undefined && ms < p.durationMs ? next({ ...e, props: { ...p, durationMs: ms } } as never) : next(e)
+  }).catch(($, e, next) => next(e))
+}
+
+/** Whether a line waited on thimble's forks since the last line drawn; the lines drawn, by row; the own time of a
+ *  line's turn where Claude Code counted the forks' time in it. */
+let waited = false
+const lines = new Set<string>()
+const ownTime = new Map<string, number>()
+
+/** A finished turn's line as Claude Code draws it: `✻ Brewed for 1m 4s`. */
+export function turnLine(word: string, ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000))
+  const took = s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
+  return `✻ ${word} for ${took}`
 }
