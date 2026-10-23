@@ -434,13 +434,13 @@ def _label(st: Store, a: argparse.Namespace) -> int:
 
 FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engine/kernel/fixes.py says how).
 
-    thimble fix list                 every fix: on, off, redo, a request with no code, sent, released
+    thimble fix list                 your fixes (ready, on, off, redo, request, sent), not those in the release
     thimble fix show ID              one fix: your words, what it does, its files and tests
     thimble fix diff ID              its change
     thimble fix export ID [--to DIR] its patch and its record as files in DIR (default: here); nothing is sent
     thimble fix off                  thimble as the plain release; your fixes are kept
     thimble fix on                   your fixes on again
-    thimble fix update               a newer release, with your fixes replayed on it (thimble does this at each start)
+    thimble fix update               a newer release, with your fixes replayed on it
 
 Ask for a fix in thimble: /thimble-fix <what should work differently>. Applying a fix and submitting one need your key
 in thimble, never a shell command."""

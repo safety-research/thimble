@@ -90,22 +90,40 @@ async function withThread($: Engine, e: Any, now: { kind: string; args: unknown 
   return under.length ? els.Box({ flexDirection: 'column', children: [drawn, ...under] }) : drawn
 }
 
+/** The pane's columns at its last drawing, or 0 before one: the width a copy of it is drawn at (paneDrawing). */
+let paneColumns = 0
+
+/** What the pane shows now, drawn with `els`: Claude Code's elements when it draws the pane, or plain ones when the
+ *  fixer gets a text copy of the screen (fix/screen.ts). */
+export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any): Promise<unknown> {
+  try {
+    if (now?.kind === 'evidence') return withThread($, e, now, els, await drawEvidence($, e, now.args, els))
+    if (now?.kind === 'labels') return withThread($, e, now, els, await drawLabels($, e, now.args, els))
+    if (now?.kind === 'coverage') return withThread($, e, now, els, await drawCoverage($, e, now.args, els))
+    if (now?.kind === 'settings') return await drawSettings($, e, now.args, els)
+    if (now?.kind === 'claims') return withThread($, e, now, els, await drawClaimsPane($, e, now.args, els))
+    if (now?.kind === 'threads' || now?.kind === 'thread') return await drawThreadsPane($, e, now.kind, now.args, els)
+    if (now?.kind === 'fixes') return await drawFixes($, e, now.args, els)
+    if (now?.kind === 'fixsubmit') return await drawFixSubmit($, e, now.args, els)
+    return els.Text({ dimColor: true, children: now ? `thimble has no pane ${now.kind}.` : 'Nothing is open here.' })
+  } catch (err) {
+    return els.Text({ color: 'error', wrap: 'wrap', children: `This pane could not be drawn (${String((err as Error)?.message || err).slice(0, 160)}). Press esc, then open it again.` })
+  }
+}
+
+/** The pane as it shows now, drawn with `els` at the width it was last drawn at, or null when it is closed. */
+export async function paneDrawing($: Engine, els: Any): Promise<{ kind: string; drawn: unknown } | null> {
+  const now = await paneNow($)
+  if (!now || !(await isOpen($))) return null
+  const e = { requestId: PANE_ID, props: { bodyColumns: paneColumns || 60 } }
+  return { kind: now.kind, drawn: await drawPane($, e, now, els) }
+}
+
 export const registerPanes: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
     const els = $.ui.resolve(e) as Any
-    const now = await paneNow($)
-    try {
-      if (now?.kind === 'evidence') return withThread($, e, now, els, await drawEvidence($, e, now.args, els))
-      if (now?.kind === 'labels') return withThread($, e, now, els, await drawLabels($, e, now.args, els))
-      if (now?.kind === 'coverage') return withThread($, e, now, els, await drawCoverage($, e, now.args, els))
-      if (now?.kind === 'settings') return await drawSettings($, e, now.args, els)
-      if (now?.kind === 'claims') return withThread($, e, now, els, await drawClaimsPane($, e, now.args, els))
-      if (now?.kind === 'threads' || now?.kind === 'thread') return await drawThreadsPane($, e, now.kind, now.args, els)
-      if (now?.kind === 'fixes') return await drawFixes($, e, now.args, els)
-      if (now?.kind === 'fixsubmit') return await drawFixSubmit($, e, now.args, els)
-      return els.Text({ dimColor: true, children: now ? `thimble has no pane ${now.kind}.` : 'Nothing is open here.' })
-    } catch (err) {
-      return els.Text({ color: 'error', wrap: 'wrap', children: `This pane could not be drawn (${String((err as Error)?.message || err).slice(0, 160)}). Press esc, then open it again.` })
-    }
+    const cols = Number((e as Any).props?.bodyColumns)
+    if (cols > 0) paneColumns = cols
+    return drawPane($, e, await paneNow($), els)
   })
 }

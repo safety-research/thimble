@@ -205,7 +205,8 @@ def test_failed_tests_no_change_and_not_now(world, monkeypatch):
     assert n["state"] == "off" and n["note"] == "not now" and n["work"] is None
     assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == world["base"]
     lines = FX.list_lines()
-    assert any("request" in x and "no code" in x for x in lines) and any("failed" in x for x in lines)
+    assert any("request" in x and "“explain the terms of my field”" in x for x in lines) and any("failed" in x for x in lines)
+    assert lines[3].split() == ["#", "state", "fix", "made", "you", "asked"]
 
 
 def test_redo_makes_a_new_copy_with_the_earlier_change(world, monkeypatch):
@@ -332,6 +333,7 @@ def test_a_new_release_carries_the_fixes_that_fit_and_marks_the_rest(world, monk
     out = FX.update()
     assert out["said"] == f"thimble {new[:7]} · 1 fix carried · 1 in the release" or out["said"].endswith("1 fix carried · 1 in the release")
     assert FX.get(a["id"])["state"] == "on" and FX.get(b["id"])["state"] == "released"
+    assert not any(" released " in x or "A note" in x for x in FX.list_lines())
     assert FX.get(a["id"])["commit"] == sh("git", "rev-parse", "mine", cwd=FX.live_dir())
     assert FX.release()["base"] == new and new in (FX.home() / "off.sh").read_text()
     log = sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines()

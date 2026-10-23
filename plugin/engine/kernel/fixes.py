@@ -945,16 +945,20 @@ def _tilde(p: str) -> str:
 
 
 def list_lines() -> list[str]:
+    """Each fix but those the release now holds: its state (a ready one waits for y in thimble), its title, when it was
+    made and the person's words."""
     d = listing()
-    if not d["fixes"]:
+    fixes = [r for r in d["fixes"] if r.get("state") != "released"]
+    if not fixes:
         return ["No fixes yet. In thimble: /thimble-fix <what should work differently>."]
     head_ = f"Your fixes · thimble {d['version'] or ''} + {d['count_on']} on".replace("  ", " ")
     if not d["on"]:
         head_ = f"Your fixes · thimble {d['version'] or ''} alone · {d['count_on']} kept off (thimble fix on brings them back)"
-    out = [head_, f"{_tilde(d['live'])} · branch mine", ""]
-    for r in d["fixes"]:
+    out = [head_, f"{_tilde(d['live'])} · branch mine", "", f"  {'#':>3}  {'state':<8}  {'fix':<40}  {'made':<5}  you asked"]
+    for r in fixes:
+        words = (r.get("words") or [""])[0]
         out.append(f"  {r['id']:>3}  {WORD.get(r['state'], r['state']):<8}  {short(r['title'], 40):<40}  "
-                   f"{_date(r.get('created'))}  {note_of(r)}".rstrip())
+                   f"{_date(r.get('created')):<5}  {f'“{short(words, 40)}”' if words else ''}".rstrip())
     return out
 
 

@@ -1,14 +1,17 @@
 // register.ts: thimble fix, the person's changes to their own thimble, in the hooks module.
 //
 //   /thimble-fix <words>   a request: the kernel makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer
-//                          (fixer.ts) works in it in the background; while the line of a fix with a copy shows, the
-//                          words are a new round of that fix (request.ts)
+//                          (fixer.ts) works in it in the background; while a fixer works, the words go to it, and
+//                          while the line of a fix with a copy shows, they are a new round of that fix (request.ts)
+//   the thimble-fix skill  the same request, by Claude, when it sees thimble misbehave (skills/thimble-fix/SKILL.md);
+//                          Claude reads what came of it in the skill's place, and is told when the fix ends
 //   /thimble-fix           Your fixes (pane.tsx)
 //   the fixer's calls      Claude Code's own permission handling, in the person's mode, as any subagent's
 //   every call             only thimble and the person's keys apply, submit or record a fix: Claude's `thimble fix`
 //                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
 //                          fixes' copies, are refused
-//   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it · d · n
+//   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it now · d what
+//                          changed · n later, and Claude Code sends a notification
 //   the person's prompt    a line that only told something goes (line.ts)
 //
 // A newer release comes with `thimble update` in a shell, never inside Claude Code.
@@ -21,14 +24,26 @@ import { busyWhile } from '../bar/busy'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { fixerEnded, fixOfAgent, recoverFixers } from './fixer'
-import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloadIfDue, setFixLine } from './fixes'
+import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloaded, reloadIfDue, setFixLine } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
-import { requestFix } from './request'
+import { request, requestFix } from './request'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
+
+/** The lead before the words in the skill's text (skills/thimble-fix/SKILL.md), as Claude Code filled in its argument. */
+const SKILL_LEAD = 'What thimble does wrong, and what it should do:'
+
+/** The words Claude gave the thimble-fix skill, or '' when it gave none. */
+export function wordsOfSkill(text: string): string {
+  const i = text.indexOf(SKILL_LEAD)
+  const words = i < 0 ? '' : text.slice(i + SKILL_LEAD.length).split(/\n\s*\n/)[0]!.trim()
+  if (words && words !== '$ARGUMENTS') return words
+  // a skill whose text names no $ARGUMENTS gets them after its text
+  return /\nARGUMENTS:\s*([\s\S]+)$/.exec(text)?.[1]?.trim() ?? ''
+}
 
 /** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), never Claude's. */
 const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|done|apply|notnow|redo|undo|remove|sandbox|draft|keep|send)\b/
@@ -69,6 +84,8 @@ export const registerFix: Register = on => {
       const l = await fixLineNow($)
       const lf = l ? list?.fixes.find(f => f.id === l.id) : null
       if (l?.kind === 'applied' && (list?.on === false || (lf && lf.state !== 'on'))) await setFixLine($, null)
+      // a reload the line waited for: this is it
+      else await reloaded($)
       const working = (list?.fixes ?? []).filter(f => f.state === 'working')
       for (const f of working) void busyWhile($, `fixing: ${cut(f.title, 36)} · in a copy`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
       await recoverFixers($, working)
@@ -85,6 +102,18 @@ export const registerFix: Register = on => {
     }
     return { text: await requestFix($, words) }
   })
+
+  // the thimble-fix skill: Claude asks for the same fix, in the words after the skill's lead (SKILL.md), and reads
+  // what came of it in the skill's place. A hook that fails leaves the skill's own text, which says how to ask
+  on('skill.prompt', { skill: /^(?:thimble:)?thimble-fix$/ }, async ($, e, next) => {
+    const words = wordsOfSkill(String(e.text ?? ''))
+    if (!words) return { text: 'thimble started no fix: the skill needs, as its argument, what thimble does wrong and what it should do. Call it again with those words.' }
+    const r = await request($, words, 'claude')
+    if (r.failed || !r.fix) return { text: `${r.text.replace(/^×\s*/, '')} Tell the person in one short line.` }
+    return { text: r.round
+      ? `thimble gave these words to the fork that already fixes fix ${r.fix.id} ("${r.fix.title}"). Tell the person in one short line, then go on with their request.`
+      : `thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix ${r.fix.id}, "${r.fix.title}"). The person sees on the bar while it works, and decides with a key whether to use the fix. Tell them in one short line, then go on with their request. thimble tells you when the fix ends.` }
+  }).catch(($, e, next) => next(e))
 
   // every call, the fixer's too: the verbs and the folder that are thimble's own and the person's keys'. The fixer's
   // other calls go through Claude Code's own permission handling, as any subagent's do
