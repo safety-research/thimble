@@ -816,8 +816,3 @@ export const registerTray: Register = on => {
   }).catch(($, e, next) => next(e))
 }
 
-/** For tests: the module's memory, cleared. */
-export function resetTray(): void {
-  pendingAbout = null
-  paged = null
-}
