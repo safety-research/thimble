@@ -208,3 +208,35 @@ test('a record\'s line in the labels pane stays on one line: its place cut in th
   expect(line.length).toBeLessThanOrEqual(W)
   expect(line).toMatch(/^▸ runs\/swe.*….*board\.jsonl:361/)
 })
+
+test('the labels pane marks the words a code label matched, cut at words around them, and shows paths short', async () => {
+  const ran: string[][] = []
+  const $ = paneEngine(ran)
+  const tmp = '/made-up/scratch/R2/tmp/thimble/prs.jsonl'
+  const head = { ...HEAD, kind: 'code', rule: 'def label(u):\n    return "yes"', in: tmp }
+  const hit = { before: `…${'early words '.repeat(20)}rebased onto main (whatsnew `, match: 'conflict', after: ` resolved). ${'later words '.repeat(20)}` }
+  const recs = [
+    { ref: `${tmp}#L5`, i: 0, value: 'yes', by: 'code', words: 'the record from its start', hit },
+    { ref: 'runs/a/board.jsonl#L7', i: 1, value: 'yes', by: 'code', words: 'Nothing found here.', unmarked: 'the code matched “x” in text it changed; where is not known' },
+  ]
+  const run = $.process.run
+  $.process.run = async (argv: string[]) => (argv.includes('--records')
+    ? { exitCode: 0, stdout: JSON.stringify({ label: head, value: 'yes', at: 0, total: 2, records: recs }), stderr: '' }
+    : argv.includes('--json') && argv.length <= 4 ? { exitCode: 0, stdout: JSON.stringify([head]), stderr: '' } : run(argv))
+  await $.state.set({ plugin: 'thimble', key: 'labelGen' }, 98)
+  await openLabels($, { label: 'sorry' })
+  const W = 60
+  const tree = nodes(await drawLabels($, { props: { bodyColumns: W, scroll: { bodyRows: 40 } } }, (await paneNow($))?.args, ELS))
+  // the match, bold in the value's color, with whole words on each side and … only where cut
+  const mark = tree.find(n => n.type === 'Text' && n.props.bold && words(n) === 'conflict')
+  expect(mark.props.color).toBe('#5aa2e6')
+  const said = words(tree.find(n => n.type === 'Text' && n.props.wrap === 'wrap' && Array.isArray(n.props.children) && n.props.children.includes(mark)))
+  expect(said).toMatch(/^…[a-z]+ .*\(whatsnew conflict resolved\)\. later .*[a-z]…$/)
+  expect(said).not.toMatch(/^…(arly|rly|ly|y|ords) /)
+  expect(said.length).toBeLessThanOrEqual(2 * (W - 4) - 12)
+  // the scope and the record's place: a temp file with … in its middle, a file of the folder relative to it
+  expect(tree.some(n => n.type === 'Text' && words(n).startsWith('3 records in /made-up/…/thimble/prs.jsonl'))).toBe(true)
+  expect(words(tree.find(n => n.type === 'Button' && n.props.key === `sel-${tmp}#L5`))).toMatch(/^▸ \/made-up\/…\/thimble\/prs\.jsonl:5/)
+  // a record whose match has no place says so at itself
+  expect(words(tree.find(n => n.type === 'Button' && n.props.key === 'sel-runs/a/board.jsonl#L7'))).toContain('where is not known')
+})

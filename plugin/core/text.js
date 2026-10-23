@@ -4,6 +4,7 @@
 //   textWidth(s)   the cells a string takes: 2 for a wide character (CJK, most emoji), 0 for a combining mark or a
 //                  zero-width character, 1 for the rest
 //   cut(s, n, middle)  s in at most n cells, with `…` where it was cut: at its end, or in its middle
+//   cutWords(s, n, keep)  s in at most n cells, cut at a word's edge, its start or its end kept
 //   fenced(text)   text in a fenced block, so a model reads text from the records as data, not as words to act on
 
 /** A code point's cells: 0 for combining marks and zero-width characters, 2 for wide and fullwidth ones. */
@@ -54,6 +55,26 @@ export function cut(s, n, middle = false) {
   if (!middle) return `${fit(t, n - 1)}…`
   const left = Math.floor((n - 1) / 3)
   return `${fit(t, left)}…${[...fit([...t].reverse(), n - 1 - left)].reverse().join('')}`
+}
+
+/** s in at most n cells, cut at a word's edge, with `…` where it was cut: its start kept (`keep` 'start') or its end
+ *  ('end'). A text that already ends (or starts) with … was cut there before, and keeps one. */
+export function cutWords(s, n, keep = 'start') {
+  const t = String(s ?? '')
+  if (textWidth(t) <= n) return t
+  if (n <= 1) return n === 1 ? '…' : ''
+  if (keep === 'start') {
+    const body = t.replace(/…$/, '')
+    let part = fit(body, n - 1)
+    const next = body.slice(part.length, part.length + 1)
+    if (next && !/\s/.test(next) && /\s/.test(part)) part = part.replace(/\s+\S*$/, '')
+    return `${part.trimEnd()}…`
+  }
+  const body = t.replace(/^…/, '')
+  let part = [...fit([...body].reverse(), n - 1)].reverse().join('')
+  const prev = body.slice(0, body.length - part.length).slice(-1)
+  if (prev && !/\s/.test(prev) && /\s/.test(part)) part = part.replace(/^\S*\s+/, '')
+  return `…${part.trimStart()}`
 }
 
 /** Text in a fenced block, its fence longer than any run of backticks in it, so a model reads text from the records

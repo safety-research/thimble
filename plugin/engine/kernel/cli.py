@@ -139,10 +139,10 @@ def _parse_within(s: str | None) -> tuple[str, str] | None:
 
 
 
-def _where_of(lab: dict[str, Any]) -> str:
+def _where_of(st: Store, lab: dict[str, Any]) -> str:
     """The files a label reads, as its ask names them: " of revisions.jsonl", or nothing for every file."""
     g = str(lab.get("in") or "")
-    return f" of {g}" if g and g not in ("*", "**/*") else ""
+    return f" of {LB.shown_path(g, st.root)}" if g and g not in ("*", "**/*") else ""
 
 
 def _label_lines(st: Store, lab: dict[str, Any]) -> list[str]:
@@ -349,7 +349,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample
             st.emit({"kind": "label_ask", "name": name, "ask": ask["id"], "units": ask["units"], "calls": ask["calls"],
                      "sample": 0 if ask["rest"] else min(EST.SAMPLE, ask["units"]), "rest": ask["rest"],
-                     "text": f"Read {'the other ' if ask['rest'] else ''}{ask['units']:,} records{_where_of(lab)} with Claude",
+                     "text": f"Read {'the other ' if ask['rest'] else ''}{ask['units']:,} records{_where_of(st, lab)} with Claude",
                      "meta": EST.calls_line(ask["calls"])})
         elif kind == "prompt" and s["waiting"]:
             # the plugin reads the change feed and starts the model's reads beside the session (labels/labels.ts)

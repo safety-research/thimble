@@ -916,14 +916,225 @@ def fields_line(row: S.Row) -> str:
     return " · ".join(parts)[:240]
 
 
+def shown_path(p: str, root: str | Path) -> str:
+    """A label's files as the person reads them: relative to the folder when inside it, else with … in the middle,
+    its first folder and its last two parts (`/mnt/…/thimble/prs.jsonl`): never a whole temp path."""
+    if not os.path.isabs(p):
+        return p
+    rel = os.path.relpath(p, root)
+    if rel != ".." and not rel.startswith("../"):
+        return rel
+    parts = [x for x in p.split("/") if x]
+    return f"/{parts[0]}/…/{'/'.join(parts[-2:])}" if len(parts) > 4 else p
+
+
 HIT_ROOM = 320  # characters of a record the label viewer shows around the part its label matched
-CODE_READS = re.compile(r"""\bunit\s*(?:\[\s*['"]([^'"\]]+)['"]\s*\]|\.get\(\s*['"]([^'"]+)['"])""")
+CODE_PARAM = re.compile(r"def\s+label\s*\(\s*([A-Za-z_]\w*)")
+
+
+def _code_reads(rule: str) -> list[str]:
+    """The fields a code label reads of its unit (`unit["body"]`, `u.get("body")`), by its parameter's name."""
+    p = CODE_PARAM.search(rule)
+    if not p:
+        return []
+    pat = re.escape(p[1]) + r"""\s*(?:\[\s*['"]([^'"\]]+)['"]\s*\]|\.get\(\s*['"]([^'"]+)['"])"""
+    return list(dict.fromkeys(a or b for a, b in re.findall(r"\b" + pat, rule)))
+
+
+def _cut_start(s: str, n: int, cut: bool = False) -> str:
+    """The end of `s` in `n` characters at most, cut at a word's start, with … where it was cut (or `cut`)."""
+    if len(s) > n:
+        t = s[len(s) - max(0, n - 1):]
+        if t and not s[len(s) - len(t) - 1].isspace() and not t[0].isspace() and re.search(r"\s", t):
+            t = t[re.search(r"\s", t).end():]
+        s, cut = t.lstrip(), True
+    return ("…" + s) if cut and s else s
+
+
+def _cut_end(s: str, n: int, cut: bool = False) -> str:
+    """The start of `s` in `n` characters at most, cut at a word's end, with … where it was cut (or `cut`)."""
+    if len(s) > n:
+        t = s[:max(0, n - 1)]
+        if t and not s[len(t)].isspace() and not t[-1].isspace() and re.search(r"\s", t):
+            t = t[:max(i for i, ch in enumerate(t) if ch.isspace())]
+        s, cut = t.rstrip(), True
+    return (s + "…") if cut else s
+
+
+def words_around(text: str, a: int, b: int, lo: int = 0, hi: int | None = None, room: int = HIT_ROOM) -> dict[str, str]:
+    """The words of text[lo:hi] around its part [a, b), in `room` characters: {before, match, after}, each side cut at
+    a word's edge, with … only where the text was cut. The side with less to say gives its room to the other."""
+    hi = len(text) if hi is None else hi
+    match = text[a:b]
+    if len(match) > room:
+        return {"before": "…" if a > 0 else "", "match": _cut_end(match, room), "after": ""}
+    left = room - len(match)
+    before, after = text[lo:a], text[b:hi]
+    bw = min(len(before), max(left // 2, left - len(after)))
+    return {"before": _cut_start(before, bw, lo > 0), "match": match,
+            "after": _cut_end(after, left - bw, hi < len(text))}
+
+
+class _Traced:
+    """A compiled pattern of a code label that notes each match it makes (search, match, fullmatch, finditer)."""
+
+    def __init__(self, p: re.Pattern, seen: dict[str, Any]):
+        self._p, self._seen = p, seen
+
+    def __getattr__(self, k: str) -> Any:
+        return getattr(self._p, k)
+
+    def _note(self, m: Any) -> Any:
+        self._seen["calls"] += 1
+        if m is not None:
+            self._seen["matches"].append(m)
+        return m
+
+    def search(self, *a: Any, **k: Any) -> Any:
+        return self._note(self._p.search(*a, **k))
+
+    def match(self, *a: Any, **k: Any) -> Any:
+        return self._note(self._p.match(*a, **k))
+
+    def fullmatch(self, *a: Any, **k: Any) -> Any:
+        return self._note(self._p.fullmatch(*a, **k))
+
+    def finditer(self, *a: Any, **k: Any) -> Iterator[Any]:
+        self._seen["calls"] += 1
+        for m in self._p.finditer(*a, **k):
+            self._seen["matches"].append(m)
+            yield m
+
+
+class _TracedRe:
+    """`re` for a code label's viewer run: what it compiles notes its matches, and the patterns it used are kept."""
+
+    def __init__(self, seen: dict[str, Any]):
+        self._seen = seen
+
+    def _pat(self, p: Any, flags: int = 0) -> _Traced:
+        p = p._p if isinstance(p, _Traced) else p
+        c = p if isinstance(p, re.Pattern) else re.compile(p, flags)
+        if c not in self._seen["patterns"]:
+            self._seen["patterns"].append(c)
+        return _Traced(c, self._seen)
+
+    def compile(self, p: Any, flags: int = 0) -> _Traced:
+        return self._pat(p, flags)
+
+    def search(self, p: Any, s: Any, flags: int = 0) -> Any:
+        return self._pat(p, flags).search(s)
+
+    def match(self, p: Any, s: Any, flags: int = 0) -> Any:
+        return self._pat(p, flags).match(s)
+
+    def fullmatch(self, p: Any, s: Any, flags: int = 0) -> Any:
+        return self._pat(p, flags).fullmatch(s)
+
+    def finditer(self, p: Any, s: Any, flags: int = 0) -> Iterator[Any]:
+        return self._pat(p, flags).finditer(s)
+
+    def __getattr__(self, k: str) -> Any:
+        f = getattr(re, k)
+        if not callable(f) or isinstance(f, type):
+            return f
+
+        def call(*a: Any, **kw: Any) -> Any:
+            # sub, split, findall… run as they are; their pattern counts among the label's own
+            a = tuple(x._p if isinstance(x, _Traced) else x for x in a)
+            if k in ("sub", "subn", "split", "findall") and a and isinstance(a[0], (str, re.Pattern)):
+                with contextlib.suppress(re.error, TypeError):
+                    self._pat(a[0], 0 if isinstance(a[0], re.Pattern) else int(kw.get("flags", 0)))
+            return f(*a, **kw)
+        return call
+
+
+_traced_code: dict[str, Any] = {}
+
+
+def _traced_fn(rule: str) -> tuple[Any, dict[str, Any]]:
+    """The code label's label(unit), run with a `re` that notes the matches it makes ({calls, matches, patterns})."""
+    if rule in _traced_code:
+        return _traced_code[rule]
+    import builtins
+    seen: dict[str, Any] = {"calls": 0, "matches": [], "patterns": []}
+    fake = _TracedRe(seen)
+    real_import = builtins.__import__
+
+    def imp(name: str, *a: Any, **k: Any) -> Any:
+        return fake if name == "re" else real_import(name, *a, **k)
+    ns: dict[str, Any] = {"re": fake, "json": json, "__name__": "__thimble_label__",
+                          "__builtins__": {**vars(builtins), "__import__": imp}}
+    exec(compile(rule, "<label>", "exec"), ns)
+    fn = ns.get("label")
+    _traced_code.clear()
+    _traced_code[rule] = (fn if callable(fn) else None, seen)
+    return _traced_code[rule]
+
+
+def _place_match(m: re.Match, texts: list[tuple[str, str]]) -> tuple[str, int, int] | None:
+    """Where in the record's own texts ([(field, text)]) a match the code made lies: in the text itself, a part of it,
+    or a copy the code changed (lowercased, parts replaced), when the matched characters are the text's own, unchanged.
+    None when it cannot be said."""
+    s = m.string
+    a, b = m.span()
+    if not isinstance(s, str) or a == b:
+        return None
+    from difflib import SequenceMatcher
+    for name, t in texts:
+        if s == t or (len(s) == len(t) and s.lower() == t.lower()):
+            return name, a, b
+        if s and t.count(s) == 1:
+            o = t.index(s)
+            return name, o + a, o + b
+    for name, t in texts:
+        if len(s) > 20_000 or len(t) > 20_000:
+            continue
+        for i, j, size in SequenceMatcher(None, s.lower(), t.lower(), autojunk=False).get_matching_blocks():
+            if i <= a and b <= i + size:
+                return name, j + a - i, j + b - i
+    return None
+
+
+def _code_hit(rule: str, row: S.Row) -> dict[str, Any]:
+    """The words a code label's code matched in a record: the match it returned (value, match) or the last match it
+    made before it returned, placed in the record's own text; with no matching call made, the first match of the
+    label's own patterns in the fields it reads. {hit} or {unmarked: why no words are marked}."""
+    unit = _unit_of(row)
+    reads = _code_reads(rule)
+    texts = [(k, v) for k, v in unit.items() if isinstance(v, str) and not k.startswith("_")]
+    texts.sort(key=lambda kv: (kv[0] not in reads,))
+    texts.append(("_text", row.raw))
+    try:
+        fn, seen = _traced_fn(rule)
+        seen.update(calls=0, matches=[])
+        got = fn(_unit_of(row)) if fn else None
+    except Exception:  # noqa: BLE001 — the viewer's run of the code is only for the marks
+        return {"unmarked": "the code failed on this record, so no words are marked"}
+    m = got[-1] if isinstance(got, tuple) and got and isinstance(got[-1], re.Match) else \
+        (seen["matches"][-1] if seen["matches"] else None)
+    if m is None and not seen["calls"]:
+        for p in seen["patterns"]:
+            for name, t in texts[:-1]:
+                if name in reads or not reads:
+                    if (pm := p.search(t)):
+                        return {"hit": words_around(t, *pm.span())}
+        return {"unmarked": "the code uses no pattern, so no words are marked"} if not seen["patterns"] \
+            else {"unmarked": "no pattern of the code matches it"}
+    if m is None:
+        return {"unmarked": "no pattern of the code matches it"}
+    at = _place_match(m, texts)
+    if at is None:
+        return {"unmarked": f"the code matched “{_cut_end(m.group(0), 40)}” in text it changed; where is not known"}
+    name, a, b = at
+    return {"hit": words_around(dict(texts)[name], a, b)}
 
 
 def matched_part(lab: dict[str, Any], row: S.Row, kinds: dict[str, str | None]) -> dict[str, Any]:
-    """The part of a record its label matched, for the viewer's example: a regex's match with its line and a line of
-    context on each side, up to HIT_ROOM characters, cut with … ({hit: {before, match, after}}); or the fields the code
-    read, each value cut ({fields: [[name, value]]}). Empty for a model's label, or a regex that does not match."""
+    """The part of a record its label matched, for the viewer's example: a regex's match, or the match a code label's
+    code made (_code_hit), with the words around it ({hit: {before, match, after}}, words_around); for a regex, its line
+    and a line of context on each side. Else why no words are marked ({unmarked}), and for code the fields it read
+    ({fields: [[name, value]]}). Empty for a model's label."""
     rule = str(lab.get("rule") or "")
     if lab.get("kind") == "regex" and rule:
         text = regex_text(row, _kind_of_ref(kinds, row.ref))
@@ -932,7 +1143,7 @@ def matched_part(lab: dict[str, Any], row: S.Row, kinds: dict[str, str | None]) 
         except re.error:
             return {}
         if not m:
-            return {}
+            return {"unmarked": "the regex does not match it"}
         a, b = m.span()
         # the match's line and a line of context on each side (a JSON record's values are one a line)
         start = text.rfind("\n", 0, a)
@@ -942,27 +1153,20 @@ def matched_part(lab: dict[str, Any], row: S.Row, kinds: dict[str, str | None]) 
             end = text.find("\n", end + 1)
         if end < 0:
             end = len(text)
-        before, match, after = text[start:a], text[a:b], text[b:end]
-        if len(match) > HIT_ROOM:
-            match, after = match[:HIT_ROOM - 1] + "…", ""
-        side = max(12, (HIT_ROOM - len(match)) // 2)
-        if len(before) > side:
-            before, start = before[-side:], 1
-        if len(after) > side:
-            after, end = after[:side], -1
-        return {"hit": {"before": ("…" if start > 0 else "") + before, "match": match,
-                        "after": after + ("…" if end < 0 or end < len(text) else "")}}
+        return {"hit": words_around(text, a, b, start, end)}
     if lab.get("kind") == "code" and rule:
+        out = _code_hit(rule, row)
+        if "hit" in out:
+            return out
         unit = _unit_of(row)
-        names = list(dict.fromkeys(a or b for a, b in CODE_READS.findall(rule)))
         fields = []
-        for name in names[:6]:
+        for name in _code_reads(rule)[:6]:
             if name in unit:
                 v = unit[name]
                 said = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False, default=str)
                 said = " ".join(said.split())
                 fields.append([name, said if len(said) <= HIT_ROOM else said[:HIT_ROOM - 1] + "…"])
-        return {"fields": fields} if fields else {}
+        return {**out, **({"fields": fields} if fields else {})}
     return {}
 
 
