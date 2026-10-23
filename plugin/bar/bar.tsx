@@ -34,7 +34,7 @@ export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'l
 
 /** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
  *  what holds the keys now (the open tray, the open chips); while any shows, the bar's left names only those, after
- *  the busy step. `color` and `bold`: words drawn lit (`s ● short`, `s catch up`) or as a failure, not dim. */
+ *  the busy step. `color` and `bold`: words drawn lit (`s ● short`) or as a failure, not dim. */
 type Item = { id: string; key?: string; words: string; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean }
 /** An item a feature puts on the bar (core/answerview.ts barLeft, barRight). */
 export type BarItem = Item
