@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
 from kernel.evidence import check_all, check_mark  # noqa: E402
 
@@ -323,6 +325,18 @@ def test_square_brackets_in_a_quote_are_the_quoters_words(tmp_path: Path):
     # the words outside the brackets must still stand in the record
     bad = check_mark(mark('"there is no network access in this environ[ment] at all"'), quote("board.jsonl", 2, sub), [], str(tmp_path))
     assert bad["status"] == "failed"
+
+
+def test_a_quote_in_a_json_line_cut_for_its_length_is_read_with_its_escapes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from kernel import evidence as E
+    # one JSON document on one line, longer than the check reads of a line: its end is cut, so it does not parse
+    doc = {"messages": [{"role": "assistant", "text": "It's a tournament \u2014 two agents fighting for port 8000."}] + [{"text": "x" * 50}] * 40}
+    (tmp_path / "u1.json").write_text(json.dumps(doc))
+    monkeypatch.setattr(E, "LINE_BYTES", 400)
+    words = "a tournament \u2014 two agents fighting for port 8000"
+    r = check_mark({"n": 1, "words": words, "sentence": f'u1 called it "[{words}]."'}, quote("u1.json", 1, words[2:]), [], str(tmp_path))
+    assert r["status"] == "verified", r["reason"]
+    assert any(l.get("highlight") for l in r["evidence"]["lines"])
 
 
 def test_quote_marks_around_the_citation_make_it_a_quote_the_output_shows_word_for_word():

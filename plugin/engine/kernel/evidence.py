@@ -1157,23 +1157,44 @@ def quoted_around(sentence: str, words: str) -> bool:
     return bool(re.search(r'"\[' + re.escape(one_quote(w)) + r'\][.,;:!?]?"', one_quote(norm_ws(sentence))))
 
 
+JSON_ESCAPE = re.compile(r'\\u([dD][89abAB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})|\\(["\\/bfnrt])')
+JSON_SIMPLE = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+
+
+def json_unescaped(raw: str) -> str:
+    """A line's JSON string escapes read as the characters they stand for (`\\u2014` is —, `\\"` is "), for a JSON
+    line that does not parse whole: one longer than LINE_BYTES, cut there. "" when it holds no escape."""
+    def one(m: re.Match) -> str:
+        if m.group(1):
+            return chr(0x10000 + ((int(m.group(1), 16) - 0xD800) << 10) + (int(m.group(2), 16) - 0xDC00))
+        if m.group(3):
+            return chr(int(m.group(3), 16))
+        return JSON_SIMPLE.get(m.group(4), m.group(4))
+    text = JSON_ESCAPE.sub(one, raw)
+    return text if text != raw else ""
+
+
 def forms(raw: str) -> list[tuple[str, bool]]:
-    """The texts a line can hold words in: the line as written, and its JSON strings decoded (`decoded` True)."""
+    """The texts a line can hold words in: the line as written, and its JSON strings decoded (`decoded` True); a JSON
+    line cut at LINE_BYTES, with its escapes read."""
     out = [(raw, False)]
     try:
         out.append(("\n".join(json_strings(json.loads(raw))), True))
     except ValueError:
-        pass
+        if raw.lstrip()[:1] in "{[" and json_unescaped(raw):
+            out.append((json_unescaped(raw), True))
     return out
 
 
 def shown_forms(raw: str) -> list[tuple[str, bool]]:
     """The texts a cited line is shown in, best first: each string value of its JSON alone, decoded (a record's message
-    reads as written, its line breaks real), then the line as written."""
+    reads as written, its line breaks real), then the line as written. A JSON line cut at LINE_BYTES shows with its
+    escapes read."""
     try:
         v = json.loads(raw)
     except ValueError:
-        return [(raw, False)]
+        cut = json_unescaped(raw) if raw.lstrip()[:1] in "{[" else ""
+        return [(cut, True), (raw, False)] if cut else [(raw, False)]
     vals: list[str] = []
 
     def walk(x: Any) -> None:
