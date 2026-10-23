@@ -13,7 +13,7 @@ import { bus } from '../lib/bus'
 import type { Concept, LabelRow, SourceKeys, SourceRecord } from '../lib/types'
 import { chipOfKeyValue, chipOfLabel, choiceId, colorKeys, keptPicks, keyChips, keyValue, labelChips, NONE, pickedChips, picksOf, readColor, togglePick, withPicks, writeColor, type ColorChoice, type ColorKept, type ColorValue } from './colorChoice'
 import { bandsOf, type RecordColor } from './colorContext'
-import { classesOf, isFilesLabel, marksOf } from './labels'
+import { classesOf, isFilesLabel, marksOf, valueOf } from './labels'
 import type { FilesLabels } from './useLabels'
 
 /** A record's label rows: those of the record it names (`meta.ref`: a whole-file JSON transcript's turn names its JSON
@@ -94,6 +94,24 @@ export interface LaneValue {
   name: string | null
 }
 const NO_LANE: LaneValue = { color: null, name: null }
+
+/** characters of a label's marked text a row's hover shows, past which it is cut with an ellipsis */
+const HOVER_TEXT = 160
+
+/** What a record's row says on hover for the labels of Color by: a line per label that has a row on the record, its
+ * name and value, and the text it marks (the row's spans) when the label keeps it; null when none has one. Pure. */
+export function labelHover(labels: readonly Pick<Concept, 'name'>[], rowOf: (i: number) => LabelRow | undefined): string | null {
+  const lines: string[] = []
+  labels.forEach((k, i) => {
+    const row = rowOf(i)
+    const value = row ? valueOf(row) : null
+    if (value == null) return
+    const marked = (row!.spans ?? []).map((t) => t.trim()).filter(Boolean).join(' … ')
+    const cut = marked.length > HOVER_TEXT ? `${marked.slice(0, HOVER_TEXT - 1)}…` : marked
+    lines.push(`${k.name}: ${value}${cut ? `\n“${cut}”` : ''}`)
+  })
+  return lines.length ? lines.join('\n') : null
+}
 
 export function useColorBy(ws: string, path: string, on: boolean, labels: FilesLabels, records: readonly SourceRecord[], rows: ReadonlyMap<string, ReadonlyMap<string, LabelRow>>, total: number | null, quiet?: RefObject<Set<string>>, holds?: RefObject<string | null>): ColorBy {
   const keys = useSourceKeys(ws, path, on)
@@ -204,6 +222,8 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
     [picks, keys, kept.colors, off, labels.byId],
   )
   const laneOf = useCallback((rec: SourceRecord, rowOf: (id: string) => LabelRow | undefined) => lanes.map((f) => f(rec, rowOf)), [lanes])
+  // the labels among the choices, in their order, whose rows a record's hover names
+  const pickedLabels = useMemo(() => picks.flatMap((c) => (c.by === 'label' ? [labels.byId.get(c.id)].filter((l): l is Concept => !!l) : [])), [picks, labels.byId])
   const colors = useMemo(() => {
     if (!on || choice.by === 'off' || (!key && !label)) return null
     const colorOf = new Map(values.map((v) => [v.id, v.color]))
@@ -214,11 +234,13 @@ export function useColorBy(ws: string, path: string, on: boolean, labels: FilesL
       // a value turned off keeps its records, without its color
       const color = chip != null && !offSet.has(chip) ? (colorOf.get(chip) ?? null) : null
       const bands = bandsOf([color, ...trackColors.map((f) => f(rec))])
-      if (chip == null && !bands.some(Boolean)) continue
-      out.set(rec.line, { color, bands })
+      const own = pickedLabels.length ? recordRows(rows, path, rec) : undefined
+      const title = own ? labelHover(pickedLabels, (i) => own.get(pickedLabels[i].id)) : null
+      if (chip == null && !bands.some(Boolean) && !title) continue
+      out.set(rec.line, { color, bands, tint: label ? color : null, title })
     }
     return out
-  }, [on, choice.by, key, label, values, off, records, chipOf, trackColors])
+  }, [on, choice.by, key, label, values, off, records, chipOf, trackColors, pickedLabels, rows, path])
   const { setFocus, toggle: toggleLabel, setColour } = labels
   const choose = useCallback(
     (c: ColorChoice) => {

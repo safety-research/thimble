@@ -1,7 +1,8 @@
 // What Color by gives each record of Files' Transcript and Table modes (colorChoice.ts, Reader): per line, the color of
 // its value of the first choice (null for a record with no value, or with its value turned off) and a band per choice for
 // its left edge (views/common EdgeBands). Color by only colors: a value turned off takes its color off its records, which
-// stay; Filter by is what hides records. Null outside those modes, or with Color by off.
+// stay; Filter by is what hides records. With a label first, the record also takes a soft tint of its value's color across
+// the whole row, and the record's hover names the labels it has. Null outside those modes, or with Color by off.
 import { createContext } from 'react'
 
 export interface RecordColor {
@@ -10,6 +11,12 @@ export interface RecordColor {
   /** one per choice, in the tracks' order: the color of the record's value of that choice, null where it has none. The
    * same array for the same colors (bandsOf), so a row that keeps its colors keeps its props */
   bands: readonly (string | null)[]
+  /** with a label as the first choice, `color` again, which the row takes as a soft tint across it (files.css
+   * .has-cb-tint); null for a key, where only the bands show */
+  tint?: string | null
+  /** what the row's hover says: each label of Color by the record has, its name and value, and the text it marks when
+   * the label keeps it; null for none */
+  title?: string | null
 }
 
 export const ColorContext = createContext<ReadonlyMap<number, RecordColor> | null>(null)

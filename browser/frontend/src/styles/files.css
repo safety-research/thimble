@@ -2153,6 +2153,17 @@
   flex: none;
   width: var(--band-w, 3px);
 }
+/* with a label first in Color by, a record also takes its value's color across the whole row (views/common
+   RecordCard, --cb-tint): the label palette is strong, so the row takes only a soft share of it, enough to tell the
+   values apart down the list while the text keeps its contrast; a little more on the dark paper, where a share of a
+   color reads fainter */
+.reader-record.has-cb-tint {
+  --cb-tint-mix: 14%;
+  background: color-mix(in oklab, var(--cb-tint) var(--cb-tint-mix), transparent);
+}
+:root[data-paper='dark'] .reader-record.has-cb-tint {
+  --cb-tint-mix: 18%;
+}
 .reader-more {
   display: flex;
   justify-content: center;
