@@ -36,12 +36,14 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-/** A made-up session: the folder's coverage counts as `coverage` says (a JSON text, or a failure), with two labels. */
+/** A made-up session: the folder's coverage counts as `coverage` says (a JSON text, or a failure), with two labels.
+ *  `ran`: each command's argv. */
 function world(on: Any, coverage: { ok: boolean; out: string }) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' })
   const clock = mock.clock(on, { now: 0 })
   const submitted: string[] = []
   const opened: string[] = []
+  const ran: string[][] = []
   on('session.id', () => ({ value: 's-bar' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
@@ -59,6 +61,7 @@ function world(on: Any, coverage: { ok: boolean; out: string }) {
   on('command.register', () => ({ value: { command: 'thimble-settings' } }))
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
     const out = (exitCode: number, stdout: string, stderr = '') => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } })
+    ran.push(e.argv)
     if (e.argv.includes('coverage')) return coverage.ok ? out(0, coverage.out) : out(1, '', coverage.out)
     if (e.argv.includes('label')) return out(0, '[{"name": "failing"}, {"name": "slow"}]')
     return out(0, '')
@@ -67,7 +70,7 @@ function world(on: Any, coverage: { ok: boolean; out: string }) {
   on('prompt.submit', (_$: unknown, e: { text: string }) => { submitted.push(e.text); return { text: e.text } })
   on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
-  return { clock, submitted, opened }
+  return { clock, submitted, opened, ran }
 }
 
 test('after an answer the bar names v, coverage and the labels; r opens the coverage pane, whose folders open', async ($, on) => {
@@ -126,8 +129,8 @@ test('a failure shows its line, whole and with no keys, f types as usual, and th
   // Claude Code's own typing, for a key thimble does not take
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  // the bar's first drawing counts once
-  await $.ui.render(BAND)
+  // the count after an answer
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
   await w.clock.advance(100)
   const line = textOf(await $.ui.render(BAND))
   expect(line).toContain('× Coverage could not be counted: a made-up reason')
@@ -145,12 +148,28 @@ test('a failure shows its line, whole and with no keys, f types as usual, and th
 test('a coverage record that cannot be read is named in words, and the labels still count', async ($, on) => {
   const w = world(on, { ok: true, out: '{"root":"/made-up/data","files":[{"path":"a.tx' })
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  await $.ui.render(BAND)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
   await w.clock.advance(100)
   const line = textOf(await $.ui.render(BAND))
   expect(line).toContain('Coverage could not be counted: thimble coverage gave no record thimble could read.')
   expect(line).not.toContain('"root"')
   expect(line).toContain('2 labels')
+})
+
+test("a drawing never starts a count, since Claude Code stops a drawing's calls when a newer one replaces it; the session's start counts once", async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  const counted = () => w.ran.filter(a => a.includes('coverage')).length
+  await $.ui.render(BAND)
+  await w.clock.advance(100)
+  await $.ui.render(BAND)
+  await w.clock.advance(100)
+  expect(counted()).toBe(0)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(100)
+  expect(counted()).toBe(1)
+  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 43% (3/7 files)')
+  await w.clock.advance(100)
+  expect(counted()).toBe(1)
 })
 
 /** Elements as plain data, for drawing the bar without a surface. */

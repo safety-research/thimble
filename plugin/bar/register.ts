@@ -2,8 +2,8 @@
 //
 //   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
 //                aboveBar). /thimble-settings and a click on `thimble` open the
-//                settings; the person's next prompt takes the failure line; the counts after each of main's turns
-//                (counts.ts)
+//                settings; the person's next prompt takes the failure line; the counts at each load of the plugin and
+//                after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Coverage leaves the keys at the prompt, so r again closes it; the labels pane takes the keys (its
 //                number keys check records), and esc closes it
@@ -13,7 +13,7 @@ import { aboveBar } from '../core/answerview'
 import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
-import { countsNow, recount } from './counts'
+import { countsNow, needCounts, recount } from './counts'
 import { failCleared, noticeLine, promptTyped } from './notice'
 
 type Engine = EngineInterface
@@ -60,9 +60,10 @@ export async function barKey($: Engine, k: string): Promise<{ later: () => Promi
 }
 
 export const registerBar: Register = on => {
-  // /thimble-settings
+  // /thimble-settings, and the counts of this load (a new or resumed session, a reload, a switch turned on)
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const r = await next(e)
+    needCounts($)
     try {
       await $.command.register({ name: 'thimble-settings', description: "thimble's settings: turn citations, cards, and the bar's coverage and labels on or off", immediate: true })
     } catch {
