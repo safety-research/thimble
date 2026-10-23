@@ -7,16 +7,16 @@
 // orientation's view builds among them, is always listed.
 //
 // Names: `main/<title>` for a thread, `orient` (and `orient-1`, `orient-2`, ...), `write-<document>` (`-2`, `-3` for
-// later runs), `check/<title>`, `dev/<view>` for a view's build and `dev/<first words of its title>` for another ticket, and a step `orient/<phase>: <agent key>`. A chat's
+// later runs), `main/fixing <name>` (or `main/changing <name>`) for a fix of the person's thimble, `check/<title>`, `dev/<view>` for a view's build and `dev/<first words of its title>` for another ticket, and a step `orient/<phase>: <agent key>`. A chat's
 // own `name` replaces the last part.
 import type { ThreadNode } from '../components/ThreadTree'
 import { hhmm } from '../lib/time'
 import type { ChatMeta } from '../lib/types'
 
 /** What a chat is: main, a thread (a fork of main), the orientation, a writer, a report check's run on a document, a
- * dev ticket's session (a view build among them), or a step of the orientation or a writer (a subagent or
- * workflow agent of its session, nested under it and opened from its card). */
-export type ThreadKind = 'main' | 'thread' | 'orient' | 'writer' | 'check' | 'dev' | 'step'
+ * dev ticket's session (a view build among them), a fix's fixer (backend fixes.fixer_chat), or a step of the
+ * orientation or a writer (a subagent or workflow agent of its session, nested under it and opened from its card). */
+export type ThreadKind = 'main' | 'thread' | 'orient' | 'writer' | 'check' | 'dev' | 'fix' | 'step'
 
 export interface PickItem {
   id: string
@@ -61,6 +61,7 @@ export function threadKind(m: Pick<ChatMeta, 'kind' | 'role'>): ThreadKind | nul
   if (m.kind === 'agent' && m.role === 'writer') return 'writer'
   if (m.kind === 'agent' && m.role === 'check') return 'check'
   if (m.kind === 'agent' && m.role === 'dev') return 'dev'
+  if (m.kind === 'agent' && m.role === 'fixer') return 'fix'
   if (m.kind === 'agent' && m.role === 'step') return 'step'
   return null
 }
@@ -77,15 +78,16 @@ export function answeredSince(was: ReadonlyMap<string, boolean>, chats: readonly
 }
 
 /** Where a message typed in a thread's composer goes: `here`, the chat's own session (main, or a thread's fork); the
- * latest orientation from its thread or its steps' (`orient`); the view a build thread builds (`view`); else main, for
- * threads of sessions that take no message. */
-export type ComposerTarget = { to: 'here' } | { to: 'main' } | { to: 'orient'; chat: string } | { to: 'view'; slug: string }
+ * latest orientation from its thread or its steps' (`orient`); the view a build thread builds (`view`); the fix a fix's
+ * thread works on (`fix`: a round of that fix); else main, for threads of sessions that take no message. */
+export type ComposerTarget = { to: 'here' } | { to: 'main' } | { to: 'orient'; chat: string } | { to: 'view'; slug: string } | { to: 'fix'; fix: number }
 
 /** The composer's target in the thread of `meta` (ComposerTarget), `latestOrient` the latest orientation's chat. Pure. */
-export function composerTarget(kind: ThreadKind | null, meta: Pick<ChatMeta, 'id' | 'parent'> & { view?: string | null } | null, latestOrient: string | null): ComposerTarget {
+export function composerTarget(kind: ThreadKind | null, meta: Pick<ChatMeta, 'id' | 'parent'> & { view?: string | null; fix?: number | null } | null, latestOrient: string | null): ComposerTarget {
   if (kind === 'main' || kind === 'thread' || kind == null) return { to: 'here' }
   if (latestOrient && ((kind === 'orient' && meta?.id === latestOrient) || (kind === 'step' && meta?.parent === latestOrient))) return { to: 'orient', chat: latestOrient }
   if (kind === 'dev' && meta?.view) return { to: 'view', slug: meta.view }
+  if (kind === 'fix' && typeof meta?.fix === 'number') return { to: 'fix', fix: meta.fix }
   return { to: 'main' }
 }
 
@@ -205,7 +207,7 @@ export function pickItems(chats: readonly ChatMeta[], running: (m: ChatMeta) => 
   const item = (m: ChatMeta): PickItem => {
     const kind = threadKind(m) ?? 'thread'
     const label = labelOf(m)
-    const agent = kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'dev' || kind === 'step'
+    const agent = kind === 'orient' || kind === 'writer' || kind === 'check' || kind === 'dev' || kind === 'fix' || kind === 'step'
     const isRunning = agent ? m.status === 'running' || running(m) : running(m)
     const shown = m.id === opts.current
     // a thread with nothing in it (asked nothing yet, or its first question never went out) is noise in the tree

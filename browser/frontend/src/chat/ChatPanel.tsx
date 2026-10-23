@@ -708,10 +708,12 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       bus.emit('fixList', { open: true })
       return Promise.resolve(true)
     }
-    if (fixing !== null) {
-      track('ui-click', { target: 'fix:new' })
+    if (fixing !== null || target.to === 'fix') {
+      // the fix runs in the background in a thread of its own (backend fixes.fixer_chat); main's chat shows the message
+      // and one line that it started there. Typed in a fix's thread, the words are a round of that fix
+      track('ui-click', { target: target.to === 'fix' && fixing === null ? `fix:${target.fix}` : 'fix:new' })
       return api
-        .requestFix(ws, fixing, pageText())
+        .requestFix(ws, fixing ?? text, pageText(), fixing === null && target.to === 'fix' ? target.fix : undefined)
         .then(() => true)
         .catch((e: Error) => {
           bus.emit('toast', { text: `thimble fix did not start: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' })
@@ -847,6 +849,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!chat.loading && !chat.error && kind === 'check' && <SessionView ws={ws} id={current} chat={chat} role="check" title={curMeta?.title || 'Check'} running={running} fromMain={false} />}
             {!chat.loading && !chat.error && kind === 'dev' && <DevView ws={ws} id={current} chat={chat} mainRecords={main.records} ticket={ticket} onTicket={setTicket} />}
             {!chat.loading && !chat.error && kind === 'step' && curMeta && <StepView ws={ws} meta={curMeta} chat={chat} running={running} />}
+            {!chat.loading && !chat.error && kind === 'fix' && <Rows rows={chat.rows} ws={ws} chat={current} streaming={chat.streaming} />}
           </div>
           </CallFocusContext.Provider>
         </div>

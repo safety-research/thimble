@@ -13,17 +13,23 @@ The kernel holds every record and makes every change, in the terminal plugin's h
 This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home.
 
     request(c, words, page)  a new fix (`fix new --made-in browser`) and its fixer
+    change(c, fid, words)    more words for a fix the person has (`/thimble-fix N <words>`, or a message in the fix's
+                             thread): a round of that fix (`fix round`), never a new fix. A fixer that still works gets
+                             the words; otherwise a new fixer works in the copy the kernel made for the round
     the fixer                a fork of main's conversation: it has the chat so far, and its first message is the
                              registry's fixer text (plugin/prompts/fixer.md), the person's words and a text copy of what
                              the page shows. It runs with main's tools and Edit and Write, in the runtime's usual
-                             sandbox, which writes only its copy and its temp folder (runtime.spec_of)
+                             sandbox, which writes only its copy and its temp folder (runtime.spec_of). It runs in the
+                             background, in a chat of its own that the thread tree lists (`fixing <name>`, or
+                             `changing <name>` for a round of a fix the person has): its steps show there, and main's
+                             chat shows the person's message and one line that the fix started there
     its end (settle)         the kernel commits the change, refuses a safety file or a binary file, and runs the tests
                              of what the change touched (`fix done`); a fix that passes is ready, and one notice at the
                              top of the chat asks the person: Use it now, What changed, Later. Nothing goes on by itself
     the person's clicks      Use it now, or Use it in Your fixes (`fix apply`, with a secret made at the click as the
                              terminal's key press makes one; then the page of live's browser/ is built and the server
                              starts again from live, dev._do_restart; a page that does not build takes the fix off
-                             again), Later (the notice goes, the fix stays ready in Your fixes), Undo (`fix undo`, then
+                             again; once it is on, the notice goes and main's chat keeps one line that says so), Later (the notice goes, the fix stays ready in Your fixes), Undo (`fix undo`, then
                              a restart), Redo (`fix redo`, a new fixer with the earlier change) and Dismiss
                              (FixStrip.tsx)
 
@@ -70,6 +76,7 @@ PAGE_CHARS = 8000  # of the text copy of the page
 
 _phase: dict[int, str] = {}  # fix id → fixing | testing | applying | restarting, while this server works on it
 _fixers: dict[int, Any] = {}  # fix id → its fixer's conversation (runtime.Conv)
+_where: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its fixer's chat (fixer_chat)
 _recovered = False
 
 
@@ -113,6 +120,22 @@ def notes_path() -> Path:
     from . import cli  # noqa: PLC0415
 
     return cli.home().expanduser() / "fixes.json"
+
+
+def _cut(text: str, n: int) -> str:
+    t = re.sub(r"\s+", " ", text or "").strip()
+    return t if len(t) <= n else t[: n - 1].rstrip() + "…"
+
+
+def fix_name(rec: dict[str, Any], n: int = 60) -> str:
+    """A fix as the person reads it: its title, else `fix <id>` (plugin/fix/fixes.ts fixName)."""
+    return _cut(str(rec.get("title") or "") or f"fix {rec.get('id')}", n)
+
+
+def fixing_word(rec: dict[str, Any]) -> str:
+    """The fixer's chat in the thread tree: `fixing <name>` for a new fix, `changing <name>` for a round of a fix the
+    person has (plugin/fix/fixes.ts fixingWord)."""
+    return f"{'changing' if rec.get('prev') else 'fixing'} {fix_name(rec, 40)}"
 
 
 # ------------------------------------------------------------------ the kernel
@@ -242,7 +265,7 @@ def status(every: bool = False) -> dict[str, Any]:
         rows.append({"id": fid, "title": r.get("title") or "", "state": r.get("state"), "phase": phase,
                      "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
                      "tests": r.get("tests"), "error": r.get("error"), "words": (r.get("words") or [""])[-1],
-                     "summary": r.get("summary") or "", "files": len(files),
+                     "summary": r.get("summary") or "", "files": len(files), "change": bool(r.get("prev")),
                      "workspace": conv.c if conv is not None else n.get("workspace"),
                      "agent": conv.agent_id if conv is not None else n.get("agent"),
                      "created": float(r.get("created") or 0),
@@ -344,9 +367,14 @@ def fixer_roots(fid: int) -> tuple[Path, list[Path], list[Path]]:
     return work, [git_dir, *lent_reads()], [work, tmp]
 
 
-async def start_fixer(c: str, rec: dict[str, Any], page: str = "", *, earlier: bool = False) -> None:
-    """The fixer on a fix whose copy the kernel just made (a request or a redo): a fork of main's conversation."""
-    from . import runtime  # noqa: PLC0415
+async def start_fixer(c: str, rec: dict[str, Any], page: str = "", *, earlier: bool = False, said: str | None = None,
+                      asked: str | None = None, announce: bool = True) -> None:
+    """The fixer on a fix whose copy the kernel just made (a request, a round or a redo): a fork of main's conversation,
+    in the background, in the fix's own chat (fixer_chat). `said`: the person's message as they typed it in main's
+    chat, which main's chat shows before its line that the fix started; `asked`: the person's words for this round,
+    which the fix's chat opens the round with; `announce` False for words typed in the fix's own thread and for Redo,
+    which main's chat does not show."""
+    from . import agents, runtime, session  # noqa: PLC0415
 
     fid = int(rec["id"])
     if rec.get("work"):
@@ -354,16 +382,66 @@ async def start_fixer(c: str, rec: dict[str, Any], page: str = "", *, earlier: b
     text = await asyncio.to_thread(first_message, rec, page, earlier)
     sp = runtime.ensure(c)
     agent_id = runtime._agent_id()
+    if said:
+        agents.mirror(c, "user", by=agents.BROWSER, text=said)
+    chat = fixer_chat(c, rec, agent_id, sp.sid, asked=asked, announce=announce)
+    session.follow(c, agent_id, chat, FIXER)
     conv = runtime.Conv(sp, agent_id, "fork", agent_id=agent_id, agent_type=runtime.FORK_TYPE, role=FIXER,
                         values={"fix": fid}, base=runtime.MAIN,
                         transcript=runtime.Transcript(sp.sub_path(agent_id), sp.sid, agent_id))
     sp.convs[agent_id] = conv
     conv.transcript.write_meta({"agentType": runtime.FORK_TYPE, "isFork": True,  # type: ignore[union-attr]
-                                "description": f"fix {fid}: {rec.get('title') or ''}".strip()})
+                                "description": fixing_word(rec)})
     conv.queue.append(text)
     _fixers[fid] = conv
     _phase_set(fid, "fixing")
+    # main hears of it at the person's next message, as the terminal's fork tells it (plugin/fix/request.ts)
+    sp.tell(runtime.MAIN, f"The person asked thimble's fixer for a change to thimble itself (“{fix_name(rec)}”); it works "
+                          "in the background in a copy, and thimble shows the person the result. Nothing for you to do.")
     conv.task = runtime._spawn_task(_run_fixer(conv, fid), f"fixer:{c}:{agent_id}")
+
+
+def fixer_chat(c: str, rec: dict[str, Any], agent_id: str, sid: str, *, asked: str | None = None,
+               announce: bool = True) -> str:
+    """The fix's chat, which the thread tree lists as `fixing <name>` (or `changing <name>`): made at the fix's first
+    fixer, and run again by each later one (a round, a redo), so a fix keeps one chat. Each run opens with the person's
+    words (`asked`), else a line that it starts again; `announce`: main's chat gets the line that the fix started there
+    (an `agent` record)."""
+    from . import agents  # noqa: PLC0415
+
+    fid, title = int(rec["id"]), fixing_word(rec)
+    had = next((m for m in agents.list_chats(c) if m.get("role") == FIXER and m.get("fix") == fid), None)
+    if had is None:
+        chat = str(agents.new_agent(c, FIXER, title, by=agents.BROWSER, announce=announce, agent_id=agent_id, fix=fid,
+                                    session=sid)["id"])
+    else:
+        chat = str(had["id"])
+        agents.update_agent(c, chat, title=title, status="running", ts_end=None, result=None, agent_id=agent_id,
+                            session=sid)
+        if announce:
+            agents.mirror(c, "agent", chat=chat, role=FIXER, title=title, by=agents.BROWSER)
+    if (asked or "").strip():
+        agents.Recorder(c, chat).record("user", text=str(asked).strip(), by=agents.BROWSER)
+    elif had is not None:
+        agents.Recorder(c, chat).record("text", delta="\n· Redo, in a new copy\n")
+    _where[fid] = (c, chat)
+    return chat
+
+
+def where(fid: int) -> tuple[str, str] | None:
+    """The workspace and chat of fix `fid`'s fixer: this server's, else the chat a fixer of an earlier server made."""
+    from . import agents  # noqa: PLC0415
+
+    if fid in _where:
+        return _where[fid]
+    with contextlib.suppress(OSError):
+        for d in sorted(config.WORKSPACES_DIR.iterdir()):
+            with contextlib.suppress(Exception):
+                m = next((m for m in agents.list_chats(d.name) if m.get("role") == FIXER and m.get("fix") == fid), None)
+                if m is not None:
+                    _where[fid] = (d.name, str(m["id"]))
+                    return _where[fid]
+    return None
 
 
 async def _run_fixer(conv: Any, fid: int) -> None:
@@ -452,14 +530,16 @@ async def settle(fid: int, answer: str) -> None:
     does not go on by itself: only the person's click (Use it now) applies it."""
     _fixers.pop(fid, None)
     _phase_set(fid, "testing")
+    name = f"fix {fid}"
     try:
         rec = await asyncio.to_thread(record, fid)
+        name = fix_name(rec)
         if rec.get("state") != "working":
             _phase_set(fid, None)
             return
         if why := await asyncio.to_thread(srt_ready):
             _phase_set(fid, None)
-            note(fid, "problem", f"Fix {fid} could not be checked: {why}")
+            note(fid, "problem", f"“{name}” could not be checked: {why}")
             return
         end = end_of(answer)
         work = Path(rec.get("work") or "")
@@ -472,17 +552,17 @@ async def settle(fid: int, answer: str) -> None:
         done = json.loads(r.out) if r.ok else {}
     except Exception as e:  # noqa: BLE001 — the end is told either way
         r, done = Ran(False, "", str(e)), {}
-    title = str(done.get("title") or f"fix {fid}")
+    title = fix_name(done) if done.get("title") else name
     state = str(done.get("state") or "")
     if not r.ok:
         _phase_set(fid, None)
-        note(fid, "problem", f"Fix {fid} could not be checked: {r.err or 'thimble fix done gave nothing'}")
+        note(fid, "problem", f"“{name}” could not be checked: {r.err or 'thimble fix done gave nothing'}")
     elif state == "request":
         _phase_set(fid, None)
         note(fid, "request", f"Saved as a request with no code: {title}")
     elif state != "ready":
         _phase_set(fid, None)
-        note(fid, "failed", f"Fix {fid} did not pass: {title} · {done.get('error') or 'its tests failed'}")
+        note(fid, "failed", f"“{title}” did not pass: {done.get('error') or 'its tests failed'}")
     else:
         _phase_set(fid, None)
         tests = str(done.get("tests") or "")
@@ -502,7 +582,7 @@ async def apply(fid: int) -> None:
     if not r.ok:
         _phase_set(fid, None)
         raise HTTPException(409, r.err or "thimble fix apply gave nothing")
-    title = str((json.loads(r.out) if r.out.strip().startswith("{") else {}).get("title") or f"fix {fid}")
+    title = fix_name({"id": fid, **(json.loads(r.out) if r.out.strip().startswith("{") else {})})
     runtime_task(_go_on(fid, title), f"fix-apply:{fid}")
 
 
@@ -511,9 +591,9 @@ async def _go_on(fid: int, title: str) -> None:
     if why:
         await asyncio.to_thread(kernel, ["undo", str(fid)], timeout=300)
         _phase_set(fid, None)
-        note(fid, "failed", f"Fix {fid} did not go on: {title} · {why}; it is off again")
+        note(fid, "failed", f"“{title}” did not go on: {why}; it is off again")
         return
-    await restart(fid, f"{title} is on", "fixed", f"fix {fid}: {title}")
+    await restart(fid, f"“{title}” is on", "fixed", f"fix {fid}: {title}")
 
 
 def runtime_task(coro: Any, name: str) -> None:
@@ -524,15 +604,20 @@ def runtime_task(coro: Any, name: str) -> None:
 
 async def restart(fid: int, said: str, kind: str, why: str) -> None:
     """The server starts again from live's browser/ (once main and the agents end their turns), and the row says
-    `said` after it."""
-    from . import dev  # noqa: PLC0415
+    `said` after it. A fix that went on has no row after it, as the terminal's line goes once the fix is on: main's
+    chat keeps one line that says so."""
+    from . import agents, dev  # noqa: PLC0415
 
     if not dev.supervised():
         _phase_set(fid, None)
         note(fid, kind, f"{said} · {RESTART_BY_HAND}")
         return
     _phase[fid] = "restarting"  # the notice keeps "Reloading thimble…" until the server is back
-    note(fid, kind, said)
+    on = kind == "fixed"
+    note(fid, kind, said, **({"dismissed": True} if on else {}))
+    if on and (at := await asyncio.to_thread(where, fid)):
+        with contextlib.suppress(Exception):
+            agents.mirror(at[0], "text", delta=f"\n· thimble starts again with your fix: {said}\n")
     _phase_set(fid, "restarting")
     t0 = time.monotonic()
     while _busy() and time.monotonic() - t0 < BUSY_WAIT_S:
@@ -594,8 +679,9 @@ def prepare(root: Path) -> str:
 # ------------------------------------------------------------------ requests
 
 
-async def request(c: str, words: str, page: str = "", *, title: str | None = None) -> dict[str, Any]:
-    """A new fix in the person's words, and its fixer started. {fix}."""
+async def request(c: str, words: str, page: str = "", *, title: str | None = None,
+                  said: str | None = None) -> dict[str, Any]:
+    """A new fix in the person's words, and its fixer started. `said`: the person's message in main's chat. {fix}."""
     words = (words or "").strip()
     if not words:
         raise HTTPException(400, EMPTY)
@@ -603,8 +689,57 @@ async def request(c: str, words: str, page: str = "", *, title: str | None = Non
         raise HTTPException(409, why)
     args = ["new", "--made-in", "browser", *(["--title", title] if title else [])]
     rec = _json(await asyncio.to_thread(kernel, args, stdin=words, timeout=180), "new")
-    await start_fixer(c, rec, page)
+    await start_fixer(c, rec, page, said=said, asked=words)
     return {"fix": {"id": rec["id"], "title": rec.get("title"), "state": rec.get("state")}}
+
+
+CHANGEABLE = ("on", "off", "ready", "working", "failed", "redo")  # the fixes more words can change (plugin/fix/request.ts)
+
+
+def form_of(words: str, recs: list[dict[str, Any]]) -> tuple[str, int | None]:
+    """The words of `/thimble-fix N <words>` and fix N, when N is a fix the person has that words can change; `new
+    <words>` and any other words: the words, for a new fix (plugin/fix/request.ts formOf)."""
+    n = re.match(r"^#?(\d+)\s+([\s\S]+)$", words)
+    if n and any(int(r.get("id") or 0) == int(n.group(1)) and r.get("state") in CHANGEABLE for r in recs):
+        return n.group(2).strip(), int(n.group(1))
+    fresh = re.match(r"^new\s+([\s\S]+)$", words, re.I)
+    return (fresh.group(1).strip() if fresh else words), None
+
+
+def round_text(rec: dict[str, Any], words: str) -> str:
+    """What a fixer that still works reads of a round (plugin/fix/request.ts roundText)."""
+    return f"The person adds to this fix (round {rec.get('rounds') or 2}): {words}"
+
+
+async def change(c: str, fid: int, words: str, page: str = "", *, said: str | None = None,
+                 announce: bool = True) -> dict[str, Any]:
+    """More words for fix `fid`: a round of that fix (`fix round`), never a new fix. A fixer that still works on it gets
+    them; otherwise a new fixer works in the copy the kernel made for the round, which holds the fix's change (one
+    that is on stays as it is until the person's Use it now). {fix}."""
+    from . import agents  # noqa: PLC0415
+
+    words = (words or "").strip()
+    if not words:
+        raise HTTPException(400, EMPTY)
+    if why := problem():
+        raise HTTPException(409, why)
+    if _phase.get(fid) in ("testing", "applying", "restarting"):
+        raise HTTPException(409, f"thimble is {'checking' if _phase[fid] == 'testing' else 'putting on'} this fix; "
+                                 "say it again once its notice shows")
+    rec = _json(await asyncio.to_thread(kernel, ["round", str(fid)], stdin=words, timeout=180), "round")
+    conv = _fixers.get(fid)
+    if conv is not None and conv.running:
+        at = _where.get(fid)
+        if said:
+            agents.mirror(c, "user", by=agents.BROWSER, text=said)
+        if at is not None:
+            agents.Recorder(at[0], at[1]).record("user", text=words, by=agents.BROWSER)
+            if announce:
+                agents.mirror(c, "agent", chat=at[1], role=FIXER, title=fixing_word(rec), by=agents.BROWSER)
+        conv.queue.append(round_text(rec, words))
+    else:
+        await start_fixer(c, rec, page, said=said, asked=words, announce=announce)
+    return {"fix": {"id": rec["id"], "title": rec.get("title"), "state": rec.get("state"), "round": True}}
 
 
 def words_of(text: str) -> str | None:
@@ -636,6 +771,7 @@ def _recover_soon() -> None:
 class Asked(BaseModel):
     words: str
     page: str = ""
+    fix: int | None = None  # words typed in the fix's own thread: a round of it
 
 
 def _clicked(http: Request) -> None:
@@ -652,10 +788,17 @@ async def status_route(every: bool = False) -> dict[str, Any]:
 
 @router.post("/ws/{c}/fixes", status_code=202)
 async def request_route(c: str, body: Asked, http: Request) -> dict[str, Any]:
-    """/thimble-fix in the chat: the person's words and what the page shows."""
+    """/thimble-fix in the chat: the person's words and what the page shows. `/thimble-fix N <words>` is a round of fix
+    N, as a message in fix N's own thread is (`fix`); any other words are a new fix."""
     _clicked(http)
     config.workspace_dir(c)
-    return await request(c, body.words, body.page)
+    if body.fix is not None:
+        return await change(c, int(body.fix), body.words, body.page, announce=False)
+    said = f"{COMMAND} {(body.words or '').strip()}"
+    words, target = form_of((body.words or "").strip(), await asyncio.to_thread(records) if not problem() else [])
+    if target is not None:
+        return await change(c, target, words, body.page, said=said)
+    return await request(c, words, body.page, said=said)
 
 
 @router.post("/fixes/{fid}/apply", status_code=202)
@@ -689,7 +832,7 @@ async def redo_route(c: str, fid: int, http: Request) -> dict[str, Any]:
     before = await asyncio.to_thread(record, fid)
     rec = _json(await asyncio.to_thread(kernel, ["redo", str(fid)], timeout=180), "redo")
     dismiss(fid)
-    await start_fixer(c, {**rec, "error": before.get("error")}, earlier=True)
+    await start_fixer(c, {**rec, "error": before.get("error")}, earlier=True, announce=False)
     return {"fix": {"id": rec["id"], "title": rec.get("title"), "state": rec.get("state")}}
 
 

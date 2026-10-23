@@ -2,8 +2,9 @@
 // thimble fix in the page (src/chat/fix.ts, src/chat/FixStrip.tsx, backend fixes.py): `/thimble-fix <words>` goes to
 // the server with a text copy of what the page shows. While Claude works, one row above the composer says what it
 // fixes. When the fix passes its checks, one notice at the top of the chat asks: Use it now (the person's click puts it
-// on), What changed (a few lines, not a diff) and Later. After Use it now: "Reloading thimble…", then "<title> is on"
-// with Undo. A fix that did not pass says why, with Redo and Dismiss.
+// on), What changed (a few lines, not a diff) and Later. After Use it now: "Reloading thimble…", then the notice goes
+// (main's chat keeps one line that the fix is on; Your fixes offers Undo). A fix that did not pass says why, with Redo
+// and Dismiss.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { changedLines, fixActions, fixText, fixWords, pageText, workingText, type FixRow } from '../../src/chat/fix.ts'
@@ -40,8 +41,9 @@ describe('the command and the page', () => {
 
 describe('the row and the notice', () => {
   test('its words: what Claude fixes and for how long, then how it went', () => {
-    expect(workingText(row({ phase: 'fixing', kind: null, said: null }), 152)).toBe('Fixing thimble: Card says how many rows · 52s')
-    expect(workingText(row({ phase: 'testing' }), 400)).toBe('Testing the fix: Card says how many rows · 5 min')
+    expect(workingText(row({ phase: 'fixing', kind: null, said: null }), 152)).toBe('Fixing “Card says how many rows” · 52s')
+    expect(workingText(row({ phase: 'fixing', change: true }), 152)).toBe('Changing “Card says how many rows” · 52s')
+    expect(workingText(row({ phase: 'testing' }), 400)).toBe('Testing “Card says how many rows” · 5 min')
     expect(fixText(row({ phase: 'applying' }))).toBe('Reloading thimble…')
     expect(fixText(row({ phase: 'restarting' }))).toBe('Reloading thimble…')
     expect(fixText(ready())).toBe('thimble fixed: Card says how many rows · tests pass')
@@ -98,7 +100,7 @@ describe('the row and the notice', () => {
     await settle()
     expect(foot.querySelector('.chat-fix')?.getAttribute('data-phase')).toBe('fixing')
     expect(foot.querySelector('.chat-fix .spinner')).not.toBeNull()
-    expect(foot.querySelector('.chat-fix-text')?.textContent).toMatch(/^Fixing thimble: Card says how many rows · /)
+    expect(foot.querySelector('.chat-fix-text')?.textContent).toMatch(/^Fixing “Card says how many rows” · /)
     expect(top.querySelector('.chat-fix')).toBeNull()
   })
 
@@ -118,6 +120,11 @@ describe('the row and the notice', () => {
     expect(sent).toEqual(['POST /fixes/3/apply'])
     expect(el.querySelector('.chat-fix')?.getAttribute('data-kind')).toBe('reloading')
     expect(el.querySelector('.chat-fix-text')?.textContent).toBe('Reloading thimble…')
+    // the server is back with the fix on: the notice goes, as the terminal's line goes once y put the fix on
+    fixes = []
+    await act(async () => bus.emit('wsStream', { connected: true } as never))
+    await settle()
+    expect(el.querySelector('.chat-fix')).toBeNull()
   })
 
   test('Later dismisses the notice; Your fixes still offers Use it', async () => {

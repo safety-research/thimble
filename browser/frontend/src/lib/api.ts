@@ -664,9 +664,10 @@ export const api = {
   fixes: (every = false) => j<FixStatus>(`${apiBase()}/fixes${every ? '?every=true' : ''}`),
   /** Use it now, or Use it in Your fixes: the person's click puts the fix on, and the server starts again with it */
   applyFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/apply`, { method: 'POST' }),
-  /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows */
-  requestFix: (ws: string, words: string, page: string) =>
-    j<{ fix: { id: number; title: string; state: string } }>(`${apiBase()}/ws/${enc(ws)}/fixes`, { method: 'POST', body: JSON.stringify({ words, page }) }),
+  /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows; `fix`: words typed in that fix's own
+   * thread, a round of it */
+  requestFix: (ws: string, words: string, page: string, fix?: number) =>
+    j<{ fix: { id: number; title: string; state: string } }>(`${apiBase()}/ws/${enc(ws)}/fixes`, { method: 'POST', body: JSON.stringify({ words, page, ...(fix !== undefined ? { fix } : {}) }) }),
   undoFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/undo`, { method: 'POST' }),
   redoFix: (ws: string, id: number) => j<{ fix: { id: number } }>(`${apiBase()}/ws/${enc(ws)}/fixes/${enc(String(id))}/redo`, { method: 'POST' }),
   dismissFix: (id: number) => j<{ ok: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/dismiss`, { method: 'POST' }),

@@ -1,8 +1,10 @@
 // thimble fix in the page (backend fixes.py): `/thimble-fix <words>` in the chat asks Claude to change the person's own
 // thimble. The words go with a text copy of what the page shows now (pageText), so "this card" can name what is open.
-// The server answers at once; the row above the composer says how the work goes, and one notice at the top of the chat
-// says how it ended (FixStrip), from GET /api/fixes and the stream's `fix` events. `/thimble-fix` alone opens Your
-// fixes.
+// The server answers at once; the fixer works in the background in a thread of its own (`fixing <name>` in the tree),
+// main's chat shows the message and one line that points there, the row above the composer says how the work goes, and
+// one notice at the top of the chat says how it ended (FixStrip), from GET /api/fixes and the stream's `fix` events.
+// `/thimble-fix N <words>`, or a message in the fix's thread, changes fix N (a round of it, never a new fix).
+// `/thimble-fix` alone opens Your fixes.
 
 export const FIX_COMMAND = '/thimble-fix'
 
@@ -27,6 +29,8 @@ export interface FixRow {
   words: string
   /** what the fixer says it did */
   summary?: string
+  /** a round of a fix the person has: the version they have stays until Use it now */
+  change?: boolean
   /** how many files it changed */
   files?: number
   tests: string | null
@@ -46,11 +50,12 @@ export const working = (r: FixRow): boolean => r.phase === 'fixing' || r.phase =
 /** Whether the fix goes on now, after the person's click (or comes off after Undo): the server starts again. */
 export const reloading = (r: FixRow): boolean => r.phase === 'applying' || r.phase === 'restarting'
 
-/** The row above the composer while Claude works: what it fixes, and for how long so far. Pure. */
+/** The row above the composer while Claude works: what it fixes, by the fix's name, and for how long so far. Pure. */
 export function workingText(r: FixRow, now: number = Date.now() / 1000): string {
   const secs = r.created ? Math.max(0, Math.round(now - r.created)) : null
   const took = secs === null ? '' : ` · ${secs < 90 ? `${secs}s` : `${Math.round(secs / 60)} min`}`
-  return `${r.phase === 'testing' ? 'Testing the fix' : 'Fixing thimble'}: ${r.title || r.words}${took}`
+  const doing = r.phase === 'testing' ? 'Testing' : r.change ? 'Changing' : 'Fixing'
+  return `${doing} “${r.title || r.words}”${took}`
 }
 
 /** The notice's words for a fix. Pure. */

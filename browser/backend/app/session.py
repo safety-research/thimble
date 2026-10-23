@@ -231,6 +231,9 @@ class Sub:
         # an orientation's continuation (U2): its first prompt is thimble's, holding the stopped run's context, and the
         # analyst's message shows as the run's own (orient_session.subagent_started), so the prompt is no message
         self.skip_prompt = False
+        # a fork the server started for a chat of its own (follow): its prompts are thimble's texts, and the chat shows
+        # the person's words itself, so no prompt is a message
+        self.own_prompts = False
         self.root: str | None = None  # the agent id of the thimble agent a descendant's chat is a step of
         self.last_text: str | None = None  # the last text it wrote, a turn's answer (agent_answer)
         # a thread's fork's words in its last `↳ thread <name>: …` line written after its last tool call, which only the
@@ -1972,6 +1975,27 @@ def expect_agent(c: str, agent_id: str, chat: str, chat_role: str) -> None:
     lv.wake.set()
 
 
+_own: dict[tuple[str, str], tuple[str, str]] = {}  # (workspace, agent id) → (chat, role) of a fork follow() names
+
+
+def follow(c: str, agent_id: str, chat: str, role: str) -> None:
+    """A fork the server started for a chat of its own (a fix's fixer, fixes.fixer_chat): the mirror reads its
+    transcript into that chat whenever it finds the file, never into main's, and shows none of its prompts."""
+    _own[(c, agent_id)] = (chat, role)
+    lv = _live.get(c)
+    if lv is None or _sub_by(lv, agent_id=agent_id) is not None:
+        return
+    lv.subs.append(_own_sub(lv, agent_id))
+    lv.wake.set()
+
+
+def _own_sub(lv: Live, agent_id: str) -> Sub:
+    chat, role = _own[(lv.c, agent_id)]
+    sub = Sub(lv.c, chat, None, agent_id, role=role)
+    sub.own_prompts = True
+    return sub
+
+
 def rekeyed(c: str, old: str, new: str, moved: "list[str]") -> None:
     """--rekey moved thimble's agents `moved` from main's session `old` to `new` (subagents.rekey): each is read on in
     the new session's folder from offset 0, as the continuation of its file in the old one (U1, V2). Main's own move
@@ -2239,6 +2263,10 @@ def _spawn(lv: Live, tool_use_id: str | None, agent_id: str | None, title: str, 
     sub = _sub_by(lv, tool_use_id=tool_use_id) or _sub_by(lv, agent_id=agent_id)
     if sub is not None and _stray(sub) and (tid := thread_for(lv.c, title)):
         _into_thread(lv, sub, tid)
+    if sub is None and agent_id and (lv.c, agent_id) in _own:
+        sub = _own_sub(lv, agent_id)
+        lv.subs.append(sub)
+        return sub
     if sub is None and agent_id:
         sub = _spawn_thimble(lv, tool_use_id, agent_id, title, agent_type, parent)
         if sub is not None:
@@ -3018,7 +3046,7 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
                 return 0  # the stop's own line: the chat's end says it was stopped
             sub.api_error = sub.api_error_class = None  # a new run's prompt, which may run on another model
             sub.run_model = sub.switched_to = None
-            if sub.skip_prompt:
+            if sub.skip_prompt or sub.own_prompts:
                 sub.skip_prompt = False
                 return 0
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)

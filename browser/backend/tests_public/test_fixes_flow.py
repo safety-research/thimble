@@ -14,7 +14,7 @@ import pytest
 from fastapi import HTTPException
 from test_runtime import CORPUS, api_key, call, main_turn, on, text  # noqa: F401 — `on` is a fixture
 
-from app import config, dev, fixes, tools
+from app import agents, config, dev, fixes, tools
 
 PAGE = 'The card open in focus (card:c1), "Incidents by week":\nweek  incidents\n1  4\n2  7'
 
@@ -56,6 +56,10 @@ class Kernel:
             if rec["state"] not in ("ready", "off"):
                 return fixes.Ran(False, "", f"fix {rec['id']} is {rec['state']}, so there is nothing to apply")
             rec["state"] = "on"
+        elif verb == "round":
+            if rec["state"] in ("on", "off", "ready"):  # changed in place: the version the person has stays (prev)
+                rec["prev"] = {"state": rec["state"]}
+            rec.update(state="working", words=[*rec["words"], stdin], rounds=int(rec.get("rounds") or 1) + 1)
         elif verb == "undo":
             rec["state"] = "off"
         elif verb == "redo":
@@ -92,6 +96,24 @@ async def _ended(fid: int = 1) -> None:
     if conv is not None and conv.task is not None:
         await conv.task
     await asyncio.sleep(0.4)  # the restart is called a moment after
+
+
+def _log(c: str, chat: str = "main") -> list[dict[str, Any]]:
+    return agents.read_events(agents.paths(c, chat)[1])
+
+
+def _fixer_chats(c: str) -> list[dict[str, Any]]:
+    return [m for m in agents.list_chats(c) if m.get("role") == fixes.FIXER]
+
+
+async def _mirrored(c: str, chat: str, kind: str = "tool_use") -> list[dict[str, Any]]:
+    """The fixer chat's records once the mirror wrote one of `kind`."""
+    for _ in range(50):
+        got = _log(c, chat)
+        if any(r.get("type") == kind for r in got):
+            return got
+        await asyncio.sleep(0.1)
+    return _log(c, chat)
 
 
 def test_the_words_after_the_command():
@@ -156,9 +178,79 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
     assert [c[0] for c in fixing.calls].count("apply") == 1
     assert fixing.restarts == [("fix 1: Card says how many rows", config.REPO_ROOT / "backend")]
     assert fixes.status()["fixes"][0]["phase"] == "restarting"
-    fixes._phase.clear()  # the server that starts again knows of no phase: the notice says the fix is on
-    row = fixes.status()["fixes"][0]
-    assert (row["kind"], row["said"], row["state"]) == ("fixed", "Card says how many rows is on", "on")
+    fixes._phase.clear()  # the server that starts again knows of no phase: the notice is gone once the fix is on
+    assert fixes.status()["fixes"] == []
+    assert fixes.status(every=True)["fixes"][0]["state"] == "on"  # Your fixes still lists it, with Undo
+    # main's chat keeps one line that says so
+    assert any(r.get("type") == "text" and "“Card says how many rows” is on" in r.get("delta", "") for r in _log(CORPUS))
+
+
+async def test_a_fix_runs_in_its_own_chat_in_the_tree_and_main_shows_only_the_message_and_one_line(fixing, monkeypatch,
+                                                                                                    analyst):
+    work = fixing.home / "fixes" / "work" / "1"
+    api_key(monkeypatch, [
+        call("Write", {"file_path": str(work / "browser" / "note.txt"), "content": "rows\n"}),
+        text("Title: Card says how many rows\nWhat it does: The card's title now ends with its row count."),
+    ])
+    before = len(_log(CORPUS))
+    got = await fixes.request_route(CORPUS, fixes.Asked(words="make the card count its rows", page=PAGE), analyst)
+    assert got["fix"]["id"] == 1
+    # the fix's own chat, which the thread tree lists by the fix's name, not its number
+    [chat] = _fixer_chats(CORPUS)
+    assert chat["kind"] == "agent" and chat["fix"] == 1 and chat["title"] == "fixing make the card count its rows"
+    records = await _mirrored(CORPUS, chat["id"])
+    await _ended()
+    records = _log(CORPUS, chat["id"])
+    # it opens with the person's words, not the fixer's prompt, and its steps are its own
+    users = [r["text"] for r in records if r["type"] == "user"]
+    assert users == ["make the card count its rows"]
+    assert any(r["type"] == "tool_use" and r["name"] == "Write" for r in records)
+    # main's chat: the message as the person typed it, and one line that the fix started in its chat; none of its steps
+    added = _log(CORPUS)[before:]
+    assert [(r["type"], r.get("text") or r.get("chat")) for r in added if r["type"] in ("user", "agent")] == [
+        ("user", "/thimble-fix make the card count its rows"), ("agent", chat["id"])]
+    assert not any(r["type"] in ("tool_use", "tool_result") for r in added)
+    assert agents.read_meta(CORPUS, chat["id"])["status"] == "done"
+
+
+async def test_n_and_words_change_fix_n_in_place_and_other_words_are_a_new_fix(fixing, monkeypatch, analyst):
+    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows."),
+                          text("Title: Card counts rows\nWhat it does: The card counts rows and columns."),
+                          text("Title: Five rows a page\nWhat it does: Pages hold five rows.")])
+    await fixes.request_route(CORPUS, fixes.Asked(words="count the rows"), analyst)
+    await _ended()
+    before = len(_log(CORPUS))
+    got = await fixes.request_route(CORPUS, fixes.Asked(words="1 count the columns too"), analyst)
+    # a round of fix 1 (`fix round 1`), never a new fix: the same id and the same chat, renamed `changing …`
+    assert got["fix"]["id"] == 1 and got["fix"]["round"] is True
+    assert ("round", "1") in fixing.calls and [c[0] for c in fixing.calls].count("new") == 1
+    assert fixing.recs[1]["words"] == ["count the rows", "count the columns too"]
+    [chat] = _fixer_chats(CORPUS)
+    assert chat["title"] == "changing Card counts rows"
+    assert [(r["type"], r.get("text")) for r in _log(CORPUS)[before:] if r["type"] == "user"] == [
+        ("user", "/thimble-fix 1 count the columns too")]
+    await _ended()
+    assert [r["text"] for r in _log(CORPUS, chat["id"]) if r["type"] == "user"] == ["count the rows", "count the columns too"]
+    # a number that is no fix of the person's is part of the words of a new fix, as the terminal reads it
+    got = await fixes.request_route(CORPUS, fixes.Asked(words="5 rows a page"), analyst)
+    assert got["fix"]["id"] == 2 and fixing.recs[2]["words"] == ["5 rows a page"]
+    await _ended(2)
+
+
+async def test_words_in_the_fix_s_thread_go_to_its_fixer_while_it_works(fixing, monkeypatch, analyst):
+    client = api_key(monkeypatch, [text("Working on it."), text("Title: Card counts rows\nWhat it does: Rows and columns.")])
+    await fixes.request_route(CORPUS, fixes.Asked(words="count the rows"), analyst)
+    before = len(_log(CORPUS))
+    # typed in the fix's own thread while its fixer works: a round of the fix, for the same fixer
+    got = await fixes.request_route(CORPUS, fixes.Asked(words="and the columns", fix=1), analyst)
+    assert got["fix"]["id"] == 1 and ("round", "1") in fixing.calls
+    await _ended()
+    assert "The person adds to this fix (round 2): and the columns" in json.dumps(client.bodies[-1]["messages"])
+    assert [c[0] for c in fixing.calls].count("new") == 1 and len(_fixer_chats(CORPUS)) == 1
+    # main's chat shows nothing of it; the fix's thread shows the words, not the fixer's text
+    assert not [r for r in _log(CORPUS)[before:] if r["type"] in ("user", "agent")]
+    users = [r["text"] for r in _log(CORPUS, _fixer_chats(CORPUS)[0]["id"]) if r["type"] == "user"]
+    assert users == ["count the rows", "and the columns"]
 
 
 async def test_a_fix_that_fails_its_checks_says_why_and_offers_redo(fixing, monkeypatch):
@@ -169,7 +261,7 @@ async def test_a_fix_that_fails_its_checks_says_why_and_offers_redo(fixing, monk
     assert "apply" not in [c[0] for c in fixing.calls] and fixing.restarts == []
     row = fixes.status()["fixes"][0]
     assert row["kind"] == "failed"
-    assert row["said"] == "Fix 1 did not pass: Bar counts rows · its tests failed in the sandbox"
+    assert row["said"] == "“Bar counts rows” did not pass: its tests failed in the sandbox"
 
 
 async def test_later_leaves_the_fix_ready_in_your_fixes_and_use_it_there_puts_it_on(fixing, monkeypatch, analyst):

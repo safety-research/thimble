@@ -228,6 +228,8 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             if (r.role === 'orient') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Orientation started in" chips={<ThreadChip id={r.chat} />} />
             if (r.role === 'writer') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Writing started in" chips={<ThreadChip id={r.chat} />} />
             if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text={devStarted(r)} chips={<ThreadChip id={r.chat} />} />
+            // a fix of the person's thimble runs in the background, in its own thread (backend fixes.fixer_chat)
+            if (r.role === 'fixer') return <Note key={r.index} className="chat-agent-note chat-fix-started" data-chat={r.chat} text={fixStarted(r.title)} chips={<ThreadChip id={r.chat} />} />
             return <AgentCard key={r.index} ws={ws} chat={r.chat} role={r.role} title={r.title} ts={r.ts} />
           case 'branch':
             return (
@@ -274,6 +276,12 @@ export const ACCESS_KIND = 'claude-access'
 export function devStarted(r: { view?: string; title?: string | null }): string {
   // the agent row's `view`; a row an earlier build wrote names a view build only by its title
   return r.view || (r.title ?? '').startsWith('view: ') ? 'View build started in' : 'Dev ticket started'
+}
+
+/** Main's note for a fix that started in its own thread: `Fixing it in the background in` for a new fix, `Changing it
+ * in the background in` for a round of a fix the person has (the chat's title starts `changing`). Pure. */
+export function fixStarted(title: string | null | undefined): string {
+  return /^changing\b/i.test(title ?? '') ? 'Changing it in the background in' : 'Fixing it in the background in'
 }
 
 /** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`
