@@ -10,7 +10,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { fixKey, fixLineRows } from '../fix/line'
 import { drawFixes } from '../fix/pane'
-import { registerFix, wordsOfSkill } from '../fix/register'
+import { notStarted, registerFix, wordsOfSkill } from '../fix/register'
 import { textOf as screenText, TEXT_ELS } from '../fix/screen'
 import { promptStub } from './stubs'
 
@@ -195,8 +195,16 @@ async function ask(s: ReturnType<typeof setup>, words: string): Promise<Any> {
   expect(own).toEqual({})
   await s.tick()
   expect(s.commands.splice(s.commands.indexOf('thimble:thimble-fix'), 1)).toEqual(['thimble:thimble-fix'])
-  return s.call('skill.prompt', { skill: 'thimble:fix-thimble', text: `What thimble does wrong, and what it should do: ${words}\n\nthimble starts its fix…`, frontmatter: {}, source: 'plugin' }, async (e: Any) => ({ text: e.text }))
+  return skillText(await skillCall(s, words))
 }
+
+/** Claude's call of the fix-thimble skill, through the Skill tool: the skill itself must not run. */
+function skillCall(s: ReturnType<typeof setup>, words: string, skill = 'thimble:fix-thimble'): Promise<Any> {
+  return s.call('tool.call', { tool: 'Skill', tool_use_id: `tu-skill-${words.length}`, skill, args: words }, async () => { throw new Error('the fix-thimble skill itself never runs') })
+}
+
+/** What Claude reads of a Skill call's answer, in the shape skill.prompt's `{ text }` has. */
+const skillText = (r: Any) => ({ text: (r.context ?? []).join('\n'), result: r.result })
 
 /** A request, and the fixer's end with what it says. */
 async function requested(s: ReturnType<typeof setup>, answer = 'Done.\n\nTitle: Bar says read for coverage\nWhat it does: The bar says r read 14%.') {
@@ -451,13 +459,13 @@ test("Claude starts a fix with the fix-thimble skill: the same fork starts, Clau
   expect(wordsOfSkill('What thimble does wrong, and what it should do: $ARGUMENTS\n\nthimble starts…\n\nARGUMENTS: the bar is cut')).toBe('the bar is cut')
   const s = setup()
   await s.call('session.start', { cwd: '/made-up/data' })
-  const skill = { skill: 'thimble:fix-thimble', text: "What thimble does wrong, and what it should do: the card's legend hides its last row\n\nthimble starts its fix…", frontmatter: {}, source: 'plugin' }
-  const r = await s.call('skill.prompt', skill, async (e: Any) => ({ text: e.text }))
+  const r = skillText(await skillCall(s, "the card's legend hides its last row", 'fix-thimble'))
+  expect(r.result).toEqual({ success: true, commandName: 'fix-thimble' })
   expect(String(r.text)).toContain('thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix 1')
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("the card's legend hides its last row")
   expect(String(s.spawns[0].prompt)).toContain("Claude, in the conversation above, saw thimble misbehave and asked for this change to the person's thimble (fix 1):")
   // no words: nothing starts, and Claude reads why
-  const none = await s.call('skill.prompt', { ...skill, text: 'What thimble does wrong, and what it should do: \n\nthimble starts…' }, async (e: Any) => ({ text: e.text }))
+  const none = skillText(await skillCall(s, ' '))
   expect(String(none.text)).toContain('thimble started no fix')
   expect(s.spawns.length).toBe(1)
   // its end: the line and the notification, and Claude is told, so that it can tell the person
@@ -465,6 +473,38 @@ test("Claude starts a fix with the fix-thimble skill: the same fork starts, Clau
   expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Legend shows every row · tests pass')
   const told = ((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
   expect(told['fix-1']).toBe('The thimble fix you started, fix 1 ("Legend shows every row"), is ready and tests pass; the person turns it on with y. Tell the person in one short line.')
+})
+
+test("where skill.prompt passes over thimble (an organization's security plugin), the Skill call still starts the fix, once; skill.prompt alone starts it too", async () => {
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  // the person's words, as typed after /thimble:thimble-fix, with an arrow and a question mark
+  const words = 'Cards should open a side thread on click -> hover feedback on a bar, then a thread. Can you do that?'
+  const r = skillText(await skillCall(s, words))
+  expect(r.text).toContain('thimble started a fork of this conversation')
+  expect(s.ran.filter(x => x.argv.includes('new')).map(x => x.stdin)).toEqual([words])
+  expect(s.spawns.length).toBe(1)
+  // the skill did not run, so no skill.prompt follows; one that comes some other way (a preload) is its own request
+  const pre = await s.call('skill.prompt', { skill: 'thimble:fix-thimble', text: `What thimble does wrong, and what it should do: new the bar's label is cut\n\nthimble starts…`, frontmatter: {}, source: 'plugin' }, async (e: Any) => ({ text: e.text }))
+  expect(String(pre.text)).toContain('thimble started a fork of this conversation')
+  expect(s.ran.filter(x => x.argv.includes('new')).length).toBe(2)
+  // another skill's call is left alone
+  expect(await s.call('tool.call', { tool: 'Skill', tool_use_id: 'tu-o', skill: 'made-up:other', args: 'x' }, async () => ({ result: 'ran' }))).toEqual({ result: 'ran' })
+})
+
+test("a fix-thimble hook that fails tells Claude why, never that thimble's hooks did not run", async () => {
+  expect(notStarted({ kind: 'throw', message: 'thimble fix new: no such file' })).toBe('thimble started no fix: its fix-thimble hook failed: thimble fix new: no such file. Tell the person in one short line, with that reason.')
+  expect(notStarted({ kind: 'timeout' })).toContain('its fix-thimble hook failed: it took too long.')
+  // the handlers the module gives Claude Code for the Skill call and skill.prompt
+  const caught: Record<string, Any> = {}
+  registerFix(((event: string, a: Any, b?: Any) => {
+    const reg: Any = { catch: (h: Any) => { if (event === 'tool.call' && a?.tool === 'Skill') caught.call = h; if (event === 'skill.prompt') caught.prompt = h; return reg } }
+    return reg
+  }) as Any)
+  const next = Object.assign(async () => { throw new Error('nothing beneath runs') }, { called: false, error: { kind: 'throw', message: 'made-up failure', budget: 1000 } })
+  expect(await caught.call({}, { tool: 'Skill', skill: 'thimble:fix-thimble', args: 'x' }, next)).toEqual({ deny: notStarted(next.error) })
+  expect(await caught.prompt({}, { skill: 'thimble:fix-thimble', text: 'x' }, next)).toEqual({ text: notStarted(next.error) })
+  expect(String((await caught.call({}, {}, next)).deny)).toContain('made-up failure')
 })
 
 test('/thimble-fix alone and /thimble-fix update answer at once, with no turn of Claude; words go to Claude as the prompt command, with the fix the person\'s', async () => {
@@ -488,14 +528,14 @@ test('/thimble-fix alone and /thimble-fix update answer at once, with no turn of
   // the prompt command stays out of the menu, so the person sees one /thimble-fix
   expect((await s.call('command.describe', { command: 'thimble:thimble-fix', description: 'd', isHidden: false, immediate: false }, async (e: Any) => ({ description: e.description, isHidden: e.isHidden }))).isHidden).toBe(true)
   // Claude's skill after it: the fixer reads the words as the person's, and Claude is not told of it again
-  await s.call('skill.prompt', { skill: 'thimble:fix-thimble', text: "What thimble does wrong, and what it should do: 2 make the bar's coverage item bold\n\nthimble starts…", frontmatter: {}, source: 'plugin' }, async (e: Any) => ({ text: e.text }))
+  await skillCall(s, "2 make the bar's coverage item bold")
   expect(String(s.spawns[0].prompt)).toContain('The person asked for this change to their thimble (fix 1)')
   expect(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).toEqual({})
   // after two of main's turns (Claude's question, and its answer), a skill call is Claude's own again
   await s.call('command.run', { command: 'thimble-fix', args: 'the bar' })
   for (const turnId of ['t-1', 't-2']) await s.call('turn.complete', { turnId, reason: 'answer', answer: 'ok', durationMs: 9, isAborted: false }, async () => ({}))
   await s.end('Title: Bar coverage bold\nWhat it does: The coverage item is bold.')
-  await s.call('skill.prompt', { skill: 'thimble:fix-thimble', text: "What thimble does wrong, and what it should do: new the pane's title is cut\n\nthimble starts…", frontmatter: {}, source: 'plugin' }, async (e: Any) => ({ text: e.text }))
+  await skillCall(s, "new the pane's title is cut")
   expect(String(s.spawns.at(-1).prompt)).toContain('Claude, in the conversation above, saw thimble misbehave')
 })
 

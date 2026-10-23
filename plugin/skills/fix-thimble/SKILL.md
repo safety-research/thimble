@@ -7,4 +7,4 @@ user-invocable: false
 
 What thimble does wrong, and what it should do: $ARGUMENTS
 
-thimble starts its fix when this skill runs, and puts what came of it in place of this text. You read this text because thimble did not start the fix: its hooks did not run in this session. Tell the person in one short line.
+thimble starts its fix when Claude calls this skill, and answers with what came of it in place of this text. You read this text, so thimble's hooks did not answer this skill in this session, and no fix started. Tell the person in one short line. Name a reason only when a notice in this session says it.

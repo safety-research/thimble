@@ -56,6 +56,28 @@ export function wordsOfSkill(text: string): string {
   return /\nARGUMENTS:\s*([\s\S]+)$/.exec(text)?.[1]?.trim() ?? ''
 }
 
+/** The fix-thimble skill, as Claude Code names it (with the plugin's name, or without). */
+const FIX_SKILL = /^(?:thimble:)?fix-thimble$/
+
+/** What Claude reads when the skill's hook failed: the reason, so that it tells the person the truth. */
+export function notStarted(error: { kind?: string; message?: string } | undefined): string {
+  const why = error?.kind === 'timeout' ? `it took too long${error.message ? ` (${error.message})` : ''}` : error?.message || 'it failed'
+  return `thimble started no fix: its fix-thimble hook failed: ${cut(why, 240)}. Tell the person in one short line, with that reason.`
+}
+
+/** The fix-thimble skill with Claude's words: the request, and what Claude reads of it in the skill's place. */
+async function startFromSkill($: Engine, words: string): Promise<string> {
+  if (!words) return 'thimble started no fix: the skill needs, as its argument, what thimble does wrong and what it should do. Call it again with those words.'
+  // after the person's /thimble-fix <words>, the request is theirs: the fixer reads their words as theirs
+  const asked = Number((await $.state.get(ASKED)).value ?? 0) > 0
+  if (asked) await $.state.set(ASKED, 0 as never)
+  const r = await request($, words, asked ? 'person' : 'claude', false)
+  if (r.failed || !r.fix) return `${r.text.replace(/^×\s*/, '')} Tell the person in one short line.`
+  return r.round
+    ? `thimble gave these words to the fork that already fixes fix ${r.fix.id} ("${r.fix.title}"). Tell the person in one short line, then go on with their request.`
+    : `thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix ${r.fix.id}, "${r.fix.title}"${r.named != null ? `, a change to fix ${r.named}` : ''}). The person sees on the bar while it works, and decides with a key whether to use the fix. Tell them in one short line, then go on with their request. thimble tells you when the fix ends.`
+}
+
 /** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), never Claude's. */
 const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|done|apply|merge|notnow|redo|undo|remove|sandbox|draft|keep|send)\b/
 
@@ -152,20 +174,21 @@ export const registerFix: Register = on => {
   // one /thimble-fix in the menu: the prompt command it runs stays out of it
   on('command.describe', { command: 'thimble:thimble-fix' }, async ($, e, next) => ({ ...(await next(e)), isHidden: true })).catch(($, e, next) => next(e))
 
-  // the fix-thimble skill: Claude asks for the same fix, in the words after the skill's lead (SKILL.md), and reads
-  // what came of it in the skill's place. A hook that fails leaves the skill's own text, which says how to ask
-  on('skill.prompt', { skill: /^(?:thimble:)?fix-thimble$/ }, async ($, e, next) => {
-    const words = wordsOfSkill(String(e.text ?? ''))
-    if (!words) return { text: 'thimble started no fix: the skill needs, as its argument, what thimble does wrong and what it should do. Call it again with those words.' }
-    // after the person's /thimble-fix <words>, the request is theirs: the fixer reads their words as theirs
-    const asked = Number((await $.state.get(ASKED)).value ?? 0) > 0
-    if (asked) await $.state.set(ASKED, 0 as never)
-    const r = await request($, words, asked ? 'person' : 'claude', false)
-    if (r.failed || !r.fix) return { text: `${r.text.replace(/^×\s*/, '')} Tell the person in one short line.` }
-    return { text: r.round
-      ? `thimble gave these words to the fork that already fixes fix ${r.fix.id} ("${r.fix.title}"). Tell the person in one short line, then go on with their request.`
-      : `thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix ${r.fix.id}, "${r.fix.title}"${r.named != null ? `, a change to fix ${r.named}` : ''}). The person sees on the bar while it works, and decides with a key whether to use the fix. Tell them in one short line, then go on with their request. thimble tells you when the fix ends.` }
-  }).catch(($, e, next) => next(e))
+  // the fix-thimble skill: Claude asks for the same fix, in the skill's argument, and reads what came of it in the
+  // skill's place. It is answered at the Skill tool's call, which every person's plugin gets: where an organization
+  // manages Claude Code, its built-in security plugin sends skill.prompt on past the plugins a person installs, so a
+  // skill.prompt hook alone never ran there. The skill then does not run, so no fix starts twice. A hook that fails
+  // says why, in the skill's place
+  on('tool.call', { tool: 'Skill', skill: FIX_SKILL }, async ($, e, next) => {
+    if (e.tool !== 'Skill' || !FIX_SKILL.test(String(e.skill ?? ''))) return next(e)
+    const text = await startFromSkill($, String(e.args ?? '').trim())
+    return { result: { success: true, commandName: String(e.skill) }, context: [text] } as never
+  }).catch(($, e, next) => (next.called ? next(e) : { deny: notStarted(next.error) }))
+
+  // the same skill expanded some other way (a subagent's preload): the skill's text is what came of it. A Claude Code
+  // without the hooks module leaves the skill's own text (SKILL.md), which says thimble's hooks did not answer
+  on('skill.prompt', { skill: FIX_SKILL }, async ($, e, next) => ({ text: await startFromSkill($, wordsOfSkill(String(e.text ?? ''))) }))
+    .catch(($, e, next) => (next.called ? next(e) : { text: notStarted(next.error) }))
 
   // every call, the fixer's too: the verbs and the folder that are thimble's own and the person's keys'. The fixer's
   // shell then runs in the sandbox runtime, and its writes stay in its copy
