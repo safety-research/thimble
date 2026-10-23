@@ -132,12 +132,25 @@ const KIND = { code: 'code', regex: 'regex', prompt: 'prompt', set: 'values Clau
 const runsWidth = runs => runs.reduce((s, r) => s + width(r.s) + (r.hotkey ? width(r.hotkey) + 2 : 0), 0)
 const withPart = (runs, part) => runs.map(r => ({ ...r, part }))
 
-/** A row with `right` at its right edge: `left`, then spaces, then `right` (the left cut when both do not fit). */
+/** Runs in at most `n` cells: those past it left out, the one it falls in cut with …. */
+function cutRuns(runs, n) {
+  const out = []
+  let x = 0
+  for (const r of runs) {
+    const rw = width(r.s) + (r.hotkey ? width(r.hotkey) + 2 : 0)
+    if (x + rw <= n) { out.push(r); x += rw; continue }
+    if (!r.hotkey && n - x > 1) out.push({ ...r, s: cut(r.s, n - x) })
+    break
+  }
+  return out
+}
+
+/** A row with `right` at its right edge: `left`, then spaces, then `right`; the left cut when both do not fit. */
 function spread(left, right, w) {
   const rw = runsWidth(right)
-  const lw = runsWidth(left)
-  if (lw + 1 + rw <= w) return [...left, { s: ' '.repeat(w - lw - rw) }, ...right]
-  return [...left, { s: ' ' }, ...right]
+  if (rw + 2 > w) return cutRuns(left, w)
+  const l = runsWidth(left) + 1 + rw <= w ? left : cutRuns(left, w - rw - 1)
+  return [...l, { s: ' '.repeat(Math.max(1, w - runsWidth(l) - rw)) }, ...right]
 }
 
 /** A label's table: its name and scope, then a row per value: the ▸ on `value`, its name, its bar (its share of the
@@ -470,7 +483,7 @@ export function valueOrder(list) {
 export function ledgerTop(list, chosen, o) {
   const w = o.w
   const head = [{ s: 'Labels', bold: true }, { s: ` · ${list.length} label${list.length === 1 ? '' : 's'}`, tone: 'dim' }]
-  const nameCol = Math.min(NAME_MAX + 2, Math.max(10, ...list.map(l => width(String(l.name)) + 2)))
+  const nameCol = Math.min(NAME_MAX + 2, Math.max(10, Math.floor(w * 0.3)), Math.max(10, ...list.map(l => width(String(l.name)) + 2)))
   const rows = []
   if (!chosen) {
     const tall = list.reduce((s, l) => s + openable(l).length + 2, 0)

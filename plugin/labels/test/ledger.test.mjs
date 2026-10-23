@@ -142,3 +142,15 @@ test('p n walk every value in reading order; a row names a table row by its key,
   // a word longer than a line is cut across lines; the styles stay with their words
   assert.deepEqual(wrapRuns([{ s: 'ab cd ' }, { s: 'efghij', bold: true }], 4).map(l => l.map(r => r.s)), [['ab'], ['cd'], ['efgh'], ['ij']])
 })
+
+test('a narrow pane: every state still fits its width, names and words cut with …', () => {
+  const w = 40
+  const long = label('a_label_with_a_rather_long_name', 'prompt', { a_value_with_a_long_name: 3, other: 2 }, { checked: 2, agree: 1, disagree: 1, trial: true, matched: 12000 })
+  const list = [...FIVE, long]
+  const fitsIn = rows => rows.map(rowText).forEach(t => assert.ok(textWidth(t) <= w, `wider than ${w}: ${JSON.stringify(t)}`))
+  fitsIn(ledgerTop(list, null, { w, rows: ROWS }).rows)
+  fitsIn(ledgerTop(list, null, { w, rows: 8 }).rows)
+  for (const l of list) fitsIn(ledgerTop(list, chosenOf(list, { label: l.name }), { w, rows: ROWS }).rows)
+  for (const sel of [null, 'runs/a/board.jsonl#L2']) fitsIn(examples(ASKS, 'yes', { at: 3, total: 2165, records: recs(12) }, { w, rows: 14, sel, place }).rows)
+  fitsIn(definition(long, w).filter(r => Array.isArray(r)))
+})
