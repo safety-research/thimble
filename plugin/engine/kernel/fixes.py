@@ -323,8 +323,11 @@ def ensure_live() -> dict[str, Any]:
             raise FixError(f"your clone {repo} already has a branch named mine; rename it (git branch -m mine "
                            "mine-old), then ask again")
         git("worktree", "add", "-q", "-b", "mine", str(live), commit, cwd=repo)
+    # the release's tag when the commit has one (v0.10.2), for its name in the list and in thimble update
+    tag = git("describe", "--tags", "--exact-match", "--match", "v*", commit, cwd=live, check=False)
     rel = {"kind": src["kind"], "source": src["url"], "repo": str(repo), "entry": src.get("entry"), "base": commit,
-           "version": _version_at(live, commit), "pointed": False, "created": time.time()}
+           "version": _version_at(live, commit), "pointed": False, "created": time.time(),
+           **({"tag": tag} if RELEASE_TAG.match(tag) else {})}
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
     return rel

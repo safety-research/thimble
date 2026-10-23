@@ -141,4 +141,4 @@ def test_the_command_lists_only_what_stays(root: Path) -> None:
     for gone in ("thimble run", "thimble rows", "thimble save", "thimble claims"):
         assert gone not in out.stdout
     bad = run(root, "rows")
-    assert bad.returncode == 2 and "the commands are label, coverage and fix" in bad.stderr
+    assert bad.returncode == 2 and "the commands are label, coverage, fix, fixes and update" in bad.stderr

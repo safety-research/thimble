@@ -355,6 +355,9 @@ def three_fixes(world) -> tuple[int, int, int]:
 def test_update_carries_a_fix_drops_one_the_release_has_and_sets_aside_one_that_conflicts(world, upstream):
     a, b, c = three_fixes(world)
     assert FX.update(tests=False)["newer"] is False  # v0.10.2 is what runs
+    sh("git", "tag", "v0.10.2", world["base"], cwd=world["rel"])  # the person's clone has the tags too
+    FX.write_json(FX.home() / "release.json", {k: v for k, v in FX.release().items() if k != "tag"})
+    assert FX.update(check=True)["from"] == "0.10.2"
     # 0.10.3 takes the note as it is, and writes its own legend on the line fix c changed
     new = upstream({"plugin/notes.md": "made-up note\n", "plugin/legend.ts": "const legend = `quiet ${n} files`\n"},
                    "v0.10.3", version="0.10.3")
