@@ -8,18 +8,19 @@
 #
 #   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it
+#   thimble-browser --setup --how claude-code --yes | --how wif --wif-file F   the same, without asking
 #
 # The workbench keeps its workspaces and its choice in ~/.thimble-browser, or in THIMBLE_BROWSER_HOME, apart from the
 # terminal plugin's ~/.thimble. The server listens on 127.0.0.1, on port 8300 or the next free one (--port N takes N alone).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-folder="" setup=0
+folder="" setup=0 setup_args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) [ $# -ge 2 ] || { echo "thimble-browser: --port needs a number" >&2; exit 2; }; export THIMBLE_PORT="$2"; shift 2 ;;
     --port=*) export THIMBLE_PORT="${1#--port=}"; shift ;;
-    --setup) setup=1; shift ;;
+    --setup) setup=1; shift; setup_args=("$@"); break ;;
     -h | --help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "thimble-browser: unknown option $1 (see --help)" >&2; exit 2 ;;
     *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else echo "thimble-browser: $1 is not a folder" >&2; exit 2; fi; shift ;;
@@ -35,7 +36,7 @@ py="$root/backend/.venv/bin/python"
   echo "thimble-browser: $root/backend/.venv is missing: run scripts/install.sh at the top of the repository" >&2; exit 1; }
 
 if [ "$setup" = 1 ]; then
-  cd "$root/backend" && exec "$py" -m app.claude_access setup
+  cd "$root/backend" && exec "$py" -m app.claude_access setup "${setup_args[@]}"
 fi
 
 # the page is built the first time, and again when its sources are newer than the build (after a pull, say)

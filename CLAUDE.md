@@ -20,14 +20,19 @@ https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) 
    The script checks what is missing first, one line each, and installs nothing until all of it is there. Tell the
    user what is missing and the command that fixes it, run that command only when the user agrees, then run the
    script again.
+   For the workbench, run the script with `--no-setup` (its own question needs a terminal) and ask how the
+   workbench should reach Claude, with your question tool: an Anthropic API key, the user's Claude Code sign-in, or
+   Workload Identity Federation. For the Claude Code sign-in, show this text and get a yes first: "This uses your
+   Claude subscription through Claude Code and will launch headless Claude Code sessions in the background." Then
+   run `thimble-browser --setup --how claude-code --yes`. For WIF, ask for the path of its config file and run
+   `thimble-browser --setup --how wif --wif-file <path>`. Never ask for an API key or let one pass through you: say
+   the page asks for it at its first start.
 4. End with a short reply on how to use what was installed:
    - The plugin: open `claude` in a folder of data files. Claude cites each claim, and a second Claude checks it
      against the files; a click on the underlined words opens the evidence. The line above the prompt shows the keys:
      `v` card, `s` squeeze, `c` claims, `r` coverage. A click on `thimble` in that line, or `/thimble-settings`, opens
      the settings; `/plugin` turns thimble off.
-   - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints. The page asks at
-     its first start how it reaches Claude (an API key, Workload Identity Federation, or the Claude Code sign-in);
-     `thimble-browser --setup` asks again.
+   - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints.
 5. When the plugin was installed, offer to show it in this session, in one short line: "Type /reload-plugins, then
    try it." (You cannot type `/reload-plugins` for them; it loads thimble here.) When they answer after the reload,
    look at `examples/sample/runs.csv` yourself (40 made-up nightly test runs) and answer: did the failures start
