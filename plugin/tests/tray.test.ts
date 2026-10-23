@@ -5,6 +5,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { citeTint } from '../marks/view'
+import { evidenceOpener } from '../tray/tray'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,8 +34,8 @@ const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, tex
 
 /** A resumed session with one answer, TEXT (or `more.text`), whose citation the check left as `item`; `more`: the
  *  turn's cards, the message's parts and kept files to add (a card's meta.json under cards/<id>/). */
-async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
+async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string> } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...(more.env ?? {}) })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
   const spawns: Any[] = []
@@ -296,6 +297,45 @@ test('a check the session ended mid-way is failed when the session resumes, and 
   expect(band).toContain('The check did not run.')
   expect(band).not.toContain('session ended')
   expect(band).toContain('x repair')
+})
+
+// A click on the file's place in the tray opens the citation's evidence in the side pane, by a button or, where the
+// terminal draws hyperlinks, by the link
+for (const [how, env] of [['a button', {}], ['a file link', { FORCE_HYPERLINK: '1' }]] as const) {
+  test(`a click on the file's place in the tray (${how}) opens the citation's evidence in the side pane`, async ($, on) => {
+    const opens: Any[] = []
+    on('ui.open', (_$: unknown, e: Any) => { opens.push(e.id); return { value: { isPlaced: true } } as never })
+    on('ui.close', () => ({ value: undefined }))
+    await resumed($, on, QUOTED, `s-tray-pane-${how}`, { env })
+    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+    const ui = await $.ui.mount(above())
+    const place = all(await ui.drawn()).find(n => n.props?.key === 'tray-file')
+    expect(place?.type).toBe(how === 'a button' ? 'Button' : 'Markdown')
+    await ui.press(place.type === 'Markdown' ? { key: 'tray-file', link: { href: place.props.pressableLinks[0] } } : { key: 'tray-file' })
+    await ui.unmount()
+    expect(opens).toEqual(['thimble'])
+    expect(textOf(await $.ui.render(above()))).not.toContain('did not open the side pane')
+  })
+}
+
+// Claude Code places a pane at any width only for an open made while the person's press runs; an open the handler
+// leaves to run after it returns is unasked and waits undrawn below 144 columns (the tray's file place showed "did not
+// open the side pane" at 118 columns). The test kit's press waits for such work too, so the handler is called here as
+// Claude Code calls it: the open must be made by the time what it returns settles.
+test("the tray's file place makes its pane open inside the press, before its handler settles", async () => {
+  const opens: string[] = []
+  const notices: string[] = []
+  const later = <T>(v: T) => new Promise<T>(r => setTimeout(() => r(v), 1))
+  const state = new Map<string, unknown>()
+  const $: Any = {
+    state: { get: (k: Any) => later({ value: state.get(k.key) ?? null }), set: (k: Any, v: unknown) => later(void state.set(k.key, v)) },
+    ui: { open: (p: Any) => later((opens.push(p.id), { isPlaced: true })), panes: () => later([]), close: () => later(undefined), toast: (t: string) => later(void notices.push(t)) },
+  }
+  const pressed = evidenceOpener($, { row: 'row-t1', n: 1 })()
+  expect(pressed).toBeInstanceOf(Promise)
+  await pressed
+  expect(opens).toEqual(['thimble'])
+  expect(state.get('pane')).toMatchObject({ kind: 'evidence', args: { row: 'row-t1', n: 1 } })
 })
 
 test('a verified citation offers no repair', async ($, on) => {
