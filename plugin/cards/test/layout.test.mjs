@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 
 import { startRunner } from './start.mjs'
 
+import { layoutLines } from '../layout.js'
 import { GALLERY, GOLDEN_WIDTHS } from './gallery.mjs'
 
 let dir
