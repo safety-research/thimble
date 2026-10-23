@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -281,3 +282,19 @@ def test_a_copy_gets_the_installed_packages_and_a_folder_of_its_own_for_the_page
     assert nm.is_dir() and not nm.is_symlink()
     assert (nm / "vite").resolve() == (src / "frontend" / "node_modules" / "vite").resolve()
     assert not (nm / ".vite").exists()
+
+
+def test_the_tests_read_the_real_packages_also_when_the_server_runs_from_live(tmp_path, monkeypatch):
+    """After a fix went on, the server runs from live's browser/, whose node_modules is a folder of links: the sandbox
+    must read the folder the links point into, and a new copy links to the real packages."""
+    real, live, copy = tmp_path / "install", tmp_path / "live", tmp_path / "copy"
+    (real / "backend" / ".venv" / "bin").mkdir(parents=True)
+    (real / "frontend" / "node_modules" / "vite").mkdir(parents=True)
+    for root in (live, copy):
+        (root / "backend").mkdir(parents=True)
+        (root / "frontend").mkdir()
+    fixes.lend(live, real)
+    monkeypatch.setattr(config, "REPO_ROOT", live)
+    assert set(fixes.lent_reads()) == {(real / "backend" / ".venv").resolve(), (real / "frontend" / "node_modules").resolve()}
+    fixes.lend(copy)
+    assert os.readlink(copy / "frontend" / "node_modules" / "vite") == str((real / "frontend" / "node_modules" / "vite").resolve())

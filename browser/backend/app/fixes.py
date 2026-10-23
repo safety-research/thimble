@@ -309,7 +309,7 @@ def lend(root: Path, src: Path | None = None) -> None:
             have.mkdir()
             for entry in real.iterdir():
                 if not entry.name.startswith(".vite"):
-                    (have / entry.name).symlink_to(entry, target_is_directory=entry.is_dir())
+                    (have / entry.name).symlink_to(os.path.realpath(entry), target_is_directory=entry.is_dir())
     exclude = fixes_home() / "live" / ".git" / "info" / "exclude"
     with contextlib.suppress(OSError):
         lines = exclude.read_text().splitlines() if exclude.is_file() else []
@@ -319,9 +319,21 @@ def lend(root: Path, src: Path | None = None) -> None:
             exclude.write_text("\n".join([*lines, *[w for w in want_lines if w not in lines]]) + "\n")
 
 
+def _packages(p: Path) -> Path:
+    """The real folder of installed packages that `p` stands for: its target when it is a link, or, for a folder of
+    links (what lend() makes, also in live's browser/, which the server runs from once a fix went on), the folder its
+    links point into."""
+    if p.is_symlink() or not p.is_dir():
+        return Path(os.path.realpath(p))
+    for entry in p.iterdir():
+        if entry.is_symlink():
+            return Path(os.path.realpath(entry)).parent
+    return p
+
+
 def lent_reads() -> list[Path]:
     """The real folders of what lend() links, which the fixer and the tests read."""
-    return [Path(os.path.realpath(config.REPO_ROOT / p / n)) for p, n in LINKS if (config.REPO_ROOT / p / n).exists()]
+    return [_packages(config.REPO_ROOT / p / n) for p, n in LINKS if (config.REPO_ROOT / p / n).exists()]
 
 
 def fixer_roots(fid: int) -> tuple[Path, list[Path], list[Path]]:
