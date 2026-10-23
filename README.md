@@ -1,20 +1,14 @@
 <p align="center"><img src="docs/assets/thimble-banner.svg" alt="thimble" width="100%"></p>
 
-**thimble** is a Claude Code plugin that gives Claude tools to cite, visualize and label your data, and gives you tools to check its work.
+**thimble is a Claude Code plugin that gives Claude tools to cite, visualize and label your data. It gives you tools to check Claude's work.**
 
 https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
 
 ## Features
 
-**For Claude**
-
 - **Cards**: interactive graphs of your data, drawn in the terminal, that you can click and ask about. `v` draws one for the last answer.
-- **Citations**: every claim in an answer points to the code output or file line that shows it.
-- **Labels**: records sorted into categories by a rule or a model's reading.
-
-**For you**
-
-- **Verified citations**: a second Claude checks each claim against your files; a click shows the evidence.
+- **Citations**: every claim points to the code output or file line that shows it, and a second Claude checks each one against your files.
+- **Labels**: records sorted into categories by a rule or a model's reading, which you can open and correct.
 - **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
 - **Claims** (`c`): everything the session has concluded, as a map, with what was corrected and why.
 - **Squeeze** (`s`): the last answer, shorter or longer, or with its interpretation and background.
