@@ -105,7 +105,7 @@ def test_the_built_ins_are_heads_up_and_explainers_on_the_documents_and_the_chat
         assert c["builtin"] is True and c["covers"] == want_covers, c
         want = open(config.REPO_ROOT / "prompts" / "checks" / f"{c['id']}.md", encoding="utf-8").read()
         assert c["prompt"] == want.split("\n---\n", 1)[1].strip()
-    assert checks.read(CORPUS, IMPORTANT)["prompt"].startswith("A heads-up is a detail the analyst should know")
+    assert checks.read(CORPUS, IMPORTANT)["prompt"].startswith("A heads-up marks words of the answer for a detail the analyst should know")
     assert checks.read(CORPUS, "explainers")["prompt"].startswith("An explainer marks a key term")
     for gone in ("verified", "unverified"):
         assert checks.read(CORPUS, gone) is None
@@ -373,7 +373,7 @@ async def test_main_s_turn_end_runs_important_details_on_the_unseen_cards_with_a
     assert {f"card:{old}", f"card:{plan}", f"card:{plan}#step-1", f"card:{plan}#step-3"} <= covered
     assert not any(deck in r for r in covered), "the orientation's deck has its own critic"
     task = (checks.work_dir(CORPUS, IMPORTANT, checks.CANVAS) / checks.TASK_FILE).read_text()
-    assert "A heads-up is a detail the analyst should know before they rely on the text." in task
+    assert "A heads-up marks words of the answer for a detail the analyst should know before they rely on it." in task
     assert f"- card:{plan} · plan · Plan: build the environment and pilot it" in task
     assert f"card:{plan}#step-2 · running · Build the agent container" in task
     assert "takeaway: Both agents merged their PR." in task

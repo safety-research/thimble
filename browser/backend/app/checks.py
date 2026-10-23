@@ -115,7 +115,8 @@ FORMER_DEFAULT_COVERS = {"heads-up": (["documents", "cards"], ["documents", "car
 FORMER_PROMPTS = {
     "judgment": ("20b914af87f96860649651e3c44b4a1217752e90",),
     "heads-up": ("af5c7de4b07f80efaa866258cc65be5a34a91981", "f3bce900c61feda9b38b72f34d5e8fdc34e5dec5",
-                 "0829a23430817c86bc793d3a14a4cac5f644a93b"),
+                 "0829a23430817c86bc793d3a14a4cac5f644a93b", "7ad911bc447c64e183a48130f7d7d8857b3c2de4"),
+    "explainers": ("9478d19fb7bf335552308b11f88df81af897e591",),
 }
 CANVAS = canvas_comments.CANVAS  # the run target of a check over the cards, among `runs` beside the documents' slugs
 CANVAS_NAME = "cards"  # how a line, a chat and main's `checked` event name that target
