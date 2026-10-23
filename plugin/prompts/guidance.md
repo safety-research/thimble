@@ -63,6 +63,7 @@ Advice:
 - thimble draws the title.
 - Take colors from `surface.colors`, so they stay muted and read on light and dark terminals.
 - Show what each color, symbol and line style means with a sample (`█ survived`); mark the selected item with bold or `▸`.
+- When a key or click changes the card's state, every row stays where it was; what follows the selection, such as a note or details, goes on rows kept for it.
 - Size each column from its longest value; a cut value keeps the part that tells it apart, and a line counts what is left out (`+47 more`).
 - Numbers that touch read as one; a cell of two records shows its count.
 - Put each axis label at its tick.
