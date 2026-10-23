@@ -32,12 +32,10 @@ For the browser workbench:
 - **About 1 GB of disk** in the checkout: the page's packages, the server's Python packages, the sandbox runtime and
   the built page.
 
-## If you used thimble 0.10 or earlier
+## If you tried an earlier 0.10 build
 
-thimble 0.11 no longer runs Claude's queries itself, so it needs no pandas: you can delete the Python that 0.10 made in
-`~/.thimble/python`. The `thimble/` folder in a data folder keeps only labels now; 0.11 reads none of its other files
-(the queries, the cards and the record of each reply). 0.11 keeps its own records in new folders of `~/.thimble`, so
-you can also delete `~/.thimble/lean`.
+thimble 0.10 no longer runs Claude's queries itself, so it needs no pandas: you can delete the Python an earlier build
+made in `~/.thimble/python`, and `~/.thimble/lean`. The `thimble/` folder in a data folder keeps only labels now.
 
 ## If you used thimble 0.9
 
