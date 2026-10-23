@@ -93,6 +93,14 @@ export function cardWidth(columns?: number): number {
   return Math.max(MIN_WIDTH, (columns || columnsSeen || 100) - FRAME)
 }
 
+/** The share of the window's columns Claude Code leaves the conversation beside a side pane (2.1.307: 88 of 160). */
+const BESIDE_PANE = 0.55
+
+/** The width a card is drawn at while a side pane narrows the conversation (a thread, the tray). */
+export function cardWidthBesidePane(): number {
+  return cardWidth(Math.round((columnsSeen || 100) * BESIDE_PANE))
+}
+
 const about = (id: string) => `card:${id}`
 
 /** The key of a card's Client: one per version, so a new version is a new instance, and a Client that failed on an

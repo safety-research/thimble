@@ -17,8 +17,9 @@
 // listeners) between calls.
 //
 // Requests are POST /<op> with a JSON body; each answers JSON: {ok: true, ...} or {ok: false, error}.
-//   load     {id, version, title, view, rows, state, width}  a new version from its view source and rows file;
-//            answers the tree, state, keys, the rows' summary and the text copy. A version that fails keeps the old one.
+//   load     {id, version, title, view, rows, state, width, beside}  a new version from its view source and rows file;
+//            answers the tree, state, keys, the rows' summary and the text copy, and the copy at `beside` (the width a
+//            side pane leaves it) when texts wrap there. A version that fails keeps the old one.
 //   draw     {id, width}              the tree at a width, which the card is drawn at from now on
 //   copy     {id, width}              the text copy at a width; the card stays as it is
 //   key      {id, key}                the view's onKey; `handled` says whether it has one
@@ -564,7 +565,22 @@ function load(a) {
   if (!r.ok) return r
   card.tree = r.tree
   cards.set(a.id, card)
-  return { ...r, ...copy(r.tree, a.width) }
+  const own = copy(r.tree, a.width)
+  return { ...r, ...own, ...besideOf(card, own, Number(a.beside) || 0) }
+}
+
+/** The copy at `width`, the narrower width a side pane leaves the card, when texts that fit on their rows at the
+ *  card's width wrap there: `beside: {width, lines, cut, wrapped}`, `wrapped` the numbers of the lines they start on.
+ *  A row laid out for the wider card (fixed columns, a long details line) wraps there, and Claude sees it before the
+ *  person does. Nothing when none does, or the view fails at that width (it is told when the card draws there). */
+function besideOf(card, own, width) {
+  if (!width || width >= card.width) return {}
+  const r = inContext(card, 'copy', { width }, EVENT_MS)
+  if (!r.ok) return {}
+  const c = copy(r.tree, width)
+  const before = new Set(own.wrapped.map(w => w.text))
+  const wrapped = [...new Set(c.wrapped.filter(w => !before.has(w.text)).map(w => w.line))]
+  return wrapped.length ? { beside: { width, lines: c.lines, cut: c.cut, wrapped } } : {}
 }
 
 /** A click: a Button around lines that holds the cell where it ended, else the view's onPointer listener. */

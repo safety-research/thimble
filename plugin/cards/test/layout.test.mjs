@@ -65,3 +65,9 @@ test('wide characters take two cells, and a line past the width is cut and named
   assert.deepEqual(wide.cut, [1, 2])
   assert.equal(wide.lines[0], '┌' + '─'.repeat(19))
 })
+
+test('a text that wraps onto more rows than its own lines is named by its first line', () => {
+  const tree = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: ['one\ntwo'] }, { t: 'Text', p: {}, c: ['a row of cells too wide'] }] }
+  assert.deepEqual(layoutLines(tree, 30).wrapped, [])
+  assert.deepEqual(layoutLines(tree, 12).wrapped, [{ line: 3, text: 'a row of cells too wide' }])
+})

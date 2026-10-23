@@ -103,7 +103,11 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     const tree = String(body.view ?? '').includes('BOLD') ? { t: 'Text', p: { bold: 'yes' }, c: ['ada 3'] } : TREE
     const answers: Record<string, unknown> = {
       ping: { ok: true },
-      load: { ok: true, tree, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' } },
+      load: {
+        ok: true, tree, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
+        // a view with a row laid out for the card's width: it wraps at the narrower width a side pane leaves it
+        ...(String(body.view ?? '').includes('WIDE_ROW') && body.beside > 0 && body.beside < body.width ? { beside: { width: body.beside, lines: ['ada 3 of 9', 'merged', 'bram 5'], cut: [], wrapped: [1] } } : {}),
+      },
       key: { ok: true, handled: body.key === 'o', tree: SORTED, state: '{"sorted":true}' },
       draw: { ok: true, tree: TREE, state: 'null' },
       copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
@@ -289,6 +293,15 @@ test('a side pane opens: the card in the conversation and its copy in the pane e
   await pane.post({ client: 'made-up-2', width: 32, events: [{ n: 2, press: 0, width: 32 }] }, { in: key })
   expect(w.asked.slice(-2)).toEqual(['draw', 'press'])
   await pane.unmount()
+})
+
+test('a row that fits the card but wraps at the width a side pane leaves it: the call answers that copy too', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const plain = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+  expect(String(plain.result)).not.toContain('side pane')
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_18', title: 'Scores', data: 'runs.json', view: `${VIEW}\n// WIDE_ROW` } as never)) as Any
+  expect(String(r.result)).toMatch(/When a side pane opens beside the conversation, the card is \d+ columns wide, and texts that fit on their rows at \d+ columns wrap onto more rows there \(line 1\):\nada 3 of 9\nmerged\nbram 5/)
 })
 
 test('a post the Client sent before its frame narrowed is answered with the drawing at the frame\'s width now, so no row of the wider one wraps', async ($, on) => {
