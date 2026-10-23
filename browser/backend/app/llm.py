@@ -104,6 +104,19 @@ def credentials_failure(e: BaseException) -> bool:
     return isinstance(e, (NoCredentials, wif.WifError, WorkloadIdentityError, anthropic.AuthenticationError))
 
 
+def api_refusal(status: int, body: Any, raw: str) -> str:
+    """An error answer of Claude's API in one plain sentence: its status, the kind of error in words and the API's own
+    message, from the answer's body ({"error": {"type", "message"}}); the raw text when the body holds none."""
+    err = body.get("error") if isinstance(body, dict) else None
+    said = err.get("message") if isinstance(err, dict) else None
+    if not isinstance(said, str) or not said.strip():
+        flat = re.sub(r"\s+", " ", raw)[:300]
+        return f"Claude's API answered {status}: {flat}"
+    kind = str(err.get("type") or "").removesuffix("_error").replace("_", " ")
+    said = re.sub(r"\s+", " ", said).strip()[:300]
+    return f"Claude's API answered {status}{f' ({kind})' if kind else ''}: {said}{'' if said.endswith('.') else '.'}"
+
+
 def failure(e: BaseException) -> str:
     """A failed call in one plain sentence; a 401 names the time and the way, which whoever manages the credentials
     needs to find the reason."""
@@ -129,8 +142,7 @@ def failure(e: BaseException) -> str:
     if isinstance(e, anthropic.RateLimitError):
         return "Claude's rate limit was reached and the retries ran out. Send the message again in a minute."
     if isinstance(e, anthropic.APIStatusError):
-        msg = re.sub(r"\s+", " ", str(getattr(e, "message", e)))[:300]
-        return f"Claude's API answered {e.status_code}: {msg}"
+        return api_refusal(e.status_code, getattr(e, "body", None), str(getattr(e, "message", e)))
     if isinstance(e, anthropic.APIConnectionError):
         return "Claude's API could not be reached. Check the network and send the message again."
     return f"Claude stopped with an error: {str(e)[:300] or type(e).__name__}"
