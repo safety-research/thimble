@@ -7,7 +7,7 @@
   padding: 0;
   border: 0;
   border-radius: 0;
-  /* a citation's look (marks.css .mark-words): the text's color, underlined in it; the citations' purple tint on hover
+  /* a citation's look (marks.css .mark-words): the text's color, underlined in the citations' purple; their tint on hover
      and while its label is open */
   background: none;
   color: inherit;
@@ -18,7 +18,7 @@
   text-decoration-line: underline;
   text-decoration-style: solid;
   text-decoration-thickness: 1px;
-  text-decoration-color: currentColor;
+  text-decoration-color: var(--cite-line);
   text-underline-offset: 3px;
   cursor: pointer;
   transition: var(--transition-color), background-color var(--dur-fast) var(--ease-out);

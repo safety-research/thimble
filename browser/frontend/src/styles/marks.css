@@ -4,8 +4,8 @@
    could not confirm: red words, underlined, × after them, and a soft red tint (--cite-tint-failed) on hover and while
    open. Back-to-back marks keep a small gap, so they read as two. Its label is RefChip's (.refchip-pop), at most
    560 px wide. */
-:root { --cite-tint: rgba(135, 0, 255, 0.1); --cite-tint-failed: rgba(201, 58, 40, 0.1); }
-:root[data-paper='dark'] { --cite-tint: rgba(179, 107, 255, 0.24); --cite-tint-failed: rgba(255, 138, 122, 0.2); }
+:root { --cite-line: #8b3fd9; --cite-tint: rgba(135, 0, 255, 0.1); --cite-tint-failed: rgba(201, 58, 40, 0.1); }
+:root[data-paper='dark'] { --cite-line: #b36bff; --cite-tint: rgba(179, 107, 255, 0.24); --cite-tint-failed: rgba(255, 138, 122, 0.2); }
 .mark { position: relative; }
 /* a claim's mark is words of the sentence: inline in the text's own face, so it wraps with the line and its underline
    sits under the words, never the small inline-block of the status marks (components.css .mark) */
@@ -18,7 +18,7 @@
   text-decoration-line: underline;
   text-decoration-style: solid;
   text-decoration-thickness: 1px;
-  text-decoration-color: currentColor;
+  text-decoration-color: var(--cite-line);
   text-underline-offset: 3px;
   cursor: pointer;
   transition: var(--transition-color), background-color var(--dur-fast) var(--ease-out);
@@ -29,7 +29,7 @@
   background: var(--cite-tint);
   outline: none;
 }
-.mark.is-failed .mark-words { color: var(--status-negative); }
+.mark.is-failed .mark-words { color: var(--status-negative); text-decoration-color: currentColor; }
 .mark.is-failed .mark-words:hover,
 .mark.is-failed .mark-words:focus-visible,
 .mark.is-failed.is-open .mark-words { background: var(--cite-tint-failed); }
