@@ -664,9 +664,9 @@ export const api = {
   /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows */
   requestFix: (ws: string, words: string, page: string) =>
     j<{ fix: { id: number; title: string; state: string } }>(`${apiBase()}/ws/${enc(ws)}/fixes`, { method: 'POST', body: JSON.stringify({ words, page }) }),
-  undoFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${id}/undo`, { method: 'POST' }),
-  redoFix: (ws: string, id: number) => j<{ fix: { id: number } }>(`${apiBase()}/ws/${enc(ws)}/fixes/${id}/redo`, { method: 'POST' }),
-  dismissFix: (id: number) => j<{ ok: boolean }>(`${apiBase()}/fixes/${id}/dismiss`, { method: 'POST' }),
+  undoFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/undo`, { method: 'POST' }),
+  redoFix: (ws: string, id: number) => j<{ fix: { id: number } }>(`${apiBase()}/ws/${enc(ws)}/fixes/${enc(String(id))}/redo`, { method: 'POST' }),
+  dismissFix: (id: number) => j<{ ok: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/dismiss`, { method: 'POST' }),
   // ---- tickets ----
   tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),
   ticket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}`),
