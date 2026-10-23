@@ -1491,6 +1491,33 @@ button.model-line-part[aria-expanded='true'] {
   flex-direction: column;
   max-height: 100%;
 }
+/* the holds, the permission card, the view proposal, the label asks and the notices: at most 40% of the window's
+   height together, so the transcript keeps its room above them; more scrolls here */
+.chat-foot-stack {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border-radius: var(--radius-card);
+}
+/* more below what shows: the stack's foot fades into the composer */
+.chat-foot-stack[data-more] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+}
+.chat-foot-stack:empty {
+  display: none;
+}
+.chat-foot-stack > * {
+  flex: none;
+}
+.chat-foot-stack .chat-notices {
+  max-height: none;
+  overflow: visible;
+}
 .chat-foot .chat-composer {
   position: relative;
   z-index: 1;
