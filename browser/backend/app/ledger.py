@@ -627,8 +627,9 @@ ARCHIVE_TIME = "%Y-%m-%d-%H%M%S"
 
 async def _end_work(c: str) -> None:
     """End what the server runs for the workspace: its jobs, its view builds, a pending write, a label apply, the
-    kernels, the agent chats the server runs. Nothing writes into its directory afterwards."""
-    from . import agents as chat, concepts, dev, jobs, notebook, report_types  # lazy: keeps ledger importable on its own and avoids an import cycle
+    kernels, the agent chats the server runs, and main's and its agents' turns (runtime.forget, last, so that nothing
+    starts a turn again before the caller moves or deletes the folder). Nothing writes into its directory afterwards."""
+    from . import agents as chat, concepts, dev, jobs, notebook, report_types, runtime  # lazy: keeps ledger importable on its own and avoids an import cycle
 
     jobs.cancel_workspace(c)  # a verification: none writes into the removed directory
     await dev.stop_views(c)  # the dev agent's view builds, awaited: their proposals stay queued or building
@@ -639,6 +640,7 @@ async def _end_work(c: str) -> None:
     for (cc, chat_id), task in list(chat._agent_tasks.items()):  # a background agent chat the server runs
         if cc == c:
             task.cancel()
+    await runtime.forget(c)
 
 
 async def _stop_sessions(c: str, why: str) -> None:
@@ -747,7 +749,16 @@ async def restore_workspace(c: str, body: dict[str, Any] = Body(...)) -> dict[st
         raise HTTPException(404, f"{c} has no archive named {name!r}")
     replaced = (await archive_workspace(c))["archived"]
     path = config.workspace_path(c).resolve()
-    src.rename(path)
+    for attempt in range(3):
+        try:
+            src.rename(path)
+            break
+        except OSError:
+            if attempt == 2 or not path.exists():
+                raise
+            # a request or a thread made the folder again since (config.workspace_dir, such as an open tab's): it goes
+            # to the archive as well, where a folder that holds nothing is listed as no session (folder_sessions)
+            path.rename(archive_path(c))
     from . import investigation, views  # noqa: PLC0415 — lazy: investigation imports this module
 
     try:

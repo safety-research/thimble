@@ -4,12 +4,12 @@
 # when its sources are newer than the build, then starts the server on 127.0.0.1, opens the folder as a workspace and
 # prints the page's sign-in link (backend app/cli.py `browser`). The server runs the chat and thimble's agents itself, on
 # the way to reach Claude chosen at install or in the page: an Anthropic API key, your Claude Code sign-in, or Workload
-# Identity Federation. Ctrl-C stops the server. The workspace's cards, canvas, reports and labels stay from one start to
-# the next; the chat with Claude starts anew each time, as in Claude Code, unless --continue or --resume names one.
+# Identity Federation. Ctrl-C stops the server. Each start is a new session, as in Claude Code: an empty chat, canvas,
+# report and labels, as at the folder's first start. --continue and --resume bring an earlier session back whole.
 #
-#   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given; opens a new chat
-#   thimble-browser -c | --continue       continue the folder's latest chat
-#   thimble-browser -r | --resume [ID]    pick an earlier chat from a list (or open chat ID)
+#   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given; starts a new session
+#   thimble-browser -c | --continue       continue the folder's latest session: its chat, canvas, report and labels
+#   thimble-browser -r | --resume [ID]    pick an earlier session from a list (or the session of chat ID)
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it
 #   thimble-browser --setup --how claude-code --yes | --key-file F | --how wif --wif-file F   the same, without asking
 #   thimble-browser --setup --find-wif    list the Workload Identity Federation config files found, by path
@@ -19,19 +19,19 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-folder="" setup=0 setup_args=() chat=new
+folder="" setup=0 setup_args=() session=new
 while [ $# -gt 0 ]; do
   case "$1" in
-    -c | --continue) chat=continue; shift ;;
+    -c | --continue) session=continue; shift ;;
     -r | --resume)
-      chat=pick; shift
+      session=pick; shift
       # an id, not a folder, takes the place of the list
-      if [ $# -gt 0 ] && [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]] && [ ! -d "$1" ]; then chat="$1"; shift; fi ;;
-    --resume=*) chat="${1#--resume=}"; shift ;;
+      if [ $# -gt 0 ] && [[ "$1" =~ ^[A-Za-z0-9_][A-Za-z0-9_-]*$ ]] && [ ! -d "$1" ]; then session="$1"; shift; fi ;;
+    --resume=*) session="${1#--resume=}"; shift ;;
     --port) [ $# -ge 2 ] || { echo "thimble-browser: --port needs a number" >&2; exit 2; }; export THIMBLE_PORT="$2"; shift 2 ;;
     --port=*) export THIMBLE_PORT="${1#--port=}"; shift ;;
     --setup) setup=1; shift; setup_args=("$@"); break ;;
-    -h | --help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "thimble-browser: unknown option $1 (see --help)" >&2; exit 2 ;;
     *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else echo "thimble-browser: $1 is not a folder" >&2; exit 2; fi; shift ;;
   esac
@@ -59,4 +59,4 @@ if [ ! -f "$fe/dist/index.html" ] || [ -n "$(find "$fe/src" "$fe/index.html" "$f
 fi
 here="$(cd "${folder:-.}" && pwd -P)"
 cd "$root/backend"
-exec "$py" -m app.cli browser --cwd "$here" --chat "$chat"
+exec "$py" -m app.cli browser --cwd "$here" --session "$session"

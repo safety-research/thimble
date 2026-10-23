@@ -4500,10 +4500,15 @@ def _failed_up(what: str, e: BaseException) -> int:
 BROWSER_LINE = "thimble browser: {what}"
 
 
-CHAT_NONE_LINE = {"continue": "no earlier chat in {cwd} to continue.", "pick": "no earlier chat in {cwd} to resume."}
-CHAT_UNKNOWN_LINE = "no chat {id} in {cwd} (thimble-browser --resume lists them)."
-PICK_HEAD = "Chats in {cwd}, the latest first:"
+SESSION_NONE_LINE = {"continue": "no earlier session in {cwd} to continue.",
+                     "pick": "no earlier session in {cwd} to resume."}
+SESSION_UNKNOWN_LINE = "no session with chat {id} in {cwd} (thimble-browser --resume lists the sessions)."
+PICK_HEAD = "Sessions in {cwd}, the latest first:"
 PICK_ASK = "Number to resume (Enter to cancel): "
+NEW_SESSION = {"archive": None, "chat": "new"}  # pick_session's answer for a new session
+SET_ASIDE_FAILED_LINE = ("the last session was not moved aside ({why}), so the page opens it with a new chat; "
+                         "see {log}")
+BACK_FAILED_LINE = "the session was not brought back ({why}); see {log}"
 
 
 def _ago(at: float, now: float | None = None) -> str:
@@ -4516,42 +4521,55 @@ def _ago(at: float, now: float | None = None) -> str:
     return "just now"
 
 
-def chat_lines(rows: list[dict[str, Any]], width: int = 100, now: float | None = None) -> list[str]:
-    """The picker's rows, numbered from 1: when, the number of turns and the first message, cut to `width`."""
+def _counted(n: int, noun: str) -> str:
+    return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
+def session_lines(rows: list[dict[str, Any]], width: int = 100, now: float | None = None) -> list[str]:
+    """The picker's rows, numbered from 1: when, the number of turns and of cards, and the first message, cut to
+    `width`."""
     out = []
     for i, r in enumerate(rows, 1):
-        turns = f"{r['turns']} turn{'' if r['turns'] == 1 else 's'}"
-        head = f"{i:>3}. {_ago(r['at'], now):<16} {turns:>9}  "
+        turns, cards = _counted(r["turns"], "turn"), _counted(r["cards"], "card")
+        head = f"{i:>3}. {_ago(r['at'], now):<16} {turns:>9}  {cards:>9}  "
         first = r["first"] or "(no message)"
         room = max(10, width - len(head))
         out.append(head + (first if len(first) <= room else first[: room - 1] + "…"))
     return out
 
 
-def pick_chat(cwd: Path, data_dir: Path, how: str) -> str | None:
-    """The chat of main thimble-browser opens (runtime.py, main's chats): "new", or an earlier chat's id for
-    `continue` (the latest), `pick` (a numbered list here, picked by number) or an id (or the start of one). None,
-    with a line that says why, when there is no such chat or the pick was cancelled."""
-    from . import runtime  # noqa: PLC0415
+def _chosen(row: dict[str, Any], chat: str | None = None) -> dict[str, Any]:
+    return {"archive": row["archive"], "chat": chat or row["chat"] or "new"}
+
+
+def pick_session(cwd: Path, data_dir: Path, how: str) -> dict[str, Any] | None:
+    """The session of the folder thimble-browser opens (folder_sessions.py): NEW_SESSION for `new`; else the latest
+    (`continue`), one picked by number from a list printed here (`pick`), or the one that holds the chat of main with
+    that id (or the start of one), as {archive: the name of its folder in the archive, None for the session open now;
+    chat: the chat of main to open}. None, with a line that says why, when there is no such session or the pick was
+    cancelled."""
+    from . import folder_sessions  # noqa: PLC0415
 
     if how == "new":
-        return how
+        return dict(NEW_SESSION)
     here = cwd.resolve()
     known = known_corpus(here, data_dir.resolve())
-    rows = runtime.main_chats(known[0]) if known is not None and (known[1] == here or known[1].parent == data_dir.resolve()) else []
-    if how in CHAT_NONE_LINE and not rows:
-        print(BROWSER_LINE.format(what=CHAT_NONE_LINE[how].format(cwd=cwd)))
+    mine = known is not None and (known[1] == here or known[1].parent == data_dir.resolve())
+    rows = folder_sessions.listing(known[0]) if known is not None and mine else []
+    if how in SESSION_NONE_LINE and not rows:
+        print(BROWSER_LINE.format(what=SESSION_NONE_LINE[how].format(cwd=cwd)))
         return None
     if how == "continue":
-        return str(rows[0]["id"])
+        return _chosen(rows[0])
     if how != "pick":
-        hit = [r for r in rows if r["id"] == how] or [r for r in rows if str(r["id"]).startswith(how)]
+        hit = ([(r, how) for r in rows if how in r["chats"]]
+               or [(r, c) for r in rows for c in r["chats"] if c.startswith(how)])
         if len(hit) != 1:
-            print(BROWSER_LINE.format(what=CHAT_UNKNOWN_LINE.format(id=how, cwd=cwd)))
+            print(BROWSER_LINE.format(what=SESSION_UNKNOWN_LINE.format(id=how, cwd=cwd)))
             return None
-        return str(hit[0]["id"])
+        return _chosen(*hit[0])
     print(PICK_HEAD.format(cwd=cwd))
-    for ln in chat_lines(rows, shutil.get_terminal_size((100, 24)).columns - 1):
+    for ln in session_lines(rows, shutil.get_terminal_size((100, 24)).columns - 1):
         print(ln)
     while True:
         try:
@@ -4562,17 +4580,48 @@ def pick_chat(cwd: Path, data_dir: Path, how: str) -> str | None:
         if not got:
             return None
         if got.isdigit() and 1 <= int(got) <= len(rows):
-            return str(rows[int(got) - 1]["id"])
+            return _chosen(rows[int(got) - 1])
         print(f"  a number from 1 to {len(rows)}, or Enter to cancel")
+
+
+def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool:
+    """Put the session pick_session chose in place in workspace `name`, then open its chat of main (the register
+    route's `chat`). A new session moves the open one aside when it holds anything (`POST /api/ws/{c}/archive`); an
+    earlier one comes back from the archive (`POST /api/ws/{c}/restore`), the open one going there. False, with a line
+    that says why, when the session was not brought back; a session that was not moved aside stays open, with a new
+    chat and a line that says so."""
+    from . import folder_sessions  # noqa: PLC0415
+
+    chat = str(chosen.get("chat") or "new")
+    if chosen.get("archive"):
+        status, body = restore_workspace(url, name, str(chosen["archive"]))
+        if status != 200:
+            print(BROWSER_LINE.format(what=BACK_FAILED_LINE.format(why=body.get("detail") or status or "no answer",
+                                                                    log=log_path())))
+            return False
+    elif chat == "new":
+        ws = Path(resolve_env()["workspaces_dir"]) / name
+        if ws.is_dir() and folder_sessions.holds(folder_sessions.summary(ws)):
+            answered, moved = archive_workspace(url, name)
+            if not moved:
+                why = "the server found no workspace to move" if answered else "the server did not move it"
+                print(BROWSER_LINE.format(what=SET_ASIDE_FAILED_LINE.format(why=why, log=log_path())))
+    status, resp = _request("POST", f"{url}/api/corpora/register", {"path": str(cwd.resolve()), "exact": True,
+                                                                     "chat": chat})
+    if status not in (200, 201):
+        why = resp.get("detail") if isinstance(resp, dict) else None
+        print(BROWSER_LINE.format(what=f"the chat was not opened ({why or status}); see {log_path()}"))
+    return True
 
 
 def cmd_browser(args: argparse.Namespace) -> int:
     """`thimble-browser [FOLDER]` (browser/scripts/thimble-browser): start the server if needed, open the folder as a
     workspace, print the page's sign-in link and how thimble reaches Claude (claude_access.py), then hold the terminal
     until Ctrl-C, which stops the server. No Claude Code session starts here: the server runs main and every agent
-    itself (runtime.py). `--chat` says which chat of main the page opens (pick_chat): a new one, as each `claude` starts
-    a new session, the latest (`--continue`), one picked from a list (`--resume`) or one by id. With `--detach` it
-    returns once the link is printed and the server keeps running."""
+    itself (runtime.py). `--session` says which session of the folder the page opens (pick_session, open_session): a
+    new one, as each `claude` starts a new session, as empty as the folder's first; the latest (`--continue`); one
+    picked from a list (`--resume`); or the one that holds a chat of main by id. With `--detach` it returns once the
+    link is printed and the server keeps running."""
     from . import claude_access, llm  # noqa: PLC0415
 
     llm.scrub_env()
@@ -4584,8 +4633,9 @@ def cmd_browser(args: argparse.Namespace) -> int:
     ensure_home()
     env = resolve_env()
     data_dir = Path(env["data_dir"])
-    chat = pick_chat(cwd, data_dir, getattr(args, "chat", None) or "new")
-    if chat is None:
+    with server_dirs():
+        chosen = pick_session(cwd, data_dir, getattr(args, "session", None) or "new")
+    if chosen is None:
         return 1
     if refuse_foreign(api_url()):
         return 1
@@ -4600,15 +4650,13 @@ def cmd_browser(args: argparse.Namespace) -> int:
         print(BROWSER_LINE.format(what=f"the server did not start: {why or 'see ' + str(log_path())}"))
         return 1
     name, opened = open_workspace(cwd.resolve(), data_dir, url, here=True)
-    if name and not opened:  # a folder opened before: registering it again opens the chat of main asked for at once
-        status, resp = _request("POST", f"{url}/api/corpora/register",
-                                {"path": str(cwd.resolve()), "exact": True, "chat": chat})
-        if status not in (200, 201):
-            why = resp.get("detail") if isinstance(resp, dict) else None
-            print(BROWSER_LINE.format(what=f"the chat was not opened ({why or status}); see {log_path()}"))
     if not name:
         print(BROWSER_LINE.format(what=f"could not open {cwd} as a workspace; see {log_path()}"))
         return 1
+    if not opened:  # a folder opened before: its session is put in place, and its chat of main opened, at once
+        with server_dirs():
+            if not open_session(url, name, cwd, chosen):
+                return 1
     print(BROWSER_LINE.format(what=ui_url(name, pair=to_terminal())), flush=True)
     p = claude_access.problem_line()
     print(BROWSER_LINE.format(what=f"Claude access: {claude_access.describe()}" + (f". {p}" if p else "")), flush=True)
@@ -4676,7 +4724,8 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("browser", help="thimble-browser: start the server, open this folder, print the sign-in link")
     b.add_argument("--cwd")
     b.add_argument("--detach", action="store_true")
-    b.add_argument("--chat", default="new", help="new | continue | pick | a chat's id: the chat of main to open")
+    b.add_argument("--session", default="new",
+                   help="new | continue | pick | a chat's id: the session of the folder to open (pick_session)")
     b.set_defaults(fn=cmd_browser)
     e = sub.add_parser("up", aliases=["ensure"], help="start the server if needed, open this directory, print the URL")
     e.add_argument("--cwd")
