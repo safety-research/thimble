@@ -16,7 +16,7 @@ https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
 - **Citations**: every claim points to the code output or file line that shows it, and a second Claude checks each one against your files.
 - **Labels** (`l`): records sorted into categories by a rule or a model's reading, which you can open and correct.
 - **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
-- **Claims** (`c`): everything the session has concluded, a row for each question it looked into, with what was corrected and why.
+- **Claims** (`c`): everything the session has concluded, as a map, with what was corrected and why.
 - **Squeeze** (`s`): the last answer, shorter or longer, or with its interpretation and background.
 - **Side threads** (`t`): ask about a passage or part of a card without derailing the session.
 

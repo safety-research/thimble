@@ -1,14 +1,13 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
-// out: the head (how many claims), every cluster's row (its claims as dots, then its name; every row open when all
-// fit), the cluster chosen open in place (its claims, or the claim picked with its chips, and with e its history and
-// evidence), and the keys. A pane taller than Claude Code gives it scrolls. A click is the main way to move: a
-// cluster's name chooses the cluster (the open row's name again closes it), a dot or a claim of an open row picks that
-// claim (its dot again, the cluster); `↑ N more clusters` and `↓ N more clusters` choose the next cluster folded; `↑ N
-// earlier` and `↓ N more` page an open row's claims; ‹ › step through the citations; a citation opens its evidence
-// pane. Tab and Enter reach the same Buttons.
+// out: the head (how many claims), the map of clusters (its cells shorter when the detail needs the rows; a list in a
+// narrow pane; none in a short session, whose clusters are listed with their claims), the detail under it (the cluster chosen and its claims, or the claim picked in that list with its
+// chips, and with e its history and evidence), and the keys. A pane taller than Claude Code gives it scrolls. A click is
+// the main way to move: a cluster's name chooses the cluster, a dot or a claim in the list picks that claim (its dot
+// again, the cluster); `↑ N earlier` and `↓ N more` page the list; ‹ › step through the citations; a citation opens its
+// evidence pane. Tab and Enter reach the same Buttons.
 //
-//   keys while the pane holds the keyboard, each once: p n the previous or next cluster, top to bottom (nothing chosen
-//   yet: n the first, p the last) · k j the
+//   keys while the pane holds the keyboard, each once: p n the previous or next cluster, in reading order of the map
+//   as drawn (row by row, left to right; a list top to bottom; nothing chosen yet: n the first, p the last) · k j the
 //   previous or next claim of the cluster shown (none picked yet: the last or the first; with one cluster, its claims
 //   from the start; nothing chosen: the first claim of the first cluster, the last of the last) · e the claim's
 //   evidence, open or closed (`no citations` on a claim with none to show) · x repair a failed citation (a check of it
@@ -23,7 +22,7 @@
 //   that wraps is one press over all its lines (rowEls), so it highlights whole.
 //
 // A claim's citations are the reply's marks near its words (store.js sources): their check and evidence come from
-// marks/store.ts as they stand now, so a check that ends after the look shows in the open row.
+// marks/store.ts as they stand now, so a check that ends after the look shows in the detail.
 import type { EngineInterface } from 'claude-code'
 
 import { messageOf } from '../core/answers'
@@ -45,9 +44,9 @@ type Engine = EngineInterface
 type Any = any
 type Run = { s: string; tone?: string | null; bold?: boolean; underline?: boolean; tint?: boolean; part?: string | null }
 
-/** The clusters' palette (0.10's c1..c6; the rows draw in its purple, c2: graph.js MARK) and what each other tone draws
- *  as: theme colors, so light and dark both read; a faint tone is its color dimmed; `code` the code's color of the
- *  citations' card; `plain` the theme's text color. */
+/** The clusters' colors (0.10's c1..c6) and what each other tone draws as: theme colors, so light and dark both read;
+ *  a faint tone is its color dimmed; `code` the code's color of the citations' card; `plain` the theme's text color
+ *  (the map's other clusters while one is chosen: dim gray dots and names read too faint on a light background). */
 const CLUSTER = ['#3cc2b9', '#a98be0', '#cfae7e', '#8fa1bd', '#e384b2', '#b2c24f']
 /** The same hues for a light background, darker, so a dot and a name read on white (contrast 4.8 or more; the dark set
  *  is near 2 there). */
@@ -245,8 +244,9 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     ] })
   }
 
-  // ---- every cluster's row, the one chosen open
+  // ---- the map and the detail
   const view = graphView(raw, { ...keep, ...(a.from != null ? { from: a.from } : {}) }, { w: W, h: H, bright: await claimsBright($) })
+  // the claims and clusters as the map draws them (graph.js fitClusters)
   const data = view.data as Any
   const claim = view.claim as Any
   const group = view.group as string | null
@@ -267,8 +267,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (part === 'cite-next') return stepCite(1)()
     const pg = /^pg:(\d+)$/.exec(part)
     if (pg) return showClaims($, { ...keep, from: Number(pg[1]) })
-    // a cluster's name: its row opens; the open row's name again closes it
-    if (part.startsWith('g:')) return view.chosen && !claim && part.slice(2) === group ? showClaims($, { at: data.last }) : pickGroup(part.slice(2))
+    if (part.startsWith('g:')) return pickGroup(part.slice(2))
     if (part.startsWith('d:')) {
       // a dot: its claim; the claim picked again, its cluster
       const c = data.claims.find((x: Any) => x.id === part.slice(2))
@@ -285,7 +284,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (ev && claim) return openEvidence(cites[Number(ev[1]) - 1])
     if (part.startsWith('was-')) return pick(part.slice(4))
   }
-  // the clusters top to bottom (graph.js graphView): p n walk these
+  // the clusters in reading order of the map as drawn (graph.js graphView): p n walk these
   const order = view.order as string[]
   // k j: the claims of the cluster shown, once one is chosen (none picked yet: k the last, j the first); with one
   // cluster, its claims from the start; nothing chosen: j the first claim of the first cluster, k the last of the last
@@ -335,8 +334,9 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const rule: Run[] = [{ s: '─'.repeat(W), tone: 'dim-faint' }]
   return Box({ flexDirection: 'column', children: [
     ...(view.head as Run[][]).map((r, i) => row(r, `h${i}`)),
-    ...((view.body as Run[][]).length ? [row([], 'gap')] : []),
-    ...rowEls(els, view.body as Run[][], 'b', press),
+    ...((view.graph as Run[][]).length || view.listed ? [row([], 'gap')] : []),
+    ...(view.graph as Run[][]).map((r, i) => row(r, `g${i}`)),
+    ...rowEls(els, view.panel as Run[][], 'p', press),
     ...(keys.length ? [row(rule, 'rule'), keysRow(els, keys)] : []),
   ] })
 }
