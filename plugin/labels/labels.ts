@@ -5,7 +5,7 @@
 //                  core/feed.ts reads it): the model reads the waiting records beside the session (labelreads.mjs), its
 //                  calls made here with $.model.complete, side by side. The bar's busy line says `labeling <name>` while
 //                  they run; Claude hears what the reads gave with the person's next prompt; a call that failed shows
-//                  the failure line (bar/fix.ts failNotice), in the person's words (core/why.js)
+//                  the failure line (bar/notice.ts failNotice), in the person's words (core/why.js)
 //   checkRecord    the person's check of one record in the labels pane: `thimble label NAME --check REF VALUE`; Claude
 //                  hears what the person checked with their next prompt
 //   labelsData     what the pane shows: the folder's labels (`thimble label --json`), or a page of one label's records

@@ -173,7 +173,7 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
 async function finish($: Engine, d: Design, e: { reason: string; answer: string }): Promise<void> {
   if (e.reason === 'aborted') return end($, d, 'cancelled')
   if (e.reason === 'refusal') {
-    // not thimble's failure, so the line offers no fix of thimble: only the way out
+    // not thimble's failure, so a notice, not a failure line: only the way out
     await end($, d, 'failed')
     return noticeLine($, "The model's safeguards refused to draw this card. Another model may draw it: /model.", 'v')
   }

@@ -17,7 +17,6 @@
 //   cache/<folder>/                 a folder's row counts, and what coverage reads of the labels: speed only
 //                                   (engine/kernel/store.py)
 //   folders/<folder>/labels/        the labels of thimble 0.10 and before, one set per folder: kept, never shown
-//   fixes/                          the fixes (engine/kernel/fix.py)
 //   run/                            the card runner's socket (cards/ask.ts)
 //   tmp/                            the temp folder of a session that has no TMPDIR (core/home.ts tempDir)
 //
@@ -55,4 +54,3 @@ export const seenFile = (home, key, part = 1) => `${at(home)}/seen/${safeName(ke
 export const labelsDirOf = (home, key, realPath) => `${conversationDir(home, key)}/folders/${folderName(realPath)}/labels`
 export const runDir = home => `${at(home)}/run`
 export const tmpDir = home => `${at(home)}/tmp`
-export const fixesDir = home => `${at(home)}/fixes`

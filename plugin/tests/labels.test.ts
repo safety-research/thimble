@@ -86,7 +86,7 @@ test('a label line starts the reads: the busy line names the label, and Claude h
   await clock.advance(500)
   expect(w.answers[0].values).toEqual({ 'chat.jsonl#L1': { value: 'yes', confidence: 0.9 }, 'chat.jsonl#L2': { value: 'no', confidence: 0.8 } })
   expect(textOf(await $.ui.render(BAND))).not.toContain('labeling apology')
-  expect(textOf(await $.ui.render(BAND))).not.toContain('f fix this')
+  expect(textOf(await $.ui.render(BAND))).not.toContain('× ')
   // the next prompt carries what the reads gave, as context beside it that the person does not see
   await $.prompt.submit({ text: 'How many apologized?', origin: { kind: 'composer' } } as never)
   const told = w.context.join('\n')
@@ -100,10 +100,9 @@ test('a call that failed shows the failure line, in the person\'s words', async 
   await claudeLabels($, w)
   await clock.advance(500)
   expect(w.answers[0].failed['chat.jsonl#L1']).toBe('the call failed: the sign-in failed or expired. Sign in again with /login')
-  // the failure line, with the keys that fix or report it
+  // the failure line
   const bar = textOf(await $.ui.render(BAND))
   expect(bar).toContain('× 2 records of the label apology got no value, because a model call failed: the sign-in failed or expired.')
-  expect(bar).toContain('f fix this')
 })
 
 const HEAD = { name: 'sorry', kind: 'regex', rule: '(?i)sorry|apolog', values: ['yes', 'no'], in: 'chat.jsonl', records: 3, valued: 3, waiting: 0, failed: 0, checked: 0, agree: 0, disagree: 0, counts: { yes: 2, no: 1 } }

@@ -1,11 +1,10 @@
 // feed.ts: the kernel's change feed, $THIMBLE_HOME/events/<conversation>.jsonl (core/layout.mjs), one JSON line per change the plugin
 // acts on: a `label` whose records wait for the model (labels/labels.ts), a `label_ask` whose large run waits for the
-// person's choice (labels/use.ts), a `fix_ask` whose share waits for the person (bar/fix.ts). The feed is read after each Bash call (main's or a subagent's), each second while one runs (`thimble label … --prompt … && thimble label … --wait` waits on the
+// person's choice (labels/use.ts). The feed is read after each Bash call (main's or a subagent's), each second while one runs (`thimble label … --prompt … && thimble label … --wait` waits on the
 // model's reads, which start from the feed), and at the end of each turn. Lines the kernel wrote before this session
 // started are not acted on. The telemetry's lines share the file, and nothing acts on their kinds.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { fixAskFromFeed } from '../bar/fix'
 import { sessionKey } from '../hooks/conversation'
 import { labelFromFeed } from '../labels/labels'
 import { labelAskFromFeed } from '../labels/use'
@@ -65,7 +64,6 @@ async function readOnce($: Engine): Promise<void> {
     try {
       if (ev?.kind === 'label') labelFromFeed($, ev)
       else if (ev?.kind === 'label_ask') await labelAskFromFeed($, ev)
-      else if (ev?.kind === 'fix_ask') await fixAskFromFeed($, ev)
     } catch {
       // each module says its own failure
     }

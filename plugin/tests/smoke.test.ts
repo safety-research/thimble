@@ -47,10 +47,9 @@ test('the module loads, a session starts, a prompt goes through, and the bar dra
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   const r = (await $.prompt.submit({ text: 'How many runs failed?' } as never)) as Any
   expect(r.text).toBe('How many runs failed?')
-  // the count after the start failed: its line, with the keys that fix or report it
+  // the count after the start failed: its failure line
   await w.clock.advance(100)
   const line = textOf(await $.ui.render(BAND))
   expect(line).toContain('thimble')
-  expect(line).toContain('f fix this')
-  expect(line).toContain('F report only')
+  expect(line).toContain('× ')
 })

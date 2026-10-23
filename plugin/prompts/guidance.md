@@ -87,4 +87,3 @@ Claude    (runs `thimble label refund --in "tickets/*.jsonl" --regex "refund|mon
 ## The thimble command
 
 - `thimble coverage` lists the files you read, only computed over, or never touched. Read it before you say that the records hold no sign of something.
-- `thimble fix` changes thimble or reports a problem with it, when the analyst asks in plain words or with `/thimble:fix`. Read `thimble fix --help` first. A draft can go public, so it holds no file contents, names, paths or values from this session.

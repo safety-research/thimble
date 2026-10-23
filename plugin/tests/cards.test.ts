@@ -478,8 +478,8 @@ test('when the sandbox cannot start, no card runs: the call and the failure line
   expect(bar).toContain('sudo apt-get install bubblewrap')
   expect(w.asked).not.toContain('load')
   expect(w.spawned.length).toBe(0)
-  // the fix needs the person's sudo: a notice with no keys, not a failure that offers Claude the fix
-  expect(bar).not.toContain('fix this')
+  // the fix needs the person's sudo: a notice, not a failure line
+  expect(bar).not.toContain('× Cards cannot draw')
   // no folder is made for a runner that cannot start
   expect(w.runs.some(a => a.some(x => /\/cards-[0-9a-f]+$/.test(x)))).toBe(false)
   // the call's result row says the whole reason and the fix
