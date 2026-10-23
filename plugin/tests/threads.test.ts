@@ -214,6 +214,21 @@ test('the margin of a passage or a card opens its thread; it says asked (↳) on
   expect(threadOf(key)!.scope).toEqual({ about: '"Tuesday 41" in the card "Runs per day"', card: 'c00000000000b1', part: '▸ Tuesday  ██████ 41' })
 })
 
+test('the list of threads (t) draws each thread as a press that holds only text, as Claude Code draws a Button', async () => {
+  const s = setup()
+  const asked = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await asked
+  const all = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'threads', {}, els))
+  const presses = all.filter(n => n.type === 'Button')
+  expect(presses.length).toBe(1)
+  expect(textOf(presses[0])).toContain('41 of the 44')
+  // a Box inside a Button makes Claude Code refuse the whole pane
+  for (const b of presses) expect(nodes(b.props.children).some(n => n.type === 'Box')).toBe(false)
+  expect(textOf(all.find(n => n.props?.key === 'q'))).toContain('why so many?')
+})
+
 test('the thread pane: its steps without the folders they ran in, and m drawn once as Claude Code draws a key', async () => {
   const s = setup()
   const asked = askHere(s.$, SCOPE, 'why so many?')
