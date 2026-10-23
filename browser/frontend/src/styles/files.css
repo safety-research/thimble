@@ -1204,10 +1204,12 @@
 }
 
 /* -------- the reader: the cell's paper behind a hairline, square tabs on the sidebar's step -------- */
+/* at least 260 px beside a sidebar, and never wider than the pane: in a pane narrower than 260 px the column takes the
+   pane's width rather than spill past its edge, where the pane clips it */
 .files-main {
   position: relative;
   flex: 1 1 0;
-  min-width: 260px;
+  min-width: min(260px, 100%);
   min-height: 0;
   display: flex;
   flex-direction: column;

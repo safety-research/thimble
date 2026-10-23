@@ -756,6 +756,10 @@ export function FilesTab({ ws, active, focused = active }: { ws: string; active:
               <FolderPane state={folders.store.get(open.path)} lead={lead} onOpen={(path) => openTab({ path })} />
             ) : open && ready ? (
               <Reader workspace={ws} path={open.path} kind={kindOf(open.path)} targetRef={open.ref} lead={lead} end={openInEnd} labels={labels} onMode={setMode} findAsk={findAsk} />
+            ) : !open && !side.shown ? (
+              // no file open and the tree folded (a pane too narrow to dock it, or hidden): the workspace's top folder
+              // in the column, so the pane is never empty
+              <FolderPane state={root} lead={lead} onOpen={(path) => openTab({ path })} />
             ) : (
               <div className="reader">
                 <div className="reader-bar">{lead}</div>
