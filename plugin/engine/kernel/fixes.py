@@ -631,6 +631,25 @@ def check_ask(fid: int, secret: str | None) -> None:
         raise FixError("only the person's key press in thimble does that")
 
 
+def at_person_terminal() -> bool:
+    """A person typing in a terminal: a terminal on stdin and stdout, outside a command Claude Code runs (its Bash
+    tool sets CLAUDECODE and gives a command no terminal)."""
+    return sys.stdin.isatty() and sys.stdout.isatty() and not os.environ.get("CLAUDECODE")
+
+
+def apply_typed(fid: int | str, answer=input) -> dict[str, Any] | None:
+    """`thimble fix apply ID` typed by the person in their own terminal: thimble asks, and their y is the key press.
+    None when they say no."""
+    rec = get(fid)
+    if not at_person_terminal():
+        raise FixError("only the person applies a fix: type thimble fix apply in your own terminal, or press y in thimble")
+    if str(answer(f'Use fix {rec["id"]} "{rec["title"]}" now? [y/N] ')).strip().lower() not in ("y", "yes"):
+        return None
+    secret = secrets.token_hex(16)
+    write_json(home() / "asks" / f"{rec['id']}.json", {"key": key_hash(secret)})
+    return apply(rec["id"], secret)
+
+
 # ------------------------------------------------------------------ on, off, undo
 
 
@@ -1428,7 +1447,12 @@ def cmd(a) -> int:
             summary = stdin_text() if a.summary == "-" else (a.summary or "")
             out_json(done(a.id, a.title, summary, a.request, not a.no_tests))
         elif verb == "apply":
-            out_json(apply(a.id, stdin_text() if a.ask == "-" else None))
+            if a.ask == "-":
+                out_json(apply(a.id, stdin_text()))
+            else:
+                r = apply_typed(a.id)
+                print(f"✓ {r['title']} is on. In Claude Code, type /reload-plugins; restart thimble-browser." if r
+                      else "Not applied; thimble fix apply asks again whenever you want.")
         elif verb == "notnow":
             out_json(not_now(a.id))
         elif verb == "redo":
