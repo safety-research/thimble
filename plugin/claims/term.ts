@@ -32,9 +32,11 @@ export type ClaimsPart = { lit: true; note: string; claims: string[] }
 /** The pane's arguments: the claim picked, else the cluster chosen (its key: graph.js groupKey), the last turn when it
  *  was chosen; with a claim, `open` while its evidence is open, `cite` the citation shown (from 0), `all` the whole
  *  history, `whole` the citation's code and output whole; `from` the first claim of the list's window, once the person
- *  paged it; with `source`, where that claim was said. */
+ *  paged it; `term` the words whose explainer shows under it; with `source`, where that claim was said. */
 export type ClaimsArgs = {
   claim?: string | null; group?: string | null; at?: number | null; open?: boolean; cite?: number; all?: boolean; whole?: boolean; from?: number
+  /** the words whose explainer shows under the claim picked */
+  term?: string
   source?: string; row?: string
 }
 
@@ -42,6 +44,11 @@ const CLAIMS = { plugin: 'thimble', key: 'claims' } as const
 const BRIGHT = { plugin: 'thimble', key: 'claimsBright' } as const
 /** How long the bar's count is bold after new claims, as in 0.10. */
 const BRIGHT_MS = 1600
+/** The first claims of a session: the bar's count pulses (in thimble's color, then plain) this many times this far
+ *  apart, and says `new` until the pane is first opened, so a person sees that it appeared. */
+const PULSE = { times: 6, ms: 450 }
+const FIRST = { plugin: 'thimble', key: 'claimsFirst' } as const
+type First = { lit: boolean; opened: boolean }
 const FILE = 'claims.json'
 
 // ------------------------------------------------------------------------------------------------ the store
@@ -74,8 +81,28 @@ export async function saveClaims($: Engine, store: Store): Promise<void> {
   if (store.claims.length > before) {
     await $.state.set(BRIGHT, Number(await $.clock.now()))
     $.clock.after(BRIGHT_MS + 50, () => { void (async () => { await $.state.set(BRIGHT, null) })().catch(() => undefined) })
+    if (!before) pulse($)
   }
   await writeKept($, FILE, store).catch(() => undefined)
+}
+
+/** The first claims of the session: the bar's count lit, then plain, PULSE.times times. */
+function pulse($: Engine): void {
+  for (let i = 0; i <= 2 * PULSE.times; i++) {
+    $.clock.after(i * PULSE.ms, () => {
+      void (async () => {
+        const was = (await $.state.get(FIRST)).value as First | null | undefined
+        await $.state.set(FIRST, { lit: i < 2 * PULSE.times && i % 2 === 0, opened: !!was?.opened })
+      })().catch(() => undefined)
+    })
+  }
+}
+
+/** How the bar's count draws attention after the session's first claims: `lit` while it pulses on, `fresh` from then
+ *  until the pane was first opened. */
+export async function claimsFresh($: Engine): Promise<{ lit: boolean; fresh: boolean }> {
+  const f = (await $.state.get(FIRST)).value as First | null | undefined
+  return { lit: !!f?.lit, fresh: !!f && !f.opened }
 }
 
 /** A /clear or a /resume (hooks/turnover.ts): the new conversation's claims are held before anything draws their
@@ -182,6 +209,7 @@ export async function claimsLit($: Engine): Promise<boolean> {
  *  names the bar's count, a click on which opens it. */
 export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false): Promise<void> {
   await reloadClaims($)
+  await $.state.set(FIRST, { lit: false, opened: true }).catch(() => undefined)
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
   const n = byKey ? await claimCount($) : 0

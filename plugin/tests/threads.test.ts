@@ -7,7 +7,8 @@ import { expect, test } from 'claude-code/testing'
 import { registerForks } from '../core/forks'
 import { registerTell } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
-import { askHere, drawThreads, passageRuns } from '../threads/pane'
+import { askHere, drawThreads, passageRuns, threadUnder } from '../threads/pane'
+import { keptDir } from '../core/env'
 import { openThread, threadCardAnchor, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { threadKey } from '../threads/threads.mjs'
@@ -339,10 +340,10 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   expect(textOf(steps)).toBe('● 1 step · python3 count.py')
   expect(all.some(n => typeof n.props?.children === 'string' && n.props.children.includes('/made-up'))).toBe(false)
   // m in the keys' row above the input bar, dim at rest as a key's hint; the Button draws its key and label itself
-  // (`m: send this answer to Claude`): no second key or label inside it
+  // (`m: add this answer to the main conversation`): no second key or label inside it
   const m = all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-m')
   expect(m.props.hotkey).toBe('m')
-  expect(m.props.label).toBe('send this answer to Claude')
+  expect(m.props.label).toBe('add this answer to the main conversation')
   expect(m.props.dimColor).toBe(true)
   expect(m.props.children).toBe(undefined)
   // under the pointer its words brighten, never Claude Code's inverse of a plain Button
@@ -439,4 +440,36 @@ test("a read of a running thread's turns that the fork's end overtakes leaves th
   release!()
   await settle()
   expect(threadOf(KEY)!.status).toBe('done')
+})
+
+test('under the claims pane the input names what it asks about, each question shows its claim quoted above it, and m says the answer went to the main conversation', async () => {
+  const s = setup()
+  const store = { v: 2, session: 's-threads', updated: null, gaps: [],
+    claims: [{ id: 'c1', text: 'Run 4 failed on the p95 check.', by: 'claude', cluster: 'k1', turn: 1, said: [{ row: 'r1', by: 'claude', turn: 1, quote: 'Run 4 failed', sentence: 'Run 4 failed on the p95 check.' }], sources: [] }],
+    clusters: [{ id: 'k1', name: 'failures', turn: 1, named: 1 }] }
+  s.files[`${await keptDir(s.$)}/claims.json`] = JSON.stringify(store)
+  const e = { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }
+  const input = async (args: Any) => nodes(await threadUnder(s.$, e, 'claims', args, els)).find(n => n.type === 'Input')
+  expect((await input({ claim: 'c1' })).props.placeholder).toBe('Ask about: “Run 4 failed on the p95 check.”')
+  expect((await input({ group: 'k1' })).props.placeholder).toBe('Ask about the whole cluster “failures”…')
+  expect((await input({})).props.placeholder).toBe('Ask about all the claims…')
+  // a question about the claim: the claim quoted above it once answered, in place of `about this claim`
+  const scope = { about: 'the claim', pane: { kind: 'claims', args: { claim: 'c1' } } }
+  const asked = askHere(s.$, scope as Any, 'why the p95?')
+  await settle()
+  s.go()
+  await asked
+  s.answer('agent-1', 'The p95 check failed because two requests timed out.')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  const under = nodes(await threadUnder(s.$, e, 'claims', { claim: 'c1' }, els))
+  const t = textOf({ props: { children: under } })
+  expect(t).toContain('▎ “Run 4 failed on the p95 check.”❯ why the p95?')
+  expect(t).not.toContain('about this claim')
+  const m = under.find(n => n.type === 'Button' && n.props?.key === 'thread-key-m')
+  expect(m.props.label).toBe('add this answer to the main conversation')
+  const key = threadList()[0]!.key
+  expect(await sendToMain(s.$, key)).toBe(true)
+  const after = nodes(await threadUnder(s.$, e, 'claims', { claim: 'c1' }, els))
+  expect(textOf({ props: { children: after } })).toContain('✓ added to the main conversation: Claude reads it there and replies to it')
+  expect(after.find(n => n.type === 'Button' && n.props?.key === 'thread-key-m').props.label).toBe('added to the main conversation')
 })

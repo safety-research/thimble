@@ -17,10 +17,18 @@
 //   explainMerge($, look)              what one look gave for the explain and heads lenses, placed and kept
 //   expandExplainer($, mark)           Longer: the explainer written again at more length, in its place (expand.ts);
 //                                      null when it did, else a sentence that says why not
+//   sessionGlosses($)                  every explainer of this session: the panes highlight their terms (claims, a
+//                                      side thread's answers) and open them in place
+//   explainTerm($, row, term)          on demand: an explainer of words the analyst picked (a citation's words, a term
+//                                      in a pane, /explain), written by the explain-expand call and kept on its message
+//                                      as the look's are; explaining(term) says while it is written
+//   registerExplain                    /explain <words>: an explainer of those words in the newest answer that holds
+//                                      them, opened in the tray. Claude Code gives a plugin no selection of the words of
+//                                      a reply, so typing the words is the way to ask for any of them
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
 // Each lens's switch (settings: Explainers, Important details) also hides what it gave while it is off.
-import type { EngineInterface } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
@@ -35,8 +43,8 @@ import { withoutMarks } from '../marks/message.js'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { openTray, trayFocus } from '../tray/seam'
-import { expandGloss } from './expand'
-import { markColors, mergeLook, placeGlosses } from './place.mjs'
+import { askGloss, expandGloss } from './expand'
+import { anchorTerm, holds, markColors, mergeLook, placeGlosses, termOf } from './place.mjs'
 
 type Engine = EngineInterface
 
@@ -47,6 +55,8 @@ type Engine = EngineInterface
 export type Gloss = {
   id: string; term: string; kind?: 'heads'; title?: string; body?: string; here?: string; bullets?: string[]; offer?: string
   expanded?: boolean; short?: { body: string; here: string }
+  /** written on demand: the analyst picked its words and asked (explainTerm) */
+  asked?: boolean
 }
 /** A row's part `explain`: its explainers and heads-ups by id, in the order they were given. */
 export type ExplainPart = { items: Record<string, Gloss>; order: string[] }
@@ -157,4 +167,111 @@ export async function expandExplainer($: Engine, mark: MarkRef): Promise<string 
 /** For tests: the module's memory, cleared. */
 export function resetExplain(): void {
   Object.assign(M, { session: '', loaded: false, glossed: [], headsGiven: [] })
+}
+
+// ------------------------------------------------------------------------------------------------ on demand
+
+/** An explainer of the session, where it is kept: its message's row and its id there. */
+export type SessionGloss = Gloss & { row: string }
+
+const normTerm = (t: string) => termOf(t).toLowerCase().replace(/\s+/g, ' ').trim()
+
+/** Every explainer of this session (none while Explainers is off), the newest message's first. */
+export async function sessionGlosses($: Engine): Promise<SessionGloss[]> {
+  if (!featureOn('explain')) return []
+  const rows = [...new Set([...(await answerRows($).catch(() => [] as string[])), ...(await textRows($).catch(() => [] as string[]))])].reverse()
+  const out: SessionGloss[] = []
+  const seen = new Set<string>()
+  for (const row of rows) {
+    const part = await partOf<ExplainPart>($, row, 'explain').catch(() => null)
+    for (const id of part?.order ?? Object.keys(part?.items ?? {})) {
+      const g = part?.items?.[id]
+      if (!g || g.kind === 'heads' || seen.has(normTerm(g.term))) continue
+      seen.add(normTerm(g.term))
+      out.push({ ...g, row })
+    }
+  }
+  return out
+}
+
+/** The session's explainer of these words: the same words, or another form of them ("hit counters" finds "public
+ *  hit counter" only when the words say all of it). */
+export function glossFor(list: SessionGloss[], term: string): SessionGloss | null {
+  const t = normTerm(term)
+  return list.find(g => normTerm(g.term) === t) ?? list.find(g => { const at = anchorTerm(t, g.term); return !!at && at.how !== 'word' }) ?? null
+}
+
+// the words being explained on demand now, and why the last try of each failed
+const asking = new Set<string>()
+const failed = new Map<string, string>()
+
+/** Whether an explainer of these words is being written now; why the last one was not, else ''. */
+export function explaining(term: string): { pending: boolean; why: string } {
+  const t = normTerm(term)
+  return { pending: asking.has(t), why: failed.get(t) ?? '' }
+}
+
+/**
+ * An explainer of `term`, the words the analyst picked in the message `row`: the session's one when it has one, else
+ * one written now (explain/expand.ts askGloss), kept on that message, so its words show it there too. Returns where it
+ * is, or a sentence that says why there is none. The panes draw again when it is written.
+ */
+export async function explainTerm($: Engine, row: string, term: string): Promise<SessionGloss | string> {
+  const words = termOf(term).replace(/\s+/g, ' ').trim()
+  if (!words) return 'Pick some words to explain.'
+  if (!featureOn('explain')) return 'Explainers are off. Turn on "Explainers" in /thimble-settings to use them.'
+  const have = glossFor(await sessionGlosses($), words)
+  if (have) return have
+  const t = normTerm(words)
+  if (asking.has(t)) return 'That explainer is being written.'
+  asking.add(t)
+  failed.delete(t)
+  $.ui.invalidate('ui.render')
+  try {
+    const got = await askGloss($, row, words)
+    if (typeof got === 'string') { failed.set(t, got); return got }
+    const m = await memory($)
+    m.glossed = [...m.glossed, words].slice(-GLOSSED_KEEP)
+    await writeKept($, FILE, { glossed: m.glossed, headsGiven: m.headsGiven }).catch(() => undefined)
+    const g = (await partOf<ExplainPart>($, row, 'explain'))?.items?.[got.id]
+    return g ? { ...g, row } : 'The explainer was written, but its answer is not in this session any more.'
+  } finally {
+    asking.delete(t)
+    $.ui.invalidate('ui.render')
+  }
+}
+
+/** /explain <words>: the newest answer that holds the words (else the newest answer) explains them, in the tray. */
+async function explainCommand($: Engine, args: string): Promise<{ text?: string }> {
+  const words = String(args || '').replace(/^["“'‘]+|["”'’]+$/g, '').trim()
+  if (!words) return { text: 'Type the words to explain after /explain, as in /explain hit counter.' }
+  const rows = (await answerRows($).catch(() => [] as string[])).slice().reverse()
+  if (!rows.length) return { text: 'No answer to explain words in yet: ask Claude something first.' }
+  let row = rows[0]!
+  for (const r of rows) {
+    const text = (await messageOf($, r))?.text ?? ''
+    if (holds(text, words) || anchorTerm(text, words)) { row = r; break }
+  }
+  void (async () => {
+    const got = await explainTerm($, row, words)
+    if (typeof got === 'string') failNotice($, got, 'explain')
+    else {
+      await openTray($, { row: got.row, kind: 'explain', id: got.id })
+      await tellOpened($, { kind: 'explain', row: got.row, term: got.term }, (await messageOf($, got.row))?.text ?? '')
+    }
+  })().catch(err => failNotice($, `The explainer was not written: ${String((err as Error)?.message || err).slice(0, 160)}`, 'explain'))
+  return { text: `Writing an explainer of “${words}”. It opens under the answer when it is ready.` }
+}
+
+export const registerExplain: Register = on => {
+  on('session.start', { isInteractive: true }, async ($, e, next) => {
+    const r = await next(e)
+    try {
+      await $.command.register({ name: 'explain', description: 'Explain words of an answer: /explain hit counter', argumentHint: '<words to explain>', immediate: true })
+    } catch {
+      // the panes' presses still explain
+    }
+    return r
+  }).catch(($, e, next) => next(e))
+  on('command.run', { command: /^(thimble:)?explain$/ }, async ($, e) => explainCommand($, String((e as { args?: string }).args ?? '')))
 }

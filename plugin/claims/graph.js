@@ -35,7 +35,8 @@
 //
 // A canvas (canvas()) is a grid of cells: text and dots that are parts (a press on the part; the blank cells beside a
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, part}.
-import { blocks } from '../marks/message.js'
+import { anchorTerm } from '../explain/place.mjs'
+import { blocks, marksIn } from '../marks/message.js'
 import { tableLines } from '../marks/table.mjs'
 import { evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printLine } from '../tray/tray.mjs'
 import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
@@ -72,8 +73,11 @@ export const wrapName = (name, n) => wrap(one(name).replace(/ …$/, '\u2060…'
 
 /** A cluster's color: the six categorical tones in turn. */
 export const toneOf = i => `c${(Math.max(0, i) % 6) + 1}`
-/** A claim's dot: filled, heavier when said twice or more (a claim a later one corrected stays filled). */
-export const dotOf = c => ((c.n || 1) >= 2 ? '◉' : '●')
+/** Whether a claim cites no record: none of its words in the reply is a citation. */
+export const uncited = c => !(c.sources || []).length
+/** A claim's dot: filled, heavier when said twice or more (a claim a later one corrected stays filled); hollow when the
+ *  claim cites no record. */
+export const dotOf = c => (uncited(c) ? '○' : (c.n || 1) >= 2 ? '◉' : '●')
 
 /** Who said a claim and when, in a few words, for a side thread: `turn 2`, `turn 2 · you`. */
 export function whenOf(c) {
@@ -284,7 +288,7 @@ const slim = c => ({
 export function paneData(store) {
   const view = viewOf({ clusters: [], gaps: [], ...(store || {}), claims: Array.isArray(store?.claims) ? store.claims : [] })
   const claims = view.flat.map(slim)
-  const groups = view.groups.map((g, i) => ({ id: g.id ?? null, name: g.name, i }))
+  const groups = view.groups.map((g, i) => ({ id: g.id ?? null, name: g.name, i, ...(g.about ? { about: g.about } : {}) }))
   return {
     total: view.total, clusters: view.clusters, last: view.last, gaps: (view.gaps || []).slice(-3),
     claims, groups, edges: edgesOf(view.flat),
@@ -339,7 +343,8 @@ export const CELL_MIN = 4
  *  evidence open (the rule, the cluster's name, a claim of three lines and its chips, a citation's card and the steps
  *  between citations), or a cluster's name and a few of its claims (the list pages past them). */
 const DETAIL_MIN = 14
-/** The rows above the map: the head and a blank row. */
+/** The rows above the map: the head and a blank row (the caption under the head shows only at rest, when no detail
+ *  takes the rows under the map). */
 const TOP_ROWS = 2
 /** A pane this wide or wider has three columns of cells. */
 const WIDE = 96
@@ -641,7 +646,8 @@ export const citationRows = (s, W) => cardOf(s, W).rows
  *  pane) leaves out `citations`. Runs, two spaces between. */
 export function checkChips(c, { short = false } = {}) {
   const srcs = c.sources || []
-  if (!srcs.length) return [{ s: 'no citations', tone: 'dim' }]
+  // no citation: why, in a few words (the analyst's own words are never cited)
+  if (!srcs.length) return [{ s: c.by === 'person' ? 'your words, not cited' : 'no citation', tone: 'dim' }]
   const count = { good: 0, bad: 0, checking: 0, dim: 0 }
   for (const s of srcs) {
     const k = statusKey(s)
@@ -858,11 +864,83 @@ export function groupOf(data, key) {
   return { g, name: g ? g.name : 'between clusters', cs: (data.claims || []).filter(c => claimGroup(data, c) === String(key)) }
 }
 
+// ------------------------------------------------------------------------------------------------ styled words
+
+/** Words wrapped to lines of at most n characters, each line with the offset of its first character in `text`: [{s,
+ *  at}]. Runs of white space are one space (`text` is one line already: one()); a word longer than n goes on over the
+ *  next lines. */
+function wrapAt(text, n) {
+  const out = []
+  let cur = null
+  for (const m of String(text).matchAll(/\S+/g)) {
+    let w = m[0], at = m.index
+    if (cur && len(cur.s) + 1 + len(w) <= n) { cur.s += ' ' + w; continue }
+    if (cur) out.push(cur)
+    while (len(w) > n) { out.push({ s: w.slice(0, n), at }); w = w.slice(n); at += n }
+    cur = { s: w, at }
+  }
+  if (cur) out.push(cur)
+  return out
+}
+
+/**
+ * The words a pane shows a session's explainers on: where each term stands in `text`, as written or in another form
+ * of its words ("public hit counter" in "public hit counters"; explain/place.mjs anchorTerm), never on a small word
+ * alone. `terms`: [{term, key}]. [{a, b, key}] in text order, none overlapping.
+ */
+export function termSpans(text, terms = []) {
+  const out = []
+  for (const t of terms) {
+    const hit = anchorTerm(text, t.term, out.map(x => ({ start: x.a, end: x.b })))
+    if (hit && hit.how !== 'word') out.push({ a: hit.start, b: hit.end, key: t.key })
+  }
+  return out.sort((x, y) => x.a - y.a)
+}
+
+/** A run of a term that has an explainer: the explainers' fill (pane.tsx draws `bg: 'gloss'`), a press that opens it
+ *  under the claim `id` (`x:[id, key]`). */
+export const termLook = (key, id = null) => ({ bg: 'gloss', part: `x:${JSON.stringify([id, key])}` })
+
+/**
+ * One line of words as rows n wide, each a list of runs: `base` the look of every run, `spans` [{a, b, look}] the
+ * looks of stretches of the text over it (a later span over an earlier one). A run's part is the span's, else `base`'s.
+ */
+export function styledRows(text, n, base = {}, spans = []) {
+  const t = one(text)
+  const merged = spans.map(x => ({ a: x.a, b: x.b, l: { ...base, ...x.look } }))
+  const lookAt = i => {
+    let l = base
+    for (const x of merged) if (i >= x.a && i < x.b) l = x.l
+    return l
+  }
+  return wrapAt(t, n).map(line => {
+    const runs = []
+    Array.from(line.s).forEach((ch, k) => {
+      const at = line.at + k
+      // a space between two words of one stretch takes its look; any other space the base's
+      const l = ch === ' ' ? (lookAt(at - 1) === lookAt(at + 1) ? lookAt(at - 1) : base) : lookAt(at)
+      const last = runs[runs.length - 1]
+      if (last && last.l === l) last.s += ch
+      else runs.push({ s: ch, l })
+    })
+    // the lines are split on words in a one-spaced copy: the offsets hold, since `text` is passed one-spaced
+    return runs.map(r => ({ ...r.l, s: r.s }))
+  })
+}
+
+/** A cluster's orienting line under its name, dim, three lines at most, each a press on `part`. */
+function aboutRows(about, W, part) {
+  if (!about) return []
+  let lines = wrap(about, Math.max(12, W - 4))
+  if (lines.length > 3) lines = [...lines.slice(0, 2), cutWords(lines.slice(2).join(' '), Math.max(12, W - 4))]
+  return lines.map(l => [{ s: '  ', part }, { s: l, tone: 'dim', part }])
+}
+
 /** A cluster's name over its list, as rows W wide, each a press on `part`. Chosen alone (`lit`): `● name` bold in the
  *  cluster's color; above a claim: the dot in the color and the name bold; `dim` (another cluster is chosen): all dim.
  *  The name is whole, wrapped (never cut), and `after` (dim) follows it, on a row of its own when the last line has
  *  no room for it. */
-function nameRows(name, tone, W, { after = '', part = null, lit = false, dim = false, narrow = false } = {}) {
+function nameRows(name, tone, W, { after = '', part = null, lit = false, dim = false, narrow = false, about = '' } = {}) {
   const room = narrow ? Math.max(8, W - 2) : Math.max(12, W - 14)
   const lines = wrapName(name, room)
   if (!lines.length) lines.push('')
@@ -870,23 +948,135 @@ function nameRows(name, tone, W, { after = '', part = null, lit = false, dim = f
   const rows = lines.map((l, i) => [{ s: i ? '  ' : '● ', ...(i ? {} : lit ? { tone, bold: true } : { tone: dim ? 'dim' : tone }), part }, { s: l, ...look, part }])
   if (after && 2 + len(lines[lines.length - 1] ?? '') + 1 + len(after) <= W) rows[rows.length - 1].push({ s: ` ${after}`, tone: 'dim', part })
   else if (after) rows.push([{ s: '  ', part }, { s: after, tone: 'dim', part }])
+  // its orienting line under it, when its cluster is shown alone or the list has room for every cluster's
+  if (about && !dim) rows.push(...aboutRows(about, W, part))
   return rows
 }
 
 /** A claim in the cluster's list, as rows W wide, each a press on `part`: `–` and its sentence, wrapped under its first
  *  word, whole when `whole`, else two lines at most (then …). The claim picked: `▸` and the whole sentence bold in the
  *  cluster's color; with a claim picked, every other one dim; a new claim (`fresh`) bold. */
-function itemRows(c, W, { tone, picked = false, dim = false, fresh = false, part = null, whole = false }) {
+function itemRows(c, W, { tone, picked = false, dim = false, fresh = false, part = null, whole = false, terms = [] }) {
   const look = picked ? { tone, bold: true } : fresh ? { bold: true } : dim ? { tone: 'dim' } : {}
-  let lines = wrap(sentenceOf(c.text), W - 4)
-  if (!picked && !whole && lines.length > 2) {
-    const words = lines[1].split(' ')
+  let text = one(sentenceOf(c.text))
+  const plain = wrap(text, W - 4)
+  if (!picked && !whole && plain.length > 2) {
+    // two lines at most, the second cut after a whole word, then …: a prefix of the sentence, so its terms keep their
+    // places
+    const words = plain[1].split(' ')
     while (words.length > 1 && len(words.join(' ')) + 2 > W - 4) words.pop()
-    lines = [lines[0], `${words.join(' ')} …`]
+    text = `${plain[0]} ${words.join(' ')} …`
   }
+  // the terms that have an explainer this session: in the explainers' fill, each a press that opens it
+  const lines = styledRows(text, W - 4, { ...look, part }, termSpans(text, terms).map(x => ({ a: x.a, b: x.b, look: termLook(x.key, c.id) })))
+  // a claim that cites no record: a hollow marker, as its dot on the map
+  const mark = picked ? '▸ ' : uncited(c) ? '◦ ' : '– '
   return lines.map((l, i) => (i
-    ? [{ s: '    ', part }, { s: l, ...look, part }]
-    : [{ s: '  ', part }, { s: picked ? '▸ ' : '– ', ...(picked || fresh ? look : { tone: 'dim' }), part }, { s: l, ...look, part }]))
+    ? [{ s: '    ', part }, ...l]
+    : [{ s: '  ', part }, { s: mark, ...(picked || fresh ? look : { tone: 'dim' }), part }, ...l]))
+}
+
+
+/**
+ * The paragraph of the reply a claim came from (the block of `md` that holds its place), as the person reads it, in
+ * rows n wide after a dim `▎ `: the claim's own words in the text's color, the rest dim; a citation's words underlined,
+ * each a press that explains them (`w:<k>`, k its index among `words`); the terms that have an explainer in their fill,
+ * each a press that opens it (`x:<key>`). At most `max` rows, round the claim's words, `…` where it was cut.
+ * {rows, words}: `words` the citations' words as the person reads them. Null when the place is not in `md`.
+ */
+export function passageRows(md, place, n, { terms = [], max = 5, claim = null } = {}) {
+  const s = String(md || '')
+  if (!s || !place) return null
+  const span = spanOf(s, place)
+  if (!span) return null
+  const b = blocks(s).find(x => x.type !== 'rule' && x.type !== 'code' && x.from <= span[0] && span[0] < x.to)
+  if (!b) return null
+  const p = plainOf(s.slice(b.from, b.to))
+  // the plain text one-spaced, with each kept character's markdown offset
+  let text = ''
+  const at = []
+  for (let i = 0; i < p.plain.length; i++) {
+    const ch = /\s/.test(p.plain[i]) ? ' ' : p.plain[i]
+    if (ch === ' ' && (!text || text.endsWith(' '))) continue
+    text += ch
+    at.push(p.at[i] + b.from)
+  }
+  while (text.endsWith(' ')) { text = text.slice(0, -1); at.pop() }
+  if (!text) return null
+  const range = (x, y) => {
+    const a = at.findIndex(m => m >= x)
+    if (a < 0) return null
+    let e = a
+    while (e < at.length && at[e] < y) e++
+    return e > a ? { a, b: e } : null
+  }
+  const spans = []
+  const own = range(span[0], span[1])
+  if (own) spans.push({ ...own, look: { tone: null } })
+  const words = []
+  for (const m of marksIn(s)) {
+    if (m.start < b.from || m.end > b.to) continue
+    const r = range(m.start, m.end)
+    if (!r) continue
+    spans.push({ ...r, look: { underline: true, part: `w:${words.length}` } })
+    words.push(text.slice(r.a, r.b))
+  }
+  for (const t of termSpans(text, terms)) spans.push({ a: t.a, b: t.b, look: termLook(t.key, claim) })
+  let rows = styledRows(text, Math.max(10, n - 2), { tone: 'dim' }, spans)
+  if (rows.length > max) {
+    // the window round the claim's words
+    const lineOf = i => { let k = 0, used = 0; for (const r of rows) { used += r.reduce((a, x) => a + len(x.s), 0) + 1; if (used > i) return k; k++ } return rows.length - 1 }
+    const from = Math.max(0, Math.min(own ? lineOf(own.a) - 1 : 0, rows.length - max))
+    const cutTop = from > 0, cutEnd = from + max < rows.length
+    rows = rows.slice(from, from + max)
+    if (cutTop) rows[0] = [{ s: '… ', tone: 'dim' }, ...rows[0]]
+    if (cutEnd) rows[rows.length - 1] = [...rows[rows.length - 1], { s: ' …', tone: 'dim' }]
+  }
+  return { rows: rows.map(r => [{ s: '▎ ', tone: 'dim' }, ...r]), words }
+}
+
+/** An explainer shown in place under a claim (`ex`: {term, body, here} once written; {term, pending} while it is
+ *  written on demand; {term, why} when it was not), as rows n wide: the term bold in the explainers' fill and `explainer`
+ *  dim, then its body, then where it mattered, dim (its links read as their words). */
+export function explainerRows(ex, n) {
+  if (!ex) return []
+  const w = Math.max(10, n - 2)
+  const head = [{ s: '▎ ', tone: 'dim' }, { s: one(ex.term), bold: true, bg: 'gloss' }, { s: '  explainer', tone: 'dim' }]
+  if (ex.pending) return [head, [{ s: '▎ ', tone: 'dim' }, { s: 'writing an explainer of these words…', tone: 'dim' }]]
+  if (ex.why) return [head, ...wrap(ex.why, w).map(l => [{ s: '▎ ', tone: 'dim' }, { s: l, tone: 'bad' }])]
+  const words = t => one(String(t || '').replace(/\[([^\]\n]+)\]\([^()\s]*\)/g, '$1').replace(/[`*]/g, ''))
+  const rows = [head, ...wrap(words(ex.body), w).map(l => [{ s: '▎ ', tone: 'dim' }, { s: l }])]
+  if (ex.here) rows.push(...wrap(words(ex.here), w).map(l => [{ s: '▎ ', tone: 'dim' }, { s: l, tone: 'dim' }]))
+  return rows
+}
+
+/** A claim's first citation as its card draws it (cardOf), short: its words and check, why it failed or what it was,
+ *  and the line of its evidence; each row a press that opens its evidence pane (`ev-1`). */
+function firstCiteRows(claim, W) {
+  const s = evidenceOf(claim)[0]
+  if (!s) return []
+  const part = s.row && s.n ? 'ev-1' : null
+  return cardOf(s, W).rows.slice(0, 4).map(r => r.map(x => ({ ...x, part })))
+}
+
+/**
+ * A claim picked in the list, as rows W wide: the claim (itemRows: `▸`, whole, bold in its cluster's color), its chips
+ * (chipRuns, with which claim of how many it is), and, with its evidence closed, what it came from: the paragraph of
+ * the reply that said it (passageRows), the explainer asked for in place (explainerRows) and its first citation
+ * (firstCiteRows). `ctx`: {terms, passage: {md, place}, explainer}.
+ */
+function pickedOf(c, { tone, W, fixes, narrow, cs = [], st = {}, ctx = {} }) {
+  const at = cs.findIndex(x => x.id === c.id)
+  const place = cs.length > 1 && at >= 0 ? { i: at + 1, n: cs.length } : null
+  const rows = [...itemRows(c, W, { tone, picked: true, part: `c:${c.id}`, terms: ctx.terms || [] }), fit([{ s: '    ' }, ...chipRuns(c, fixes, narrow, place)], W)]
+  if (st.open) return rows
+  // why a claim of Claude's has no citation: the reply cites no record for it, so nothing checked it
+  if (uncited(c) && c.by !== 'person') rows.push(...wrap('The reply cites no record for this claim, so thimble did not check it.', W - 4).map(l => [{ s: '    ' }, { s: l, tone: 'dim' }]))
+  const pass = ctx.passage ? passageRows(ctx.passage.md, ctx.passage.place, W - 4, { terms: ctx.terms || [], claim: c.id }) : null
+  if (pass) rows.push(...indent(pass.rows, 4))
+  rows.push(...indent(explainerRows(ctx.explainer, W - 4), 4))
+  rows.push(...indent(firstCiteRows(c, W - 4), 4))
+  return rows
 }
 
 /** Rows indented by n cells. */
@@ -894,8 +1084,8 @@ const indent = (rows, n) => rows.map(r => (r.length ? [{ s: ' '.repeat(n), part:
 
 /** The chips under a picked claim: its citations' checks (checkChips), `corrected ×N` (or `corrected later`), its
  *  turn. Runs. */
-function chipRuns(claim, fixes, short) {
-  const chips = [...checkChips(claim, { short })]
+function chipRuns(claim, fixes, short, place = null) {
+  const chips = [...(place ? [{ s: `claim ${place.i} of ${place.n}`, tone: 'dim' }, { s: '  ' }] : []), ...checkChips(claim, { short })]
   if (fixes) chips.push({ s: '  ' }, { s: claim.revised_by ? 'corrected later' : fixes > 1 ? `corrected ×${fixes}` : 'corrected', tone: 'cite' })
   const when = whenOf(claim)
   if (when) chips.push({ s: '  ' }, { s: when, tone: 'dim' })
@@ -911,18 +1101,18 @@ function chipRuns(claim, fixes, short) {
  * claims a–b of N` under it, each a press that pages by a screen (`pg:<first claim of that screen>`).
  * {rows, cites, shown, cut, fixes, windowed}
  */
-export function panelOf({ data, claim, group, tone, W, byId = new Map((data.claims || []).map(c => [c.id, c])), room = 16, st = {}, fresh = new Set(), narrow = false }) {
-  const { name, cs } = groupOf(data, group)
+export function panelOf({ data, claim, group, tone, W, byId = new Map((data.claims || []).map(c => [c.id, c])), room = 16, st = {}, fresh = new Set(), narrow = false, ctx = {} }) {
+  const { g, name, cs } = groupOf(data, group)
   const gtone = tone(cs[0] || claim || {})
-  const rows = [[{ s: '─'.repeat(W), tone: 'dim-faint' }], ...nameRows(name, gtone, W, { after: clusterWords(cs), part: `g:${group}`, lit: !claim, narrow })]
+  const rows = [[{ s: '─'.repeat(W), tone: 'dim-faint' }], ...nameRows(name, gtone, W, { after: clusterWords(cs), part: `g:${group}`, lit: !claim, narrow, about: g?.about || '' })]
   const fixes = claim ? correctionsOf(claim, byId).length : 0
-  const pickedRows = c => [...itemRows(c, W, { tone: gtone, picked: true, part: `c:${c.id}` }), fit([{ s: '    ' }, ...chipRuns(c, fixes, narrow)], W)]
+  const pickedRows = c => pickedOf(c, { tone: gtone, W, fixes, narrow, cs, st, ctx })
   if (claim && st.open) {
     const ev = evidenceRows(claim, byId, W - 4, st)
     rows.push(...pickedRows(claim), ...indent(ev.rows, 4))
     return { rows, cites: ev.cites, shown: ev.shown, cut: ev.cut, fixes, windowed: false }
   }
-  const itemsOf = whole => cs.map(c => (claim?.id === c.id ? pickedRows(c) : itemRows(c, W, { tone: gtone, dim: !!claim, fresh: fresh.has(c.id), part: `n:${c.id}`, whole })))
+  const itemsOf = whole => cs.map(c => (claim?.id === c.id ? pickedRows(c) : itemRows(c, W, { tone: gtone, dim: !!claim, fresh: fresh.has(c.id), part: `n:${c.id}`, whole, terms: ctx.terms || [] })))
   const budget = Math.max(3, room - rows.length)
   const height = its => its.reduce((a, r) => a + r.length, 0)
   // each claim whole when they all fit the room, else two lines at most, so a claim is cut only when the room is short
@@ -975,8 +1165,8 @@ export function panelOf({ data, claim, group, tone, W, byId = new Map((data.clai
  * under it (panelOf). The list has no window: a list taller than the pane scrolls. {rows, cites, shown, cut, fixes,
  * windowed}
  */
-export function listOf({ data, claim, group, chosen, tone, W, byId = new Map((data.claims || []).map(c => [c.id, c])), st = {}, fresh = new Set(), narrow = false }) {
-  if (claim && st.open) return panelOf({ data, claim, group, tone, W, byId, st, fresh, narrow })
+export function listOf({ data, claim, group, chosen, tone, W, byId = new Map((data.claims || []).map(c => [c.id, c])), st = {}, fresh = new Set(), narrow = false, ctx = {} }) {
+  if (claim && st.open) return panelOf({ data, claim, group, tone, W, byId, st, fresh, narrow, ctx })
   const fixes = claim ? correctionsOf(claim, byId).length : 0
   const rows = [[{ s: '─'.repeat(W), tone: 'dim-faint' }]]
   for (const g of counted(data)) {
@@ -984,10 +1174,10 @@ export function listOf({ data, claim, group, chosen, tone, W, byId = new Map((da
     const gtone = toneOf(g.i)
     const mine = chosen && g.key === group
     if (rows.length > 1) rows.push([])
-    rows.push(...nameRows(g.name, gtone, W, { after: clusterWords(cs), part: `g:${g.key}`, lit: mine && !claim, dim: chosen && !mine, narrow }))
+    rows.push(...nameRows(g.name, gtone, W, { after: clusterWords(cs), part: `g:${g.key}`, lit: mine && !claim, dim: chosen && !mine, narrow, about: g.about || '' }))
     for (const c of cs) {
-      if (claim?.id === c.id) rows.push(...itemRows(c, W, { tone: gtone, picked: true, part: `c:${c.id}` }), fit([{ s: '    ' }, ...chipRuns(c, fixes, narrow)], W))
-      else rows.push(...itemRows(c, W, { tone: gtone, dim: !!claim || (chosen && !mine), fresh: fresh.has(c.id), part: `n:${c.id}` }))
+      if (claim?.id === c.id) rows.push(...pickedOf(c, { tone: gtone, W, fixes, narrow, cs, st, ctx }))
+      else rows.push(...itemRows(c, W, { tone: gtone, dim: !!claim || (chosen && !mine), fresh: fresh.has(c.id), part: `n:${c.id}`, terms: ctx.terms || [] }))
     }
   }
   return { rows, cites: claim ? evidenceOf(claim).length : 0, shown: null, cut: false, fixes, windowed: false }
@@ -1010,6 +1200,9 @@ export const NARROW = 48
 /** A session with fewer claims than this has no map: a few dots in one or two cells look sparse, so the pane lists its
  *  clusters, each with its claims (listOf). The map appears once there are this many. */
 export const FEW = 10
+/** The caption under the head: what the map shows and what a click does; and in a list of clusters. */
+export const CAPTION_MAP = "Each dot is a claim from this chat, grouped by question; click a name or a dot."
+export const CAPTION_LIST = "The claims of this chat, grouped by question; click a cluster or a claim."
 /** The rows the keys take under the detail: a rule and the keys' row. */
 const KEYS_ROWS = 2
 
@@ -1036,7 +1229,8 @@ function counted(data) {
  * `cite-prev` `cite-next` the citation before or after, `was-<id>` another version of the claim, `pg:<i>` a screen of
  * the list from its claim i).
  */
-export function graphView(raw, st = {}, { w = 90, h = 40, bright = false } = {}) {
+export function graphView(raw, st = {}, { w = 90, h = 40, bright = false, terms = [], passage = null, explainer = null } = {}) {
+  const ctx = { terms, passage, explainer }
   const W = Math.max(24, w)
   const narrow = W < NARROW
   const H = Math.max(12, h)
@@ -1056,11 +1250,13 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false } = {})
   for (const g of data.gaps || []) head.push([{ s: `Turn ${g.turn} was not read: `, tone: 'bad' }, { s: cut(g.why || 'the look at the answer failed', W - 24), tone: 'dim' }])
   const none = { claim: null, group: null, chosen: false, cites: 0, shown: null, cut: false, fixes: 0, windowed: false, narrow, cellRows: 0, data, order: [] }
   if (!claims.length) return { head, graph: [], panel: [], ...none }
+  // at rest, a caption under the head: what the pane shows and what a click does
+  if (!selectedOf(data, st).chosen) head.push(...wrap(few || narrow ? CAPTION_LIST : CAPTION_MAP, W).map(l => [{ s: l, tone: 'dim' }]))
   const mapped = counted(data)
   const listed = mapped.map(g => g.key)
-  if (few) return { head, graph: [], ...result(listOf({ data, claim, group, chosen, tone, W, byId, st, fresh, narrow })), claim, group, chosen, narrow, cellRows: 0, listed: true, data, order: listed }
+  if (few) return { head, graph: [], ...result(listOf({ data, claim, group, chosen, tone, W, byId, st, fresh, narrow, ctx })), claim, group, chosen, narrow, cellRows: 0, listed: true, data, order: listed }
   const top = head.length + 1
-  const detail = room => (chosen ? panelOf({ data, claim, group, tone, W, byId, room, st, fresh, narrow }) : null)
+  const detail = room => (chosen ? panelOf({ data, claim, group, tone, W, byId, room, st, fresh, narrow, ctx }) : null)
   if (narrow) {
     const list = clusterLines(mapped, W, { group, chosen })
     const panel = detail(H - top - list.length - KEYS_ROWS)

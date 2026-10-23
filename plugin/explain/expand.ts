@@ -72,26 +72,21 @@ async function evidencePlaces($: Engine, row: string): Promise<Place[]> {
   return out
 }
 
-/**
- * The explainer `id` of the message `row`, written again at more length: the message's part takes it in place of the
- * short one. Returns null when it did, or a sentence that says why it was not written.
- */
-export async function expandGloss($: Engine, row: string, id: string): Promise<string | null> {
+/** One side call of the `explain-expand` prompt: the term, the explainer as it stands (`g`; none for a term the
+ *  analyst picked that has none yet), the question, the answer the term stands in and the files they cite. {body,
+ *  here} once written, else a sentence that says why not. */
+async function writeExplainer($: Engine, row: string, term: string, g: Gloss | null): Promise<{ body: string; here: string } | string> {
   const msg = await messageOf($, row)
-  const g = (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id]
-  if (!msg || !g) return 'That answer is not in this session any more.'
-  if (g.expanded) return null
+  if (!msg) return 'That answer is not in this session any more.'
   const roots = [...new Set([await startDir($), (await rootHere($)) || ''].filter(Boolean))]
   const answer = (await textView($, row, msg.text)).text
-  const places = [...filePlaces(`${g.body || ''}\n${g.here || ''}`), ...(await evidencePlaces($, row)), ...filePlaces(answer)]
+  const places = [...filePlaces(`${g?.body || ''}\n${g?.here || ''}`), ...(await evidencePlaces($, row)), ...filePlaces(answer)]
   const question = await questionOf($, row).catch(() => '')
   const system = await promptText($, 'explain-expand')
   const prompt = [
-    `The term: ${g.term}`,
+    `The term: ${term}`,
     '',
-    'The explainer as it stands:',
-    `body: ${g.body || ''}`,
-    `here: ${g.here || ''}`,
+    ...(g ? ['The explainer as it stands:', `body: ${g.body || ''}`, `here: ${g.here || ''}`] : ['The explainer as it stands: none yet. The analyst picked these words in the answer and asked what they mean.']),
     '',
     `The analyst's question: ${String(question || '(not known)').slice(0, 2000)}`,
     '',
@@ -104,15 +99,48 @@ export async function expandGloss($: Engine, row: string, id: string): Promise<s
   const req = { model: 'opus', maxTokens: 6000, timeoutMs: 120000, system: [{ text: system, cache: true }], prompt }
   let r: Any
   try {
-    r = await tracked($, { feature: 'explain', prompt: 'explain-expand', doing: 'writing a longer explainer', model: req.model, extra: { row, term: g.term } }, () => $.model.complete(req as Any))
+    r = await tracked($, { feature: 'explain', prompt: 'explain-expand', doing: g ? 'writing a longer explainer' : 'writing an explainer you asked for', model: req.model, extra: { row, term } }, () => $.model.complete(req as Any))
   } catch (err) {
     r = { isAnswered: false, reason: 'refused', error: String((err as Error)?.message || err).slice(0, 300) }
   }
-  if (!r?.isAnswered) return `The longer explanation of “${g.term}” was not written: ${modelWhy(r) || 'the call gave no answer'}. Press e on it to try again.`
+  if (!r?.isAnswered) return `The explanation of “${term}” was not written: ${modelWhy(r) || 'the call gave no answer'}.`
   const d = jsonIn(r.text) as Any
   const body = str(d?.body, 2400)
-  if (!body) return `The longer explanation of “${g.term}” came back empty. Press e on it to try again.`
-  const next: Gloss = { ...g, body, here: str(d?.here, 800) || g.here || '', expanded: true, short: { body: g.body || '', here: g.here || '' } }
+  if (!body) return `The explanation of “${term}” came back empty.`
+  return { body, here: str(d?.here, 800) }
+}
+
+/**
+ * The explainer `id` of the message `row`, written again at more length: the message's part takes it in place of the
+ * short one. Returns null when it did, or a sentence that says why it was not written.
+ */
+export async function expandGloss($: Engine, row: string, id: string): Promise<string | null> {
+  const g = (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id]
+  if (!(await messageOf($, row)) || !g) return 'That answer is not in this session any more.'
+  if (g.expanded) return null
+  const got = await writeExplainer($, row, g.term, g)
+  if (typeof got === 'string') return `${got} Press e on it to try again.`
+  const next: Gloss = { ...g, body: got.body, here: got.here || g.here || '', expanded: true, short: { body: g.body || '', here: g.here || '' } }
   await setPart<ExplainPart>($, row, 'explain', cur => (cur?.items?.[id] ? { ...cur, items: { ...cur.items, [id]: next } } : cur))
   return null
+}
+
+/**
+ * An explainer of words the analyst picked in the message `row` (a citation's words, a term in a pane), written on
+ * demand: kept in the message's part `explain` as its others are, so the words show it wherever they stand. {id} once
+ * written, else a sentence that says why not.
+ */
+export async function askGloss($: Engine, row: string, term: string): Promise<{ id: string } | string> {
+  const got = await writeExplainer($, row, term, null)
+  if (typeof got === 'string') return got
+  let id = ''
+  await setPart<ExplainPart>($, row, 'explain', cur => {
+    const items = { ...(cur?.items ?? {}) }
+    let n = 1
+    while (items[`a${n}`]) n++
+    id = `a${n}`
+    items[id] = { id, term, body: got.body, here: got.here, expanded: true, asked: true }
+    return { items, order: [...(cur?.order ?? Object.keys(cur?.items ?? {})), id] }
+  })
+  return { id }
 }

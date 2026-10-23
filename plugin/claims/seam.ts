@@ -13,7 +13,8 @@
 //   claimsLookFailed($, look, why)     a look that gave nothing: the turn's claims are missing, and why
 //   drawClaimsPane($, e, args, els)    the side pane of kind `claims` (core/pane.ts)
 //   claimsThreadScope($, args)         what the side thread under the claims pane is about: the claim selected, the
-//                                      cluster selected, or where a claim was said (threads/pane.tsx)
+//                                      cluster selected, or where a claim was said, with the words its input bar's
+//                                      placeholder names and the claim a side answer answers (threads/pane.tsx)
 //   registerClaims                     its own hooks (/claims; x in the pane, which starts a repair inside its
 //                                      ui.press hook, as the tray's does)
 import type { EngineInterface, Register } from 'claude-code'
@@ -25,7 +26,7 @@ import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { CLAIMS_REPAIR, claimsThreadScope as threadScope, drawClaims, repairShown } from './pane'
-import { claimCount, claimsBarWords, claimsBright, claimsDigest, claimsLit, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
+import { claimCount, claimsBarWords, claimsBright, claimsDigest, claimsFresh, claimsLit, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -45,9 +46,11 @@ export async function claimsBar($: Engine, on: (key: string) => boolean, preview
   // no claims yet: nothing to open, so the bar shows no claims item until the first claim
   if (!(await claimCount($))) return []
   const words = await claimsBarWords($)
-  // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims
-  const look = await claimsLit($) ? { color: accent() } : {}
-  return [{ id: 'claims', key: 'c', words, ...look, ...(await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
+  // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims. The session's
+  // first claims: the count pulses, and says `new` until the pane is first opened
+  const first = await claimsFresh($)
+  const look = first.lit || await claimsLit($) ? { color: accent() } : {}
+  return [{ id: 'claims', key: 'c', words: first.fresh ? `${words} · new` : words, ...look, ...(first.lit || await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
 }
 
 export async function claimsState($: Engine): Promise<Record<string, unknown>> {
@@ -66,7 +69,7 @@ export async function drawClaimsPane($: Engine, e: Any, args: unknown, els: Any)
   return drawClaims($, e, args, els)
 }
 
-export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: unknown }> {
+export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: unknown; ask: string; quote?: string }> {
   return threadScope($, args)
 }
 

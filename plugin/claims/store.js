@@ -7,12 +7,15 @@
 //   {v: 2, session, updated,
 //    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?, why?,
 //              links?: [{to, how: supports | contradicts | same topic}]}],
-//    clusters: [{id, name, turn, named}],
+//    clusters: [{id, name, turn, named, about?}],
 //    gaps: [{turn, why}]}
 //
 //   a name   a cluster's name is kept whole (up to MAX_NAME characters, past that cut after a word); the pane cuts it
 //            only to draw it. A store of v 1 kept names cut at 60 characters, often in a word: read, such a name ends
 //            after its last whole word, then …
+//
+//   about    a cluster's orienting line, as the lens gave it: what its question is and why it matters, for a reader new
+//            to the data. The pane shows it under the cluster's name.
 //
 //   a place  {row, by, turn, quote, sentence, start, end}: where a claim was said, the message row, who said it
 //            (claude | person), the words matched and their sentence, as offsets into the row's markdown.
@@ -39,6 +42,7 @@ const MAX_TEXT = 200
 const MAX_QUOTE = 240
 const MAX_SENTENCE = 320
 const MAX_WHY = 240
+const MAX_ABOUT = 240
 /** A cluster's name is kept up to this many characters (past that, cut after a word). */
 const MAX_NAME = 160
 /** The length a store of v 1 cut every cluster name at. */
@@ -383,10 +387,16 @@ export function grownClusters(store) {
   return out
 }
 
-/** The lens's renames and splits: {id, name} renames a cluster; {split, name, claims} moves those claims of the split
- *  cluster to a new cluster of that name. A cluster offered as grown is counted as named at its size now. */
+/** The lens's renames, splits and orienting lines: {id, name} renames a cluster; {split, name, claims} moves those
+ *  claims of the split cluster to a new cluster of that name; an `about` on any of them, or on {id} or {name} alone (a
+ *  cluster named by a claim of this turn), is that cluster's orienting line. A cluster offered as grown is counted as
+ *  named at its size now. */
 function applyClusters(store, list, grown, turn) {
   const done = []
+  const aboutOf = (c, x) => {
+    const about = str(x.about, MAX_ABOUT)
+    if (c && about && about !== c.about) { c.about = about; done.push({ about: c.id }) }
+  }
   for (const x of Array.isArray(list) ? list : []) {
     if (!x || typeof x !== 'object') continue
     if (x.split) {
@@ -396,15 +406,22 @@ function applyClusters(store, list, grown, turn) {
       const moving = store.claims.filter(c => from && c.cluster === from.id && ids.has(c.id))
       if (!from || !name || !moving.length || moving.length === sizeOf(store, from.id)) continue
       const id = nextId(store.clusters, 'k')
-      store.clusters.push({ id, name, turn, named: moving.length, split: from.id })
+      const made = { id, name, turn, named: moving.length, split: from.id }
+      store.clusters.push(made)
       for (const c of moving) c.cluster = id
       done.push({ split: from.id, into: id, name, claims: moving.map(c => c.id) })
+      aboutOf(made, x)
     } else if (x.id) {
       const c = store.clusters.find(k => k.id === String(x.id))
+      if (!c) continue
+      aboutOf(c, x)
       const name = nameOf(x.name)
-      if (!c || !name || name === c.name) continue
+      if (!name || name === c.name) continue
       done.push({ renamed: c.id, from: c.name, to: name })
       c.name = name
+    } else if (x.name) {
+      const name = nameOf(x.name).toLowerCase()
+      aboutOf(store.clusters.find(k => String(k.name).toLowerCase() === name), x)
     }
   }
   for (const g of grown || []) {
@@ -569,7 +586,7 @@ export function promptLines(store, max = 120) {
     const flags = [c.by === 'person' ? 'the analyst' : '', c.revised_by ? `corrected by ${c.revised_by}` : '', c.said.length > 1 ? `×${c.said.length}` : ''].filter(Boolean)
     return `- ${c.id} · ${c.cluster || '-'} · ${c.text}${flags.length ? ` (${flags.join(', ')})` : ''}`
   })
-  const clusters = store.clusters.filter(k => sizeOf(store, k.id)).map(k => `- ${k.id} · ${k.name} · ${sizeOf(store, k.id)} claim${sizeOf(store, k.id) === 1 ? '' : 's'}`)
+  const clusters = store.clusters.filter(k => sizeOf(store, k.id)).map(k => `- ${k.id} · ${k.name} · ${sizeOf(store, k.id)} claim${sizeOf(store, k.id) === 1 ? '' : 's'} · ${k.about || '(no orienting line yet)'}`)
   return {
     claims: lines.length ? (store.claims.length > claims.length ? `(${store.claims.length - claims.length} older claims not shown)\n` : '') + lines.join('\n') : '(none yet)',
     clusters: clusters.length ? clusters.join('\n') : '(none yet)',

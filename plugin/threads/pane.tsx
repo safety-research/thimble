@@ -24,8 +24,13 @@
 //
 //     [a card it drew]
 //                                             a question at work: the bar says `⠋ answering: <thread>` (bar/busy.ts)
-//   e: show the card · m: send this answer…   the keys' row, as other panes draw keys: e the card whole or not (a
-//                                             card's thread), m (or a click) sends the answer to main once it answered
+//   e: show the card · m: add this answer…    the keys' row, as other panes draw keys: e the card whole or not (a
+//                                             card's thread), m (or a click) adds the answer to the main conversation
+//                                             once it answered, and says so after
+//
+// Under the claims pane each question shows the claim it asks about, quoted above it, and the input bar names it. In
+// the answers, the terms that have an explainer this session (explain/seam.ts sessionGlosses) are in the explainers'
+// fill, and a click shows the explainer under the answer.
 //   ─────────────────────────────────         the input bar: Claude Code's prompt box, a rule above and below,
 //   ❯ Ask about Jun 17…              ↵ ask    ❯ and the field between them
 //   ─────────────────────────────────
@@ -40,8 +45,10 @@ import { WORD_MS } from '../hooks/keys'
 import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
+import { sessionGlosses, type SessionGloss } from '../explain/seam'
+import { anchorTerm, markColors } from '../explain/place.mjs'
 import { cut, textWidth } from '../core/text.js'
-import { themeNow } from '../core/theme'
+import { themeLast, themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeHeat, citeLook, messageEl, type MarkLook } from '../marks/view'
@@ -122,10 +129,11 @@ const rowsAt = (s: string, w: number) => String(s).split('\n').reduce((n, l) => 
 
 /** The thread's conversation: its newest turns that fit in about `room` rows, with a dim row on top saying how many
  *  are above them. */
-async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, room: number): Promise<Any[]> {
+async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, room: number, quote = ''): Promise<Any[]> {
   const { Box, Text } = els
   const turns = t.turns
   if (!turns.length) return []
+  const glosses = await sessionGlosses($).catch(() => [] as SessionGloss[])
   const out: Any[] = []
   const head = ` ${cut(nameOf(t), w - 8)} `
   out.push(Text({ key: 'conv-head', dimColor: true, wrap: 'truncate-end', children: `──${head}${'─'.repeat(Math.max(2, w - textWidth(head) - 2))}` }))
@@ -146,9 +154,11 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     if (x.role === 'person') {
       // the question on the prompt's background, as Claude Code draws the person's prompt; what it is about after it
       out.push(Text({ key: `${k}-gap`, children: ' ' }))
+      // under the claims pane: the claim it asks about, quoted above it, in place of `about this claim`
+      if (quote) out.push(Text({ key: `${k}-quote`, wrap: 'wrap', children: [Text({ dimColor: true, children: '▎ ' }), Text({ dimColor: true, italic: true, children: `“${quote.replace(/\s+/g, ' ').trim()}”` })] }))
       out.push(Text({ key: `${k}-q`, wrap: 'wrap', children: [
         Text({ backgroundColor: 'userMessageBackground', color: 'text', children: `❯ ${x.text}` }),
-        ...(x.about ? [Text({ dimColor: true, children: `   about ${cut(String(x.about), 40)}` })] : []),
+        ...(x.about && !quote ? [Text({ dimColor: true, children: `   about ${cut(String(x.about), 40)}` })] : []),
       ] }))
       continue
     }
@@ -157,7 +167,13 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
       out.push(Text({ key: `${k}-sgap`, children: ' ' }))
       out.push(Text({ key: `${k}-steps`, dimColor: true, wrap: 'truncate-end', children: `● ${cut(`${calls.length} step${calls.length === 1 ? '' : 's'} · ${stepWords(calls[calls.length - 1], t.root)}`, w - 4)}` }))
     }
-    if (x.text) out.push(await answerEl($, els, t, i, x.text, w, `${k}-a`))
+    if (x.text) {
+      out.push(await answerEl($, els, t, i, x.text, w, `${k}-a`, glosses))
+      // the explainer a click on one of its terms opened, under the answer that holds the term
+      const open = glossOpen.get(t.key)
+      const g = open ? glosses.find(y => `${y.row}|${y.id}` === open) : null
+      if (g && lastHolding(t, g.term) === i) out.push(...explainerEls(els, g, `${k}-x`))
+    }
     // the cards its fork drew while it answered this question
     for (const meta of await cardsOfTurn($, x.cards)) {
       if (t.scope.card === meta.id) out.push(Text({ key: `${k}-c-${meta.id}`, dimColor: true, wrap: 'truncate-end', children: '  ⎿ drew a new version of this card, shown above' }))
@@ -169,17 +185,17 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     out.push(Text({ key: 'conv-fail-gap', children: ' ' }))
     out.push(Text({ key: 'conv-fail', color: 'error', wrap: 'wrap', children: `  ⎿ × ${String(t.error || 'the thread stopped')} · ask again` }))
   }
-  // the answer sent to main (m in the keys' row sends it)
+  // the answer added to the main conversation (m in the keys' row adds it): where it went and what comes of it
   if (answerToSend(t) === 'sent') {
     out.push(Text({ key: 'conv-m-gap', children: ' ' }))
-    out.push(Text({ key: 'conv-m', dimColor: true, wrap: 'truncate-end', children: '  ✓ sent to Claude' }))
+    out.push(Text({ key: 'conv-m', dimColor: true, wrap: 'wrap', children: '  ✓ added to the main conversation: Claude reads it there and replies to it' }))
   }
   return out
 }
 
 /** An answer of the thread with its citations as main's reply draws them (marks/register.ts): pending while the thread
  *  answers, a turning glyph after each until its verdict arrives, corrected words in place, verified or failed; a press opens a citation's evidence. Its check is the answer's own (threads.mjs answerRow). */
-async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, w: number, key: string): Promise<Any> {
+async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, w: number, key: string, glosses: SessionGloss[] = []): Promise<Any> {
   const row = answerRow(t, i)
   const on = featureOn('marks')
   const reply = on ? await rowMarks($, row).catch(() => null) : null
@@ -197,11 +213,61 @@ async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, 
     return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
   })
   if (marks.length) await themeNow($)
+  const spans = termSpansOf($, t, text, glosses)
+  if (spans.length && !marks.length) await themeNow($)
   const body = messageEl(els, {
-    text, marks, looks, key, cols: w - 2, first: true, spin,
+    text, marks, looks, key, cols: w - 2, first: true, spin, ...(spans.length ? { spans } : {}),
     onMark: async (j: number) => { const n = looks[j]!.n; if (n > 0 && reply) await openPane($, 'evidence', { row, n }, `citation ${n}`) },
   })
   return els.Box({ key, flexDirection: 'column', children: [body] })
+}
+
+// each thread's explainer opened by a click on its term in an answer (`<row>|<id>` of the explainer)
+const glossOpen = new Map<string, string>()
+
+/** Where a term stands in an answer's words: as written or in another form of its words, never in a citation or code. */
+const termAt = (text: string, term: string, taken: { start: number; end: number }[] = []) => {
+  const at = anchorTerm(text, term, taken)
+  return at && at.how !== 'word' ? at : null
+}
+
+/** The index of the thread's last answer that holds the term, else -1. */
+function lastHolding(t: Thread, term: string): number {
+  for (let i = t.turns.length - 1; i >= 0; i--) if (t.turns[i]!.role === 'claude' && termAt(String(t.turns[i]!.text || ''), term)) return i
+  return -1
+}
+
+/** The terms of the session's explainers an answer says, as spans of its words in the explainers' fill: a click shows
+ *  the explainer under the answer (again: hides it). */
+function termSpansOf($: Engine, t: Thread, text: string, glosses: SessionGloss[]): Any[] {
+  if (!glosses.length) return []
+  const c = markColors(themeLast())
+  const out: Any[] = []
+  for (const g of glosses) {
+    const at = termAt(text, g.term, out)
+    if (!at) continue
+    const k = `${g.row}|${g.id}`
+    out.push({ start: at.start, end: at.end, look: { backgroundColor: c.glossBg, hoverBg: c.glossFocus }, label: `explain ${g.term}`.slice(0, 120), onPress: () => {
+      if (glossOpen.get(t.key) === k) glossOpen.delete(t.key)
+      else glossOpen.set(t.key, k)
+      $.ui.invalidate('ui.render')
+    } })
+  }
+  return out.sort((a, b) => a.start - b.start)
+}
+
+/** An explainer shown under an answer: its term bold in the explainers' fill, then what it is and where it mattered,
+ *  after a dim `▎` as the thread's subject draws one. */
+function explainerEls(els: Any, g: SessionGloss, key: string): Any[] {
+  const { Text } = els
+  const words = (s: string) => String(s || '').replace(/\[([^\]\n]+)\]\([^()\s]*\)/g, '$1').replace(/[`*]/g, '').replace(/\s+/g, ' ').trim()
+  const bar = (k: string, child: Any) => Text({ key: `${key}-${k}`, wrap: 'wrap', children: [Text({ dimColor: true, children: '  ▎ ' }), child] })
+  return [
+    Text({ key: `${key}-gap`, children: ' ' }),
+    bar('t', Text({ children: [Text({ bold: true, backgroundColor: markColors(themeLast()).glossBg, children: g.term }), Text({ dimColor: true, children: '  explainer' })] })),
+    ...(g.body ? [bar('b', Text({ children: words(g.body) }))] : []),
+    ...(g.here ? [bar('h', Text({ dimColor: true, children: words(g.here) }))] : []),
+  ]
 }
 
 /** The thread's last answer: 'send' once it answered and m may send it to main, 'sent' once it did, else null. */
@@ -217,9 +283,9 @@ type PaneKey = { k: string; label: string; onPress: () => unknown }
  *  are the pane's own (e on a card). */
 function paneKeys($: Engine, t: Thread | null, more: PaneKey[] = []): PaneKey[] {
   const keys = [...more]
-  if (t && answerToSend(t) === 'send') keys.push({ k: 'm', label: 'send this answer to Claude', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach Claude: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } })
-  // sent: m stays, saying so, so a second m is not typed into the prompt
-  else if (t && answerToSend(t) === 'sent') keys.push({ k: 'm', label: 'already sent', onPress: () => undefined })
+  if (t && answerToSend(t) === 'send') keys.push({ k: 'm', label: 'add this answer to the main conversation', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach the main conversation: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } })
+  // added: m stays, saying so, so a second m is not typed into the prompt
+  else if (t && answerToSend(t) === 'sent') keys.push({ k: 'm', label: 'added to the main conversation', onPress: () => undefined })
   return keys
 }
 
@@ -259,7 +325,7 @@ function keyTyped($: Engine, key: string, v: string, keys: PaneKey[]): void {
 
 /** The input bar: Claude Code's prompt box in the pane, a blank row, a rule, `❯` and the field, a rule. ↵ asks the
  *  thread about `scope`; a key of the keys' row typed alone into the empty field presses it (keyTyped). */
-function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean, keys: PaneKey[] = []): Any[] {
+function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean, keys: PaneKey[] = [], ask = ''): Any[] {
   const { Box, Text, Input } = els
   const key = threadKey(scope)
   const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
@@ -270,7 +336,7 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
     Box({ key: 'entry-row', flexDirection: 'row', children: [
       Box({ width: 2, flexShrink: 0, children: [Text({ color: 'text', children: '❯ ' })] }),
       Box({ flexGrow: 1, flexShrink: 1, children: [Input({
-        key: fieldKey(key), placeholder: `Ask about ${what}${what.endsWith('…') ? '' : '…'}`, submitLabel: 'ask',
+        key: fieldKey(key), placeholder: ask ? cut(ask, Math.max(20, w - 12)) : `Ask about ${what}${what.endsWith('…') ? '' : '…'}`, submitLabel: 'ask',
         ...(focus ? { autoFocus: true } : {}),
         ...(carried.has(key) ? { value: carried.get(key) } : {}),
         onInput: (v: string) => { const was = typed.get(key) ?? ''; typed.set(key, v); if (!was) keyTyped($, key, v, keys) },
@@ -423,7 +489,9 @@ export async function threadParts($: Engine, e: Any, els: Any, args: Any): Promi
   const subject = await subjectOfPane($, e, els, t, W)
   const pk = paneKeys($, t, subject.keys)
   const keys = keysRow(els, pk)
-  const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - keys.length))
+  const pane = (t.scope as Any).pane as { kind?: string; args?: unknown } | undefined
+  const quote = pane?.kind === 'claims' ? (await claimsThreadScope($, pane.args).catch(() => null))?.quote ?? '' : ''
+  const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - keys.length), quote)
   ringDrawn($, key)
   return { body: [subject.el, ...conv], bottom: [...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key), pk)] }
 }
@@ -466,11 +534,13 @@ export async function threadUnderParts($: Engine, e: Any, kind: string, args: un
   await $.state.get({ plugin: 'thimble', key: 'thread', id: key })
   const { W, H } = sizeOf(e)
   const t = threadOf(key)
+  // under the claims pane: the placeholder names the claim or the cluster asked about, and each question shows its claim
+  const claims = kind === 'claims' ? await claimsThreadScope($, args).catch(() => null) : null
   // two fifths of the pane for the conversation, as 0.10's panel gave it
-  const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4))) : []
+  const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4)), claims?.quote ?? '') : []
   ringDrawn($, key)
   const pk = paneKeys($, t)
-  return { conv: [els.Text({ key: 'thread-gap', children: ' ' }), ...conv], bottom: [...keysRow(els, pk), ...entry($, els, scope, W - 1, takeAskNext(key), pk)] }
+  return { conv: [els.Text({ key: 'thread-gap', children: ' ' }), ...conv], bottom: [...keysRow(els, pk), ...entry($, els, scope, W - 1, takeAskNext(key), pk, claims?.ask ?? '')] }
 }
 
 /** About how many rows threadUnder takes under a pane: the gap and the input bar, and with a conversation its share of

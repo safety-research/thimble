@@ -152,6 +152,9 @@ declare module 'claude-code' {
       claims: unknown
       /** when the count of claims last went up: the bar's count is bold for a moment after (claims/term.ts) */
       claimsBright: number | null
+      /** the session's first claims: the bar's count pulses (`lit` while on) and says `new` until the pane is opened
+       *  (claims/term.ts) */
+      claimsFirst: { lit: boolean; opened: boolean } | null
     }
   }
 }

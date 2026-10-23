@@ -2,7 +2,8 @@
 // page of a value's records (`--records`). No `$`, no elements: pane.tsx draws the rows this returns with Claude Code's
 // own elements, and the tests read them as text.
 //
-//   at rest        each label a short table: its name and what it went over, then a row per value with its bar, its
+//   at rest        each label a short table: its name and what it went over, a plain line of what it means with its
+//                  values (plainLine), then a row per value with its bar, its
 //                  count and its share of the records. Labels whose tables do not fit fold to one line each: the name,
 //                  a small bar of all values, then each value and its count (wrapped)
 //   a value open   that label's table in its place, the ▸ on the value; every other label one line (cut with …);
@@ -152,11 +153,28 @@ function spread(left, right, w) {
   return [...l, { s: ' '.repeat(Math.max(1, w - runsWidth(l) - rw)) }, ...right]
 }
 
+/** What a label means, in one plain line with its values and their counts: a --prompt label's definition (its first
+ *  sentence), how a regex, code or set label gave its values, then `— yes 1,607 / no 1,366`. */
+export function plainLine(l) {
+  const rule = oneLine(String(l?.rule || ''))
+  const first = rule.replace(/^(.{12,}?[.?!])\s.*$/, '$1')
+  const how = l?.kind === 'prompt' ? (first || 'Claude read each record and gave it a value')
+    : l?.kind === 'regex' ? `the record's words match ${cut(rule, 60)}`
+      : l?.kind === 'code' ? 'code gave each record its value'
+        : l?.kind === 'set' ? 'values Claude gave records after reading them'
+          : first
+  const values = partsOf(l).filter(p => p.v !== NONE).map(p => `${p.name} ${num(p.n)}`).join(' / ')
+  return [how, values].filter(Boolean).join(' — ')
+}
+
 /** A label's table: its name and scope, then a row per value: the ▸ on `value`, its name, its bar (its share of the
  *  records), its count and share. */
 function block(l, value, w) {
   const name = String(l.name)
   const rows = [spread([{ s: cut(name, Math.max(8, w - 12)), bold: true, part: labelPart(name) }], [{ s: scopeShort(l), tone: 'dim' }], w)]
+  // what it means, in plain words with its values, on one line (d shows the definition whole)
+  const plain = plainLine(l)
+  if (plain) rows.push([{ s: cut(plain, w), tone: 'dim', part: labelPart(name) }])
   const parts = openable(l)
   const all = Number(l.records) || parts.reduce((s, p) => s + p.n, 0)
   const nw = Math.min(Math.max(8, Math.floor(w / 3)), Math.max(8, ...parts.map(p => width(p.name))))
@@ -485,7 +503,7 @@ export function ledgerTop(list, chosen, o) {
   const nameCol = Math.min(NAME_MAX + 2, Math.max(10, Math.floor(w * 0.3)), Math.max(10, ...list.map(l => width(String(l.name)) + 2)))
   const rows = []
   if (!chosen) {
-    const tall = list.reduce((s, l) => s + openable(l).length + 2, 0)
+    const tall = list.reduce((s, l) => s + openable(l).length + 3, 0)
     if (tall - 1 <= o.rows) for (const l of list) rows.push(...block(l, null, w), [])
     else for (const l of list) rows.push(...line(l, w, nameCol, true))
     while (rows.length && !rows[rows.length - 1].length) rows.pop()

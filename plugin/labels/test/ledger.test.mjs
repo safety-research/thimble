@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { textWidth } from '../../core/text.js'
-import { chosenOf, definition, examples, isNegative, ledgerTop, partOf, rowText, toneOf, valueOrder, whoOf, wrapRuns } from '../ledger.mjs'
+import { chosenOf, definition, examples, isNegative, ledgerTop, partOf, plainLine, rowText, toneOf, valueOrder, whoOf, wrapRuns } from '../ledger.mjs'
 
 const W = 74
 const ROWS = 37
@@ -36,8 +36,10 @@ test('at rest each label is a table: its name and records, then each value with 
   assert.equal(rowText(top.head), 'Labels · 5 labels')
   const t = text(top.rows)
   assert.match(t[0], /^stuck {2,}9,921$/)
-  assert.match(t[1], /^ {2}yes {7}▅+ +1,175 +12%$/)
-  assert.match(t[2], /^ {2}no {8}▅+ +8,746 +88%$/)
+  // under its name, what it means in plain words with its values
+  assert.equal(t[1], "the record's words match stuck|blocked — yes 1,175 / no 8,746")
+  assert.match(t[2], /^ {2}yes {7}▅+ +1,175 +12%$/)
+  assert.match(t[3], /^ {2}no {8}▅+ +8,746 +88%$/)
   // a trial says so; a value with no records shows its 0 with no bar
   assert.ok(t.some(x => /^post_kind +120 of 9,921 at random$/.test(x)))
   assert.ok(t.some(x => /^ {2}question {9} +0 +0%$/.test(x)))
@@ -47,7 +49,7 @@ test('at rest each label is a table: its name and records, then each value with 
   assert.equal(toneOf(['yes', 'no'], 'no'), 'neg')
   assert.equal(toneOf(['merged', 'closed'], 'closed'), 'v1')
   assert.equal(isNegative(['no', 'maybe'], 'no'), false)
-  const no = top.rows[2]
+  const no = top.rows[3]
   assert.deepEqual([no.find(r => r.s.startsWith('no'))?.tone, no.find(r => r.s.startsWith('▅'))?.tone], ['neg', 'track'])
 })
 
@@ -68,7 +70,8 @@ test('a value open: its label a table with the ▸, the others one line each, it
   const top = ledgerTop(FIVE, chosen, { w: W, rows: ROWS })
   const t = text(top.rows)
   assert.deepEqual(t.slice(0, 3).map(x => x.split(/\s+/)[0]), ['stuck', '', 'asks_review'])
-  assert.match(t[3], /^▸ yes +▅+ +2,165 +22%$/)
+  assert.equal(t[3], 'code gave each record its value — yes 2,165 / no 7,756')
+  assert.match(t[4], /^▸ yes +▅+ +2,165 +22%$/)
   // a label folded to one line is cut with … where its values do not fit
   assert.ok(t.find(x => x.startsWith('post_kind')).endsWith('…'))
   const ex = examples(ASKS, 'yes', { at: 0, total: 2165, records: recs(30) }, { w: W, rows: 20, sel: null, place })
@@ -82,7 +85,9 @@ test('a value open: its label a table with the ▸, the others one line each, it
   assert.deepEqual(ex.rows[1].filter(r => r.bold).map(r => [r.s, r.tone]), [['REVIEW WANTED', 'v0']])
   fits([...top.rows, ...ex.rows])
   // a press: a value row opens it, an example picks it
-  assert.deepEqual(partOf(top.rows[3][0].part), ['v', 'asks_review', 'yes'])
+  assert.deepEqual(partOf(top.rows[4][0].part), ['v', 'asks_review', 'yes'])
+  // the plain line opens its label
+  assert.deepEqual(partOf(top.rows[3][0].part), ['l', 'asks_review'])
   assert.deepEqual(partOf(ex.rows[1][0].part), ['r', 'runs/a/board.jsonl#L1'])
 })
 
@@ -121,8 +126,9 @@ test('one label opens on its first value with records; d shows the definition wh
   assert.deepEqual([chosen.lab.name, chosen.value], ['tone', 'friendly'])
   const t = text(ledgerTop([TONE], chosen, { w: W, rows: ROWS }).rows)
   assert.match(t[0], /^tone +60 of 9,921 at random$/)
-  assert.match(t[1], /^▸ friendly/)
-  assert.equal(t.filter(x => /^[^\s▸]/.test(x)).length, 1)
+  assert.equal(t[1], 'stuck|blocked — friendly 8 / neutral 46 / terse 6')
+  assert.match(t[2], /^▸ friendly/)
+  assert.equal(t.filter(x => /^[^\s▸]/.test(x)).length, 2)
   // nothing named and more than one label: at rest
   assert.equal(chosenOf(FIVE, {}), null)
   // a value named that the label does not have: its first with records
@@ -153,4 +159,10 @@ test('a narrow pane: every state still fits its width, names and words cut with 
   for (const l of list) fitsIn(ledgerTop(list, chosenOf(list, { label: l.name }), { w, rows: ROWS }).rows)
   for (const sel of [null, 'runs/a/board.jsonl#L2']) fitsIn(examples(ASKS, 'yes', { at: 3, total: 2165, records: recs(12) }, { w, rows: 14, sel, place }).rows)
   fitsIn(definition(long, w).filter(r => Array.isArray(r)))
+})
+
+test("a label's plain line: a --prompt label's definition, its first sentence, then its values and their counts", () => {
+  const timing = { name: 'ask_timing', kind: 'prompt', rule: 'The post asks when the next round comes. Count a post that guesses the time too.', values: ['yes', 'no'], counts: { yes: 1607, no: 1366 } }
+  assert.equal(plainLine(timing), 'The post asks when the next round comes. — yes 1,607 / no 1,366')
+  assert.equal(plainLine({ name: 'x', kind: 'set', values: ['a'], counts: { a: 2 } }), 'values Claude gave records after reading them — a 2')
 })

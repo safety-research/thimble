@@ -36,13 +36,15 @@ import { citeWords } from '../marks/evidence'
 import { citeHeat } from '../marks/view'
 import { plainSentence } from '../marks/message.js'
 import { NOT_RUN, rowMarks, type MarkItem } from '../marks/store'
-import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
+import { explaining, explainTerm, glossFor, sessionGlosses, type SessionGloss } from '../explain/seam'
+import { markColors } from '../explain/place.mjs'
+import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, passageRows, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
 import { claimsBright, claimsStore, placeText, showClaims, type ClaimsArgs } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Run = { s: string; tone?: string | null; bold?: boolean; underline?: boolean; tint?: boolean; part?: string | null }
+type Run = { s: string; tone?: string | null; bold?: boolean; underline?: boolean; tint?: boolean; bg?: string; part?: string | null }
 
 /** The clusters' colors (0.10's c1..c6) and what each other tone draws as: theme colors, so light and dark both read;
  *  a faint tone is its color dimmed; `code` the code's color of the citations' card; `plain` the theme's text color
@@ -69,8 +71,10 @@ function look(tone: string | null | undefined): Record<string, unknown> {
 /** A run as a Text: its tone, bold and underline; cited words in evidence look as in the citations' card (citeWords,
  *  in hover group `id`). */
 function spanOf(els: Any, r: Run, i: number, id: string): unknown {
+  // `gloss`: the words of a term that has an explainer, in the explainers' fill as the reply draws them
+  const bg = r.bg === 'gloss' ? { backgroundColor: markColors(themeLast()).glossBg } : {}
   return els.Text({
-    key: `t${i}`, ...look(r.tone), ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}),
+    key: `t${i}`, ...look(r.tone), ...bg, ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}),
     ...(r.tint ? citeWords(id) : {}), children: r.s,
   })
 }
@@ -159,21 +163,22 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
 }
 
 /** What the side thread under the claims pane is about (threads/pane.tsx): the claim selected, the cluster selected, or
- *  where a claim was said. The arguments keep only what names the thing. */
-export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: ClaimsArgs }> {
+ *  where a claim was said. The arguments keep only what names the thing. `ask` is what the input bar's placeholder
+ *  says it asks about, and `quote` the claim a side answer answers, which the thread shows above each question. */
+export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: ClaimsArgs; ask: string; quote?: string }> {
   const a = (args && typeof args === 'object' ? args : {}) as ClaimsArgs
   const data = paneData(await claimsStore($))
   if (a.source) {
     const c = data.claims.find((x: Any) => x.id === a.source) ?? null
-    return { about: threadAbout(c, true), args: { source: a.source, ...(a.row ? { row: a.row } : {}) } }
+    return { about: threadAbout(c, true), args: { source: a.source, ...(a.row ? { row: a.row } : {}) }, ask: 'Ask about where this claim was said…', ...(c ? { quote: String(c.text) } : {}) }
   }
   const c = a.claim ? data.claims.find((x: Any) => x.id === a.claim) ?? null : null
-  if (c) return { about: threadAbout(c), args: { claim: c.id } }
+  if (c) return { about: threadAbout(c), args: { claim: c.id }, ask: `Ask about: “${String(c.text).replace(/\s+/g, ' ').trim()}”`, quote: String(c.text) }
   if (a.group != null && data.groups.some((g: Any) => (g.id == null ? '-' : String(g.id)) === String(a.group))) {
     const { name, cs } = groupOf(data, a.group)
-    return { about: threadAbout(null, false, { name, n: cs.length }), args: { group: String(a.group) } }
+    return { about: threadAbout(null, false, { name, n: cs.length }), args: { group: String(a.group) }, ask: `Ask about the whole cluster “${String(name)}”…` }
   }
-  return { about: threadAbout(null), args: {} }
+  return { about: threadAbout(null), args: {}, ask: 'Ask about all the claims…' }
 }
 
 type Key = { k: string; label: string; onPress: () => unknown; id?: string }
@@ -219,6 +224,16 @@ export async function repairShown($: Engine): Promise<boolean> {
   return true
 }
 
+/** The explainer of `term` as the detail shows it under the claim (graph.js explainerRows): the session's, else one
+ *  being written, else why it was not. */
+function explainerOf(glosses: SessionGloss[], term: string): Any {
+  const g = glossFor(glosses, term)
+  if (g) return { term: g.term, body: g.body ?? '', here: g.here ?? '' }
+  const now = explaining(term)
+  if (now.pending) return { term, pending: true }
+  return { term, why: now.why || 'No explainer of these words yet: click them again to ask for one.' }
+}
+
 export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Promise<unknown> {
   const a = (args && typeof args === 'object' ? args : {}) as ClaimsArgs
   const W = Math.max(24, Number(e?.props?.bodyColumns) || 90)
@@ -245,12 +260,20 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   }
 
   // ---- the map and the detail
-  const view = graphView(raw, { ...keep, ...(a.from != null ? { from: a.from } : {}) }, { w: W, h: H, bright: await claimsBright($) })
+  // the session's explainers: their terms in the explainers' fill wherever a claim or its paragraph says them
+  const glosses = await sessionGlosses($).catch(() => [] as SessionGloss[])
+  const terms = glosses.map(g => ({ term: g.term, key: `${g.row}|${g.id}` }))
+  // the claim picked: the paragraph of the reply it came from, and the explainer asked for under it
+  const sel = selectedOf(raw, keep).claim as Any
+  const said = sel ? ((sel.said || []) as Any[]).find(x => x.row && x.by === 'claude') ?? (sel.said || []).find((x: Any) => x.row) ?? null : null
+  const md = said ? await placeText($, said.row) : null
+  const passage = md ? { md, place: said } : null
+  const view = graphView(raw, { ...keep, ...(a.from != null ? { from: a.from } : {}) }, { w: W, h: H, bright: await claimsBright($), terms, passage, explainer: a.term ? explainerOf(glosses, a.term) : null })
   // the claims and clusters as the map draws them (graph.js fitClusters)
   const data = view.data as Any
   const claim = view.claim as Any
   const group = view.group as string | null
-  const pick = (id: string | null) => (id ? showClaims($, { claim: id, at: data.last }) : undefined)
+  const pick = (id: string | null, more: { term?: string } = {}) => (id ? showClaims($, { claim: id, at: data.last, ...more }) : undefined)
   const pickGroup = (k: string | null) => (k != null ? showClaims($, { group: k, at: data.last }) : undefined)
   const cites = claim ? (evidenceOf(claim) as Any[]) : []
   const openEvidence = async (s: Any) => {
@@ -268,17 +291,34 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     const pg = /^pg:(\d+)$/.exec(part)
     if (pg) return showClaims($, { ...keep, from: Number(pg[1]) })
     if (part.startsWith('g:')) return pickGroup(part.slice(2))
+    // a dot or a claim of the list: that claim, which a question in the input under the pane is then about; the claim
+    // picked again stays picked (its cluster's name chooses the cluster)
     if (part.startsWith('d:')) {
-      // a dot: its claim; the claim picked again, its cluster
       const c = data.claims.find((x: Any) => x.id === part.slice(2))
-      if (!c) return
-      return claim?.id === c.id ? pickGroup(claimGroup(data, c)) : pick(c.id)
+      return c && claim?.id !== c.id ? pick(c.id) : undefined
     }
     if (part.startsWith('n:')) return pick(part.slice(2))
-    // the claim picked: its cluster
-    if (part.startsWith('c:')) {
-      const c = data.claims.find((x: Any) => x.id === part.slice(2))
-      return c ? pickGroup(claimGroup(data, c)) : undefined
+    if (part.startsWith('c:')) return undefined
+    // a term that has an explainer: it shows under its claim (again: it closes)
+    if (part.startsWith('x:')) {
+      const [id, k] = JSON.parse(part.slice(2)) as [string | null, string]
+      const g = glosses.find(x => `${x.row}|${x.id}` === k)
+      const cid = id ?? claim?.id ?? null
+      if (!g || !cid) return
+      return pick(cid, claim?.id === cid && a.term === g.term ? {} : { term: g.term })
+    }
+    // a citation's words in the claim's paragraph: an explainer of them, written now when the session has none
+    const w = /^w:(\d+)$/.exec(part)
+    if (w && claim && passage) {
+      const words = (passageRows(passage.md, passage.place, W - 4).words as string[])[Number(w[1])]
+      if (!words) return
+      const have = glossFor(glosses, words)
+      const busy = explaining(words).pending
+      // the explainer shown again: it closes; one that failed is asked for again
+      if (a.term && (a.term === words || a.term === have?.term) && (have || busy)) return pick(claim.id)
+      void pick(claim.id, { term: have?.term ?? words })
+      if (!have && !busy) void explainTerm($, passage.place.row, words).catch(() => undefined)
+      return
     }
     const ev = /^ev-(\d+)$/.exec(part)
     if (ev && claim) return openEvidence(cites[Number(ev[1]) - 1])
@@ -290,20 +330,23 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   // cluster, its claims from the start; nothing chosen: j the first claim of the first cluster, k the last of the last
   const cs = (view.chosen || data.groups.length < 2) && group != null ? (groupOf(data, group).cs as Any[]) : []
   const i = claim ? cs.findIndex(c => c.id === claim.id) : -1
+  // the list's ends hold: k on the first claim and j on the last stay there (the chips say which claim of how many)
   const claimKeys = () => {
     if (cs.length) {
-      key('k', 'previous claim', () => pick(cs[i < 0 ? cs.length - 1 : (i - 1 + cs.length) % cs.length]?.id ?? null))
-      key('j', 'next claim', () => pick(cs[(i + 1) % cs.length]?.id ?? null))
+      key('k', 'previous claim', () => pick(cs[Math.max(0, i - 1)]?.id ?? null))
+      key('j', 'next claim', () => pick(cs[i < 0 ? 0 : Math.min(cs.length - 1, i + 1)]?.id ?? null))
     } else if (order.length) {
-      key('k', 'previous claim', () => pick((groupOf(data, order[order.length - 1]).cs as Any[]).at(-1)?.id ?? null))
-      key('j', 'next claim', () => pick((groupOf(data, order[0]).cs as Any[])[0]?.id ?? null))
+      // nothing chosen: either key starts at the first claim of the first cluster
+      const first = () => pick((groupOf(data, order[0]).cs as Any[])[0]?.id ?? null)
+      key('k', 'previous claim', first)
+      key('j', 'next claim', first)
     }
   }
   // p n: the cluster before or after the one shown, in reading order; nothing chosen yet, n the first, p the last
   const clusterKeys = () => {
     if (!order.length) return
-    key('p', 'previous', () => pickGroup(hopCluster(order, view.chosen ? group : null, -1)))
-    key('n', 'next', () => pickGroup(hopCluster(order, view.chosen ? group : null, 1)))
+    key('p', 'previous cluster', () => pickGroup(hopCluster(order, view.chosen ? group : null, -1)))
+    key('n', 'next cluster', () => pickGroup(hopCluster(order, view.chosen ? group : null, 1)))
   }
   const shown = view.shown as Any
   const hasEvidence = !!shown?.evidence && shown.status !== 'checking' && shown.status !== 'gone'

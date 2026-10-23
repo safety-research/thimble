@@ -9,7 +9,8 @@ import { spansFor } from '../core/answerview'
 import { resetEngaged } from '../core/engaged'
 import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
-import { explainState, expandExplainer, resetExplain, type ExplainPart } from '../explain/seam'
+import { explainState, expandExplainer, explaining, explainTerm, glossFor, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { drawEvidence, fieldsOf } from '../marks/evidence'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
@@ -149,3 +150,75 @@ test('Longer writes the explainer again from the answer and the lines it links t
   expect((await partOf<ExplainPart>(failing.$, 't1-row', 'explain'))!.items.g1!.expanded).toBe(undefined)
 })
 
+
+const els: Any = new Proxy({}, { get: (_t, type: string) => (props: Any) => ({ type, props }) })
+const textOf = (n: Any): string => (n == null || n === false ? '' : typeof n === 'string' || typeof n === 'number' ? String(n) : Array.isArray(n) ? n.map(textOf).join('') : textOf(n.props?.children))
+const buttonsOf = (n: Any, out: Any[] = []): Any[] => {
+  if (!n || typeof n !== 'object') return out
+  if (Array.isArray(n)) { n.forEach(x => buttonsOf(x, out)); return out }
+  if (n.type === 'Button') out.push(n.props)
+  buttonsOf(n.props?.children, out)
+  return out
+}
+
+test('on demand: words the analyst picked get an explainer from the explain-expand call, kept on their answer as the look\'s are; asked again, the same one; the session lists it', async () => {
+  setOptions({})
+  const s = setup([LOOK], { complete: reply({ body: 'The thirty seconds the client waits before it gives up on an upload.', here: 'It shows in [upload.log](logs/upload.log#L2).' }) })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  const got = await explainTerm(s.$, 't1-row', '30 seconds after a drop') as Any
+  expect(got).toMatchObject({ row: 't1-row', term: '30 seconds after a drop', asked: true, expanded: true })
+  // the call is told no explainer stands yet
+  expect(s.calls[0].prompt).toContain('The explainer as it stands: none yet.')
+  expect(s.calls[0].prompt).toContain('The term: 30 seconds after a drop')
+  const part = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!
+  expect(part.order).toEqual(['h1', 'g1', 'a1'])
+  expect((await explainState(s.$)).glossed).toEqual(['retry budget', '30 seconds after a drop'])
+  // the same words again: the one written, no second call; a term of the look's is found in another form
+  expect(await explainTerm(s.$, 't1-row', '30 seconds after a drop')).toMatchObject({ id: 'a1' })
+  expect(s.calls.length).toBe(1)
+  const all = await sessionGlosses(s.$)
+  expect(all.map(g => g.term).sort()).toEqual(['30 seconds after a drop', 'retry budget'])
+  expect(glossFor(all, 'retry budgets')?.term).toBe('retry budget')
+  // a call that fails says why, and the words can be asked for again
+  const failing = setup([LOOK], { complete: { isAnswered: false, reason: 'aborted' } })
+  await answered(failing, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  expect(String(await explainTerm(failing.$, 't1-row', 'the client'))).toContain('was not written')
+  expect(explaining('the client')).toMatchObject({ pending: false })
+  expect(explaining('the client').why).toContain('was not written')
+})
+
+test("a quote of a JSON record reads as a record: its key fields and the cited words decoded; r shows the raw lines; w explains the cited words in place", async () => {
+  setOptions({})
+  const s = setup([LOOK], { complete: reply({ body: 'A page anyone can bump to leave a number for the next copy.', here: '' }) })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  const record = { rev_id: 1044, page: 'BrindleNotes', author: 'CopyTrain9', time: '2026-06-15T00:48:00Z', text: 'Note to the next copy: round 1 asked for Brindle. Paste it fast.' }
+  s.files.set('/made-up/data/revisions.jsonl', `{"rev_id": 1}\n${JSON.stringify(record)}\n{"rev_id": 3}\n`)
+  s.$.fs.stat = async (p: string) => (s.files.has(p) ? { kind: 'file', size: s.files.get(p)!.length, mtimeMs: 1 } : { kind: 'missing', size: 0 })
+  const item = { n: 1, row: 't1-row', words: '41 of the 44', start: 57, end: 75, sentence: 'Uploads fail.', status: 'verified', shown: 'Paste it fast',
+    evidence: { kind: 'quote', file: 'revisions.jsonl', line: '2', lines: [{ n: 1, text: '{"rev_id": 1}' }, { n: 2, text: 'Note to the next copy: round 1 asked for Brindle. Paste it fast.', highlight: [50, 63], decoded: true }, { n: 3, text: '{"rev_id": 3}' }] } }
+  await s.$.state.set({ plugin: 'thimble', key: 'marksRow', id: 't1-row' }, 'k1')
+  await s.$.state.set({ plugin: 'thimble', key: 'marks', id: 'k1' }, { key: 'k1', turnId: 't1', rows: ['t1-row'], startedAt: 0, settledAt: 1, items: [item] })
+  const e = { props: { bodyColumns: 80 } }
+  const pane = await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els)
+  const t = textOf(pane)
+  expect(t).toContain('revisions.jsonl:2')
+  expect(t).toContain('rev_id 1044 · page BrindleNotes · author CopyTrain9 · time 2026-06-15T00:48:00Z')
+  expect(t).toContain('▎Note to the next copy: round 1 asked for Brindle. Paste it fast.')
+  // the raw lines wait behind r
+  expect(t).not.toContain('{"rev_id": 3}')
+  const keys = buttonsOf(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])
+  expect(keys).toEqual([['w', 'explain these words'], ['r', 'raw lines']])
+  buttonsOf(pane).find(b => b.hotkey === 'r').onPress()
+  const raw = textOf(await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els))
+  expect(raw).toContain('{"rev_id": 3}')
+  expect(raw).toContain("the line's JSON text, decoded")
+  // w: the cited words' explainer, written now, shows in the pane
+  buttonsOf(pane).find(b => b.hotkey === 'w').onPress()
+  await settle()
+  const ex = textOf(await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els))
+  expect(ex).toContain('Paste it fast  explainer')
+  expect(ex).toContain('A page anyone can bump to leave a number for the next copy.')
+  // the fields a record shows: its short values, in its order, none that holds the cited words
+  expect(fieldsOf('{"a": "x", "b": 2, "long": "' + 'y'.repeat(80) + '", "c": "it holds Paste it fast"}', 'Paste it fast')).toEqual([['a', 'x'], ['b', '2']])
+  expect(fieldsOf('not json')).toEqual([])
+})
