@@ -221,7 +221,7 @@ export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {
   }
 }
 
-/** What a tinted passage's click does: open its comment under the answer (chat/Rows). */
+/** What a tinted passage's click does: open its comment in a popover beside it (chat/Rows, AnswerComment.tsx). */
 export const AnswerMarksContext = createContext<{ open: (id: string) => void } | null>(null)
 
 function MdMark(props: JSX.IntrinsicElements['mark'] & ExtraProps) {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A check's comments on Claude's answer in main's chat (src/chat/answerComments.ts, AnswerComment.tsx, Rows.tsx): the
 // answer's rows carry the turn its `done` record names; a comment on that turn tints its passage in the drawn words in
-// its check's color, a click opens the comment card the canvas and the report draw under the answer, ✓ resolves it and
+// its check's color, a click opens the comment card the canvas and the report draw in a popover beside the passage (Esc or a press outside closes it), ✓ resolves it and
 // takes the tint away; another turn's comment, a thread's chat and an answer still streaming show none.
 import { act } from 'react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
@@ -66,7 +66,7 @@ describe("a check's comment on Claude's answer, in main's chat", () => {
     return el
   }
 
-  test('the passage is tinted in its check color, and a click opens the comment card under the answer', async () => {
+  test('the passage is tinted in its check color, and a click opens the comment card in a popover beside it', async () => {
     const el = await chat()
     // one mark per text node: the bold words are a mark of their own
     const marks = [...el.querySelectorAll<HTMLElement>('mark.answer-tint')]
@@ -74,9 +74,11 @@ describe("a check's comment on Claude's answer, in main's chat", () => {
     const tint = marks[0]
     expect(tint.style.getPropertyValue('--tint')).toContain('var(--label')
     expect(tint.dataset.anchor).toBe(`answer:${TURN}#s2`)
-    expect(el.querySelector('.wu-cm')).toBeNull()
+    expect(document.querySelector('.wu-cm')).toBeNull()
     await click(tint)
-    const card = el.querySelector<HTMLElement>('.chat-assistant .wu-cm.answer-cm')!
+    // the card is not under the answer: it floats in a popover on the body
+    expect(el.querySelector('.wu-cm')).toBeNull()
+    const card = document.querySelector<HTMLElement>('.answer-cm-pop[data-answer-comment-pop="ac1"] .wu-cm.answer-cm')!
     expect(card.dataset.comment).toBe('ac1')
     expect(card.querySelector('.wu-cm-name')?.textContent).toBe('Important details')
     expect(card.querySelector('.wu-cm-statement')?.textContent).toBe('The label could not read 899 revisions.')
@@ -85,20 +87,35 @@ describe("a check's comment on Claude's answer, in main's chat", () => {
     expect(card.querySelector('.wu-cm-details [data-ref="card:hidden-revisions"]')).not.toBeNull()
     // a second click on the passage folds the card away
     await click(el.querySelector('mark.answer-tint'))
-    expect(el.querySelector('.wu-cm')).toBeNull()
+    expect(document.querySelector('.wu-cm')).toBeNull()
+  })
+
+  test('Esc, or a press outside the popover, closes it; a press inside keeps it', async () => {
+    const el = await chat()
+    await click(el.querySelector('mark.answer-tint'))
+    const press = (t: Element) => act(async () => void t.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+    await press(document.querySelector('.answer-cm-pop .wu-cm-statement')!)
+    expect(document.querySelector('.answer-cm-pop')).not.toBeNull()
+    await act(async () => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(document.querySelector('.answer-cm-pop')).toBeNull()
+    expect(el.querySelector('mark.answer-tint-open')).toBeNull()
+    await click(el.querySelector('mark.answer-tint'))
+    expect(document.querySelector('.answer-cm-pop')).not.toBeNull()
+    await press(document.body)
+    expect(document.querySelector('.answer-cm-pop')).toBeNull()
   })
 
   test('a click makes it active with its field, and ✓ resolves it and its tint', async () => {
     const el = await chat()
     await click(el.querySelector('mark.answer-tint'))
-    const card = () => el.querySelector<HTMLElement>('.wu-cm.answer-cm')!
+    const card = () => document.querySelector<HTMLElement>('.answer-cm-pop .wu-cm.answer-cm')!
     await click(card().querySelector('.wu-cm-statement'))
     expect(card().classList.contains('wu-cm-active')).toBe(true)
     expect(card().querySelector('.wu-cm-reply textarea')).not.toBeNull()
     await click(card().querySelector('.wu-cm-resolve'))
     await settle()
     expect(posts).toEqual(['/api/ws/mini/answer-comments/ac1/dismiss'])
-    expect(el.querySelector('.wu-cm')).toBeNull()
+    expect(document.querySelector('.wu-cm')).toBeNull()
     expect(el.querySelector('mark.answer-tint')).toBeNull()
   })
 

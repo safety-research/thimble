@@ -259,6 +259,22 @@ export function placePop(el: HTMLElement, rect: DOMRect): void {
   el.style.top = `${top}px`
 }
 
+/** Place a body-portaled label to the right of `column` (the chat's column), its top on the line of `rect` (the words
+ * it is about), kept inside `bounds` (the part of the column that shows) and the viewport. With no room right of the
+ * column, it goes beside the words as placePop places a citation's label. */
+export function placeBeside(el: HTMLElement, rect: DOMRect, column: DOMRect, bounds: DOMRect = column): void {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const w = el.offsetWidth
+  const h = el.offsetHeight
+  const left = column.right + POP_GAP * 4
+  if (left + w > vw - POP_MARGIN) return placePop(el, rect)
+  const lo = Math.max(POP_MARGIN, bounds.top)
+  const hi = Math.min(vh - POP_MARGIN, bounds.bottom) - h
+  el.style.left = `${left}px`
+  el.style.top = `${Math.max(lo, Math.min(rect.top - 2, hi))}px`
+}
+
 /** Whether ⌘ is picking (the pointer sets this on the body while it is live). */
 const pointing = (): boolean => document.body.hasAttribute('data-cmd')
 
