@@ -48,6 +48,13 @@ async function take($: Engine): Promise<string[]> {
   return texts
 }
 
+/** A /clear or a /resume (hooks/turnover.ts): what the earlier conversation still owed Claude stays in its kept
+ *  folder; what the new one's owes waits. */
+export async function turnTell($: Engine): Promise<void> {
+  const kept = await readKept<Record<string, string>>($, FILE)
+  await update($, WAITING, () => (kept && Object.keys(kept).length ? kept : {}))
+}
+
 export const registerTell: Register = on => {
   // a resumed session: the texts its conversation still owed Claude wait again
   on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {

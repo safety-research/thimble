@@ -211,9 +211,10 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
     # what was only named: a file, or a folder (`runs/`, `./`) for all its files, and the programs that named it
     listed: dict[str, set[str]] = defaultdict(set)
     # the labels this session applied (each label keeps the sessions that defined it): a model's reads of a --prompt
-    # label's records, a rule's pass over the others (labels.summaries: per file, never the label's records)
+    # label's records, a rule's pass over the others (labels.summaries: per file, never the label's records); for every
+    # session, the labels of every conversation in the folder
     want = st.session if session == "" else session
-    for lab in LB.summaries(st):
+    for lab in LB.summaries(st, every=want is None):
         if want is not None and want not in lab["sessions"]:
             continue
         for f, (model, ruled) in lab["files"].items():

@@ -37,7 +37,7 @@ import { claimsLookFailed, claimsMerge, claimsState } from '../claims/seam'
 import { messageOf, turnOf, type TurnRec } from '../core/answers'
 import { isPersonPrompt, oneLine } from '../core/answers.mjs'
 import { textView } from '../core/answerview'
-import { rootHere, runThimble, startDir, writeKept } from '../core/env'
+import { readKept, rootHere, runThimble, startDir, writeKept } from '../core/env'
 import { modelWhy } from '../core/why.js'
 import { explainMerge, explainState } from '../explain/seam'
 import { sessionKey } from '../hooks/conversation'
@@ -78,6 +78,8 @@ const S = {
   running: '' as string,
   log: [] as Record<string, unknown>[],
   person: 'now' as 'now' | 'later' | 'never',
+  /** goes up when the conversation changes (a /clear, a /resume): a look of the earlier one's messages adds nothing */
+  gen: 0,
 }
 
 const cut = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`)
@@ -223,6 +225,7 @@ const signInFailed = (r: Any) => !!r && r.reason === 'api-error' && (r.status ==
 async function look($: Engine, batch: LookMsg[]): Promise<void> {
   const newest = batch[batch.length - 1]!
   const started = Date.now()
+  const gen = S.gen
   const row: Record<string, unknown> = { kind: 'look', turn: newest.turnNo, messages: batch.map(m => ({ row: m.row, kind: m.kind, turn: m.turnNo })), wait_ms: Math.max(0, started - batch[0]!.t) }
   try {
     if (!observerOn()) { row.dropped = 'turned off'; return }
@@ -245,6 +248,7 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
       p = await pass($, { frame, parts, msgs: batch, vals, st })
     }
     row.fork = p.fork
+    if (gen !== S.gen) { row.dropped = 'the conversation changed'; return }
     const moved = !!S.running && S.running !== newest.turnId
     const lookOf = (out: Look['out']): Look => ({ msgs: batch, out, moved, log: (k, v) => { row[k] = v } })
     if (!p.out) {
@@ -268,13 +272,25 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
     row.error = cut(String((err as Error)?.message || err), 300)
   } finally {
     row.ms = Date.now() - started
-    S.log = [...S.log, { at: new Date(Number(await $.clock.now())).toISOString(), ...row }].slice(-400)
-    await writeKept($, 'observer.json', { log: S.log }).catch(() => undefined)
+    if (gen === S.gen) {
+      S.log = [...S.log, { at: new Date(Number(await $.clock.now())).toISOString(), ...row }].slice(-400)
+      await writeKept($, 'observer.json', { log: S.log }).catch(() => undefined)
+    }
     await record($, { kind: 'look', turn: newest.turnNo, messages: batch.length, ...(row.skip ? { skip: row.skip } : {}), ...(typeof row.land_ms === 'number' ? { land_ms: row.land_ms } : {}) }).catch(() => undefined)
   }
 }
 
 // ------------------------------------------------------------------------------------------------ hooks
+
+/** A /clear or a /resume (hooks/turnover.ts): the looks waiting for the earlier conversation's messages are dropped,
+ *  a look that runs for them adds nothing, and the log goes on from the new one's. */
+export async function turnObserver($: Engine): Promise<void> {
+  S.gen += 1
+  S.queue = []
+  S.queued.clear()
+  const kept = await readKept<{ log?: Record<string, unknown>[] }>($, 'observer.json')
+  S.log = Array.isArray(kept?.log) ? kept!.log : []
+}
 
 export const registerObserver: Register = on => {
   // who is at this session: a `-p` run never; a session of Claude Code's background service from the person's first

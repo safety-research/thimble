@@ -8,6 +8,13 @@
 // conversation, and joined by a later session that starts with the conversation's transcript already in it. A session
 // that starts empty is a conversation of its own, whatever file it finds. Where any of it cannot be read, the key is
 // the session's own id, as before.
+//
+// Everything thimble shows the person or tells Claude belongs to the conversation: a new one in the same folder starts
+// with none of it, and a resumed one gets its own back. At a load of the plugin the modules' session.start hooks read
+// back what the conversation kept. A /clear or a /resume inside a running Claude Code changes the conversation with no
+// session.start: conversationTurned notices the new key (hooks/turnover.ts, which hooks/watch.ts asks at the end of the
+// old session, at each prompt, at each turn of main's and before each Bash call), and each module drops what it held
+// of the earlier conversation and reads back what the new one kept, before the hook that asked goes on.
 import type { EngineInterface } from 'claude-code'
 
 import { thimbleHome } from '../core/home'
@@ -88,4 +95,18 @@ export async function noteConversation($: Engine): Promise<void> {
   } catch {
     // a continuation then starts its own records
   }
+}
+
+// ------------------------------------------------------------------------------------------------ a new conversation
+
+/** The key the modules' state follows: noted at the first ask of a load (the session.start hooks read it back). */
+let followed = ''
+
+/** Whether the conversation changed since the last ask (a /clear, a /resume inside a running Claude Code): the first
+ *  ask of a load only notes it. hooks/turnover.ts asks, one ask at a time, and turns the modules over when it did. */
+export async function conversationTurned($: Engine): Promise<boolean> {
+  const key = await sessionKey($)
+  const was = followed
+  followed = key
+  return !!was && was !== key
 }

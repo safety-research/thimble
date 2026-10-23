@@ -726,6 +726,12 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
 
 // ------------------------------------------------------------------------------------------------ hooks
 
+/** A /clear or a /resume (hooks/turnover.ts): the tray on the earlier conversation's citations closes. */
+export async function turnTray($: Engine): Promise<void> {
+  await $.state.set(TRAY, null as never)
+  await $.state.set(STAND, null as never)
+}
+
 export const registerTray: Register = on => {
   // a question the person typed with the tray open is about its mark: its scope is already waiting for this prompt
   // (core/tell.ts sends it), so the tray closes without taking it back, and the prompt shows what it was about

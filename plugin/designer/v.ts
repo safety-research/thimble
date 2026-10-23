@@ -228,6 +228,14 @@ async function denial($: Engine, e: { tool: string; file_path?: unknown }): Prom
   return (await inTemp($, e.file_path)) ? null : `The card's copy writes only in the temp folder, ${await tempDir($)}.`
 }
 
+/** A /clear or a /resume (hooks/turnover.ts): v draws under the new conversation's last answer (none after a
+ *  /clear); a design that runs for the earlier one ends. */
+export async function turnDesigner($: Engine): Promise<void> {
+  if (current && running()) await end($, current, 'cancelled')
+  await $.state.set(NOW, null)
+  await $.state.set(ANSWER, (await readKept<{ row?: string }>($, ANSWER_FILE))?.row ?? null)
+}
+
 export const registerDesigner: Register = on => {
   // a reload of the plugin, or a resumed session: the answer and the design that runs are known again; a design whose
   // fork is gone ends as failed, and says so

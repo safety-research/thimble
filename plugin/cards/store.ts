@@ -224,6 +224,15 @@ export async function readState($: Engine, id: string, version: number): Promise
   }
 }
 
+/** A /clear or a /resume (hooks/turnover.ts): no card of the earlier conversation takes keys or is drawn under an
+ *  answer; the new conversation's cards are back (restoreCards). */
+export async function turnCards($: Engine): Promise<void> {
+  await $.state.set(FOCUS, null)
+  await $.state.set(SEEN, [])
+  await $.state.set(AT, {})
+  await restoreCards($)
+}
+
 /** The cards this conversation drew before (a resumed session, or a reload of the plugin): back in $.state, the
  *  newest drawn card focused. */
 export async function restoreCards($: Engine): Promise<void> {

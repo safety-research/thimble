@@ -6,6 +6,8 @@
 //     reads the labels again, and a failure line about a label whose records all have a value now goes
 //   - the labels pane is pane.tsx (core/pane.ts kind `labels`); the bar's l and a click on its label count open it with
 //     openLabels, and the person's checks there are labels.ts checkRecord
+//   - the labels are the conversation's own (core/env.ts labelsDir): a /clear or a /resume turns the reads, the label
+//     rows and the ask over to the new conversation's (labels.ts turnLabels, use.ts turnLabelUse; hooks/turnover.ts)
 import type { Register } from 'claude-code'
 
 import { labelsChanged, labelsSettled } from './labels'

@@ -264,8 +264,8 @@ def test_labels_are_kept_under_thimble_home_and_nothing_is_written_in_the_folder
     before = sorted(p.name for p in root.rglob("*"))
     r = run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     assert r.returncode == 0, r.stdout + r.stderr
-    kept = tmp_path / "th" / "folders" / STORE.folder_name(str(root.resolve()))
-    assert (kept / "labels" / "sorry.json").is_file()
+    kept = tmp_path / "th" / "conversations" / "s-test" / "folders" / STORE.folder_name(str(root.resolve()))
+    assert kept == STORE.kept_dir(root) and (kept / "labels" / "sorry.json").is_file()
     assert "  sorry: yes 2 · no 4 of 6 records" in r.stdout
     # the label reads back, checks and CSV work there
     assert run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes").returncode == 0
@@ -473,3 +473,78 @@ def test_claude_waits_through_the_ask_and_the_sample_and_hears_the_labels_counts
     run(root, "label", "spam", "--answers", "-", stdin=json.dumps({"values": {r: {"value": "no"} for r in refs[100:]}}))
     said = waiting.communicate(timeout=30)[0]
     assert waiting.returncode == 0 and "spam: yes 0 · no 300 of 300 records" in said
+
+
+# ------------------------------------------------------------------ a label belongs to its conversation
+
+
+def in_conversation(root: Path, conversation: str, *args: str, stdin: str = "") -> subprocess.CompletedProcess:
+    """`thimble …` as Claude's command in the conversation `conversation` (the hooks set both variables to its key)."""
+    env = {**os.environ, "THIMBLE_ROOT": str(root), "THIMBLE_PYTHON": sys.executable, "THIMBLE_SESSION": conversation,
+           "THIMBLE_CONVERSATION": conversation}
+    return subprocess.run([str(THIMBLE), *args], input=stdin, capture_output=True, text=True, env=env, cwd=root, timeout=120)
+
+
+def test_a_new_conversation_in_the_same_folder_starts_with_no_labels_and_a_resumed_one_has_its_own(root: Path):
+    r = in_conversation(root, "conv-a", "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    assert r.returncode == 0, r.stdout + r.stderr
+    # a new conversation in the folder: no label, by any of the commands that show one
+    assert in_conversation(root, "conv-b", "label", "--json").stdout.strip() == "[]"
+    assert in_conversation(root, "conv-b", "label").stdout.startswith("no labels yet")
+    assert "no label 'sorry'" in in_conversation(root, "conv-b", "label", "sorry").stdout
+    assert "sorry" not in in_conversation(root, "conv-b", "coverage", "--json").stdout
+    # its own label of the same name is its own
+    assert in_conversation(root, "conv-b", "label", "sorry", "--in", "chat/*.jsonl", "--regex", "wrong").returncode == 0
+    assert "  sorry: yes 1 · no 5 of 6 records" in in_conversation(root, "conv-b", "label", "sorry").stdout
+    # the first conversation, resumed (the same key): its label as it left it
+    assert "  sorry: yes 2 · no 4 of 6 records" in in_conversation(root, "conv-a", "label", "sorry").stdout
+    assert [x["name"] for x in json.loads(in_conversation(root, "conv-a", "label", "--json").stdout)] == ["sorry"]
+    # coverage of every session reads every conversation's labels of the folder
+    cov = json.loads(in_conversation(root, "conv-b", "coverage", "--all", "--json").stdout)
+    assert {f["path"]: f["labels"] for f in cov["files"]}["chat/room.jsonl"] == ["sorry"]
+
+
+def test_the_folders_labels_of_thimble_0_10_stay_on_disk_and_only_the_conversation_that_applied_one_finds_it(root: Path):
+    # thimble 0.10 kept one set of labels per folder, which every session showed
+    old = STORE.legacy_dir(root) / "labels"
+    old.mkdir(parents=True)
+    lab = {"name": "old", "kind": "regex", "rule": "sorry", "in": "chat/*.jsonl", "values": ["yes", "no"], "rev": 1,
+           "units": {"chat/room.jsonl#L1": {"v": "yes", "c": 1.0, "by": "regex"}}, "checks": {}, "sessions": ["conv-old"]}
+    (old / "old.json").write_text(json.dumps(lab))
+    before = (old / "old.json").read_text()
+    # a new conversation shows none of it
+    assert in_conversation(root, "conv-new", "label", "--json").stdout.strip() == "[]"
+    # the conversation that applied it, resumed, finds it again, and a change of it leaves the old file as it was
+    assert "  old: yes 1 · no 0 of 1 record" in in_conversation(root, "conv-old", "label", "old").stdout
+    assert in_conversation(root, "conv-old", "label", "old", "--check", "chat/room.jsonl#L1", "no").returncode == 0
+    assert (old / "old.json").read_text() == before
+    assert "the analyst checked 1" in in_conversation(root, "conv-old", "label", "old").stdout
+    assert in_conversation(root, "conv-new", "label", "--json").stdout.strip() == "[]"
+    # a label an earlier thimble wrote in the folder itself: the same
+    own = root / "thimble" / "labels"
+    own.mkdir(parents=True)
+    (own / "mine.json").write_text(json.dumps({**lab, "name": "mine", "sessions": ["conv-own"]}))
+    assert in_conversation(root, "conv-new2", "label", "--json").stdout.strip() == "[]"
+    assert [x["name"] for x in json.loads(in_conversation(root, "conv-own", "label", "--json").stdout)] == ["mine"]
+
+
+def test_the_same_prompt_label_in_another_conversation_reuses_the_models_reads_and_nothing_else(root: Path):
+    define = ("label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    assert in_conversation(root, "conv-a", *define).returncode == 0
+    waiting = json.loads(in_conversation(root, "conv-a", "label", "apology", "--waiting").stdout)
+    refs = [u["ref"] for u in waiting["units"]]
+    answers = {"values": {r: {"value": "yes" if i in (0, 2) else "no"} for i, r in enumerate(refs[:5])}}
+    in_conversation(root, "conv-a", "label", "apology", "--answers", "-", stdin=json.dumps(answers))
+    in_conversation(root, "conv-a", "label", "apology", "--check", refs[0], "no")
+    # the same label in a new conversation: the model reads only the record it never read; the analyst's check stays
+    # the first conversation's
+    out = in_conversation(root, "conv-b", *define).stdout
+    assert "1 records wait for the model" in out
+    st = Store(root, conversation="conv-b")
+    lab = LB.load(st, "apology")
+    assert LB.status(lab)["counts"] == {"yes": 2, "no": 3} and not lab["checks"]
+    assert [r for r, u in lab["units"].items() if u.get("wait")] == [refs[5]]
+    # another definition reads every record again
+    other = ("label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message is short.")
+    out = in_conversation(root, "conv-c", *other).stdout
+    assert "6 records wait for the model" in out

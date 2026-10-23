@@ -51,6 +51,13 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.string
 
 // ------------------------------------------------------------------------------------------------ the chips' state
 
+/** A /clear or a /resume (seam.ts turnSqueeze): the chips close, and the chips the person typed in the earlier
+ *  conversation are not offered. */
+export async function turnChips($: Engine): Promise<void> {
+  await $.state.set(OPEN, null)
+  await $.state.set(OWN, [])
+}
+
 export async function openNow($: Engine): Promise<Open | null> {
   return ((await $.state.get(OPEN)).value ?? null) as Open | null
 }

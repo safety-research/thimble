@@ -164,6 +164,15 @@ export async function checkRecord($: Engine, root: string, label: string, ref: s
 
 // ------------------------------------------------------------------------------------------------ what the pane reads
 
+/** A /clear or a /resume (hooks/turnover.ts): the labels are the new conversation's. What was read of the earlier
+ *  one's, and the failure lines about them, go; what shows a label reads it again. */
+export async function turnLabels($: Engine): Promise<void> {
+  failing.clear()
+  read.clear()
+  readGen = -1
+  await labelsChanged($)
+}
+
 /** What the pane asks for: the labels (no `label`), or a page of one label's records: those of `value` (`*` all, `-`
  *  none yet), from `at`, `n` of them. */
 export type LabelsAsk = { root: string; label?: string; value?: string; at?: number; n?: number }

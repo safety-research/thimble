@@ -107,10 +107,10 @@ export async function recount($: Engine): Promise<void> {
   let labels = was?.labels ?? 0
   let error: string | null = null
   const why = (err: unknown) => String((err as Error)?.message || err).slice(0, 200)
+  const session = await sessionKey($)
+  let got: Any = null
   try {
-    const session = await sessionKey($)
-    const got = record(await busy($, 'counting coverage', () => coverageOf($, root, session)), 'thimble coverage')
-    last = got
+    got = record(await busy($, 'counting coverage', () => coverageOf($, root, session)), 'thimble coverage')
     const files = Number(got.total?.files) || 0
     coverage = files ? shareOfFiles(Number(got.total?.touched_files) || 0, files) : null
   } catch (err) {
@@ -121,9 +121,21 @@ export async function recount($: Engine): Promise<void> {
   } catch (err) {
     error ??= `The labels could not be counted: ${why(err)}.`
   }
+  // a count of a conversation the session left (a /clear, a /resume) while it ran: the new one counts its own
+  if (session !== (await sessionKey($))) return
+  if (got) last = got
   if (error) failNotice($, error, 'coverage')
   await $.state.set(COUNTS, { coverage, labels, gen: (was?.gen ?? 0) + 1, error })
   if (!error) await failCleared($, 'coverage')
+}
+
+/** A /clear or a /resume (hooks/turnover.ts): the bar and the coverage pane show nothing of the earlier conversation,
+ *  and the new one is counted once, a moment after. */
+export async function turnCounts($: Engine): Promise<void> {
+  last = null
+  asked = false
+  await $.state.set(COUNTS, null)
+  needCounts($)
 }
 
 /** The bar found nothing counted in this load of the plugin (a new session, a reload, the switch just turned on):
