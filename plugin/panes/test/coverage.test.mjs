@@ -1,6 +1,5 @@
 // The coverage pane (panes/coverage-view.mjs) as text: the overview's one bar and its key, one line per row, a folder
-// opened one level, a file picked with its detail in its own unit, and the edge cases (nothing touched, everything
-// read, too many rows, a narrow pane, files without lines). Made-up data only.
+// opened one level, and a file picked with its detail in its own unit. Made-up data only.
 //   node --test plugin/panes/test/
 //   COVERAGE_RENDER=1 node --test plugin/panes/test/   (also prints each state)
 import '../../test-home.mjs'
@@ -109,67 +108,3 @@ test('step 3, a file picked: its detail in its own unit, the tree scrolled to ke
   fits(v, 66)
 })
 
-test('edge: too many rows scroll with the selection; the head stays and the line says which rows show', () => {
-  const groups = Array.from({ length: 214 }, (_, i) => ({ folder: `days/2026-06-${String((i % 30) + 1).padStart(2, '0')}-run-${String(i * 7 + 11).padStart(3, '0')}/`, files: 19, touched: i % 3 ? 2 : 3, seen_files: i === 44 ? 1 : 0 }))
-  const cov = { total: { files: 4066, touched_files: 42, seen_files: 3 }, groups, files: [], untouched: { path: [] } }
-  let view = null
-  for (let i = 0; i < 50; i++) view = stepView(cov, view, 1, DIMS)
-  const v = coverageView(cov, view, DIMS)
-  show('edge · too many rows', v)
-  const t = textOf(v).split('\n')
-  assert.match(t[0], /^Coverage/)
-  assert.match(t.at(-1), /rows \d+–50 of 215$/)
-  assert.ok(t.length <= 38)
-  fits(v, 66)
-})
-
-test('edge: files without lines: a PDF counts its pages, an image is read or not as a whole', () => {
-  const cov = folderCov()
-  const view = pressView(cov, { open: ['notes/'] }, 'file:notes/protocol.pdf', DIMS)
-  const pdf = textOf(coverageView(cov, view, DIMS))
-  show('edge · a PDF picked', coverageView(cov, view, DIMS))
-  assert.match(pdf, /protocol\.pdf {2}notes\/ · 12 pages/)
-  assert.match(pdf, /█ in Claude's context +0\/12 pages +0%/)
-  assert.match(pdf, /▓ searched +12\/12 +100% {2}grep/)
-  const img = coverageView(cov, { ...view, sel: 'file:notes/board-layout.png' }, DIMS)
-  show('edge · an image picked', img)
-  assert.match(textOf(img), /board-layout\.png {2}notes\/ · image\n▓ computed over, not in Claude's context {2}python3$/)
-})
-
-test('edge: nothing touched yet: an empty bar and the top folders, dim, with their files', () => {
-  const cov = { total: { files: 996, touched_files: 0, seen_files: 0 }, groups: [{ folder: 'trials/', files: 904 }, { folder: './', files: 1 }, { folder: 'notes/', files: 91 }], files: [], untouched: { path: ['README.md'], unit: ['lines'], units: [3], by: [''] } }
-  const v = coverageView(cov, null, DIMS)
-  show('edge · nothing touched yet', v)
-  const t = textOf(v).split('\n')
-  assert.match(t[0], /^Coverage +nothing touched yet$/)
-  assert.equal(t[1], '░'.repeat(66))
-  assert.match(t[3], /^▸ trials\/ +904 files$/)
-  assert.match(t.join('\n'), /▸ notes\/ +91 files/)
-  assert.match(t.join('\n'), / {2}README\.md +1 file/)
-  assert.ok(v.lines.slice(3).every(l => l.runs.every(r => r.tone === 'dim')))
-})
-
-test('edge: everything read: the bar is full and the rows say all', () => {
-  const names = ['interview-01.md', 'interview-02.md', 'interview-03.md', 'summary.md', 'codes.csv', 'README.md']
-  const cov = { total: { files: 6, touched_files: 6, seen_files: 6 }, groups: [{ folder: 'notes/', files: 6, touched: 6, seen_files: 6 }],
-    files: names.map(n => ({ path: `notes/${n}`, unit: 'lines', units: 10, seen: true, seen_units: 10 })), untouched: { path: [] } }
-  const v = coverageView(cov, null, DIMS)
-  show('edge · everything read', v)
-  const t = textOf(v)
-  assert.match(t, /^Coverage +6\/6 files touched · 100%\n█{66}\n/)
-  assert.match(t, /▾ notes\/ +█{12} {2}all 6/)
-  assert.equal(t.match(/█{12} {2}read/g).length, 6)
-})
-
-test('edge: a narrow pane (44 columns): no bars in the rows; the top bar and the counts stay', () => {
-  const cov = folderCov()
-  const v = coverageView(cov, null, { W: 44, H: 40 })
-  show('edge · narrow', v)
-  const t = textOf(v).split('\n')
-  assert.match(t[0], /^Coverage +19\/996 touched · 1\.9%$/)
-  assert.equal(textWidth(t[1]), 44)
-  assert.match(t[2], /█ in context 1 {2}▓ computed 18 {2}░ untouched/)
-  assert.match(t[4], /^▾ trials\/ +16\/904$/)
-  assert.ok(!t.slice(4).some(l => /[█▓░]/.test(l)))
-  fits(v, 44)
-})

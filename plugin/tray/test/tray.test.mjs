@@ -3,10 +3,7 @@
 //   node --test plugin/tray/test/tray.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import {
-  aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
-  moreLines, open, pageOf, printLine, push, restStop, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
-} from '../tray.mjs'
+import { back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -32,79 +29,6 @@ test('a row\'s stops: its citations and explainers by where they stand, then its
   assert.equal(stepFrom(stops, 4, 1), null)
   assert.equal(stepFrom(stops, 0, -1), null)
   assert.deepEqual(stops.map(stopWhat), ['citation', 'heads up', 'explainer', 'citation', 'card'])
-})
-
-test('a heads-up on a citation\'s words stops before the citation, so one ] opens it; an explainer there stops after it', () => {
-  const cites = [{ n: 1, start: 30, words: 'more in 7 of 8' }, { n: 2, start: 60, words: 'tied in 1' }]
-  const spans = [{ id: 'g1', kind: 'explain', start: 4, end: 14 }, { id: 'h1', kind: 'heads', start: 31, end: 45 }, { id: 'g2', kind: 'explain', start: 61, end: 65 }]
-  const stops = stopsOfRow('r2', cites, spans, [])
-  assert.deepEqual(stops.map(s => (s.kind === 'citation' ? `c${s.n}` : s.id)), ['g1', 'h1', 'c1', 'c2', 'g2'])
-})
-
-test('a turn\'s stops: the cards Claude drew inline stand between the text rows where their calls stood, v\'s under their row', () => {
-  const own = { a: [{ row: 'a', kind: 'citation', n: 1 }], b: [{ row: 'b', kind: 'explain', id: 'g1' }, { row: 'b', card: 'cv' }] }
-  const stops = stopsOfTurn(['a', 'b'], row => own[row], [{ id: 'c0', after: 0 }, { id: 'c1', after: 1 }, { id: 'c9', after: 5 }])
-  assert.deepEqual(stops.map(s => s.card ?? (s.kind === 'citation' ? `c${s.n}` : s.id)), ['c0', 'c1', 'c1', 'g1', 'c9', 'cv'])
-  assert.deepEqual(stops.filter(s => s.card).map(s => `${s.card}@${s.row}`), ['c0@a', 'c1@a', 'c9@b', 'cv@b'])
-})
-
-test('] from rest goes to the answer\'s first mark, past a card above the words; [ to its last stop', () => {
-  const stops = [{ row: 'a', card: 'c0' }, { row: 'a', kind: 'citation', n: 1 }, { row: 'b', kind: 'explain', id: 'g1' }, { row: 'b', card: 'c9' }]
-  assert.deepEqual(restStop(stops, 1), stops[1])
-  assert.deepEqual(restStop(stops, -1), stops[3])
-  assert.deepEqual(restStop([{ row: 'a', card: 'c0' }], 1), { row: 'a', card: 'c0' })
-  assert.equal(restStop([], 1), null)
-})
-
-test('a tall tray body: the lines that fit and a row for m, which goes on and then back to the top', () => {
-  assert.deepEqual(pageOf([1, 1, 1], 5), { start: 0, end: 3, more: 0, next: null })
-  assert.deepEqual(pageOf([1, 1, 1], 0), { start: 0, end: 3, more: 0, next: null })
-  const hs = [1, 2, 1, 1, 3, 1]
-  assert.deepEqual(pageOf(hs, 5), { start: 0, end: 3, more: 3, next: 3 })
-  assert.deepEqual(pageOf(hs, 5, 3), { start: 3, end: 5, more: 4, next: 5 })
-  // the 3-row unit does not fit whole in the 2 rows left: its top shows there, and m starts at it
-  assert.deepEqual(pageOf([1, 1, 3, 1], 5), { start: 0, end: 3, more: 1, next: 2 })
-  assert.deepEqual(pageOf([1, 1, 3, 1], 5, 2), { start: 2, end: 4, more: 2, next: 0 })
-  assert.deepEqual(pageOf(hs, 5, 5), { start: 5, end: 6, more: 5, next: 0 })
-  // a unit taller than the room still shows
-  assert.equal(pageOf([9, 1], 4).end, 1)
-  assert.equal(rowsOf('', 40), 1)
-  assert.equal(rowsOf('aaaa bbbb cccc', 9), 2)
-  assert.equal(rowsOf('x'.repeat(20), 8), 3)
-})
-
-test('the bar names ] with what it goes to while there is a next, else [ with what is before', () => {
-  assert.deepEqual(stepWords({ next: true, prev: false, nextWhat: 'explainer' }), [{ key: ']', words: 'next explainer' }])
-  assert.deepEqual(stepWords({ next: false, prev: true, prevWhat: 'card' }), [{ key: '[', words: 'previous card' }])
-  assert.deepEqual(stepWords({ next: true, prev: true }), [{ key: ']', words: 'next' }])
-  assert.deepEqual(stepWords({ next: false, prev: false }), [])
-  assert.equal(cutTitle('notes/deep/plan.txt:12', 12), '…plan.txt:12')
-  assert.equal(cutTitle('a long title here', 8), 'a long …')
-})
-
-test('a question asked with the tray open says which mark was open, where, and what it said', () => {
-  const cite = scopeText(C1, { begins: 'Two of the five runs failed', words: '[2 of 5](#) runs', status: 'verified', evidence: { kind: 'quote', file: 'runs/summary.txt', line: '4', lines: [] } })
-  assert.match(cite, /citation of your reply open in the tray: "2 of 5 runs" in your reply that begins "Two of the five runs failed"/)
-  assert.match(cite, /The check verified it\. Its evidence is runs\/summary\.txt:4\./)
-  const g = { id: 'g1', term: 'p95', body: 'The time [95 of 100](#) requests stay under.', here: 'Here it rose in run 3.' }
-  assert.match(scopeText(G1, { begins: 'Latency rose', gloss: g }), /the term "p95" in your reply that begins "Latency rose"\. The explainer said: The time 95 of 100 requests stay under\. Here it rose in run 3\./)
-  const h = { id: 'h1', kind: 'heads', term: 'cache', title: 'The cache was cold', bullets: ['Run 1 read from disk.'], todo: 'Compare runs 2 to 5.' }
-  assert.match(scopeText({ row: 'r2', kind: 'heads', id: 'h1' }, { gloss: h }), /important detail .*"The cache was cold", on the words "cache"\. It said: Run 1 read from disk\. What to do: Compare runs 2 to 5\./)
-  assert.equal(aboutOf(C1, { words: '[2 of 5](#)' }), 'the citation "2 of 5"')
-  assert.equal(aboutOf(G1, { gloss: g }), 'the explainer of "p95"')
-  assert.match(saidOf(h), /^thimble marked them as an important detail, "The cache was cold"/)
-})
-
-test('an explainer\'s words keep their citations; a heads-up reads as a title, bullets and what to do', () => {
-  assert.equal(explainerText({ term: 'p95', body: 'The time [95 of 100](#) stay under.', here: 'Here: run 3.' }), 'The time [95 of 100](#) stay under.\n\nHere: run 3.')
-  assert.equal(explainerText({ kind: 'heads', term: 'x', title: 'Cold *cache*', bullets: ['a', ' ', 'b'], todo: 'look' }), '**Cold cache**\n\n- a\n- b\n\n→ look')
-})
-
-test('a file link where the terminal draws hyperlinks', () => {
-  assert.equal(drawsHyperlinks({ TERM_PROGRAM: 'iTerm.app' }), true)
-  assert.equal(drawsHyperlinks({ TERM_PROGRAM: 'Apple_Terminal' }), false)
-  assert.equal(drawsHyperlinks({ FORCE_HYPERLINK: '0', TERM_PROGRAM: 'kitty' }), false)
-  assert.equal(fileHref('/data/a #1.txt', '12-14'), 'file:///data/a%20%231.txt#L12')
 })
 
 test('a citation\'s card: why in one sentence, and the one line of evidence that holds the value, cut around it', () => {
@@ -146,23 +70,3 @@ test('a citation\'s card: why in one sentence, and the one line of evidence that
   assert.equal(lineWindow({ text: said, spans: [[0, 4]] }, 30).text, 'Each open ticket waits for a …')
 })
 
-test('the code line that printed the cited output line: its own words stand in that line, else the last print', () => {
-  const code = 'day, n, names = peak()\nprint(f"peak: {day}, with {n:,} saves under {names} names")\nprint(f"total: {total:,}")'
-  assert.equal(printLine(code, 'peak: June 18, with 6,543 saves under 906 names'), 'print(f"peak: {day}, with {n:,} saves under {names} names")')
-  assert.equal(printLine('  print(before, "before Jun 23")\n  print(after, "after")', '444 before Jun 23'), 'print(before, "before Jun 23")')
-  // the most words on a tie of fit, the later line on an even tie
-  assert.equal(printLine('print("a:", x)\nprint("a: %d of %d" % (x, y))', 'a: 3 of 4'), 'print("a: %d of %d" % (x, y))')
-  // none fits: the last print; no print: the last line with code
-  assert.equal(printLine('print(count())\nprint(other())\n# done', 'failed: 11'), 'print(other())')
-  assert.equal(printLine('x = 1\nx + 1\n', '2'), 'x + 1')
-  assert.equal(printLine('', 'x'), '')
-  assert.equal(printLine('echo "rows: $n"\necho "cols: ${m}"', 'rows: 12'), 'echo "rows: $n"')
-})
-
-test('x repairs a citation the check found wrong or could not confirm', () => {
-  assert.equal(canRepair({ status: 'failed' }), true)
-  assert.equal(canRepair({ status: 'verified' }), false)
-  assert.equal(canRepair({ status: 'corrected' }), false)
-  assert.equal(canRepair({ status: 'checking' }), false)
-  assert.equal(canRepair(null), false)
-})

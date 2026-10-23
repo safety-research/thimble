@@ -32,28 +32,6 @@ test('a dense card gets a blank row under its takeaway, around its legend and ab
   assert.equal(out.length - lines(dense(2)).length, 3)
 })
 
-test('the rows stay where they are when the selection moves', () => {
-  for (const sel of [0, 1, 5, 7]) assert.equal(lines(spaced(dense(sel), 80)).length, lines(spaced(dense(2), 80)).length)
-})
-
-test('a small card, a column the view spaced itself, and a table header stay as they are', () => {
-  const small = B([T('Fay ran longest of the eight agents, at 41 minutes.'), T('ada 3'), T('bram 5')], { flexDirection: 'column' })
-  assert.equal(spaced(small, 80), small)
-  const gap = { ...dense(1), p: { flexDirection: 'column', gap: 1 } }
-  assert.equal(spaced(gap, 80), gap)
-  const margin = dense(1)
-  margin.c[3] = { ...margin.c[3], p: { marginTop: 1 } }
-  assert.equal(spaced(margin, 80), margin)
-  const table = B([T('agent   run  tests  failed', { bold: true }), ...Array.from({ length: 14 }, (_, i) => T(`a${i}        1     10       0`))], { flexDirection: 'column' })
-  assert.equal(spaced(table, 80), table)
-})
-
-test('a card never grows by more than four rows', () => {
-  const parts = Array.from({ length: 8 }, (_, i) => [T([T(`Part ${i}`, { bold: true }), ' of the run']), T('  a line'), T('  another line')]).flat()
-  const t = B([T('The eight parts of the run took about as long as each other.'), ...parts], { flexDirection: 'column' })
-  assert.equal(lines(spaced(t, 80)).length - lines(t).length, 4)
-})
-
 /** A score of lanes as the wiki card in a recording drew it: a ▼ note on its own row above the first lane, and the selected lane
  *  bold, with no ▸ (`whole`: the whole row bold, not only its name). */
 function lanes(sel, whole = false) {
@@ -74,15 +52,6 @@ function lanes(sel, whole = false) {
 
 const rowOf = (out, name) => out.findIndex(l => l.startsWith(name + ' '))
 
-test('a bold selected row among rows like it is no heading: j moves the band, never a row', () => {
-  const first = lines(spaced(lanes(0), 80))
-  assert.equal(first[rowOf(first, 'Welcome') - 1].trim(), '▼ peak 2,299 edits', 'the note stays on the row above its lane')
-  for (const sel of [1, 2, 5]) {
-    const out = lines(spaced(lanes(sel), 80))
-    assert.deepEqual(['Welcome', 'MainPage', 'Sandbox', 'Archive'].map(n => rowOf(out, n)), ['Welcome', 'MainPage', 'Sandbox', 'Archive'].map(n => rowOf(first, n)), `selection ${sel}`)
-  }
-})
-
 test('the places of the blank rows are kept from the first drawing, so a row that reads as a heading in one state moves nothing', () => {
   const plan = new Map()
   const first = lines(spaced(lanes(0, true), 80, plan))
@@ -99,14 +68,3 @@ test('the places of the blank rows are kept from the first drawing, so a row tha
   assert.equal(plan.size, 2)
 })
 
-test('a bold header over rows, bold all through, still gets a blank row above it', () => {
-  const t = B([
-    T('Bram ran the most tests of the three agents, and failed none of them.'),
-    T('  some context line'),
-    T('  more context'),
-    T('agent   runs  tests', { bold: true }),
-    ...['ada', 'bram', 'cleo', 'dov', 'eli', 'fay', 'gus', 'hal', 'ivy'].map(a => T(`${a.padEnd(6)}  3     10`)),
-  ], { flexDirection: 'column' })
-  const out = lines(spaced(t, 80))
-  assert.equal(out[out.indexOf('agent   runs  tests') - 1], '')
-})

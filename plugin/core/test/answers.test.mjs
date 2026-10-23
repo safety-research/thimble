@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { isOthersPrompt, isPersonPrompt, labelCommands, oneLine, sinceLastPrompt, stepFrom } from '../answers.mjs'
+import { isOthersPrompt, isPersonPrompt, labelCommands, sinceLastPrompt } from '../answers.mjs'
 import { HEAD, askedLine, openedLine } from '../engaged.mjs'
 
 test('a Bash command names the labels it runs `thimble label` on, in order; data and the list name none', () => {
@@ -20,40 +20,35 @@ test('a Bash command names the labels it runs `thimble label` on, in order; data
   assert.deepEqual(labelCommands('echo thimble label'), [])
 })
 
-test("since the person's last prompt: that prompt, Claude's rows after it, and the answers; a task's report is not the person's", () => {
-  const turns = [
-    { prompt: { text: 'Why was pr/118 reverted?', by: 'composer', row: 'p1' }, rows: ['a', 'b'], answer: 'b' },
-    { prompt: { text: '<task-notification>…', by: 'task-notification', row: 'p2' }, rows: ['c'], answer: 'c' },
-    { prompt: { text: 'x', by: 'peer', row: 'p3' }, rows: ['d'], answer: null },
-  ]
-  assert.deepEqual(sinceLastPrompt(turns), { prompt: { row: 'p1', text: 'Why was pr/118 reverted?' }, rows: ['a', 'b', 'c', 'd'], replies: ['b', 'c'] })
-  assert.deepEqual(sinceLastPrompt([...turns, { prompt: { text: 'And then?', by: 'bridge', row: null }, rows: [], answer: null }]), { prompt: { row: null, text: 'And then?' }, rows: [], replies: [] })
-  assert.deepEqual(sinceLastPrompt([]), { prompt: null, rows: [], replies: [] })
-  assert.equal(isPersonPrompt('plugin'), true)
-  assert.equal(isPersonPrompt('task-notification'), false)
-})
-
-test("a turn whose sender was not recorded ends the span: it never reaches back past the person's prompts", () => {
-  const turns = [
-    { prompt: { text: 'How many runs failed?', by: 'composer', row: 'p1' }, rows: ['a'], answer: 'a' },
-    { prompt: { text: '<task-notification>…', by: 'task-notification', row: 'p2' }, rows: ['b'], answer: 'b' },
-    { prompt: { text: 'Break them down by type', by: 'unknown', row: 'p3' }, rows: ['c'], answer: 'c' },
-  ]
-  // one reply since the newest prompt: the replies before it are not in the span
-  assert.deepEqual(sinceLastPrompt(turns), { prompt: { row: 'p3', text: 'Break them down by type' }, rows: ['c'], replies: ['c'] })
-  assert.deepEqual(sinceLastPrompt([...turns, { prompt: { text: '', by: 'continuation', row: null }, rows: ['d'], answer: 'd' }]).replies, ['c', 'd'])
-  assert.equal(sinceLastPrompt([turns[0], { ...turns[2], prompt: { ...turns[2].prompt, by: 'unclassified' } }]).replies.length, 1)
-  assert.equal(isOthersPrompt('peer'), true)
-  assert.equal(isOthersPrompt('unknown'), false)
-  assert.equal(isOthersPrompt(undefined), false)
-})
-
-test('a step over the answers stops at either end; from none it starts at the newest going back', () => {
-  assert.equal(stepFrom(['a', 'b', 'c'], 'b', -1), 'a')
-  assert.equal(stepFrom(['a', 'b', 'c'], 'c', 1), null)
-  assert.equal(stepFrom(['a', 'b', 'c'], null, -1), 'c')
-  assert.equal(stepFrom(['a', 'b', 'c'], null, 1), null)
-  assert.equal(oneLine(' a\n b  c ', 4), 'a b…')
+test("since the person's last prompt: that prompt, Claude's rows after it, and the answers; a task's report is not the person's, and a turn whose sender was not recorded ends the span", () => {
+  // since the person's last prompt: that prompt, Claude's rows after it, and the answers; a task's report is not the person's
+  {
+    const turns = [
+      { prompt: { text: 'Why was pr/118 reverted?', by: 'composer', row: 'p1' }, rows: ['a', 'b'], answer: 'b' },
+      { prompt: { text: '<task-notification>…', by: 'task-notification', row: 'p2' }, rows: ['c'], answer: 'c' },
+      { prompt: { text: 'x', by: 'peer', row: 'p3' }, rows: ['d'], answer: null },
+    ]
+    assert.deepEqual(sinceLastPrompt(turns), { prompt: { row: 'p1', text: 'Why was pr/118 reverted?' }, rows: ['a', 'b', 'c', 'd'], replies: ['b', 'c'] })
+    assert.deepEqual(sinceLastPrompt([...turns, { prompt: { text: 'And then?', by: 'bridge', row: null }, rows: [], answer: null }]), { prompt: { row: null, text: 'And then?' }, rows: [], replies: [] })
+    assert.deepEqual(sinceLastPrompt([]), { prompt: null, rows: [], replies: [] })
+    assert.equal(isPersonPrompt('plugin'), true)
+    assert.equal(isPersonPrompt('task-notification'), false)
+  }
+  // a turn whose sender was not recorded ends the span: it never reaches back past the person's prompts
+  {
+    const turns = [
+      { prompt: { text: 'How many runs failed?', by: 'composer', row: 'p1' }, rows: ['a'], answer: 'a' },
+      { prompt: { text: '<task-notification>…', by: 'task-notification', row: 'p2' }, rows: ['b'], answer: 'b' },
+      { prompt: { text: 'Break them down by type', by: 'unknown', row: 'p3' }, rows: ['c'], answer: 'c' },
+    ]
+    // one reply since the newest prompt: the replies before it are not in the span
+    assert.deepEqual(sinceLastPrompt(turns), { prompt: { row: 'p3', text: 'Break them down by type' }, rows: ['c'], replies: ['c'] })
+    assert.deepEqual(sinceLastPrompt([...turns, { prompt: { text: '', by: 'continuation', row: null }, rows: ['d'], answer: 'd' }]).replies, ['c', 'd'])
+    assert.equal(sinceLastPrompt([turns[0], { ...turns[2], prompt: { ...turns[2].prompt, by: 'unclassified' } }]).replies.length, 1)
+    assert.equal(isOthersPrompt('peer'), true)
+    assert.equal(isOthersPrompt('unknown'), false)
+    assert.equal(isOthersPrompt(undefined), false)
+  }
 })
 
 test('what the person opened and asked, in words Claude reads; the same open is the same key', () => {

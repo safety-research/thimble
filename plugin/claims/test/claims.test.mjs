@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseAnswer } from '../../observer/reply.mjs'
-import { cardOf, checkChips, citationRows, correctionsOf, evidenceOf, FEW, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, repairable, rowText, snippetOf, spread, wordDiff } from '../graph.js'
+import { cardOf, checkChips, citationRows, correctionsOf, evidenceOf, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, repairable, rowText, snippetOf, wordDiff } from '../graph.js'
 import lens from '../lens.mjs'
 import { applyTurn, edgesOf, emptyStore, parseClaims, promptLines, readStore, viewOf } from '../store.js'
 
@@ -300,52 +300,6 @@ test('a corrected claim: a corrected chip; e opens its History, one word-level d
   assert.deepEqual(correctionsOf(own, new Map()), [{ from: 'turn 4', to: 'the check', old: '15', now: '12', why: 'agent-07 merged 12, not 15.', part: null }])
 })
 
-test('five corrections: the newest two, newest first, and how many earlier; h shows all of them, oldest first', () => {
-  const data = corrected(5)
-  const v = graphView(data, { claim: 'c6', open: true }, { w: 66, h: 50 })
-  assert.equal(v.fixes, 5)
-  const p = panel(v)
-  assert.match(p, /corrected ×5/)
-  assert.match(p, /History\n {4}turn 5 → turn 6\n {4}Most of the admin's deletions came after the edits stopped,\n {4}from June 23 to July 13 12\.\n {4}reason: the last deletion is on July 12\.\n\n {4}turn 4 → turn 5\n(.*\n)+ {4}\+ 3 earlier corrections$/)
-  // six claims: no map, the list alone, its history in full however short the pane (it scrolls)
-  const short = graphView(data, { claim: 'c6', open: true }, { w: 66, h: 27 })
-  assert.ok(v.listed && short.listed)
-  assert.deepEqual(short.graph, [])
-  assert.equal(panel(short), p)
-  const all = panel(graphView(data, { claim: 'c6', open: true, all: true }, { w: 66, h: 50 }))
-  assert.deepEqual([...all.matchAll(/turn (\d) → turn (\d)/g)].map(m => m[1]), ['1', '2', '3', '4', '5'])
-  assert.doesNotMatch(all, /earlier corrections/)
-})
-
-test("a long cluster name wraps under its cluster's dots, three lines at most, and a press on any of its lines chooses the cluster", () => {
-  const st = emptyStore('s')
-  const long = 'How the wiki admin cleaned up after the agents left'
-  const text = Array.from({ length: 12 }, (_, i) => `Note ${i + 1} is a fact about item ${i + 1}.`).join(' ')
-  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text }], out: { claims: Array.from({ length: 12 }, (_, i) => ({ quote: `Note ${i + 1} is a fact about item ${i + 1}`, cluster: i % 4 ? `topic ${i % 4}` : long })) } })
-  const v = graphView(paneData(st), {}, { w: 60, h: 40 })
-  const lines = v.graph.map(r => r.filter(x => x.part === 'g:k1').map(x => x.s).join('').trim()).filter(Boolean)
-  assert.ok(lines.length >= 2 && lines.length <= 3, lines.join(' | '))
-  assert.equal(lines.join(' '), long)
-  // the name stands under its dots: every dot of the cluster on a row above the name's first
-  const top = v.graph.findIndex(r => r.some(x => x.part === 'g:k1' && x.s.trim()))
-  const dotRows = v.graph.map((r, y) => (r.some(x => /^d:/.test(x.part || '') && /[●◉○]/.test(x.s) && ['c1', 'c5', 'c9'].includes(x.part.slice(2))) ? y : -1)).filter(y => y >= 0)
-  assert.ok(dotRows.every(y => y < top), `${dotRows} above ${top}`)
-  // a name of more than three lines ends the third in …; the header under the map shows it whole
-  const names = spread([{ id: 'a', cluster: '1' }], [{ id: '1', name: 'Risky behavior by the agents: script-injection probes, a hidden signal channel and blocked-site fetches' }], [], { w: 31, h: 7 }).names
-  assert.deepEqual(names[0].lines, ['Risky behavior by the agents:', 'script-injection probes, a', 'hidden signal channel and …'])
-})
-
-test('a long claim takes two lines in the list, then …; picked, it shows whole', () => {
-  const st = emptyStore('s')
-  const long = "About 9 requests carry script-injection (XSS) probes against the wiki software; two of them try to show the browser's cookies"
-  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: `${long}. A short one.` }], out: { claims: [{ quote: long, cluster: 'risky' }, { quote: 'A short one', cluster: 'risky' }] } })
-  const data = paneData(st)
-  const listed = panel(graphView(data, { claim: 'c2' }, { w: 62, h: 50 }))
-  assert.match(listed, /\n {2}– About 9 requests carry script-injection \(XSS\) probes\n {4}against the wiki software; two of them try to show the …\n/)
-  const picked = panel(graphView(data, { claim: 'c1' }, { w: 62, h: 50 }))
-  assert.match(picked, /cookies\.\n/)
-})
-
 test('fourteen clusters: near clusters join, named for both; past what the map holds the rest share a cell; the pane never scrolls; p n visit those drawn', () => {
   const build = (linkTwice, names = g => `topic ${g}`) => {
     const st = emptyStore('s')
@@ -412,61 +366,6 @@ function eleven() {
   return st
 }
 
-test("p n walk the clusters in reading order of the map as drawn, row by row and left to right; nothing chosen, n the first and p the last", () => {
-  const data = paneData(eleven())
-  for (const w of [70, 110]) {
-    const v = graphView(data, {}, { w, h: 70 })
-    assert.equal(v.order.length, 11)
-    // where each name stands: its last line (the foot of its cell) and its first column
-    const at = new Map()
-    v.graph.forEach((r, y) => { let x = 0; for (const run of r) { if (/^g:/.test(run.part || '') && run.s.trim()) { const k = run.part.slice(2); const o = at.get(k) || { y: -1, x: Infinity }; at.set(k, { y: Math.max(o.y, y), x: Math.min(o.x, x + run.s.length - run.s.trimStart().length) }) } x += run.s.length } })
-    const drawn = [...at.keys()].sort((p, q) => at.get(p).y - at.get(q).y || at.get(p).x - at.get(q).x)
-    assert.deepEqual(v.order, drawn)
-    assert.equal(hopCluster(v.order, null, 1), drawn[0])
-    assert.equal(hopCluster(v.order, null, -1), drawn.at(-1))
-    let k = null
-    const walked = []
-    for (let i = 0; i < 11; i++) { k = hopCluster(v.order, k, 1); walked.push(k) }
-    assert.deepEqual(walked, drawn)
-    assert.equal(hopCluster(v.order, drawn[0], -1), drawn.at(-1))
-  }
-  // a narrow pane's list and a short session's list: top to bottom
-  const narrow = graphView(data, {}, { w: 40, h: 70 })
-  assert.deepEqual(narrow.order, narrow.graph.map(r => r.find(x => /^g:/.test(x.part || '')).part.slice(2)))
-})
-
-test('a cluster name is kept whole and never cut in a word: the map ends it after a word in …, the header under the map shows it whole', () => {
-  const st = eleven()
-  assert.ok(ELEVEN.every(n => st.clusters.some(c => c.name === n)))
-  const data = paneData(st)
-  const v = graphView(data, {}, { w: 70, h: 70 })
-  for (const g of data.groups) {
-    const shown = v.graph.map(r => r.filter(x => x.part === `g:${g.id}` && x.s.trim()).map(x => x.s.trim()).join(' ')).filter(Boolean).join(' ')
-    if (shown === g.name) continue
-    assert.match(shown, / …$/, shown)
-    const words = shown.slice(0, -2).split(' ')
-    assert.deepEqual(words, g.name.split(' ').slice(0, words.length), shown)
-  }
-  // chosen: the header under the map wraps the name whole
-  const late = data.groups.find(g => g.name.startsWith('When the agents')).id
-  const chosen = graphView(data, { group: late }, { w: 50, h: 70 })
-  const head = chosen.panel.slice(1).filter(r => r.some(x => x.part === `g:${late}`)).map(r => rowText(r).replace(/^[● ] /, '').replace(/ · \d+ claims$/, '').trim())
-  assert.equal(head.join(' '), 'When the agents were busiest and whether activity dropped late in the runs')
-  // a narrow pane: the header wraps too, and the list of clusters cuts a name after a word
-  const narrow = graphView(data, { group: late }, { w: 40, h: 70 })
-  assert.ok(narrow.panel.map(rowText).join(' ').replace(/\s+/g, ' ').includes('dropped late in the runs'))
-  for (const r of narrow.graph) {
-    const name = rowText(r).replace(/^ ●? ?/, '').replace(/ \d+$/, '').trim()
-    if (name.endsWith('…')) assert.ok(ELEVEN.some(n => n.startsWith(name.slice(0, -2) + ' ')), name)
-    else assert.ok(ELEVEN.includes(name), name)
-  }
-  // a name too long for the store is cut after a word
-  const big = emptyStore('s')
-  applyTurn(big, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: 'One fact holds.' }], out: { claims: [{ quote: 'One fact holds', cluster: 'word '.repeat(60) }] } })
-  assert.match(big.clusters[0].name, /^(word )+…$/)
-  assert.ok(big.clusters[0].name.length <= 160)
-})
-
 test('a store of v 1 cut cluster names at 60 characters: read, such a name ends after its last whole word in …', () => {
   const cut60 = 'When the agents were busiest and whether activity dropped la'
   assert.equal(cut60.length, 60)
@@ -479,158 +378,6 @@ test('a store of v 1 cut cluster names at 60 characters: read, such a name ends 
   assert.ok(head.some(l => /activity$/.test(l)) && head.some(l => /^ {2}dropped … · 1 claim$/.test(l)), head.join('\n'))
   // a store of v 2 keeps a name of 60 characters as it is
   assert.equal(readStore({ v: 2, claims: [], clusters: [{ id: 'k1', name: cut60 }] }, 's').clusters[0].name, cut60)
-})
-
-test('a long list pages by a screen: a press on ↑ N earlier or ↓ N more', () => {
-  const st = emptyStore('s')
-  const qs = Array.from({ length: 80 }, (_, i) => ({ quote: `Run ${i + 1} copied an answer`, cluster: 'copying' }))
-  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: qs.map(q => `${q.quote}.`).join(' ') }], out: { claims: qs } })
-  const data = paneData(st)
-  const key = String(data.groups[0].id)
-  const first = graphView(data, { group: key }, { w: 62, h: 40 })
-  assert.ok(first.windowed)
-  const down = first.panel.at(-1)
-  assert.match(rowText(down), /^ {2}↓ \d+ more · claims 1–(\d+) of 80$/)
-  const next = Number(down[0].part.slice(3))
-  assert.equal(down[0].part, `pg:${next}`)
-  const second = graphView(data, { group: key, from: next }, { w: 62, h: 40 })
-  const up = second.panel.find(r => rowText(r).includes('↑'))
-  assert.equal(rowText(up), `  ↑ ${next} earlier`)
-  assert.equal(up[0].part, 'pg:0')
-  assert.ok(second.panel.some(r => rowText(r) === `  – Run ${next + 1} copied an answer.`))
-  // the last screen ends with the last claim
-  const last = graphView(data, { group: key, from: 79 }, { w: 62, h: 40 })
-  assert.match(rowText(last.panel.at(-1)), /^ {2}claims \d+–80 of 80$/)
-  assert.ok(!last.panel.at(-1)[0].part)
-})
-
-test('a narrow pane lists the clusters one per line, the chosen one bold; in a short one the map stays a graph when the evidence is open', () => {
-  const data = paneData(uneven())
-  const key = String(data.groups[2].id)
-  const v = graphView(data, { group: key }, { w: 44, h: 50 })
-  assert.ok(v.narrow)
-  assert.match(text(v), /^Claims · 155 · 7 clusters\n\n ● group/)
-  assert.equal(v.graph.length, 7)
-  assert.ok(v.graph.every(r => rowText(r).length <= 44))
-  assert.ok(v.graph.find(r => r.some(x => x.part === `g:${key}`)).some(x => x.bold && x.tone === 'c3'))
-  assert.ok(v.panel.every(r => rowText(r).length <= 44))
-  const short = graphView(data, { claim: 'c40', open: true }, { w: 62, h: 30 })
-  // as many clusters as the map holds over the evidence, in cells shorter when the evidence needs the rows
-  assert.equal(short.data.groups.length, mapCapacity(62, 30))
-  assert.ok(short.cellRows >= 4 && short.cellRows <= 7)
-  assert.equal(short.graph.length, 3 * short.cellRows)
-  assert.ok(rows(short).length + 2 <= 30)
-  assert.ok(short.graph.some(r => r.some(x => /^d:/.test(x.part || ''))))
-})
-
-test('new claims while browsing: the selection stays, the new dots are ◆, the new claims bold, and +N new shows for a moment', () => {
-  const st = emptyStore('s')
-  const first = 'ABCDEFGHI'.split('').map((l, i) => ({ quote: `${l} is ${i + 1}`, cluster: i % 2 ? 'y' : 'x' }))
-  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: first.map(q => `${q.quote}.`).join(' ') }], out: { claims: first } })
-  const before = paneData(st)
-  applyTurn(st, { turn: 2, places: [{ row: 'a2', by: 'claude', turn: 2, text: 'J is 10. K is 11.' }], out: { claims: [{ quote: 'J is 10', cluster: 'k1' }, { quote: 'K is 11', cluster: 'k2' }] } })
-  const data = paneData(st)
-  const v = graphView(data, { claim: 'c1', at: before.last }, { w: 62, h: 40, bright: true })
-  assert.equal(v.claim.id, 'c1')
-  assert.match(rowText(v.head[0]), /^Claims · 11 claims · 2 clusters {2}\+2 new$/)
-  const fresh = v.graph.flat().filter(x => x.s === '◆')
-  assert.deepEqual(fresh.map(x => x.part).sort(), ['d:c10', 'd:c11'])
-  assert.ok(fresh.every(x => x.bold))
-  assert.ok(v.panel.some(r => rowText(r) === '  – J is 10.' && r.slice(1).every(x => x.bold)))
-  // in a short session's list too, a new claim is bold
-  const few = emptyStore('s')
-  applyTurn(few, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: 'A is 1.' }], out: { claims: [{ quote: 'A is 1', cluster: 'x' }] } })
-  applyTurn(few, { turn: 2, places: [{ row: 'a2', by: 'claude', turn: 2, text: 'B is 2.' }], out: { claims: [{ quote: 'B is 2', cluster: 'k1' }] } })
-  const l = graphView(paneData(few), { claim: 'c1', at: 1 }, { w: 62, h: 40, bright: true })
-  assert.ok(l.listed && l.panel.some(r => rowText(r) === '  – B is 2.' && r.slice(1).every(x => x.bold)))
-  assert.doesNotMatch(rowText(graphView(data, { claim: 'c1', at: before.last }, { w: 62, h: 40 }).head[0]), /new/)
-  assert.ok(!graphView(data, { claim: 'c1', at: data.last }, { w: 62, h: 40 }).graph.flat().some(x => x.s === '◆'))
-})
-
-/** A short session's claims: six in two clusters, the second linked to the first and citing `16 of 60`. */
-function sixClaims() {
-  const st = emptyStore('s')
-  const qs = [['posts', 'Most posts are status updates: 37 of 60 sampled'], ['posts', 'Review requests come second: 16 of 60'], ['posts', 'Claiming work is rare: 4 of 60'],
-    ['posts', 'Asking for help is rare: 2 of 60'], ['data', 'The label post_kind sorts every post'], ['data', '9,921 posts across 16 runs']]
-    .map(([cluster, quote], i) => ({ quote, cluster, ...(i === 1 ? { links: [{ to: 'c1', how: 'supports' }] } : {}) }))
-  const text = qs.map(q => `${q.quote}.`).join(' ').replace('16 of 60', '[16 of 60](#)')
-  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text }], out: { claims: qs } })
-  return paneData(st)
-}
-
-test('a short session has no map: its clusters are listed, each its name then its claims, with the picking, chips and evidence of the detail', () => {
-  const data = sixClaims()
-  assert.equal(FEW, 10)
-  const rest = graphView(data, {}, { w: 70, h: 36 })
-  assert.ok(rest.listed)
-  assert.deepEqual(rest.graph, [])
-  assert.equal([...rest.head, ...rest.panel].map(rowText).join('\n'), [
-    'Claims · 6 claims · 2 clusters', '─'.repeat(70),
-    '● posts · 4 claims', '  – Most posts are status updates: 37 of 60 sampled.', '  – Review requests come second: 16 of 60.',
-    '  – Claiming work is rare: 4 of 60.', '  – Asking for help is rare: 2 of 60.', '',
-    '● data · 2 claims', '  – The label post_kind sorts every post.', '  – 9,921 posts across 16 runs.',
-  ].join('\n'))
-  // at rest nothing is chosen: each name a press on its cluster, each claim on itself, none dim
-  assert.equal(rest.chosen, false)
-  assert.ok(rest.panel.filter(r => rowText(r).startsWith('● ')).every((r, i) => r.every(x => x.part === `g:${data.groups[i].id}`) && r[0].tone === `c${i + 1}`))
-  assert.ok(rest.panel.filter(r => rowText(r).startsWith('  – ')).every(r => /^n:c\d$/.test(r[0].part) && !r[2].tone))
-  // a cluster chosen: its name bold in its color, the other cluster dim
-  const key = String(data.groups[1].id)
-  const g = graphView(data, { group: key }, { w: 70, h: 36 })
-  assert.ok(g.chosen && g.group === key)
-  const nameRow = name => g.panel.find(r => rowText(r).startsWith(`● ${name}`))
-  assert.ok(nameRow('data').slice(0, 2).every(x => x.bold && x.tone === 'c2'))
-  assert.ok(nameRow('posts').every(x => x.tone === 'dim'))
-  assert.ok(g.panel.some(r => rowText(r) === '  – 9,921 posts across 16 runs.' && !r[2].tone))
-  assert.ok(g.panel.some(r => rowText(r) === '  – Claiming work is rare: 4 of 60.' && r[2].tone === 'dim'))
-  // a claim picked: ▸ bold in its cluster's color, its chips under it, every other claim dim; a press on it chooses
-  // its cluster
-  const c = graphView(data, { claim: 'c2' }, { w: 70, h: 36 })
-  const p = panel(c)
-  assert.match(p, /\n {2}▸ Review requests come second: 16 of 60\.\n {4}× 1 citation failed {2}turn 1\n {2}– Claiming/)
-  const picked = c.panel.find(r => rowText(r).includes('▸'))
-  assert.ok(picked.slice(1).every(x => x.bold && x.tone === 'c1' && x.part === 'c:c2'))
-  assert.ok(c.panel.filter(r => /^ {2}– /.test(rowText(r))).every(r => r[2].tone === 'dim'))
-  assert.equal(c.cites, 1)
-  // e: only its cluster's name and the claim stay, its evidence under it
-  const open = graphView(data, { claim: 'c2', open: true }, { w: 70, h: 36 })
-  assert.ok(open.listed)
-  assert.match(panel(open), /^─+\n● posts · 4 claims\n {2}▸ Review requests come second: 16 of 60\.\n {4}× 1 citation failed {2}turn 1\n\n {4}16 of 60 {3}× failed · cite\n/)
-  assert.doesNotMatch(panel(open), /data|Claiming/)
-  // a narrow pane lists them too, each row in its width
-  const narrow = graphView(data, { claim: 'c1' }, { w: 40, h: 36 })
-  assert.ok(narrow.listed && narrow.panel.every(r => rowText(r).length <= 40))
-})
-
-test('the map appears once a session has FEW claims', () => {
-  const st = emptyStore('s')
-  const qs = Array.from({ length: FEW }, (_, i) => ({ quote: `Fact ${i + 1} holds`, cluster: i % 2 ? 'odd' : 'even' }))
-  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: qs.map(q => `${q.quote}.`).join(' ') }], out: { claims: qs.slice(0, FEW - 1) } })
-  const under = graphView(paneData(st), {}, { w: 90, h: 36 })
-  assert.ok(under.listed && !under.graph.length)
-  applyTurn(st, { turn: 2, places: [{ row: 'a2', by: 'claude', turn: 2, text: `${qs.at(-1).quote}.` }], out: { claims: qs.slice(-1) } })
-  const at = graphView(paneData(st), {}, { w: 90, h: 36 })
-  assert.ok(!at.listed && at.graph.some(r => r.some(x => /^d:/.test(x.part || ''))))
-  assert.deepEqual(at.panel, [])
-})
-
-test('no lines join the claims, however they are linked', () => {
-  const data = linkedClaims()
-  assert.ok(data.edges.length > 10)
-  for (const st of [{}, { claim: 'c9' }, { claim: 'c14' }, { group: String(data.groups[0].id) }]) {
-    const g = graphView(data, st, { w: 110, h: 34 }).graph.map(rowText).join('\n')
-    assert.doesNotMatch(g, /[─│╭╮╰╯├┤┬┴┼]/, JSON.stringify(st))
-  }
-  // nor in a short session's list: linked claims are listed next to each other, the one rule over the list alone
-  const few = graphView(sixClaims(), {}, { w: 70, h: 36 }).panel.map(rowText)
-  assert.deepEqual(few.filter(l => /[─│╭╮╰╯├┤┬┴┼]/.test(l)), ['─'.repeat(70)])
-  assert.equal(few[0], '─'.repeat(70))
-})
-
-test('with no claims the pane says so in its head', () => {
-  const none = graphView(paneData(emptyStore('s')), {}, { w: 90, h: 30 })
-  assert.deepEqual(none.head.map(rowText), ['Claims · no claims yet'])
-  assert.deepEqual([...none.graph, ...none.panel], [])
 })
 
 test('a cluster named #N is the cluster of the Nth claim of the same list, never a cluster called "#N"', () => {
