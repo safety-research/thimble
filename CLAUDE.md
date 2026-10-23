@@ -28,12 +28,12 @@ https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) 
    - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints. The page asks at
      its first start how it reaches Claude (an API key, Workload Identity Federation, or the Claude Code sign-in);
      `thimble-browser --setup` asks again.
-5. When the plugin was installed, offer to show it in this session. `examples/sample/runs.csv` holds 40 made-up
-   nightly test runs. The user types `/reload-plugins` (you cannot type it for them), which loads thimble here, then
-   sends: "Did the failures in examples/sample/runs.csv start after the config change? Show it as a card." Give the
-   file's full path in that line. Answer it as thimble's guidance says: one card, and checked citations. If the line
-   above the prompt does not show `thimble` after the reload, give the two commands that start it fresh instead:
-   `cd <clone>/examples/sample` and `claude`, with the same question.
+5. When the plugin was installed, offer to show it in this session, in one short line: "Type /reload-plugins, then
+   try it." (You cannot type `/reload-plugins` for them; it loads thimble here.) When they answer after the reload,
+   look at `examples/sample/runs.csv` yourself (40 made-up nightly test runs) and answer: did the failures start
+   after the config change? Answer it as thimble's guidance says: one card, and checked citations. Never ask the
+   user to type the question or a path. If the line above the prompt does not show `thimble` after the reload, say
+   that a new `claude` session in a folder of their own files will have it.
 
 ## Working on thimble
 
