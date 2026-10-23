@@ -17,9 +17,9 @@ https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) 
    removing that file) before you go on.
 3. Clone the repository (or use the local folder the user names) and run `scripts/install.sh` in it, with
    `--no-browser` for the plugin alone, and `--no-setup` (step 4 asks instead). Add `--local` when the source is a
-   local folder, so the plugin comes from it. The script checks what is missing first, one line each, and installs nothing until all of it is there. Tell the
-   user what is missing and the command that fixes it, run that command only when the user agrees, then run the
-   script again.
+   local folder, so the plugin comes from it. The script checks what is missing first, one line each, and installs
+   nothing until all of it is there. Tell the user what is missing and the command that fixes it, run that command
+   only when the user agrees, then run the script again.
 4. When the workbench was installed, set up how it reaches Claude before you reply. Ask with your question tool:
    an Anthropic API key, the user's Claude Code sign-in, or Workload Identity Federation. For the Claude Code
    sign-in, show this text and get a yes first: "This uses your Claude subscription through Claude Code and will
