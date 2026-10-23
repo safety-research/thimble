@@ -589,7 +589,7 @@ def _q(w: str) -> str:
 REPAIR_NOT_RUN = "The analyst pressed x to check citation {n}, whose first check did not run. It may stand in an earlier reply than your last."
 REPAIR_FIRST = "The analyst pressed x to repair citation {n}. It may stand in an earlier reply than your last. The first check {found}"
 REPAIR_TASK = (
-    "Check it again from the start, and make the citation correct: change the cited words, the sentence or the evidence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.",
+    "Check it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.",
     "When the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.",
 )
 

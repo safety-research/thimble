@@ -386,3 +386,41 @@ def test_repair_checks_a_failed_mark_again_and_main_hears_how_it_ended(_fresh, m
     assert m["status"] == "corrected" and m["shown"] == "243 against 104" and m["was"] == "243 against 105", m
     (c, said), = [t for t in _fresh if not t[1].startswith("notice")]
     assert "pressed Repair" in said and '"243 against 105" is corrected to "243 against 104"' in said
+
+
+def test_a_repair_that_finds_the_right_place_for_right_words_verifies_them(_fresh, monkeypatch):
+    """A right claim whose first check cited the wrong place fails as not confirmed. Its repair finds the place and
+    keeps the words, so the repair request asks for `verified` then: the validator reads a `corrected` whose words do
+    not change as an error around them, which would flag the right claim as wrong."""
+    _seed_card("", [RUNS])
+    cards = marks.session_cards(CORPUS)
+    emergent, managed = (f"card:{cards[0]['id']}#issues%20closed/opus%20{s}" for s in ("emergent", "managed"))
+    place = [{"ref": emergent}, {"ref": managed}]
+    turn = marks.new_turn()
+    failed = {"n": 1, "piece": 0, "k": 0, "words": "243 against 104", "sentence": "Opus closed [243 against 104] issues.",
+              "status": "failed", "failedBy": "evidence", "reason": "The card's issues closed shows 99, not 243.",
+              "shown": "243 against 104"}
+    marks._save(CORPUS, {"turn": turn, "items": [failed]})
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        out = [{"mark": 1, "kind": "card", "evidence": place, "status": "verified", "correction": None,
+                "reason": "the card shows 243 and 104"}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    async def go():
+        assert await marks.repair(CORPUS, turn=turn, n=1, fork=fork) == ""
+        await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+
+    asyncio.run(go())
+    request = seen[0].split("The analyst pressed x to repair citation 1.", 1)[1]
+    assert "When the cited words hold, answer `verified` with the evidence that shows them." in request
+    assert "or the evidence" not in request
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "verified" and m["shown"] == "243 against 104", m
+    # the answer the request asked for before, `corrected` with the same words, flags the right claim as wrong
+    same = {"kind": "card", "evidence": place, "status": "corrected", "correction": {"words": "243 against 104"}}
+    got = marks.evidence().check_mark({"n": 1, "words": "243 against 104"}, same, [], "/", cards=cards)
+    assert got["status"] == "failed" and got["failedBy"] == "check", got
