@@ -20,6 +20,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { failNotice } from '../bar/notice'
+import { ACCENT } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
@@ -44,8 +45,8 @@ export async function claimsBar($: Engine, on: (key: string) => boolean, preview
   // no claims yet: nothing to open, so the bar shows no claims item until the first claim
   if (!(await claimCount($))) return []
   const words = await claimsBarWords($)
-  // in the lit color when a claim was corrected, as squeeze's; bold for a moment after new claims
-  const look = await claimsLit($) ? { color: 'suggestion' } : {}
+  // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims
+  const look = await claimsLit($) ? { color: ACCENT } : {}
   return [{ id: 'claims', key: 'c', words, ...look, ...(await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
 }
 

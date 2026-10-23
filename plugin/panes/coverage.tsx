@@ -60,7 +60,8 @@ export async function drawCoverage($: EngineInterface, e: Any, args: unknown, el
     ? Button({ key: l.press, plain: true, label: l.press.replace(/^(dir|file):/, ''), onPress: press(l.press), ...(l.sel ? { autoFocus: true } : {}), children: runs(l.runs, l.sel) })
     : Text({ key: l.key, wrap: 'truncate-end', children: runs(l.runs) })))
 
-  // the keys, under a rule: each a plain Button its key presses (Claude Code draws the key, lit, then a colon)
+  // the keys, under a rule: each a plain Button its key presses (Claude Code draws the key, lit, then a colon). ↵ has no
+  // hotkey, so the pane draws it, lit as Claude Code lights the keys beside it (a plugin cannot set that color)
   const keys: [string | null, string, () => unknown][] = [
     ['k', 'up', step(-1)],
     ['j', 'down', step(1)],

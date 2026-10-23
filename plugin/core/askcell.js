@@ -2,15 +2,15 @@
 // no `$`. marks/view.ts draws it left of each passage of a reply, cards/draw.ts left of each card's frame; the threads
 // (threads/seam.ts) say whether the thing has a thread and open it.
 //
-//   askCell(els, o)        the 2 columns: a blue ↳ once a side thread was asked about the thing, which opens it; else
-//                          `glyph` (the reply's ● or a blank) with a blue ? over it, shown only while the pointer is
+//   askCell(els, o)        the 2 columns: a purple ↳ once a side thread was asked about the thing, which opens it; else
+//                          `glyph` (the reply's ● or a blank) with a purple ? over it, shown only while the pointer is
 //                          over the row (the row's keyed Box scopes the hover), which asks about it. The mark takes
 //                          the glyph's own cell, so it never adds indent
 //   passageLabel(text)     a passage's few words: a heading's section by its heading, else its first words
 //   quiet(key, over)       a press's `hover`: a group of its own, no inverse, its words underlined
 
-/** The color of a key the person can press (the bar's). */
-const BLUE = 'suggestion'
+/** The color of a key the person can press: thimble's purple, as the bar's (core/theme.ts ACCENT). */
+const KEY_COLOR = 'merged'
 
 /** A short, stable name for a string (Claude Code takes at most 64 characters for a hover group). */
 function scopeOf(s) {
@@ -31,8 +31,8 @@ export function quiet(key, over = {}) {
  */
 export function askCell(els, o) {
   const glyph = o.glyph ?? ' '
-  if (o.has) return els.Box({ width: 2, flexShrink: 0, children: [els.Button({ key: `${o.key}-asked`, plain: true, label: `open the thread about ${o.label}`, onPress: o.press, hover: quiet(`${o.key}-asked`), children: [els.Text({ color: BLUE, children: '↳' })] })] })
-  const q = els.Button({ key: `${o.key}-ask`, plain: true, label: `ask about ${o.label}`, onPress: o.press, hover: quiet(`${o.key}-ask`), children: [els.Text({ color: BLUE, bold: true, children: '?' })] })
+  if (o.has) return els.Box({ width: 2, flexShrink: 0, children: [els.Button({ key: `${o.key}-asked`, plain: true, label: `open the thread about ${o.label}`, onPress: o.press, hover: quiet(`${o.key}-asked`), children: [els.Text({ color: KEY_COLOR, children: '↳' })] })] })
+  const q = els.Button({ key: `${o.key}-ask`, plain: true, label: `ask about ${o.label}`, onPress: o.press, hover: quiet(`${o.key}-ask`), children: [els.Text({ color: KEY_COLOR, bold: true, children: '?' })] })
   return els.Box({ width: 2, flexShrink: 0, children: [els.Text({ children: glyph }), els.Box({ width: 1, display: 'none', hover: { display: 'flex' }, position: 'absolute', top: 0, left: 0, children: [q] })] })
 }
 

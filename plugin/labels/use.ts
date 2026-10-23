@@ -39,6 +39,7 @@ import { metaOf, treeOf } from '../cards/store'
 import { labelsOf, turnOfRow, turnsNow } from '../core/answers'
 import { rootHere, runThimble } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
+import { ACCENT } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
@@ -57,7 +58,7 @@ type Choice = 'all' | 'sample' | 'cancel'
 
 const LABELASK = { plugin: 'thimble', key: 'labelAsk' } as const
 /** The color of a key the person can press, as the bar draws one. */
-const KEY_COLOR = 'suggestion'
+const KEY_COLOR = ACCENT
 /** The values a row names at most. */
 const VALUES_SHOWN = 8
 

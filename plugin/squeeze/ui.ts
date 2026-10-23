@@ -23,6 +23,7 @@ import type { BarItem } from '../bar/bar'
 import { markPressed } from '../core/answerview'
 import { actingRow, pickAnswer, pickedRow } from '../core/answers'
 import { openPane } from '../core/pane'
+import { ACCENT } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import type { Take } from '../hooks/keys'
 import { marksIn } from '../marks/message.js'
@@ -45,9 +46,9 @@ const OWN = { plugin: 'thimble', key: 'squeezeOwn' } as const
 /** What [ and ] do to each chip, in its words: the way down, then the way up. */
 const WAYS: Record<string, string> = { length: 'shorter / longer', interpret: 'facts / interpretation', familiarity: 'newer / more expert' }
 /** thimble's color, as the rule down a catch-up's side and its name in its head line. */
-const RULE = 'permission'
+const RULE = ACCENT
 /** The color of a key the bar names, lit (as bar.tsx's keys). */
-const LIT = 'suggestion'
+const LIT = ACCENT
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 

@@ -230,7 +230,7 @@ test('s close leads the bar while the chips are open, the chips row ends with it
   const row = tree.props.children
   const btn = nodes(row[row.length - 1]).find(n => n.type === 'Button')
   expect(btn.props.label).toBe('s close')
-  expect(btn.props.children[0].props).toEqual({ color: 'suggestion', bold: true, children: 's' })
+  expect(btn.props.children[0].props).toEqual({ color: 'merged', bold: true, children: 's' })
   expect(btn.props.children[1].props).toEqual({ dimColor: true, children: ' close' })
   // a press on it closes the chips
   btn.props.onPress()
