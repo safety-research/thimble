@@ -317,7 +317,7 @@ function withMarks(turns: ReadonlyMap<string, TextRow[]>, marks: ReadonlyMap<str
   for (const [turn, items] of marks) {
     const texts = turns.get(turn)
     if (!texts?.length || !items.length) continue
-    const byN = [...items].sort((a, b) => a.n - b.n)
+    const byN = [...items].sort((a, b) => a.n - b.n).map((m) => ({ ...m, turn }))
     let at = 0
     for (const row of texts) {
       const n = marksIn(row.text).length

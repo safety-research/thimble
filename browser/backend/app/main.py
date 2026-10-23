@@ -143,8 +143,9 @@ ROUTER_MODULES = [
     "card_libs", "extensions",
     # the agent engine (main, threads, background agents) and the tools they call
     "agents", "tools", "plans", "jobs", "verify",
-    # documents, and the report checks that comment on them (their runs shut down with the server)
-    "report_types", "exports", "checks", "canvas_comments",
+    # documents, and the report checks that comment on them (their runs shut down with the server); the citation
+    # checks' Repair
+    "report_types", "exports", "checks", "canvas_comments", "marks",
     # the developer agent, telemetry, the workspace export, the problem report
     "dev", "telemetry", "export", "feedback_routes",
     # undo and redo over the workspace's cards and documents

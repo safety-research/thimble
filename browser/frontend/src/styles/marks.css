@@ -61,6 +61,12 @@
   color: var(--status-negative);
 }
 .mark-pop-state { color: var(--text-tertiary); }
+/* a failed mark's reason beside Repair; a corrected mark's earlier words under nothing but its evidence */
+.mark-pop-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mark-pop-head .mark-pop-why { flex: 1 1 auto; min-width: 0; }
+.mark-pop-repair { flex: none; }
+.mark-pop-repair-error { color: var(--status-negative); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mark-pop-was { color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mark-ev { display: flex; flex-direction: column; min-width: 0; }
 .mark-pop .mark-ev-code {
   margin: 6px 0 0;

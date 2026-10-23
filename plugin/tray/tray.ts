@@ -586,7 +586,7 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   const tl = table ? tableLines(table, w - 2) : null
   if (ev.kind === 'card') rows.push({ h: 1, el: Text({ key: 'card', wrap: 'truncate-end', children: [Text({ key: 'k', dimColor: true, children: 'card ' }), Text({ key: 't', bold: true, children: ev.title || ev.card })] }) })
   if (ev.kind === 'card' && tl) {
-    rows.push(ruled(els, tl[0]!.text, [], w, 'th'), ruled(els, tl[1]!.text, tl[1]!.spans as [number, number][], w, 'tr'))
+    rows.push(ruled(els, tl[0]!.text, [], w, 'th'), ...tl.slice(1).map((l, i) => ruled(els, l.text, l.spans as [number, number][], w, i ? `tr${i}` : 'tr')))
     return rows
   }
   const line = evidenceLine(ev)
@@ -594,7 +594,7 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   if (ev.kind === 'computed' && tl) {
     const said = printLine(ev.code, line.text)
     if (said) rows.push({ h: 1, el: Text({ key: 'said', color: CODE_INK, wrap: 'truncate-end', children: said }) })
-    rows.push(ruled(els, tl[0]!.text, [], w, 'th'), ruled(els, tl[1]!.text, tl[1]!.spans as [number, number][], w, 'tr'))
+    rows.push(ruled(els, tl[0]!.text, [], w, 'th'), ...tl.slice(1).map((l, i) => ruled(els, l.text, l.spans as [number, number][], w, i ? `tr${i}` : 'tr')))
     return rows
   }
   if (ev.kind === 'computed') {

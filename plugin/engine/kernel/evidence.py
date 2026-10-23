@@ -1337,11 +1337,19 @@ def _window(rows: list[dict[str, Any]], r: int) -> tuple[list[dict[str, Any]], i
     return rows[lo:hi], r - lo, lo, len(rows) - hi
 
 
-def table_of(corner: str, cols: list[str], rows: list[dict[str, Any]], r: int, c: int) -> dict[str, Any]:
+def table_of(corner: str, cols: list[str], rows: list[dict[str, Any]], r: int, c: int, also: list[tuple[int, int]] = ()) -> dict[str, Any]:
     """A table as the evidence shows it: its corner (the row names' header), columns, the rows around row r, and the cited
-    cell `at` among them (c = -1: the row's name). `above`/`below` count the rows left out."""
-    shown, at, above, below = _window(rows, r)
-    return {"corner": corner, "cols": cols, "rows": shown, "at": {"r": at, "c": c}, "above": above, "below": below}
+    cell `at` among them (c = -1: the row's name). `above`/`below` count the rows left out. `also`: the other cells a
+    citation of several values cites (a range, a pair), (row, column) each; the rows shown then run from the first
+    cited row to the last, with one row around them, and each is in `also` among them."""
+    also = [(x, y) for x, y in also if (x, y) != (r, c)]
+    if not also:
+        shown, at, above, below = _window(rows, r)
+        return {"corner": corner, "cols": cols, "rows": shown, "at": {"r": at, "c": c}, "above": above, "below": below}
+    cited = [r] + [x for x, _ in also]
+    lo, hi = max(0, min(cited) - 1), min(len(rows), max(cited) + 2)
+    return {"corner": corner, "cols": cols, "rows": rows[lo:hi], "at": {"r": r - lo, "c": c}, "above": lo, "below": len(rows) - hi,
+            "also": [{"r": x - lo, "c": y} for x, y in also]}
 
 
 def _segments(block: list[str], gap: int) -> list[tuple[int, int]]:
@@ -1414,14 +1422,28 @@ def text_table(output: str, spans: list[list[int]]) -> dict[str, Any] | None:
     if i < first or not body:
         return None
     rows = [{"label": x[0], "values": x[1:]} for x in body]
-    col = a - at
-    c = next((k for k, (s, e) in enumerate(segs) if s <= col < e + 1), len(segs) - 1) - 1
-    return table_of(corner, head[1:], rows, i - first, c)
+
+    def cell(x: int) -> tuple[int, int] | None:
+        """The row (among `rows`) and column of the table that offset x of the output stands in."""
+        if x < 0:
+            return None
+        k = output.count("\n", 0, x)
+        if not (first <= k <= hi):
+            return None
+        col = x - (output.rfind("\n", 0, x) + 1)
+        return k - first, next((j for j, (s, e) in enumerate(segs) if s <= col < e + 1), len(segs) - 1) - 1
+
+    # the other highlights in the table's body: the other values of words that hold several (a range, a pair)
+    also = [rc for sp in spans[1:] for rc in [cell(sp[0])] if rc is not None]
+    r, c = cell(a)
+    return table_of(corner, head[1:], rows, r, c, list(dict.fromkeys(also)))
 
 
 LABEL_ESCAPE = frozenset('%/|#[]*_~`\\<>&')
 CARD_TD = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)#([^/]+)/(.+)$")
 CARD_LINE = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)@out(\d+)#L(\d+)$")
+# lines of a card's printed output cited as a range: `card:<id>@out<i>#L<a>-L<b>` (or `-<b>`)
+CARD_LINES = re.compile(r"^(?:card|cell):([A-Za-z0-9_-]+)@out(\d+)#L(\d+)-L?(\d+)$")
 
 
 def encode_label(label: str) -> str:
@@ -1532,55 +1554,112 @@ def terminal_cards(folder: str | None) -> list[dict[str, Any]]:
     return out
 
 
-def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
-    """The problems of card evidence, and the evidence to show: the cited place must be one of the session's cards and
-    show the words (a cell's value, with its row's name; a line of printed output)."""
-    ref = str((ev or {}).get("ref") or "").strip().strip("[]") if isinstance(ev, dict) else ""
+def card_refs(ev: Any) -> list[str]:
+    """The places card evidence names: one `ref`, or several when the cited words hold several values (a range such as
+    "2.5 to 3.7 hours", a pair such as "243 against 104"): a list of refs, as `ref` or as a list of evidence objects,
+    and a range of lines (`#L7-L8`) as each of its lines."""
+    out: list[str] = []
+    for e in ev if isinstance(ev, list) else [ev]:
+        got = e.get("ref", e.get("refs")) if isinstance(e, dict) else e
+        for x in got if isinstance(got, list) else [got]:
+            ref = str(x or "").strip().strip("[]") if isinstance(x, str) else ""
+            m = CARD_LINES.match(ref)
+            if m and int(m.group(3)) <= int(m.group(4)) <= int(m.group(3)) + MAX_RANGE:
+                out += [f"card:{m.group(1)}@out{m.group(2)}#L{n}" for n in range(int(m.group(3)), int(m.group(4)) + 1)]
+            elif ref and ref not in out:
+                out.append(ref)
+    return out
+
+
+def _card_place(ref: str, cards: list[dict[str, Any]] | None) -> tuple[str, dict[str, Any] | None]:
+    """One place of a card: why it is no place of the session's cards, or what it is: {cid, title, ref, value, text,
+    where, out}, with the cell's grid (`cols`, `rows`, `r`, `c`, `corner`) or the output's numbered `lines` and `at`."""
     td, ln = CARD_TD.match(ref), CARD_LINE.match(ref)
     if not td and not ln:
-        return ["the check named no value or line of a card"], None
+        return "the check named no value or line of a card", None
     cid = (td or ln).group(1)
     card = next((c for c in cards or [] if str(c.get("id")) == cid), None)
     if card is None:
-        return [f"there is no card {cid} in this session"], None
+        return f"there is no card {cid} in this session", None
     title = str(card.get("title") or "")
     if td:
         col, row = decode_label(td.group(2)), decode_label(td.group(3))
-        for o in card.get("outputs") or []:
+        for i, o in enumerate(card.get("outputs") or []):
             cols, rows, where = _grid(o)
             if (col, row) not in where:
                 continue
             r, c = where[(col, row)]
             value = rows[r]["values"][c]
-            shown = {"kind": "card", "card": cid, "title": title, "ref": f"card:{cid}#{encode_label(col)}/{encode_label(row)}", "value": value,
-                     "table": table_of(str(o.get("corner") or ""), cols, rows, r, c)}
-            text = f"{row} {value}"
-            if not (shows(target, value, approx) or shows(target, text, approx)):
-                return [f"the card's {col} for {row} shows {short(value, 40) or 'nothing'}, not {unshown(target, text, approx)}"], shown
-            missing = unshown_change(was, target, text, approx) if was else []
-            if missing:
-                return [f"the card's {col} for {row} does not show “{short(' … '.join(missing), 60)}”"], shown
-            return [], shown
-        return [f"the card has no {col} for {row}"], None
+            return "", {"cid": cid, "title": title, "ref": f"card:{cid}#{encode_label(col)}/{encode_label(row)}", "value": value,
+                        "text": f"{row} {value}", "where": f"the card's {col} for {row}", "out": ("cells", i), "col": col, "row": row,
+                        "cols": cols, "rows": rows, "r": r, "c": c, "corner": str(o.get("corner") or "")}
+        return f"the card has no {col} for {row}", None
     out_i, n = int(ln.group(2)), int(ln.group(3))
     o = next((x for x in card.get("outputs") or [] if int(x.get("out") or 0) == out_i and x.get("lines")), None)
     lines = [(int(k), str(t)) for k, t in (o or {}).get("lines") or []]
     at = next((j for j, (k, _) in enumerate(lines) if k == n), None)
     if at is None:
-        return [f"the card's output has no line {n}"], None
-    text = "\n".join(t for _, t in lines)
-    start = sum(len(t) + 1 for _, t in lines[:at])
+        return f"the card's output has no line {n}", None
     line = lines[at][1]
-    spans = [[start + a, start + b] for a, b in spans_of(target, line)] or [[start, start + len(line)]]
-    shown = {"kind": "card", "card": cid, "title": title, "ref": f"card:{cid}@out{out_i}#L{n}", "value": line}
+    return "", {"cid": cid, "title": title, "ref": f"card:{cid}@out{out_i}#L{n}", "value": line, "text": line,
+                "where": f"line {n} of the card's output", "out": ("lines", out_i), "n": n, "lines": lines, "at": at}
+
+
+def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
+    """The evidence to show of the places of one card output: a cell's table with each cited cell marked, or the
+    output's lines with what shows the words highlighted on each cited line (as a table when the output is one)."""
+    p = ps[0]
+    shown: dict[str, Any] = {"kind": "card", "card": p["cid"], "title": p["title"], "ref": p["ref"], "value": p["value"]}
+    if len(ps) > 1:
+        shown["refs"] = [x["ref"] for x in ps]
+    if p["out"][0] == "cells":
+        shown["table"] = table_of(p["corner"], p["cols"], p["rows"], p["r"], p["c"], [(x["r"], x["c"]) for x in ps[1:]])
+        return shown
+    lines = p["lines"]
+    text = "\n".join(t for _, t in lines)
+    spans: list[list[int]] = []
+    for x in ps:
+        start = sum(len(t) + 1 for _, t in lines[:x["at"]])
+        line = lines[x["at"]][1]
+        # each cited line highlights what of the words it shows (one value of a range on its own line)
+        spans += [[start + a, start + b] for a, b in spans_of(target, line)] or ([[start, start + len(line)]] if x is p else [])
     shown["output"], shown["highlight"] = window(text, spans, OUTPUT_MAX)
     if table := text_table(text, spans):
         shown["table"] = table
-    if not shows(target, line, approx):
-        return [instead(f"line {n} of the card's output", target, [line], approx)], shown
-    missing = unshown_change(was, target, line, approx) if was else []
+    return shown
+
+
+def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
+    """The problems of card evidence, and the evidence to show: each cited place must be one of the session's cards,
+    and together they show the words (a cell's value, with its row's name; a line of printed output). Words that hold
+    several values (a range, a pair) may cite a place for each: each value must stand in one of them."""
+    refs = card_refs(ev)
+    if not refs:
+        return ["the check named no value or line of a card"], None
+    places: list[dict[str, Any]] = []
+    for ref in refs:
+        why, p = _card_place(ref, cards)
+        if p is None:
+            return [why], None
+        places.append(p)
+    groups: dict[tuple[str, Any], list[dict[str, Any]]] = {}
+    for p in places:
+        groups.setdefault((p["cid"], p["out"]), []).append(p)
+    shown_all = [_card_shown(target, g) for g in groups.values()]
+    shown = {**shown_all[0], **({"more": shown_all[1:]} if len(shown_all) > 1 else {})}
+    values, texts = [p["value"] for p in places], [p["text"] for p in places]
+    one = places[0]
+    if not (shows(target, "\n".join(values), approx) or shows(target, "\n".join(texts), approx)):
+        if len(places) > 1:
+            return [instead(" and ".join(p["where"] for p in places), target, texts, approx)], shown
+        if one["out"][0] == "cells":
+            return [f"{one['where']} shows {short(one['value'], 40) or 'nothing'}, not {unshown(target, one['text'], approx)}"], shown
+        return [instead(one["where"], target, texts, approx)], shown
+    missing = unshown_change(was, target, "\n".join(texts), approx) if was else []
     if missing:
-        return [f"line {n} of the card's output does not show “{short(' … '.join(missing), 60)}”"], shown
+        where = " and ".join(p["where"] for p in places)
+        return [f"{where} does not show “{short(' … '.join(missing), 60)}”" if len(places) > 1 or one["out"][0] == "lines"
+                else f"the card's {one['col']} for {one['row']} does not show “{short(' … '.join(missing), 60)}”"], shown
     return [], shown
 
 

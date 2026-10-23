@@ -8,7 +8,7 @@
 //   failed     the check could not confirm it (wrong, not confirmed, or no check could run): red words, underlined,
 //              `×` after them and a soft red tint on hover, as the terminal draws it
 // While the reply streams (`pending`) and while its check runs (`checking`) it has the plain look.
-import { marksIn } from '../../../../plugin/marks/message.js'
+import { marksIn, plainSentence, rewritesIn, withCorrections } from '../../../../plugin/marks/message.js'
 
 /** A table the evidence shows (evidence.py table_of): the rows around the cited one, the cited cell `at` among them
  * (c = -1: the row's name), and how many rows are left out above and below. */
@@ -19,6 +19,8 @@ export interface EvidenceTable {
   at: { r: number; c: number }
   above?: number
   below?: number
+  /** the other cited cells of words that hold several values (a range, a pair) */
+  also?: { r: number; c: number }[]
 }
 
 /** One piece of evidence a mark's check found (backend: the terminal's engine/kernel/evidence.py). */
@@ -42,6 +44,9 @@ export interface Evidence {
   line?: string | number
   lines?: { n: number; text: string; highlight?: [number, number] }[]
   places?: Evidence[]
+  /** card: the places of words that hold several values; places of another card or output, and a quote's other places */
+  refs?: string[]
+  more?: Evidence[]
 }
 
 /** A mark as the server keeps it: its place in the turn (its text `piece`, its order `k` among that text's marks), its
@@ -56,9 +61,18 @@ export interface MarkItem {
   shown?: string
   was?: string
   reason?: string
-  failedBy?: 'check' | 'evidence'
+  failedBy?: 'check' | 'evidence' | 'none'
   evidence?: Evidence | Evidence[]
   note?: string
+  /** corrected: only `shown`, a part of the words, is cited; the rest stays in the text as Claude's own words */
+  narrowed?: boolean
+  /** corrected: the sentence the check wrote in place of the mark's own (each citation `[words]`) */
+  rewrite?: string
+  /** the check runs because the analyst pressed Repair */
+  repair?: boolean
+  /** where the mark is kept, which Repair names: a reply's turn, or the card whose takeaway holds it */
+  turn?: string
+  card?: string
 }
 
 export type MarkLook = 'pending' | 'checking' | 'verified' | 'failed'
@@ -70,6 +84,30 @@ export function lookOf(item: MarkItem | undefined): MarkLook {
   if (item.status === 'corrected') return 'verified'
   if (item.status === 'failed' || item.status === 'unchecked') return 'failed'
   return item.status
+}
+
+/** A text as the analyst reads it once its check settled, as the terminal shows it (plugin/marks/message.js): each
+ * sentence a check rewrote in place of Claude's, and each corrected citation's words in place of its own. A rewrite that
+ * cannot stand in the text leaves Claude's sentence, whose words the check did not confirm: its mark draws failed. Pure. */
+export function asChecked(text: string, checks: readonly (MarkItem | undefined)[]): { text: string; checks: (MarkItem | undefined)[] } {
+  if (!checks.some((m) => m?.status === 'corrected')) return { text, checks: [...checks] }
+  const { text: rewritten, placed } = rewritesIn(text, checks)
+  const out = checks.map((m, k) =>
+    m?.status === 'corrected' && m.rewrite && !placed.has(k) ? { ...m, status: 'failed' as const, failedBy: 'evidence' as const, shown: m.words, reason: m.reason || 'The check rewrote this sentence, but its new sentence does not fit the reply.' } : m,
+  )
+  return { text: withCorrections(rewritten, out), checks: out }
+}
+
+/** Whether Repair can check a mark again: it failed (or no check ran), no check of it runs, and its place is known. */
+export function canRepair(item: MarkItem | undefined): boolean {
+  return !!item && (item.status === 'failed' || item.status === 'unchecked') && !!(item.turn || item.card)
+}
+
+/** What a corrected mark was, as the terminal says it under the words: `corrected; was 15 of 40`. Pure. */
+export function wasLine(item: MarkItem | undefined): string {
+  if (item?.status !== 'corrected' || !item.was) return ''
+  const kind = item.rewrite ? 'sentence rewritten' : item.narrowed ? 'narrowed' : 'corrected'
+  return `${kind}; was ${(item.rewrite ? plainSentence(item.sentence) : item.was).replace(/\*\*|`/g, '')}`
 }
 
 /** Why a failed mark failed, in one line: the check's reason, else what kind of failure it was. Pure. */
@@ -106,11 +144,11 @@ export function withMarkHrefs(text: string): string {
 
 /** A card's takeaway's marks as the check left them (backend notebook.takeaway_marks), by their order in the takeaway;
  * none while no check has started on the takeaway as it reads now (each draws pending). Pure. */
-export function takeawayChecks(cell: { takeaway?: string; takeaway_marks?: { text?: string; items?: MarkItem[] } }): (MarkItem | undefined)[] {
+export function takeawayChecks(cell: { id?: string; takeaway?: string; takeaway_marks?: { text?: string; items?: MarkItem[] } }): (MarkItem | undefined)[] {
   const kept = cell.takeaway_marks
   if (!kept || kept.text !== cell.takeaway || !Array.isArray(kept.items)) return []
   const out: (MarkItem | undefined)[] = []
-  for (const m of kept.items) if (typeof m?.k === 'number') out[m.k] = m
+  for (const m of kept.items) if (typeof m?.k === 'number') out[m.k] = cell.id ? { ...m, card: cell.id } : m
   return out
 }
 

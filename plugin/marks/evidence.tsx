@@ -129,7 +129,8 @@ export function tableRows(els: Any, t: EvidenceTable, width: number, key = 'tb')
   if (!lines) return []
   return [
     els.Text({ key: `${key}h`, dimColor: true, wrap: 'truncate-end', children: lines[0]!.text }),
-    highlighted(els, lines[1]!.text, lines[1]!.spans as [number, number][], `${key}r`),
+    // the cited row, and the other cited rows of words that hold several values (a range, a pair)
+    ...lines.slice(1).map((l, i) => highlighted(els, l.text, l.spans as [number, number][], i ? `${key}r${i}` : `${key}r`)),
   ]
 }
 
@@ -139,6 +140,8 @@ function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
     return [
       Text({ key: 'ct', wrap: 'wrap', children: [Text({ key: 'k', dimColor: true, children: 'card  ' }), Text({ key: 't', bold: true, children: ev.title || ev.card })] }),
       Box({ key: 'cv', flexDirection: 'column', children: ev.table ? tableRows(els, ev.table, width) : outputRows(els, ev.output ?? ev.value, ev.highlight ?? [], OUTPUT_ROWS) }),
+      // the places of another card or output that the words' other values stand in
+      ...(ev.more ?? []).flatMap((p: Evidence, k: number) => [Text({ key: `mg${k}`, children: ' ' }), ...evidenceRows(els, p, width).map((x: Any, j: number) => Box({ key: `m${k}-${j}`, flexDirection: 'column', children: [x] }))]),
     ]
   }
   if (ev.kind === 'computed') {
