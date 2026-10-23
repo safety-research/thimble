@@ -69,7 +69,7 @@ condition), which evidence that prints the marked words does not answer; one it 
 is a correction. A correction whose evidence does not show its
 new words is not confirmed: its evidence confirms neither the new words nor the marked ones. A mark the checker could
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
-module cannot judge, stays unchecked. A checker's note on the rest of the sentence stays beside the mark.
+module cannot judge, fails as a check that did not run (`failedBy` `none`), which x in the tray starts again. A checker's note on the rest of the sentence stays beside the mark.
 
   check_all(marks, answer, calls, cwd, root, tmp, cards)  -> {parsed, results}: every mark of a reply
   check_mark(mark, item, calls, cwd, root, tmp, cards)    -> {n, status, shown, reason, failedBy?, evidence?, note?}
@@ -159,6 +159,8 @@ WORDNUM = {w: str(i) for i, w in enumerate(
     "eighteen nineteen twenty".split())}
 PRINTERS = {"print", "str", "format", "repr", "f"}
 MAX_RANGE = 50
+# the words the person reads first on a mark whose check did not run or gave no answer (marks/store.ts NOT_RUN)
+NOT_RUN = "The check did not run."
 BLOCK = 1 << 20  # bytes read at a time while counting the lines before a cited one
 LINE_BYTES = 1 << 20  # bytes of a cited line the check reads; a longer line is cut there
 SHIFT_MAX = 5  # lines a cited line may be off by and still name the line that holds the words
@@ -1545,10 +1547,11 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     turns the checker's verdict that a claim is wrong into verified, so a correction whose evidence does not show the
     new words is not confirmed. A mark the checker judged wrong or unconfirmed keeps the evidence it gave, when that
     evidence is real, so the person sees what the check found. `failedBy` is `check` when the checker found the claim
-    wrong, `evidence` when the claim is only not confirmed: the checker could not see it, or its evidence did not hold.
+    wrong, `evidence` when the claim is only not confirmed: the checker could not see it, or its evidence did not hold,
+    `none` when the check gave no answer this module can judge (the plugin's marks/store.ts notRun).
     A `note` is what the checker found wrong in the sentence outside the mark's own claim."""
     n, words = mark["n"], str(mark["words"])
-    out: dict[str, Any] = {"n": n, "status": "unchecked", "shown": words, "reason": "the check gave no answer for this citation"}
+    out: dict[str, Any] = {"n": n, "status": "failed", "failedBy": "none", "shown": words, "reason": f"{NOT_RUN} Its answer left this citation out."}
     if not item:
         return out
     status, kind = item.get("status"), item.get("kind")
@@ -1588,7 +1591,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if status == "unconfirmed":
         return judged("evidence", reason or "the check could not show this claim from the data")
     if status not in ("verified", "corrected"):
-        return {**out, "reason": f"the check gave the status {status!r}"}
+        return {**out, "reason": f"{NOT_RUN} It gave the status {status!r}."}
     problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if new else "", cards)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or words, "reason": reason, **extra}
     if evidence:
@@ -1622,8 +1625,8 @@ def cited_calls(items: list[dict[str, Any]], calls: list[dict[str, Any]]) -> lis
 
 def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Every mark of a reply: {parsed, results}. `answer` is the checker's last message; `tmp` the session's temp
-    folder; `cards` the session's cards' outputs (check_card). A mark the validator fails on stays unchecked, with why;
-    the other marks are judged."""
+    folder; `cards` the session's cards' outputs (check_card). A mark the validator fails on fails as a check that did
+    not run, with why; the other marks are judged."""
     items = parse_answer(answer)
     calls = cited_calls(items or [], calls)
     by_n: dict[int, dict[str, Any]] = {}
@@ -1637,6 +1640,6 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
         try:
             results.append(check_mark(m, by_n.get(int(m["n"])), calls, cwd, root, tmp, cards))
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
-            results.append({"n": m.get("n"), "status": "unchecked", "shown": str(m.get("words", "")),
-                            "reason": f"thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})"})
+            results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
+                            "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})."})
     return {"parsed": items is not None, "results": results}

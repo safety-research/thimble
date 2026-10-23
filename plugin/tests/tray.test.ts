@@ -258,6 +258,43 @@ test('a citation not confirmed: ? in the warning color, underlined; a click on x
   expect(submitted.length).toBe(0)
 })
 
+test('a citation whose check did not run is failed: ? in the reply, ? failed in the card with the plain reason, and x starts its check', async ($, on) => {
+  // an earlier thimble kept it as unchecked, with no evidence: the resumed session finds it failed
+  const { evidence: _e, ...words } = QUOTED
+  const { clock, spawns, submitted } = await resumed($, on, { ...words, status: 'unchecked', reason: 'the reply was interrupted before its citations were checked' }, 's-tray-12')
+  const reply = all(await $.ui.render(answer('row-t1', TEXT)))
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'warning', underline: true })
+  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ?')?.props?.color).toBe('warning')
+  await $.prompt.edit(key(']'))
+  const drawn = all(await $.ui.render(above()))
+  const band = textOf(drawn)
+  expect(band).toContain('? failed · cite')
+  expect(band).not.toContain('not checked')
+  expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'The check did not run.')?.props).toMatchObject({ dimColor: true })
+  expect(band).not.toContain('gave no evidence')
+  expect(band).toContain('x repair: start its check')
+  expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'check this citation')).toBe(true)
+  await clock.advance(2000)
+  await $.prompt.edit(key('x'))
+  await clock.advance(1000)
+  expect(spawns.length).toBe(1)
+  expect(spawns[0].prompt).toContain('The analyst pressed x to check citation 1, whose first check did not run.')
+  expect(spawns[0].prompt).not.toContain('right value')
+  expect(submitted.length).toBe(0)
+  // (the test kit names no agent it starts, so the check's run and end are marks.test.ts's)
+})
+
+test('a check the session ended mid-way is failed when the session resumes, and offers x', async ($, on) => {
+  const { evidence: _e, reason: _r, ...words } = QUOTED
+  await resumed($, on, { ...words, status: 'checking' }, 's-tray-13')
+  await $.prompt.edit(key(']'))
+  const band = textOf(await $.ui.render(above()))
+  expect(band).toContain('? failed · cite')
+  expect(band).toContain('The check did not run.')
+  expect(band).not.toContain('session ended')
+  expect(band).toContain('x repair')
+})
+
 test('a verified citation offers no repair', async ($, on) => {
   await resumed($, on, QUOTED, 's-tray-7')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })

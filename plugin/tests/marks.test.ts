@@ -1,12 +1,13 @@
 // Marks across one reply (marks/checker.ts, view.ts): a reply with marks starts one checker fork with the marks filled
 // into its text; the fork's answer, once validated, gives each mark its status, the footer and what main reads next; a
-// refusal, a validator that fails and a fork that is gone leave the marks unchecked with one failure line; the checker
-// may only read, and run code as one Python script. All data is made up.
+// refusal, a validator that fails, a fork that is gone and an interrupted reply leave the marks failed (the check did
+// not run) with one failure line, and x starts their check; the checker may only read, and run code as one Python
+// script. All data is made up.
 // `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
-import { checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
+import { awaitsCheck, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { marksIn } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { footerEl, messageEl } from '../marks/view'
@@ -141,16 +142,22 @@ test("the validator gets the fork's calls and main's (it keeps main's whose outp
   expect(JSON.parse(seen.stdin[0]!).calls.map((c: Any) => [c.command, c.by])).toEqual([["python3 - <<'PY'\nprint('12 of 40')\nPY", 'checker'], ['python3 count.py', 'main'], ['ls', 'main']])
 })
 
-test('a refused check leaves the marks unchecked, says so once, and nothing spins', async () => {
+test('a refused check leaves the marks failed, says so once, and nothing spins', async () => {
   const { $, seen } = engine(VALIDATED)
   await noteRow($, 'row-1', REPLY)
   await startCheck($, { turnId: 't-1', reason: 'answer' })
   await endCheck($, { agentId: FORK, reason: 'refusal', answer: '' })
   const out = await drawn($)
-  // the marks draw unchecked; the failure line, not a footer, says why
+  // the marks draw failed, each with its reason; the failure line, not a footer, says why
+  expect(out).toContain('"ship it" ?')
+  expect(out.match(/ \?/g)?.length).toBe(3)
   expect(out).not.toContain('not checked')
   expect(out).not.toContain('checking')
   expect(out).not.toContain('×')
+  const items = (await rowMarks($, 'row-1'))!.items
+  expect(items.map(m => [m.status, m.failedBy, m.reason])).toEqual(Array(3).fill(['failed', 'none', "The check did not run. The model's safeguards refused it."]))
+  // a check that did not run is no finding of the check's: main is not told of it
+  expect(Object.keys(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>)).toEqual([])
   const line = String((await failLineNow($))?.text ?? '')
   expect(line).toContain("safeguards refused the check of the citations")
   expect(line).toContain('/model')
@@ -161,8 +168,10 @@ test('a validator that cannot run, or a fork that is gone, leaves no mark checki
   await noteRow($, 'row-1', REPLY)
   await startCheck($, { turnId: 't-1', reason: 'answer' })
   await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
-  expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['unchecked', 'unchecked', 'unchecked'])
+  expect((await rowMarks($, 'row-1'))!.items.map(m => [m.status, m.failedBy, m.reason])).toEqual(Array(3).fill(['failed', 'none', 'The check did not run. thimble could not validate its answer.']))
+  expect((await rowMarks($, 'row-1'))!.failed).toBe(3)
   expect(String((await failLineNow($))?.text)).toContain('thimble could not validate the check of the citations (made-up: the command ran past its time limit)')
+  expect(String((await failLineNow($))?.text)).toContain('Press x on one in the tray to check it.')
   expect((await $.state.get({ plugin: 'thimble', key: 'marksRunning' })).value).toEqual({})
   // a reload of the plugin finds a check whose fork Claude Code no longer runs
   const { $: other } = engine(VALIDATED)
@@ -170,7 +179,35 @@ test('a validator that cannot run, or a fork that is gone, leaves no mark checki
   await startCheck(other, { turnId: 't-1', reason: 'answer' })
   await resumeChecks(other)
   expect((await rowMarks(other, 'row-1'))!.checking).toBe(0)
+  expect((await rowMarks(other, 'row-1'))!.items[0]).toMatchObject({ status: 'failed', failedBy: 'none', reason: 'The check did not run. thimble lost the copy that checked it.' })
   expect(String((await failLineNow(other))?.text)).toContain('thimble lost the copy that checked them')
+})
+
+test("an interrupted reply's citations fail at once: their check did not run, and x starts it", async () => {
+  const { $, seen } = engine(() => ({ exitCode: 0, stdout: JSON.stringify({ parsed: true, results: [{ n: 2, status: 'verified', shown: '15 of 40', reason: 'counted' }] }), stderr: '' }))
+  await noteRow($, 'row-1', REPLY)
+  // while main's turn ends, its rows wait for their check (the reply draws them pending, not failed)
+  expect(await awaitsCheck($, 'row-1')).toBe(true)
+  await startCheck($, { turnId: 't-1', reason: 'aborted' })
+  expect(await awaitsCheck($, 'row-1')).toBe(false)
+  expect(seen.spawned.length).toBe(0)
+  const reply = await rowMarks($, 'row-1')
+  expect(reply!.items.map(m => [m.status, m.failedBy, m.reason])).toEqual(Array(3).fill(['failed', 'none', 'The check did not run. The reply was interrupted.']))
+  expect([reply!.failed, reply!.checking, reply!.verified]).toEqual([3, 0, 0])
+  expect(await drawn($)).toContain('15 of 40 ?')
+  // x: the check itself, of that one citation
+  const r = await repairOf($, 'row-1', 2)
+  expect(typeof r).toBe('object')
+  expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
+  expect(seen.spawned[0].prompt).toBe('CHECK\n2. [15 of 40] in: Of the [40] pull requests, agent-07 merged [15 of 40].\nIN /made-up/data\n\nThe analyst pressed x to check citation 2, whose first check did not run. It may stand in an earlier reply than your last.')
+  // it spins until its check ends, then shows what the check found
+  expect(await drawn($)).toContain('15 of 40 ⠋')
+  expect((await rowMarks($, 'row-1'))!.items[1]).toMatchObject({ status: 'checking', repair: true })
+  expect((await rowMarks($, 'row-1'))!.items[1]!.reason).toBeUndefined()
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect((await rowMarks($, 'row-1'))!.items[1]).toMatchObject({ status: 'verified', shown: '15 of 40', repair: true })
+  const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['marks:row-1:repair:2']).toContain('- "15 of 40" is verified as written')
 })
 
 test("the checker reads files, and runs code only as one Python script; a mark's sentence goes in its prompt as written", () => {
@@ -214,7 +251,7 @@ test('checker forks that end at the same moment all settle their marks, and main
   for (let i = 0; i < 12; i++) expect(told[0]).toContain(`"${i + 10}" is corrected to "${i + 100}"`)
 })
 
-test('a resumed session draws the marks as their check left them; a check the session ended is not checked', async () => {
+test('a resumed session draws the marks as their check left them; a check the session ended did not run (failed)', async () => {
   const { $, files } = engine(VALIDATED)
   await noteRow($, 'row-1', REPLY)
   await startCheck($, { turnId: 't-1', reason: 'answer' })
@@ -228,8 +265,14 @@ test('a resumed session draws the marks as their check left them; a check the se
   expect(first!.items.map(m => [m.status, m.shown])).toEqual([['verified', '40'], ['corrected', '12 of 40'], ['failed', '"ship it"']])
   expect([first!.verified, first!.corrected, first!.failed]).toEqual([2, 1, 1])
   const second = await rowMarks(resumed, 'row-2')
-  expect(second!.items[0]!.status).toBe('unchecked')
-  expect(second!.checking).toBe(0)
+  expect(second!.items[0]).toMatchObject({ status: 'failed', failedBy: 'none', reason: 'The check did not run. The session ended before it did.' })
+  expect([second!.checking, second!.failed]).toEqual([0, 1])
+  // a mark an earlier thimble kept as unchecked is failed too
+  const key = [...files.keys()].find(k => k.endsWith('/marks/row-2.json'))!
+  files.set(key, JSON.stringify({ ...JSON.parse(files.get(key)!), key: 'row-2', items: [{ ...JSON.parse(files.get(key)!).items[0], status: 'unchecked', reason: 'old words' }] }))
+  const { $: again } = engine(VALIDATED, files)
+  await restoreMarks(again)
+  expect((await rowMarks(again, 'row-2'))!.items[0]).toMatchObject({ status: 'failed', failedBy: 'none', reason: 'The check did not run.' })
 })
 
 test('a corrected citation draws as a settled one (purple, underlined); a failed one in the warning color with ?, whatever failed it; each underlined', () => {

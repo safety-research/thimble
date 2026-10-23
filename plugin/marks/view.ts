@@ -18,8 +18,10 @@
 //   corrected    the corrected words in place of the marked ones, purple, underlined: once corrected it holds, so it
 //                looks as a verified one does (its tray card says it was corrected)
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
-//                did not show them): the warning color, underlined, with ` ?` after it. One look whatever the cause
-//   unchecked    underlined in the text's color: no check could run
+//                did not show them), or it did not run or gave no answer: the warning color, underlined, with ` ?`
+//                after it. One look whatever the cause
+//   unchecked    underlined in the text's color: words no check is for (a side thread's citations, or new ones in a
+//                version shown in place of Claude's words)
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
 // explainer in teal, underlined; a span inside a mark's words keeps the mark's press and look and adds its `tint` behind

@@ -6,12 +6,12 @@ declare module 'claude-code' {
       // ---- marks (marks/)
       /** a reply's marks and their checks, by the reply's key, its last text row (a session.append uuid of main's; the
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
-       *  sentence, status: 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked', shown, was?, reason?,
-       *  failedBy?, evidence?, note?, repair? }] } (marks/store.ts Reply), kept on disk too */
+       *  sentence, status: 'checking' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
+       *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair? }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
       /** the reply each text row with marks belongs to, by the row: the reply's key */
       marksRow: StateFamily<string>
-      /** main's text rows of the turn that runs: [{ row, text, at }] */
+      /** main's text rows of the turn that runs, until its reply's marks are in the store: [{ row, text, at }] */
       marksRows: { row: string; text: string; at: number }[]
       /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
        *  check of one mark again, which x in the tray started */

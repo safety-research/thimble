@@ -29,8 +29,8 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   checking: { word: 'checking', dim: true },
   verified: { word: 'verified', color: 'success' },
   corrected: { word: 'verified', color: 'success' },
+  // a check that did not run is failed too (store.ts notRun); its reason says so
   failed: { word: 'failed', color: 'warning' },
-  unchecked: { word: 'not checked', dim: true },
 }
 
 /** The cited words' look wherever their evidence shows (this pane, the tray, the claims pane): bold in the citations'
@@ -160,7 +160,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const reply = row ? await rowMarks($, row) : null
   const m: MarkItem | undefined = reply?.items.find(x => x.n === n)
   if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' })
-  const st = STATUS[m.status] ?? STATUS.unchecked!
+  const st = STATUS[m.status] ?? STATUS.failed!
   const head = Text({ key: 'head', wrap: 'wrap', children: [
     Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
     Text({ key: 'w', children: `  ${m.shown.replace(/\*\*|`/g, '')}` }),

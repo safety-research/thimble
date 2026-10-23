@@ -100,7 +100,8 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   await t.clock.advance(1000)
   expect(t.asked.length).toBe(1)
   const back = textOf(await $.ui.render(answer('row-t1', LONG)))
-  expect(back).toContain('The nightly build failed on 3 of 12 runs')
+  // (no check of the reply ran here, so its citation draws failed, ? after it)
+  expect(back).toContain('The nightly build failed on 3 of 12 ? runs')
   expect(back).not.toContain('fresh fetch')
 })
 
