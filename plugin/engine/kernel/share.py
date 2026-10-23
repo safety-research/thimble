@@ -154,11 +154,26 @@ def open_page(page: Path) -> bool:
     return True
 
 
+def _store_of(rec: dict[str, Any]) -> Store | None:
+    """The folder whose names the scan takes out, in a shell: the one the fix was asked in, else the folder the shell
+    stands in (not the home folder or /, whose every file the scan would list)."""
+    here = Path.cwd()
+    root = rec.get("root") if rec.get("root") and Path(rec["root"]).is_dir() else None
+    if not root and here not in (Path.home(), Path("/")):
+        root = str(here)
+    try:
+        return Store(root) if root else None
+    except Exception:  # noqa: BLE001 - a folder thimble cannot read: the machine's names are still taken out
+        return None
+
+
 def share(fid: int | str, given: dict[str, Any] | None = None, st: Store | None = None, open_it: bool = True) -> dict[str, Any]:
     """The share draft through the scan, the share page, and the page opened. Nothing is sent."""
     rec = FX.get(fid)
     if rec.get("state") not in STATES:
         raise FX.FixError(f"fix {rec['id']} is {rec.get('state')}: there is nothing to share yet")
+    if st is None:
+        st = _store_of(rec)
     d, src = _given(rec, given)
     title = FX.short(d["title"] or rec["title"], 72)
     hits, text = _scan(f"{title}\n{_body(rec, d)}", st)

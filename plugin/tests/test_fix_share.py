@@ -135,8 +135,10 @@ def test_the_page_is_one_local_file_that_holds_the_text_safely(world, monkeypatc
     assert opened.read_text().split() == [str(page)]
 
 
-def test_the_shell_prints_what_happened_and_the_link(world, monkeypatch, opened, capsys):
+def test_the_shell_prints_what_happened_and_the_link(world, monkeypatch, opened, capsys, tmp_path):
     rec = fix_on(world)
+    (tmp_path / "shell").mkdir()
+    monkeypatch.chdir(tmp_path / "shell")  # the shell stands in a folder of its own
     monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["board-7.jsonl"]})
     FX.write_json(SH.share_dir(rec["id"]) / "given.json", DRAFT)
     assert CLI.main(["fix", "share", str(rec["id"])]) == 0
@@ -160,3 +162,21 @@ def test_the_shell_prints_what_happened_and_the_link(world, monkeypatch, opened,
     assert d["opened"] is False and d["text"] == "claude" and d["title"] == DRAFT["title"]
     assert CLI.main(["fix", "share", "9"]) == 1
     assert "there is no fix 9" in capsys.readouterr().err
+
+
+def test_in_a_shell_the_scan_takes_out_the_names_of_the_folder_the_fix_was_asked_in(world, monkeypatch, opened, tmp_path):
+    data = tmp_path / "made-up-study"
+    (data / "runs").mkdir(parents=True)
+    (data / "runs" / "board-7.jsonl").write_text('{"x": 1}\n')
+    monkeypatch.setenv("THIMBLE_ROOT", str(data))
+    r = FX.new("after Claude read board-7.jsonl the bar still said coverage")
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("coverage", "read"))
+    FX.done(r["id"], "Bar says read", "The bar says read.")
+    assert FX.get(r["id"])["root"] == str(data)
+    # the shell: no THIMBLE_ROOT, and it stands somewhere else
+    monkeypatch.delenv("THIMBLE_ROOT")
+    monkeypatch.chdir(tmp_path)
+    out = SH.share(r["id"])
+    assert out["took"] == "took 1 file name out of the text"
+    assert "board-7.jsonl" not in out["body"] + out["url"] and "after Claude read ‹data file›" in out["body"]
