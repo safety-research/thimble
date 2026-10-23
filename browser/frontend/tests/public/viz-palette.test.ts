@@ -158,75 +158,88 @@ test('one order of the families on every accent, blue first: the series are thei
   }
 })
 
-describe.each(Object.keys(PAPERS).flatMap((paper) => Object.keys(ACCENT_FAMILY).map((accent) => [paper, accent])))('the series on the %s paper with the %s accent', (paper, accent) => {
-  const t = PAPERS[paper]
-  const colors = SLOTS.map((s) => resolve(s, paper, accent))
+describe('the series on every paper with every accent', () => {
+  const cases = Object.keys(PAPERS).flatMap((paper) => Object.keys(ACCENT_FAMILY).map((accent) => ({ paper, accent, t: PAPERS[paper], colors: SLOTS.map((s) => resolve(s, paper, accent)) })))
 
   test('are seven hues, none of them a red', () => {
-    expect(colors.every(Boolean)).toBe(true)
-    expect(new Set(colors).size).toBe(7)
-    for (const c of colors) {
-      const [chroma, hue] = chromaHue(c)
-      expect(chroma, c).toBeGreaterThanOrEqual(0.1)
-      expect(hue >= 10 && hue < 40, `${c} is a red (hue ${hue.toFixed(0)})`).toBe(false)
+    for (const { colors } of cases) {
+      expect(colors.every(Boolean)).toBe(true)
+      expect(new Set(colors).size).toBe(7)
+      for (const c of colors) {
+        const [chroma, hue] = chromaHue(c)
+        expect(chroma, c).toBeGreaterThanOrEqual(0.1)
+        expect(hue >= 10 && hue < 40, `${c} is a red (hue ${hue.toFixed(0)})`).toBe(false)
+      }
     }
   })
 
   test('each reads at 3:1 or more on every ground of the paper', () => {
-    for (const g of GROUNDS) for (const c of colors) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
+    for (const { t, colors } of cases) {
+      for (const g of GROUNDS) for (const c of colors) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
+    }
   })
 
   // the dataviz validator's floors: 15 apart in OKLab for full-color readers, 8 under each simulated vision, except
   // where the chosen order (blue, orange, teal, pink, gold) accepts less (ACCEPTED)
   const floor = (i: number, j: number, v?: string): number => ACCEPTED[`${FAMILIES[i]}-${FAMILIES[j]}`]?.[v ?? 'full'] ?? (v ? 8 : 15)
   test('neighbors stay apart, also under protan, deutan and tritan vision', () => {
-    for (let i = 1; i < colors.length; i++) {
-      const [a, b] = [colors[i - 1], colors[i]]
-      expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(floor(i - 1, i))
-      for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(floor(i - 1, i, v))
+    for (const { colors } of cases) {
+      for (let i = 1; i < colors.length; i++) {
+        const [a, b] = [colors[i - 1], colors[i]]
+        expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(floor(i - 1, i))
+        for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(floor(i - 1, i, v))
+      }
     }
   })
 
   test('the first three, which a scatter or a map of three groups shows side by side, stay apart pairwise', () => {
-    for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) {
-      const [a, b] = [colors[i], colors[j]]
-      expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(floor(i, j))
-      for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(floor(i, j, v))
+    for (const { colors } of cases) {
+      for (const [i, j] of [[0, 1], [0, 2], [1, 2]]) {
+        const [a, b] = [colors[i], colors[j]]
+        expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(floor(i, j))
+        for (const v of VISIONS) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(floor(i, j, v))
+      }
     }
   })
 
   test("the diverging ramp's two sides stay apart, also under protan, deutan and tritan vision, with the gray nearest the paper between them", () => {
-    const [lo, loIn, gray, hiIn, hi] = VIZ_DIV.map((s) => resolve(s, paper, accent))
-    for (const v of [undefined, ...VISIONS]) {
-      expect(apart(lo, hi, v), `${lo} and ${hi} under ${v ?? 'full color'}`).toBeGreaterThanOrEqual(8)
-      expect(apart(loIn, hiIn, v), `${loIn} and ${hiIn} under ${v ?? 'full color'}`).toBeGreaterThanOrEqual(6)
+    for (const { paper, accent, t } of cases) {
+      const [lo, loIn, gray, hiIn, hi] = VIZ_DIV.map((s) => resolve(s, paper, accent))
+      for (const v of [undefined, ...VISIONS]) {
+        expect(apart(lo, hi, v), `${lo} and ${hi} under ${v ?? 'full color'}`).toBeGreaterThanOrEqual(8)
+        expect(apart(loIn, hiIn, v), `${loIn} and ${hiIn} under ${v ?? 'full color'}`).toBeGreaterThanOrEqual(6)
+      }
+      const paperL = lightness(t['--white'])
+      const off = (c: string) => Math.abs(lightness(c) - paperL)
+      expect(off(gray)).toBeLessThan(Math.min(off(loIn), off(hiIn)))
     }
-    const paperL = lightness(t['--white'])
-    const off = (c: string) => Math.abs(lightness(c) - paperL)
-    expect(off(gray)).toBeLessThan(Math.min(off(loIn), off(hiIn)))
   })
 })
 
-describe.each(['warm', 'dark'])('the color families on the %s paper', (paper) => {
-  const t = PAPERS[paper]
+describe('the color families on the warm and the dark paper', () => {
+  const cases = ['warm', 'dark'].map((paper) => ({ paper, t: PAPERS[paper] }))
   test('each steps from faint, near the paper, to strong in one hue', () => {
-    for (const f of FAMILIES) {
-      const steps = [1, 2, 3, 4, 5].map((n) => t[`--viz-${f}-${n}`])
-      expect(steps.every(Boolean), f).toBe(true)
-      const ls = steps.map(lightness)
-      // the light papers step from light to dark, Dark from dark to light
-      for (let i = 1; i < 5; i++) expect(paper === 'dark' ? ls[i] - ls[i - 1] : ls[i - 1] - ls[i], `${f} steps ${i} and ${i + 1}`).toBeGreaterThanOrEqual(0.06)
-      const hue = chromaHue(steps[2])[1]
-      for (const c of steps) {
-        const d = Math.abs(chromaHue(c)[1] - hue)
-        expect(Math.min(d, 360 - d), `${c} is not ${f}`).toBeLessThanOrEqual(10)
+    for (const { paper, t } of cases) {
+      for (const f of FAMILIES) {
+        const steps = [1, 2, 3, 4, 5].map((n) => t[`--viz-${f}-${n}`])
+        expect(steps.every(Boolean), f).toBe(true)
+        const ls = steps.map(lightness)
+        // the light papers step from light to dark, Dark from dark to light
+        for (let i = 1; i < 5; i++) expect(paper === 'dark' ? ls[i] - ls[i - 1] : ls[i - 1] - ls[i], `${f} steps ${i} and ${i + 1}`).toBeGreaterThanOrEqual(0.06)
+        const hue = chromaHue(steps[2])[1]
+        for (const c of steps) {
+          const d = Math.abs(chromaHue(c)[1] - hue)
+          expect(Math.min(d, 360 - d), `${c} is not ${f}`).toBeLessThanOrEqual(10)
+        }
       }
     }
   })
 
   test("no step takes a label's hex, so a figure's label colors and its series become their own tokens", () => {
-    const labels = new Set(Object.entries(t).filter(([k]) => k.startsWith('--label-')).map(([, v]) => v))
-    for (const f of FAMILIES) for (let n = 1; n <= 5; n++) expect(labels.has(t[`--viz-${f}-${n}`]), `--viz-${f}-${n}`).toBe(false)
+    for (const { t } of cases) {
+      const labels = new Set(Object.entries(t).filter(([k]) => k.startsWith('--label-')).map(([, v]) => v))
+      for (const f of FAMILIES) for (let n = 1; n <= 5; n++) expect(labels.has(t[`--viz-${f}-${n}`]), `--viz-${f}-${n}`).toBe(false)
+    }
   })
 })
 
@@ -285,85 +298,98 @@ test("the label colours' copies are the light paper's: the charts' fallbacks and
   for (const name of [...SLOTS, ...LABELS, '--label-none']) expect(snap[name], `${name} in the tour's frame-base.css`).toBe(resolve(name, 'warm', 'iris'))
 })
 
-describe.each(Object.keys(PAPERS))('the picked colours on the %s paper', (paper) => {
-  const t = PAPERS[paper]
+describe('the picked colours on every paper', () => {
+  const cases = Object.keys(PAPERS).map((paper) => ({ t: PAPERS[paper] }))
   test('are red, purple and pink, a light and a dark of each, each at 3:1 or more on every ground', () => {
-    const colours = PICKED.map((s) => t[s])
-    expect(colours.every(Boolean)).toBe(true)
-    const hues = colours.map((c) => chromaHue(c)[1])
-    expect(hues.slice(0, 2).every((h) => h < 45 || h >= 345), `reds ${hues}`).toBe(true)
-    for (const g of GROUNDS) for (const c of colours) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
+    for (const { t } of cases) {
+      const colours = PICKED.map((s) => t[s])
+      expect(colours.every(Boolean)).toBe(true)
+      const hues = colours.map((c) => chromaHue(c)[1])
+      expect(hues.slice(0, 2).every((h) => h < 45 || h >= 345), `reds ${hues}`).toBe(true)
+      for (const g of GROUNDS) for (const c of colours) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
+    }
   })
 })
 
-describe.each(Object.keys(PAPERS))('the label colours on the %s paper', (paper) => {
-  const t = PAPERS[paper]
-  const colours = LABELS.map((s) => t[s])
+describe('the label colours on every paper', () => {
+  const cases = Object.keys(PAPERS).map((paper) => ({ t: PAPERS[paper], colours: LABELS.map((s) => PAPERS[paper][s]) }))
 
   test('are twelve colours, none of them a red or a purple', () => {
-    expect(colours.every(Boolean)).toBe(true)
-    for (const c of colours) {
-      const [chroma, hue] = chromaHue(c)
-      expect(chroma, c).toBeGreaterThan(0.085)
-      expect(hue < 45 || hue >= 345, `${c} is a red (hue ${hue.toFixed(0)})`).toBe(false)
-      expect(hue >= 270 && hue < 345, `${c} is a purple (hue ${hue.toFixed(0)})`).toBe(false)
+    for (const { colours } of cases) {
+      expect(colours.every(Boolean)).toBe(true)
+      for (const c of colours) {
+        const [chroma, hue] = chromaHue(c)
+        expect(chroma, c).toBeGreaterThan(0.085)
+        expect(hue < 45 || hue >= 345, `${c} is a red (hue ${hue.toFixed(0)})`).toBe(false)
+        expect(hue >= 270 && hue < 345, `${c} is a purple (hue ${hue.toFixed(0)})`).toBe(false)
+      }
     }
   })
 
   test('each reads at 3:1 or more on every ground of the paper', () => {
-    for (const g of GROUNDS) {
-      for (const c of colours) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
+    for (const { t, colours } of cases) {
+      for (const g of GROUNDS) {
+        for (const c of colours) expect(contrast(c, t[g]), `${c} on ${g} ${t[g]}`).toBeGreaterThanOrEqual(3)
+      }
     }
   })
 
   test('neighbours stay apart, also under protan and deutan vision, and no two of the twelve look alike', () => {
-    for (let i = 1; i < colours.length; i++) {
-      const [a, b] = [colours[i - 1], colours[i]]
-      expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
-      for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
-    }
-    for (let i = 0; i < colours.length; i++) for (let j = i + 1; j < colours.length; j++) expect(apart(colours[i], colours[j]), `${colours[i]} and ${colours[j]}`).toBeGreaterThanOrEqual(7.5)
-  })
-
-  test('each place is the hue its name says: show_label names the place a stored color takes, so a place keeps its hue', () => {
-    expect(Object.keys(NAMES).sort()).toEqual(Object.keys(FAMILY).sort())
-    expect(Object.values(NAMES).sort((a, b) => a - b)).toEqual(Array.from({ length: 18 }, (_, i) => i + 1))
-    for (const [name, [lo, hi]] of Object.entries(FAMILY)) {
-      const c = t[place(name)]
-      const hue = chromaHue(c)[1]
-      expect(hue >= lo && hue < hi, `${place(name)} ${c} is not ${name} (hue ${hue.toFixed(0)})`).toBe(true)
-    }
-    const [chroma, hue, light] = [(n: string) => chromaHue(t[place(n)])[0], (n: string) => chromaHue(t[place(n)])[1], (n: string) => lightness(t[place(n)])]
-    expect(chroma('orange'), 'orange is the vivid one of its family').toBeGreaterThan(Math.max(chroma('brown'), chroma('chestnut')))
-    expect(hue('brown'), 'brown is yellower than chestnut').toBeGreaterThan(hue('chestnut'))
-    expect(chroma('grass green'), 'grass is more vivid than green').toBeGreaterThan(chroma('green'))
-    expect(light('sky blue'), 'sky is lighter than cerulean').toBeGreaterThan(light('cerulean'))
-    expect(chroma('sky blue'), 'sky is more vivid than cerulean').toBeGreaterThan(chroma('cerulean'))
-    expect(chroma('blue'), 'blue is more vivid than navy').toBeGreaterThan(chroma('navy'))
-    for (const n of ['red', 'purple', 'pink']) expect(chroma(n), `${n} is more vivid than dark ${n}`).toBeGreaterThan(chroma(`dark ${n}`))
-  })
-
-  test('the first five new values take (LABEL_ORDER), which a field of five values shows side by side, are five hues with no second blue, 15 apart in OKLab, also under protan and deutan vision', () => {
-    const five = LABEL_ORDER.slice(0, 5).map((n) => t[`--label-${n}`])
-    expect(LABEL_ORDER.slice(0, 5).map((n) => Object.keys(NAMES).find((k) => NAMES[k] === n))).toEqual(['blue', 'orange', 'green', 'olive', 'teal'])
-    for (let i = 0; i < 5; i++)
-      for (let j = i + 1; j < 5; j++) {
-        const [a, b] = [five[i], five[j]]
-        const dh = Math.abs(chromaHue(a)[1] - chromaHue(b)[1])
-        expect(Math.min(dh, 360 - dh), `${a} and ${b} are one hue`).toBeGreaterThanOrEqual(25)
-        expect(cielab(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(29.5)
-        // the floor of the dataviz validator: orange and gold were 12.7 apart on the light papers, and read as one
+    for (const { colours } of cases) {
+      for (let i = 1; i < colours.length; i++) {
+        const [a, b] = [colours[i - 1], colours[i]]
         expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
         for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
       }
+      for (let i = 0; i < colours.length; i++) for (let j = i + 1; j < colours.length; j++) expect(apart(colours[i], colours[j]), `${colours[i]} and ${colours[j]}`).toBeGreaterThanOrEqual(7.5)
+    }
+  })
+
+  test('each place is the hue its name says: show_label names the place a stored color takes, so a place keeps its hue', () => {
+    for (const { t } of cases) {
+      expect(Object.keys(NAMES).sort()).toEqual(Object.keys(FAMILY).sort())
+      expect(Object.values(NAMES).sort((a, b) => a - b)).toEqual(Array.from({ length: 18 }, (_, i) => i + 1))
+      for (const [name, [lo, hi]] of Object.entries(FAMILY)) {
+        const c = t[place(name)]
+        const hue = chromaHue(c)[1]
+        expect(hue >= lo && hue < hi, `${place(name)} ${c} is not ${name} (hue ${hue.toFixed(0)})`).toBe(true)
+      }
+      const [chroma, hue, light] = [(n: string) => chromaHue(t[place(n)])[0], (n: string) => chromaHue(t[place(n)])[1], (n: string) => lightness(t[place(n)])]
+      expect(chroma('orange'), 'orange is the vivid one of its family').toBeGreaterThan(Math.max(chroma('brown'), chroma('chestnut')))
+      expect(hue('brown'), 'brown is yellower than chestnut').toBeGreaterThan(hue('chestnut'))
+      expect(chroma('grass green'), 'grass is more vivid than green').toBeGreaterThan(chroma('green'))
+      expect(light('sky blue'), 'sky is lighter than cerulean').toBeGreaterThan(light('cerulean'))
+      expect(chroma('sky blue'), 'sky is more vivid than cerulean').toBeGreaterThan(chroma('cerulean'))
+      expect(chroma('blue'), 'blue is more vivid than navy').toBeGreaterThan(chroma('navy'))
+      for (const n of ['red', 'purple', 'pink']) expect(chroma(n), `${n} is more vivid than dark ${n}`).toBeGreaterThan(chroma(`dark ${n}`))
+    }
+  })
+
+  test('the first five new values take (LABEL_ORDER), which a field of five values shows side by side, are five hues with no second blue, 15 apart in OKLab, also under protan and deutan vision', () => {
+    for (const { t } of cases) {
+      const five = LABEL_ORDER.slice(0, 5).map((n) => t[`--label-${n}`])
+      expect(LABEL_ORDER.slice(0, 5).map((n) => Object.keys(NAMES).find((k) => NAMES[k] === n))).toEqual(['blue', 'orange', 'green', 'olive', 'teal'])
+      for (let i = 0; i < 5; i++)
+        for (let j = i + 1; j < 5; j++) {
+          const [a, b] = [five[i], five[j]]
+          const dh = Math.abs(chromaHue(a)[1] - chromaHue(b)[1])
+          expect(Math.min(dh, 360 - dh), `${a} and ${b} are one hue`).toBeGreaterThanOrEqual(25)
+          expect(cielab(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(29.5)
+          // the floor of the dataviz validator: orange and gold were 12.7 apart on the light papers, and read as one
+          expect(apart(a, b), `${a} and ${b}`).toBeGreaterThanOrEqual(15)
+          for (const v of ['protan', 'deutan']) expect(apart(a, b, v), `${a} and ${b} under ${v}`).toBeGreaterThanOrEqual(8)
+        }
+    }
   })
 
   test('chestnut and brown stay apart from orange, and navy from sky', () => {
-    const [orange, sky, brown, navy, chestnut] = ['orange', 'sky blue', 'brown', 'navy', 'chestnut'].map((n) => t[place(n)])
-    expect(cielab(chestnut, orange), `${chestnut} and ${orange}`).toBeGreaterThanOrEqual(30)
-    // the dataviz floor too: Dark's chestnut #f1a271 was 12.8 from orange in OKLab, and beside it read as one orange
-    expect(apart(chestnut, orange), `${chestnut} and ${orange}`).toBeGreaterThanOrEqual(15)
-    expect(cielab(brown, orange), `${brown} and ${orange}`).toBeGreaterThanOrEqual(28)
-    expect(cielab(navy, sky), `${navy} and ${sky}`).toBeGreaterThanOrEqual(23)
+    for (const { t } of cases) {
+      const [orange, sky, brown, navy, chestnut] = ['orange', 'sky blue', 'brown', 'navy', 'chestnut'].map((n) => t[place(n)])
+      expect(cielab(chestnut, orange), `${chestnut} and ${orange}`).toBeGreaterThanOrEqual(30)
+      // the dataviz floor too: Dark's chestnut #f1a271 was 12.8 from orange in OKLab, and beside it read as one orange
+      expect(apart(chestnut, orange), `${chestnut} and ${orange}`).toBeGreaterThanOrEqual(15)
+      expect(cielab(brown, orange), `${brown} and ${orange}`).toBeGreaterThanOrEqual(28)
+      expect(cielab(navy, sky), `${navy} and ${sky}`).toBeGreaterThanOrEqual(23)
+    }
   })
 })

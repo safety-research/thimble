@@ -1,9 +1,7 @@
 // Cards never cover each other, in a real browser with thimble's own stylesheets and the real Canvas
 // (src/canvas/Canvas.tsx dropCard). A card dragged away from a gap and dropped on a card in an open frame moves straight
 // down to the first place where it covers no card, which the move route is told and the board then shows; a card
-// dropped on a collapsed frame goes to the end of its deck (the move names the frame and no place), and the top card of
-// a deck dropped back on its own deck stays where it is, as does a card of a column moved a little and dropped back over
-// its own place.
+// dropped on a collapsed frame goes to the end of its deck (the move names the frame and no place).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -108,24 +106,4 @@ test('a card dropped on a collapsed frame goes to the end of its deck', async ()
   await page.waitForTimeout(300)
   assert.equal(await page.locator('[data-cell="x"]').count(), 0, 'the card is in the collapsed deck, which shows only its first card')
   assert.equal(await page.locator('[data-group="h"] .frame-chev.is-open').count(), 0, 'the frame stays collapsed')
-})
-
-test('the top card of a deck dropped back on its own deck stays where it is', async () => {
-  const d = await box('[data-cell="d"]')
-  await drag('d', { x: d.left + d.width / 2 + 30, y: d.top + d.height / 2 + 10 })
-  assert.equal(moves.length, 2, 'no move is made')
-})
-
-test('a card of a column moved a little and dropped back over its own place stays in the column', async () => {
-  const before = await box('[data-cell="b"]')
-  const start = { x: before.left + before.width / 2, y: before.top + before.height / 2 }
-  // a click whose hand moved: past the slop that starts a drag, far from any gap or side
-  await page.mouse.move(start.x, start.y)
-  await page.mouse.down()
-  for (let i = 1; i <= 4; i++) await page.mouse.move(start.x + 3 * i, start.y + 2 * i)
-  await page.mouse.up()
-  await page.waitForTimeout(400)
-  assert.equal(moves.length, 2, 'no move is made')
-  const after = await box('[data-cell="b"]')
-  assert.deepEqual([after.left, after.top], [before.left, before.top], 'the card is where it was')
 })

@@ -7,7 +7,6 @@
 // shows no tint: the tint waits TINT_DELAY_MS after ⌘ goes down and goes at the next key.
 import { api } from './api'
 import { bus } from './bus'
-import { demoStop } from './demo'
 import { isMacPlatform, isModKey, modKeyHeld } from './platform'
 
 /** How long (ms) ⌘ stays down alone before the tint shows. */
@@ -59,7 +58,7 @@ function onKeyDown(e: KeyboardEvent): void {
     e.preventDefault()
     e.stopImmediatePropagation()
     clear()
-    if (!demoStop()) t.send()
+    t.send()
     return
   }
   if (isModKey(e.key, mac)) {

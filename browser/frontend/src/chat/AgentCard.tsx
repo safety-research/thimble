@@ -25,7 +25,7 @@ import { teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import type { ChatMeta, ChatRecord } from '../lib/types'
 import { ApiErrorCard } from './ApiError'
-import { TERMINAL_WAIT, terminalWaits, waitingAt } from './waiting'
+import { waitingAt } from './waiting'
 import { agentChipName, agentFiles, apiErrorAt, changeSummary, deckCards, durationText, foldRecords, followUpSummary, lastRowTs, leadText, madeBy, madeCards, orientMade, orientRuns, orientWriterOf, orientWriters, reviewList, sessionSteps, stripHarness, taskTitle, toolSteps, type Made, type OrientWriter, type Row } from './model'
 import { openThread, ThreadChip, ThreadsContext } from './Notes'
 import { DocChip, GroupChip, LabelChip } from './SurfaceChips'
@@ -272,36 +272,27 @@ function WriteAgain({ ws, request }: { ws: string; request: string }) {
   )
 }
 
-/** What a subagent's card says under its steps, or null when it says nothing: that it waits on a permission prompt in
- * the terminal, its own or one of its steps' (`terminal`, TERMINAL_WAIT, in place of `paused`), that the orientation
- * waits for its critic (`paused`), why it stopped (`stopped`), Write again on a writer that main's quit stopped
+/** What a subagent's card says under its steps, or null when it says nothing: that the orientation waits for its critic
+ * (`paused`), why it stopped (`stopped`), Write again on a writer that main's quit stopped
  * (`again`, its request), and, while thimble's module is not in main's session, how to stop it in the terminal
  * (`noStop`). Nothing else says where the terminal shows the agent, in any state. Pure. */
-export function subagentNotes(meta: ChatMeta | null, running: boolean, noModule = false, back = false, inTerminal = false): { terminal: boolean; paused: boolean; stopped: string; again: string | null; noStop: boolean } | null {
+export function subagentNotes(meta: ChatMeta | null, running: boolean, noModule = false, back = false): { paused: boolean; stopped: string; again: string | null; noStop: boolean } | null {
   if (!isSubagent(meta)) return null
-  const terminal = running && inTerminal
   const n = {
-    terminal,
-    paused: running && !terminal && meta?.paused === 'critique',
+    paused: running && meta?.paused === 'critique',
     stopped: stoppedLine(meta, back && meta?.continue === 'here'),
     again: (meta?.role === 'writer' && meta.stopped_by === 'quit' && !running && meta.request) || null,
     noStop: running && noModule,
   }
-  return n.terminal || n.paused || n.stopped || n.again || n.noStop ? n : null
+  return n.paused || n.stopped || n.again || n.noStop ? n : null
 }
 
 /** The notes of a subagent's card (subagentNotes), drawn; nothing when there are none. */
-export function SubagentNotes({ ws, meta, running, noModule = false, back = false, inTerminal = false }: { ws: string; meta: ChatMeta | null; running: boolean; noModule?: boolean; back?: boolean; inTerminal?: boolean }) {
-  const n = subagentNotes(meta, running, noModule, back, inTerminal)
+export function SubagentNotes({ ws, meta, running, noModule = false, back = false }: { ws: string; meta: ChatMeta | null; running: boolean; noModule?: boolean; back?: boolean }) {
+  const n = subagentNotes(meta, running, noModule, back)
   if (!n) return null
   return (
-    <div className="chat-sub-notes" data-paused={meta?.paused ?? undefined} data-terminal={n.terminal || undefined}>
-      {n.terminal && (
-        <p className="chat-sub-paused chat-sub-terminal" role="status">
-          <span className="dot tt-waiting chat-sub-wait-dot" aria-hidden="true" />
-          <span>{TERMINAL_WAIT}</span>
-        </p>
-      )}
+    <div className="chat-sub-notes" data-paused={meta?.paused ?? undefined}>
       {n.paused && (
         <p className="chat-sub-paused" role="status">
           <Spinner size={10} label={PAUSED_LINE} />
@@ -465,10 +456,8 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     setStopping(true)
     void stopSession(ws, chat, role).finally(() => setStopping(false))
   }
-  // waiting on a permission prompt Claude Code asks in the terminal, its own or one of its steps' (chat/waiting.ts)
-  const inTerminal = useMemo(() => running && terminalWaits(main, metas?.values()).has(chat), [running, main, metas, chat])
-  // what the card says of the agent besides its steps: its wait in the terminal or for its critic, why it stopped
-  const notes = own && !followUp && subagentNotes(meta, running, noModule, !!main?.attached, inTerminal) ? <SubagentNotes ws={ws} meta={meta} running={running} noModule={noModule} back={!!main?.attached} inTerminal={inTerminal} /> : null
+  // what the card says of the agent besides its steps: its wait for its critic, why it stopped
+  const notes = own && !followUp && subagentNotes(meta, running, noModule, !!main?.attached) ? <SubagentNotes ws={ws} meta={meta} running={running} noModule={noModule} back={!!main?.attached} /> : null
   // waiting for the analyst: on its own prompt, or on its critique's (chat/waiting.ts)
   const waitingFor = useMemo(() => {
     if (!running) return null
@@ -476,7 +465,7 @@ function AgentCardView({ ws, chat, role, title, ts, log, openWhileRunning = fals
     if (meta) all.set(meta.id, meta) // the card's own read, which may be newer than the list's
     return waitingAt(chat, all.values())
   }, [running, chat, meta, metas])
-  const waiting = !!waitingFor || inTerminal
+  const waiting = !!waitingFor
   // the orientation's cards that name no group are in its deck (backend tools.default_group), so they count there; a
   // view an orientation from before 0.8.0 proposed that was dropped when the analyst stopped it is not among what it
   // made

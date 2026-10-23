@@ -2,8 +2,7 @@
 // keyed by slug, followed by its build state. Each build is a view builder, a subagent of the analyst's Claude Code
 // session (`thimble:view-builder`). Queued: at most VIEW_POOL build at once, so the chip says how many build ahead of it.
 // Building: a spinner, a click opens the build's thread (each gate shows there as a step), its tooltip says where the
-// terminal shows it, and a repair (a fresh builder after a build that failed for good) says which of VIEW_REPAIRS it is;
-// while Claude Code asks its builder a permission prompt in the terminal, a still warning dot and words that say so.
+// terminal shows it, and a repair (a fresh builder after a build that failed for good) says which of VIEW_REPAIRS it is.
 // Built: a click opens the view (with Open after it while the analyst has not opened it yet, files/viewReady.ts).
 // Failed (a view the analyst asked for, or one nobody asked for after its repairs), or stopped when the analyst's
 // Claude Code session ended: ✕ with why in its tooltip, Retry, and Report a problem (shell/ProblemReport); Retry is a
@@ -22,14 +21,12 @@ import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { demoStop } from '../lib/demo'
 import { hasEffort, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { findProposal, refreshProposals, useProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
 import { teleport } from '../lib/teleport'
 import type { Proposal, Settings, StartAnswer } from '../lib/types'
 import { failureText, ReportProblemButton } from '../shell/ProblemReport'
-import { TERMINAL_WAIT, useTerminalWaits } from './waiting'
 import { useReadyViews } from '../files/viewReady'
 import { AGENT_EFFORTS } from './ModelLine'
 import { openThread } from './Notes'
@@ -141,9 +138,6 @@ export function ViewChip({ ws, slug, name, className }: Props) {
   }, [ws])
   const key = p?.slug ?? slug ?? null
   const status = p?.status ?? null
-  // its builder waits on a permission prompt in the terminal (chat/waiting.ts), read while it builds
-  const terminal = useTerminalWaits(ws, status === 'building' && !!p?.chat)
-  const inTerminal = status === 'building' && !!p?.chat && terminal.has(p.chat)
   if (status === 'dropped') return null
   const pending = status === 'queued' || status === 'building'
   const changeFailed = status === 'built' && p?.failed_change != null
@@ -166,7 +160,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
   }
   // Retry and Try again: a new builder through thimble's plugin, with the Build menu's values
   const retry = () => {
-    if (!p || demoStop()) return
+    if (!p) return
     track('view-build', { target: `view:${p.slug}`, detail: { again: true, ...values } })
     setRetrying(true)
     api
@@ -201,8 +195,8 @@ export function ViewChip({ ws, slug, name, className }: Props) {
       <ViewTab name={name} className="view-chip-chip" onClick={clickable ? (e) => (e.stopPropagation(), open()) : undefined} />
       {pending && (
         <Tipped text={status === 'building' ? BUILD_TERMINAL_TIP : `At most ${VIEW_POOL} views build at once`} className="view-chip-state">
-          {inTerminal ? <span className="dot tt-waiting view-chip-wait" role="img" aria-label={TERMINAL_WAIT} /> : <Spinner size={10} label={status === 'queued' ? 'Queued' : 'Building'} />}
-          <span className="view-chip-word">{status === 'queued' ? queuedText(proposals ?? []) : inTerminal ? TERMINAL_WAIT.toLowerCase() : buildingText(p)}</span>
+          <Spinner size={10} label={status === 'queued' ? 'Queued' : 'Building'} />
+          <span className="view-chip-word">{status === 'queued' ? queuedText(proposals ?? []) : buildingText(p)}</span>
         </Tipped>
       )}
       {status === 'built' && !changeFailed && key && ready.includes(key) && (

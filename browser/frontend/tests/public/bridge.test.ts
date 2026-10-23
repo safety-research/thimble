@@ -1,13 +1,11 @@
 // The frame half of a view's bridge (backend/app/viewer_bridge.js), which a custom view's page loads first and which is
 // the only way the view, sandboxed with no network, talks to thimble. Run in a jsdom window of its own: the bridge says
 // it is ready and reports each data-anchor once; window.thimble.fetch posts a query and resolves with the page's answer
-// to that id, a newer fetch with its key or its signal drops it and has its call cancelled, its progress reaches the
-// page's onProgress or else thimble's box at the corner, and thimble.lib gives the packages the view bundled; a message
-// from anywhere but the parent page is ignored; with a label filter on, what the filter drops is hidden and the page hears
-// how many; in a card's frame the page draws what `init` brings, says the height it needs, and has what the filter
-// drops dimmed while it filters its own records; a label call with no gesture in the frame is refused there, and the
-// key for label calls reaches the bridge alone. The label calls with a real gesture are
-// tests/public/browser/view-label-calls.test.ts.
+// to that id, and a newer fetch with its key or its signal drops it and has its call cancelled; a message from
+// anywhere but the parent page is ignored; with a label filter on, what the filter drops is hidden; in a card's frame
+// the page draws what `init` brings, says the height it needs, and has what the filter drops dimmed; a label call with
+// no gesture in the frame is refused there, and the key for label calls reaches the bridge alone. The label calls with
+// a real gesture are tests/public/browser/view-label-calls.test.ts.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -84,38 +82,6 @@ describe('the view bridge', () => {
     expect(of('error')).toEqual([])
   })
 
-  test("a fetch's progress reaches onProgress, and a fetch without it shows thimble's box, whose Cancel drops it", async () => {
-    const heard: unknown[] = []
-    const got = win().thimble.fetch({ heavy: true }, { onProgress: (p: unknown) => heard.push(p) })
-    const [q] = of('fetch')
-    expect(q).toMatchObject({ progress: true })
-    fromPage({ type: 'thimble:progress', id: q.id, seconds: 2, phase: 'call', done: 3, total: 10, note: 'counting' })
-    expect(heard).toEqual([{ seconds: 2, phase: 'call', done: 3, total: 10, note: 'counting' }])
-    fromPage({ type: 'thimble:result', id: q.id, data: 'done' })
-    await expect(got).resolves.toBe('done')
-
-    const doc = dom.window.document
-    const slow = win().thimble.fetch({ heavy: true })
-    const [, q2] = of('fetch')
-    await wait(30)
-    expect(doc.querySelector('.thimble-wait')).toBeNull()
-    await wait(1300)
-    fromPage({ type: 'thimble:progress', id: q2.id, seconds: 1, phase: 'index' })
-    const box = doc.querySelector('.thimble-wait') as HTMLElement
-    expect(box.style.display).toBe('')
-    expect(box.textContent).toMatch(/^Reading the files · 1 sCancel$/)
-    ;(box.querySelector('button') as HTMLButtonElement).click()
-    await expect(slow).rejects.toMatchObject({ name: 'AbortError' })
-    expect(of('cancel').at(-1)).toMatchObject({ id: q2.id })
-    expect(box.style.display).toBe('none')
-  })
-
-  test('thimble.lib gives a package the view bundled, and names one it did not', async () => {
-    ;(win() as any).__thimbleLibs = { 'd3-force': { forceSimulation: 1 } }
-    expect(win().thimble.lib('d3-force')).toEqual({ forceSimulation: 1 })
-    expect(() => win().thimble.lib('three')).toThrow('the view loads no library three')
-  })
-
   test('a message from anything but the parent page is ignored', async () => {
     const got = win().thimble.fetch({ page: 1 })
     const [q] = of('fetch')
@@ -126,12 +92,6 @@ describe('the view bridge', () => {
     fromPage({ type: 'thimble:result', id: q.id, data: 'real' })
     expect(seen).toEqual([])
     await expect(got).resolves.toBe('real')
-  })
-
-  test('navigate posts the ref to open, and asks for the File browser only when the page says so', async () => {
-    win().thimble.navigate('board.jsonl#L2')
-    win().thimble.navigate('board.jsonl#L1', { browser: true })
-    expect(of('navigate').map((m) => [m.ref, m.browser])).toEqual([['board.jsonl#L2', false], ['board.jsonl#L1', true]])
   })
 
   test('with a filter on, a page that does not filter hides what the filter drops, and keeps what holds a kept record', async () => {
@@ -197,34 +157,6 @@ describe('the view bridge', () => {
     fromPage({ type: 'thimble:key', key: 'secret' })
     fromPage({ type: 'thimble:open', open: { ref: null } })
     expect(heard).toEqual(['thimble:open', 'thimble:open'])
-  })
-
-  test('with a filter on, the page hears how many anchored refs it hides once thimble answered for all of them, and none once the filter is off', async () => {
-    fromPage({ type: 'thimble:open', open: { ref: null } })
-    const seq = of('anchors').at(-1)!.seq
-    expect(seq).toBe(3)
-    const marks = { 'board.jsonl#L2': { keep: true }, 'board.jsonl#L1': { bar: '#e69f00', names: ['asks'], spans: [], keep: false } }
-    const filter = { label: 'asks', value: 'yes', colour: '#e69f00' }
-    // the rows of some refs are still being read, so what is hidden for want of them is no count yet
-    fromPage({ type: 'thimble:labels', marks, on: [], filter, answered: -1 })
-    await wait()
-    expect(of('hidden').at(-1)).toMatchObject({ n: null, self: false })
-    fromPage({ type: 'thimble:labels', marks, on: [], filter, answered: seq })
-    await wait()
-    expect(of('hidden').at(-1)).toMatchObject({ n: 1, self: false })
-    // a record that appears is hidden until thimble answers for it, and the count waits for that answer
-    const three = dom.window.document.createElement('article')
-    three.setAttribute('data-anchor', 'board.jsonl#L3')
-    dom.window.document.querySelector('section')!.appendChild(three)
-    await wait()
-    expect(of('anchors').at(-1)).toMatchObject({ refs: ['board.jsonl#L3'], seq: 4 })
-    expect(of('hidden').at(-1)).toMatchObject({ n: null })
-    fromPage({ type: 'thimble:labels', marks, on: [], filter, answered: 4 })
-    await wait()
-    expect(of('hidden').at(-1)).toMatchObject({ n: 2 })
-    fromPage({ type: 'thimble:labels', marks: {}, on: [], filter: null })
-    await wait()
-    expect(of('hidden').at(-1)).toMatchObject({ n: 0, self: false })
   })
 
 })

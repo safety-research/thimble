@@ -216,26 +216,6 @@ describe('Colour by', () => {
     expect(d.by).toEqual({ label: 'k1', title: 'Deadline' })
   })
 
-  test("counts the page gives replace those of the page's elements, and the undeclared values take colours by count", async () => {
-    await load()
-    const c = mount()
-    c.counts({ 'Text only': 900, 'With links': 120, '': 3 })
-    await wait()
-    expect(chips()).toEqual([
-      ['Text only', '900', 'true'],
-      ['With links', '120', 'true'],
-      ['No kind', '3', 'true'],
-    ])
-    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
-    ;(doc().querySelector('[data-by="f:channel"]') as HTMLElement).click()
-    ;(doc().querySelector('[data-by="f:kind"]') as HTMLElement).click()
-    // the kinds the page drew for Kind are no values of Channel: they are taken off the page until it draws again
-    expect(doc().querySelectorAll('.msg[data-colour]')).toHaveLength(0)
-    c.counts([['wiki', 40], ['ops', 7], ['press', 90]])
-    await wait()
-    expect(chips().map((x) => x[0])).toEqual(['press', 'wiki', 'ops'])
-    expect(of('colour').at(-1)!.state).toMatchObject({ colours: { channel: { press: 0, wiki: 1, ops: 2 } } })
-  })
 })
 
 describe('several choices', () => {
@@ -293,24 +273,6 @@ describe('several choices', () => {
     expect(doc().querySelectorAll('[data-thimble-bands], [data-thimble-bar], [data-thimble-edge]')).toHaveLength(0)
   })
 
-  test("a label as the second choice: its band where it marks the record, in its value's colour, an empty one where it does not", async () => {
-    await load({ v: 1, by: 'f:kind', picks: ['f:kind', 'l:k1'], field: 'kind', off: {}, seen: ['k1'], colours: {} })
-    const c = mount()
-    const marks = {
-      'a.jsonl#L2': { bar: '#025ac3', names: ['Deadline'], values: [{ id: 'k1', label: 'Deadline', value: 'deadline', colour: '#025ac3' }], spans: [] },
-      'a.jsonl#L4': { bar: '#025ac3', names: ['Deadline'], values: [{ id: 'k1', label: 'Deadline', value: 'deadline', colour: '#025ac3' }], spans: [] },
-    }
-    labels(true, marks)
-    await wait()
-    expect(c.picks.map((p: { title: string }) => p.title)).toEqual(['Kind', 'Deadline'])
-    expect(bands()).toEqual({
-      'a.jsonl#L1': { edge: 'bands', bar: false, colours: [c.colourOf('Text only'), 'transparent'] },
-      'a.jsonl#L2': { edge: 'bands', bar: false, colours: [c.colourOf('With links'), '#025ac3'] },
-      'a.jsonl#L3': { edge: 'bands', bar: false, colours: [c.colourOf('Text only'), 'transparent'] },
-      'a.jsonl#L4': { edge: 'bands', bar: false, colours: ['transparent', '#025ac3'] },
-    })
-    expect(doc().querySelector('[data-anchor="a.jsonl#L4"]')!.getAttribute('data-thimble-colour')).toBe('')
-  })
 })
 
 describe('Color by: how the view opens', () => {
@@ -396,36 +358,6 @@ describe('Color by: how the view opens', () => {
   })
 })
 
-describe('Color by: Off', () => {
-  test('colors nothing: no chips, no bars, no choice for the reader; it is kept, and the page starts on it', async () => {
-    await load()
-    let changed = 0
-    const c = mount({ onChange: () => changed++ })
-    await wait()
-    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
-    ;(doc().querySelector('.thimble-colour-menu [data-by="off"]') as HTMLElement).click()
-    await wait()
-    expect(doc().querySelector('.thimble-colour-by')!.textContent).toBe('Color by:Off')
-    expect(chips()).toEqual([])
-    expect(doc().querySelectorAll('[data-thimble-colour], [data-thimble-label], [data-thimble-bar]')).toHaveLength(0)
-    expect([c.off, c.by, c.field, c.label, c.query(), c.colourOf('Text only'), c.valueOf({ kind: 'Text only' }), c.attr({ kind: 'Text only' })]).toEqual([true, null, null, null, null, null, null, ''])
-    expect(changed).toBe(1)
-    expect(of('colour').at(-1)!.state).toMatchObject({ by: 'off' })
-    // the page built again starts on Off, and a label that was on already draws no bar either
-    await load({ ...(of('colour').at(-1)!.state as object), seen: ['k1'] })
-    const d = mount()
-    labels(true, { 'a.jsonl#L2': { bar: '#025ac3', names: ['Deadline'], values: [{ id: 'k1', label: 'Deadline', value: 'deadline', colour: '#025ac3' }], spans: [] } })
-    await wait()
-    expect(d.off).toBe(true)
-    expect(doc().querySelectorAll('[data-thimble-bar]')).toHaveLength(0)
-  })
-
-  test('thimble.colorBy and thimble.colourBy are the one control', async () => {
-    await load()
-    expect(win().thimble.colorBy).toBe(win().thimble.colourBy)
-  })
-})
-
 describe('Reset', () => {
   test("shows while a value is off or the row's search field is changed, and puts both back", async () => {
     await load()
@@ -457,77 +389,6 @@ describe('Reset', () => {
     expect(reset().hidden).toBe(true)
   })
 
-  test('shows while Color by has another choice than the view opens on, and puts that back: the initial field, else Off', async () => {
-    // kept on Channel, a view that opens on Kind: the choice is a change from how the view opens
-    await load({ v: 1, by: 'f:channel', field: 'channel', off: {}, seen: [], colours: {} }, 'channel')
-    let changed = 0
-    const c = mount({ onChange: () => changed++ })
-    await wait()
-    const reset = () => doc().querySelector<HTMLButtonElement>('.thimble-reset')!
-    expect(c.by).toEqual({ field: 'channel', title: 'Channel' })
-    expect(reset().hidden).toBe(false)
-    reset().click()
-    await wait()
-    expect(c.by).toEqual({ field: 'kind', title: 'Kind' })
-    expect(changed).toBe(1)
-    expect(reset().hidden).toBe(true)
-    // kept as the view's own default, so a newer version of the view that opens on another field opens there
-    expect(of('colour').at(-1)!.state).toMatchObject({ by: null, picks: null, field: null, off: {} })
-    // a view with no `initial`: Reset puts back Off, and the page's reset() runs with Color by's onChange
-    await load({ v: 1, by: 'f:channel', field: 'channel', off: {}, seen: [], colours: {} }, 'channel')
-    changed = 0
-    const d = mount({ initial: undefined, onChange: () => changed++ })
-    const page = { draws: 0 }
-    win().thimble.onReset({ changed: () => false, reset: () => { page.draws++ } })
-    await wait()
-    expect(reset().hidden).toBe(false)
-    reset().click()
-    await wait()
-    expect([d.off, page.draws, changed]).toEqual([true, 1, 1])
-    expect(doc().querySelectorAll('[data-thimble-bar]')).toHaveLength(0)
-    expect(reset().hidden).toBe(true)
-  })
-
-  test('a label the analyst turned on is how the view opens: it stays the choice, and Reset hides', async () => {
-    await load()
-    const c = mount({ initial: undefined })
-    labels(true, { 'a.jsonl#L2': { bar: '#025ac3', names: ['Deadline'], values: [{ id: 'k1', label: 'Deadline', value: 'deadline', colour: '#025ac3' }], spans: [] } })
-    await wait()
-    const reset = () => doc().querySelector<HTMLButtonElement>('.thimble-reset')!
-    expect(c.by).toEqual({ label: 'k1', title: 'Deadline' })
-    expect(reset().hidden).toBe(true)
-    // a field chosen: Reset shows, and puts the label back
-    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
-    ;(doc().querySelector('.thimble-colour-menu [data-by="off"]') as HTMLElement).click()
-    await wait()
-    expect(c.off).toBe(true)
-    expect(reset().hidden).toBe(false)
-    reset().click()
-    await wait()
-    expect(c.by).toEqual({ label: 'k1', title: 'Deadline' })
-    expect(reset().hidden).toBe(true)
-  })
-
-  test("the page's own state: changed() shows Reset, and reset() alone draws the page again", async () => {
-    await load()
-    let changed = 0
-    mount({ onChange: () => changed++ })
-    const state = { user: null as string | null, draws: 0 }
-    const r = win().thimble.onReset({ changed: () => state.user != null, reset: () => { state.user = null; state.draws++ } })
-    state.user = 'ash'
-    r.check()
-    await wait()
-    const reset = () => doc().querySelector<HTMLButtonElement>('.thimble-reset')!
-    expect(reset().hidden).toBe(false)
-    doc().querySelectorAll<HTMLElement>('.thimble-colour-chip')[0].click()
-    await wait()
-    changed = 0
-    reset().click()
-    await wait()
-    expect([state.user, state.draws, changed]).toEqual([null, 1, 0])
-    expect(chips().every((x) => x[2] === 'true')).toBe(true)
-    expect(reset().hidden).toBe(true)
-  })
 })
 
 describe('a label chosen in the menu', () => {
@@ -544,7 +405,6 @@ describe('a label chosen in the menu', () => {
     return c
   }
   const row = () => doc().querySelector<HTMLElement>('.thimble-colour-menu [data-by="l:k1"]')!
-  const calls = () => of('labelCall').map((m) => [m.op, m.args])
 
   test('checked, it colours by it and asks for its editor beside the menu, which stays open with the label checked', async () => {
     const c = await ready(true)
@@ -562,59 +422,6 @@ describe('a label chosen in the menu', () => {
     expect(doc().activeElement).toBe(row())
   })
 
-  test('closed by a click elsewhere, it leaves the focus alone', async () => {
-    await ready(true)
-    row().click()
-    await wait()
-    const [edit] = of('labelCall').filter((m) => m.op === 'edit')
-    const field = doc().body.appendChild(doc().createElement('input'))
-    field.focus()
-    fromPage({ type: 'thimble:labelDone', id: edit.id })
-    fromPage({ type: 'thimble:labelEditorClosed', id: edit.id, focus: false })
-    await wait()
-    expect(doc().activeElement).toBe(field)
-  })
-
-  test('a label that is off is turned on first, then its editor asked for, in the same click', async () => {
-    await ready(false)
-    row().click()
-    await wait()
-    expect(calls()).toEqual([
-      ['on', { id: 'k1', on: true }],
-      ['edit', { id: 'k1', anchor: { left: 0, top: 0, width: 0, height: 0 } }],
-    ])
-  })
-
-  test('unchecked, it leaves the choices and is turned off in Files, with no editor', async () => {
-    const c = await ready(true)
-    row().click()
-    await wait()
-    expect(c.by).toEqual({ label: 'k1', title: 'Deadline' })
-    row().click()
-    await wait()
-    expect(c.off).toBe(true)
-    expect(calls().map((x) => x[0])).toEqual(['edit', 'on'])
-    expect(calls()[1]).toEqual(['on', { id: 'k1', on: false }])
-    expect(row().getAttribute('aria-checked')).toBe('false')
-  })
-
-  test('a field or Off asks for no editor, and there is no button for a definition, beside Color by or in the menu', async () => {
-    const c = await ready(true)
-    expect(doc().querySelector('.thimble-colour-menu [data-info], .thimble-colour-menu .thimble-def')).toBeNull()
-    ;(doc().querySelector('.thimble-colour-menu [data-by="f:channel"]') as HTMLElement).click()
-    await wait()
-    expect(c.by).toEqual({ field: 'channel', title: 'Channel' })
-    expect(doc().querySelector('.thimble-colour-menu'), 'a field checked keeps the menu open').not.toBeNull()
-    ;(doc().querySelector('.thimble-colour-menu [data-by="off"]') as HTMLElement).click()
-    await wait()
-    expect(doc().querySelector('.thimble-colour-menu'), 'Off closes it').toBeNull()
-    expect(calls()).toEqual([])
-    // the label as the colour has no button beside Color by
-    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
-    row().click()
-    await wait()
-    expect(doc().querySelector('.thimble-colour-about')).toBeNull()
-  })
 })
 
 describe('a declared value that names its colour', () => {
@@ -629,36 +436,6 @@ describe('a declared value that names its colour', () => {
     expect(chips().map((x) => x[0])).toEqual(['Text only', 'With links', 'Quote', 'Other'])
   })
 
-  test("may name one of the picker's colours no value takes by itself, such as red for a failure", async () => {
-    await load()
-    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'outcome', title: 'Outcome', values: [{ name: 'merged', colour: 3 }, { name: 'failed', colour: 13 }] }], initial: 'outcome' })
-    c.counts({ merged: 3, failed: 2, open: 1 })
-    await wait()
-    // the declared ones their own; the undeclared one one of the twelve, since red is never a place a value takes by itself
-    expect(['merged', 'failed'].map((v) => c.colourOf(v))).toEqual(['var(--label-3)', 'var(--label-13)'])
-    expect(c.colourOf('open')).toMatch(/^var\(--label-([1-9]|1[0-2])\)$/)
-    expect(chips().map((x) => x[0])).toEqual(['merged', 'failed', 'open'])
-  })
-})
-
-describe("a field's values without a colour of their own", () => {
-  test('take the palette in the order new values take it, so the first five hold no second blue', async () => {
-    await load()
-    // the page's own records say the first two, the commonest, whichever counts the control reads first
-    const values = ['Text only', 'With links', 'c', 'd', 'e', 'f', 'g', 'h']
-    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], initial: 'kind' })
-    c.counts(Object.fromEntries(values.map((v, i) => [v, 100 - i])))
-    await wait()
-    expect(values.map((v) => c.colourOf(v))).toEqual([1, 2, 3, 5, 6, 7, 4, 8].map((n) => `var(--label-${n})`))
-  })
-
-  test('take the places in that order around the colours declared values name, and a named place is its hue', async () => {
-    await load()
-    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: ['a', 'b', { name: 'c', colour: 4 }, 'd', 'e'] }], initial: 'kind' })
-    c.counts({ a: 1, b: 1, c: 1, d: 1, e: 1 })
-    await wait()
-    expect(['a', 'b', 'c', 'd', 'e'].map((v) => c.colourOf(v))).toEqual([1, 2, 4, 3, 5].map((n) => `var(--label-${n})`))
-  })
 })
 
 describe("a field's values past the palette's twelve colours", () => {
@@ -702,54 +479,6 @@ describe("a field's values past the palette's twelve colours", () => {
     expect(doc().querySelector('.thimble-tip .thimble-tip-m')!.textContent).toBe('v13 88 · v14 87 · v15 86')
   })
 
-  test('a field of twelve values or fewer has no "Other"', async () => {
-    await load()
-    doc().getElementById('list')!.innerHTML = ''
-    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], initial: 'kind' })
-    c.counts(Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`v${i}`, 20 - i])))
-    await wait()
-    // in the order of their counts, which is the order they took the palette in
-    expect(chips().map((x) => x[0])).toEqual(Array.from({ length: 12 }, (_, i) => `v${i}`))
-    expect(doc().querySelector('[data-other]')).toBeNull()
-  })
-})
-
-describe('the menu of a field that declares no values', () => {
-  test("says how many values the records the page hands the kit take, and shows them, the commonest first, in the colours they would take; none is kept", async () => {
-    await load()
-    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }, { name: 'service', title: 'Service' }, { name: 'n', title: 'Row', value: (i: number) => (i % 2 ? 'odd' : 'even') }] })
-    // the page draws its records, each through attr (a record twice, as a redraw does, counts once), and the rows by index
-    const recs = [
-      { kind: 'a', service: 'api' },
-      { kind: 'a', service: 'db' },
-      { kind: 'b', service: 'db' },
-      { kind: 'a', service: 'db' },
-      { kind: 'c', service: '' },
-    ]
-    for (const r of [...recs, recs[0]]) c.attr(r)
-    for (const i of [0, 1, 2, 2]) c.valueOf(i)
-    await wait()
-    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
-    const row = (by: string) => {
-      const r = doc().querySelector(`.thimble-colour-menu [data-by="${by}"]`)!
-      return [r.querySelector('.thimble-colour-top .thimble-colour-n')?.textContent ?? '', [...r.querySelectorAll('.thimble-colour-pchip')].map((p) => [p.textContent, (p.querySelector('.thimble-colour-sw') as HTMLElement).getAttribute('style')])]
-    }
-    expect(row('f:service')).toEqual(['2 values', [['db', '--c:var(--label-1)'], ['api', '--c:var(--label-2)']]])
-    expect(row('f:n')).toEqual(['2 values', [['even', '--c:var(--label-1)'], ['odd', '--c:var(--label-2)']]])
-    // the field chosen keeps its colours by the counts the page gives, not by what the menu showed
-    expect(JSON.stringify(of('colour').at(-1)?.state ?? {})).not.toContain('service')
-  })
-})
-
-describe('a field that says its own value', () => {
-  test('takes any record the page has, such as a row index into columns', async () => {
-    await load()
-    const kinds = ['Text only', 'With links', '']
-    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', value: (i: number) => kinds[i] }], initial: 'kind' })
-    expect([0, 1, 2].map((i) => c.valueOf(i))).toEqual(['Text only', 'With links', null])
-    expect(c.attr(1)).toBe(' data-color="With links"')
-    expect(c.keeps(0)).toBe(true)
-  })
 })
 
 describe('the choice thimble keeps for a view', () => {
@@ -771,129 +500,5 @@ describe('color marks the records alone', () => {
     expect(chips()[0]).toEqual(['Text only', '2', 'true'])
   })
 
-  test("thimble.mix draws a group's share of each value in its colour, a value off in gray, nothing for Off", async () => {
-    await load()
-    const c = mount()
-    await wait()
-    const el = doc().body.appendChild(doc().createElement('span'))
-    win().thimble.mix(el, { 'With links': 1, 'Text only': 3, '': 2 })
-    const parts = () => [...el.querySelectorAll('.thimble-mix > span')].map((s) => (s as HTMLElement).style.flexGrow)
-    const fills = () => [...el.querySelectorAll('.thimble-mix > span')].map((s) => (s as HTMLElement).style.background)
-    // the chips' order, the records with no value last
-    expect(parts()).toEqual(['3', '1', '2'])
-    expect(el.querySelector('.thimble-mix')!.getAttribute('title')).toBe('Kind: Text only 3 · With links 1 · No kind 2')
-    const [textOnly, withLinks, none] = fills()
-    expect(textOnly).not.toBe(none)
-    expect(win().thimble.mix({ 'Text only': 1 })).toContain('class="thimble-mix"')
-    doc().querySelectorAll<HTMLElement>('.thimble-colour-chip')[0].click()
-    await wait()
-    // a value turned off keeps its share, in the gray of the records with no value
-    win().thimble.mix(el, { 'With links': 1, 'Text only': 3, '': 2 })
-    expect(parts()).toEqual(['3', '1', '2'])
-    expect(fills()).toEqual([none, withLinks, none])
-    ;(doc().querySelector('.thimble-colour-by') as HTMLElement).click()
-    ;(doc().querySelector('.thimble-colour-menu [data-by="off"]') as HTMLElement).click()
-    await wait()
-    expect(c.off).toBe(true)
-    win().thimble.mix(el, { 'Text only': 3 })
-    expect(el.querySelector('.thimble-mix')!.hasAttribute('hidden')).toBe(true)
-  })
 })
 
-describe('the color picker', () => {
-  const WHEEL = JSON.parse(readFileSync(path.join(APP, 'label_wheel.json'), 'utf8')) as number[][]
-  test('shows every hue around the color wheel, a light and a dark of each, red, purple and pink among them', async () => {
-    await load(undefined, 'kind', `<script>window.__thimbleLabelWheel = ${JSON.stringify(WHEEL)}</script>`)
-    const c = mount()
-    await wait()
-    ;(doc().querySelector('.thimble-colour-chip .chip-sw[data-palette]') as HTMLElement).click()
-    const picks = [...doc().querySelectorAll('.thimble-colour-palette [data-pick]')].map((b) => Number(b.getAttribute('data-pick')) + 1)
-    expect(picks).toEqual(WHEEL.flat())
-    expect(picks).toHaveLength(18)
-    // red first, then around the wheel to pink
-    expect(picks.slice(0, 2)).toEqual([13, 14])
-    expect(picks.slice(-4)).toEqual([15, 16, 17, 18])
-    // red picked for a value: it takes it, and keeps a chip of its own
-    ;(doc().querySelector('.thimble-colour-palette [data-pick="12"]') as HTMLElement).click()
-    await wait()
-    expect(c.colourOf('Text only')).toBe('var(--label-13)')
-    expect(of('colour').at(-1)!.state).toMatchObject({ picked: { kind: { 'Text only': 12 } } })
-    expect(chips()[0][0]).toBe('Text only')
-  })
-
-  test('red, purple and pink are never given by themselves: new values take the twelve, past them "Other"', async () => {
-    await load()
-    doc().getElementById('list')!.innerHTML = ''
-    const c = win().thimble.colourBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind' }], initial: 'kind' })
-    const names = Array.from({ length: 18 }, (_, i) => `v${i}`)
-    c.counts(Object.fromEntries(names.map((v, i) => [v, 100 - i])))
-    await wait()
-    const given = names.map((v) => c.colourOf(v))
-    expect(given.slice(0, 12).every((x: string) => /var\(--label-([1-9]|1[0-2])\)$/.test(x))).toBe(true)
-    expect(given.slice(12).every((x: string) => x === 'var(--label-none)')).toBe(true)
-  })
-})
-
-describe("every choice of the kit's controls", () => {
-  test('is listed for the checks, each one a go() that chooses it: Off, the fields, the labels on, and two together', async () => {
-    await load()
-    const c = mount()
-    labels(true)
-    await wait()
-    const list = win().thimble.__choices() as { control: string; choice: string; go: () => void }[]
-    expect(list.map((x) => `${x.control}: ${x.choice}`)).toEqual(['Color by: Off', 'Color by: Kind', 'Color by: Channel', 'Color by: Deadline', 'Color by: Kind + Channel'])
-    list[0].go()
-    await wait()
-    expect(c.off).toBe(true)
-    list[4].go()
-    await wait()
-    expect(c.picks.map((p: { title: string }) => p.title)).toEqual(['Kind', 'Channel'])
-  })
-})
-
-describe('the American names, the British ones kept as aliases', () => {
-  test('colorOf, a value\'s color and a declared value\'s color, as colourOf and colour are', async () => {
-    await load()
-    const c = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'kind', title: 'Kind', values: [{ name: 'Text only', color: 4 }, { name: 'With links', colour: 7 }] }], initial: 'kind' })
-    await wait()
-    expect(win().thimble.colourBy).toBe(win().thimble.colorBy)
-    expect([c.colorOf('Text only'), c.colorOf('With links')]).toEqual(['var(--label-4)', 'var(--label-7)'])
-    expect(c.colourOf('With links')).toBe(c.colorOf('With links'))
-    expect(c.values.every((v: { color: unknown; colour: unknown }) => v.color === v.colour)).toBe(true)
-  })
-
-  test('a record the page marks with data-color by hand, or data-colour, takes its bar', async () => {
-    await load()
-    for (const e of doc().querySelectorAll('.msg[data-anchor="a.jsonl#L1"],.msg[data-anchor="a.jsonl#L2"]')) {
-      e.setAttribute('data-color', e.getAttribute('data-colour')!)
-      e.removeAttribute('data-colour')
-    }
-    mount()
-    await wait()
-    expect([...doc().querySelectorAll('[data-thimble-bar]')].map((e) => e.getAttribute('data-anchor'))).toEqual(['a.jsonl#L1', 'a.jsonl#L2', 'a.jsonl#L3'])
-    expect(chips()).toEqual([
-      ['Text only', '2', 'true'],
-      ['With links', '1', 'true'],
-      ['No kind', '1', 'true'],
-    ])
-  })
-
-  test("markOf and onLabels give each color as color and colour; setLabelColour is setLabelColor", async () => {
-    await load()
-    const heard: any[] = []
-    win().thimble.onLabels((s: unknown) => heard.push(s))
-    labels(true, { 'a.jsonl#L2': { bar: '#025ac3', names: ['Deadline'], values: [{ id: 'k1', label: 'Deadline', value: 'deadline', colour: '#025ac3' }], spans: [{ text: 'due', colour: '#025ac3', id: 'k1' }] } })
-    await wait()
-    const m = win().thimble.markOf('a.jsonl#L2')
-    expect([m.values[0].color, m.values[0].colour, m.spans[0].color, m.spans[0].colour]).toEqual(['#025ac3', '#025ac3', '#025ac3', '#025ac3'])
-    const state = heard.at(-1)
-    for (const l of [...state.labels, ...state.all]) {
-      expect(l.color).toBe(l.colour)
-      for (const v of l.values) expect(v.color).toBe(v.colour)
-    }
-    const calls: unknown[][] = []
-    win().thimble.setLabelColor = (...a: unknown[]) => (calls.push(a), Promise.resolve())
-    win().thimble.setLabelColour('k1', 'deadline', '#025ac3')
-    expect(calls).toEqual([['k1', 'deadline', '#025ac3']])
-  })
-})

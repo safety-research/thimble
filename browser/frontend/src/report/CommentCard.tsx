@@ -11,7 +11,6 @@ import { TextArea } from '../components/Field'
 import { RefChip } from '../components/RefChip'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { demoStop } from '../lib/demo'
 import { track } from '../lib/telemetry'
 import { commentName, CLAUDE_AUTHOR, extraEvidence, type CheckLook } from './checkComments'
 import { noteText } from './NoteText'
@@ -176,7 +175,7 @@ function Reply({ ws, comment, name, thread }: { ws: string; comment: CommentView
   const [busy, setBusy] = useState(false)
   const send = async () => {
     const msg = text.trim()
-    if (!msg || busy || demoStop()) return
+    if (!msg || busy) return
     setBusy(true)
     try {
       // the question goes with the thread, so no empty thread is left when no session listens

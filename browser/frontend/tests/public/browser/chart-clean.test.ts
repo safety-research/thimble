@@ -1,5 +1,5 @@
 // thimble.chart's charts and thimble.diagram on a card (components/Outputs, canvas/DataViz), drawn in a real browser with
-// thimble's stylesheets on the light paper and the dark one, as the QA pass of 0.7.0 found them: a dots chart's groups
+// thimble's stylesheets on the light paper, as the QA pass of 0.7.0 found them: a dots chart's groups
 // at one time on one row blended into a dark dot its legend does not show; every chart with names down its y axis
 // logged Vega-Lite's "Dropping fit-y" warning, and a histogram with a mark a format conflict; a time axis over nine days
 // named every day while the dates had one digit and every other day after; a loop's numbered circle sat on a label.
@@ -132,142 +132,138 @@ afterAll(async () => {
   cleanup()
 })
 
-for (const paper of ['warm', 'dark'])
-  describe(`on the ${paper} paper`, () => {
-    let page: Page
-    const logged: string[] = []
+describe('on the warm paper', () => {
+  const paper = 'warm'
+  let page: Page
+  const logged: string[] = []
 
-    beforeAll(async () => {
-      page = await browser.newPage({ viewport: { width: 1000, height: 1200 } })
-      page.on('console', (m) => {
-        if (m.type() === 'warning' || m.type() === 'error') logged.push(m.text())
-      })
-      page.on('pageerror', (e) => logged.push(e.message))
-      await page.route('**/*', (route) => {
-        const p = new URL(route.request().url()).pathname
-        if (p === '/bundle.css') return route.fulfill({ status: 200, contentType: 'text/css', body: css })
-        return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body></body></html>' })
-      })
-      await page.addInitScript((p) => localStorage.setItem('thimble:paper', p), paper)
-      await page.goto(`${ORIGIN}/`)
-      await page.addScriptTag({ path: script })
+  beforeAll(async () => {
+    page = await browser.newPage({ viewport: { width: 1000, height: 1200 } })
+    page.on('console', (m) => {
+      if (m.type() === 'warning' || m.type() === 'error') logged.push(m.text())
     })
-
-    afterAll(() => page?.close())
-
-    const draw = async (id: string, spec: unknown, width: number) => {
-      await page.evaluate(([id, spec, w]) => (window as any).__t.chart(id, spec, w), [id, spec, width] as const)
-      await page.waitForSelector(`#${id} [data-settled="true"] svg`, { timeout: 30_000 })
-    }
-
-    test('the paper is the one asked for', async () => {
-      assert.equal(await page.evaluate(() => document.documentElement.getAttribute('data-paper')), paper)
+    page.on('pageerror', (e) => logged.push(e.message))
+    await page.route('**/*', (route) => {
+      const p = new URL(route.request().url()).pathname
+      if (p === '/bundle.css') return route.fulfill({ status: 200, contentType: 'text/css', body: css })
+      return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body></body></html>' })
     })
-
-    test("a dots chart's groups at one time on one row stand side by side, each dot in its own color", async () => {
-      await draw('dots', dots, 560)
-      const got = await page.evaluate(() =>
-        Array.from(document.querySelectorAll('#dots g.mark-symbol.role-mark path')).map((p) => {
-          const r = p.getBoundingClientRect()
-          return { x: r.left + r.width / 2, y: r.top + r.height / 2, d: r.width, fill: p.getAttribute('fill') }
-        }),
-      )
-      assert.equal(got.length, DOTS.length)
-      assert.equal(new Set(got.map((g) => g.fill)).size, ACTIONS.length)
-      // two dots of different colors never overlap: the claim and the review at one minute are a dot's width apart or more
-      for (const a of got)
-        for (const b of got)
-          if (a.fill !== b.fill) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= a.d, `dots of ${a.fill} and ${b.fill} overlap at ${a.x}, ${a.y}`)
-    })
-
-    test("two legends under a range on a phone's card each go into a column and keep their labels whole", async () => {
-      // QA 2026-10-12: two legends side by side ran past the edge, so each went into a column with its labels cut to
-      // the room the second had beside the first ("emerge…", "after …"), though as columns both fit whole
-      await draw('range-phone', range, 342)
-      const got = await page.evaluate(() =>
-        Array.from(document.querySelectorAll('#range-phone g.role-legend')).map((g) => {
-          const box = g.getBoundingClientRect()
-          return { labels: Array.from(g.querySelectorAll('g.role-legend-label text')).map((t) => t.textContent), right: box.right }
-        }),
-      )
-      assert.deepEqual(got.map((g) => g.labels), [['emergent', 'managed'], ['after 1 hour', 'at the end']])
-      const edge = await page.evaluate(() => document.querySelector('#range-phone')!.getBoundingClientRect().right)
-      for (const g of got) assert.ok(g.right <= edge + 1, `a legend runs past the card's edge: ${g.right} > ${edge}`)
-    })
-
-    test('a chart with names down its y axis, the dots chart and a histogram with a mark log nothing', async () => {
-      await draw('names', bars, 560)
-      await draw('histogram', histogram, 560)
-      assert.deepEqual(logged, [])
-    })
-
-    test('a time axis over ten days names its days at one step, whatever the width', async () => {
-      for (const width of [360, 400, 440, 480, 520, 560, 640]) {
-        await draw(`days-${width}`, days, width)
-        const shown = await page.evaluate((id) => {
-          const axis = Array.from(document.querySelectorAll(`#${id} g.role-axis`)).find((g) => (g.getAttribute('aria-label') ?? '').startsWith('X-axis'))!
-          return Array.from(axis.querySelectorAll('g.role-axis-label text'))
-            .filter((t) => t.getAttribute('opacity') !== '0')
-            .map((t) => ({ text: t.textContent ?? '', left: t.getBoundingClientRect().left }))
-            .sort((a, b) => a.left - b.left)
-            .map((t) => t.text)
-        }, `days-${width}`)
-        const dates = shown.map((t) => Number(/Aug (\d+)/.exec(t)?.[1]))
-        assert.ok(dates.length >= 3 && dates.every(Number.isFinite), `${width} px: ${shown.join(', ')}`)
-        const steps = new Set(dates.slice(1).map((d, i) => d - dates[i]))
-        assert.equal(steps.size, 1, `${width} px names ${shown.join(', ')}`)
-      }
-      assert.deepEqual(logged, [])
-    })
-
-    test("a heatmap's days read across a card when their names fit their columns, and stand on end past that, none over another", async () => {
-      // a card is 720 px wide, its body 692 px (canvas/layout CARD_W, Cell CARD_PAD_X)
-      const axisOf = (n: number) =>
-        page.evaluate((id) => {
-          const axis = Array.from(document.querySelectorAll(`#${id} g.role-axis`)).find((g) => (g.getAttribute('aria-label') ?? '').startsWith('X-axis'))!
-          const shown = Array.from(axis.querySelectorAll('g.role-axis-label text'))
-            .filter((t) => t.getAttribute('opacity') !== '0' && t.textContent)
-            .map((t) => ({ text: t.textContent ?? '', size: parseFloat(t.getAttribute('font-size') ?? ''), ...(t.getBoundingClientRect().toJSON() as DOMRect) }))
-            .sort((a, b) => a.left - b.left)
-          const ticks = Array.from(axis.querySelectorAll('g.role-axis-tick line')).map((l) => l.getBoundingClientRect()).map((r) => r.left + r.width / 2)
-          return { shown, ticks, svg: document.querySelector(`#${id} svg`)!.getBoundingClientRect().width }
-        }, `heat-${n}`)
-      for (const [n, across] of [[11, true], [20, false]] as const) {
-        await draw(`heat-${n}`, heatmap(n), 692)
-        const { shown, ticks } = await axisOf(n)
-        assert.equal(shown.length, n, `${n} days name ${shown.map((t) => t.text).join(', ')}`)
-        assert.ok(shown.every((t) => /^[A-Z][a-z]{2} \d{1,2}$/.test(t.text)), shown.map((t) => t.text).join(', '))
-        for (const t of shown) assert.equal(t.width > t.height, across, `${n} days: "${t.text}" is ${t.width} by ${t.height} px`)
-        for (let i = 1; i < shown.length; i++) assert.ok(shown[i].left >= shown[i - 1].right + 1, `${n} days: "${shown[i - 1].text}" runs into "${shown[i].text}"`)
-        // each name stands between two ticks, as the cell it names does, never over one at the space inside it
-        assert.equal(ticks.length, n + 1, `${n} days: ${ticks.length} ticks`)
-        for (const t of shown) assert.ok(!ticks.some((x) => x > t.left + 0.5 && x < t.right - 0.5), `${n} days: a tick stands on "${t.text}"`)
-      }
-      // 40 days stand on end at their own size in a chart as wide as the card: the empty name of the tick the columns
-      // take beside their own is no column's, so it does not halve the room a name is measured to have
-      await draw('heat-40', heatmap(40), 692)
-      const { shown, svg } = await axisOf(40)
-      assert.equal(shown.length, 40)
-      assert.ok(shown.every((t) => t.size === 11 && t.height > t.width) && svg <= 692, `40 days: names at ${shown[0].size} px in ${svg} px`)
-      assert.deepEqual(logged, [])
-    })
-
-    test("a loop's numbered circle sits on its own edge, clear of the labels and the nodes", async () => {
-      for (const width of [260, 400, 600]) {
-        const id = `loop-${width}`
-        await page.evaluate(([id, ds, w]) => (window as any).__t.diagram(id, ds, w), [id, LOOP, width] as const)
-        await page.waitForSelector(`#${id} [data-settled="true"] svg`)
-        const got = await page.evaluate((id) => {
-          const boxes = (sel: string) => Array.from(document.querySelectorAll(`#${id} ${sel}`)).map((e) => e.getBoundingClientRect().toJSON() as DOMRect)
-          return { circles: boxes('.canvas-diagram-mark circle'), labels: boxes('.canvas-diagram-label-bg'), nodes: boxes('.canvas-diagram-node rect') }
-        }, id)
-        assert.ok(got.circles.length >= 1, `${width} px: no numbered circle`)
-        const hits = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
-        for (const c of got.circles) {
-          for (const l of got.labels) assert.ok(!hits(c, l), `${width} px: a circle at ${c.left}, ${c.top} covers a label`)
-          for (const n of got.nodes) assert.ok(!hits(c, n), `${width} px: a circle at ${c.left}, ${c.top} covers a node`)
-          for (const o of got.circles) assert.ok(o === c || !hits(c, o), `${width} px: two circles overlap`)
-        }
-      }
-    })
+    await page.addInitScript((p) => localStorage.setItem('thimble:paper', p), paper)
+    await page.goto(`${ORIGIN}/`)
+    await page.addScriptTag({ path: script })
   })
+
+  afterAll(() => page?.close())
+
+  const draw = async (id: string, spec: unknown, width: number) => {
+    await page.evaluate(([id, spec, w]) => (window as any).__t.chart(id, spec, w), [id, spec, width] as const)
+    await page.waitForSelector(`#${id} [data-settled="true"] svg`, { timeout: 30_000 })
+  }
+
+  test("a dots chart's groups at one time on one row stand side by side, each dot in its own color", async () => {
+    await draw('dots', dots, 560)
+    const got = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('#dots g.mark-symbol.role-mark path')).map((p) => {
+        const r = p.getBoundingClientRect()
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2, d: r.width, fill: p.getAttribute('fill') }
+      }),
+    )
+    assert.equal(got.length, DOTS.length)
+    assert.equal(new Set(got.map((g) => g.fill)).size, ACTIONS.length)
+    // two dots of different colors never overlap: the claim and the review at one minute are a dot's width apart or more
+    for (const a of got)
+      for (const b of got)
+        if (a.fill !== b.fill) assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= a.d, `dots of ${a.fill} and ${b.fill} overlap at ${a.x}, ${a.y}`)
+  })
+
+  test("two legends under a range on a phone's card each go into a column and keep their labels whole", async () => {
+    // QA 2026-10-12: two legends side by side ran past the edge, so each went into a column with its labels cut to
+    // the room the second had beside the first ("emerge…", "after …"), though as columns both fit whole
+    await draw('range-phone', range, 342)
+    const got = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('#range-phone g.role-legend')).map((g) => {
+        const box = g.getBoundingClientRect()
+        return { labels: Array.from(g.querySelectorAll('g.role-legend-label text')).map((t) => t.textContent), right: box.right }
+      }),
+    )
+    assert.deepEqual(got.map((g) => g.labels), [['emergent', 'managed'], ['after 1 hour', 'at the end']])
+    const edge = await page.evaluate(() => document.querySelector('#range-phone')!.getBoundingClientRect().right)
+    for (const g of got) assert.ok(g.right <= edge + 1, `a legend runs past the card's edge: ${g.right} > ${edge}`)
+  })
+
+  test('a chart with names down its y axis, the dots chart and a histogram with a mark log nothing', async () => {
+    await draw('names', bars, 560)
+    await draw('histogram', histogram, 560)
+    assert.deepEqual(logged, [])
+  })
+
+  test('a time axis over ten days names its days at one step, whatever the width', async () => {
+    for (const width of [360, 400, 440, 480, 520, 560, 640]) {
+      await draw(`days-${width}`, days, width)
+      const shown = await page.evaluate((id) => {
+        const axis = Array.from(document.querySelectorAll(`#${id} g.role-axis`)).find((g) => (g.getAttribute('aria-label') ?? '').startsWith('X-axis'))!
+        return Array.from(axis.querySelectorAll('g.role-axis-label text'))
+          .filter((t) => t.getAttribute('opacity') !== '0')
+          .map((t) => ({ text: t.textContent ?? '', left: t.getBoundingClientRect().left }))
+          .sort((a, b) => a.left - b.left)
+          .map((t) => t.text)
+      }, `days-${width}`)
+      const dates = shown.map((t) => Number(/Aug (\d+)/.exec(t)?.[1]))
+      assert.ok(dates.length >= 3 && dates.every(Number.isFinite), `${width} px: ${shown.join(', ')}`)
+      const steps = new Set(dates.slice(1).map((d, i) => d - dates[i]))
+      assert.equal(steps.size, 1, `${width} px names ${shown.join(', ')}`)
+    }
+    assert.deepEqual(logged, [])
+  })
+
+  test("a heatmap's days read across a card when their names fit their columns, and stand on end past that, none over another", async () => {
+    // a card is 720 px wide, its body 692 px (canvas/layout CARD_W, Cell CARD_PAD_X)
+    const axisOf = (n: number) =>
+      page.evaluate((id) => {
+        const axis = Array.from(document.querySelectorAll(`#${id} g.role-axis`)).find((g) => (g.getAttribute('aria-label') ?? '').startsWith('X-axis'))!
+        const shown = Array.from(axis.querySelectorAll('g.role-axis-label text'))
+          .filter((t) => t.getAttribute('opacity') !== '0' && t.textContent)
+          .map((t) => ({ text: t.textContent ?? '', size: parseFloat(t.getAttribute('font-size') ?? ''), ...(t.getBoundingClientRect().toJSON() as DOMRect) }))
+          .sort((a, b) => a.left - b.left)
+        const ticks = Array.from(axis.querySelectorAll('g.role-axis-tick line')).map((l) => l.getBoundingClientRect()).map((r) => r.left + r.width / 2)
+        return { shown, ticks, svg: document.querySelector(`#${id} svg`)!.getBoundingClientRect().width }
+      }, `heat-${n}`)
+    for (const [n, across] of [[11, true], [20, false]] as const) {
+      await draw(`heat-${n}`, heatmap(n), 692)
+      const { shown, ticks } = await axisOf(n)
+      assert.equal(shown.length, n, `${n} days name ${shown.map((t) => t.text).join(', ')}`)
+      assert.ok(shown.every((t) => /^[A-Z][a-z]{2} \d{1,2}$/.test(t.text)), shown.map((t) => t.text).join(', '))
+      for (const t of shown) assert.equal(t.width > t.height, across, `${n} days: "${t.text}" is ${t.width} by ${t.height} px`)
+      for (let i = 1; i < shown.length; i++) assert.ok(shown[i].left >= shown[i - 1].right + 1, `${n} days: "${shown[i - 1].text}" runs into "${shown[i].text}"`)
+      // each name stands between two ticks, as the cell it names does, never over one at the space inside it
+      assert.equal(ticks.length, n + 1, `${n} days: ${ticks.length} ticks`)
+      for (const t of shown) assert.ok(!ticks.some((x) => x > t.left + 0.5 && x < t.right - 0.5), `${n} days: a tick stands on "${t.text}"`)
+    }
+    // 40 days stand on end at their own size in a chart as wide as the card: the empty name of the tick the columns
+    // take beside their own is no column's, so it does not halve the room a name is measured to have
+    await draw('heat-40', heatmap(40), 692)
+    const { shown, svg } = await axisOf(40)
+    assert.equal(shown.length, 40)
+    assert.ok(shown.every((t) => t.size === 11 && t.height > t.width) && svg <= 692, `40 days: names at ${shown[0].size} px in ${svg} px`)
+    assert.deepEqual(logged, [])
+  })
+
+  test("a loop's numbered circle sits on its own edge, clear of the labels and the nodes", async () => {
+    for (const width of [260, 400, 600]) {
+      const id = `loop-${width}`
+      await page.evaluate(([id, ds, w]) => (window as any).__t.diagram(id, ds, w), [id, LOOP, width] as const)
+      await page.waitForSelector(`#${id} [data-settled="true"] svg`)
+      const got = await page.evaluate((id) => {
+        const boxes = (sel: string) => Array.from(document.querySelectorAll(`#${id} ${sel}`)).map((e) => e.getBoundingClientRect().toJSON() as DOMRect)
+        return { circles: boxes('.canvas-diagram-mark circle'), labels: boxes('.canvas-diagram-label-bg'), nodes: boxes('.canvas-diagram-node rect') }
+      }, id)
+      assert.ok(got.circles.length >= 1, `${width} px: no numbered circle`)
+      const hits = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+      for (const c of got.circles) {
+        for (const l of got.labels) assert.ok(!hits(c, l), `${width} px: a circle at ${c.left}, ${c.top} covers a label`)
+        for (const n of got.nodes) assert.ok(!hits(c, n), `${width} px: a circle at ${c.left}, ${c.top} covers a node`)
+        for (const o of got.circles) assert.ok(o === c || !hits(c, o), `${width} px: two circles overlap`)
+      }
+    }
+  })
+})

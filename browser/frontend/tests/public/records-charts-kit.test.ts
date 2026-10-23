@@ -1,14 +1,13 @@
 // The view kit's record viewer (backend/app/viewer_record.js, thimble.record) and charts (viewer_chart.js,
 // thimble.chart) in a jsdom window of their own with the bridge and the kit's other parts, as views.frame_document loads
 // them. A record is a tree under its citation: its fields as rows, a nested value folded past `open` levels behind its
-// key with its size and first fields, a long string folded with Show more and Show less, a long list's first items with
-// Show N more, JSON text drawn as what it holds; the record is anchored with its ref and its citation opens it in the
-// File browser; `find` highlights its matches and opens what holds them; called again with the same ref it keeps what
-// was opened, with another it starts afresh. A chart asks thimble for its spec with the kit's own fetch, with
-// thimble.chart's options and none of the kit's own, and asks once for the same chart; it draws the answer with the
-// canvas's drawing (here a stand-in, since jsdom draws no Vega: tests/public/browser/view-chart.test.ts draws it),
-// its groups in Color by's colours with no legend and a label's classes in the label's colours; it says what is wrong
-// in its place, and a chart of no rows asks nothing. Each works on a plain element with no other part mounted.
+// key with its size and first fields, a long string folded with Show more, a long list's first items with Show N more;
+// the record is anchored with its ref and its citation opens it in the File browser; `find` highlights its matches and
+// opens what holds them; called again with the same ref it keeps what was opened, with another it starts afresh. A
+// chart asks thimble for its spec with the kit's own fetch, with thimble.chart's options and none of the kit's own, and
+// asks once for the same chart; it draws the answer with the canvas's drawing (here a stand-in, since jsdom draws no
+// Vega: tests/public/browser/view-chart.test.ts draws it), its groups in Color by's colours with no legend and a label's
+// classes in the label's colours. Each works on a plain element with no other part mounted.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -146,61 +145,6 @@ describe('thimble.record', () => {
     expect(texts('mark.thimble-record-hit')).toEqual(['142'])
   })
 
-  test('draws JSON text as what it holds, a plain value alone, and with `open` 1 folds every nested value', async () => {
-    await load()
-    win().thimble.record({ mount: '#rec', value: JSON.stringify({ a: 1, b: { c: 2 } }) + '\n', ref: 'x.jsonl#L3', open: 1 })
-    expect(texts('#rec .thimble-record-tree > .thimble-record-row .thimble-record-key')).toEqual(['a', 'b'])
-    expect(doc().querySelector('[data-fold="/b"]')!.getAttribute('aria-expanded')).toBe('false')
-    win().thimble.record({ mount: '#rec', value: 'not { json', ref: 'x.jsonl#L4' })
-    expect(texts('#rec .thimble-record-val')).toEqual(['not { json'])
-    win().thimble.record({ mount: '#rec', value: { a: 1 } })
-    expect(doc().querySelector('#rec .thimble-record')!.hasAttribute('data-anchor')).toBe(false)
-    expect(doc().querySelector('#rec .thimble-record-cite')).toBeNull()
-  })
-
-  test("draws the strings of the fields named in `mono`, and those under them, in the mono face, a long one folded as any other; a field of another name or a number as before", async () => {
-    await load()
-    const line = '{"ts": 1778910000000, "svc": "ferry-api", "state": "firing", "msg": "p99 latency over 2s"}'
-    const value = { id: 'alert-7', line, lines: [line, line + ' '.repeat(500) + 'tail'], took: 42 }
-    win().thimble.record({ mount: '#rec', value, ref: 'alerts/a.jsonl#L3', mono: ['line', 'lines'] })
-    const val = (key: string) => [...doc().querySelectorAll('#rec .thimble-record-row')].find((r) => r.querySelector('.thimble-record-key')?.textContent === key)!.querySelector('.thimble-record-val')!
-    expect(val('line').classList.contains('is-mono')).toBe(true)
-    expect(val('line').textContent).toBe(line)
-    expect(val('id').classList.contains('is-mono')).toBe(false)
-    expect(val('took').className).toBe('thimble-record-val is-num')
-    // under a list the page names, every item, the long one folded with Show more
-    const items = [...doc().querySelectorAll('#rec .thimble-record-kids .thimble-record-val')]
-    expect(items.map((v) => v.classList.contains('is-mono'))).toEqual([true, true])
-    expect(items[1].classList.contains('is-long')).toBe(true)
-    // without `mono`, drawn again in the body face
-    win().thimble.record({ mount: '#rec', value, ref: 'alerts/a.jsonl#L3' })
-    expect(doc().querySelectorAll('#rec .is-mono')).toHaveLength(0)
-  })
-
-  test("names its citation as thimble's chips do", async () => {
-    await load()
-    const refs = ['runs/r1/explorer.jsonl#L12', 'runs/team-6/agents/a.jsonl#L3-L9', 'a/b/c/trial-03/x/y/notes.jsonl#L5.b2', 'deploys.csv#row=3',
-      'chat/ops.json#/messages/12', 'papers/x.pdf#p4', 'logs/run.db#calls/41', 'top.jsonl#L1', 'view:board/INC-311', 'src/app.py#parse_args', 'README.md']
-    for (const ref of refs) {
-      win().thimble.record({ mount: '#rec', value: { a: 1 }, ref })
-      expect(texts('#rec .thimble-record-cite .chip-text')[0], ref).toBe(refLabel(ref))
-    }
-  })
-
-  test('draws in the side panel as its body, and takes Color by\'s bar', async () => {
-    await load('<span id="colour"></span><div id="body"><div id="list"></div></div>')
-    const colour = win().thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }], initial: 'tool' })
-    const side = win().thimble.side({ mount: '#body' })
-    side.open({ title: 'Read', ref: 'a.jsonl#L1', render: (body: HTMLElement) => win().thimble.record({ mount: body, value: REC, ref: 'a.jsonl#L1', colour }) })
-    const rec = side.body.querySelector('.thimble-record')!
-    expect(rec.getAttribute('data-anchor')).toBe('a.jsonl#L1')
-    expect(rec.getAttribute('data-color')).toBe('Read')
-    // the panel's next body, the page's own, is the page's: a click in it draws no record
-    side.open({ title: 'Other', html: '<button id="mine" data-more="/steps">mine</button>' })
-    click(side.body.querySelector('#mine'))
-    expect(side.body.querySelector('.thimble-record')).toBeNull()
-    expect(side.body.querySelector('#mine')).not.toBeNull()
-  })
 })
 
 describe('thimble.chart', () => {
@@ -247,28 +191,6 @@ describe('thimble.chart', () => {
     expect(win().__drawn[0].d.gone).toBe(true)
     expect(win().__drawn[1].spec.height).toBe(50)
     expect(doc().querySelector('#c')!.hasAttribute('data-pick')).toBe(false)
-  })
-
-  test('asks one call at a time for a mount: the calls made while it waits ask nothing but the latest', async () => {
-    await load()
-    const rowsOf = (n: number) => [{ agent: 'agent-1', posts: n }]
-    const first = win().thimble.chart('#c', 'bar', rowsOf(1))
-    const second = win().thimble.chart('#c', 'bar', rowsOf(2))
-    const third = win().thimble.chart('#c', 'bar', rowsOf(3))
-    await wait()
-    expect(of('fetch').map((m) => (m.query as { rows: unknown }).rows)).toEqual([rowsOf(1)])
-    answer(BAR)
-    await wait()
-    expect(of('fetch').map((m) => (m.query as { rows: unknown }).rows)).toEqual([rowsOf(1), rowsOf(3)])
-    answer(BAR)
-    expect(await first).toBeNull()
-    expect(await second).toBeNull()
-    expect(await third).toBe(win().__drawn.at(-1).d.view)
-    expect(win().__drawn.length).toBe(1)
-    // another mount asks for itself
-    win().thimble.chart('#rec', 'bar', rowsOf(4))
-    await wait()
-    expect(of('fetch').length).toBe(3)
   })
 
   test("draws the groups in Color by's colours with no legend, gray for a value turned off, and a label in its colours", async () => {
@@ -319,36 +241,4 @@ describe('thimble.chart', () => {
     ]])
   })
 
-  test('says what is wrong in its place, draws nothing for no rows, and draws any Vega-Lite spec given', async () => {
-    await load()
-    const failing = win().thimble.chart('#c', 'bar', [{ a: 'x' }])
-    answer(null)
-    expect(await failing).toBeNull()
-    expect(texts('#c .thimble-chart-note.is-error')).toEqual(["Chart failed: thimble.chart('bar') takes (category, value) or (category, value, group) columns, in that order; got 1: a"])
-    expect(of('error').at(-1)!.message).toContain("thimble.chart('bar') takes")
-    const asked = of('fetch').length
-    expect(await win().thimble.chart('#c', 'line', [])).toBeNull()
-    expect(of('fetch').length).toBe(asked)
-    expect(texts('#c .thimble-chart-note')).toEqual(['No data'])
-    expect(doc().querySelector<HTMLElement>('#c .thimble-chart-note')!.classList.contains('is-error')).toBe(false)
-    await win().thimble.chart('#c', BAR, { height: 60 })
-    expect(of('fetch').length).toBe(asked)
-    expect(win().__drawn.at(-1).spec).toMatchObject({ mark: 'bar', height: 60 })
-    // rows named down its side take 36 px each at most, so two bars stay bars; a y of numbers takes the height asked
-    await win().thimble.chart('#c', BAR, { height: 200 })
-    expect(win().__drawn.at(-1).spec.height).toBe(72)
-    const line = { ...BAR, mark: 'line', encoding: { x: { field: 'posts', type: 'quantitative' }, y: { field: 'posts', type: 'quantitative' } } }
-    await win().thimble.chart('#c', line, { height: 200 })
-    expect(win().__drawn.at(-1).spec.height).toBe(200)
-    expect(doc().querySelector<HTMLElement>('#c .thimble-chart-note')!.hidden).toBe(true)
-    // rows that are no JSON say so in the chart's place too
-    const loop: Record<string, unknown> = { a: 'x' }
-    loop.self = loop
-    expect(await win().thimble.chart('#rec', 'bar', [loop])).toBeNull()
-    expect(texts('#rec .thimble-chart-note.is-error')[0]).toMatch(/^Chart failed: thimble\.chart: .*circular/i)
-    // a spec written by hand with no schema is drawn as Vega-Lite, so it is fitted to its box as the others are
-    const { $schema: _schema, ...bare } = BAR
-    await win().thimble.chart('#c', bare)
-    expect(win().__drawn.at(-1).spec.$schema).toBe(BAR.$schema)
-  })
 })

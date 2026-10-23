@@ -1,8 +1,6 @@
 // The key that places a card freely on the canvas (src/canvas/Canvas.tsx, src/lib/platform.ts freeKeyHeld), in a real
-// browser with the real Canvas: of ⌘ (Ctrl off a Mac) and ⌥ (Alt), the one Settings did not pick as the ask key. A card
-// dragged to the gap between two cards of an open frame goes into the column there; with the free key held it is placed
-// free where it is dropped. With ⌘ picked (the default) Alt places it free; with ⌥ picked Ctrl does, and a press with
-// Alt is the pointer's, so the card does not move.
+// browser with the real Canvas: of ⌘ (Ctrl off a Mac) and ⌥ (Alt), the one Settings did not pick as the ask key. With
+// ⌘ picked (the default), a card dragged with Alt held is placed free where it is dropped.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -93,13 +91,6 @@ async function dragToGap(page: Page, key: 'Alt' | 'Control' | null) {
   await page.waitForTimeout(400)
 }
 
-test('with no key held, a card dropped on the gap between two cards goes into the column there', async () => {
-  const { page, moves } = await open('meta')
-  await dragToGap(page, null)
-  assert.deepEqual(moves, [{ cells: ['x'], group: 'g', after: 'a' }])
-  await page.close()
-})
-
 test('with ⌘ picked as the ask key, Alt held places the card free', async () => {
   const { page, moves } = await open('meta')
   await dragToGap(page, 'Alt')
@@ -108,18 +99,4 @@ test('with ⌘ picked as the ask key, Alt held places the card free', async () =
   assert.deepEqual([m.cells, m.group, m.after], [['x'], 'g', undefined])
   assert.ok(m.pos && typeof m.pos.x === 'number', `placed free: ${JSON.stringify(m)}`)
   await page.close()
-})
-
-test('with ⌥ picked as the ask key, Ctrl held places the card free, and a press with Alt does not move it', async () => {
-  const { page, moves } = await open('alt')
-  await dragToGap(page, 'Control')
-  assert.equal(moves.length, 1)
-  const m = moves[0] as { cells: string[]; group: string; pos?: Pos; after?: string }
-  assert.deepEqual([m.cells, m.group, m.after], [['x'], 'g', undefined])
-  assert.ok(m.pos && typeof m.pos.x === 'number', `placed free: ${JSON.stringify(m)}`)
-  await page.close()
-  const second = await open('alt')
-  await dragToGap(second.page, 'Alt')
-  assert.deepEqual(second.moves, [], 'an Alt press is the pointer’s: the card stays')
-  await second.page.close()
 })

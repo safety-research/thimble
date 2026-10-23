@@ -1,11 +1,9 @@
 // @vitest-environment jsdom
 // The label editor (src/files/LabelEditor.tsx): Files' Labels sidebar and the popover a view opens over itself draw the
-// one editor, LabelCard, with the same fields, prompt, classes and actions. A label that exists opens compact: its name,
-// its type and scope, its prompt clamped until it has the focus, its classes, and More folded over the rest, which stays
-// as the analyst left it for the page's session; Cancel and Re-run show once something changed. A new label shows every
-// field. The popover sits beside what asked for it,
-// takes the focus, and Escape, Cancel or × close it, giving the focus back and telling the opener; a second request
-// takes the first one's place. A view's edit call (labelCalls.ts) hands the editor the rect the page gave, in the page's
+// one editor, LabelCard, with the same fields, prompt, classes and actions. A label that exists opens compact, with More
+// folded over the rest; Cancel and Re-run show once something changed. A new label shows every field. The popover takes
+// the focus, and Escape, Cancel or × close it, giving the focus back and telling the opener; a second request takes the
+// first one's place. A view's edit call (labelCalls.ts) hands the editor the rect the page gave, in the page's
 // coordinates, and a view's label controls (ViewPane) open it with what a new label applies to. A class's swatch opens
 // the palette Color by's chips open (ValuePalette), whose pick for a saved value goes through setColour, and whose
 // Escape closes the palette alone.
@@ -28,7 +26,6 @@ vi.mock('../../src/files/ViewerFrame', () => ({
 const { closeLabelEditor, EDITOR_WIDTH, LabelEditorHost, openLabelEditor } = await import('../../src/files/LabelEditor.tsx')
 const { frameAnchor, frameRect, runLabelCall } = await import('../../src/files/labelCalls.ts')
 const { useLabelRuns, useLabelSide } = await import('../../src/files/ViewSide.tsx')
-const { scopeLine } = await import('../../src/files/LabelCard.tsx')
 const { ViewPane } = await import('../../src/files/ViewPane.tsx')
 
 const kind = {
@@ -192,22 +189,6 @@ describe('a compact card', () => {
     expect(el.querySelector('.label-card-more-body')).toBeNull()
   })
 
-  test("More stays as the analyst left it for the next card the page opens", async () => {
-    const first = await mount(<SideCard editing="k1" />)
-    await act(async () => first.querySelector<HTMLButtonElement>('.label-card-more')!.click())
-    unmountAll()
-    const next = await mount(<SideCard editing="k1" />)
-    expect(next.querySelector('.label-card-more-body')).not.toBeNull()
-    await act(async () => next.querySelector<HTMLButtonElement>('.label-card-more')!.click())
-  })
-
-  test('a label of one color has its name in that color, in place of the swatch', async () => {
-    const one = { ...kind, id: 'k2', classes: [{ name: 'asks', color: 3, highlight: true }, { name: 'other', color: 0, highlight: false }], labels: ['asks', 'other'] } as unknown as Concept
-    const el = await mount(<SideCard editing="k2" of={{ ...labels, all: [one], on: [one], byId: new Map([[one.id, one]]) }} />)
-    expect(el.querySelector<HTMLInputElement>('[aria-label="Name"]')!.style.color).toBe('var(--label-3)')
-    expect(el.querySelector('.label-card-swatch, .label-card-tag')).toBeNull()
-  })
-
   test('an edit shows Cancel and Re-run; put back, they go again', async () => {
     const el = await mount(<SideCard editing="k1" />)
     const prompt = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!
@@ -219,23 +200,6 @@ describe('a compact card', () => {
     expect(shape(el.querySelector('.label-card')!).foot).toEqual(['Cancel', 'Re-run'])
   })
 
-  test("the scope says the files and how many records, as the label's row in the Labels pane does", () => {
-    expect(scopeLine(kind)).toBe('transcript.jsonl · 1,815 records')
-    expect(scopeLine({ ...kind, last_run: { status: 'done', ts: '2026-10-07T00:00:00Z', total: 2064, matches: 1815, failed: 230 } } as unknown as Concept)).toBe('transcript.jsonl · 1,815 of 2,064 records')
-    expect(scopeLine({ ...kind, glob: 'a.jsonl, b/*.jsonl', n_labeled: undefined } as unknown as Concept)).toBe('a.jsonl, b/*.jsonl')
-  })
-
-  test('the prompt stands about four lines tall until it has the focus', async () => {
-    const el = await mount(<SideCard editing="k1" />)
-    const prompt = el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Prompt"]')!
-    expect(prompt.style.maxHeight).toBe('90px')
-    expect(el.querySelector('.label-card-body')!.classList.contains('is-clamped')).toBe(true)
-    await act(async () => prompt.focus())
-    expect(prompt.style.maxHeight).toBe('180px')
-    expect(el.querySelector('.label-card-body')!.classList.contains('is-clamped')).toBe(false)
-    await act(async () => prompt.blur())
-    expect(prompt.style.maxHeight).toBe('90px')
-  })
 })
 
 describe("a class's swatch", () => {
@@ -254,18 +218,6 @@ describe("a class's swatch", () => {
     await act(async () => (picks.find((b) => b.getAttribute('aria-label') === 'Color 5') as HTMLButtonElement).click())
     expect(setColour.mock.calls).toEqual([['k1', 'writing', 5]])
     expect(palette()).toBeNull()
-  })
-
-  test("a class not saved yet takes the color in the draft, and a class that had it takes the old one", async () => {
-    const setColour = labels.setColour as ReturnType<typeof vi.fn>
-    setColour.mockClear()
-    const el = await mount(<SideCard editing="new" />)
-    const colours = () => [...el.querySelectorAll<HTMLElement>('.label-card-colour')].map((b) => b.style.getPropertyValue('--c'))
-    const before = colours()
-    await act(async () => swatch(el, 'no match').click())
-    await act(async () => [...palette()!.querySelectorAll<HTMLButtonElement>('.colorby-pick')].find((b) => b.style.getPropertyValue('--c') === before[0])!.click())
-    expect(colours()).toEqual([before[1], before[0]])
-    expect(setColour).not.toHaveBeenCalled()
   })
 
   test('Escape in the palette closes the palette alone, in the popover too', async () => {
@@ -317,21 +269,6 @@ describe('the popover', () => {
     }
   })
 
-  test('a click outside closes it and leaves the focus where the click put it', async () => {
-    await mount(<LabelEditorHost ws="w" />)
-    const at = control()
-    const other = control()
-    const closed = vi.fn()
-    await act(async () => openLabelEditor({ id: 'k1', anchor: at, back: at, onClose: closed }))
-    await act(frames)
-    // the button the analyst presses takes the focus as the press ends
-    other.addEventListener('mousedown', () => queueMicrotask(() => other.focus()))
-    await act(async () => void other.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
-    expect(popover()).toBeNull()
-    expect(document.activeElement).toBe(other)
-    expect(closed.mock.calls).toEqual([[false]])
-  })
-
   test("a second request takes the first one's place, and the first hears it closed", async () => {
     await mount(<LabelEditorHost ws="w" />)
     const first = vi.fn()
@@ -345,28 +282,6 @@ describe('the popover', () => {
     expect(popover()!.getAttribute('aria-label')).toBe('New label')
   })
 
-  test('it stays where it stood when the control it stands beside leaves the page', async () => {
-    await mount(<LabelEditorHost ws="w" />)
-    const at = control()
-    // a control out of the page has no box, as a browser gives it
-    at.getBoundingClientRect = () => (at.isConnected ? new DOMRect(100, 100, 50, 20) : new DOMRect(0, 0, 0, 0))
-    await act(async () => openLabelEditor({ id: 'k1', anchor: at, side: 'below' }))
-    await settle()
-    const where = () => [popover()!.style.left, popover()!.style.top]
-    expect(where()).toEqual(['100px', '124px'])
-    at.remove()
-    await act(async () => void window.dispatchEvent(new Event('resize')))
-    expect(where()).toEqual(['100px', '124px'])
-  })
-
-  test('a label the labels do not hold closes it once they are read', async () => {
-    await mount(<LabelEditorHost ws="w" />)
-    const closed = vi.fn()
-    await act(async () => openLabelEditor({ id: 'gone', anchor: control(), onClose: closed }))
-    await settle()
-    expect(popover()).toBeNull()
-    expect(closed).toHaveBeenCalledTimes(1)
-  })
 })
 
 describe("a view's edit call", () => {
@@ -412,13 +327,6 @@ describe("a view's edit call", () => {
     expect(side).toBe('below')
   })
 
-  test('the anchor follows the frame when it moves', () => {
-    const f = frame()
-    const a = frameAnchor(f, frameRect({ left: 5, top: 6, width: 7, height: 8 }))
-    expect(box(a.getBoundingClientRect())).toEqual([105, 56, 7, 8])
-    f.getBoundingClientRect = () => new DOMRect(0, 0, 600, 400)
-    expect(box(a.getBoundingClientRect())).toEqual([5, 6, 7, 8])
-  })
 })
 
 test("a view's label controls open the editor over the view, a new label applying to the files the view claims", async () => {

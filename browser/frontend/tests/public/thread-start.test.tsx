@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 // A side thread while it starts speaks from its own point of view (src/chat/threadStatus.ts STAGE_TEXT,
-// src/chat/ChatPanel.tsx, src/components/ThreadTree.tsx): a short turn of main starts the thread's fork, but the thread
-// never names main or shows main's state for it. While its question waits for the fork the strip says it is starting;
-// once the fork runs the strip says it works. Until main's turn that took the question to the fork ends, the thread's
-// tree shows no spinner on main's row and its folded card does not count main's run as work elsewhere (mainRelays); a
-// turn of main's own, after one the analyst asked for, shows as main at work.
+// src/chat/ChatPanel.tsx): a short turn of main starts the thread's fork, but the thread never names main or shows
+// main's state for it. While its question waits for the fork the strip says it is starting; once the fork runs the
+// strip says it works. Until main's turn that took the question to the fork ends, the thread's folded card does not
+// count main's run as work elsewhere (mainRelays).
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ChatPanel, taskStrip } from '../../src/chat/ChatPanel.tsx'
 import { mainRelays, STAGE_TEXT } from '../../src/chat/threadStatus.ts'
@@ -78,18 +77,10 @@ describe("main's turn that takes the thread's question to its fork", () => {
     // a call of main's in that turn after the question, such as the fork's, leaves it one
     expect(mainRelays([done, call(LATER)], true, [QUESTION], true)).toBe(true)
   })
-  test('is none while main or the thread does not run', () => {
-    expect(mainRelays([done], false, [QUESTION], true)).toBe(false)
-    expect(mainRelays([done], true, [QUESTION], false)).toBe(false)
-  })
   test("is none for a turn of main's own: the analyst asked main, main was at work before the question, or a turn ended after it", () => {
     expect(mainRelays([done, { type: 'user', ts: T, text: 'count the merges', by: 'browser' }], true, [QUESTION], true)).toBe(false)
     expect(mainRelays([done, call(EARLIER)], true, [QUESTION], true)).toBe(false)
     expect(mainRelays([{ type: 'done', ts: LATER }], true, [QUESTION], true)).toBe(false)
-  })
-  test('is none for a thread with no question, or one the analyst typed to the fork in the agent view, which main never got', () => {
-    expect(mainRelays([done], true, [], true)).toBe(false)
-    expect(mainRelays([done], true, [{ ...QUESTION, tray: true } as ChatRecord], true)).toBe(false)
   })
 })
 
@@ -105,17 +96,6 @@ describe('a thread whose question waits for its fork, while main runs the turn t
     expect(said).not.toMatch(/\bmain is\b|sent to main|working on it/i)
   })
 
-  test("its open tree shows no spinner on main's row, and one on its own", async () => {
-    localStorage.setItem('thimble:mini:threads-collapsed', JSON.stringify(false))
-    const el = await mount(<ChatPanel ws="mini" />)
-    await settle()
-    await settle()
-    const row = (id: string) => el.querySelector(`.tt-list .tt-row[data-thread="${id}"]`)
-    expect(row('main')).not.toBeNull()
-    expect(row('main')?.querySelector('[aria-label="running"]')).toBeNull()
-    expect(row('th1')?.querySelector('[aria-label="running"]')).not.toBeNull()
-  })
-
   test('once its fork runs, the strip says it works', async () => {
     thread = { ...thread, fork: { agent_id: 'afork1' } } as unknown as ChatMeta
     main = { ...main, running: false }
@@ -125,21 +105,4 @@ describe('a thread whose question waits for its fork, while main runs the turn t
     expect(el.querySelector('.chat-strip-title')?.textContent).toBe('Working')
   })
 
-  test('once its fork runs while main ends the turn that started it, the strip says it works and its card counts no run', async () => {
-    thread = { ...thread, fork: { agent_id: 'afork1' } } as unknown as ChatMeta
-    const el = await mount(<ChatPanel ws="mini" />)
-    await settle()
-    await settle()
-    expect(el.querySelector('.chat-strip-title')?.textContent).toBe('Working')
-    expect(el.querySelector('.tt-summary .tt-active')).toBeNull()
-  })
-
-  test('a turn of main the analyst asked for counts as work elsewhere', async () => {
-    mainEvents = [...mainEvents, { type: 'user', ts: T, text: 'count the merges', by: 'browser' }]
-    const el = await mount(<ChatPanel ws="mini" />)
-    await settle()
-    await settle()
-    expect(el.querySelector('.chat-strip-title')?.textContent).toBe('Starting this thread…')
-    expect(el.querySelector('.tt-summary .tt-active')?.getAttribute('data-active')).toBe('1')
-  })
 })

@@ -5,13 +5,10 @@
 // while the agent runs is sent (where it goes, and whether it waits for the run, is the caller's), and clearing the
 // field brings Stop back. The two squares fill one slot with one component, so React keeps the button and keyboard focus
 // stays on it across the swap. Stop ignores `disabled`, which is about the field: stopping needs nothing a loading or unreadable thread lacks.
-// With `tip`, hovering the composer shows it in the one tooltip, a disabled field included (a demo page's composer
-// says why nothing can be typed there).
 import { type FormEvent, type ReactNode, type Ref } from 'react'
 import { Button } from './Button'
 import { TextArea } from './Field'
 import type { IconName } from './Icon'
-import { useTooltip } from './Tooltip'
 
 export interface ComposerFrameProps {
   value: string
@@ -22,8 +19,6 @@ export interface ComposerFrameProps {
   /** the text area's accessible name */
   label?: string
   disabled?: boolean
-  /** what hovering the composer shows in the one tooltip, such as why it is disabled */
-  tip?: string
   /** a send is in flight: the square shows the ring */
   busy?: boolean
   /** the foot's left side: the model and effort as quiet text or a menu */
@@ -49,15 +44,14 @@ export interface ComposerFrameProps {
   [data: `data-${string}`]: string | undefined
 }
 
-export function ComposerFrame({ value, onChange, onSubmit, placeholder, label, disabled = false, tip, busy = false, model, tools, head, stop, sendIcon = 'arrow-up', sendLabel = 'Send', mono, rows = 2, maxHeight = 200, submitOnMod = false, spellCheck, className, textRef, ...rest }: ComposerFrameProps) {
+export function ComposerFrame({ value, onChange, onSubmit, placeholder, label, disabled = false, busy = false, model, tools, head, stop, sendIcon = 'arrow-up', sendLabel = 'Send', mono, rows = 2, maxHeight = 200, submitOnMod = false, spellCheck, className, textRef, ...rest }: ComposerFrameProps) {
   const ready = !!value.trim() && !disabled
-  const { props: tipProps, tip: tipEl } = useTooltip(tip, undefined, 'start')
   const submit = (e?: FormEvent) => {
     e?.preventDefault()
     if (ready && !busy) onSubmit()
   }
   return (
-    <form className={`composer${ready ? ' composer-ready' : ''}${disabled ? ' composer-disabled' : ''}${className ? ` ${className}` : ''}`} onSubmit={submit} data-tipped={tip ? '' : undefined} {...tipProps} {...rest}>
+    <form className={`composer${ready ? ' composer-ready' : ''}${disabled ? ' composer-disabled' : ''}${className ? ` ${className}` : ''}`} onSubmit={submit} {...rest}>
       {head}
       <TextArea
         ref={textRef}
@@ -93,7 +87,6 @@ export function ComposerFrame({ value, onChange, onSubmit, placeholder, label, d
           <Button variant={ready ? 'primary' : 'secondary'} size="sm" icon={sendIcon} title={sendLabel} aria-label={sendLabel} type="submit" className="composer-send" disabled={!ready} busy={busy} />
         )}
       </div>
-      {tipEl}
     </form>
   )
 }

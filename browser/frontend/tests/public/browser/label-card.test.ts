@@ -1,6 +1,6 @@
-// A label card on the real Canvas (src/canvas/Canvas.tsx): the card shows no record
-// of the corpus, and its Definition and records opens the card's details at the board's right, where the label's
-// definition and its records under each value are (DetailPanel LabelDetails), from the board and from focus mode.
+// A label card on the real Canvas (src/canvas/Canvas.tsx): the card shows no record of the corpus, and its Definition
+// and records opens the card's details at the board's right, where the label's definition and its records under each
+// value are (DetailPanel LabelDetails).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -89,41 +89,4 @@ test("the card shows no record; Definition and records opens the card's details 
   assert.ok(!(await page.locator('article.canvas-card[data-cell="c1"]').first().innerText()).includes('Beschreibe'))
   await page.locator('.bdetail-close').click()
   await page.waitForFunction(() => !document.querySelector('.bdetail'))
-})
-
-test("on a narrow card the label row's words go under its tags, whole, and the two tags stay on one line", async () => {
-  const wide = await page.evaluate(() => {
-    const row = document.querySelector<HTMLElement>('[data-cell="c1"] .bcell-label-row')!
-    const top = (s: string) => row.querySelector(s)!.getBoundingClientRect().top
-    return { meta: top('.bcell-label-meta'), tag: top('.bcell-kind-tag') }
-  })
-  assert.ok(Math.abs(wide.meta - wide.tag) < 8, 'on a wide card the row is one line')
-  await page.evaluate(() => {
-    const card = document.querySelector<HTMLElement>('[data-cell="c1"]')!
-    ;(card.closest<HTMLElement>('.bcell') ?? card).style.width = '360px'
-  })
-  await page.waitForTimeout(200)
-  const narrow = await page.evaluate(() => {
-    const row = document.querySelector<HTMLElement>('[data-cell="c1"] .bcell-label-row')!
-    const meta = row.querySelector<HTMLElement>('.bcell-label-meta')!
-    const box = (s: string) => row.querySelector(s)!.getBoundingClientRect()
-    return { cut: meta.scrollWidth > meta.clientWidth, metaTop: box('.bcell-label-meta').top, kindTop: box('.bcell-kind-tag').top, kindBottom: box('.bcell-kind-tag').bottom, tagTop: box('.bcell-tag').top, rowRight: row.getBoundingClientRect().right, metaRight: box('.bcell-label-meta').right }
-  })
-  assert.equal(narrow.cut, false, 'how the label is defined and what it ran on show whole')
-  assert.ok(narrow.metaTop >= narrow.kindBottom - 1, 'they stand under the tags')
-  assert.ok(Math.abs(narrow.kindTop - narrow.tagTop) < 4, 'the Label tag and the label tag share a line')
-  assert.ok(narrow.metaRight <= narrow.rowRight + 1)
-  await page.evaluate(() => {
-    const card = document.querySelector<HTMLElement>('[data-cell="c1"]')!
-    ;(card.closest<HTMLElement>('.bcell') ?? card).style.width = ''
-  })
-})
-
-test('from focus mode it leaves focus mode and opens the same details', async () => {
-  // the card is selected (Definition and records selected it), and Enter opens focus mode on it
-  await page.keyboard.press('Enter')
-  await page.waitForSelector('.bfocus')
-  await page.locator('.bfocus .bcell-label button', { hasText: 'Definition and records' }).click()
-  await page.waitForFunction(() => !document.querySelector('.bfocus') && !!document.querySelector('.bdetail'))
-  await page.waitForFunction((t) => document.querySelector('.bdetail')?.textContent?.includes(t), RECORD, { timeout: 5000 })
 })

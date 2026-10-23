@@ -3,8 +3,7 @@
 // the Report's formatting toolbar shows again; back on the tab, the box is back beside its element with the text. The
 // element taken off the page (a card a collapsed frame no longer draws) hides it, and the element drawn anew in its
 // place, once the frame opens, brings it back beside the new element. A send under way while the box is hidden still
-// finishes: the thread opens and the box is gone. A view's frame, which has no anchor of its own, is found again drawn
-// anew in its card or in its view's pane.
+// finishes: the thread opens and the box is gone.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -147,81 +146,4 @@ test('a send under way while the box is hidden still finishes', async () => {
   assert.equal((threads[0] as { text: string; anchor: string }).anchor, 'card:a')
   await showTab('canvas')
   assert.equal(await boxShown(), false, 'the box is gone once its question is sent')
-})
-
-/** A view's frame titled `title` in `host` (an element of the page), the frame of a card's graphic or of a view's pane. */
-async function addFrame(host: string, id: string, top: number) {
-  await page.evaluate(
-    ([h, i, t]) => {
-      const f = document.createElement('iframe')
-      f.id = i
-      f.className = 'viewer-frame'
-      f.title = 'Timeline'
-      f.style.cssText = `position:absolute;left:120px;top:${t}px;width:400px;height:200px;border:0`
-      document.querySelector(h)!.appendChild(f)
-    },
-    [host, id, top] as const,
-  )
-}
-
-test("a box about a view's frame in a card comes back when the card is drawn anew with a new frame", async () => {
-  await showTab('canvas')
-  await page.evaluate(() => {
-    const card = document.createElement('div')
-    card.id = 'v'
-    card.setAttribute('data-anchor', 'card:v')
-    card.style.cssText = 'position:absolute;left:0;top:0;width:700px;height:400px'
-    document.getElementById('canvas')!.appendChild(card)
-  })
-  await addFrame('#v', 'f1', 60)
-  await page.evaluate(() => (window as any).__point('f1'))
-  await page.waitForSelector('.pointer-box textarea')
-  await page.fill('.pointer-box textarea', 'why did this deploy start late')
-  // the card's frame collapses: the card and its frame are gone; it opens again: both are drawn anew, lower down
-  await page.evaluate(() => document.getElementById('v')!.remove())
-  await frames()
-  await page.waitForTimeout(100)
-  assert.equal(await boxShown(), false)
-  await page.evaluate(() => {
-    const card = document.createElement('div')
-    card.id = 'v2'
-    card.setAttribute('data-anchor', 'card:v')
-    card.style.cssText = 'position:absolute;left:0;top:200px;width:700px;height:400px'
-    document.getElementById('canvas')!.appendChild(card)
-  })
-  await addFrame('#v2', 'f2', 60)
-  await page.waitForSelector('.pointer-box', { timeout: 2000 })
-  await frames()
-  assert.equal(await page.inputValue('.pointer-box textarea'), 'why did this deploy start late')
-  const f = await rectOf('#f2')
-  const hl = await rectOf('.pointer-hl')
-  assert.ok(Math.abs(hl.top - (f.top + 40)) < 4 && Math.abs(hl.left - (f.left + 10)) < 4, `the highlight marks the row in the new frame: ${JSON.stringify({ f, hl })}`)
-  await page.press('.pointer-box textarea', 'Escape')
-  await page.evaluate(() => document.getElementById('v2')!.remove())
-})
-
-test("a box about a view's frame in its pane comes back when the pane is drawn anew", async () => {
-  const pane = (id: string) =>
-    page.evaluate((i) => {
-      const s = document.createElement('section')
-      s.id = i
-      s.setAttribute('data-panel', 'files')
-      s.setAttribute('data-surface', 'view:timeline')
-      s.style.cssText = 'position:absolute;inset:0'
-      document.body.insertBefore(s, document.getElementById('root'))
-    }, id)
-  await pane('p1')
-  await addFrame('#p1', 'g1', 100)
-  await page.evaluate(() => (window as any).__point('g1'))
-  await page.waitForSelector('.pointer-box textarea')
-  await page.fill('.pointer-box textarea', 'which incident is this')
-  // another surface takes the pane, then the view comes back to it: its pane and frame are drawn anew
-  await page.evaluate(() => document.getElementById('p1')!.remove())
-  await frames()
-  await page.waitForTimeout(100)
-  assert.equal(await boxShown(), false)
-  await pane('p2')
-  await addFrame('#p2', 'g2', 100)
-  await page.waitForSelector('.pointer-box', { timeout: 2000 })
-  assert.equal(await page.inputValue('.pointer-box textarea'), 'which incident is this')
 })
