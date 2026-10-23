@@ -5,9 +5,10 @@
     searched  a search (`grep`, `rg`, `sed -n '/re/p'`) went over it and showed only the lines that matched
     computed  a program went over its content and only its results came back: code (`python`, `jq`, `awk`, …) that
               names the file in its arguments, in a here-document or in the script it runs; a count (`wc`,
-              `grep -c`, `grep -l`); a stage that takes the lines and is not known to pass them on; or a command whose
-              output went to a file. Code is taken to go over all of a file it names, as code that opens a file mostly
-              does
+              `grep -c`, `grep -l`); a program that decodes a video, a sound, an image or a PDF (`ffmpeg`,
+              `pdftotext`, …), whose frames, text or facts Claude reads in place of the file; a stage that takes the
+              lines and is not known to pass them on; or a command whose output went to a file. Code is taken to go
+              over all of a file it names, as code that opens a file mostly does
     listed    only its name came up: a listing (`ls`, `find`), or a program thimble does not know
 
 A folder a command names stands for its files only for a search, which goes into it; any other program only lists it.
@@ -37,6 +38,9 @@ COMPUTES = re.compile(r"^(?:python[\d.]*|pypy3?|jq|g?awk|mawk|node|perl|ruby|Rsc
 SCRIPTED = re.compile(r"^(?:python[\d.]*|pypy3?|node|perl|ruby|Rscript)$")
 # programs that count what they read and print only the counts
 COUNTS = {"wc", "md5sum", "sha1sum", "sha256sum", "sha512sum", "cksum", "cmp"}
+# programs that decode a media or document file: Claude sees what they extract (frames, text, a duration), not the file
+DECODES = {"ffmpeg", "ffprobe", "mediainfo", "exiftool", "sox", "soxi", "pdftotext", "pdftoppm", "pdfinfo", "pdfimages",
+           "tesseract", "identify", "convert", "magick", "whisper"}
 SCRIPT_MAX_BYTES = 1 << 20
 # programs that pass on the lines they get (head, tail and sed narrow them; uniq -c counts them)
 PASSES = {"cat", "less", "more", "cut", "column", "nl", "tr", "fold", "fmt", "expand", "sort", "tee", "uniq", "head", "tail", "sed"}
@@ -301,7 +305,7 @@ def search_operands(args: list[str]) -> list[str]:
 def stage_shows(prog: str, args: list[str]) -> tuple[str, Range | None]:
     """What one stage does with the lines it gets: ("read", the lines it prints as a function of their range, None for
     all of them), ("searched", None), ("computed", None) or ("listed", None)."""
-    if COMPUTES.match(prog) or prog in COUNTS:
+    if COMPUTES.match(prog) or prog in COUNTS or prog in DECODES:
         return "computed", None
     if prog in SEARCHES:
         if "--files" in args:  # `rg --files` lists the names it would search

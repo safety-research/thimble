@@ -165,6 +165,20 @@ def test_a_search_names_the_files_it_searches_not_its_pattern() -> None:
     assert [f for f, *_ in got] == ["src/a.py"]
 
 
+def test_a_video_or_a_pdf_a_decoder_went_over_is_computed_not_only_listed() -> None:
+    from kernel import shellcmd as SH
+
+    files = ["P3/recording.mp4", "P3/transcript.md", "papers/a.pdf"]
+    # frames taken from the video for Claude to look at: the video was gone over, its frames went to the temp folder
+    got = SH.shows("for t in 19:30 20:00; do ffmpeg -v error -y -ss 00:$t -i P3/recording.mp4 -frames:v 1 $TMPDIR/f_$t.png; done",
+                   files, "/data", "/data", lambda f: 10)
+    assert ("P3/recording.mp4", "computed", None, "ffmpeg") in got
+    got = SH.shows("ffprobe -v error -show_entries format=duration P3/recording.mp4; pdftotext papers/a.pdf - | head -40", files, "/data", "/data", lambda f: 10)
+    assert [(f, how) for f, how, _, _ in got] == [("P3/recording.mp4", "computed"), ("papers/a.pdf", "computed")]
+    # a listing still only names it
+    assert [how for _, how, _, _ in SH.shows("ls -la P3/recording.mp4", files, "/data", "/data", lambda f: 10)] == ["listed"]
+
+
 def made_up_village(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A made-up export: an event log, a table of agents, notes, and three days of screenshots."""
     d = tmp_path / "village"

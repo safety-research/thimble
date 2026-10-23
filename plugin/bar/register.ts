@@ -5,8 +5,8 @@
 //                settings; the person's next prompt takes the failure line; the counts at each load of the plugin and
 //                after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
-//                Coverage leaves the keys at the prompt, so r again closes it; the labels pane takes the keys (its
-//                number keys check records), and esc closes it
+//                Each pane takes the keys its key row names (coverage's j k ↵ and r, the labels' number keys that
+//                check records), and esc closes it
 import type { EngineInterface, Register } from 'claude-code'
 
 import { aboveBar } from '../core/answerview'
@@ -14,7 +14,7 @@ import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
-import { failCleared, noticeLine, promptTyped } from './notice'
+import { noticeLine, promptTyped } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,16 +31,14 @@ async function paneShows($: Engine, kind: string): Promise<boolean> {
   return (await $.ui.panes()).some(p => p.id === PANE_ID)
 }
 
-/** Coverage or the labels: open, or closed when the pane shows it. Coverage leaves the keys at the prompt, so the same
- *  key closes it; a click inside it presses its rows. The labels pane takes the keys (labels/pane.tsx). A pane a key
- *  opened that Claude Code did not place (a narrow terminal, core/pane.ts) is said in the bar, with the click that
- *  opens it. */
+/** Coverage or the labels: open, or closed when the pane shows it. Each takes the keys, so the keys its key row names
+ *  act in it, not in the prompt (coverage.tsx, labels/pane.tsx), and esc closes it. A pane a key opened that
+ *  Claude Code did not place (a narrow terminal, core/pane.ts) is said in the bar, with the click that opens it. */
 async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void> {
   if (await paneShows($, kind)) { await closePane($); return }
   if (kind === 'coverage') void recount($).catch(() => undefined)
-  const placed = kind === 'labels' ? await openLabels($) : await openPane($, kind, {}, TITLES[kind])
-  if (placed) await failCleared($, `pane:${kind}`)
-  else {
+  const placed = kind === 'labels' ? await openLabels($) : await openPane($, kind, {}, TITLES[kind], { focus: true })
+  if (!placed) {
     // the words the bar shows for it, which a click opens
     const n = (await countsNow($))?.labels ?? 0
     const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'

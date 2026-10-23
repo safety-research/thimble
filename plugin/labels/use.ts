@@ -130,13 +130,14 @@ async function usedOf($: Engine, names: string[]): Promise<UsedLabel[] | null> {
 // ------------------------------------------------------------------------------------------------ the rows
 
 /** The row under a card or an answer: `label has-link · regex · 412 records  ● yes  ● no`, each name and value a
- *  press. */
+ *  press. Each label is one group, so a row too long for the width wraps between labels, never inside one. */
 export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen: (name: string, value: string | null) => unknown }): Any | null {
   if (!used.length) return null
   const { Box, Button, Text } = els
-  const kids: Any[] = [Text({ key: `${o.key}-w`, dimColor: true, children: used.length === 1 ? 'label ' : 'labels ' })]
+  const row: Any[] = [Text({ key: `${o.key}-w`, dimColor: true, children: used.length === 1 ? 'label ' : 'labels ' })]
   used.forEach((l, i) => {
-    if (i) kids.push(Text({ key: `${o.key}-s${i}`, dimColor: true, children: '   ' }))
+    if (i) row.push(Text({ key: `${o.key}-s${i}`, dimColor: true, children: '   ' }))
+    const kids: Any[] = []
     kids.push(Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ key: 'n', bold: true, children: l.name })] }))
     const how = howMade(l.kind)
     if (how) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${how}` }))
@@ -149,8 +150,9 @@ export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen
       kids.push(Text({ key: `${o.key}-g${i}-${j}`, children: '  ' }))
       kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: words }))
     })
+    row.push(Box({ key: `${o.key}-l${i}`, flexDirection: 'row', flexWrap: 'wrap', children: kids }))
   })
-  return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: kids })
+  return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: row })
 }
 
 /** What a press on a row's label name (value null) or value does: open the labels pane on it. The open is returned, so

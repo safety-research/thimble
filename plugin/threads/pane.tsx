@@ -294,10 +294,14 @@ async function drawList($: Engine, e: Any, els: Any): Promise<Any> {
     const lastRow = i === rows.length - 1
     const state = r.status === 'running' ? Text({ color: 'warning', children: 'answering…' }) : r.status === 'failed' ? Text({ color: 'error', children: 'stopped' }) : Text({ dimColor: true, children: `${r.asks} question${r.asks === 1 ? '' : 's'}${r.ago ? ` · ${r.ago}` : ''}` })
     const name = cut(r.name, Math.max(12, W - 26))
-    out.push(Button({ key: `thread-${i}`, plain: true, label: r.name, onPress: () => showThread($, r.key, { from: 'threads' }), children: [Box({ flexDirection: 'column', children: [
-      Text({ key: 'n', wrap: 'truncate-end', children: [Text({ dimColor: true, children: lastRow ? '└─ ' : '├─ ' }), Text({ children: name }), Text({ children: '  ' }), state] }),
+    // a Button holds strings and Text only (Claude Code draws no pane whose Button holds a Box): the thread's line is
+    // the press, its last question the line under it
+    out.push(Box({ key: `thread-${i}`, flexDirection: 'column', children: [
+      Button({ key: `thread-${i}-open`, plain: true, label: r.name, onPress: () => showThread($, r.key, { from: 'threads' }), children: [
+        Text({ key: 'n', wrap: 'truncate-end', children: [Text({ dimColor: true, children: lastRow ? '└─ ' : '├─ ' }), Text({ children: name }), Text({ children: '  ' }), state] }),
+      ] }),
       ...(r.last ? [Text({ key: 'q', dimColor: true, wrap: 'truncate-end', children: `${lastRow ? ' ' : '│'}    ${cut(r.last, Math.max(10, W - 6))}` })] : []),
-    ] })] }))
+    ] }))
   })
   return Box({ flexDirection: 'column', children: out })
 }

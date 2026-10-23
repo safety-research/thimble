@@ -6,7 +6,7 @@
 // ask back. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
+import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelRowEl, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -75,6 +75,14 @@ function engine(kernel: (args: string[]) => { code?: number; out: unknown } = ()
   const set = (key: string, value: unknown, id?: string) => $.state.set({ plugin: 'thimble', key, ...(id ? { id } : {}) }, value)
   return { $, ran, flush, set, state }
 }
+
+test('a row of several labels wraps between labels: each label, with its values, is one group', () => {
+  const used = ['sabotage_candidate', 'sabotage', 'sabotage2'].map(name => ({ name, kind: 'regex', values: ['yes', 'no'], records: 20764 }))
+  const row = labelRowEl(ELS, used, { key: 'k', onOpen: () => undefined })
+  const groups = (row.props.children as Any[]).filter(n => n.type === 'Box')
+  expect(groups.map(textOf)).toEqual(used.map(l => `${l.name} · regex · 20,764 records  ● yes  ● no`))
+  expect(textOf(row)).toBe(`labels ${groups.map(textOf).join('   ')}`)
+})
 
 test('a card shows the labels its turn ran before it; the answer only those no card of it shows; a press opens the label', async () => {
   const LIST = [

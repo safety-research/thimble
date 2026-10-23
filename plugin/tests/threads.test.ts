@@ -178,6 +178,19 @@ test('where no fork starts, the thread\'s own agent type answers; a card its age
   expect(dropped.drop).toContain('thread')
 })
 
+test('a key that cannot open a thread in a narrow terminal says to type /threads; once /threads opens it, that line goes', async () => {
+  const s = setup()
+  const line = async () => String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text ?? '')
+  s.$.ui.open = async () => ({ isPlaced: false })
+  expect(await openThread(s.$, SCOPE)).toBe(false)
+  expect(await line()).toContain('Type /threads to open it')
+  // a command's pane is placed at any width: it opens the thread on the citation's evidence
+  s.$.ui.open = async () => ({ isPlaced: true })
+  await s.call('command.run', { command: 'threads' }, async () => ({}))
+  await settle()
+  expect(await line()).toBe('')
+})
+
 test('the margin of a passage or a card opens its thread; it says asked (↳) once a question was asked there', async () => {
   const s = setup()
   const p = { text: 'Two runs failed.', label: '"Two runs failed."' }
@@ -241,9 +254,24 @@ test('each press that opens the side pane makes the open inside the press', asyn
   s.go()
   await asked
   const list = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'threads', {}, els))
-  expect(await pressed(list.find(n => n.type === 'Button' && n.props?.key === 'thread-0').props.onPress)).toBe(1)
+  expect(await pressed(list.find(n => n.type === 'Button' && n.props?.key === 'thread-0-open').props.onPress)).toBe(1)
   const one = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY, from: 'threads' }, els))
   expect(await pressed(one.find(n => n.type === 'Button' && n.props?.key === 'back').props.onPress)).toBe(1)
+})
+
+test('the list of threads (t) draws each thread as a press that holds only text, as Claude Code draws a Button', async () => {
+  const s = setup()
+  const asked = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await asked
+  const all = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'threads', {}, els))
+  const presses = all.filter(n => n.type === 'Button')
+  expect(presses.length).toBe(1)
+  expect(textOf(presses[0])).toContain('41 of the 44')
+  // a Box inside a Button makes Claude Code refuse the whole pane
+  for (const b of presses) expect(nodes(b.props.children).some(n => n.type === 'Box')).toBe(false)
+  expect(textOf(all.find(n => n.props?.key === 'q'))).toContain('why so many?')
 })
 
 test('the thread pane: its steps without the folders they ran in, and m drawn once as Claude Code draws a key', async () => {

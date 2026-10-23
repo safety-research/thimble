@@ -7,7 +7,7 @@
 // one more, `Catch up on N replies` (its digit after the chips'): it writes one catch-up of them, drawn under the newest
 // of them while they draw no text (term.ts catchUp), with the chips open on it. A letter right after s, or after the
 // catch-up's digit, undoes it (hooks/keys.ts word window).
-// While the chips are open their keys come first (core/answerview.ts restoredKey):
+// While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey):
 //   [ ] shorter / longer on the picked chip (Length: short · as written · longer · much longer); < > , . the same, unnamed
 //   1–N pick a chip (N+1: the catch-up, when the row offers it) · 0 the original (on a catch-up: the replies again)
 //   · s close · + a chip in the person's own words (typed as `/squeeze <words>`, with the earlier ones offered as it is typed)

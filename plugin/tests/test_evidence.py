@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "engine"))
 from kernel.evidence import check_all, check_mark  # noqa: E402
 
@@ -310,6 +312,45 @@ def test_a_quote_worked_into_a_sentence_may_change_its_first_letter(tmp_path: Pa
     (tmp_path / "CHANGELOG.md").write_text("- Allowed whitelisted users to chat while public chat is closed\n")
     r = check_mark(mark('"allowed... to chat while public chat is closed"'), quote("CHANGELOG.md", 1, "to chat while public chat is closed"), [], str(tmp_path))
     assert r["status"] == "verified"
+
+
+def test_square_brackets_in_a_quote_are_the_quoters_words(tmp_path: Path):
+    rec = {"author": "agent-03", "body": "meson tries to download xsimd from github and there is no network access in this environment. Do not trust it."}
+    (tmp_path / "board.jsonl").write_text("{}\n" + json.dumps(rec) + "\n")
+    sub = "there is no network access in this environment"
+    # brackets inside a word complete it; brackets alone stand for words of the record, which the quote skips
+    for words in ('"there is no network access in this environ[ment]"', '"[T]here is no network access in this environment"',
+                  '"meson tries to download [the subprojects] from github"'):
+        assert check_mark(mark(words), quote("board.jsonl", 2, sub), [], str(tmp_path))["status"] == "verified", words
+    # the words outside the brackets must still stand in the record
+    bad = check_mark(mark('"there is no network access in this environ[ment] at all"'), quote("board.jsonl", 2, sub), [], str(tmp_path))
+    assert bad["status"] == "failed"
+
+
+def test_a_quote_in_a_json_line_cut_for_its_length_is_read_with_its_escapes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from kernel import evidence as E
+    # one JSON document on one line, longer than the check reads of a line: its end is cut, so it does not parse
+    doc = {"messages": [{"role": "assistant", "text": "It's a tournament \u2014 two agents fighting for port 8000."}] + [{"text": "x" * 50}] * 40}
+    (tmp_path / "u1.json").write_text(json.dumps(doc))
+    monkeypatch.setattr(E, "LINE_BYTES", 400)
+    words = "a tournament \u2014 two agents fighting for port 8000"
+    r = check_mark({"n": 1, "words": words, "sentence": f'u1 called it "[{words}]."'}, quote("u1.json", 1, words[2:]), [], str(tmp_path))
+    assert r["status"] == "verified", r["reason"]
+    assert any(l.get("highlight") for l in r["evidence"]["lines"])
+
+
+def test_quote_marks_around_the_citation_make_it_a_quote_the_output_shows_word_for_word():
+    m = {"n": 1, "words": "I've been locked out", "sentence": 'At 09:18 agent-02 wrote "[I\'ve been locked out]."'}
+    found = 'print("[1]", "I\'ve been locked out" in text)'
+    printed = 'print("[1]", text[:60])'
+    # a test of whether the words are there shows no quote: only the record's own words do
+    r = check_mark(m, computed("[1] True"), [call(found, "[1] True\n")], "/data")
+    assert (r["status"], r["reason"]) == ("failed", "The result reads “[1] True”, not the quoted words."), r["reason"]
+    ok = check_mark(m, computed("[1] agent-02: I've been locked out of sudo"), [call(printed, "[1] agent-02: I've been locked out of sudo\n")], "/data")
+    assert ok["status"] == "verified"
+    # words in no quote marks stay the check's reading of the output, as before
+    plain = {"n": 1, "words": "was locked out", "sentence": "At 09:18 agent-02 [was locked out]."}
+    assert check_mark(plain, computed("[1] True"), [call(found, "[1] True\n")], "/data")["status"] == "verified"
 
 
 def test_a_claim_that_joins_two_places_cites_both(tmp_path: Path):
@@ -848,8 +889,8 @@ def test_a_rewrite_stays_within_its_sentence_and_keeps_the_other_citations():
     m = {"n": 2, "words": "13", "sentence": "Of the [40] pull requests, [13] were merged by agent-07."}
     calls = [call(CODE, "12 merged by agent-07\n")]
 
-    def one(sentence: str) -> dict:
-        item = {"mark": 2, **computed("12 merged by agent-07", status="corrected", correction={"sentence": sentence})}
+    def one(sentence: str, reason: str = "") -> dict:
+        item = {"mark": 2, **computed("12 merged by agent-07", status="corrected", correction={"sentence": sentence}), "reason": reason}
         return validated("/data", [m], [item], calls)[0]
 
     r = one("Of the [40] pull requests, agent-07 merged [12].")
@@ -861,6 +902,9 @@ def test_a_rewrite_stays_within_its_sentence_and_keeps_the_other_citations():
                           ("Of the [40] pull requests, [12] were merged by agent-07, not 13.", "leaves “not 13.” out of the citation")):
         r = one(sentence)
         assert (r["status"], r["failedBy"], r["shown"]) == ("failed", "evidence", "13") and why in r["reason"], (sentence, r["reason"])
+    # a rewording that cannot stand still says what the check found wrong, in the check's own reason
+    r = one("Of the [41] pull requests, agent-07 merged [12].", "agent-07 merged 12 of them, not 13")
+    assert (r["status"], r["failedBy"], r["shown"], r["reason"]) == ("failed", "evidence", "13", "agent-07 merged 12 of them, not 13.")
 
 
 def test_a_sentence_is_rewritten_once():
@@ -902,6 +946,11 @@ def test_a_failed_citation_says_why_in_one_plain_sentence(tmp_path):
         (check_mark(mark("13 merged"), card("card:k3f9a1@out1#L3"), [], "/data", cards=CARDS), "Line 3 of the card's output reads “agent-07 12 40”, not 13."),
         (check_mark(mark("15 of 40"), computed("12 of 40", status="corrected", correction={"words": "13 of 40"}), [call(CODE, "12 of 40")], "/data"),
          "The check offered other words, but the result reads “12 of 40”, not 13."),
+        # a time is named whole, never by one of its numbers
+        (check_mark(mark("merged by about 14:08"), computed("merged at 14:07"), [call('import json\nr = json.loads(open("pr.json").read())\nprint("merged at", r["at"])', "merged at 14:07\n")], "/data"),
+         "The result reads “merged at 14:07”, not 14:08."),
+        (check_mark(mark("merged at 14:08"), quote("standup.jsonl", 2, "Merged"), [], str(tmp_path)),
+         "Line 2 of standup.jsonl reads “Merged 4 PRs on 2026-06-12.”, not 14:08."),
         # what is missing
         (check_mark(mark("15 of 40"), computed("15 of 40"), [call(wrong_typed, "15 of 40")], "/data"),
          "The code typed 15 and 40 in by hand instead of computing them from the records."),

@@ -187,6 +187,32 @@ async function chipsDrawn($: Any, row: string, text: string, override: Any = {})
   return { client, tree: Chips({ ...client?.props.props, ...override } as never, surface as never), posts }
 }
 
+test('a citation opened over the open chips takes the keys: the bar names 0 once, 0 closes the tray and keeps the version, then the chips take 0 again', async ($, on) => {
+  const text = 'Of the [12 runs](#), [3 failed](#) on the [slow mirror](#).'
+  const t = await setup($, on, ['Of all [12 nightly runs](#), exactly [3 of them failed](#), each on the [slow package mirror](#).'])
+  await t.turn('t1', text)
+  await t.press('s')
+  await t.press(']')
+  await t.clock.advance(5000)
+  const all = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : [n, ...[n.props?.children, n.children].flat(Infinity).flatMap(all)])
+  const cite = all(await $.ui.render(answer('row-t1', text))).find(n => n.type === 'Button' && /^citation 2/.test(String(n.props.label)))
+  const ui = await $.ui.mount(answer('row-t1', text))
+  await ui.press({ key: cite.props.key })
+  await ui.unmount()
+  // the tray is open over the chips: the bar names its keys alone, each key once
+  const open = await t.bar()
+  expect(open).toContain('3 failed')
+  expect(open.match(/0 (close|back|revert)/g)).toEqual(['0 close'])
+  expect(open).not.toContain('shorter / longer')
+  // 0 closes the tray; the longer version stays, and the chips hold the keys again
+  await t.press('0')
+  expect(await t.bar()).not.toContain('0 close')
+  expect(textOf(await $.ui.render(answer('row-t1', text)))).toContain('slow package mirror')
+  expect(await t.bar()).toContain('0 revert')
+  await t.press('0')
+  expect(textOf(await $.ui.render(answer('row-t1', text)))).not.toContain('slow package mirror')
+})
+
 // A catch-up words the replies' citations anew, and each reply numbers its citations from 1. Each citation of the
 // catch-up stands for the reply's citation that states the same claim: a press on a reworded one acts on that citation
 // (the tray stands on it), and citations of two replies light apart, each in its own hover group
