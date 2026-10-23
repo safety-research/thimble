@@ -64,7 +64,8 @@ number inside a date matches only a number of the words' own dates, and a time t
 Cited lines a few lines off from the ones that hold the words, or a few lines short of them, are moved to them. A
 correction is the words that replace the mark: words of the sentence the checker repeated around them go.
 
-A mark the checker verified whose evidence does not hold here fails as not confirmed, with the reason. A mark the
+A mark the checker verified whose evidence does not hold here fails as not confirmed, with one plain sentence that
+says why: what the records show in place of the words, or what is missing (nearest, unshown). A mark the
 checker found wrong stays failed, with its reason: the checker finds a mark wrong also for the words around it (a wrong
 condition), which evidence that prints the marked words does not answer; one it found wrong and gave the right words for
 is a correction. A correction whose evidence does not show its
@@ -189,6 +190,92 @@ def short(s: str, n: int) -> str:
     """At most about n characters of the text for a reason, cut at the end of a word, with "…" where it is cut."""
     s = norm_ws(s)
     return s if len(s) <= n else s[:n].rsplit(" ", 1)[0] + "…"
+
+
+# ------------------------------------------------------------------------------------------------ why, for the person
+#
+# A failed citation says why in one plain sentence (its `reason`): the check's own when the check found the claim wrong
+# or could not confirm it, else this module's, which says what the records show in place of the words, or what is
+# missing, never the whole cited words again.
+
+def sentence(clause: str) -> str:
+    """A clause of a reason as the sentence the person reads: its first letter capital, a stop at its end."""
+    s = norm_ws(clause)
+    if not s:
+        return s
+    s = s[0].upper() + s[1:]
+    return s if s[-1] in ".!?" else s + "."
+
+
+def check_reason(reason: str, words: str) -> str:
+    """The check's own reason as the sentence the person reads: a stop at its end, and a capital first letter unless
+    its first word is a name (one the cited words hold, or one with a digit, a dash or a capital in it)."""
+    s = norm_ws(reason)
+    if not s:
+        return s
+    first = re.match(r"[^\s,;:]+", s)
+    w = first.group(0) if first else ""
+    if re.fullmatch(r"[a-z]+", w) and not re.search(rf"(?<!\w){re.escape(w)}(?!\w)", unmark(words)):
+        s = s[0].upper() + s[1:]
+    return s if s[-1] in ".!?\"”)" else s + "."
+
+
+SENTENCE_STOP = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"“(])")
+
+
+def nearest(words: str, texts: list[str], n: int = 70) -> str:
+    """What the records hold nearest the words: of the lines (and the sentences in them) of `texts`, the one that
+    shares the most characters with the words, at most about n characters of it around where it matches best, cut at
+    words with "…". Never more than one sentence of the records, so the reason stays one sentence."""
+    want = one_quote(unmark(words)).lower()
+    best: tuple[int, int, str] = (-1, 0, "")
+    # a JSON record reads as its string values, each alone, as the pane shows it
+    lines = [x for text in texts for raw in str(text or "").splitlines() for t in ([v for v, d in shown_forms(raw) if d] or [raw]) for x in t.splitlines()]
+    for part in (p for line in lines for p in SENTENCE_STOP.split(norm_ws(line)) if p):
+        sm = difflib.SequenceMatcher(None, want, one_quote(part).lower(), autojunk=False)
+        best = max(best, (sum(b.size for b in sm.get_matching_blocks()), -len(part), part))
+    part = best[2]
+    if len(part) <= n:
+        return part
+    m = difflib.SequenceMatcher(None, want, one_quote(part).lower(), autojunk=False).find_longest_match(0, len(want), 0, len(part))
+    b = min(len(part), max(0, m.b + m.size // 2 - n // 2) + n)
+    a = max(0, b - n)
+    if a > 0 and part.find(" ", a, b) > 0:
+        a = part.find(" ", a, b) + 1
+    if b < len(part) and part.rfind(" ", a, b) > a:
+        b = part.rfind(" ", a, b)
+    return ("…" if a > 0 else "") + part[a:b].strip(" ,;:") + ("…" if b < len(part) else "")
+
+
+def unshown(words: str, text: str, approx: bool = False) -> str:
+    """What of the words the text does not show, as the reason names it: the quoted words, a day, the numbers, the
+    record names; "these words" when none of these stands out."""
+    w = unmark(words)
+    gone = [f for f in quote_fragments(w) if not any(bounded_in(one_quote(g), one_quote(text)) for g in (f, f[:1].swapcase() + f[1:]))]
+    if gone:
+        # a short quoted part by its words; a long one, or one that is all the cited words, as what it is
+        named = " or ".join(f"“{f}”" for f in gone)
+        whole = len(" ".join(gone)) >= len(w.strip(QUOTE_CHARS + " .")) - 3
+        return named if len(named) <= 44 and not whole else "the quoted words"
+    if calendar_days(w) and not days_shown(w, text):
+        day = next((m.group(0) for p in DATE_PARTS for m in [p.search(w)] if m), "")
+        return f"the day {day}" if day else "the day the words name"
+    said = wordnums(text, counts=True)
+    nums = [v for v, d in marked_numbers(wordnums(w, counts=True)) if not has_number(v, said, dates=d, approx=approx)]
+    if nums:
+        return " or ".join(dict.fromkeys(nums))
+    names = [x for x in NAME.findall(w) if not has_name(x, text)]
+    if names:
+        return " or ".join(dict.fromkeys(names))
+    return "these words"
+
+
+def instead(where: str, words: str, texts: list[str], approx: bool = False) -> str:
+    """The clause that says what a place holds in place of the words, as a reason ends it: `line 3 of board.md reads
+    “bye”, not the quoted words`."""
+    near = nearest(words, texts)
+    missing = unshown(words, "\n".join(texts), approx)
+    return f"{where} reads “{near}”, not {missing}" if near else f"{where} is empty"
 
 
 QUOTES = str.maketrans({c: '"' for c in "“”‘’'"})
@@ -874,7 +961,7 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
     highlighted from the cited place on. When no call printed that output, the check's own last call is shown. For a
     correction, `was` is the marked words: the output also shows each run of words the correction puts in."""
     if not output_parts(given):
-        return ["the check gave no output of a call"], None
+        return ["the check showed no printed result for it"], None
     runs = [(c, at) for c in calls for at in [printed(given, str(c.get("output") or ""))] if at is not None]
 
     def shown(c: dict[str, Any], spans: list[list[int]]) -> dict[str, Any]:
@@ -886,7 +973,7 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
     if not runs:
         # what the check itself ran, so the person sees what it found
         own = [c for c in calls if c.get("by") == "checker"]
-        return ["no call of the session printed the output the check gave"], shown(own[-1], []) if own else None
+        return ["no command of this session printed the result the check gave"], shown(own[-1], []) if own else None
     problem = ""
     for c, at in runs:
         # the words must stand in the lines the check copied, not anywhere in a long output, where another value
@@ -904,19 +991,20 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
             # text, where a computed value printed it
             typed += [v for v in texts if not has_number(v, without_texts(out, texts[v]), dates=False, approx=approx)]
         if typed:
-            problem = problem or f"its code writes {', '.join(sorted(set(typed)))} in by hand instead of computing it"
+            vals = sorted(set(typed))
+            problem = problem or f"the code typed {' and '.join(vals)} in by hand instead of computing {'them' if len(vals) > 1 else 'it'} from the records"
         elif quoted:
-            problem = problem or f"its code writes the quoted words “{quoted[0]}” itself instead of reading them from the records"
+            problem = problem or "the code typed the quoted words in itself instead of reading them from the records"
         elif shows(target, out, approx):
             missing = unshown_change(was, target, out, approx) if was else []
             if missing:
-                problem = problem or f"the output of that call does not show “{short(' … '.join(missing), 80)}”, which the correction puts in"
+                problem = problem or f"the result does not show “{short(' … '.join(missing), 60)}”"
                 continue
             # the words in the cited lines, else the cited lines themselves
             spans = [[a + at[0], b + at[0]] for a, b in spans_of(target, out)] or [at]
             return [], shown(c, spans)
         else:
-            problem = problem or f"the output of that call does not show “{target}”"
+            problem = problem or instead("the result", target, [out], approx)
     return [problem], shown(runs[0][0], [runs[0][1]])
 
 
@@ -1098,13 +1186,13 @@ def place(ev: dict[str, Any], cwd: str, root: str | None, tmp: str | None = None
     own code, such as a label's rule); its path shows whole."""
     file, line, sub = ev.get("file"), ev.get("line", ev.get("lines")), ev.get("substring")
     if not file or line is None or not sub:
-        return ["the check gave no file, line or words to find there"], None, []
+        return ["the check named no line of a file to look at"], None, []
     paths = paths_of(str(file), cwd, root, tmp, calls)
     if not paths:
-        return [f"{file} is outside the folder of this session"], None, []
+        return [f"{file} is outside the folder this session works in"], None, []
     files = [p for p in paths if os.path.isfile(p)]
     if not files:
-        return [f"there is no file {file} in the folder of this session"], None, []
+        return [f"there is no file {file} in this session's folder"], None, []
     looks = [look(p, str(file), line, str(sub), cwd, root) for p in files]
     return next((x for x in looks if not x[0]), looks[0])
 
@@ -1115,7 +1203,7 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     number of lines moved, or more lines around them (a quote that runs over three lines cited as two)."""
     span = line_span(line)
     if not span:
-        return [f"the check cited lines {line}, which is not one line or a range of at most {MAX_RANGE} lines"], None, []
+        return [f"the check cited lines {line}, which are not one line or a range of at most {MAX_RANGE} lines"], None, []
     a, b = span
     near = read_lines(path, max(1, a - SHIFT_MAX), b + SHIFT_MAX, partial=True)
     if near is None or near[0] + len(near[1]) - 1 < b:
@@ -1133,7 +1221,7 @@ def look(path: str, file: str, line: Any, sub: str, cwd: str, root: str | None) 
     first, last = max(top, a - 1), min(top + len(texts) - 1, b + 1)
     rows = [{"n": n, "text": t} for n, t in zip(range(first, last + 1), at(first, last))]
     hay = hay_of(at(a, b))
-    problems = [] if holds(str(sub), hay) else [f"line {line} of {file} does not hold “{short(sub, 80)}”, the words the check gave"]
+    problems = [] if holds(str(sub), hay) else [instead(f"line {line} of {file}", str(sub), [t for x in at(a, b) for t, _ in shown_forms(x)])]
     # for the pane: each cited line in the form that holds the substring, cut around it; the lines around cut short
     for r in rows:
         if not (a <= r["n"] <= b):
@@ -1174,18 +1262,18 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     where = " or ".join(f"line {s['line']} of {s['file']}" for s in shown)
     for frag in quote_fragments(target):
         if not any(in_text(frag, h) for h in hay) and not (kind == "code" and in_code(frag, hay)):
-            problems.append(f"{where} does not hold the quoted words “{short(frag, 60)}”")
+            problems.append(instead(where, f"“{frag}”", hay))
     # a quote of a record shows its days and numbers; a claim about what code does may compute them from it (`2 ** k`)
     if kind != "code" and calendar_days(unmark(target)) and not days_shown(unmark(target), " ".join(hay)):
-        problems.append(f"{where} does not show the day the words name")
+        problems.append(instead(where, unmark(target), hay))
     pct = percents(target)
     for v, in_date in (marked_numbers(unmark(target)) if kind != "code" else []):
         if not any(has_number(v, h, dates=in_date) or (v in pct and has_number(fraction(v), h)) for h in hay):
-            problems.append(f"{where} does not show {v}")
+            problems.append(f"{where} reads “{nearest(target, hay)}”, not {v}")
     if was and kind != "code" and not problems:
         missing = unshown_change(was, target, "\n".join(hay))
         if missing:
-            problems.append(f"{where} does not show “{short(' … '.join(missing), 80)}”, which the correction puts in")
+            problems.append(f"{where} does not show “{short(' … '.join(missing), 60)}”")
     return problems, {"kind": kind, **shown[0], **({"more": shown[1:]} if len(shown) > 1 else {})}
 
 
@@ -1404,11 +1492,11 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
     ref = str((ev or {}).get("ref") or "").strip().strip("[]") if isinstance(ev, dict) else ""
     td, ln = CARD_TD.match(ref), CARD_LINE.match(ref)
     if not td and not ln:
-        return [f"the check named no place of a card ({short(ref, 60) or 'none'})"], None
+        return ["the check named no value or line of a card"], None
     cid = (td or ln).group(1)
     card = next((c for c in cards or [] if str(c.get("id")) == cid), None)
     if card is None:
-        return [f"no card card:{cid} is in this session"], None
+        return [f"there is no card {cid} in this session"], None
     title = str(card.get("title") or "")
     if td:
         col, row = decode_label(td.group(2)), decode_label(td.group(3))
@@ -1422,18 +1510,18 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
                      "table": table_of(str(o.get("corner") or ""), cols, rows, r, c)}
             text = f"{row} {value}"
             if not (shows(target, value, approx) or shows(target, text, approx)):
-                return [f"the card's {col} of {row} shows {short(value, 40) or 'nothing'}, not “{target}”"], shown
+                return [f"the card's {col} for {row} shows {short(value, 40) or 'nothing'}, not {unshown(target, text, approx)}"], shown
             missing = unshown_change(was, target, text, approx) if was else []
             if missing:
-                return [f"the card's {col} of {row} does not show “{short(' … '.join(missing), 80)}”, which the correction puts in"], shown
+                return [f"the card's {col} for {row} does not show “{short(' … '.join(missing), 60)}”"], shown
             return [], shown
-        return [f"card:{cid} has no value at {col} of {row}"], None
+        return [f"the card has no {col} for {row}"], None
     out_i, n = int(ln.group(2)), int(ln.group(3))
     o = next((x for x in card.get("outputs") or [] if int(x.get("out") or 0) == out_i and x.get("lines")), None)
     lines = [(int(k), str(t)) for k, t in (o or {}).get("lines") or []]
     at = next((j for j, (k, _) in enumerate(lines) if k == n), None)
     if at is None:
-        return [f"card:{cid} has no line {n} in its output {out_i}"], None
+        return [f"the card's output has no line {n}"], None
     text = "\n".join(t for _, t in lines)
     start = sum(len(t) + 1 for _, t in lines[:at])
     line = lines[at][1]
@@ -1443,10 +1531,10 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
     if table := text_table(text, spans):
         shown["table"] = table
     if not shows(target, line, approx):
-        return [f"line {n} of the card's output does not show “{target}”"], shown
+        return [instead(f"line {n} of the card's output", target, [line], approx)], shown
     missing = unshown_change(was, target, line, approx) if was else []
     if missing:
-        return [f"line {n} of the card's output does not show “{short(' … '.join(missing), 80)}”, which the correction puts in"], shown
+        return [f"line {n} of the card's output does not show “{short(' … '.join(missing), 60)}”"], shown
     return [], shown
 
 
@@ -1484,8 +1572,8 @@ def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]],
         return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was)
     if kind in ("quote", "code"):
         evs = [e for e in (ev if isinstance(ev, list) else [ev]) if isinstance(e, dict)]
-        return check_quote(target, kind, evs, cwd, root, tmp, calls, was) if evs else (["the check gave no place"], None)
-    return [f"the check gave evidence of no known kind ({kind!r})"], None
+        return check_quote(target, kind, evs, cwd, root, tmp, calls, was) if evs else (["the check named no place in a file"], None)
+    return ["the check gave evidence of a kind thimble does not know"], None
 
 
 APPROX = re.compile(r"(?:\babout|\baround|\broughly|\bapproximately|\bnearly|\balmost|~|≈)\s*$", re.I)
@@ -1621,11 +1709,11 @@ def sentence_rewrite(given: str, sentence: str, words: str) -> dict[str, Any] | 
     sentence: one line, no sentence added, the block's marker kept, and every other citation of the sentence with its
     words as they were (a sentence that writes them with no brackets has them bracketed where they stand)."""
     if re.search(r"\n\s*\S", given.strip()):
-        return "the check's sentence runs over more than one line"
+        return "its sentence runs over more than one line"
     old = citations_of(sentence)
     k = next((i for i, (a, b) in enumerate(old) if loose(sentence[a + 1:b - 1]) == loose(words)), None)
     if k is None:
-        return "thimble could not find the citation in its sentence"
+        return "thimble could not find the citation in the sentence"
     # a citation written as the reply writes one (`[words](#)`) is one too
     new = norm_ws(given).replace("](#)", "]")
     lead = LEAD.match(sentence)
@@ -1642,25 +1730,25 @@ def sentence_rewrite(given: str, sentence: str, words: str) -> dict[str, Any] | 
             if j >= 0 and a0 <= j < b0:
                 j = new.find(w, b0)
             if j < 0:
-                return "the check's sentence leaves out another citation of it"
+                return "it leaves out another citation of the sentence"
             spans.append((j, j + len(w)))
             at = j + len(w)
         for a, b in sorted(spans, reverse=True):
             new = f"{new[:a]}[{new[a:b]}]{new[b:]}"
         groups = citations_of(new)
     if len(groups) != len(old):
-        return "the check's sentence changes the other citations of it"
+        return "it changes the other citations of the sentence"
     inner = [new[a + 1:b - 1] for a, b in groups]
     fits = [j for j in range(len(groups)) if [loose(w) for i, w in enumerate(inner) if i != j] == [loose(w) for w in others]]
     if not fits:
-        return "the check's sentence changes the other citations of it"
+        return "it changes the other citations of the sentence"
     j = k if k in fits else fits[0]
     # the sentences a quote holds are the quote's
     ends = lambda x: len(SENTENCE_END.findall(QUOTED.sub("q", x)))  # noqa: E731
     if ends(rest_of(new, groups, j)) > ends(rest_of(sentence, old, k)):
-        return "the check's sentence adds a sentence"
+        return "it adds a sentence"
     if not inner[j].strip():
-        return "the check's sentence cites no words"
+        return "it cites no words"
     return {"sentence": new, "cited": norm_ws(inner[j]), "rest": rest_of(new, groups, j), "was_rest": rest_of(sentence, old, k)}
 
 
@@ -1734,7 +1822,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         return out
     status, kind = item.get("status"), item.get("kind")
     ev = item.get("evidence") if isinstance(item.get("evidence"), (dict, list)) else {}
-    reason = norm_ws(item.get("reason") or "")
+    # the check's own reason says why when the check found the claim wrong or could not confirm it; when its evidence
+    # does not hold, the reason is this module's (its reason then says why the claim held, which it did not)
+    reason = check_reason(item.get("reason") or "", words)
     note = norm_ws(item.get("note") or "")
     extra = {"note": note} if note else {}
     approx = approximate(mark)
@@ -1756,7 +1846,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if given.strip() and status in ("verified", "corrected", "narrowed", "wrong"):
         got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words)
         if isinstance(got, str):
-            return judged("evidence", f"Not confirmed: {got}.")
+            return judged("evidence", f"The check reworded the sentence, but {got}.")
         corr = {**corr, "words": got["cited"]}
         if loose(got["rest"]) == loose(got["was_rest"]):
             # only the cited words change: a correction of them, or no change
@@ -1780,7 +1870,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         # a correction that leaves the words as they were found an error around them (a wrong place, a wrong
         # condition), which the words cannot show: the mark is wrong, with the checker's reason
         status = "wrong"
-        reason = reason or "the check gave no corrected words"
+        reason = reason or "The check found an error around these words but gave no corrected sentence."
 
     # the words the check puts outside the citation: a narrowing's left-out words, a rewrite's new words
     runs: list[str] = []
@@ -1788,7 +1878,7 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if narrow:
         part = narrowed_part(norm_ws(corr.get("words") or ""), words) if corr else None
         if not part:
-            return judged("evidence", "Not confirmed: the check narrowed the citation to words that are not part of it.")
+            return judged("evidence", "The check cut the citation down to words that are not part of it.")
         new, *runs = part
         runs = [r for r in runs if re.search(r"\w", r)]
         status, narrow = ("corrected", True) if runs else ("verified", False)
@@ -1797,9 +1887,9 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         new = rewrite["cited"]
         runs = put_in(rewrite["was_rest"], rewrite["rest"])
     if status == "wrong":
-        return judged("check", reason or "the data do not show this claim")
+        return judged("check", reason or "The records do not show this claim.")
     if status == "unconfirmed":
-        return judged("evidence", reason or "the check could not show this claim from the data")
+        return judged("evidence", reason or "The check found no records that show this claim true or false.")
     if status not in ("verified", "corrected"):
         return {**out, "reason": f"{NOT_RUN} It gave the status {status!r}."}
     # a narrowing puts no words in: the evidence shows the part it keeps
@@ -1808,24 +1898,24 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or words, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
-    did = "cited only a part of the words" if narrow else "rewrote the sentence" if rewrite else "gave other words"
+    did = "cited only a part of these words" if narrow else "reworded the sentence" if rewrite else "offered other words"
     if problems and new:
         # the check's verdict that the words are wrong rests on evidence that does not show its new words: neither the
         # old words nor the new ones are confirmed (a match of the old words there, such as the 250 of a test that
         # printed False, is no sign that they hold)
-        res.update(status="failed", shown=words, failedBy="evidence", reason=f"Not confirmed: the check {did}, but {problems[0]}.")
+        res.update(status="failed", shown=words, failedBy="evidence", reason=f"The check {did}, but {problems[0]}.")
         return res
     if problems:
-        res.update(status="failed", failedBy="evidence", reason=f"Not confirmed: {problems[0]}. The claim may still be true.")
+        res.update(status="failed", failedBy="evidence", reason=sentence(problems[0]))
         return res
     bad = uncited_values(runs, words, new or words, evidence_text(evidence), approx)
     if bad:
         why, run = bad
         if why == "left" and narrow:
-            return judged("evidence", f"Not confirmed: the check cited only “{short(new, 60)}”, but the words it left out (“{short(norm_ws(' '.join(runs)), 60)}”) state a value of the data.")
+            return judged("evidence", f"The records show only “{short(new, 50)}”; the words left out, “{short(norm_ws(' '.join(runs)), 40)}”, state a value of the data.")
         if why == "left":
-            return judged("evidence", f"Not confirmed: the check's sentence leaves “{short(run, 60)}” out of the citation, a value of the data.")
-        return judged("evidence", f"Not confirmed: the check's sentence states “{short(run, 60)}”, which its evidence does not show.")
+            return judged("evidence", f"The check reworded the sentence, but it leaves “{short(run, 40)}” out of the citation, a value of the data.")
+        return judged("evidence", f"The records do not show “{short(run, 40)}”, which the check's rewording states.")
     if new:
         res["was"] = words
         if narrow:
@@ -1876,7 +1966,7 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
             continue
         key = norm_ws(m.get("sentence") or "")
         if key in rewritten:
-            r.update(status="failed", failedBy="evidence", shown=str(m.get("words", "")), reason="Not confirmed: the check rewrote this sentence for another of its citations too.")
+            r.update(status="failed", failedBy="evidence", shown=str(m.get("words", "")), reason="The check reworded this sentence for another of its citations too, so this change was left out.")
             for k in ("rewrite", "was", "narrowed"):
                 r.pop(k, None)
         rewritten.add(key)

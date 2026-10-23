@@ -38,7 +38,7 @@ When your result differs from the reply, read your code once for an error, then 
 - `wrong`: the records show the claim false, and no words can replace the cited words.
 - `unconfirmed`: the records you can read do not show it true or false. First follow each value to the record that sets it, such as an earlier command's variable or a file that an earlier step wrote.
 
-`reason` is one short sentence: what the data show, or what you could not see.
+`reason` is one short sentence in plain words, which the analyst reads under the citation: what the records show, and for a citation that stays wrong or unconfirmed, what they show instead or what is missing ("The board shows agent-05 merged #118, not agent-07."), without the cited words again.
 
 Example: the reply says "[15 of 40](#) pull requests were merged by agent-07". `print("15 of 40")` is not evidence, because you typed the value. This is evidence, because it counts what the sentence claims:
 
