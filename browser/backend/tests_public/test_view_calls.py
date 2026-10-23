@@ -98,6 +98,8 @@ class FakeKernels:
             sys.settrace(tracer)
             exec(code, {})  # noqa: S102 — the snippet a reader kernel runs
         except KeyboardInterrupt:
+            sys.settrace(None)  # before the flag is cleared, so clearing it is traced no more
+            flag.clear()
             return [{"application/vnd.thimble.error+json": {"ename": "KeyboardInterrupt", "evalue": ""}}], "error"
         finally:
             sys.settrace(None)
@@ -135,14 +137,16 @@ _OUT = _ThreadOut()
 
 
 class _Interruptible:
-    """A trace function that raises KeyboardInterrupt once `flag` is set, as SIGINT interrupts a kernel's code."""
+    """A trace function that raises KeyboardInterrupt while `flag` is set, as SIGINT interrupts a kernel's code, until
+    the run catches it and clears the flag: a raise that lands in a finalizer the collector runs in the run's thread
+    (an anyio stream's __del__, a WeakSet's callback) is ignored there, and an interrupt cleared at its first raise was
+    lost then, so the cancelled call ran to its end (test_cancelling_a_call_interrupts_its_kernel... failed in CI)."""
 
     def __init__(self, flag: threading.Event) -> None:
         self.flag = flag
 
     def __call__(self, frame, event, arg):
         if self.flag.is_set():
-            self.flag.clear()
             raise KeyboardInterrupt
         return self
 
