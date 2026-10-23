@@ -267,7 +267,8 @@ async def check() -> dict[str, Any]:
         await llm.client().messages.create(model=CHECK_MODEL, max_tokens=1,
                                            messages=[{"role": "user", "content": "ok"}])
     except Exception as e:  # noqa: BLE001 — any failure is the check's answer
-        return {**out, "ok": False, "problem": {"what": llm.failure(e), "fix": "Check the choice in Settings."}}
+        return {**out, "ok": False, "problem": {"what": llm.failure(e),
+                                                 "fix": "Or set it again with thimble-browser --setup."}}
     return {**out, "ok": True}
 
 

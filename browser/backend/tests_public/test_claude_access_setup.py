@@ -47,7 +47,8 @@ def test_key_file_check_runs_and_a_failure_does_not_print_the_key(tmp_path, caps
     p = key_file(tmp_path, FAKE_KEY)
 
     async def failed():
-        return {"ok": False, "problem": {"what": "The API key was refused.", "fix": "Check the choice in Settings."}}
+        return {"ok": False, "problem": {"what": "The API key was refused.",
+                                         "fix": "Or set it again with thimble-browser --setup."}}
 
     monkeypatch.setattr(claude_access, "check", failed)
     rc, out = run_setup(capsys, "--key-file", str(p))
