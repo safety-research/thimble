@@ -9,8 +9,10 @@
 //                   claim said twice or more, a ◆ a claim that came in while the person browsed (until the next look).
 //                   No lines join the dots, which keep their places while the person walks them. The map has two
 //                   columns of cells (three in a wide pane) and as many rows of cells as fit over the room the detail
-//                   keeps; clusters beyond what it draws, smallest first, join the nearest larger cluster (fitClusters).
-//                   When the detail needs the rows the cells get shorter, 7 rows down to 4; past that the pane scrolls.
+//                   keeps (cells of 4 rows); clusters beyond that, smallest first, join a near cluster (linked or
+//                   sharing many words), its name then both names (fitClusters); clusters near no other stay apart.
+//                   When the map or the detail needs the rows the cells get shorter, 7 rows down to 4; past that the
+//                   pane scrolls.
 //                   A narrow pane lists every cluster one per line
 //   the selection   at rest nothing is chosen. A press on a name, or p n, chooses a cluster: its dots and name bold in
 //                   its color, every other dim. A press on a dot, or on a claim in the list, picks that claim
@@ -328,9 +330,9 @@ export function hopCluster(data, key, dir) {
 /** The rows of a cell of the map: seven, down to four when the detail needs the rows. */
 export const CELL_ROWS = 7
 export const CELL_MIN = 4
-/** The rows the map leaves the detail under it when it counts how many rows of cells it has: a cluster's name and a
- *  dozen of its claims. */
-const DETAIL_ROOM = 16
+/** The rows the map leaves the detail under it when it counts how many clusters it can draw: a cluster's name and a
+ *  few of its claims (the list pages past them). */
+const DETAIL_MIN = 10
 /** The rows above the map: the head and a blank row. */
 const TOP_ROWS = 2
 /** A pane this wide or wider has three columns of cells. */
@@ -339,50 +341,81 @@ const WIDE = 96
 /** The map's columns of cells: two, three in a wide pane. */
 export const mapColumns = W => (W >= WIDE ? 3 : 2)
 
-/** How many clusters the map draws in a pane of W × H: its columns times the rows of full cells that fit over the
- *  room the detail keeps; two rows at least, whose cells shorten in a short pane. */
+/** How many clusters the map draws in a pane of W × H: its columns times the rows of the shortest cells (CELL_MIN) that
+ *  fit over the room the detail keeps; two rows at least. Cells taller than that are drawn while they fit. */
 export function mapCapacity(W, H) {
-  return mapColumns(W) * Math.max(2, Math.floor((H - TOP_ROWS - KEYS_ROWS - DETAIL_ROOM) / CELL_ROWS))
+  return mapColumns(W) * Math.max(2, Math.floor((H - TOP_ROWS - KEYS_ROWS - DETAIL_MIN) / CELL_MIN))
 }
 
+/** Two clusters are near, and the map may draw them as one, when their claims are linked this many times, or their
+ *  names and claims share this much of their words (store.js likeness). */
+const NEAR_LINKS = 2
+const NEAR_WORDS = 0.6
+/** A merged cluster's two names joined are kept up to this length; past it, the larger's name and how many claims
+ *  joined it. */
+const JOINED_MAX = 80
+
 /**
- * The data with at most `cap` groups, so the map draws every cluster: while there are more, the smallest (one-claim
- * clusters first; of two alike, the later listed) joins the nearest larger one, the one its claims are linked to most
- * (data.edges), else the one whose name and claims share the most words with its own. The claims between clusters
- * join one too; none joins them. Its claims take that cluster's id, and the groups keep their order, numbered again
- * for their colors. The store is not changed: a larger pane shows the clusters apart again.
+ * The data with at most `cap` groups where it can: while there are more, the smallest cluster (one-claim clusters
+ * first; of two alike, the later listed) that is near another (NEAR_LINKS, NEAR_WORDS) joins the near one its claims
+ * are linked to most, else whose name and claims share the most words with its own, a larger one first. Clusters near
+ * no other stay apart, and the map draws more than `cap` (its cells shorter, then the pane scrolls). The claims between
+ * clusters may join one too; none joins them. Its claims take that cluster's id, its name says what it holds (both
+ * names joined, or the larger's and `+ N other claims`), and the groups keep their order, numbered again for their
+ * colors. The store is not changed: a larger pane shows the clusters apart again.
  */
 export function fitClusters(data, cap) {
   const claims = data.claims || []
   const groups = (data.groups || []).map(g => ({ ...g, key: groupKey(g) }))
   const into = new Map()
-  const home = c => { let k = claimGroup(data, c); while (into.has(k)) k = into.get(k); return k }
+  const root = k => { while (into.has(k)) k = into.get(k); return k }
+  const home = c => root(claimGroup(data, c))
   const live = () => groups.filter(g => !into.has(g.key) && claims.some(c => home(c) === g.key))
+  const byId = new Map(claims.map(c => [c.id, c]))
+  const nameOf = k => groups.find(g => g.key === k)?.name || 'between clusters'
   let now = live()
   if (now.length <= Math.max(1, cap)) return data
   while (now.length > Math.max(1, cap)) {
     const size = new Map(now.map(g => [g.key, claims.filter(c => home(c) === g.key).length]))
-    const src = now.reduce((b, g) => (size.get(g.key) < size.get(b.key) || (size.get(g.key) === size.get(b.key) && g.i > b.i) ? g : b))
-    const others = now.filter(g => g !== src && g.key !== '-')
-    if (!others.length) break
-    const larger = others.filter(g => size.get(g.key) >= size.get(src.key))
-    const pool = larger.length ? larger : others
-    const mine = new Set(claims.filter(c => home(c) === src.key).map(c => c.id))
-    const textOf = k => [k === src.key ? src.name : (groups.find(g => g.key === k)?.name || ''), ...claims.filter(c => home(c) === k).map(c => c.text)].join(' ')
-    const byId = new Map(claims.map(c => [c.id, c]))
-    const links = k => (data.edges || []).filter(e => (mine.has(e.a) && byId.has(e.b) && home(byId.get(e.b)) === k) || (mine.has(e.b) && byId.has(e.a) && home(byId.get(e.a)) === k)).length
-    const mineText = textOf(src.key)
-    const score = g => [links(g.key), likeness(mineText, textOf(g.key)), size.get(g.key), -g.i]
-    const better = (x, y) => { for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false }
-    let best = pool[0], bs = score(best)
-    for (const g of pool.slice(1)) { const sc = score(g); if (better(sc, bs)) { best = g; bs = sc } }
-    into.set(src.key, best.key)
+    const textOf = k => [nameOf(k), ...claims.filter(c => home(c) === k).map(c => c.text)].join(' ')
+    const linksOf = (a, b) => (data.edges || []).filter(e => byId.has(e.a) && byId.has(e.b) && (
+      (home(byId.get(e.a)) === a && home(byId.get(e.b)) === b) || (home(byId.get(e.a)) === b && home(byId.get(e.b)) === a))).length
+    // the smallest first; one near no other stays apart
+    const order = now.slice().sort((p, q) => size.get(p.key) - size.get(q.key) || q.i - p.i)
+    let joined = false
+    for (const src of order) {
+      const mine = textOf(src.key)
+      const near = now.filter(g => g !== src && g.key !== '-').map(g => ({ g, links: linksOf(src.key, g.key), words: likeness(mine, textOf(g.key)) }))
+        .filter(x => x.links >= NEAR_LINKS || x.words >= NEAR_WORDS)
+      if (!near.length) continue
+      const larger = near.filter(x => size.get(x.g.key) >= size.get(src.key))
+      const pool = larger.length ? larger : near
+      const score = x => [x.links, x.words, size.get(x.g.key), -x.g.i]
+      const better = (x, y) => { for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] > y[i]; return false }
+      let best = pool[0], bs = score(best)
+      for (const x of pool.slice(1)) { const sc = score(x); if (better(sc, bs)) { best = x; bs = sc } }
+      into.set(src.key, best.g.key)
+      joined = true
+      break
+    }
+    if (!joined) break
     now = live()
   }
+  if (!into.size) return data
   const keep = new Map(now.map(g => [g.key, g]))
+  // a merged cluster's name: both names joined when short enough, else the larger's and how many claims joined it
+  const named = k => {
+    const parts = groups.filter(g => root(g.key) === k)
+    if (parts.length < 2) return nameOf(k)
+    const sized = parts.map(g => ({ name: nameOf(g.key), n: claims.filter(c => claimGroup(data, c) === g.key).length })).sort((p, q) => q.n - p.n)
+    const both = sized.map(x => x.name).join(' + ')
+    if (sized.length === 2 && len(both) <= JOINED_MAX) return both
+    const others = sized.slice(1).reduce((a, x) => a + x.n, 0)
+    return `${sized[0].name} + ${others} other claim${others === 1 ? '' : 's'}`
+  }
   return {
     ...data,
-    groups: (data.groups || []).filter(g => keep.has(groupKey(g))).map((g, i) => ({ ...g, i })),
+    groups: (data.groups || []).filter(g => keep.has(groupKey(g))).map((g, i) => ({ ...g, name: named(groupKey(g)), i })),
     claims: claims.map(c => { const k = home(c); return k === claimGroup(data, c) ? c : { ...c, cluster: keep.get(k)?.id ?? null } }),
     merged: into.size,
   }
@@ -933,11 +966,11 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false } = {})
   }
   const cols = mapColumns(W)
   const cellRowsOf = Math.ceil(mapped.length / Math.min(cols, mapped.length))
-  // the cells shorten, seven rows to four, while the detail does not fit under them: an evidence taller than the room,
+  // the cells shorten, seven rows to four, while the map or the detail does not fit: an evidence taller than the room,
   // or a list with too few rows left for a few claims
   let ch = CELL_ROWS
   let panel = detail(H - top - ch * cellRowsOf - KEYS_ROWS)
-  const tight = (p, room) => !!p && (p.rows.length > room || (p.windowed && room < 12))
+  const tight = (p, room) => room < 0 || (!!p && (p.rows.length > room || (p.windowed && room < 12)))
   while (ch > CELL_MIN && tight(panel, H - top - ch * cellRowsOf - KEYS_ROWS)) {
     ch--
     panel = detail(H - top - ch * cellRowsOf - KEYS_ROWS)

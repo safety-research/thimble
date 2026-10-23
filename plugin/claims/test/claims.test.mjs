@@ -103,9 +103,10 @@ test('the map takes the top of the pane; at rest nothing is chosen and no detail
   for (const h of [46, 40, 34]) {
     const rest = graphView(data, {}, { w: 136, h })
     const tu = text(rest)
-    // three columns of cells in a wide pane: nine clusters at 46 rows, six at fewer, so the seventh joins another
-    const n = h >= 46 ? 7 : 6
-    assert.equal(mapCapacity(136, h), h >= 46 ? 9 : 6)
+    // three columns of cells in a wide pane, as many rows of the shortest cells as fit over the detail's room: all
+    // seven clusters at each of these heights
+    const n = 7
+    assert.equal(mapCapacity(136, h), 3 * Math.floor((h - 14) / 4))
     assert.match(tu, new RegExp(`^Claims · 155 claims · ${n} clusters`))
     assert.equal(rest.head[0][0].s, 'Claims')
     assert.ok(rest.head[0][0].bold && !rest.head[0][0].tone)
@@ -338,35 +339,49 @@ test('a long claim takes two lines in the list, then …; picked, it shows whole
   assert.match(picked, /cookies\.\n/)
 })
 
-test('fourteen clusters: the map draws as many as fit, the smallest joining the nearest larger one; p n visit those', () => {
-  const st = emptyStore('s')
-  const sizes = [9, 8, 7, 6, 6, 5, 4, 3, 3, 2, 2, 2, 2, 1]
-  const qs = sizes.flatMap((n, g) => Array.from({ length: n }, (_, i) => ({ quote: `Fact ${g}-${i} holds`, cluster: `topic ${g}`,
-    // the one-claim cluster's claim is linked to topic 2's
-    ...(g === 13 ? { links: [{ to: 'c18', how: 'supports' }] } : {}) })))
-  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: qs.map(q => `${q.quote}.`).join(' ') }], out: { claims: qs } })
-  const data = paneData(st)
-  // 62 columns by 46 rows: two columns of three rows of cells
-  assert.equal(mapCapacity(62, 46), 6)
-  const v = graphView(data, {}, { w: 62, h: 46 })
-  assert.match(rowText(v.head[0]), /^Claims · 60 claims · 6 clusters$/)
+test('fourteen clusters: the map draws them all, cells shorter; only near clusters join, named for both; p n visit those drawn', () => {
+  const build = (linkTwice, names = g => `topic ${g}`) => {
+    const st = emptyStore('s')
+    const sizes = [9, 8, 7, 6, 6, 5, 4, 3, 3, 2, 2, 2, 2, 1]
+    const qs = sizes.flatMap((n, g) => Array.from({ length: n }, (_, i) => ({ quote: `Fact ${g}-${i} holds`, cluster: names(g),
+      // the one-claim cluster's claim is linked to topic 2's claims: once, or twice (near)
+      ...(g === 13 ? { links: [{ to: 'c18', how: 'supports' }, ...(linkTwice ? [{ to: 'c19', how: 'supports' }] : [])] } : {}) })))
+    applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: qs.map(q => `${q.quote}.`).join(' ') }], out: { claims: qs } })
+    return st
+  }
+  // 62 columns by 26 rows: room for two columns of three rows of the shortest cells
+  assert.equal(mapCapacity(62, 26), 6)
+  // no two clusters near (one link, few words shared): none joins another, however many; the cells are as short as
+  // they go and the pane scrolls
+  const apart = paneData(build(false))
+  assert.equal(fitClusters(apart, 6), apart)
+  const v = graphView(apart, {}, { w: 62, h: 26 })
+  assert.match(rowText(v.head[0]), /^Claims · 60 claims · 14 clusters$/)
+  assert.equal(v.cellRows, 4)
   const onMap = new Set(v.graph.flatMap(r => r.filter(x => /^g:/.test(x.part || '') && x.s.trim()).map(x => x.part)))
-  assert.equal(onMap.size, 6)
+  assert.equal(onMap.size, 14)
   assert.equal(new Set(v.graph.flat().filter(x => /^d:/.test(x.part || '') && /[●◉○]/.test(x.s)).map(x => x.part)).size, 60)
-  assert.doesNotMatch(v.graph.map(rowText).join('\n'), /more cluster/)
-  // the one-claim cluster joined the cluster its claim is linked to; every claim is in a cluster the map draws
+  // linked twice: the one-claim cluster joins topic 2, whose name now says both; every claim is in a cluster drawn
+  const st = build(true)
+  const data = paneData(st)
   const fit = fitClusters(data, 6)
-  assert.equal(fit.groups.length, 6)
-  assert.equal(fit.claims.find(c => c.text.startsWith('Fact 13-0')).cluster, data.claims.find(c => c.id === 'c18').cluster)
+  assert.equal(fit.groups.length, 13)
+  const into = fit.claims.find(c => c.text.startsWith('Fact 13-0')).cluster
+  assert.equal(into, data.claims.find(c => c.id === 'c18').cluster)
+  assert.equal(fit.groups.find(g => g.id === into).name, 'topic 2 + topic 13')
   assert.ok(fit.claims.every(c => fit.groups.some(g => g.id === c.cluster)))
-  assert.deepEqual(fit.groups.map(g => g.i), [0, 1, 2, 3, 4, 5])
-  // the store is not changed, and a larger pane draws more of them apart
+  assert.deepEqual(fit.groups.map(g => g.i), [...Array(13).keys()])
+  // long names: the larger's name and how many claims joined it
+  const long = fitClusters(paneData(build(true, g => `Topic ${g}: what the agents did with their pull requests`)), 6)
+  assert.match(long.groups.find(g => g.id === into).name, /^Topic 2: what the agents did with their pull requests \+ \d+ other claims?$/)
+  // the store is not changed, and a pane with room draws them apart
   assert.equal(paneData(st).groups.length, 14)
-  assert.equal(graphView(data, {}, { w: 120, h: 50 }).data.groups.length, 12)
+  assert.equal(graphView(data, {}, { w: 120, h: 50 }).data.groups.length, 14)
+  const w = graphView(data, {}, { w: 62, h: 26 })
   const seen = new Set()
-  let k = String(v.data.groups[0].id)
-  for (let i = 0; i < 6; i++) { seen.add(k); k = hopCluster(v.data, k, 1) }
-  assert.equal(seen.size, 6)
+  let k = String(w.data.groups[0].id)
+  for (let i = 0; i < 13; i++) { seen.add(k); k = hopCluster(w.data, k, 1) }
+  assert.equal(seen.size, 13)
 })
 
 test('a long list pages by a screen: a press on ↑ N earlier or ↓ N more', () => {
@@ -403,10 +418,10 @@ test('a narrow pane lists the clusters one per line, the chosen one bold; in a s
   assert.ok(v.graph.find(r => r.some(x => x.part === `g:${key}`)).some(x => x.bold && x.tone === 'c3'))
   assert.ok(v.panel.every(r => rowText(r).length <= 44))
   const short = graphView(data, { claim: 'c40', open: true }, { w: 62, h: 30 })
-  // two rows of cells at least, shorter when the evidence needs the rows
-  assert.equal(short.data.groups.length, 4)
+  // every cluster, in cells shorter when the evidence needs the rows
+  assert.equal(short.data.groups.length, 7)
   assert.ok(short.cellRows >= 4 && short.cellRows <= 7)
-  assert.equal(short.graph.length, 2 * short.cellRows)
+  assert.equal(short.graph.length, 4 * short.cellRows)
   assert.ok(short.graph.some(r => r.some(x => /^d:/.test(x.part || ''))))
 })
 
