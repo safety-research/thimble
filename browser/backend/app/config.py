@@ -730,7 +730,7 @@ def register_corpus(path: str | Path, *, exact: bool = False, shown: object = KE
     renamed_from?}. `shown` is the folder as the analyst named it when that was another path to it, through a symlink
     (shown_alias), which the dashboard shows in place of `path`: a string records it, None clears it, KEEP_SHOWN leaves
     it. `name` is the name a new registration takes in place of the basename (`thimble demo` registers demo-<dataset>);
-    a folder registered already keeps its own name. `renamed_from` lists the names an earlier build moved the corpus from.
+    a folder registered already keeps its own name. `renamed_from` lists the names rename_corpus moved the corpus from.
 
     A path inside DATA_DIR/<c> is corpus c: nothing written. A path inside (not at) a registered directory is that
     directory's corpus unless `exact`, which registers the folder itself. Exactly a registered working directory refreshes
@@ -813,6 +813,33 @@ def _write_sidecar(rec: dict) -> None:
 def name_taken(name: str) -> bool:
     """Whether a corpus of DATA_DIR holds `name`: a corpus directory DATA_DIR/<name>, or a sidecar, readable or not."""
     return _dir_corpus(name) is not None or sidecar_path(name).exists()
+
+
+def rename_corpus(old: str, new: str) -> dict:
+    """The registration of `old` moved to the name `new` (ledger.move_workspace moves its workspace with it): the sidecar
+    DATA_DIR/<new>.corpus.json written with the same record, `old` added to its `renamed_from` (which the start page
+    gives the browser, so a tab or a bookmark on the old name finds the new one), then DATA_DIR/<old>.corpus.json
+    removed. The new record. ValueError when `new` is not a valid name or is taken, and when `old` is no registered
+    folder's: a corpus directory DATA_DIR/<old> is never renamed."""
+    if not _valid_name(new):
+        raise ValueError(f"invalid corpus name: {new!r}")
+    rec = read_sidecar(old)
+    if rec is None or _dir_corpus(old) is not None:
+        raise ValueError(f"{old!r} is not a registered folder's corpus")
+    if name_taken(new):
+        raise ValueError(f"the name {new!r} is taken")
+    was = [str(n) for n in rec.get("renamed_from") or [] if n not in (old, new)]
+    moved = {**rec, "name": new, "renamed_from": [*was, old]}
+    _write_sidecar(moved)
+    try:
+        sidecar_path(old).unlink()
+    except FileNotFoundError:
+        pass
+    except OSError:
+        sidecar_path(new).unlink(missing_ok=True)
+        raise
+    log.info("renamed corpus %r to %r (%s)", old, new, rec["path"])
+    return moved
 
 
 def _registry_holds(data_dir: Path, name: str) -> str | None:

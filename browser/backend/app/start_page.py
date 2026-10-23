@@ -2,8 +2,8 @@
 not hold) and the top bar's switcher (frontend shell/WorkspaceList.tsx): GET /api/workspaces.
 
 Each corpus of GET /corpora is one row, of kind `folder`, labeled by its folder's name, with its path, ordered by folder
-name. Each row also lists the names its registration records it was renamed from (`renamed_from`, which only an earlier
-build wrote), so a page opened on an old name goes to the new one (frontend App).
+name. Each row also lists the names its workspace was renamed from (`renamed_from`, config.rename_corpus), so a page
+opened on an old name goes to the new one (frontend App).
 
 A registered folder that is gone is left out, since its workspace cannot open. The route is a read like GET /corpora,
 open to the page with or without the key's cookie (hook_auth guards writes only).
