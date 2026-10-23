@@ -23,7 +23,9 @@ and check.md (its prompt) in its folder, follow the built-ins as `<extension>-<s
 first changed as the built-ins are, and off. A run is a `thimble:check`, a subagent of the analyst's Claude Code session
 (subagents.py), registered from prompts/check.md (definition) on Settings' checks row, with the corpus read-only and a
 work folder of its own, check-work/<id>-<doc>/. Its task file there, task.md, holds the context engine's part
-(context.render) and then the document, the check's prompt and the passages it covers; a task too large for one Read
+(context.render) and then the document, the check's prompt and the passages it covers (a run of Heads up or Explainers,
+LENS_CHECKS, reads the terminal observer's context in place of the whole transcript: main's conversation in brief, what
+the answer it checks rests on, and a digest of what the check already said, digest); a task too large for one Read
 call is written as task.md, task-2.md… (read_parts), each small enough that Read returns it whole. Its prompt names that
 file or those files in order (`## check-task-file`, `## check-task-files`). It comments with add_comment and hands back
 one line, its run's summary. At most MAX_SESSIONS run at once; the others wait queued. A run has no time limit, and the
@@ -127,6 +129,15 @@ MAX_ANSWERS = 3  # the answers a run over answers covers at most, the last ones
 COLOURS = tuple(range(1, 9))  # the label palette's places a check's color may take (kernel_thimble.LABEL_COLOURS)
 NEW_COLOURS = tuple(m for m in LABEL_ORDER if m in COLOURS)  # the order new checks take them, as new label values do
 CONTEXT_CHARS = 400_000  # of the context engine's part of a run's first message
+# the built-ins that are the terminal's lenses, each with the digest it reads: a run of one reads what the terminal's
+# observer reads (first_message), main's conversation in brief, the cards, the documents, what the answer it checks rests
+# on, and what the check already said (digest), in LENS_CONTEXT_CHARS
+LENS_CHECKS = {"heads-up": "heads", "explainers": "glossed"}
+LENS_PARTS = ("brief", "canvas", "views", "documents", "evidence")
+LENS_CONTEXT_CHARS = 160_000
+DIGEST_KEEP = {"heads": 20, "glossed": 100}  # the newest comments a digest lists, as the terminal's lens digests keep
+DIGEST_CHARS = 300  # of one comment's text in a digest
+DIGEST_QUOTE_CHARS = 100  # of the passage a heads-up is on
 WAITING_QUEUED = "queued"  # a run's `waiting` while it waits for a place (MAX_SESSIONS)
 WAITING_PLAN = "plan"  # a run's `waiting` while main is in plan mode, where a writer's end holds the runs it starts
 MAX_SESSIONS = 3  # runs whose agents run at once
@@ -810,13 +821,71 @@ def task_text(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any
     return "\n\n".join(p.strip() for p in parts if p.strip())
 
 
+def _cut_words(text: Any, cap: int) -> str:
+    t = _collapse(text)
+    return t if len(t) <= cap else t[: cap - 1] + "…"
+
+
+def digest(c: str, cid: str, cover: list[dict[str, Any]] | None = None) -> str:
+    """What check `cid` already said in workspace `c`, for a run of it (LENS_CHECKS): its comments on Claude's answers,
+    the documents and the cards, open or dismissed by the analyst, oldest first, the newest DIGEST_KEEP of them; a
+    comment a later run superseded and one on a passage of `cover` (which the task lists as the ones the run replaces,
+    _replaced_part) left out. A heads-up as its text and the passage it is on, an explainer as its text."""
+    from . import investigation as inv, report_types  # noqa: PLC0415
+
+    slot = LENS_CHECKS.get(cid, "heads")
+    covered = {p["ref"] for p in cover or []}
+    rows: list[tuple[str, str, str, str]] = []  # (ts, ref, text, quote)
+    name = str((read(c, cid) or {}).get("name") or "")
+
+    def keep(cm: dict[str, Any]) -> bool:
+        return current_id(cm.get("check")) == cid and cm.get("resolution") != answer_comments.RESOLUTION_SUPERSEDED
+
+    for cm in answer_comments._read(c):
+        if keep(cm) and cm.get("ref") not in covered:
+            rows.append((str(cm.get("ts") or ""), str(cm.get("ref") or ""), str(cm.get("text") or ""),
+                         str(cm.get("quote") or "")))
+    for cm in canvas_comments.all_comments(c):
+        if keep(cm) and str(cm.get("ref") or "") not in covered and f"card:{cm.get('card')}" not in covered:
+            rows.append((str(cm.get("ts") or ""), str(cm.get("ref") or ""), str(cm.get("text") or ""), ""))
+    for t in report_types.list_types(c):
+        slug = str(t["slug"])
+        d = report_types.read_doc(c, inv.MAIN, slug)
+        if not d:
+            continue
+        ps = passages(slug, d)
+        for cm in d.get("comments") or []:
+            if not isinstance(cm, dict) or not keep(cm) or _of_comment(slug, ps, str(cm.get("sentence_id"))) in covered:
+                continue
+            note = canvas_comments.note_of(cm, name)
+            rows.append((str(cm.get("ts") or ""), f"report:{slug}#{cm.get('sentence_id')}", note["text"], ""))
+    rows.sort(key=lambda r: r[0])
+    out = []
+    for _, ref, text, quote in rows[-DIGEST_KEEP[slot]:]:
+        line = f"- {_cut_words(text, DIGEST_CHARS)}"
+        if slot == "heads":
+            line += f" (on {ref}" + (f": \"{_cut_words(quote, DIGEST_QUOTE_CHARS)}\"" if quote.strip() else "") + ")"
+        out.append(line)
+    return "\n".join(out)
+
+
 def first_message(c: str, check: dict[str, Any], doc: str, cover: list[dict[str, Any]]) -> str:
-    """A run's task file: the context engine's part (CONTEXT_CHARS), then the task (task_text)."""
+    """A run's task file: the context engine's part (CONTEXT_CHARS), then the task (task_text). A run of Heads up or
+    Explainers (LENS_CHECKS) reads what the terminal's observer reads instead: main's conversation in brief, the cards,
+    the views, the documents, for a run over answers what those answers rest on, and the check's digest, in
+    LENS_CONTEXT_CHARS."""
     from . import context  # noqa: PLC0415 — context imports this module for the check names
 
     focus = (tuple(dict.fromkeys(f"card:{p['card']}" for p in cover)) if doc == CANVAS else () if doc == ANSWERS
              else (f"report:{doc}",))
-    return context.render(c, task_text(c, check, doc, cover), budget=CONTEXT_CHARS, focus=focus)
+    task = task_text(c, check, doc, cover)
+    slot = LENS_CHECKS.get(str(check["id"]))
+    if slot is None:
+        return context.render(c, task, budget=CONTEXT_CHARS, focus=focus)
+    turns = {p["turn"] for p in cover} if doc == ANSWERS else set()
+    answers = [a for a in answer_comments.answers(c) if a["turn"] in turns]
+    return context.render(c, task, budget=LENS_CONTEXT_CHARS, focus=focus, parts=(*LENS_PARTS, slot), answers=answers,
+                          given={slot: digest(c, str(check["id"]), cover)})
 
 
 async def start_run(c: str, cid: str, doc: str, *, passages_: list[str] | None = None, force: bool = False,
