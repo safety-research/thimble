@@ -39,7 +39,8 @@ export function textOf(n: Any): string {
   const p = n.props ?? {}
   if (n.type === 'Box') {
     const parts = (Array.isArray(p.children) ? p.children : [p.children]).map(textOf)
-    return p.flexDirection === 'column' ? parts.filter(x => x !== '').join('\n') : parts.join('')
+    // a row spread to both edges (the bar) keeps a gap between its parts
+    return p.flexDirection === 'column' ? parts.filter(x => x !== '').join('\n') : parts.join(p.justifyContent === 'space-between' ? '   ' : '')
   }
   if (n.type === 'Button') return p.children != null ? textOf(p.children) : String(p.label ?? '')
   if (n.type === 'Markdown') return String(p.text ?? '')
