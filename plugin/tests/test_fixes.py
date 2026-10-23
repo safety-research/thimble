@@ -377,8 +377,8 @@ def test_update_sets_the_fixes_aside_and_reapply_brings_back_what_the_release_st
     assert FX.get(c)["pending"]["files"] == ["plugin/legend.ts"]
     assert out["lines"] == [
         "Updated thimble 0.10.2 → 0.10.3 (terminal plugin)", "",
-        "You have 3 local fixes. They are off for now: 0.10.3 may already fix some of the same things, and Claude "
-        "checks each one so nothing is fixed twice.", "",
+        "You have 3 local fixes. They are off for now: 0.10.3 may already fix some of the same",
+        "things, and Claude checks each one so nothing is fixed twice.", "",
         "Bring them back:  thimble reapply",
         "  Claude opens, checks each fix against 0.10.3, keeps what is still needed, and turns it on.", "",
         "Then  Terminal: /reload-plugins in Claude Code"]

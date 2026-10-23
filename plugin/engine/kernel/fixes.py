@@ -1194,21 +1194,29 @@ def update(check: bool = False) -> dict[str, Any]:
     return out
 
 
-def _summary(d: dict[str, Any]) -> list[str]:
+def _summary(d: dict[str, Any], paint: Paint | None = None) -> list[str]:
     """What thimble update prints: the versions, the fixes it set aside and how to bring them back, and how each mode
     loads the release."""
+    import textwrap  # noqa: PLC0415
+
+    c = paint or Paint(False)
     both = d.get("browser") == "ready"
-    out = [f"Updated thimble {d['from']} → {d['to']} (terminal plugin{' and browser' if both else ''})"]
+    versions = f"{d['from']} → {d['to']}"
+    out = [f"Updated thimble {c('bold', versions)} "
+           f"(terminal plugin{' and browser' if both else ''})"]
     if d.get("browser") == "failed":
         out.append(f"The browser workbench stays on the release it had: {d.get('browser_error')}. Run thimble update "
                    "again after you correct that.")
     k = len(d.get("aside") or [])
     if k:
-        out += ["", f"You have {k} local fix{'' if k == 1 else 'es'}. {'It is' if k == 1 else 'They are'} off for now: "
-                f"{d['to']} may already fix some of the same things, and Claude checks each one so nothing is fixed "
-                "twice.", "", "Bring them back:  thimble reapply" if k > 1 else "Bring it back:  thimble reapply",
-                f"  Claude opens, checks each fix against {d['to']}, keeps what is still needed, and turns it on."]
-    out += ["", "Then  Terminal: /reload-plugins in Claude Code" + (" · Browser: restart thimble-browser" if both else "")]
+        n = f"{k} local fix{'' if k == 1 else 'es'}"
+        para = textwrap.wrap(f"You have {n}. {'It is' if k == 1 else 'They are'} off for now: {d['to']} may already fix "
+                             "some of the same things, and Claude checks each one so nothing is fixed twice.", 88)
+        para[0] = para[0].replace(n, c("bold", n), 1)
+        out += ["", *para, "", f"{c('title', 'Bring them back:' if k > 1 else 'Bring it back:')}  {c('cmd', 'thimble reapply')}",
+                c("dim", f"  Claude opens, checks each fix against {d['to']}, keeps what is still needed, and turns it on.")]
+    out += ["", f"{c('title', 'Then')}  Terminal: {c('cmd', '/reload-plugins')} in Claude Code"
+            + (f" · Browser: restart {c('cmd', 'thimble-browser')}" if both else "")]
     return out
 
 
@@ -1970,7 +1978,7 @@ def cmd_update(a) -> int:
             if in_claude_code():
                 raise FixError(SHELL_ONLY.format(what="thimble update"))
             r = update()
-            lines = r.get("lines") or []
+            lines = _summary(r, Paint()) if r.get("newer") else r.get("lines") or []
     except FixError as e:
         print(f"thimble update: {e}", file=sys.stderr)
         return 1
