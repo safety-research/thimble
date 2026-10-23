@@ -10,7 +10,7 @@
 // the page at once.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { ASK_KEY_LABEL, BYPASS_LINE, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyOptions, changedAskKey, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
+import { ASK_KEY_LABEL, BYPASS_LINE, EDITS_LABEL, MAIN_MODE_LINE, PROPOSE_LABEL, askKeyOptions, changedAskKey, changedEdits, SESSION_BYPASS_NOTE, SettingsPopover, TICKET_FAST, agentMode, cardWaitLine, changedPropose, changedRoles, changedWeb, fenceLine, lockedWhy, memoryWords, modeRowShown, rolesOf, roleEfforts, webRows } from '../../src/shell/SettingsPopover.tsx'
 import { invalidateSettings } from '../../src/lib/models.ts'
 import { getAskKey, setAskKey } from '../../src/lib/platform.ts'
 import type { Attached, Settings } from '../../src/lib/types.ts'
@@ -170,6 +170,26 @@ describe('the popover', () => {
     await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
     await settle()
     expect(puts).toEqual([['/api/ws/mini/settings', { propose_views: false }]])
+  })
+
+  test('Claude can edit files in this folder: on by default, and a save sends false to turn it off, null to turn it back on', async () => {
+    expect(changedEdits(SETTINGS, true)).toEqual({})
+    expect(changedEdits({ ...SETTINGS, corpus_edits: false }, true)).toEqual({ corpus_edits: null })
+    const anchor = document.createElement('button')
+    document.body.appendChild(anchor)
+    await mount(<SettingsPopover ws="mini" anchor={anchor} open onClose={() => {}} />)
+    await settle()
+    await settle()
+    const doc = document.body
+    const row = doc.querySelector('.settings-row[data-auto="corpus-edits"]')!
+    expect(row.querySelector('.settings-role')?.textContent).toBe(EDITS_LABEL)
+    expect(EDITS_LABEL).toBe('Claude can edit files in this folder')
+    const sw = row.querySelector<HTMLButtonElement>('[role="switch"]')!
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    await act(async () => sw.click())
+    await act(async () => [...doc.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === 'Save')!.click())
+    await settle()
+    expect(puts).toEqual([['/api/ws/mini/settings', { corpus_edits: false }]])
   })
 
   test('the Ask key choice, ⌘ by default: picking the other key and saving sends it, and the page takes it at once', async () => {

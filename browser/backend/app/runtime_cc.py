@@ -6,7 +6,8 @@ calls: `--safe-mode`, so the person's CLAUDE.md, plugins, hooks and MCP servers 
 thimble's prompt as the whole system prompt; the role's model and effort. thimble's tools are an in-process MCP server
 named so that the tools read as 0.8's plugin named them (tools.thimble_tool); Claude Code's built-in tools are the
 same set the Messages API runtime gives (Spec.builtins), Bash in Claude Code's sandbox (no Bash where it cannot run),
-Edit and Write allowed only in the agent's write folders, and `dontAsk`, so nothing waits on a prompt nobody sees.
+Edit and Write allowed only in the agent's write folders (the corpus among them for main and its thread forks while
+Settings' "Claude can edit files in this folder" is on, runtime.Spec.corpus_edits), and `dontAsk`, so nothing waits on a prompt nobody sees.
 
 A PreToolUse hook callback (in this process, not a plugin hook) hears each call of thimble's tools with Claude Code's
 id for it, which the tool's handler takes up, so a call runs as its caller's (Conv.call_thimble) as in 0.8. The
@@ -109,15 +110,20 @@ def settings(spec: Any, bash: bool, tmp: Path | None = None) -> dict[str, Any]:
     from . import cc_settings, sdk  # noqa: PLC0415
 
     out = json.loads(sdk.cli_settings(spec.model, spec.effort or None))
+    no_write = list(getattr(spec, "no_write", []) or [])
+    corpus = spec.cwd in spec.write_roots  # main and its thread forks while Settings lets Claude edit the folder
     out["permissions"] = {
         "allow": [f"Edit(/{w}/**)" for w in spec.write_roots],
-        "deny": [f"Edit(/{spec.cwd}/**)", *[r for p in spec.private for r in (f"Read(/{p})", f"Edit(/{p})")]],
+        "deny": [*([] if corpus else [f"Edit(/{spec.cwd}/**)"]),
+                 *[r for p in spec.private for r in (f"Read(/{p})", f"Edit(/{p})")],
+                 *[r for p in no_write for r in (f"Edit(/{p})", f"Edit(/{p}/**)")]],
         "additionalDirectories": [str(w) for w in spec.write_roots],
     }
     if bash:
         writes = [str(w) for w in spec.write_roots] + ([str(tmp)] if tmp else [])
         out["sandbox"] = {**cc_settings.offline_sandbox(auto_allow=True, network=True, required=True),
-                          "filesystem": {"allowWrite": writes}}
+                          "filesystem": {"allowWrite": writes,
+                                         "denyWrite": [*map(str, spec.private), *map(str, no_write)]}}
     return out
 
 

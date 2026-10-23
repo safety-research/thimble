@@ -76,7 +76,7 @@ def tool_entries(spec: Any) -> list[dict[str, Any]]:
 
     secs = tools.tool_sections(spec.thimble)
     out = [{"name": n, "description": secs[n][0], "input_schema": secs[n][1]} for n in spec.thimble if n in secs]
-    out += runtime_tools.definitions(spec.builtins)
+    out += runtime_tools.definitions(spec.builtins, getattr(spec, "corpus_edits", None))
     if out:
         out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
     return out
@@ -163,8 +163,10 @@ async def fork_stream(c: str, prompt: str, *, model: str, effort: str | None, al
     spec.model, spec.effort, spec.fast = model, effort or "", False
     messages = complete_prefix(_load(sp.main.state_path("api")))
     messages.append({"role": "user", "content": prompt})
+    # main's tool list as it is (the cache), but no write of the corpus: a checker or proposer fork is no thread's
     box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
-                            write_roots=spec.write_roots, private=spec.private, home=spec.home)
+                            write_roots=[w for w in spec.write_roots if w != spec.cwd], private=spec.private,
+                            home=spec.home, no_write=spec.no_write)
     client = await asyncio.to_thread(llm.client)  # the SDK's first import and the credentials take seconds
     out: list[str] = []
     texts: list[str] = []
@@ -222,7 +224,8 @@ async def turn(conv: Any, text: str) -> Any:
     messages.append({"role": "user", "content": text})
     _save(path, messages)
     box = runtime_tools.Box(cwd=spec.cwd, workspace=spec.workspace, read_roots=spec.read_roots,
-                            write_roots=spec.write_roots, private=spec.private, home=spec.home)
+                            write_roots=spec.write_roots, private=spec.private, home=spec.home,
+                            no_write=spec.no_write, corpus_edits=spec.corpus_edits)
     reply = ""
     piece, key = 0, ""
     try:

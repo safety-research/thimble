@@ -81,6 +81,26 @@ DEFS: dict[str, dict[str, Any]] = {
 }
 
 
+# Settings' switch that lets main and its thread forks write the corpus folder (ledger.corpus_edits), by its name
+EDITS_SWITCH = "Claude can edit files in this folder"
+# what the built-in tools' descriptions say of the corpus folder (definitions), by Spec.corpus_edits: True and False
+# for main and its thread forks, which the switch reaches, None for thimble's other agents, which never write it
+CORPUS_WORDS: dict[bool | None, dict[str, str]] = {
+    True: {"Bash": "which it reads and writes; it also writes your own folders",
+           "Write": "The corpus folder and your own folders can be written; thimble's own files cannot.",
+           "Edit": "The corpus folder and your own folders can be edited; thimble's own files cannot."},
+    False: {"Bash": (f"which it reads but cannot write while the analyst's Settings switch \"{EDITS_SWITCH}\" is off; "
+                     "it writes only your own folders"),
+            "Write": (f"Only your own folders can be written: the corpus folder is read-only while the analyst's "
+                      f"Settings switch \"{EDITS_SWITCH}\" is off, which they can turn on."),
+            "Edit": (f"Only your own folders can be edited: the corpus folder is read-only while the analyst's "
+                     f"Settings switch \"{EDITS_SWITCH}\" is off, which they can turn on.")},
+    None: {"Bash": "which it reads but cannot write; it writes only your own folders",
+           "Write": "Only your own folders can be written.",
+           "Edit": "Only your own folders can be edited."},
+}
+
+
 @dataclass
 class Box:
     """What an agent's built-in tools may touch: the folder its commands start in, the roots it reads and the folders
@@ -91,6 +111,8 @@ class Box:
     write_roots: list[Path]
     private: list[Path] = field(default_factory=list)
     home: Path | None = None  # HOME and TMPDIR of its commands, inside a write root
+    no_write: list[Path] = field(default_factory=list)  # never written, inside a write root or not (runtime.protected)
+    corpus_edits: bool | None = None  # Spec.corpus_edits: what a refused write in the corpus tells the agent
 
     def _inside(self, q: Path, roots: list[Path]) -> bool:
         return any(q == r or r in q.parents for r in roots)
@@ -100,9 +122,14 @@ class Box:
         q = raw.resolve()
         if any(q == x or x in q.parents for x in self.private):
             raise ValueError(f"{p} is private to thimble")
+        if write and self._inside(q, [x.resolve() for x in self.no_write]):
+            raise ValueError(f"{p} is thimble's own file, which only thimble writes")
         roots = self.write_roots if write else [*self.read_roots, *self.write_roots]
         if not self._inside(q, [r.resolve() for r in roots]):
             what = "write" if write else "read"
+            if write and self.corpus_edits is False and self._inside(q, [self.cwd.resolve()]):
+                raise ValueError(f"{p} is in the corpus folder, which is read-only while the analyst's Settings switch "
+                                 f"\"{EDITS_SWITCH}\" is off; they can turn it on there")
             raise ValueError(f"{p} is outside the folders this agent may {what}")
         return q
 
@@ -152,8 +179,9 @@ def available(names: tuple[str, ...] | list[str]) -> list[str]:
     return [n for n in names if n != "Bash" or not sandbox_reason()]
 
 
-def definitions(names: list[str]) -> list[dict[str, Any]]:
-    """The Messages API's tool entries for the built-in `names`: client tools, and the server tools for the web."""
+def definitions(names: list[str], corpus_edits: bool | None = None) -> list[dict[str, Any]]:
+    """The Messages API's tool entries for the built-in `names`: client tools, and the server tools for the web. Bash,
+    Write and Edit say what they may do in the corpus folder by `corpus_edits` (CORPUS_WORDS)."""
     out: list[dict[str, Any]] = []
     for n in names:
         if n == "WebSearch":
@@ -161,8 +189,21 @@ def definitions(names: list[str]) -> list[dict[str, Any]]:
         elif n == "WebFetch":
             out.append(dict(WEB_FETCH))
         elif n in DEFS:
-            out.append({"name": n, **DEFS[n]})
+            out.append({"name": n, **DEFS[n], **({"description": describe(n, corpus_edits)} if n in CORPUS_WORDS[None]
+                                                  else {})})
     return out
+
+
+def describe(name: str, corpus_edits: bool | None) -> str:
+    """Bash's, Write's or Edit's description with what it may do in the corpus folder (CORPUS_WORDS)."""
+    words = CORPUS_WORDS[corpus_edits][name]
+    if name == "Bash":
+        return ("Runs one bash command in a sandbox and returns its output. Each command starts in the corpus folder, "
+                f"{words}. `timeout` in milliseconds, up to 600000 (default 120000).")
+    if name == "Write":
+        return f"Writes a file, replacing what it held. {words}"
+    return ("Replaces `old_string` with `new_string` in a file, which must hold `old_string` exactly once unless "
+            f"`replace_all`. {words}")
 
 
 async def call(box: Box, name: str, args: dict[str, Any]) -> Out:
@@ -283,7 +324,7 @@ def _rules(box: Box) -> dict[str, Any]:
                                   hide=[str(p) for p in box.private], home=Path.home(), platform=sys.platform)
     fs = rules["filesystem"]
     fs["allowWrite"] = [str(p) for p in box.write_roots]
-    fs["denyWrite"] = list(dict.fromkeys([*fs.get("denyWrite", []), *map(str, box.private)]))
+    fs["denyWrite"] = list(dict.fromkeys([*fs.get("denyWrite", []), *map(str, box.private), *map(str, box.no_write)]))
     return rules
 
 
