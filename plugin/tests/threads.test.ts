@@ -159,11 +159,11 @@ test('m on the thread of a failed citation: main answers the correction now; a p
   await settle()
   s.go()
   await asking
-  s.answer('agent-1', 'The manifest names no hardware. A correct sentence: "The run used 12 agents for 3 hours."')
+  s.answer('agent-1', 'The manifest names [no hardware](#). A correct sentence: "The run used 12 agents for 3 hours."')
   await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
   expect(await sendToMain(s.$, key)).toBe(true)
   await settle()
-  expect(s.submitted.map(x => x.text)).toEqual([expect.stringContaining('A correct sentence: "The run used 12 agents for 3 hours."')])
+  expect(s.submitted.map(x => x.text)).toEqual([expect.stringContaining('The manifest names no hardware. A correct sentence: "The run used 12 agents for 3 hours."')])
   // a hook refused the prompt: the answer waits for the person's next prompt instead, and a line says so
   s.$.prompt.submit = async (a: Any) => { s.submitted.push(a); return { drop: 'made-up refusal' } }
   s.answer('agent-1', 'Also: the run ended early.')
