@@ -33,6 +33,8 @@ export interface ComposerProps {
   /** the text area's accessible name when there is no placeholder */
   label?: string
   disabled?: boolean
+  /** what hovering the composer shows, such as why it is disabled (ComposerFrame `tip`) */
+  tip?: string
   /** the Stop of what the thread shows while it runs (ComposerFrame `stop`): main's turn, a side thread's fork, an agent */
   stop?: ComposerFrameProps['stop']
   /** the thread shown: each thread keeps its own draft, so text typed in one is never sent from another */
@@ -48,7 +50,7 @@ export function withDraft(drafts: Readonly<Record<string, string>>, thread: stri
   return next
 }
 
-export function Composer({ model, models, onModel, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, stop, thread = 'main' }: ComposerProps) {
+export function Composer({ model, models, onModel, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, tip, stop, thread = 'main' }: ComposerProps) {
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({})
   const input = drafts[thread] ?? ''
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -88,6 +90,7 @@ export function Composer({ model, models, onModel, effort, onEffort, fast = null
       placeholder={placeholder}
       label={placeholder ?? label}
       disabled={disabled}
+      tip={tip}
       busy={sending}
       model={chip}
       stop={stop}

@@ -21,7 +21,7 @@ export function tabOfEvent(type: string, payload: Record<string, unknown>): Tab 
     case 'report':
       return 'report'
     case 'view':
-      return payload.status === 'built' ? 'files' : null
+      return payload.status === 'built' && !payload.held ? 'files' : null
     case 'concepts':
       return payload.what === 'applied' && payload.scope === 'files' && payload.shown === true ? 'files' : null
     case 'filter':

@@ -15,6 +15,7 @@ import { Spinner } from '../components/Spinner'
 import { Tipped } from '../components/Tooltip'
 import { api, docsApi, isNotFound } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { parseRef } from '../lib/refs'
 import { track } from '../lib/telemetry'
 import { revealAnchor } from '../lib/teleport'
@@ -22,7 +23,7 @@ import type { AnyDoc, TypesState, Writeup } from '../lib/types'
 import { readStorage, writeStorage } from '../lib/workspace'
 import { ReportProblemButton } from '../shell/ProblemReport'
 import { writerDoc } from '../chat/threads'
-import { useChatMetas } from '../chat/waiting'
+import { terminalWaits, useChatMetas } from '../chat/waiting'
 import { NewDocMenu, TypeActions } from './DocMenus'
 import type { DocFilter } from './Editor'
 import { DraftDiff, HistoryMenu, PastDraft } from './History'
@@ -292,6 +293,8 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   // a writer's session of this document that runs: the write goes on after its first save (the stream says
   // `generated` then), so the primary action stays Writing, never Revise, until the session ends
   const writer = chats.find((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === slug) ?? null
+  // that writer waits on a permission prompt Claude Code asks in the terminal: the bar says so in place of Writing
+  const writerWaits = !!writer && terminalWaits(null, chats).has(writer.id)
   // a document is being written while its write is pending or a writer of it runs (which goes on after its first save)
   const writingOf = (s: string) => !!generating[s] || types?.[s]?.status === 'generating' || chats.some((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === s)
   const busy = writingSlug === slug || !!generating[slug] || types?.[slug]?.status === 'generating' || !!writer
@@ -299,7 +302,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   // `report` events (generating, then generated or failed) carry the write from there, so the button stays busy while
   // the writer works. A start that did not happen shows its card under the bar
   const write = async () => {
-    if (busy) return
+    if (busy || demoStop()) return
     const s = slug
     setWritingSlug(s)
     track('ui-click', { target: `ui:report-write`, detail: { slug: s } })
@@ -398,6 +401,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
           name={ownType(slug) ? docLabel(slug, types) : docLabel(slug, types).toLowerCase()}
           written={written}
           busy={busy}
+          waiting={writerWaits}
           disabled={(load.state === 'loading' && !held) || load.state === 'error'}
           history={!isPage && !isVideo}
           onWrite={() => void write()}

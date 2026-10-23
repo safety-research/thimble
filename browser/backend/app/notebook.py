@@ -7,8 +7,10 @@ for everything else (_kernel_for). Oversized stream outputs are bounded to a hea
 file. The in-memory notebook cache is used by the event-loop thread only, and is trusted only while the file is
 unchanged (mtime_ns, size and inode).
 
-Every change holds the store's lock (editing: ledger.locked on the notebooks folder) from its read to its write, and a
-run, which cannot hold it while the code runs, saves its cell into the group as the file holds it then (_merge_cell).
+More than one process writes the groups: the server or, in terminal mode, the MCP shim, and `thimble-run`, which runs a
+card's code in main's Bash and writes its outputs (cardrun.py). Every change therefore holds the store's lock (editing:
+ledger.locked on the notebooks folder) from its read to its write, and a run, which cannot hold it while the code runs,
+saves its cell into the group as the file holds it then (_merge_cell).
 """
 from __future__ import annotations
 
@@ -1110,23 +1112,30 @@ def write_notebook(ws: Path, nb: dict) -> None:
 
 
 INTERRUPTED_ENAME = "Interrupted"
-INTERRUPTED_EVALUE = "thimble stopped while this card ran; run it again"
+INTERRUPTED_EVALUE = "thimble stopped while this card ran; run it again"  # the server, or a terminal session
 
 
-def mark_interrupted_cells(root: Path | None = None) -> list[str]:
+def mark_interrupted_cells(root: Path | None = None, only: "tuple[str, ...] | None" = None) -> list[str]:
     """Server start: a cell stored `running` was mid-run when the previous server went away, and nothing will write its
     result. Mark each such cell errored with one Interrupted output (code, title and place stay), and end a pending card
-    check the same way. Reads every workspace under `root` directly, and writes changed notebooks back atomically under
-    the store's lock. Returns `<workspace>/<notebook>/<cell>` per cell marked."""
-    from . import checkstore  # noqa: PLC0415 — checkstore imports this module
+    check the same way. Reads every workspace under `root` directly, or only the workspaces `only` names (the terminal
+    mode's shim, which serves one), and writes changed notebooks back atomically under the store's lock. A workspace
+    open in terminal mode in a session that still runs is left alone, since its cards run in that session's Bash
+    (local.live_terminal). Returns `<workspace>/<notebook>/<cell>` per cell marked."""
+    from . import checkstore, local  # noqa: PLC0415 — checkstore imports this module
 
     root = config.WORKSPACES_DIR if root is None else root
     marked: list[str] = []
     files = sorted(root.glob("*/notebooks/*.json")) if root.is_dir() else []
+    if only is not None:
+        files = [p for p in files if p.parent.parent.name in only]
+    live: dict[Path, bool] = {}
     for p in files:
         if not ID_RE.match(p.stem):
             continue
         wsd = p.parent.parent
+        if only is None and live.setdefault(wsd, local.live_terminal(wsd)):
+            continue
         with editing(wsd):
             marked.extend(_mark_interrupted(p, checkstore))
     return marked
@@ -1574,7 +1583,8 @@ def drop_payload_key(workspace: str, cell_id: str, key: str) -> bool:
 # {by, ts, id, fields}, and what it replaced is kept beside the groups, in HISTORY_DIR/<cell id>/<id>.json: {id, was,
 # shown?}, `was` the fields the edit changed as they were and, for an edit of a card's code, `shown` the outputs and
 # status the card showed before it, which the edit's run replaces. Every edit path stamps one (stamp_edit): edit_cell
-# (edit_card on a data card, and the analyst's edits in the browser), edit_and_run (edit_card on a card of code), a card check's fix and its Undo (checkstore.py), a takeaway written over another (append_takeaway), and
+# (edit_card on a data card, and the analyst's edits in the browser), edit_and_run and stage_edit (edit_card on a card
+# of code), a card check's fix and its Undo (checkstore.py), a takeaway written over another (append_takeaway), and
 # Restore. The card as it stood before an edit (version_of) is the card now with the record of that edit and of every
 # later one put back, the newest first; Restore (restore_version) makes the card that version again, as an edit of its
 # own. A run, a check's rewrite of a takeaway's citations and a card's first takeaway (_fold_takeaway) are no edits.
@@ -1868,7 +1878,9 @@ def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
     for q in _subscribers.get((workspace, cell.get("notebook", MAIN)), ()):
         q.put_nowait(data)
     cid = str(cell.get("id") or "")
-    if not cid:
+    if not cid or local_kernel is not None:
+        # a card runner (cardrun.py) writes no history: main's sandbox cannot write the workspace's logs, and the shim's
+        # CardWatch records the run once it ends (canvas_history, undo)
         return
     from . import canvas_history  # noqa: PLC0415 — every version of every card, for the workspace export
 
@@ -2094,7 +2106,8 @@ def kernel_argv(connection_file: Path, record: Path, ttl: float | None = None, p
     ]
 
 
-# What every card's shell runs before its first cell (kernel_argv).
+# What every card's shell runs before its first cell, in a kernel (kernel_argv) and in a card runner's shell
+# (cardrun.LocalKernel), so a card draws the same in both.
 SHELL_LINES = (
     # interactive charts: Altair emits the Vega-Lite mime instead of an html+script blob
     "import altair as _alt; _alt.renderers.enable('mimetype'); del _alt",
@@ -2107,7 +2120,7 @@ SHELL_LINES = (
 def startup_lines(roots: tuple[str, ...] | None = None, workspace: Path | None = None) -> list[str]:
     """The lines a card's shell runs at its start (SHELL_LINES, then the figure formatter and the page's faces, then
     with `roots` the cell-reads audit hook and with `workspace` the `thimble` module): kernel_argv passes them as
-    exec_lines."""
+    exec_lines, cardrun.LocalKernel runs them in its shell."""
     lines = [
         *SHELL_LINES,
         # a matplotlib figure ending a cell is drawn whatever the backend: with `matplotlib.use("Agg")` IPython has no
@@ -2256,9 +2269,38 @@ class _Kernel:
 
 _kernels: dict[str, _Kernel] = {}  # the shared per-workspace kernel: the run session's exploration notebooks
 _exec_kernels: dict[tuple[str, str], _Kernel] = {}  # named dedicated execution kernels, keyed (workspace, name)
+# In a card runner (`thimble-run`, cardrun.py), the in-process shell that stands in for every kernel: a function of
+# (workspace, kernel name) returning an object with the kernel's fields and `local = True`, which _ensure_started and
+# _execute hand over to (cardrun.LocalKernel). None everywhere else.
+local_kernel: Any = None
+
+
+class TerminalRun(RuntimeError):
+    """A card's code asked to run in a process of a terminal-mode workspace that is no card runner: there, card code
+    runs through `thimble-run` in the caller's Bash (cardrun.py), never in the MCP shim."""
+
+
+class TrialUnavailable(RuntimeError):
+    """A trial_run in a terminal-mode workspace whose card runner did not start or gave no result (cardrun.trial): the
+    revision was not tried, which says nothing of its code."""
+
+
+def _no_kernel_here(workspace: str) -> None:
+    """TerminalRun when this process may not run card code for `workspace` (TerminalRun)."""
+    if local_kernel is not None:
+        return
+    from . import local  # noqa: PLC0415
+
+    if local.terminal(workspace):
+        raise TerminalRun(f"in terminal mode, card code in {workspace} runs through thimble-run, not in this process")
+
+
 def _kernel(workspace: str, kernel: str | None = None) -> _Kernel:
     """The workspace's shared kernel, or (with `kernel`) the named dedicated execution kernel, which starts in the same
-    scratch cwd but shares no state, lock or lifecycle with the shared one."""
+    scratch cwd but shares no state, lock or lifecycle with the shared one. In a card runner, its in-process shell
+    (local_kernel)."""
+    if local_kernel is not None:
+        return local_kernel(workspace, kernel)
     if kernel:
         key = (workspace, kernel)
         k = _exec_kernels.get(key)
@@ -2709,7 +2751,11 @@ async def _attach(k: _Kernel) -> bool:
 
 async def _ensure_started(k: _Kernel, workspace: str, kernel: str | None = None) -> None:
     """Start the kernel if it is not running: keep a live connection, reconnect a recorded kernel, else launch a fresh
-    one. Call with k.lock held. `kernel` is the dedicated kernel's name (kept for callers)."""
+    one. Call with k.lock held. `kernel` is the dedicated kernel's name (kept for callers). A card runner's shell
+    (local_kernel) starts itself."""
+    if getattr(k, "local", False):
+        await k.start()
+        return
     if k.kc is not None:
         if k.alive():
             return
@@ -2991,6 +3037,8 @@ async def _execute(k: _Kernel, code: str, timeout: float | None = None,
     land on k.last_expr and the execute_result's position on k.last_result.
     """
     timeout = EXEC_TIMEOUT if timeout is None else timeout
+    if getattr(k, "local", False):  # a card runner's in-process shell (local_kernel) collects the same bundles
+        return await k.execute(code, timeout, user_expressions)
     kc = k.kc
     assert kc is not None
     k.last_expr = None
@@ -3230,7 +3278,7 @@ async def _run_card_code(k: _Kernel, code: str, kind: str | None, timeout_s: flo
     k.last_label_revs. `extra_exprs` are more user expressions for the same request."""
     from . import cardtypes  # noqa: PLC0415 — cardtypes imports views, which imports this module lazily
 
-    if cardtypes.CARD_CALL in code:
+    if cardtypes.CARD_CALL in code and not getattr(k, "local", False):  # a card runner's types: the shim's (cardrun)
         await cardtypes.refresh_quietly(k.workspace, warm=False)
     exprs = {frames.EXPR_KEY: frames.CAPTURE} if frames.captures(kind) else {}
     exprs[LABELS_EXPR_KEY] = LABELS_EXPR
@@ -3265,6 +3313,7 @@ async def execute_on(workspace: str, kernel: str, code: str, timeout_s: float | 
     a cell. Raises when the kernel cannot start; a code error is an `error` status with its bundle."""
     if not kernel:
         raise ValueError("execute_on needs a dedicated kernel name")
+    _no_kernel_here(workspace)
     k = _kernel(workspace, kernel)
     async with k.lock:
         await _ensure_started(k, workspace, kernel)
@@ -3284,8 +3333,10 @@ TRIAL_EXPR_KEY = "thimble_trial"  # the user expression that ends a trial (trial
 async def trial_run(workspace: str, cell_id: str, code: str) -> dict:
     """The card as it would be with `code`, run on the card's kernel and not stored: a fix the card check tries before
     applying it. Returns {**card, code, outputs, status, exec_count, trial}, its outputs numbered against the card's.
-    The names the run bound are noted under `trial` so trial_settle can put them back when the fix is refused. KeyError
-    for a missing card, ValueError for one that runs no code."""
+    The names the run bound are noted under `trial` so trial_settle can put them back when the fix is refused. In a
+    terminal-mode workspace outside a card runner the code runs through `thimble-run trial` as a card run would
+    (cardrun.trial), whose shell ends with it, so `trial` is empty. KeyError for a missing card, ValueError for one
+    that runs no code, TrialUnavailable for a card runner that gave no result."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None:
@@ -3297,6 +3348,14 @@ async def trial_run(workspace: str, cell_id: str, code: str) -> dict:
         timeout_s = positive_timeout(cell.get("timeout_s"))
     except ValueError:
         timeout_s = None
+    if local_kernel is None and _terminal(workspace):
+        from . import cardrun  # noqa: PLC0415 — cardrun reaches back into this module
+
+        got = await cardrun.trial(workspace, cell_id, code, timeout_s)  # its outputs numbered there, as below
+        return {**copy.deepcopy(cell), "code": code, "outputs": list(got.get("outputs") or []),
+                "status": str(got.get("status") or "error"),
+                "exec_count": got.get("exec_count"), "labels": list(got.get("labels") or []),
+                "label_revs": dict(got.get("label_revs") or {}), "trial": ""}
     kernel = _kernel_for(nb, None, cell, ws)
     tid = secrets.token_hex(6)
     try:
@@ -3317,12 +3376,15 @@ async def trial_run(workspace: str, cell_id: str, code: str) -> dict:
 
 async def trial_settle(workspace: str, cell_id: str, tid: str, *, keep: bool) -> None:
     """The end of a trial_run: a kept fix's trial is forgotten, and a refused one has its bound names put back where no
-    run since has rebound them. A card or kernel gone since leaves nothing to settle."""
+    run since has rebound them. A card or kernel gone since leaves nothing to settle, nor does a terminal-mode trial,
+    whose card runner's shell ended with it (cardrun.trial)."""
     ws = _ws(workspace)
     hit = _locate(ws, cell_id)
     if hit is None or not tid:
         return
     nb, cell = hit
+    if local_kernel is None and _terminal(workspace):
+        return
     key = _kernel_for(nb, None, cell, ws)
     k = _kernel(workspace, key)
     async with k.lock:
@@ -3349,9 +3411,16 @@ def land_run(workspace: str, nb: dict, cell: dict, code: str, outputs: list[dict
         _verify_hook("ran", workspace, nb, cell)
 
 
+def _terminal(workspace: str) -> bool:
+    from . import local  # noqa: PLC0415
+
+    return local.terminal(workspace)
+
+
 async def _run_cell(workspace: str, nb_id: str, cell_id: str, kernel: str | None = None,
                     timeout_s: float | None = None) -> dict:
     """Run an existing cell; the cell as stored (bounded outputs). 400 for a data cell."""
+    _no_kernel_here(workspace)
     nb = load_notebook(workspace, nb_id)
     cell = _find(nb, cell_id)
     _reject_data_run(cell)
@@ -3368,6 +3437,7 @@ async def edit_and_run(workspace: str, nb_id: str, cell_id: str, code: str, *, b
     `title` and `kind` change in the same edit when given. `from_dataset` turns a diagram or timeline stored with a
     dataset into a card of code. Returns the cell with complete outputs. 404 for an unknown cell, 400 for a data cell or
     a kind without code."""
+    _no_kernel_here(workspace)
     nb = load_notebook(workspace, nb_id)
     cell = _find(nb, cell_id)
     before, shown = content_of(cell), shown_of(cell)
@@ -3420,6 +3490,29 @@ def _keep_takeaway(workspace: str, cell: dict, changed: bool) -> tuple[str, str]
     return kept, before
 
 
+RUN_KEY = "run"  # a card whose code runs through `thimble-run` (terminal mode): {state, by, script, ...} (cardrun.py)
+
+
+@_changes
+def stage_edit(workspace: str, nb_id: str, cell_id: str, code: str, run: dict, *, by: str, title: str | None = None,
+               kind: str | None = None, from_dataset: bool = False) -> dict:
+    """edit_and_run's change to a card stored to run later through `thimble-run` (terminal mode), with its RUN_KEY
+    record. A kept takeaway's outputs text goes in the record as `kept`, so the run marks it stale when its outputs
+    differ. Returns a copy of the stored cell."""
+    ws = _ws(workspace)
+    nb = load_notebook(workspace, nb_id)
+    cell = _find(nb, cell_id)
+    before, shown = content_of(cell), shown_of(cell)
+    changed = _edit_code(cell, code, title=title, kind=kind, from_dataset=from_dataset)
+    kept, was_text = _keep_takeaway(workspace, cell, changed)
+    if changed:
+        stamp_edit(ws, cell, before, by, shown=shown)
+    cell[RUN_KEY] = {**run, **({"kept": was_text} if kept else {})}
+    write_notebook(ws, nb)
+    _emit(workspace, cell, what="edited")
+    return dict(cell)
+
+
 def _mark_takeaway_stale(workspace: str, cell_id: str) -> None:
     """Mark the card's takeaway TAKEAWAY_STALE where the card is stored now, after a run changed its outputs' text."""
     ws = _ws(workspace)
@@ -3448,6 +3541,7 @@ async def rerun_on_labels(workspace: str, cell_id: str) -> dict | None:
     when nothing ran."""
     from . import concepts  # noqa: PLC0415 — concepts imports this module
 
+    _no_kernel_here(workspace)
     key = (workspace, cell_id)
     ws = _ws(workspace)
     async with _label_rerun_locks.setdefault(key, asyncio.Lock()):
@@ -3646,6 +3740,7 @@ async def _run_code(
     kind: str | None = None,
 ) -> tuple[dict, dict]:
     """run_code returning (the cell as stored, the cell with its complete outputs). One load, one save."""
+    _no_kernel_here(workspace)
     timeout_s = positive_timeout(timeout_s)  # reject a bad value before anything is written
     if kind is not None and kind not in RUNNABLE_KINDS:
         raise ValueError(f"a {kind} card has no code to run; the runnable kinds are {', '.join(RUNNABLE_KINDS)}")

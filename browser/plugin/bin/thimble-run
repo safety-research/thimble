@@ -1,0 +1,26 @@
+#!/bin/sh
+''''exec "$(dirname "$0")/thimble-python" "$0" "$@" # '''
+"""thimble-run: a card's code run in the caller's Bash, for terminal mode (app/cardrun.py).
+
+    thimble-run card <card id>          run the card's code; prints the card's result as add_card prints it
+    thimble-run label <label id|name>   run a code label apply_label left waiting; prints apply_label's result
+    thimble-run stale                   run again the cards that read a label that changed since they ran
+    thimble-run trial <card id>         run the card with the code on stdin and store nothing; prints the run as JSON
+                                        (the card check's revision, which the shim runs in main's sandbox)
+
+add_card, edit_card and apply_label give the command in their result, by its name: the launcher puts this folder
+first on the session's PATH in terminal mode, and main's `--allowedTools` lets `thimble-run *` (and
+`<plugin>/bin/thimble-run *`) run without asking. The first two lines make this file both a shell script and a Python
+program, as in bin/thimble-mcp. Exit 0, or 1 when the code errored or the run was refused.
+"""
+import os
+import sys
+from pathlib import Path
+
+REPO = Path(os.environ.get("THIMBLE_APP_DIR") or Path(__file__).resolve().parents[2])
+sys.path.insert(0, str(REPO / "backend"))
+
+from app import cardrun  # noqa: E402
+
+if __name__ == "__main__":
+    sys.exit(cardrun.main(sys.argv[1:]))

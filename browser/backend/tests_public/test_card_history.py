@@ -3,7 +3,7 @@ whichever path, is an entry of its `edited` list naming the fields it changed, a
 groups, small: the fields it changed alone, and for new code the outputs the card showed before. The card as it stood
 before a kept edit opens to read (GET /cells/{id}/versions/{entry}), and Restore (POST .../restore) makes the card that
 version again as an edit of the analyst's, itself an entry. The paths: edit_card on a note and on a plan (edit_cell), on a
-card of code (edit_and_run), the analyst's edits in the browser (PUT /cells/{id}), a
+card of code (edit_and_run, and stage_edit in terminal mode), the analyst's edits in the browser (PUT /cells/{id}), a
 card check's fix and its Undo, and a takeaway written over another; a card's first takeaway is part of its making."""
 from __future__ import annotations
 

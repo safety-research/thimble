@@ -585,7 +585,8 @@ button.settings-ext-name:hover .settings-ext-caret {
   align-items: center;
 }
 .settings-ext-line,
-.settings-ext-more {
+.settings-ext-more,
+.settings-ext-ask {
   grid-column: 1;
   min-width: 0;
   color: var(--text-secondary);
@@ -627,6 +628,14 @@ button.settings-ext-name:hover .settings-ext-caret {
 .settings-ext-facts dd {
   margin: 0;
   overflow-wrap: anywhere;
+}
+/* the question whether to run an extension's orientation now, under its line */
+.settings-ext-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
 }
 /* a view of the extension above it: its name set in under the extension's, its switch in the same column */
 .settings-ext-row-extension-view {

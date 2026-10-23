@@ -29,7 +29,7 @@ import { Spinner } from '../components/Spinner'
 import { Switch } from '../components/Switch'
 import { useTooltip } from '../components/Tooltip'
 import { api } from '../lib/api'
-import { ExtensionsSettings, changedLocalViews, changedViews, extensionCalls, viewKey } from './ExtensionsSettings'
+import { ExtensionsSettings, answeredRuns, changedLocalViews, changedViews, extensionCalls, viewKey } from './ExtensionsSettings'
 import { hasEffort, hasFastMode, invalidateSettings, loadSettings, modelChoices, modelLabel, sameModel } from '../lib/models'
 import { EFFORTS, ROLES, type AgentRow, type Attached, type CallAgent, type Extensions, type MainEffort, type MainFence, type ModeAgent, type ModelConf, type OrientPermissions, type Settings, type SettingsPatch, type TaskRow } from '../lib/types'
 import { bus } from '../lib/bus'
@@ -393,6 +393,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
   const [extOn, setExtOn] = useState<Record<string, boolean>>({})
   const [viewOn, setViewOn] = useState<Record<string, boolean>>({})
   const [localOn, setLocalOn] = useState<Record<string, boolean>>({})
+  // each answer to an extension's question whether to run its orientation now, sent on Save
+  const [runAnswers, setRunAnswers] = useState<Record<string, boolean>>({})
   // View proposals (thimble's config `views.propose`)
   const [propose, setPropose] = useState(true)
   // Claude can edit files in this folder (the workspace's settings.json `corpus_edits`)
@@ -413,6 +415,7 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
         setExtOn(Object.fromEntries((ex?.extensions ?? []).map((e) => [e.name, e.on])))
         setViewOn(Object.fromEntries((ex?.extensions ?? []).flatMap((e) => (e.views ?? []).map((v) => [viewKey(e.name, v.slug), v.on]))))
         setLocalOn(Object.fromEntries((ex?.local?.views ?? []).map((v) => [v.slug, v.on])))
+        setRunAnswers({})
         const a = main?.meta?.attached ?? null
         setSettings(s)
         setModeRows(s.permission_modes ?? {})
@@ -466,6 +469,13 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
       if (effortNow) await api.setEffort(ws, main.effort as MainEffort)
       if (fastNow) await api.setFast(ws, !!main.fast)
       if (effortNow || fastNow) bus.emit('toast', { text: `Main's effort and fast mode: ${NEXT_LAUNCH}.`, kind: 'info' })
+      // last, so an orientation that cannot be sent the instructions leaves the other settings saved
+      for (const [name, run] of exts ? answeredRuns(exts, extOn, runAnswers) : []) {
+        const { status } = await api.answerExtensionOrientation(ws, name, run)
+        if (status === 'rerun') bus.emit('toast', { text: `${name} is running the orientation again.`, kind: 'info' })
+        if (status === 'resumed' || status === 'sent') bus.emit('toast', { text: `The orientation is running ${name}'s instructions.`, kind: 'info' })
+        if (status === 'held' || status === 'queued') bus.emit('toast', { text: `${name}'s instructions go to the orientation when its coverage check ends.`, kind: 'info' })
+      }
       invalidateSettings(ws)
       onClose()
     } catch (e) {
@@ -749,6 +759,8 @@ export function SettingsPopover({ ws, anchor, open, onClose }: { ws: string; anc
             setViewOn={(key, v) => setViewOn((cur) => ({ ...cur, [key]: v }))}
             localOn={localOn}
             setLocalOn={(slug, v) => setLocalOn((cur) => ({ ...cur, [slug]: v }))}
+            answers={runAnswers}
+            setAnswer={(name, run) => setRunAnswers((cur) => ({ ...cur, [name]: run }))}
           />
         )}
         {(error || settings?.config_error) && <div className="settings-error">{error || settings?.config_error}</div>}

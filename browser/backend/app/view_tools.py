@@ -176,6 +176,8 @@ def _check_text(answer: dict[str, Any]) -> str:
     out = "\n".join([head, *lines])
     if answer.get("png"):
         out += f"\n\nThe picture of the page as it opens, which Read opens: {answer['png']}"
+    if answer.get("drawing"):
+        out += f"\n\nThe view as it opens, drawn as text as the panel shows it:\n\n{answer['drawing']}"
     return out
 
 
