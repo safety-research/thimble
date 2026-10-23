@@ -15,7 +15,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { agentTinted } from '../lib/agentKey'
 import { api } from '../lib/api'
-import { demoStop } from '../lib/demo'
 import { bus } from '../lib/bus'
 import { getAskKey, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
@@ -430,7 +429,7 @@ export function CmdPointer({ ws }: { ws: string }) {
   }
   const submit = async () => {
     const text = draft.trim()
-    if (!box || !text || busy || demoStop()) return
+    if (!box || !text || busy) return
     setBusy(true)
     track('pointer-send', { target: box.anchor, detail: { text, range: box.anchors.length } })
     try {

@@ -15,7 +15,6 @@ import { Popover } from '../components/Menu'
 import { api, feedbackApi } from '../lib/api'
 import { openThread } from '../chat/Notes'
 import { bus, type ProblemPrefill } from '../lib/bus'
-import { demoStop } from '../lib/demo'
 import { recentProblems } from '../lib/problemLog'
 import type { ProblemReport, ProblemReportBody } from '../lib/types'
 
@@ -197,7 +196,6 @@ export function ProblemReportPopover({ ws, anchor, open, onClose, prefill = null
   // the description as a ticket for thimble's developer agent: a click, which starts its agent; the dialog closes on the
   // ticket's thread
   const fileTicket = useCallback(async () => {
-    if (demoStop()) return
     setFiling(true)
     setError(null)
     try {

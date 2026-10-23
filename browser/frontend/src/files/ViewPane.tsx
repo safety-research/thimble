@@ -16,7 +16,6 @@ import { Button } from '../components/Button'
 import { CheckMark } from '../components/CheckMark'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
-import { demoStop } from '../lib/demo'
 import { refreshProposals } from '../lib/proposals'
 import { refPath } from '../lib/refs'
 import { track } from '../lib/telemetry'
@@ -175,8 +174,7 @@ export function ReviewMark({ ws, slug, review: r, onUndo }: { ws: string; slug: 
     void call()
       .then(() => refreshProposals(ws))
       .catch((e: Error) => bus.emit('toast', { text: `Could not ${what}. ${e.message}`, kind: 'error' }))
-  const reviewAgain = act(() => api.viewReviewAgain(ws, slug), 'review the view again')
-  const again = () => demoStop() || reviewAgain()
+  const again = act(() => api.viewReviewAgain(ws, slug), 'review the view again')
   const stop = act(() => api.viewReviewStop(ws, slug), 'stop the review')
   const undo = act(() => (onUndo?.(), api.viewReviewUndo(ws, slug)), 'undo the revision')
   const line = reviewLine(r)

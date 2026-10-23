@@ -63,7 +63,6 @@ function fanOut(ev: WsEvent): void {
           asked: rest.asked === true || undefined,
           accepted: rest.accepted === true || undefined,
           version: typeof rest.version === 'string' ? rest.version : undefined,
-          held: rest.held === true || undefined,
         })
       return
     case 'ticket':

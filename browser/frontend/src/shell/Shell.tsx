@@ -4,7 +4,7 @@
 // and fold state are kept per workspace in browser storage (App clears it first when the workspace was replaced by a new
 // one of the same name, lib/workspace.ts syncInstance); a new workspace opens on Files. A folded chat column opens when
 // something asks for a thread. When the workspace is replaced (the stream's `reset`), the page reloads. With no Claude
-// Code session attached the shell is inert under SessionGone, except on a demo page (lib/demo, `data-session` static).
+// Code session attached the shell is inert under SessionGone.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Canvas } from '../canvas/Canvas'
 import { ChatPanel } from '../chat/ChatPanel'
@@ -19,7 +19,6 @@ import { useViews } from '../files/ViewsBar'
 import { ViewSurface } from '../files/ViewSurface'
 import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
-import { onDemoNote, useDemo } from '../lib/demo'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { setAskKey } from '../lib/platform'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
@@ -31,7 +30,6 @@ import { noteOpened, openedBefore, openingRef, readStorage, storageKey, writeSto
 import { CmdPointer } from '../pointer/CmdPointer'
 import { ReportTab } from '../report/ReportTab'
 import { tabSignals, useTabDots, writing } from './dots'
-import { DemoLine } from './DemoLine'
 import { NewVersion } from './NewVersion'
 import { DragGhost, PaneArea, usePaneDrag, type SurfaceSpec } from './PaneArea'
 import {
@@ -206,8 +204,6 @@ export function Shell({ ws }: { ws: string }) {
       patch({ chatOpen: true })
     }
     const offs = [
-      // an action that stopped on a demo page: its note is in the chat (lib/demo)
-      onDemoNote(() => chatOpen.current || open()),
       bus.on('openChat', (e) => {
         if (chatOpen.current) return
         holdForChat({ event: 'openChat', payload: e })
@@ -248,7 +244,6 @@ export function Shell({ ws }: { ws: string }) {
   // the chat when it is the only thing open, rather than covering them
   const [side, setSide] = useState<SideSection | null>(null)
   useEffect(() => bus.on('openLabels', () => setSide('labels')), [])
-  const demo = useDemo()
 
   // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
   const paneX = 12 + (layout.chatOpen ? liveWidth + 12 : 40)
@@ -329,7 +324,7 @@ export function Shell({ ws }: { ws: string }) {
   const signals = tabSignals(dots, isWriting)
 
   return (
-    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : demo ? 'static' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
+    <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>
       <TopBar
         ws={ws}
         tabs={BASE.map((t) => ({
@@ -347,7 +342,6 @@ export function Shell({ ws }: { ws: string }) {
         side={side}
         onSide={setSide}
       />
-      <DemoLine />
       <div className="shell-body">
         {layout.chatOpen ? (
           <>

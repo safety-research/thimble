@@ -687,9 +687,6 @@ export const api = {
     j<Extensions>(`${ws(c)}/extensions/${enc(name)}/views/${enc(slug)}`, { method: 'PUT', body: JSON.stringify({ on }) }),
   /** this workspace's switch of a view built for it; the analyst's browser alone may turn it (backend views.set_view_on) */
   switchLocalView: (c: string, slug: string, on: boolean) => j<LocalExtension>(`${ws(c)}/views/${enc(slug)}/on`, { method: 'PUT', body: JSON.stringify({ on }) }),
-  /** the answer to Settings' offer to run an extension's orientation instructions now: Run now (true) or Not now */
-  answerExtensionOrientation: (c: string, name: string, run: boolean) =>
-    j<Extensions & { status: string }>(`${ws(c)}/extensions/${enc(name)}/orientation`, { method: 'POST', body: JSON.stringify({ run }) }),
   /** the paper and accent this browser shows, so the card harness draws a card in them (backend/app/render.py) */
   reportTheme: (c: string, paper: string, accent: string) => j<{ paper: string; accent: string }>(`${ws(c)}/render/theme`, { method: 'PUT', body: JSON.stringify({ paper, accent }) }),
 }
