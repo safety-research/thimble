@@ -1122,14 +1122,18 @@ def read_lines(path: str, a: int, b: int, partial: bool = False) -> tuple[int, l
 
 def quote_fragments(words: str) -> list[str]:
     """The quoted words of a direct quote, split at an ellipsis: `"Confirmed sequence: GA -> ... G5"` gives
-    ["Confirmed sequence: GA ->", "G5"]; [] for words that are no direct quote."""
+    ["Confirmed sequence: GA ->", "G5"]; [] for words that are no direct quote. Square brackets hold the quoter's own
+    words: inside a word they complete or change it (`environ[ment]`, `[T]he`) and are read as part of it; standing
+    alone they replace words of the record (`[the agents] could not`), and the quote is split there, as at an
+    ellipsis."""
     w = unmark(words)
     spans = re.findall(r"[\"“]([^\"“”]+)[\"”]", w)
     if not spans and w[:1] in QUOTE_CHARS and w[-1:] in QUOTE_CHARS:
         spans = [w[1:-1]]
     frags = []
     for s in spans:
-        frags += [f.strip(" .,;:" + QUOTE_CHARS) for f in re.split(r"…|\.\.\.", s)]
+        s = re.sub(r"(?<=\w)\[([^\[\]]*)\]|\[([^\[\]]*)\](?=\w)", lambda m: m.group(1) or m.group(2) or "", s)
+        frags += [f.strip(" .,;:" + QUOTE_CHARS) for f in re.split(r"…|\.\.\.|\[[^\[\]]*\]", s)]
     return [f for f in frags if len(f) >= 3]
 
 

@@ -312,6 +312,19 @@ def test_a_quote_worked_into_a_sentence_may_change_its_first_letter(tmp_path: Pa
     assert r["status"] == "verified"
 
 
+def test_square_brackets_in_a_quote_are_the_quoters_words(tmp_path: Path):
+    rec = {"author": "agent-03", "body": "meson tries to download xsimd from github and there is no network access in this environment. Do not trust it."}
+    (tmp_path / "board.jsonl").write_text("{}\n" + json.dumps(rec) + "\n")
+    sub = "there is no network access in this environment"
+    # brackets inside a word complete it; brackets alone stand for words of the record, which the quote skips
+    for words in ('"there is no network access in this environ[ment]"', '"[T]here is no network access in this environment"',
+                  '"meson tries to download [the subprojects] from github"'):
+        assert check_mark(mark(words), quote("board.jsonl", 2, sub), [], str(tmp_path))["status"] == "verified", words
+    # the words outside the brackets must still stand in the record
+    bad = check_mark(mark('"there is no network access in this environ[ment] at all"'), quote("board.jsonl", 2, sub), [], str(tmp_path))
+    assert bad["status"] == "failed"
+
+
 def test_a_claim_that_joins_two_places_cites_both(tmp_path: Path):
     (tmp_path / "shell.tsx").write_text("const shown = load()\n" + "x\n" * 80 + "write(path, shown)\n")
     ev = [{"file": "shell.tsx", "line": 1, "substring": "const shown = load()"}, {"file": "shell.tsx", "line": 82, "substring": "write(path, shown)"}]
