@@ -463,14 +463,19 @@ def test_a_fix_whose_tests_fail_on_the_release_waits_with_the_test_output(world,
     upstream({"plugin/rc.md": "x\n"}, "v0.10.4-rc1")
     check = FX.update(check=True)
     assert (check["newer"], check["to"]) == (True, "0.10.3") and FX.release()["base"] == world["base"]
+    # tests that fail once (a time limit under load) and pass the second time: the fix is carried
+    flaky = world["tmp"] / "flaky"
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", f"test -e {flaky} || {{ touch {flaky}; false; }}")
+    assert FX.update()["carried"] == [a["id"]] and flaky.exists() and not (FX.live_dir() / "plugin" / "rc.md").exists()
+    upstream({"plugin/more.md": "x\n"}, "v0.10.5")
     monkeypatch.setenv("THIMBLE_FIX_TESTS", "echo 'bar.test.ts: 1 failed'; false")
     out = FX.update()
-    assert out["pending"] == [a["id"]] and not (FX.live_dir() / "plugin" / "rc.md").exists()
+    assert out["pending"] == [a["id"]]
     r = FX.get(a["id"])
-    assert r["error"] == "its tests failed on thimble 0.10.3" and "1 failed" in r["pending"]["tests"]
+    assert r["error"] == "its tests failed on thimble 0.10.5" and "1 failed" in r["pending"]["tests"]
     assert "bar.test.ts: 1 failed" in Path(out["prompt"]).read_text()
     shown = "\n".join(FX.show_lines(a["id"]))
-    assert "Why it waits: its tests failed on thimble 0.10.3" in shown and "claude \"$(cat" in shown
+    assert "Why it waits: its tests failed on thimble 0.10.5" in shown and "claude \"$(cat" in shown
     assert "plugin/bar/bar.tsx  +1 −1" in shown
 
 

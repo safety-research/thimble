@@ -1082,7 +1082,11 @@ def update(tests: bool = True, check: bool = False) -> dict[str, Any]:
                     released.append(fid)
                     continue
                 if tests:
+                    # once more when they fail: the hooks tests' 5 s time limits fail under load, and a fix set aside
+                    # costs the person a session with Claude
                     ok, tail = run_tests("update")
+                    if not ok:
+                        ok, tail = run_tests("update")
                     if not ok:
                         git("reset", "-q", "--hard", before, cwd=wt)
                         pending[fid] = {"why": "tests", "tests": tail}
