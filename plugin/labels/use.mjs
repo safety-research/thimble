@@ -1,6 +1,8 @@
 // use.mjs: the pure parts of the label rows and of the ask before a large label run (labels/use.ts draws them). No `$`.
 //
-//   howMade(kind)                 -> how a label was made, in a few plain words: 'regex', 'code', 'read by Claude'
+//   howMade(kind)                 -> how a label was made, in a few plain words: 'regex', 'code', 'read by Claude',
+//                                    'values Claude gave' (the row and the labels pane both say it so)
+//   rowValues(l)                  -> the values a row names: those some record has, then the records with no value
 //   tonesInTree(tree, values)     -> {value: color}: where a card's drawing (the runner's tree of Box, Text and Button
 //                                    nodes) first names a label's value as a word of its own in a color (a legend, a
 //                                    bar's name), or in plain words after a mark in a color (`■ agent`), never on a fill
@@ -18,10 +20,28 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
 export const ASK_KEYS = { 1: 'all', 2: 'sample', 0: 'cancel' }
 
 export function howMade(kind) {
-  if (kind === 'prompt' || kind === 'set') return 'read by Claude'
+  if (kind === 'prompt') return 'read by Claude'
+  if (kind === 'set') return 'values Claude gave'
   if (kind === 'regex') return 'regex'
   if (kind === 'code') return 'code'
   return ''
+}
+
+/** The records with no value yet, as the labels pane names them (ledger.mjs partsOf). */
+export const NO_VALUE = '-'
+
+/** The values a row names, as {v, name}, from a label as `thimble label --json` gives it: each value some record has,
+ *  in the label's order, then the records that wait for the model or got no value (`v` '-'). A label read with no
+ *  counts names its values. So a label whose records all got no value says that, and names no value it never gave. */
+export function rowValues(l) {
+  const values = Array.isArray(l?.values) ? l.values.map(String) : []
+  const counts = l && typeof l.counts === 'object' && l.counts ? l.counts : null
+  if (!counts) return values.map(v => ({ v, name: v }))
+  const given = [...values, ...Object.keys(counts).filter(v => !values.includes(v))]
+  const out = given.filter(v => Number(counts[v]) > 0).map(v => ({ v, name: v }))
+  const none = (Number(l.waiting) || 0) + (Number(l.failed) || 0)
+  if (none) out.push({ v: NO_VALUE, name: l.waiting ? 'not labeled yet' : 'no value' })
+  return out
 }
 
 // the marks a legend puts before a value's name in the value's color (`■ agent`)
