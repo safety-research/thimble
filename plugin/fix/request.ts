@@ -1,6 +1,7 @@
-// request.ts: a request for a change, as /thimble-fix <words> makes it (or Claude, with the fix-thimble skill), a round
-// of a fix whose copy is still there, and r (redo) on a fix that failed or no longer fits. Each makes the copy with the
-// kernel, then starts the fixer in it. Words for a fix whose fixer still works go to that fixer, as a round of its fix.
+// request.ts: a request for a change, as the fix-thimble skill makes it (after the person's /thimble-fix <words>, or on
+// Claude's own), a round of a fix whose copy is still there, and r (redo) on a fix that failed or no longer fits. Each
+// makes the copy with the kernel, then starts the fixer in it. Words for a fix whose fixer still works go to that fixer,
+// as a round of its fix. The skill's words, as /thimble-fix gives them:
 //
 //   /thimble-fix <words>      the fixer's round, else a round of the fix the line shows, else a new fix; while the fix
 //                             the person applied last is on, the new fix's fixer is told of it, and its end may say
@@ -18,13 +19,7 @@ type Engine = EngineInterface
 
 /** What a request came to: the words the transcript shows after the command (or Claude reads after the skill), the
  *  fix, and whether something went wrong. */
-export type Requested = { text: string; fix: Fix | null; failed: boolean; round: boolean }
-
-/** /thimble-fix <words>, or the fix-thimble skill: words for the fixer that still works (a round of its fix), a round of
- *  the fix the line shows while its copy is still there, or a new fix. */
-export async function requestFix($: Engine, words: string, by: Asker = 'person'): Promise<string> {
-  return (await request($, words, by)).text
-}
+export type Requested = { text: string; fix: Fix | null; failed: boolean; round: boolean; named?: number }
 
 /** The fixes a request can change: on, off or ready, with a change. */
 const REFINABLE = ['on', 'off', 'ready']
@@ -45,7 +40,10 @@ export function lastApplied(list: { fixes: Fix[]; on: boolean } | null): Fix | n
   return on.sort((a, b) => (b.on_at ?? 0) - (a.on_at ?? 0) || b.id - a.id)[0] ?? null
 }
 
-export async function request($: Engine, said: string, by: Asker = 'person'): Promise<Requested> {
+/** The fix-thimble skill (after /thimble-fix <words>, or Claude's own), or the person's key on the line: words for the
+ *  fixer that still works (a round of its fix), a round of the fix the line shows while its copy is still there, or a
+ *  new fix. `tell`: Claude hears of a request it did not make at the person's next prompt. */
+export async function request($: Engine, said: string, by: Asker = 'person', tell = true): Promise<Requested> {
   const who = by === 'claude' ? 'Claude' : 'The person'
   const form = formOf(said, (await refreshFixes($))?.fixes ?? [])
   const words = form.words
@@ -89,11 +87,11 @@ export async function request($: Engine, said: string, by: Asker = 'person'): Pr
     await refreshFixes($)
     return { text: `× ${bad} The words are kept as a request: /thimble-fix lists it.`, fix, failed: true, round }
   }
-  if (by === 'person') await tellAtNextPrompt($, `fix-${fix.id}`, `The person asked thimble's fixer for a change to thimble itself (fix ${fix.id}); it works in the background in a copy, and thimble shows the person the result. Nothing for you to do.`)
+  if (by === 'person' && tell) await tellAtNextPrompt($, `fix-${fix.id}`, `The person asked thimble's fixer for a change to thimble itself (fix ${fix.id}); it works in the background in a copy, and thimble shows the person the result. Nothing for you to do.`)
   return round
     ? { text: `A fork of this session is fixing fix ${fix.id} again, with these words, in the background. Keep going.`, fix, failed: false, round }
     : named
-      ? { text: `A fork of this session is changing fix ${named.id} in the background. Keep going.`, fix, failed: false, round }
+      ? { text: `A fork of this session is changing fix ${named.id} in the background. Keep going.`, fix, failed: false, round, named: named.id }
       : { text: `A fork of this session is fixing it in the background (fix ${fix.id}: ${cut(fix.title, 60)}). Keep going.`, fix, failed: false, round }
 }
 

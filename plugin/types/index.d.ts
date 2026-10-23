@@ -109,6 +109,8 @@ declare module 'claude-code' {
       fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart' } | null
       /** whether this session looked for a newer release already (register.ts) */
       fixUpdated: boolean
+      /** after the person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is their request (fix/register.ts) */
+      fixAsked: number
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
       fixers: Record<string, number>
       /** the start of the command each fix's fixer runs a shell command with, in the sandbox, by the fix's id (fixer.ts) */

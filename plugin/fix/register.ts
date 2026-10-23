@@ -1,13 +1,17 @@
 // register.ts: thimble fix, the person's changes to their own thimble, in the hooks module.
 //
-//   /thimble-fix <words>   a request: the kernel makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer
+//   /thimble-fix <words>   a prompt to Claude: the plugin's prompt command /thimble:thimble-fix (commands/
+//                          thimble-fix.md, left out of the menu) runs with the words, so the transcript shows them as
+//                          typed. Claude starts the fix with the fix-thimble skill, or first asks one short question
+//                          when the words do not say what should change. Typed mid-turn, it waits for the turn's end
+//   the fix-thimble skill  a request: the kernel makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer
 //                          (fixer.ts) works in it in the background; while a fixer works, the words go to it, and
 //                          while the line of a fix with a copy shows, they are a new round of that fix (request.ts);
 //                          while the fix applied last is on, the fixer may fold its change into it. N <words> always
-//                          changes fix N, new <words> always makes a new fix
-//   the fix-thimble skill  the same request, by Claude, when it sees thimble misbehave (skills/fix-thimble/SKILL.md);
-//                          Claude reads what came of it in the skill's place, and is told when the fix ends
-//   /thimble-fix           Your fixes (pane.tsx)
+//                          changes fix N, new <words> always makes a new fix. The person asked for it after their
+//                          /thimble-fix <words>; else Claude did, when it saw thimble misbehave (skills/fix-thimble/
+//                          SKILL.md). Claude reads what came of it in the skill's place, and is told when the fix ends
+//   /thimble-fix           Your fixes (pane.tsx), at once, without a turn of Claude's
 //   the fixer's calls      its shell runs in the sandbox runtime (no network, reads only the system, its tools and
 //                          the copy, writes only the copy), at most 5 minutes a command, with no dialog unless the
 //                          person's rules deny the command; Write and Edit only in its copy; its other calls go
@@ -34,7 +38,7 @@ import { fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes,
 import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
-import { request, requestFix } from './request'
+import { request } from './request'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,6 +64,10 @@ const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|done|apply|merge|notnow|redo|u
 const UPDATED = { plugin: 'thimble', key: 'fixUpdated' } as const
 
 const fixerAgents = new Set<string>()
+
+/** The person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is still the person's request
+ *  (the turn of the command, and the one after Claude's question). */
+const ASKED = { plugin: 'thimble', key: 'fixAsked' } as const
 
 async function knowFixers($: Engine): Promise<void> {
   for (const id of Object.keys(((await $.state.get({ plugin: 'thimble', key: 'fixers' })).value ?? {}) as Record<string, number>)) fixerAgents.add(id)
@@ -95,8 +103,9 @@ async function refusal($: Engine, e: Any): Promise<string | null> {
 export const registerFix: Register = on => {
   on('session.start', { cwd: /^\/.*$/ }, async ($, e, next) => {
     const r = await next(e)
+    // not immediate: words typed mid-turn wait for the turn's end, as a prompt does
     try {
-      await $.command.register({ name: 'thimble-fix', description: 'Change thimble for yourself: say what should work differently. N <words> changes fix N; new <words> makes a new fix. Alone: your fixes.', argumentHint: '[N | new] [what should work differently]', immediate: true })
+      await $.command.register({ name: 'thimble-fix', description: 'Change thimble for yourself: say what should work differently. N <words> changes fix N; new <words> makes a new fix. Alone: your fixes.', argumentHint: '[N | new] [what should work differently]' })
     } catch {
       // the command is missing in this session; the shell's `thimble fix list` still works
     }
@@ -122,26 +131,40 @@ export const registerFix: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  on('command.run', { command: 'thimble-fix' }, async ($, e) => {
+  // /thimble-fix alone and /thimble-fix update answer here, without a turn; words become the prompt command's run
+  // (commands/thimble-fix.md), whose row in the transcript shows them, a moment after this hook (a run from inside it
+  // would wait on it)
+  on('command.run', { command: /^(?:thimble:)?thimble-fix$/ }, async ($, e, next) => {
     const words = String(e.args || '').trim()
     if (/^update$/i.test(words)) return { text: UPDATE_IN_SHELL }
     if (!words) {
       const placed = await openFixes($)
       return placed ? {} : { text: 'Your fixes open in a pane in a wider terminal. In a shell: thimble fix list' }
     }
-    return { text: await requestFix($, words) }
+    await $.state.set(ASKED, 2 as never)
+    if (e.command !== 'thimble-fix') return next(e)
+    $.clock.after(0, () => {
+      void $.command.run({ command: 'thimble:thimble-fix', args: words } as never).catch(err => $.ui.toast(`thimble could not ask Claude for this fix: ${cut(String((err as Error)?.message || err), 160)}`))
+    })
+    return {}
   })
+
+  // one /thimble-fix in the menu: the prompt command it runs stays out of it
+  on('command.describe', { command: 'thimble:thimble-fix' }, async ($, e, next) => ({ ...(await next(e)), isHidden: true })).catch(($, e, next) => next(e))
 
   // the fix-thimble skill: Claude asks for the same fix, in the words after the skill's lead (SKILL.md), and reads
   // what came of it in the skill's place. A hook that fails leaves the skill's own text, which says how to ask
   on('skill.prompt', { skill: /^(?:thimble:)?fix-thimble$/ }, async ($, e, next) => {
     const words = wordsOfSkill(String(e.text ?? ''))
     if (!words) return { text: 'thimble started no fix: the skill needs, as its argument, what thimble does wrong and what it should do. Call it again with those words.' }
-    const r = await request($, words, 'claude')
+    // after the person's /thimble-fix <words>, the request is theirs: the fixer reads their words as theirs
+    const asked = Number((await $.state.get(ASKED)).value ?? 0) > 0
+    if (asked) await $.state.set(ASKED, 0 as never)
+    const r = await request($, words, asked ? 'person' : 'claude', false)
     if (r.failed || !r.fix) return { text: `${r.text.replace(/^×\s*/, '')} Tell the person in one short line.` }
     return { text: r.round
       ? `thimble gave these words to the fork that already fixes fix ${r.fix.id} ("${r.fix.title}"). Tell the person in one short line, then go on with their request.`
-      : `thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix ${r.fix.id}, "${r.fix.title}"). The person sees on the bar while it works, and decides with a key whether to use the fix. Tell them in one short line, then go on with their request. thimble tells you when the fix ends.` }
+      : `thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix ${r.fix.id}, "${r.fix.title}"${r.named != null ? `, a change to fix ${r.named}` : ''}). The person sees on the bar while it works, and decides with a key whether to use the fix. Tell them in one short line, then go on with their request. thimble tells you when the fix ends.` }
   }).catch(($, e, next) => next(e))
 
   // every call, the fixer's too: the verbs and the folder that are thimble's own and the person's keys'. The fixer's
@@ -179,6 +202,8 @@ export const registerFix: Register = on => {
   on('turn.complete', { reason: /^[\s\S]*$/ }, async ($, e, next) => {
     const r = await next(e)
     if (e.agentId === undefined) {
+      const asked = Number((await $.state.get(ASKED)).value ?? 0)
+      if (asked > 0) await $.state.set(ASKED, (asked - 1) as never)
       $.clock.after(0, () => {
         void reloadIfDue($).catch(() => undefined)
         void (async () => recoverFixers($, ((await fixesNow($))?.fixes ?? []).filter(f => f.state === 'working')))().catch(() => undefined)
