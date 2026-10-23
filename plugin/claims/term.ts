@@ -184,9 +184,11 @@ export async function openClaims($: Engine, args: ClaimsArgs = {}): Promise<void
   if (!placed) noticeLine($, 'Claude Code did not open the Claims pane here: the terminal is too narrow. Type /claims to open it.')
 }
 
-/** The pane shows other arguments (the person moved in it). */
+/** The pane shows other arguments (the person moved in it, by a key or a click), and holds the keyboard: Claude Code
+ *  stops a click at the Button it lands on, so a click alone does not give the pane back the keyboard. (Claude Code
+ *  leaves the keyboard at a prompt that holds typed words.) */
 export async function showClaims($: Engine, args: ClaimsArgs): Promise<void> {
-  await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims')
+  await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims', { focus: true })
 }
 
 // ------------------------------------------------------------------------------------------------ hooks
