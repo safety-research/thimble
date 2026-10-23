@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -313,6 +314,36 @@ def test_the_fixers_sandbox_writes_only_its_copy(world, tmp_path):
     p = subprocess.run(world["real_sandbox"](r["id"]) + [cmd], cwd=r["work"], capture_output=True, text=True)
     assert "NONET" in p.stdout
     assert (Path(r["work"]) / "plugin" / "x.txt").read_text() == "in\n" and not outside.exists()
+    # it reads only the system, its tools and the copy: a folder beside the copy and the home folder are hidden, and a
+    # search of the whole disk finds nothing there and ends soon
+    beside = tmp_path / "beside"
+    beside.mkdir()
+    (beside / "notes-made-up.txt").write_text("made-up\n")
+    cmd = (f"cat {beside}/notes-made-up.txt 2>/dev/null || echo NOREAD; ls {Path.home()} 2>/dev/null | head -1; "
+           "find / -name notes-made-up.txt 2>/dev/null; echo FOUND-END")
+    t = time.monotonic()
+    p = subprocess.run(world["real_sandbox"](r["id"]) + [cmd], cwd=r["work"], capture_output=True, text=True, timeout=120)
+    assert "NOREAD" in p.stdout and "made-up\n" not in p.stdout.replace("notes-made-up", "")
+    assert str(beside) not in p.stdout and p.stdout.rstrip().endswith("FOUND-END")
+    assert time.monotonic() - t < 60
+
+
+def test_a_copy_gets_the_types_claude_code_wrote(world, monkeypatch, tmp_path):
+    """plugin/.claude-plugin/types is git-ignored: each copy gets the types Claude Code wrote beside the plugin."""
+    plugin = tmp_path / "loaded" / "plugin"
+    (plugin / ".claude-plugin" / "types" / "claude-code").mkdir(parents=True)
+    (plugin / ".claude-plugin" / "types" / "claude-code" / "index.d.ts").write_text("export type MadeUpRow = {}\n")
+    (plugin / ".claude-plugin" / "types" / "tsconfig.json").write_text("{}\n")
+    monkeypatch.setattr(FX, "PLUGIN", plugin)
+    r = FX.new("make the bar say read")
+    got = Path(r["work"]) / "plugin" / ".claude-plugin" / "types"
+    assert (got / "claude-code" / "index.d.ts").read_text() == "export type MadeUpRow = {}\n"
+    # with none written, a copy has none and nothing fails; a round keeps its copy, the types too
+    monkeypatch.setattr(FX, "PLUGIN", tmp_path / "none")
+    assert not (Path(FX.new("another change")["work"]) / "plugin" / ".claude-plugin" / "types").exists()
+    monkeypatch.setattr(FX, "PLUGIN", plugin)
+    FX.done(r["id"], "Bar says read", "The bar says read.")
+    assert (Path(FX.round_(r["id"], "and keep the percent")["work"]) / "plugin" / ".claude-plugin" / "types" / "tsconfig.json").exists()
 
 
 def test_a_request_with_no_code_goes_as_an_issue(world, monkeypatch, tmp_path):

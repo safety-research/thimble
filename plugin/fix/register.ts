@@ -8,7 +8,10 @@
 //   the fix-thimble skill  the same request, by Claude, when it sees thimble misbehave (skills/fix-thimble/SKILL.md);
 //                          Claude reads what came of it in the skill's place, and is told when the fix ends
 //   /thimble-fix           Your fixes (pane.tsx)
-//   the fixer's calls      Claude Code's own permission handling, in the person's mode, as any subagent's
+//   the fixer's calls      its shell runs in the sandbox runtime (no network, reads only the system, its tools and
+//                          the copy, writes only the copy), at most 5 minutes a command, with no dialog unless the
+//                          person's rules deny the command; Write and Edit only in its copy; its other calls go
+//                          through Claude Code's own permission handling, in the person's mode (fixer.ts)
 //   every call             only thimble and the person's keys apply, submit or record a fix: Claude's `thimble fix`
 //                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
 //                          fixes' copies, are refused
@@ -27,7 +30,7 @@ import { busyWhile } from '../bar/busy'
 import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
-import { fixerEnded, fixOfAgent, recoverFixers } from './fixer'
+import { fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, recoverFixers } from './fixer'
 import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
@@ -142,19 +145,26 @@ export const registerFix: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // every call, the fixer's too: the verbs and the folder that are thimble's own and the person's keys'. The fixer's
-  // other calls go through Claude Code's own permission handling, as any subagent's do
+  // shell then runs in the sandbox runtime, and its writes stay in its copy
   on('tool.call', { tool: /^(?:Bash|Write|Edit|MultiEdit|NotebookEdit)$/ }, async ($, e, next) => {
-    if (e.agentId && (await fixOfAgent($, e.agentId)) != null) {
-      // the fixer writes in its copy (~/.thimble/fixes/work/<id>), which the folder rule allows
-      fixerAgents.add(String(e.agentId))
-    }
+    const id = e.agentId ? await fixOfAgent($, e.agentId) : null
+    if (id != null) fixerAgents.add(String(e.agentId))
     const no = await refusal($, e)
     if (no) return { deny: no }
-    const r = await next(e)
+    const f = id != null ? await fixerCall($, e, id) : null
+    if (f?.deny) return { deny: f.deny }
+    const r = await next((f?.call ?? e) as never)
+    if (f?.call) fixerCallDone(e)
     // after Claude's thimble update --continue (in the session thimble reapply opens), the plugins load again
     if (e.tool === 'Bash' && /\bthimble\s+(?:fix\s+)?update\b/.test(String(e.command ?? ''))) await updateRan($).catch(() => undefined)
     return r
   }).catch(($, e, next) => (fixerAgents.has(String(e.agentId)) ? { deny: 'thimble could not check this call of the fixer.' } : next(e)))
+
+  // the fixer's shell commands in the sandbox need no dialog, as Claude Code's own sandboxed commands need none
+  on('tool.check', { agentId: /^[\s\S]+$/ }, async ($, e, next) => {
+    if ((await fixOfAgent($, e.agentId)) == null) return next(e)
+    return ((await fixerCheck($, e)) ?? next(e)) as never
+  }).catch(($, e, next) => next(e))
 
   // the fixer's end: thimble commits and tests its change, a moment after (the tests take a while)
   on('turn.complete', { agentId: /^[\s\S]+$/ }, async ($, e, next) => {

@@ -538,6 +538,7 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, refines
         base = head()
         wt.parent.mkdir(parents=True, exist_ok=True)
         git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+        _give_types(wt)
         if tgt and tgt.get("state") != "on":
             p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{tgt['id']}"],
                     cwd=wt, check=False, env=as_thimble())
@@ -553,6 +554,20 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, refines
                "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
                **({"refines": tgt["id"], "refines_always": bool(always)} if tgt else {})}
         return put(rec)
+
+
+def _give_types(wt: Path) -> None:
+    """The copy gets the types Claude Code wrote beside the plugin it loads (plugin/.claude-plugin/types: the
+    `claude-code` module that plugin/tsconfig.json reads), which git leaves out, so its code type-checks as the person's
+    does. Nothing when Claude Code wrote none."""
+    rel = Path(".claude-plugin") / "types"
+    for src in (PLUGIN / rel, live_dir() / "plugin" / rel):
+        if (src / "claude-code").is_dir():
+            try:
+                shutil.copytree(src, wt / "plugin" / rel, dirs_exist_ok=True)
+            except OSError:
+                continue
+            return
 
 
 def round_(fid: int | str, words: str) -> dict[str, Any]:
@@ -849,6 +864,7 @@ def redo(fid: int | str, words: str = "") -> dict[str, Any]:
             shutil.rmtree(wt)
         base = head()
         git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+        _give_types(wt)
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         if earlier.strip():
             (tmp_dir(rec["id"]) / "earlier.patch").write_text(earlier)

@@ -111,6 +111,8 @@ declare module 'claude-code' {
       fixUpdated: boolean
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
       fixers: Record<string, number>
+      /** the start of the command each fix's fixer runs a shell command with, in the sandbox, by the fix's id (fixer.ts) */
+      fixerBox: Record<string, string[]>
       /** the fixes Claude started with the fix-thimble skill, by the fix's id (fixer.ts) */
       fixBy: Record<string, 'claude'>
       /** what Your fixes shows (pane.tsx): the selected fix, the marked ones, whether the diff shows, or what s shared */
