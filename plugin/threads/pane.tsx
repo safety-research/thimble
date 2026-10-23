@@ -31,25 +31,29 @@
 //   ─────────────────────────────────
 import type { EngineInterface } from 'claude-code'
 
+import { SPIN } from '../bar/busy'
 import { failNotice } from '../bar/notice'
 import { cardWidth, frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
-import { PANE_ID } from '../core/pane'
+import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
 import { cut, textWidth } from '../core/text.js'
-import { blocks, inline, marksIn, tableOf } from '../marks/message.js'
+import { themeNow } from '../core/theme'
+import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
-import { citeHeat, citeLook, messageEl } from '../marks/view'
+import { citeHeat, citeLook, footerEl, messageEl, type MarkLook } from '../marks/view'
+import { featureOn } from '../settings/features.mjs'
 import type { ThreadScope } from './seam'
 import { askThread, cardsOfTurn, isSending, listThreads, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
-import { aboutOf, askWords, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
+import { aboutOf, answerRow, askWords, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
 const GEN = { plugin: 'thimble', key: 'threadsGen' } as const
+const BUSY = { plugin: 'thimble', key: 'busy' } as const
 
 // each thread's input bar: a new field (a new key) once a question was asked, so no word of it stays in the field
 const fieldGen = new Map<string, number>()
@@ -151,14 +155,7 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
       out.push(Text({ key: `${k}-sgap`, children: ' ' }))
       out.push(Text({ key: `${k}-steps`, dimColor: true, wrap: 'truncate-end', children: `● ${cut(`${calls.length} step${calls.length === 1 ? '' : 's'} · ${stepWords(calls[calls.length - 1], t.root)}`, w - 4)}` }))
     }
-    if (x.text) {
-      // its citations as Claude wrote them: no checker reads a side thread, so they draw unchecked
-      const marks = marksIn(x.text)
-      out.push(Box({ key: `${k}-a`, flexDirection: 'column', children: [messageEl(els, {
-        text: x.text, marks, looks: marks.map((_m: unknown, j: number) => ({ n: j + 1, status: 'unchecked' as const })), key: `${k}-a`,
-        cols: w - 2, first: true, spin: '', onMark: () => undefined,
-      })] }))
-    }
+    if (x.text) out.push(await answerEl($, els, t, i, x.text, w, `${k}-a`))
     // the cards its fork drew while it answered this question
     for (const meta of await cardsOfTurn($, x.cards)) {
       if (t.scope.card === meta.id) out.push(Text({ key: `${k}-c-${meta.id}`, dimColor: true, wrap: 'truncate-end', children: '  ⎿ drew a new version of this card, shown above' }))
@@ -176,6 +173,35 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     out.push(Text({ key: 'conv-m', dimColor: true, wrap: 'truncate-end', children: '  ✓ sent to Claude' }))
   }
   return out
+}
+
+/** An answer of the thread with its citations as main's reply draws them (marks/register.ts): pending while the thread
+ *  answers, a turning glyph while they are checked, corrected words in place, verified or failed, and the footer under
+ *  it while it is checked; a press opens a citation's evidence. Its check is the answer's own (threads.mjs answerRow). */
+async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, w: number, key: string): Promise<Any> {
+  const row = answerRow(t, i)
+  const on = featureOn('marks')
+  const reply = on ? await rowMarks($, row).catch(() => null) : null
+  const rewrote = rewritesIn(on ? raw : withoutMarks(raw), reply?.items ?? [])
+  const text = withCorrections(rewrote.text, reply?.items ?? [])
+  const marks = on ? marksIn(text) : []
+  const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
+  const spin = SPIN[frame % SPIN.length]!
+  // no check in the store: pending while the thread answers or its check starts, else failed, since it did not run
+  const waits = t.status === 'running' || (i === t.turns.length - 1 && t.status === 'done' && Date.now() - Date.parse(t.at) < 30000)
+  const looks: MarkLook[] = marks.map((_m: unknown, j: number) => {
+    const it = reply?.items[j]
+    if (!it) return { n: j + 1, status: waits ? 'pending' : 'failed' }
+    if (it.status === 'corrected' && it.rewrite && !rewrote.placed.has(j)) return { n: it.n, status: 'failed' }
+    return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
+  })
+  if (marks.length) await themeNow($)
+  const body = messageEl(els, {
+    text, marks, looks, key, cols: w - 2, first: true, spin,
+    onMark: async (j: number) => { const n = looks[j]!.n; if (n > 0 && reply) await openPane($, 'evidence', { row, n }, `citation ${n}`) },
+  })
+  const foot = reply?.last && reply.checking ? footerEl(els, { key: `${key}-f`, spin, checking: reply.checking }) : null
+  return els.Box({ key, flexDirection: 'column', children: foot ? [body, foot] : [body] })
 }
 
 /** The thread's last answer: 'send' once it answered and m may send it to main, 'sent' once it did, else null. */

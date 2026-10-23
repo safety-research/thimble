@@ -26,6 +26,7 @@
 //   rowsOf(list, now)             the thread list's rows: key, name, status, questions, last question, how long ago
 //   ago(at, now)                  how long ago, in a word: `now`, `4m`, `2h`, `3d`
 //   cardPart(copy)                the part of a card a question is about: its selected line, from its text copy
+//   answerRow(thread, i)          the name of the answer at turn i in the store of citations, which checks and draws it
 
 const safe = s => String(s ?? '').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'x'
 /** A short, stable name for a text. */
@@ -276,6 +277,10 @@ export function rowsOf(list, now = Date.now()) {
       return { key: String(t.key), name: nameOf(t), status: String(t.status || ''), asks: (t.asks || []).length || qs.length, last: qs.length ? String(qs[qs.length - 1].text || '') : '', ago: ago(t.at, now) }
     })
 }
+
+/** The name an answer of a thread has in the store of citations (marks/store.ts), by its place among the thread's
+ *  turns: its check is kept and drawn by it. */
+export const answerRow = (thread, i) => `thread-${safe(thread?.id ?? thread?.key)}-${i}`
 
 /** A thread's answer as a text main reads (m): what it was on, the question, the answer. */
 export function sentNote(thread) {

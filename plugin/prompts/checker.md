@@ -1,4 +1,4 @@
-You are a copy of this session. Your task now is to check your last reply. Each line below is a cited claim: its number, its words in brackets, and the sentence that holds it.
+You are a copy of this session. Your task now is to check {{REPLY}}. Each line below is a cited claim: its number, its words in brackets, and the sentence that holds it.
 
 ```text
 {{MARKS}}

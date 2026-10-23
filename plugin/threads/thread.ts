@@ -20,6 +20,8 @@
 //     | 'claude', text, at, about?, calls?, cards?}], error?, at}. A resumed session reads them back.
 //   - The cards its fork draws (the card tool) are kept with the question they answer, and drawn under that answer in
 //     the pane (threadCardAnchor: cards/tool.ts anchors them at `thread:<key>`).
+//   - Its answers cite as main's replies do, and are checked as they are (marks/checker.ts checkAnswer, at the fork's
+//     turn end): each answer is a reply of its own in the marks' store (threads.mjs answerRow), which the pane draws.
 //   - The bar counts the session's threads (`t 2 threads`); t or a click on the count lists them (pane `threads`), and
 //     opening one shows it again with its conversation.
 // Nothing here runs unless the person asked a question.
@@ -35,11 +37,12 @@ import { readKept, rootHere, startDir, writeKept, keptDir } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
 import { openPane, paneNow } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
+import { checkAnswer } from '../marks/checker'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { fieldSettled, fieldShown } from './pane'
 import type { ThreadScope } from './seam'
-import { aboutOf, cardPart, display, firstMessage, forkDirective, nextMessage, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
+import { aboutOf, answerRow, cardPart, display, firstMessage, forkDirective, nextMessage, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -488,6 +491,12 @@ export const registerThreads: Register = on => {
       const t = threads.get(byAgent.get(e.agentId)!)
       if (t && t.status === 'failed' && !t.error) await keep($, { ...t, error: (e as Any).isAborted ? 'the thread was stopped' : 'the thread ended with an error' })
       if (t && (e as Any).reason === 'refusal') failNotice($, `The model's safeguards refused to answer the side thread about ${t.subject}. Another model may answer it: /model.`, 'thread')
+      // its answer's citations are checked as a reply's are, and drawn checked in the pane (pane.tsx)
+      const now = t ? threads.get(t.key) : null
+      const i = now ? now.turns.length - 1 : -1
+      if (now && i >= 0 && now.turns[i]!.role === 'claude' && now.turns[i]!.text && !retired.has(now)) {
+        await checkAnswer($, { row: answerRow(now, i), text: now.turns[i]!.text, turnId: String((e as Any).turnId ?? ''), agentId: e.agentId, about: aboutOf(now.scope), reason: String((e as Any).reason ?? 'answer') })
+      }
     } catch {
       // the thread shows its last state
     }
