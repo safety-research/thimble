@@ -24,7 +24,7 @@ import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { CLAIMS_REPAIR, claimsThreadScope as threadScope, drawClaims, repairShown } from './pane'
-import { claimsBarWords, claimsBright, claimsDigest, claimsLit, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
+import { claimCount, claimsBarWords, claimsBright, claimsDigest, claimsLit, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,6 +41,8 @@ export async function claimsKey($: Engine, key: string, _until: number): Promise
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('claims')) return []
   if (preview) return [{ id: 'claims', key: 'c', words: 'claims' }]
+  // no claims yet: nothing to open, so the bar shows no claims item until the first claim
+  if (!(await claimCount($))) return []
   const words = await claimsBarWords($)
   // in the lit color when a claim was corrected, as squeeze's; bold for a moment after new claims
   const look = await claimsLit($) ? { color: 'suggestion' } : {}
