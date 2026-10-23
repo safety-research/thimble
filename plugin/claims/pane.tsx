@@ -29,7 +29,7 @@ import { messageOf } from '../core/answers'
 import { tellOpened } from '../core/engaged'
 import { failNotice } from '../bar/notice'
 import { openPane, paneNow } from '../core/pane'
-import { themeNow } from '../core/theme'
+import { themeLast, themeNow } from '../core/theme'
 import { launchRepair, repairOf } from '../marks/checker'
 import { citeWords } from '../marks/evidence'
 import { citeHeat } from '../marks/view'
@@ -44,11 +44,15 @@ type Any = any
 type Run = { s: string; tone?: string | null; bold?: boolean; underline?: boolean; tint?: boolean; part?: string | null }
 
 /** The clusters' colors (0.10's c1..c6) and what each other tone draws as: theme colors, so light and dark both read;
- *  a faint tone is its color dimmed; `code` the code's color of the citations' card. */
+ *  a faint tone is its color dimmed; `code` the code's color of the citations' card; `plain` the theme's text color
+ *  (the map's other clusters while one is chosen: dim gray dots and names read too faint on a light background). */
 const CLUSTER = ['#3cc2b9', '#a98be0', '#cfae7e', '#8fa1bd', '#e384b2', '#b2c24f']
+/** The same hues for a light background, darker, so a dot and a name read on white (contrast 4.8 or more; the dark set
+ *  is near 2 there). */
+const CLUSTER_LIGHT = ['#0f7f78', '#7650c4', '#87662a', '#4f6386', '#b03a74', '#677510']
 /** A line of code's color: the theme key thimble draws inline code in (tray/tray.ts), shaded by Claude Code. */
 const CODE_INK = 'permission'
-const THEME: Record<string, string> = { accent: 'suggestion', good: 'success', bad: 'error', warn: 'warning', cite: 'merged' }
+const THEME: Record<string, string> = { plain: 'text', accent: 'suggestion', good: 'success', bad: 'error', warn: 'warning', cite: 'merged' }
 
 function look(tone: string | null | undefined): Record<string, unknown> {
   if (!tone) return {}
@@ -57,7 +61,7 @@ function look(tone: string | null | undefined): Record<string, unknown> {
   if (t === 'del') return { color: THEME.bad, strikethrough: true }
   if (t === 'ins') return { color: THEME.good }
   const c = /^c(\d)$/.exec(t)
-  const color = c ? CLUSTER[(Number(c[1]) - 1) % 6] : t === 'code' ? CODE_INK : THEME[t]
+  const color = c ? (themeLast() === 'light' ? CLUSTER_LIGHT : CLUSTER)[(Number(c[1]) - 1) % 6] : t === 'code' ? CODE_INK : THEME[t]
   return { ...(color ? { color } : {}), ...(faint || t === 'dim' ? { dimColor: true } : {}) }
 }
 
@@ -219,7 +223,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const W = Math.max(24, Number(e?.props?.bodyColumns) || 90)
   const H = Math.max(14, Number(e?.props?.scroll?.bodyRows) || 36)
   const { Box } = els
-  // the cited words' tint is the theme set's (marks/view.ts citeLook)
+  // the cited words' tint and the clusters' colors are the theme set's (marks/view.ts citeLook, look)
   await themeNow($)
   const raw = await withMarks($, paneData(await claimsStore($)))
   const keys: Key[] = []

@@ -18,7 +18,7 @@
 //                   are listed, each its name then its claims, a blank row between (listOf), with the selection, chips,
 //                   evidence and keys of the detail; the map appears once there are FEW claims
 //   the selection   at rest nothing is chosen. A press on a name, or p n, chooses a cluster: its dots and name bold in
-//                   its color, every other dim. A press on a dot, or on a claim in the list, picks that claim
+//                   its color, every other in the text color. A press on a dot, or on a claim in the list, picks that claim
 //   the detail      under the map, after a rule: the cluster's name and its claims, each after a dim – (two lines at
 //                   most, then …), each a press that picks it; a window round the claim picked when they do not fit
 //                   (`↑ N earlier`, `↓ N more · claims a–b of N`, each a press that pages by a screen). A claim picked is ▸ and bold in the cluster's color,
@@ -757,7 +757,7 @@ export function evidenceRows(claim, byId, W, st = {}) {
 
 /** One graph of the map's clusters on a canvas: their claims as dots in the cluster's color and their names under them
  *  in the same color, no lines. With a cluster or claim chosen, its cluster's dots and name are bold and every other
- *  dot and name dim. New claims (`fresh`) are ◆, bold in their color. A name is a press on its cluster (`g:<key>`), a
+ *  dot and name `plain`: the theme's text color, not dim, so the map still reads on a light background. New claims (`fresh`) are ◆, bold in their color. A name is a press on its cluster (`g:<key>`), a
  *  dot a press on its claim (`d:<id>`). */
 function graphOf({ data, claims, groups, edges, W, h, cols, group, tone, chosen, fresh }) {
   const lay = layOf(claims, groups, edges, W, h, cols)
@@ -767,14 +767,14 @@ function graphOf({ data, claims, groups, edges, W, h, cols, group, tone, chosen,
   for (const nm of lay.names) {
     const k = keyOf(nm.id)
     const on = !chosen || k === group
-    nm.lines.forEach((l, i) => c.text(nm.x, nm.y + i, [{ s: l, tone: on ? toneOfGroup(k) : 'dim', bold: chosen && on, part: `g:${k}` }]))
+    nm.lines.forEach((l, i) => c.text(nm.x, nm.y + i, [{ s: l, tone: on ? toneOfGroup(k) : 'plain', bold: chosen && on, part: `g:${k}` }]))
   }
   for (const x of claims) {
     const p = lay.pos.get(x.id)
     if (!p) continue
     const mine = claimGroup(data, x) === group
     if (fresh.has(x.id)) c.dot(p.x, p.y, '◆', tone(x), { bold: true, part: `d:${x.id}` })
-    else c.dot(p.x, p.y, dotOf(x), !chosen || mine ? tone(x) : 'dim', { bold: chosen && mine, part: `d:${x.id}` })
+    else c.dot(p.x, p.y, dotOf(x), !chosen || mine ? tone(x) : 'plain', { bold: chosen && mine, part: `d:${x.id}` })
   }
   // a click lands on a blank cell beside a dot or a name too: a press of one cell alone is hard to hit
   for (const x of claims) {

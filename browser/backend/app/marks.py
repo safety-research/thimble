@@ -83,7 +83,8 @@ def checker_prompt(marks: str, folder: str, cards: str = "") -> str:
     text = CHECKER.read_text(encoding="utf-8")
     for old, new in CHECKER_CHANGES:
         text = text.replace(old, new)
-    for slot, value in (("MARKS", marks), ("CWD", folder), ("ROOT", folder), ("CARDS", cards)):
+    # REPLY: what holds the marks; the browser checks main's replies only (the terminal also a side thread's answers)
+    for slot, value in (("MARKS", marks), ("CWD", folder), ("ROOT", folder), ("CARDS", cards), ("REPLY", "your last reply")):
         text = text.replace("{{" + slot + "}}", value)
     return text
 

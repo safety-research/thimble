@@ -163,16 +163,16 @@ test('a cluster chosen: its name and its claims under the map, each a press on t
   const subs = v.panel.slice(2).filter(r => r.some(x => /^n:/.test(x.part || '')))
   assert.ok(subs.length >= 3)
   assert.ok(subs.every(r => r[1].s === '– ' && r[1].tone === 'dim' && !r[2].tone))
-  // its name on the map is a press on the cluster, bold in its color; every other name and dot dim
+  // its name on the map is a press on the cluster, bold in its color; every other name and dot plain (the text color)
   assert.ok(v.graph.some(r => r.some(x => x.part === `g:${key}` && x.s.includes(data.groups[2].name) && x.bold && x.tone === 'c3')))
   const names = v.graph.flatMap(r => r.filter(x => /^g:/.test(x.part || '') && x.s.trim()))
-  for (const nm of names) assert.equal(nm.tone === 'dim', nm.part !== `g:${key}`, nm.s)
+  for (const nm of names) assert.equal(nm.tone === 'plain', nm.part !== `g:${key}`, nm.s)
   const mine = new Set(data.claims.filter(c => String(c.cluster) === key).map(c => c.id))
   const dots = v.graph.flatMap(r => r.filter(x => /^d:/.test(x.part || '') && /[●◉○]/.test(x.s)))
   for (const d of dots) {
     const on = mine.has(d.part.slice(2))
     assert.equal(d.bold, on, d.part)
-    assert.equal(d.tone === 'dim', !on, d.part)
+    assert.equal(d.tone === 'plain', !on, d.part)
   }
   // p n walk the clusters, round
   const keys = data.groups.map(g => String(g.id))

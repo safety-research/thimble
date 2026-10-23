@@ -7,7 +7,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
-import { awaitsCheck, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
+import { awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { marksIn, withRewrites } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { highlighted } from '../marks/evidence'
@@ -209,6 +209,26 @@ test("an interrupted reply's citations fail at once: their check did not run, an
   expect((await rowMarks($, 'row-1'))!.items[1]).toMatchObject({ status: 'verified', shown: '15 of 40', repair: true })
   const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
   expect(told['marks:row-1:repair:2']).toContain('- "15 of 40" is verified as written')
+})
+
+test("a side thread's answer is checked as a reply is, with the thread's own calls as evidence, and main is told nothing", async () => {
+  const { $, seen } = engine(VALIDATED)
+  await checkAnswer($, { row: 'thread-t1-1', text: REPLY, turnId: 't-9', agentId: 'b0thread', about: 'the card "Merge rate"', reason: 'answer' })
+  expect(seen.spawned.length).toBe(1)
+  expect((await rowMarks($, 'thread-t1-1'))!.items.map(m => m.status)).toEqual(['checking', 'checking', 'checking'])
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  // the thread's Bash calls stand where main's stand for a reply
+  expect(JSON.parse(seen.stdin[0]!).calls.map((c: Any) => c.by)).toEqual(['checker', 'main', 'main'])
+  const r = await rowMarks($, 'thread-t1-1')
+  expect(r!.items.map(m => [m.status, m.shown])).toEqual([['verified', '40'], ['corrected', '12 of 40'], ['failed', '"ship it"']])
+  expect(r!.last).toBe(true)
+  expect(Object.keys(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as object)).toEqual([])
+  // checked once: the same answer again starts nothing
+  await checkAnswer($, { row: 'thread-t1-1', text: REPLY, turnId: 't-9', agentId: 'b0thread', about: 'x', reason: 'answer' })
+  expect(seen.spawned.length).toBe(1)
+  const item = { n: 1, row: 'r', words: '40', start: 0, end: 0, sentence: 'Of [40].', status: 'checking' as const, shown: '40' }
+  expect(checkerPrompt('Check {{REPLY}}.', [item], '/d', '/d', '', 'an answer')).toBe('Check an answer.')
+  expect(checkerPrompt('Check {{REPLY}}.', [item], '/d', '/d')).toBe('Check your last reply.')
 })
 
 test("the checker reads files, and runs code only as one Python script; a mark's sentence goes in its prompt as written", () => {

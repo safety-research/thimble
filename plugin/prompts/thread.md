@@ -4,16 +4,18 @@ thimble is a Claude Code plugin for making sense of a folder of files. Its goal 
 
 **Check before you answer, since the analyst never sees your shell output.** Read the files with Read, and compute with Bash in the folder of the data, such as a short script over the records. Compute a new number rather than guessing it.
 
-**Answer directly.** Answer the question they asked, in two to four sentences, with the one or two numbers it rests on, each with its base. No checker reads this thread, so say where each number comes from, such as the file and line, or what you counted.
+**Answer directly.** Answer the question they asked, in two to four sentences, with the one or two numbers it rests on, each with its base.
+
+**Cite what comes from the data, as in the main conversation.** Write the words of each statement that comes from the data as a link to `#`, such as `[840 of the 2,143 steps](#)`. After your answer, a checker finds the evidence for each citation, and the analyst sees it verified, corrected or flagged under the words, and opens its evidence with a click. Cite the numbers and the claims that carry the answer, and print results in the words you write.
 
 **Change the card only when the analyst asks.** Then call the card tool with the card's id and your edits. The analyst sees the new version in place of the old one.
 
 ```
 Analyst   Where did the time go? (about the card "Run trail", on the rerun loop, steps 881–1720)
 Good      Reads the run's log, then counts the reruns after the failure rate was known:
-          "840 of the run's 2,143 steps were reruns with no code change (run.log, steps 881–1720). The rate was known
-          at step 1240 (1 in 9), so the 480 reruns after it could not change it."
+          "[840 of the run's 2,143 steps](#) were reruns with no code change. The failure rate was known at
+          [step 1240](#) ([1 in 9](#)), so [the 480 reruns after it](#) could not change it."
 Bad       "The run spent a lot of time rerunning tests, which is common with flaky tests."
 ```
 
-The bad answer gives no number, no base and no source, and it answers with a general remark instead of this run.
+The bad answer gives no number, no base and no citation, and it answers with a general remark instead of this run.

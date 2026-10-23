@@ -52,7 +52,7 @@ type Any = any
 /** One fork's check: the reply, and the numbers of the marks this fork checks. `cwd` is the shell's folder, where the
  *  fork's code runs; `root` the folder the session started in, which the pane's paths start from. A relative path of
  *  the evidence is read from either. */
-type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean }
+type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; thread?: string }
 
 const RUNNING = { plugin: 'thimble', key: 'marksRunning' } as const
 const ROWS = { plugin: 'thimble', key: 'marksRows' } as const
@@ -110,10 +110,15 @@ function itemsOf(reply: { row: string; text: string }[]): MarkItem[] {
   })))
 }
 
-/** The checker's prompt: checker.md with the marks (`n. [words] in: <sentence>`), the shell's folder, the folder the
- *  session started in and the file of the cards' values (cardsIndex) filled in. */
-export function checkerPrompt(template: string, items: MarkItem[], cwd: string, root: string, cards = ''): string {
-  return fill(template, { MARKS: items.map(m => `${m.n}. [${m.words}] in: ${m.sentence}`).join('\n'), CWD: cwd, ROOT: root, CARDS: cards })
+/** What the checker checks: main's last reply, or a side thread's answer, which main's conversation does not hold. */
+export const LAST_REPLY = 'your last reply'
+export const threadAnswer = (about: string) =>
+  `an answer that a side thread of this session gave the analyst about ${about}. That thread's work is not in your conversation, so find the evidence in the files`
+
+/** The checker's prompt: checker.md with the marks (`n. [words] in: <sentence>`), what holds them (`reply`), the
+ *  shell's folder, the folder the session started in and the file of the cards' values (cardsIndex) filled in. */
+export function checkerPrompt(template: string, items: MarkItem[], cwd: string, root: string, cards = '', reply = LAST_REPLY): string {
+  return fill(template, { MARKS: items.map(m => `${m.n}. [${m.words}] in: ${m.sentence}`).join('\n'), CWD: cwd, ROOT: root, CARDS: cards, REPLY: reply })
 }
 
 /** The command that validates a check's answer (engine/validate.py), which also writes the cards' index. */
@@ -206,7 +211,8 @@ async function edit($: Engine, c: Check, change: (r: Reply) => Reply): Promise<R
     open = r.items.some(counted)
     return change(r)
   })
-  if (reply && open && !reply.items.some(counted)) {
+  // a side thread's answer: main never read it, so it hears nothing of its check
+  if (reply && open && !c.thread && !reply.items.some(counted)) {
     const text = c.repair ? repairTellText(reply.items.filter(m => mine.has(m.n))) : tellText(reply.items)
     if (text) await tellAtNextPrompt($, c.repair ? `marks:${c.key}:repair:${c.marks.join(',')}` : `marks:${c.key}`, text)
   }
@@ -281,6 +287,12 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
     await giveUp($, whole, 'The reply was interrupted.', now)
     return
   }
+  await spawnChecks($, whole, items)
+}
+
+/** The checker forks of a reply's marks, each with its share; `reply` says what holds them (checkerPrompt). */
+async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = LAST_REPLY): Promise<void> {
+  const now = whole.spawnedAt
   let template = ''
   try {
     template = await promptText($, 'checker')
@@ -293,7 +305,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   const cards = await cardsIndex($)
   for (const share of splitMarks(items)) {
     const c: Check = { ...whole, marks: share.map(m => m.n) }
-    const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, cwd, root, cards), description: 'checking citations' })
+    const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, whole.cwd, whole.root, cards, reply), description: 'checking citations' })
     if (!fork.agentId) {
       await giveUp($, c, 'Claude Code did not start it.', now)
       failNotice($, `The check of the citations could not start (${String(fork.deny || 'no reason given').slice(0, 80)}), so they are not checked. ${CHECK_ONE}`)
@@ -304,7 +316,25 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...c, agentId, spawnedAt } }))
     started.push(agentId)
   }
-  if (started.length) await showRunning($, key, items.length, started)
+  if (started.length) await showRunning($, whole.key, items.length, started)
+}
+
+/** At the end of a side thread's turn (threads/thread.ts): its answer's marks are checked as a reply's are, in the
+ *  store under `row`, a name of the answer's own, which the thread's pane draws them by. Its Bash calls are evidence
+ *  as main's are (`agentId`, the thread's agent). Main is told nothing: it never read the answer. Call it inside the
+ *  thread's turn.complete hook, as startCheck. */
+export async function checkAnswer($: Engine, a: { row: string; text: string; turnId: string; agentId: string; about: string; reason: string }): Promise<void> {
+  if (!featureOn('marks') || (await replyOf($, a.row))) return
+  const items = itemsOf([{ row: a.row, text: a.text }])
+  if (!items.length) return
+  const now = Number(await $.clock.now())
+  await newReply($, { key: a.row, turnId: a.turnId, rows: [a.row], startedAt: now, settledAt: null, items, thread: { agentId: a.agentId, about: a.about } })
+  const whole: Check = { agentId: '', key: a.row, turnId: a.turnId, marks: items.map(m => m.n), cwd: String(await $.session.cwd()), root: await startDir($), replyEnd: now, spawnedAt: now, thread: a.agentId }
+  if (a.reason !== 'answer') {
+    await giveUp($, whole, 'The answer was interrupted.', now)
+    return
+  }
+  await spawnChecks($, whole, items, threadAnswer(a.about))
 }
 
 // ------------------------------------------------------------------------------------------------ repair (x)
@@ -315,7 +345,7 @@ export const REPAIR_DESCRIPTION = 'checking a citation again (x)'
 /** A repair's spawn held for a key's word window: it waits until `until`, and is refused once `cancelled`. */
 export type RepairHold = { until: number; cancelled: boolean }
 /** What a check of one mark again needs: its reply, its mark, and the checker's text with the request. */
-export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string }
+export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string }
 
 let held: RepairHold | null = null
 const starting = new Set<string>()
@@ -353,7 +383,8 @@ export async function repairOf($: Engine, row: string, n: number): Promise<Repai
   }
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
-  return { key, turnId: r.turnId, n, cwd, root, prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex)}\n\n${repairRequest(m)}` }
+  const reply = r.thread ? threadAnswer(r.thread.about) : LAST_REPLY
+  return { key, turnId: r.turnId, n, cwd, root, ...(r.thread ? { thread: r.thread.agentId } : {}), prompt: `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\n${repairRequest(m)}` }
 }
 
 /** The repair's fork. Its spawn is the first call, so it is made inside the hook that calls this (the key's or the
@@ -379,7 +410,7 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
         return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const }
       }),
     }))
-    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true }
+    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.thread ? { thread: r.thread } : {}) }
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: c }))
     await showRunning($, r.key, 1, [agentId])
     return ''
@@ -415,7 +446,8 @@ function giveUpLine(reason: string): string {
 /** The validator's result for a fork's answer, or why there is none. */
 async function validate($: Engine, c: Check, e: { agentId: string; answer: string }, items: MarkItem[]): Promise<{ results?: Any[]; problem?: string }> {
   // main's calls too: the check may cite what main printed (the validator keeps the calls whose output the answer cites)
-  const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...bashCalls(await $.session.messages(), 'main')]
+  // a side thread's answer: the thread's calls are its own code, as main's are a reply's
+  const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...bashCalls(await $.session.messages(c.thread ? { agentId: c.thread } : undefined), 'main')]
   const ran = await $.process.run(validateArgv($), {
     cwd: c.cwd, timeoutMs: 120000,
     stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp: await tempDir($), cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),

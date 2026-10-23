@@ -46,7 +46,8 @@ export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
   status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string
 }
-export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[] }
+/** `thread`: the reply is a side thread's answer (threads/thread.ts), by its agent and what it is about. */
+export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[]; thread?: { agentId: string; about: string } }
 /** What one row draws: its own marks, and the reply's counts (the last row draws them in the footer). */
 export type RowMarks = { row: string; last: boolean; items: MarkItem[] } & Counts
 /** A reply's marks by what the person sees: `checking` the marks still checked, `verified` those the check confirmed
