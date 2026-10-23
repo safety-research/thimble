@@ -42,7 +42,7 @@ import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { fieldSettled, fieldShown } from './pane'
 import type { ThreadScope } from './seam'
-import { aboutOf, answerRow, cardPart, display, firstMessage, forkDirective, nextMessage, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
+import { aboutOf, answerRow, cardPart, display, firstMessage, forkDirective, nextMessage, partAbout, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -406,7 +406,7 @@ export async function openThreadOn($: Engine, scope: ThreadScope): Promise<boole
   // a card: the line it selects now, which the pane shows in place of the whole card
   if (scope.card && !scope.part) {
     const part = cardPart(await cardText($, scope.card).catch(() => ''))
-    if (part) scope = { ...scope, part }
+    if (part) scope = { ...scope, part, about: partAbout(scope.about, part) }
   }
   const key = threadKey(scope)
   const was = threads.get(key)

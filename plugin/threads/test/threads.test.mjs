@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ago, askWords, cardPart, display, shownAbout, firstMessage, forkDirective, nameOf, nextMessage, rowsOf, sentNote, stepWords, threadKey, turnsOf } from '../threads.mjs'
+import { ago, askWords, cardPart, display, shownAbout, firstMessage, forkDirective, nameOf, nextMessage, partAbout, partWords, rowsOf, sentNote, stepWords, threadKey, turnsOf } from '../threads.mjs'
 
 test('one thread per citation, explainer, card or pane; a citation\'s evidence pane is that citation\'s thread', () => {
   const cite = threadKey({ about: '41 of the 44', mark: { row: 'row-1', kind: 'citation', n: 2 } })
@@ -108,4 +108,17 @@ test("a card's part: the line its text copy marks selected with ▸, from the ma
   assert.equal(cardPart('│ ▸ r2 made-up   +4 │'), '▸ r2 made-up  +4 │')
   assert.equal(cardPart('no selection here'), '')
   assert.equal(cardPart(), '')
+})
+
+test('a thread for each bar or row of a card a click selected, the same at every width the card draws at', () => {
+  const wide = cardPart('  ▸ Cherbourg   ████████████████████████████████ 168')
+  const narrow = cardPart('  ▸ Cherbourg   ██████████████ 168')
+  assert.equal(partWords(wide), 'Cherbourg 168')
+  assert.equal(threadKey({ about: 'x', card: 'c0123456789ab', part: wide }), threadKey({ about: 'y', card: 'c0123456789ab', part: narrow }))
+  assert.match(threadKey({ about: 'x', card: 'c0123456789ab', part: wide }), /^card-c0123456789ab-[0-9a-z]+$/)
+  assert.notEqual(threadKey({ about: 'x', card: 'c0123456789ab', part: '▸ Queenstown ███ 77' }), threadKey({ about: 'x', card: 'c0123456789ab', part: wide }))
+  // nothing selected: the card as a whole
+  assert.equal(threadKey({ about: 'x', card: 'c0123456789ab', part: '' }), 'card-c0123456789ab')
+  assert.equal(partAbout('the card "Ports"', wide), '"Cherbourg 168" in the card "Ports"')
+  assert.equal(partAbout('the card "Ports"', ''), 'the card "Ports"')
 })
