@@ -67,7 +67,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.1"  # the uv that wrote browser/server/uv.lock; a newer one rewrites the lockfile
+          version: "0.12.1"  # the uv that wrote browser/backend/uv.lock; a newer one rewrites the lockfile
 
       - name: Install Claude Code
         run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
@@ -110,7 +110,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.1"  # the uv that wrote browser/server/uv.lock; a newer one rewrites the lockfile
+          version: "0.12.1"  # the uv that wrote browser/backend/uv.lock; a newer one rewrites the lockfile
 
       - name: Shared prompts
         run: scripts/check.sh parity
@@ -118,7 +118,7 @@ jobs:
   browser-server:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -127,18 +127,42 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: browser/frontend/package-lock.json
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          version: "0.12.1"  # the uv that wrote browser/server/uv.lock; a newer one rewrites the lockfile
+          version: "0.12.1"  # the uv that wrote browser/backend/uv.lock; a newer one rewrites the lockfile
 
-      - name: Install bubblewrap, and let it make its namespaces (the runner's AppArmor keeps it from them)
+      - name: Install the sandbox's system packages, and let bubblewrap make its namespaces (the runner's AppArmor keeps it from them)
         run: |
-          sudo apt-get install -y bubblewrap
+          sudo apt-get install -y bubblewrap socat ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-      - name: Sandbox check (installs the sandbox runtime the plugin pins in browser/server/sandbox, fails when it does not work)
-        run: browser/scripts/thimble-browser --check-sandbox
+      - name: Cache the headless Chromium
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('browser/frontend/package-lock.json', 'browser/backend/uv.lock') }}
+
+      # the view checks load pages in the headless Chromium of the page's and the server's Playwright, and the sandbox
+      # runtime the kernel runs in comes with the page's packages
+      - name: Install the server's and the page's packages, and their headless Chromium
+        run: browser/scripts/check.sh install
+
+      # without the sandbox runtime, or without working namespaces, the server tests of the sandbox skip, so this fails
+      - name: Sandbox check (runs a command in bubblewrap and in the sandbox runtime)
+        working-directory: browser/backend
+        run: |
+          python3 -I -c '
+          import sys; sys.path.insert(0, ".")
+          from pathlib import Path
+          from app import kernel_wrap, srt
+          root, node = Path("..").resolve(), srt.node()
+          why = srt.missing(root, node) or ("" if kernel_wrap.works() else "bubblewrap cannot make its namespaces here") \
+              or ("" if kernel_wrap.srt_works(node, srt.package(root)) else "the sandbox runtime cannot run a command here")
+          print(why or "the sandbox works: bubblewrap, and the sandbox runtime from browser/frontend")
+          sys.exit(1 if why else 0)'
 
       - name: Server tests
         run: scripts/check.sh server
@@ -160,3 +184,18 @@ jobs:
 
       - name: Type check, unit tests and build (after npm ci)
         run: scripts/check.sh page
+
+  # the check main's ruleset requires: it passes only when every job above passed
+  checks:
+    needs: [scan, plugin, parity, browser-server, browser-page]
+    # a skipped required job counts as passed, so this one runs, and fails, whatever the others did (a draft runs none)
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: All jobs passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "scan, plugin, parity, browser-server and browser-page: $RESULTS"
+          for r in $RESULTS; do [ "$r" = success ] || exit 1; done
