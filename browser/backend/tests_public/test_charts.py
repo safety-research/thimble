@@ -102,6 +102,19 @@ def test_a_bar_chart_of_named_categories_lies_down_largest_first_and_its_values_
     assert (s["encoding"]["y"]["field"], s["encoding"]["x"]["field"]) == ("agent", "count")
 
 
+def test_categories_that_name_times_keep_their_time_order_rather_than_largest_first():
+    # shares stacked to 100%: largest first would order the hours by their rounding
+    shares = pd.DataFrame({"hour": ["hour 01", "hour 01", "hour 02", "hour 02", "hour 08", "hour 08"],
+                           "share": [60.1, 40.0, 50.0, 50.0, 70.0, 30.1], "kind": ["a", "b"] * 3})
+    assert spec_of("bar", shares)["encoding"]["y"]["sort"] == ["hour 01", "hour 02", "hour 08"]
+    months = pd.DataFrame({"month": ["Jul", "May", "June"], "posts": [9, 1, 5]})
+    assert spec_of("bar", months)["encoding"]["y"]["sort"] == ["May", "June", "Jul"]
+    weekdays = pd.DataFrame({"weekday": ["Wed", "Mon", "Tue"], "posts": [9, 1, 5]})
+    assert spec_of("bar", weekdays)["encoding"]["y"]["sort"] == ["Mon", "Tue", "Wed"]
+    # names that only end in a number, as agents', are ranked as before
+    assert spec_of("bar", POSTS)["encoding"]["y"]["sort"] == ["agent-2", "agent-1", "agent-3"]
+
+
 def test_a_group_column_stacks_in_the_legend_s_order_sets_side_by_side_or_shares():
     spec = spec_of("bar", LINKS)
     enc = spec["encoding"]
