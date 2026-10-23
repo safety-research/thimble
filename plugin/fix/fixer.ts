@@ -96,7 +96,7 @@ export async function startFixer($: Engine, fix: Fix, earlier = false): Promise<
   if (r.deny !== undefined || !r.agentId) return `The fixer did not start (${cut(String(r.deny || 'no agent started'), 200)}).`
   await $.state.set(FIXERS, { ...(await fixers($)), [r.agentId]: fix.id } as never)
   const word = `fixing: ${cut(fix.title, 36)} · in a copy`
-  void busyWhile($, word, async () => (await fixOf($, fix.id))?.state === 'working')
+  void busyWhile($, word, async () => !ending.has(fix.id) && (await fixOf($, fix.id))?.state === 'working')
   watch($, fix.id)
   return null
 }

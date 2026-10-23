@@ -105,7 +105,9 @@ declare module 'claude-code' {
       /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read (fixes.ts) */
       fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number } | null
       /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem (fixes.ts FixLine) */
-      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem'; said?: string } | null
+      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string } | null
+      /** whether this session looked for a newer release already (register.ts) */
+      fixUpdated: boolean
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
       fixers: Record<string, number>
       /** the start of the command each fix's fixer runs a shell command with, in the sandbox, by the fix's id */

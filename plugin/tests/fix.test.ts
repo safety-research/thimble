@@ -82,6 +82,7 @@ function setup() {
     if (verb === 'undo') { fix.state = 'off'; return ok({ id: 1, reload: true }) }
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
     if (verb === 'diff') return ok('diff --git a/plugin/bar/bar.tsx b/plugin/bar/bar.tsx\n-  coverage\n+  read\n')
+    if (verb === 'update') return ok(fix.state === 'on' ? { said: 'thimble 0.10.3 · 1 fix carried', carried: [1], reload: true } : { said: '', reload: false })
     return ok({})
   }
   const $: Any = {
@@ -224,4 +225,20 @@ test("/thimble-fix alone lists the fixes; d shows the selected fix's diff; u on 
   expect(textOf(drawn)).toContain('+  read')
   await buttons(drawn)['key-u']!.onPress()
   expect(s.verbs()).toContain('apply 1 --ask -')
+})
+
+test('at session start a newer release replays the fixes that are on, once a session, and one line says what came of it', async () => {
+  const s = setup()
+  s.fix.state = 'on'
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect(s.verbs()).toContain('update --json')
+  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 · 1 fix carried · thimble reloaded')
+  expect(s.commands).toEqual(['reload-plugins'])
+  // the reload starts the module again: no second update in this session
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect(s.verbs().filter(v => v === 'update --json').length).toBe(1)
+  await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
 })

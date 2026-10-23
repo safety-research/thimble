@@ -6,6 +6,8 @@
 //   off       ○ <title> is off · thimble reloaded                        (until the next prompt)
 //   failed    × Fix 7 did not pass: <title> · <why>                     d diff · r redo · n not now
 //   request   ◇ Saved as a request with no code: <title>                n ok · /thimble-fix lists it
+//   update    ↑ thimble 0.10.3 · 3 fixes carried · 1 needs redo         (a new release at session start; until the next
+//                                                                        prompt)
 //   problem   × <what went wrong, with what to do>                      (until the next prompt)
 //
 // y applies: from then on the fix's code runs outside the sandbox, so only the person's key does it (fixes.ts).
@@ -52,7 +54,7 @@ async function pressLine($: Engine, id: number, kind: string, k: string): Promis
 /** The person's next prompt: a line that only told something goes. A fix that waits for y stays. */
 export async function lineSeen($: Engine): Promise<void> {
   const l = await fixLineNow($)
-  if (l && (l.kind === 'applied' || l.kind === 'off' || l.kind === 'problem')) await setFixLine($, null)
+  if (l && (l.kind === 'applied' || l.kind === 'off' || l.kind === 'problem' || l.kind === 'update')) await setFixLine($, null)
 }
 
 function keyText(els: Any, k: string, words: string, i: number): Any[] {
@@ -66,7 +68,7 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   const l = await fixLineNow($)
   if (!l) return []
   const { Box, Text } = els
-  const f: Fix | null = await fixOf($, l.id)
+  const f: Fix | null = l.id ? await fixOf($, l.id) : null
   const title = cut(f?.title || `fix ${l.id}`, Math.max(12, width - 40))
   const rule = (key: string) => Text({ key, color: 'warning', children: '─'.repeat(Math.max(4, width)) })
   const row = (key: string, children: Any[]) => Box({ key, flexDirection: 'row', flexWrap: 'wrap', width, children })
@@ -91,6 +93,8 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   } else if (l.kind === 'request') {
     first = [Text({ key: 'g', color: 'suggestion', children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
     second = [Text({ key: 'i', children: '  ' }), ...keyText(els, 'n', 'ok', 0), dim('m', ' · /thimble-fix lists it, and s submits it')]
+  } else if (l.kind === 'update') {
+    first = [Text({ key: 'g', color: 'suggestion', children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · /thimble-fix lists your fixes')]
   } else if (l.kind === 'problem') {
     first = [Text({ key: 't', color: 'error', wrap: 'wrap', children: `× ${l.said || `fix ${l.id} did not go through`}` })]
   } else return []

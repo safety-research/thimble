@@ -9,6 +9,7 @@
 //                          calls of those verbs, and its writes into the fixes' folder, are refused
 //   the fixer's end        thimble commits and tests the change; the line above the bar offers y apply · d diff · n
 //   the person's prompt    a line that only told something goes (line.ts)
+//   session start          a newer release: the fixes that are on replay on it, and one line says what came of it
 //
 // The kernel (engine/kernel/fixes.py) holds the records and makes every change to live; nothing here edits a file of
 // thimble's or of Claude Code's.
@@ -18,7 +19,7 @@ import { busyWhile } from '../bar/busy'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { fixerCall, fixerCheck, fixerEnded, fixOfAgent, FIXER, recoverFixers } from './fixer'
-import { fixesDir, fixesNow, refreshFixes, reloadIfDue } from './fixes'
+import { fixesDir, fixesNow, refreshFixes, reloadIfDue, updateFixes } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
 import { requestFix } from './request'
@@ -29,6 +30,9 @@ type Any = any
 
 /** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), never Claude's. */
 const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|done|apply|notnow|redo|undo|remove|sandbox|draft|keep|send)\b/
+
+/** Whether this session looked for a new release already (kept across a reload of the module). */
+const UPDATED = { plugin: 'thimble', key: 'fixUpdated' } as const
 
 /** The fixers this load knows, so a guard that fails can still refuse their calls. */
 const fixerAgents = new Set<string>()
@@ -65,12 +69,18 @@ export const registerFix: Register = on => {
       const working = (list?.fixes ?? []).filter(f => f.state === 'working')
       for (const f of working) void busyWhile($, `fixing: ${cut(f.title, 36)} · in a copy`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
       await recoverFixers($, working)
+      // a newer release: the fixes that are on replay on it, once per session (a reload starts the module again)
+      if (list?.pointed && !(await $.state.get(UPDATED)).value) {
+        await $.state.set(UPDATED, true as never)
+        await updateFixes($)
+      }
     })().catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'thimble-fix' }, async ($, e) => {
     const words = String(e.args || '').trim()
+    if (/^update$/i.test(words)) return { text: (await updateFixes($)) || 'Your thimble is the newest release.' }
     if (!words) {
       const placed = await openFixes($)
       return placed ? {} : { text: 'Your fixes open in a pane in a wider terminal. In a shell: thimble fix list' }

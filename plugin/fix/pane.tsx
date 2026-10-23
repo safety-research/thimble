@@ -72,9 +72,10 @@ function date(t: number): string {
 
 function keys(els: Any, list: [string, string, () => unknown][]): Any {
   const { Box, Button, Text } = els
+  // a plain Button with a hotkey draws `d: diff`, the key in the accent color
   return Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: list.flatMap(([k, w, press], i) => [
     ...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []),
-    Button({ key: `key-${k}`, plain: true, hotkey: k, label: `${k} ${w}`, onPress: press, children: [Text({ key: 'k', color: KEY_COLOR, bold: true, children: k }), Text({ key: 'w', children: ` ${w}` })] }),
+    Button({ key: `key-${k}`, plain: true, hotkey: k, label: w, onPress: press }),
   ]) })
 }
 

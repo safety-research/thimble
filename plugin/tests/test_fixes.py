@@ -300,3 +300,47 @@ def test_a_request_with_no_code_goes_as_an_issue(world, monkeypatch, tmp_path):
     out = FX.send(q["id"], "pr", press(q["id"]))
     assert out["pr"].endswith("/issues/3") and FX.get(q["id"])["state"] == "sent"
     assert not any(x.startswith(("repo fork", "pr create")) for x in ghlog.read_text().splitlines())
+
+
+def release_commit(w, path: str, text: str, msg: str) -> str:
+    """A newer release in the person's clone (a clone install moves when they pull)."""
+    p = w["rel"] / path
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(text)
+    sh("git", "add", "-A", cwd=w["rel"])
+    sh("git", "commit", "-q", "-m", msg, cwd=w["rel"])
+    return sh("git", "rev-parse", "HEAD", cwd=w["rel"])
+
+
+def test_a_new_release_carries_the_fixes_that_fit_and_marks_the_rest(world, monkeypatch):
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    FX.apply(a["id"], press(a["id"]))
+    b = FX.new("a note")
+    (Path(b["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    FX.done(b["id"], "A note", "")
+    FX.apply(b["id"], press(b["id"]))
+    assert FX.update(tests=False)["said"] == ""  # nothing newer yet
+    # the release takes the note as it is, and changes something else
+    new = release_commit(world, "plugin/notes.md", "made-up note\n", "the note, released")
+    new = release_commit(world, "plugin/other.md", "x\n", "another change")
+    out = FX.update()
+    assert out["said"] == f"thimble {new[:7]} · 1 fix carried · 1 in the release" or out["said"].endswith("1 fix carried · 1 in the release")
+    assert FX.get(a["id"])["state"] == "on" and FX.get(b["id"])["state"] == "released"
+    assert FX.release()["base"] == new and new in (FX.home() / "off.sh").read_text()
+    log = sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines()
+    assert log[:2] == ["Bar says read", "another change"]
+    assert "read ${n}" in live_file("plugin/bar/bar.tsx") and (FX.live_dir() / "plugin" / "other.md").exists()
+    # a release that rewrote the same line: the fix needs a redo, and mine is the release alone
+    release_commit(world, "plugin/bar/bar.tsx", "const words = `seen ${n}`\n", "the bar rewritten")
+    out = FX.update()
+    assert out["redo"] == [a["id"]] and FX.get(a["id"])["state"] == "redo" and "did not fit" in FX.get(a["id"])["error"]
+    assert "seen ${n}" in live_file("plugin/bar/bar.tsx")
+    # a fix whose tests fail on the new release needs a redo too
+    c = FX.new("a second note")
+    (Path(c["work"]) / "plugin" / "more.md").write_text("more\n")
+    FX.done(c["id"], "More", "")
+    FX.apply(c["id"], press(c["id"]))
+    release_commit(world, "plugin/third.md", "y\n", "a third change")
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    assert FX.update()["redo"] == [c["id"]] and not (FX.live_dir() / "plugin" / "more.md").exists()

@@ -34,8 +34,9 @@ export type Fix = {
 }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number }
 /** The line above the bar for one fix: ready (y apply · d diff · n not now), applied (u undo), off (after u),
- *  failed (d diff · r redo · n not now), request (no code), working (a round), or a problem with what to do. */
-export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem'; said?: string }
+ *  failed (d diff · r redo · n not now), request (no code), a new release with the fixes replayed on it (update), or a
+ *  problem with what to do. */
+export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string }
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
 
@@ -188,6 +189,23 @@ export async function allOffOn($: Engine, on: boolean): Promise<string | null> {
 export async function diffText($: Engine, id: number): Promise<string> {
   const r = await kernelFix($, ['diff', String(id)], { timeoutMs: 30000 }).catch(() => null)
   return r?.ok ? r.out : ''
+}
+
+/** A newer release, and the fixes replayed on it (at session start, and /thimble-fix update): the line says what came
+ *  of it, and the session loads it. The words, or '' when nothing changed. */
+export async function updateFixes($: Engine): Promise<string> {
+  const r = await kernelFix($, ['update', '--json'], { timeoutMs: 600000, doing: 'replaying your fixes on a new thimble' })
+  if (!r.ok) {
+    await setFixLine($, { id: 0, kind: 'problem', said: `Your fixes could not move to the new thimble: ${cut(r.err || 'thimble fix update gave nothing', 200)}. They stay as they were.` })
+    return ''
+  }
+  const d = jsonOf<Any>(r.out) ?? {}
+  await refreshFixes($)
+  if (!d.said) return ''
+  await setFixLine($, { id: 0, kind: 'update', said: String(d.said) })
+  await tellAtNextPrompt($, 'fix-update', `thimble moved to a new release and replayed the person's fixes on it: ${d.said}.`)
+  await load($, d)
+  return String(d.said)
 }
 
 /** The path of the fixes' home, as the person reads it (~ for the home folder). */

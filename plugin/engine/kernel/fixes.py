@@ -420,11 +420,11 @@ def _srt_dir() -> Path:
     return thimble_home() / "srt" / pin
 
 
-def sandbox_argv(fid: int, path_extra: list[str] | None = None) -> list[str]:
+def sandbox_argv(fid: int | str, path_extra: list[str] | None = None) -> list[str]:
     """The command that runs one shell command of the fixer, or its tests, in the sandbox runtime: no network, reads
     the system, the tools it needs and the copy's repository, writes only the copy and its temp folder. The command
-    itself follows as /bin/bash -c CMD."""
-    wt, tmp = work_dir(fid), tmp_dir(fid)
+    itself follows as /bin/bash -c CMD. `fid` names the copy: a fix's id, or `update`."""
+    wt, tmp = home() / "work" / str(fid), home() / "tmp" / str(fid)
     tmp.mkdir(parents=True, exist_ok=True)
     srt = _srt_dir()
     if not (srt / "node_modules").is_dir():
@@ -470,7 +470,7 @@ def _has_pytest(py: str) -> bool:
 QUICK_TESTS = "claude plugin test plugin"
 
 
-def run_tests(fid: int) -> tuple[bool, str]:
+def run_tests(fid: int | str) -> tuple[bool, str]:
     """The quick tests in the copy, in the sandbox: the hooks tests, and the kernel's when this Python has pytest
     (THIMBLE_FIX_TESTS, a shell command, replaces them). (passed, the log's last lines)."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
@@ -484,11 +484,12 @@ def run_tests(fid: int) -> tuple[bool, str]:
     except FixError as e:
         return False, str(e)
     try:
-        p = subprocess.run(argv, cwd=work_dir(fid), capture_output=True, text=True, timeout=540)
+        p = subprocess.run(argv, cwd=home() / "work" / str(fid), capture_output=True, text=True, timeout=540)
     except subprocess.TimeoutExpired:
         return False, "the tests ran longer than 9 minutes"
     log = (p.stdout + p.stderr).strip()
-    (tmp_dir(fid) / "tests.log").write_text(log + "\n")
+    (home() / "tmp" / str(fid)).mkdir(parents=True, exist_ok=True)
+    (home() / "tmp" / str(fid) / "tests.log").write_text(log + "\n")
     return p.returncode == 0, "\n".join(log.splitlines()[-12:])
 
 
@@ -627,7 +628,7 @@ def _rebuild(order: list[int]) -> list[int]:
     failed = []
     for fid in order:
         ref = f"refs/thimble/fixes/{fid}"
-        p = run(["git", *THIMBLE_ID, "cherry-pick", "--allow-empty", ref], cwd=live, check=False, env=as_thimble())
+        p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", ref], cwd=live, check=False, env=as_thimble())
         if p.returncode != 0:
             run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
             failed.append(fid)
@@ -660,7 +661,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
         # a fix the person turns on while all are off: the others come back with it
         git("checkout", "-q", "mine", cwd=live)
         write_json(home() / "state.json", {"on": True})
-        p = run(["git", *THIMBLE_ID, "cherry-pick", "--allow-empty", f"refs/thimble/fixes/{rec['id']}"], cwd=live,
+        p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{rec['id']}"], cwd=live,
                 check=False, env=as_thimble())
         if p.returncode != 0:
             run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
@@ -784,6 +785,91 @@ def all_on() -> dict[str, Any]:
     return _move(change)
 
 
+# ------------------------------------------------------------------ a new release
+
+
+def newest() -> str:
+    """The newest release commit: a clone install's clone's HEAD; a GitHub install's default branch, fetched."""
+    rel = release()
+    if rel.get("kind") == "clone":
+        return git("rev-parse", "HEAD", cwd=rel["repo"], check=False)
+    p = run(["git", "fetch", "-q", "--no-tags", "origin", "HEAD"], cwd=live_dir(), check=False, timeout=120)
+    return git("rev-parse", "FETCH_HEAD", cwd=live_dir(), check=False) if p.returncode == 0 else ""
+
+
+def update(tests: bool = True) -> dict[str, Any]:
+    """At session start: when a newer release is out, each fix that is on is replayed on it in a scratch copy, the quick
+    tests after each. A fix whose change the release has is released; one that does not apply, or fails its tests,
+    needs a redo (its words and old change are kept); the rest are carried. Then mine is the new release plus the
+    carried fixes, and Claude Code copies it. {said, reload}: one line for the bar, empty when nothing changed."""
+    rel = release()
+    if not rel or not (live_dir() / ".git").exists():
+        return {"said": "", "reload": False}
+    new = newest()
+    base = rel["base"]
+    if not new or new == base or run(["git", "merge-base", "--is-ancestor", new, base], cwd=live_dir(), check=False).returncode == 0:
+        return {"said": "", "reload": False}
+    with Lock():
+        recs = records()
+        order = _on_ids(recs)
+        wt = home() / "work" / "update"
+        if wt.exists():
+            run(["git", "worktree", "remove", "--force", str(wt)], cwd=live_dir(), check=False)
+            shutil.rmtree(wt, ignore_errors=True)
+        git("worktree", "add", "-q", "--detach", str(wt), new, cwd=live_dir())
+        version = _version_at(live_dir(), new) or new[:7]
+        carried, released, redo = [], [], []
+        try:
+            for fid in order:
+                before = git("rev-parse", "HEAD", cwd=wt)
+                p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{fid}"], cwd=wt, check=False,
+                        env=as_thimble())
+                if p.returncode != 0:
+                    run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+                    redo.append(fid)
+                    continue
+                if run(["git", "diff", "--quiet", before, "HEAD"], cwd=wt, check=False).returncode == 0:
+                    git("reset", "-q", "--hard", before, cwd=wt)
+                    released.append(fid)
+                    continue
+                if tests and not run_tests("update")[0]:
+                    git("reset", "-q", "--hard", before, cwd=wt)
+                    redo.append(fid)
+                    continue
+                git("update-ref", f"refs/thimble/fixes/{fid}", "HEAD", cwd=wt)
+                carried.append(fid)
+            tip = git("rev-parse", "HEAD", cwd=wt)
+        finally:
+            run(["git", "worktree", "remove", "--force", str(wt)], cwd=live_dir(), check=False)
+            shutil.rmtree(wt, ignore_errors=True)
+        _unstamp()
+        if is_on():
+            git("checkout", "-q", "-B", "mine", tip, cwd=live_dir())
+        else:
+            git("branch", "-f", "mine", tip, cwd=live_dir())
+            git("checkout", "-q", "--detach", new, cwd=live_dir())
+        rel.update(base=new, version=_version_at(live_dir(), new))
+        write_json(home() / "release.json", rel)
+        _write_off_sh(rel)
+        for fid in redo:
+            r = recs[fid]
+            r.update(state="redo", error=f"it did not fit thimble {version}")
+            put(r)
+        for fid in released:
+            r = recs[fid]
+            r.update(state="released", note=f"in {version}")
+            put(r)
+        synced = _sync()
+    parts = [f"thimble {version}"]
+    if carried:
+        parts.append(f"{len(carried)} fix{'' if len(carried) == 1 else 'es'} carried")
+    if released:
+        parts.append(f"{len(released)} in the release")
+    if redo:
+        parts.append(f"{len(redo)} need{'s' if len(redo) == 1 else ''} redo")
+    return {"said": " · ".join(parts), "carried": carried, "released": released, "redo": redo, **synced}
+
+
 # ------------------------------------------------------------------ list, show, export
 
 
@@ -795,7 +881,7 @@ def listing() -> dict[str, Any]:
     recs = [r for r in records().values() if r.get("state") != "removed"]
     recs.sort(key=lambda r: -float(r.get("created") or 0))
     rel = release()
-    return {"fixes": recs, "on": is_on(), "live": str(live_dir()), "version": rel.get("version") or "",
+    return {"fixes": recs, "on": is_on(), "live": str(live_dir()), "version": rel.get("version") or str(rel.get("base") or "")[:7],
             "base": rel.get("base") or "", "kind": rel.get("kind") or "", "pointed": bool(rel.get("pointed")),
             "count_on": sum(r.get("state") == "on" for r in recs)}
 
@@ -830,6 +916,11 @@ def note_of(r: dict[str, Any]) -> str:
     return ""
 
 
+def _tilde(p: str) -> str:
+    h = str(Path.home())
+    return "~" + p[len(h):] if p.startswith(h + os.sep) else p
+
+
 def list_lines() -> list[str]:
     d = listing()
     if not d["fixes"]:
@@ -837,7 +928,7 @@ def list_lines() -> list[str]:
     head_ = f"Your fixes · thimble {d['version'] or ''} + {d['count_on']} on".replace("  ", " ")
     if not d["on"]:
         head_ += " · all off (thimble fix on brings them back)"
-    out = [head_, f"{d['live']} · branch mine", ""]
+    out = [head_, f"{_tilde(d['live'])} · branch mine", ""]
     for r in d["fixes"]:
         out.append(f"  {r['id']:>3}  {WORD.get(r['state'], r['state']):<8}  {short(r['title'], 40):<40}  "
                    f"{_date(r.get('created'))}  {note_of(r)}".rstrip())
@@ -1277,6 +1368,14 @@ def cmd(a) -> int:
             print(r.get("said", ""))
             if r.get("reload"):
                 print("In Claude Code, type /reload-plugins to load it.")
+        elif verb == "update":
+            r = update(not a.no_tests)
+            if a.json:
+                out_json(r)
+            else:
+                print(r.get("said") or "Your thimble is the newest release.")
+                if r.get("reload"):
+                    print("In Claude Code, type /reload-plugins to load it.")
         elif verb == "on":
             r = all_on()
             print(r.get("said", ""))

@@ -10,7 +10,7 @@ session's permission mode and sandbox like any other command.
                                                (--wait waits for it; thimble label --help says more)
     thimble coverage [--all]                   what entered Claude's context, what was only computed over, and what
                                                was never touched (of this session, or of every session)
-    thimble fix [list|show ID|diff ID|export ID [--to DIR]|off|on]
+    thimble fix [list|show ID|diff ID|export ID [--to DIR]|off|on|update]
                                                your changes to thimble: list them, read one, save one as files, turn
                                                them all off (the plain release) or on again. In thimble,
                                                /thimble-fix <words> asks for one and /thimble-fix lists them
@@ -433,6 +433,7 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
     thimble fix export ID [--to DIR] its patch and its record as files in DIR (default: here); nothing is sent
     thimble fix off                  thimble as the plain release; your fixes are kept
     thimble fix on                   your fixes on again
+    thimble fix update               a newer release, with your fixes replayed on it (thimble does this at each start)
 
 Ask for a fix in thimble: /thimble-fix <what should work differently>. Applying a fix and submitting one need your key
 in thimble, never a shell command."""
@@ -486,7 +487,7 @@ def main(argv: list[str] | None = None) -> int:
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
     p.add_argument("verb", nargs="?", default="list",
-                   choices=("list", "show", "diff", "export", "off", "on", "new", "round", "done", "apply", "notnow",
+                   choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "done", "apply", "notnow",
                             "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
     p.add_argument("id", nargs="?")
     p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
