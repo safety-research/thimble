@@ -85,6 +85,41 @@ export async function canRedraw($: Engine, turn: string | undefined): Promise<bo
   return fullscreen === true || (!!turn && turn === (await mainTurn($)))
 }
 
+// Claude Code keeps the newest run of reads and commands live (ToolGroup isActive: its line and the rows of its last
+// call) until its next request after the card's call, and only then folds it into one line. A card drawn under its call
+// at once stood that many rows lower and jumped up a moment later, so the first drawing of a card of the turn that runs
+// waits while a run is live (firstWaits); it draws when the run folds, the next step starts or the turn ends (runFolded).
+// The runs live now, by row; the cards that wait; the cards drawn since the plugin loaded.
+const liveRuns = new Set<string>()
+const waiting = new Set<string>()
+const drawnOnce = new Set<string>()
+
+/** A run of calls drawn now (`row`, its requestId): live or folded. */
+export function noteRun($: Engine, row: string, live: boolean): void {
+  if (live) liveRuns.add(row)
+  else if (liveRuns.delete(row)) runFolded($)
+}
+
+/** No run is live any more (`all`: a step of main's started, or its turn ended), or one folded: the cards that waited
+ *  draw. */
+export function runFolded($: Engine, all = false): void {
+  if (all) liveRuns.clear()
+  if (!waiting.size || liveRuns.size) return
+  waiting.clear()
+  $.clock.after(0, () => $.ui.invalidate('ui.render'))
+}
+
+/** Whether the card's frame waits: its first drawing, of a card main's running turn drew, while a run is live. */
+export async function firstWaits($: Engine, meta: CardMeta): Promise<boolean> {
+  if (drawnOnce.has(meta.id)) return false
+  if (liveRuns.size && !!meta.turn && meta.turn === (await mainTurn($))) {
+    waiting.add(meta.id)
+    return true
+  }
+  drawnOnce.add(meta.id)
+  return false
+}
+
 /** The screen's rows, or 0 while no drawing said. */
 export function screenRows(): number {
   return rowsSeen
