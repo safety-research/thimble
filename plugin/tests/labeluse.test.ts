@@ -91,6 +91,14 @@ test('a regex label\'s row is one line: how it was made and over how many record
   expect(textOf(row)).toBe('label coord · regex · 13,403 records  ● yes  ● no')
 })
 
+test('a row of several labels wraps between labels: each label, with its values, is one group', () => {
+  const used = ['sabotage_candidate', 'sabotage', 'sabotage2'].map(name => ({ name, kind: 'regex', values: ['yes', 'no'], records: 20764 }))
+  const row = labelRowEl(ELS, used, { key: 'k', onOpen: () => undefined })
+  const groups = (row.props.children as Any[]).filter(n => n.type === 'Box')
+  expect(groups.map(textOf)).toEqual(used.map(l => `${l.name} · regex · 20,764 records  ● yes  ● no`))
+  expect(textOf(row)).toBe(`labels ${groups.map(textOf).join('   ')}`)
+})
+
 test('a card shows the labels its turn ran before it; the answer only those no card of it shows; a press opens the label', async () => {
   const LIST = [
     { name: 'spam', kind: 'prompt', values: ['yes', 'no'], records: 420 },
