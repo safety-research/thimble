@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/thimble-banner.svg" alt="thimble" width="100%"></p>
 
-**thimble is a Claude Code plugin for making sense of large volumes of agent outputs. It gives Claude tools to cite, visualize and label your data, and gives you tools to check Claude's work.**
+**thimble is a Claude Code plugin for making sense of large volumes of agent outputs.** It gives Claude tools to cite, visualize and label your data, and gives you an interface to understand and verify Claude's work faster.
 
 > [!CAUTION]
 > - **thimble is in alpha.** It changes daily, so expect bugs and rough edges.
