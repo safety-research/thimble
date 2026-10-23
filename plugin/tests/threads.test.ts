@@ -178,6 +178,19 @@ test('where no fork starts, the thread\'s own agent type answers; a card its age
   expect(dropped.drop).toContain('thread')
 })
 
+test('a key that cannot open a thread in a narrow terminal says to type /threads; once /threads opens it, that line goes', async () => {
+  const s = setup()
+  const line = async () => String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text ?? '')
+  s.$.ui.open = async () => ({ isPlaced: false })
+  expect(await openThread(s.$, SCOPE)).toBe(false)
+  expect(await line()).toContain('Type /threads to open it here')
+  // a command's pane is placed at any width: it opens the thread on the citation's evidence
+  s.$.ui.open = async () => ({ isPlaced: true })
+  await s.call('command.run', { command: 'threads' }, async () => ({}))
+  await settle()
+  expect(await line()).toBe('')
+})
+
 test('the margin of a passage or a card opens its thread; it says asked (↳) once a question was asked there', async () => {
   const s = setup()
   const p = { text: 'Two runs failed.', label: '"Two runs failed."' }

@@ -16,7 +16,7 @@
 // imports, so a list of draws that take `$` cannot be called from here.)
 import type { EngineInterface, Register } from 'claude-code'
 
-import { failCleared } from '../bar/notice'
+import { failCleared, failLineNow } from '../bar/notice'
 import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
@@ -32,9 +32,10 @@ export const PANE_ID = 'thimble'
 const NOW = { plugin: 'thimble', key: 'pane' } as const
 
 /** `focus`: the person opened it (a key, a click, a command), so it takes the keyboard and Esc closes it. Answers
- *  whether the pane is on screen; once it is, the notice that said it could not open (`pane:<kind>`) goes. Claude Code places a pane at any width only when the person's own command, prompt
- *  or click opened it; a key at the prompt is none of these, so below 144 columns (110 once the person opened the
- *  pane before) the pane would wait unseen until the terminal grows. Such a pane is closed, and the caller says why. */
+ *  whether the pane is on screen; once it is, the notice that said the side pane could not open (`pane:…`) goes.
+ *  Claude Code places a pane at any width only when the person's own command, prompt or click opened it; a key at the
+ *  prompt is none of these, so below 144 columns (110 once the person opened the pane before) the pane would wait
+ *  unseen until the terminal grows. Such a pane is closed, and the caller says why. */
 /** Claude Code sets `closeOnEscape` and `rows` anew on each open, so an open that only redraws the pane with other
  *  arguments (a key in it: j, v, a page) keeps those the open pane has; else Esc would stop closing it after one key. */
 export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean; rows?: number } = {}): Promise<boolean> {
@@ -45,8 +46,10 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   await $.state.set(NOW, { kind, args, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}) })
   const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
   if (r.isPlaced) {
-    // the line that said this kind could not open (a narrow terminal: `pane:<kind>`) goes once it is open
-    await failCleared($, `pane:${kind === 'thread' ? 'threads' : kind}`)
+    // the line that said the side pane could not open (a narrow terminal: `pane:<kind>`) goes once it is open, on
+    // whatever it shows (/threads opens a thread a key asked for on its citation's evidence)
+    const line = await failLineNow($)
+    if (line?.about?.startsWith('pane:')) await failCleared($, line.about)
     return true
   }
   await closePane($)
