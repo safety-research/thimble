@@ -127,9 +127,10 @@ export async function passagesFor($: Engine, row: string): Promise<{ has: (p: { 
   return { has: x => { try { return !!p.has(x) } catch { return false } }, ask: x => { try { return p.ask(x) } catch { return undefined } } }
 }
 
-/** What the margin of a card's frame asks: a side thread about the card. Null when the threads cannot say. */
-export async function cardAsk($: Engine, id: string, title: string, line = ''): Promise<{ label: string; has: boolean; press: () => unknown } | null> {
-  const a = await safe(threadOnCard($, id, title, line), null)
+/** What the margin of a card's frame asks: a side thread about the card; with `element`, about a run of its words a
+ *  click asked about. Null when the threads cannot say. */
+export async function cardAsk($: Engine, id: string, title: string, line = '', element?: { text: string; line: string }): Promise<{ label: string; has: boolean; press: () => unknown } | null> {
+  const a = await safe(threadOnCard($, id, title, line, element), null)
   return a && typeof a.label === 'string' && typeof a.press === 'function' ? { label: a.label, has: !!a.has, press: a.press } : null
 }
 

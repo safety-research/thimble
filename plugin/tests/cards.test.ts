@@ -4,6 +4,7 @@
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import Card from '../cards/client'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -153,6 +154,9 @@ test('a card call keeps the card and answers what it read and what it draws; its
   const client = elements(row).find(n => n.type === 'Client')
   expect(client?.props.module).toContain('client.tsx')
   expect(client?.props.props.tree).toEqual(TREE)
+  // what a part of it shows under the pointer: thimble's tint behind it and its color on a bar, never white inverse
+  expect(client?.props.props.tint).toMatch(/^#[0-9a-f]{6}$/)
+  expect(client?.props.props.accent).toBe('merged')
   // once its Client says it is drawn, the card is on screen and lists the keys that reach it
   const id = JSON.parse(meta![1]).id
   await shown($, callRow('toolu_made_up_1', input))
@@ -504,4 +508,31 @@ test('the session ends: the runner stops and its folder goes', async ($, on) => 
   expect(made).toBeTruthy()
   await $.session.end({ reason: 'exit', sessionId: 's-cards' } as never)
   expect(w.runs).toContainEqual(['rm', '-rf', '--', made[made.length - 1]])
+})
+
+// a bar chart's rows: a column of Text lines and of Box rows, each row a label, colored bars and a number side by side
+const ROWS = { t: 'Box', p: { flexDirection: 'column' }, c: [
+  { t: 'Text', p: { bold: true }, c: ['2 groups, 9 in all'] },
+  { t: 'Box', p: {}, c: [{ t: 'Text', p: {}, c: ['  ada  '] }, { t: 'Text', p: { color: 'success' }, c: ['███'] }, { t: 'Text', p: { color: 'warning' }, c: ['█'] }, { t: 'Text', p: {}, c: [' 4'] }] },
+  { t: 'Box', p: {}, c: [{ t: 'Text', p: {}, c: ['  bram '] }, { t: 'Text', p: { color: 'success' }, c: ['█████'] }, { t: 'Text', p: {}, c: [' 5'] }] },
+] }
+
+test('the Client makes every run of a card clickable without a Button that holds a Box: a bar takes thimble\'s color under the pointer, words its tint and an underline', async () => {
+  const el = (type: string) => (p: Any) => ({ type, props: p })
+  const posts: Any[] = []
+  const surface: Any = { elements: { Box: el('Box'), Text: el('Text'), Button: el('Button') }, columns: 60, rows: 0, post: (m: Any) => posts.push(m), onPointer: () => undefined }
+  const drawn = (Card as Any)({ tree: ROWS, width: 60, tint: '#f0e8ff', accent: 'merged' }, surface)
+  const all = elements(drawn)
+  const buttons = all.filter(n => n.type === 'Button')
+  // each run asks on its own: the title, two labels, three bars, two numbers
+  expect(buttons.length).toBe(8)
+  // Claude Code draws no Button that holds a Box: each holds the one Text of its run
+  for (const b of buttons) expect(b.props.children.map((c: Any) => c.type)).toEqual(['Text'])
+  const of = (words: string) => buttons.find(b => textOf(b) === words)!
+  expect(of('███').props.hover).toMatchObject({ inverse: false, color: 'merged' })
+  expect(of('███').props.children[0].props).toMatchObject({ color: 'success', hover: { color: 'merged' } })
+  expect(of('  bram ').props.hover).toMatchObject({ inverse: false, underline: true, backgroundColor: '#f0e8ff' })
+  // a click on a bar asks about it on its row's line
+  of('█████').props.onPress()
+  expect(posts.at(-1).events.at(-1).ask).toEqual({ text: '█████', line: '  bram █████ 5' })
 })

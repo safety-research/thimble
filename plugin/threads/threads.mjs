@@ -28,6 +28,7 @@
 //   cardPart(copy)                the part of a card a question is about: its selected line, from its text copy
 //   partWords(part)               that line's words, without the marker, the bars' glyphs or runs of spaces: the same
 //                                 at every width the card draws at
+//   elementPart(text, line)       the part a click on a run of a card's words is about: the run, and its row's words
 //   partAbout(about, part)        what a thread on a part of a card is about: `"Cherbourg 168" in the card "…"`
 //   answerRow(thread, i)          the name of the answer at turn i in the store of citations, which checks and draws it
 
@@ -60,6 +61,15 @@ export function cardPart(copy = '') {
  *  length changes with the width), single spaces. */
 export function partWords(part = '') {
   return String(part).replace(/[▸\u2500-\u259F…]/gu, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/** The part of a card a click on one of its runs of words is about (client.tsx): the run, with the row it stands in
+ *  when the row says more (a label among numbers); the row alone for a run with no words of its own (a bar). */
+export function elementPart(text = '', line = '') {
+  const t = String(text).replace(/\s{3,}/g, '  ').trim()
+  const l = String(line).replace(/\s{3,}/g, '  ').trim()
+  if (!partWords(t)) return l
+  return !l || partWords(t) === partWords(l) ? t : `${t} — ${l}`
 }
 
 /** What a thread on a part of a card is about: the part's words, then the card's `about`. */

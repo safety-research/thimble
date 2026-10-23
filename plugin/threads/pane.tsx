@@ -36,6 +36,7 @@ import { failNotice } from '../bar/notice'
 import { cardWidth, frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { quiet } from '../core/askcell.js'
+import { WORD_MS } from '../hooks/keys'
 import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
@@ -212,16 +213,21 @@ function answerToSend(t: Thread): 'send' | 'sent' | null {
 
 type PaneKey = { k: string; label: string; onPress: () => unknown }
 
-/** The keys' row above the input bar, ` · ` between keys, as the other panes draw theirs: each a plain Button its key
- *  presses, drawn dim at rest (Claude Code draws its key, lit, then a colon, and the label). m sends the last answer to
- *  main once the thread answered (then `already sent`); `more` are the pane's own (e on a card). The ring stays on the
- *  input bar as m comes (fieldSettled). */
-function keysRow($: Engine, els: Any, t: Thread | null, more: PaneKey[] = []): Any[] {
-  const { Box, Button, Text } = els
+/** The keys of the keys' row: m sends the last answer to main once the thread answered (then `already sent`); `more`
+ *  are the pane's own (e on a card). */
+function paneKeys($: Engine, t: Thread | null, more: PaneKey[] = []): PaneKey[] {
   const keys = [...more]
   if (t && answerToSend(t) === 'send') keys.push({ k: 'm', label: 'send this answer to Claude', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach Claude: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } })
   // sent: m stays, saying so, so a second m is not typed into the prompt
   else if (t && answerToSend(t) === 'sent') keys.push({ k: 'm', label: 'already sent', onPress: () => undefined })
+  return keys
+}
+
+/** The keys' row above the input bar, ` · ` between keys, as the other panes draw theirs: each a plain Button its key
+ *  presses, drawn dim at rest (Claude Code draws its key, lit, then a colon, and the label). The ring stays on the
+ *  input bar as m comes (fieldSettled), so a key typed there presses it too (keyTyped). */
+function keysRow(els: Any, keys: PaneKey[]): Any[] {
+  const { Box, Button, Text } = els
   if (!keys.length) return []
   return [
     Text({ key: 'keys-gap', children: ' ' }),
@@ -234,9 +240,26 @@ function keysRow($: Engine, els: Any, t: Thread | null, more: PaneKey[] = []): A
   ]
 }
 
+/** A key of the keys' row typed into the empty input bar: the ring stays on the field, so Claude Code types the letter
+ *  there and not to the key's Button. Alone for WORD_MS, it presses the key and the field starts empty again; a letter
+ *  after it within that time is a question that starts with it, as at the prompt (hooks/keys.ts). */
+function keyTyped($: Engine, key: string, v: string, keys: PaneKey[]): void {
+  const k = keys.find(x => x.k === v)
+  if (!k) return
+  $.clock.after(WORD_MS, () => {
+    if ((typed.get(key) ?? '') !== v) return
+    typed.delete(key)
+    carried.delete(key)
+    fieldGen.set(key, (fieldGen.get(key) ?? 0) + 1)
+    ringAfterDraw.add(key)
+    void Promise.resolve(k.onPress()).catch(() => undefined)
+    $.ui.invalidate('ui.render')
+  })
+}
+
 /** The input bar: Claude Code's prompt box in the pane, a blank row, a rule, `❯` and the field, a rule. ↵ asks the
- *  thread about `scope`. */
-function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean): Any[] {
+ *  thread about `scope`; a key of the keys' row typed alone into the empty field presses it (keyTyped). */
+function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean, keys: PaneKey[] = []): Any[] {
   const { Box, Text, Input } = els
   const key = threadKey(scope)
   const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
@@ -250,7 +273,7 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
         key: fieldKey(key), placeholder: `Ask about ${what}${what.endsWith('…') ? '' : '…'}`, submitLabel: 'ask',
         ...(focus ? { autoFocus: true } : {}),
         ...(carried.has(key) ? { value: carried.get(key) } : {}),
-        onInput: (v: string) => { typed.set(key, v) },
+        onInput: (v: string) => { const was = typed.get(key) ?? ''; typed.set(key, v); if (!was) keyTyped($, key, v, keys) },
         // the question stays in the field while its thread's fork starts: a second ↵ then asks nothing more
         onSubmit: (v: string) => { void askHere($, scope, v) },
       })] }),
@@ -399,10 +422,11 @@ async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> 
   // the way back to the list, when the list opened it (esc closes the pane)
   if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', hover: quiet('thread-back'), onPress: () => listThreads($), children: [Text({ color: accent(), children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
   const subject = await subjectOfPane($, e, els, t, W)
-  const keys = keysRow($, els, t, subject.keys)
+  const pk = paneKeys($, t, subject.keys)
+  const keys = keysRow(els, pk)
   const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - top.length - keys.length))
   ringDrawn($, key)
-  return column(els, [...top, subject.el, ...conv, ...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key))])
+  return column(els, [...top, subject.el, ...conv, ...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key), pk)])
 }
 
 /** The scope of a pane of thimble's, for the thread under it: what it shows, in words. */
@@ -433,7 +457,8 @@ export async function threadUnder($: Engine, e: Any, kind: string, args: unknown
   // two fifths of the pane for the conversation, as 0.10's panel gave it
   const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4))) : []
   ringDrawn($, key)
-  return [els.Text({ key: 'thread-gap', children: ' ' }), ...conv, ...keysRow($, els, t), ...entry($, els, scope, W - 1, takeAskNext(key))]
+  const pk = paneKeys($, t)
+  return [els.Text({ key: 'thread-gap', children: ' ' }), ...conv, ...keysRow(els, pk), ...entry($, els, scope, W - 1, takeAskNext(key), pk)]
 }
 
 /** About how many rows threadUnder takes under a pane: the gap and the input bar, and with a conversation its share of

@@ -67,6 +67,8 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.deepEqual(JSON.parse(r.state), { n: 11 })
   r = await ask('pointer', { id, down: { x: 2, y: 1 }, up: { x: 2, y: 1 } })
   assert.equal(r.handled, true)
+  // a view that reads clicks by cell says so in its tree, so the Client leaves its clicks to it (client.tsx)
+  assert.equal(r.tree.p.cells, true)
   r = await ask('copy', { id, width: 40 })
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
 })

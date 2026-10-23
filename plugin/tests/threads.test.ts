@@ -256,6 +256,12 @@ test('the margin of a passage or a card opens its thread; it says asked (↳) on
   const key = threadKey({ about: '', card: 'c00000000000b1', part: '▸ Tuesday  ██ 41' })
   expect(key).not.toBe('card-c00000000000b1')
   expect(threadOf(key)!.scope).toEqual({ about: '"Tuesday 41" in the card "Runs per day"', card: 'c00000000000b1', part: '▸ Tuesday  ██████ 41' })
+  // a click on a bar the view drew, with nothing selected: a thread about that bar's row, of its own
+  const clicked = await threadOnCard(s.$, 'c00000000000b1', 'Runs per day', '', { text: '███', line: '  Monday   ███ 12' })
+  expect(clicked.label).toBe('"Monday 12" in the card "Runs per day"')
+  clicked.press()
+  await settle()
+  expect(threadOf(threadKey({ about: '', card: 'c00000000000b1', part: 'Monday  ███ 12' }))!.scope.part).toBe('Monday  ███ 12')
 })
 
 // Claude Code places a pane at any width only for an open made while the person's press runs: one the press leaves to
@@ -365,9 +371,23 @@ test("a card's thread shows the card collapsed, its title and the line asked abo
   expect(all.some(n => n.type === 'Client')).toBe(false)
   const e = all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-e')
   expect(e.props.label).toBe('show the card')
-  e.props.onPress()
+  // e typed into the input bar, which holds the ring: a question that starts with e types as usual
+  const later: Array<() => void> = []
+  s.$.clock.after = ((_ms: number, f: () => void) => { later.push(f); return { cancel() {} } }) as Any
+  const field = () => all.find(n => n.type === 'Input')
+  field().props.onInput('e')
+  field().props.onInput('ex')
+  later.splice(0).forEach(f => f())
+  all = nodes(await draw())
+  expect(all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-e').props.label).toBe('show the card')
+  field().props.onInput('')
+  // e alone presses the key, as a click does, and the field starts empty again
+  const before = field().props.key
+  field().props.onInput('e')
+  later.splice(0).forEach(f => f())
   all = nodes(await draw())
   expect(all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-e').props.label).toBe('hide the card')
+  expect(field().props.key).not.toBe(before)
   // whole: the conversation's drawing (as wide as main's), cut at the pane's edge, so no row of it wraps
   const cut = all.find(n => n.props?.key === 'cut')
   const client = all.find(n => n.type === 'Client')
