@@ -12,8 +12,10 @@
 //
 // A rewrite: one $.model.complete call (the registry's squeeze prompt, the question, the original, every chip's level),
 // recorded in the session's events with the prompt it used (telemetry `squeeze`, the bar's busy line `rewriting` or
-// `writing a catch-up`); `shown` holds the result; a state seen before comes back from the record with no call. While a
-// call runs the old text dims; when the new text is there it writes itself in from the top at a model's pace.
+// `writing a catch-up`); `shown` holds the result; a state seen before comes back from the record with no call. A call
+// waits 1 s after the last change (settings.json settleMs), and one record has one call that shows at a time: a change
+// while a call runs makes its result go unshown. While a call runs the old text dims; when the new text is there it
+// writes itself in from the top at a model's pace.
 //
 // The chips belong to the whole answer, so with the squeeze switch for cards on, the request also shows the cards
 // drawn in the answer's turn (cards.ts), and a change of a card the reply asks for is made through the card runner as
@@ -61,10 +63,13 @@ const TOLD = { plugin: 'thimble', key: 'squeezeTold' } as const
 const DEFAULTS = { model: 'sonnet', effort: 'low', maxTokens: 4000, timeoutMs: 90000 }
 const TICK = 50
 const BLANK: SqzUi = { running: null, error: null }
+/** The wait before a call, when settings.json does not say (settleMs). */
+const SETTLE_MS = 1000
 
-// the module's memory: the call running per record and the one wanted after it; the text writing in per record; the
-// settings; the last screen width
-const inflight = new Map<string, { want: Want | null }>()
+// the module's memory: per record, the number of its latest change while one is on its way, and the change whose call
+// runs; the text writing in per record; the settings; the last screen width
+const latest = new Map<string, number>()
+const inflight = new Map<string, number>()
 const revealing = new Map<string, number>()
 // `key`: the key the bar names for it ([ or ]), which presses it again after a failure
 type Want = { at: At; key?: string | null }
@@ -134,31 +139,43 @@ export async function wantLevels($: Engine, id: string, at: At): Promise<void> {
   await setUi($, id, { want: at, error: null })
 }
 
-/** Set the chips of a record to `at` and show that version: from the record when it was written before, else one
- *  call. Changes made while a call runs wait, and only the latest of them runs next. `key`: the key that asked for it. */
+/** Set the chips of a record to `at` and show that version: from the record when it was written before, at once,
+ *  else one call after a short wait (settings.json settleMs, 1 s). Each change restarts the wait, so keys pressed in a
+ *  row are written once, at the last level; and one call at a time shows: a change that comes while a call runs makes
+ *  that call's result go unshown. `key`: the key that asked for it. */
 export async function setLevels($: Engine, id: string, at: At, key: string | null = null): Promise<void> {
+  const gen = (latest.get(id) ?? 0) + 1
+  latest.set(id, gen)
   await setUi($, id, { want: at, error: null })
   if (!(await uiOf($, id)).asked) await setUi($, id, { asked: Number(await $.clock.now()) })
-  const job = inflight.get(id)
-  if (job) {
-    job.want = { at, key }
-    return
-  }
-  inflight.set(id, { want: null })
+  const rec = await recOf($, id)
+  if (!rec) { await done($, id, gen); return }
+  const probe: Rec = { ...rec, squeeze: { ...(rec.squeeze ?? {}), at, scale: SCALE } }
+  const hit = isOriginal(chipsOf(probe)) ? restore(probe) : fromVersions(rec, at)
+  if (hit) { await settled($, id, hit as Rec, { written: false }); await done($, id, gen); return }
+  await ensure($)
+  const wait = Number(cfg.settleMs ?? SETTLE_MS)
+  if (wait > 0) await new Promise<void>(go => { $.clock.after(wait, () => go()) })
+  if (latest.get(id) !== gen) return
+  // a catch-up undone meanwhile (its s began a word) is written by no call
+  const now = await recOf($, id)
+  if (!now || now.catchup?.dismissed) { await done($, id, gen); return }
+  inflight.set(id, gen)
   try {
-    let next: Want | null = { at, key }
-    while (next) {
-      await once($, id, next)
-      const j = inflight.get(id)!
-      next = j.want
-      j.want = null
-      if (next) await setUi($, id, { want: next.at })
-    }
+    await once($, id, { at, key }, gen)
   } finally {
-    inflight.delete(id)
-    await setUi($, id, { running: null, want: null, asked: null })
-    await noteSettled($, id)
+    if (inflight.get(id) === gen) inflight.delete(id)
+    await done($, id, gen)
   }
+}
+
+/** The latest change of a record ended: its chips stand where it shows, and Claude hears of the version. A change
+ *  that a later one replaced ends nothing. */
+async function done($: Engine, id: string, gen: number): Promise<void> {
+  if (latest.get(id) !== gen) return
+  latest.delete(id)
+  await setUi($, id, { running: null, want: null, asked: null })
+  await noteSettled($, id)
 }
 
 /** The sentences of the citations the check corrected in the rows a record covers, each with its citation as written:
@@ -173,23 +190,13 @@ async function correctedSentences($: Engine, rows: string[]): Promise<string[]> 
   return out.slice(0, 4)
 }
 
-async function once($: Engine, id: string, want: Want): Promise<void> {
+/** One call for a change; its result shows only while no later change came (`gen`, the change's number). */
+async function once($: Engine, id: string, want: Want, gen: number): Promise<void> {
   const rec = await recOf($, id)
   if (!rec) return
   const s = (rec.squeeze ?? {}) as Any
   const probe: Rec = { ...rec, squeeze: { ...s, at: want.at, scale: SCALE } }
-  const hit = isOriginal(chipsOf(probe)) ? restore(probe) : fromVersions(rec, want.at)
-  if (hit) { await settled($, id, hit as Rec, { written: false }); return }
-  await ensure($)
-  // a short wait before a call, so keys pressed in a row are written once, at the last level (settings.json settleMs)
-  const wait = Number(cfg.settleMs || 0)
-  if (wait > 0) {
-    await new Promise<void>(done => { $.clock.after(wait, () => done()) })
-    if (inflight.get(id)?.want) return
-    // a catch-up undone meanwhile (its s began a word) is written by no call
-    const now = await recOf($, id)
-    if (!now || now.catchup?.dismissed) return
-  }
+  const stale = () => latest.get(id) !== gen
   revealing.delete(id)
   await setUi($, id, { running: { since: Number(await $.clock.now()) }, error: null, reveal: null })
   const rows = rec.catchup ? [...rec.catchup.rows] : [rec.row]
@@ -215,6 +222,8 @@ async function once($: Engine, id: string, want: Want): Promise<void> {
   const t0 = Number(await $.clock.now())
   const r = await tracked($, { feature: 'squeeze', prompt: 'squeeze', model: req.model, doing: rec.catchup ? 'writing a catch-up' : 'rewriting', extra: { row: rec.row, key: keyWords, ...(answer ? { cards: answer.cards.length } : {}) } }, () => $.model.complete(req as Any))
   const ms = Number(await $.clock.now()) - t0
+  // a later change came while it ran: its result is not shown (the latest change makes its own call)
+  if (stale()) { await log($, { row: id, ok: r.isAnswered, dropped: 'a later change came', ms }); return }
   if (!r.isAnswered) {
     const why = modelWhy(r)
     await setUi($, id, { error: failedWords(why, want.key) })
@@ -239,6 +248,7 @@ async function once($: Engine, id: string, want: Want): Promise<void> {
   const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, rec.catchup ? drawnAt(rec) : rec.row, setWords(probe) || 'as written') : null
   const cardProblems = answer ? [...reply.cardProblems, ...(changed?.problems ?? [])] : []
   const cards = answer && changed?.done.length ? cardsAfter(answer.orig, rec.row, changed.done) : null
+  if (stale()) return
   // the record as it is now (the person may have added a chip meanwhile)
   const fresh = (await recOf($, id)) || rec
   const fs = (fresh.squeeze ?? {}) as Any
@@ -305,7 +315,7 @@ type Told = Record<string, { told: string; pending: string | null }>
  * A version back at the one Claude was last told of says nothing. A rewrite still on its way is told when it lands.
  */
 export async function noteSettled($: Engine, id: string): Promise<void> {
-  if (inflight.has(id)) return
+  if (latest.has(id)) return
   const rec = await recOf($, id)
   if (!rec) return
   const told = ((await $.state.get(TOLD)).value ?? {}) as Told
@@ -428,6 +438,7 @@ export async function dismissCatchUp($: Engine, id: string, o: { undo?: boolean;
 
 /** For tests: the module's memory, cleared. */
 export function resetSqueeze(): void {
+  latest.clear()
   inflight.clear()
   revealing.clear()
   cfg = {}

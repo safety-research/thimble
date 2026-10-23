@@ -164,6 +164,47 @@ test('with two replies since the last prompt, the chips squeeze the newest reply
   expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('')
 })
 
+test('keys pressed in a row make one rewrite, at the last level, 1 s after the last press; the chips show each level at once', async ($, on) => {
+  const t = await setup($, on, ['The build failed on [3 of 12](#) runs.', 'The build failed on [3 of 12](#) runs: the much longer version.'])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  await t.press('[')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(1)
+  // ] ] ] quickly: short, as written, longer, much longer
+  for (const k of [']', ']', ']']) { await $.prompt.edit(key(k)); await t.clock.advance(200) }
+  const { client } = await chipsDrawn($, 'row-t1', LONG)
+  expect(client?.props.props.items.find((c: Any) => c.id === 'length').level).toBe(3)
+  await t.clock.advance(700)
+  expect(t.asked.length).toBe(1)
+  await t.clock.advance(200)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain('Length: much longer')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('the much longer version.')
+})
+
+test('a key pressed while a rewrite runs: the running one is not shown, the latest one is', async ($, on) => {
+  const gates: ((v: string) => void)[] = []
+  const t = await setup($, on, [new Promise<string>(r => { gates.push(r) }), 'The build failed on [3 of 12](#) runs: the much longer version.'])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  await t.press(']')
+  await t.clock.advance(1500)
+  expect(t.asked.length).toBe(1)
+  await t.press(']')
+  gates.shift()!('The build failed on [3 of 12](#) runs: the longer version, now old.')
+  await t.clock.advance(100)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).not.toContain('now old')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain('Length: much longer')
+  const shown = textOf(await $.ui.render(answer('row-t1', LONG)))
+  expect(shown).toContain('the much longer version.')
+  expect(shown).not.toContain('now old')
+})
+
 /** The chips' Client under a row, as the terminal would draw it: its props from the row, its elements as plain nodes. */
 const ELS = Object.fromEntries(['Box', 'Text', 'Button'].map(k => [k, (props: Any) => ({ type: k, props })]))
 const nodes = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(nodes) : [n, ...nodes(n.props?.children), ...nodes(n.children)])
