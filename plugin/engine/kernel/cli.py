@@ -436,14 +436,15 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
 
     thimble fix list                 every fix: on, off, redo, a request with no code, sent, released
     thimble fix show ID              one fix: your words, what it does, its files and tests
+    thimble fix apply ID             use a ready fix now (it asks first; type it in your own terminal)
     thimble fix diff ID              its change
     thimble fix export ID [--to DIR] its patch and its record as files in DIR (default: here); nothing is sent
     thimble fix off                  thimble as the plain release; your fixes are kept
     thimble fix on                   your fixes on again
     thimble fix update               a newer release, with your fixes replayed on it (thimble does this at each start)
 
-Ask for a fix in thimble: /thimble-fix <what should work differently>. Applying a fix and submitting one need your key
-in thimble, never a shell command."""
+Ask for a fix in thimble: /thimble-fix <what should work differently>. A fix goes on only by your own hand: y in
+thimble, or thimble fix apply typed in your own terminal; Claude cannot apply one."""
 
 
 def cmd_fix(a: argparse.Namespace) -> int:

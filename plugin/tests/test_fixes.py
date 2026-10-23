@@ -128,6 +128,28 @@ def test_ready_then_y_commits_to_mine_points_the_marketplace_and_copies(world):
     assert s["theme"] == "light"
 
 
+def test_apply_typed_in_the_persons_terminal_asks_and_never_runs_for_claude(world, monkeypatch):
+    r = made(world)
+    r = FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")
+    # a command Claude Code runs: CLAUDECODE is set and there is no terminal, so it is refused before any question
+    monkeypatch.setattr(FX, "at_person_terminal", lambda: False)
+    with pytest.raises(FX.FixError, match="your own terminal"):
+        FX.apply_typed(r["id"], answer=lambda q: "y")
+    assert FX.get(r["id"])["state"] == "ready"
+    # the person's terminal: no keeps it ready, y puts it on
+    monkeypatch.setattr(FX, "at_person_terminal", lambda: True)
+    asked = []
+    assert FX.apply_typed(r["id"], answer=lambda q: asked.append(q) or "n") is None
+    assert FX.get(r["id"])["state"] == "ready" and asked == ['Use fix 1 "Bar says read" now? [y/N] ']
+    out = FX.apply_typed(r["id"], answer=lambda q: "y")
+    assert out["reload"] is True and FX.get(r["id"])["state"] == "on"
+    assert "read ${n}" in live_file("plugin/bar/bar.tsx")
+    # Claude Code's Bash tool marks its commands
+    monkeypatch.undo()
+    monkeypatch.setenv("CLAUDECODE", "1")
+    assert FX.at_person_terminal() is False
+
+
 def test_undo_takes_the_commit_out_and_keeps_it_for_on(world):
     r = made(world)
     FX.done(r["id"], "Bar says read", "")
