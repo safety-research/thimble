@@ -419,8 +419,10 @@ def open_pr(r: dict[str, Any], user: dict[str, Any]) -> str:
                 break
             time.sleep(3)
         if p.returncode != 0:
-            err = (p.stderr or p.stdout).strip().splitlines()
-            raise FX.FixError(f"git push failed: {err[-1] if err else 'no message'}")
+            # git's last line only says that it failed; the lines that say why (remote:, !, fatal:, error:) go too
+            err = [x.strip() for x in (p.stderr or p.stdout).strip().splitlines() if x.strip()]
+            why = [x for x in err if x.startswith(("remote:", "!", "fatal:", "error:")) and "failed to push some refs" not in x]
+            raise FX.FixError("git push failed: " + ("\n  ".join(why[-8:] or err[-1:]) or "no message"))
         (tmp / "body.md").write_text(r["body"])
         head = f"{owner}:{r['branch']}" if forked else r["branch"]
         out = FX.run([FX.gh(), "pr", "create", "--repo", repo, "--base", "main", "--head", head, "--title", r["title"],
