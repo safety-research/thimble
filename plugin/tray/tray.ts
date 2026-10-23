@@ -631,6 +631,17 @@ function drawUnits(els: Any, units: Unit[]): Any[] {
   return out
 }
 
+/** The press on a citation's file place: the citation's evidence in the side pane. The open is awaited inside the
+ *  handler, so it is made while the person's press runs: Claude Code places a pane at any width only for such an open,
+ *  and one left to run after the handler returned (`void openPane(...)`) is unasked and waits undrawn below 144
+ *  columns (110 for a pane the person opened before), which the notice then reports. */
+export function evidenceOpener($: Engine, f: { row: string; n: number }): () => Promise<void> {
+  return async () => {
+    const placed = await openPane($, 'evidence', { row: f.row, n: f.n }, `citation ${f.n}`).catch(() => true)
+    if (!placed) noticeLine($, 'Claude Code did not open the side pane here. Click the citation in the reply to see its evidence.', 'tray')
+  }
+}
+
 /** In a citation of a file's lines, the file's place (`runs.jsonl:41`), dim: a click opens the citation's whole
  *  evidence in the side pane, which works over ssh too. Where Claude Code draws OSC 8 hyperlinks it is also a link to the file,
  *  which a ctrl or cmd click opens on this machine. */
@@ -638,11 +649,7 @@ async function fileLinkEl($: Engine, els: Any, f: Frame, m: MarkItem | null): Pr
   const ev = m?.evidence
   if (!ev || ev.kind === 'computed' || ev.kind === 'card' || f.kind !== 'citation') return null
   const label = `${ev.file}:${evidenceLine(ev)?.n ?? ev.line}`
-  const openIt = () => {
-    void openPane($, 'evidence', { row: f.row, n: f.n }, `citation ${f.n}`).then(placed => {
-      if (!placed) noticeLine($, 'Claude Code did not open the side pane here. Click the citation in the reply to see its evidence.', 'tray')
-    }, () => undefined)
-  }
+  const openIt = evidenceOpener($, f)
   if (els.Markdown && (await hyperlinksHere($))) {
     const start = await startDir($)
     const abs = ev.file.startsWith('/') ? ev.file : `${start.replace(/\/+$/, '')}/${ev.file}`
