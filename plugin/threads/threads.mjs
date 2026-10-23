@@ -295,7 +295,7 @@ export function rowsOf(list, now = Date.now()) {
  *  turns: its check is kept and drawn by it. */
 export const answerRow = (thread, i) => `thread-${safe(thread?.id ?? thread?.key)}-${i}`
 
-/** A thread's answer as a text main reads (m): what it was on, the question, the answer. */
+/** A thread's answer as the prompt main reads (m): what it was on, the question, the answer, and what main replies. */
 export function sentNote(thread) {
   const turns = thread?.turns || []
   let a = -1
@@ -303,5 +303,5 @@ export function sentNote(thread) {
   if (a < 0) return ''
   let q = ''
   for (let i = a - 1; i >= 0; i--) if (turns[i].role === 'person') { q = turns[i].text; break }
-  return `The analyst sent you the answer of a side thread about ${subjectOf(thread)}. They asked there: "${oneLine(q)}"\nThe side agent answered:\n${String(turns[a].text).trim()}`
+  return `The analyst sent you the answer of a side thread about ${subjectOf(thread)}. They asked there: "${oneLine(q)}"\nThe side agent answered:\n${String(turns[a].text).trim()}\n\nReply to the analyst: say what this answer changes in what you told them, if anything.`
 }

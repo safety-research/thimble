@@ -31,6 +31,7 @@ function setup(o: { denyFork?: boolean } = {}) {
   const files: Record<string, string> = {}
   const spawns: Any[] = []
   const sent: Any[] = []
+  const submitted: Any[] = []
   const ended = new Set<string>()
   const transcripts = new Map<string, Any[]>()
   let release: (() => void) | null = null
@@ -65,6 +66,8 @@ function setup(o: { denyFork?: boolean } = {}) {
     clock: { now: async () => Date.now(), every: () => () => undefined, after: () => ({ cancel() {} }), sleep: async () => undefined },
     ui: { invalidate: () => undefined, open: async () => ({ isPlaced: true }), close: async () => undefined, panes: async () => [] },
     command: { register: async () => ({}) },
+    // a prompt of the plugin's goes through the hooks, as Claude Code sends it (origin plugin)
+    prompt: { submit: async (a: Any) => { submitted.push(a); return call('prompt.submit', { ...a, origin: { kind: 'plugin', name: 'thimble' } }) } },
     agent: {
       register: async () => ({ agent: 'thimble:thread' }),
       list: async () => spawns.map((_, i) => ({ id: `agent-${i + 1}`, status: ended.has(`agent-${i + 1}`) ? 'completed' : 'running' })),
@@ -87,7 +90,7 @@ function setup(o: { denyFork?: boolean } = {}) {
   }
   const answer = (id: string, text: string) => transcripts.get(id)!.push({ role: 'assistant', content: [{ type: 'text', text }] })
   const told = async () => Object.values(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
-  return { $, call, files, spawns, sent, ended, answer, told, go: () => release?.() }
+  return { $, call, files, spawns, sent, submitted, ended, answer, told, go: () => release?.() }
 }
 
 /** Elements as plain objects, for reading what the pane draws. */
@@ -136,11 +139,39 @@ test('a second ↵ while the fork starts asks nothing more; the answer comes fro
   // kept in the conversation's folder, never in the folder under analysis
   expect(Object.keys(s.files).some(f => f.startsWith('/made-up/.thimble/') && f.endsWith(`/threads/${KEY}.json`))).toBe(true)
   expect(Object.keys(s.files).some(f => f.startsWith('/made-up/data/'))).toBe(false)
-  // m: the answer goes to main with the next prompt
+  // m: the answer goes to main at once, as a prompt of its own (a turn of main's), with what else waits for main
   expect(await sendToMain(s.$, KEY)).toBe(true)
+  await settle()
+  expect(s.submitted.length).toBe(1)
+  expect(s.submitted[0].text).toContain('The analyst sent you the answer of a side thread about 41 of the 44. They asked there: "why so many?"\nThe side agent answered:\nThe config gives the timeout in minutes (ci.yml:12).')
+  // the question line went with it, so the person's next prompt carries neither again
   const r = await s.call('prompt.submit', { text: 'ok, and now?', origin: { kind: 'composer' } })
-  expect(r.context[0]).toContain('The analyst sent you the answer of a side thread about 41 of the 44. They asked there: "why so many?"\nThe side agent answered:\nThe config gives the timeout in minutes (ci.yml:12).')
+  expect(r.context ?? []).toEqual([])
+  expect(threadOf(KEY)!.sent).toBe(2)
   expect(threadList().length).toBe(1)
+})
+
+test('m on the thread of a failed citation: main answers the correction now; a prompt that does not enter waits for the next one', async () => {
+  const s = setup()
+  const scope = { about: 'ran on 9 made-up GPUs', mark: { row: 'row-made-up-2', kind: 'citation' as const, n: 1 } }
+  const key = threadKey(scope)
+  const asking = askHere(s.$, scope, 'what does the manifest say? correct it')
+  await settle()
+  s.go()
+  await asking
+  s.answer('agent-1', 'The manifest names no hardware. A correct sentence: "The run used 12 agents for 3 hours."')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  expect(await sendToMain(s.$, key)).toBe(true)
+  await settle()
+  expect(s.submitted.map(x => x.text)).toEqual([expect.stringContaining('A correct sentence: "The run used 12 agents for 3 hours."')])
+  // a hook refused the prompt: the answer waits for the person's next prompt instead, and a line says so
+  s.$.prompt.submit = async (a: Any) => { s.submitted.push(a); return { drop: 'made-up refusal' } }
+  s.answer('agent-1', 'Also: the run ended early.')
+  await s.call('turn.complete', { turnId: 'f2', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  expect(await sendToMain(s.$, key)).toBe(true)
+  await settle()
+  const r = await s.call('prompt.submit', { text: 'and?', origin: { kind: 'composer' } })
+  expect(r.context[0]).toContain('The side agent answered:\nAlso: the run ended early.')
 })
 
 test('a later question joins the running fork; once it ended, a new fork is told the earlier turns', async () => {
