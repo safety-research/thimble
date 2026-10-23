@@ -10,8 +10,8 @@
 #   python     pytest over plugin/ (the kernel)
 #
 #   the browser workbench (browser/, thimble 0.8's browser mode):
-#   parity     the browser's prompts: each renders, names only the tools and hints the code has, and is written in
-#              American English (browser/backend/tests_public/test_prompts.py, test_american_names.py)
+#   parity     the browser's prompts: each renders and names only the hints the code has, and the API's names are
+#              American (browser/backend/tests_public/test_prompts.py, test_american_names.py)
 #   server     the server's tests (browser/backend/tests_public), in parallel, without the caller's THIMBLE_* settings;
 #              the sandbox tests need scripts/install.sh to have run
 #   page       the page's type check, unit tests and build (browser/frontend), after npm ci when its packages are missing

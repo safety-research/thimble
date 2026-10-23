@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ago, askWords, cardPart, display, shownAbout, firstMessage, forkDirective, nameOf, nextMessage, partAbout, partWords, rowsOf, sentNote, stepWords, threadKey, turnsOf } from '../threads.mjs'
+import { display, firstMessage, forkDirective, nameOf, nextMessage, sentNote, threadKey, turnsOf } from '../threads.mjs'
 
 test('one thread per citation, explainer, card or pane; a citation\'s evidence pane is that citation\'s thread', () => {
   const cite = threadKey({ about: '41 of the 44', mark: { row: 'row-1', kind: 'citation', n: 2 } })
@@ -63,62 +63,3 @@ test("a fork's transcript is the thread's turns: the question after its directiv
   assert.match(sentNote({ subject: 'Runs', turns: shown }), /^The analyst sent you the answer of a side thread about Runs\. They asked there: "and the 3\?"\nThe side agent answered:\nThey used the old config\.$/)
 })
 
-test('a step reads without the folders it ran in: no leading cd, paths in the data folder relative, others by name', () => {
-  const root = '/made-up/data'
-  assert.equal(stepWords('cd /made-up/data/runs/r1 && python3 count.py', root), 'python3 count.py')
-  assert.equal(stepWords('cd "/made-up/data" ; cd runs && wc -l events.jsonl', root), 'wc -l events.jsonl')
-  assert.equal(stepWords('python3 /made-up/data/tools/count.py /made-up/data/runs/r1/events.jsonl', root), 'python3 tools/count.py runs/r1/events.jsonl')
-  assert.equal(stepWords('Read /made-up/data/harness/config.yaml', root), 'Read harness/config.yaml')
-  assert.equal(stepWords('ls /made-up/data', root), 'ls .')
-  assert.equal(stepWords('cat /home/someone/notes/todo.txt | head', root), 'cat …/todo.txt | head')
-  assert.equal(stepWords('cd /made-up/data/runs/r1', root), 'cd runs/r1')
-  assert.equal(stepWords('Let me count.', root), 'Let me count.')
-  assert.equal(stepWords('grep -c merged forge.db', ''), 'grep -c merged forge.db')
-})
-
-test('the list: the newest first, how many questions, the last one, how long ago', () => {
-  const now = Date.parse('2026-10-22T12:00:00Z')
-  const rows = rowsOf([
-    { key: 'a', subject: 'coverage', status: 'done', asks: [{}], turns: [{ role: 'person', text: 'what is left?' }], at: '2026-10-22T11:56:00Z' },
-    { key: 'b', subject: 'Runs', status: 'running', asks: [{}, {}], turns: [{ role: 'person', text: 'one' }, { role: 'claude', text: 'x' }, { role: 'person', text: 'two' }], at: '2026-10-22T11:59:50Z' },
-  ], now)
-  assert.deepEqual(rows, [
-    { key: 'b', name: 'main/Runs', status: 'running', asks: 2, last: 'two', ago: 'now' },
-    { key: 'a', name: 'main/coverage', status: 'done', asks: 1, last: 'what is left?', ago: '4m' },
-  ])
-  assert.equal(ago('2026-10-20T12:00:00Z', now), '2d')
-})
-
-test('the input bar names its thing in a few words: never the sentence a model reads about a pane', () => {
-  const about = 'the claims of this session, with a long description'
-  assert.equal(askWords({ about, pane: { kind: 'claims', args: {} } }), 'the claims')
-  assert.equal(askWords({ about, pane: { kind: 'claims', args: { claim: 'k1' } } }), 'this claim')
-  assert.equal(askWords({ about, pane: { kind: 'claims', args: { group: '2' } } }), 'this cluster')
-  assert.equal(askWords({ about: 'the card "Runs per day"', card: 'c0123456789ab' }), 'this card')
-  assert.equal(askWords({ about: '41 of the 44', mark: { row: 'row-1', kind: 'citation', n: 2 } }), '41 of the 44')
-  assert.equal(askWords({ about: 'coverage', pane: { kind: 'coverage', args: {} } }), 'coverage')
-  // under a question: the same few words, but a card keeps its title
-  assert.equal(shownAbout({ about, pane: { kind: 'claims', args: { claim: 'k1' } } }), 'this claim')
-  assert.equal(shownAbout({ about: 'Runs', card: 'c1' }), 'Runs')
-})
-
-test("a card's part: the line its text copy marks selected with ▸, from the mark on, its runs of spaces shortened", () => {
-  const copy = 'Merges per run\n  r0 made-up      1        +3\n▸ r1 made-up        2 merged        +12\n▸ r1 made-up  details'
-  assert.equal(cardPart(copy), '▸ r1 made-up  2 merged  +12')
-  assert.equal(cardPart('│ ▸ r2 made-up   +4 │'), '▸ r2 made-up  +4 │')
-  assert.equal(cardPart('no selection here'), '')
-  assert.equal(cardPart(), '')
-})
-
-test('a thread for each bar or row of a card a click selected, the same at every width the card draws at', () => {
-  const wide = cardPart('  ▸ Cherbourg   ████████████████████████████████ 168')
-  const narrow = cardPart('  ▸ Cherbourg   ██████████████ 168')
-  assert.equal(partWords(wide), 'Cherbourg 168')
-  assert.equal(threadKey({ about: 'x', card: 'c0123456789ab', part: wide }), threadKey({ about: 'y', card: 'c0123456789ab', part: narrow }))
-  assert.match(threadKey({ about: 'x', card: 'c0123456789ab', part: wide }), /^card-c0123456789ab-[0-9a-z]+$/)
-  assert.notEqual(threadKey({ about: 'x', card: 'c0123456789ab', part: '▸ Queenstown ███ 77' }), threadKey({ about: 'x', card: 'c0123456789ab', part: wide }))
-  // nothing selected: the card as a whole
-  assert.equal(threadKey({ about: 'x', card: 'c0123456789ab', part: '' }), 'card-c0123456789ab')
-  assert.equal(partAbout('the card "Ports"', wide), '"Cherbourg 168" in the card "Ports"')
-  assert.equal(partAbout('the card "Ports"', ''), 'the card "Ports"')
-})

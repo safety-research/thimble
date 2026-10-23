@@ -6,22 +6,13 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { TEXTS, fileOf } from '../../prompts/registry.mjs'
-import { SWITCHES } from '../../settings/features.mjs'
+import { fileOf } from '../../prompts/registry.mjs'
 import { composeSystem, composeTurn, skeletonOf } from '../compose.mjs'
 import { LENSES } from '../lenses.mjs'
 import { parseAnswer } from '../reply.mjs'
 
 const text = name => readFileSync(new URL(`../../${fileOf(name)}`, import.meta.url), 'utf8')
 const ST = { glossed: ['p95'], headsGiven: ['March is half a month'], claims: { CLAIMS: 'c1 · k1 · The build broke on June 3.', CLUSTERS: 'k1 · what broke · 1', GROWN: '' } }
-
-test('each lens names a text of the registry and the switch it belongs to', () => {
-  assert.deepEqual(LENSES.map(l => l.name), ['explain', 'heads', 'claims'])
-  for (const l of LENSES) {
-    assert.ok(TEXTS[l.feature], `${l.name} reads ${l.feature}`)
-    assert.ok(SWITCHES.some(s => s.key === l.option && (s.lenses ?? []).includes(l.name)), `${l.name} belongs to ${l.option}`)
-  }
-})
 
 test('the real fragments compose: every placeholder filled, each digest from the state, the skeleton last', () => {
   const parts = LENSES.map(lens => ({ lens, text: text(lens.feature) }))

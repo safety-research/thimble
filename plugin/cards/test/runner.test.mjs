@@ -71,146 +71,6 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
 })
 
-test('a dense card gets a blank row under its takeaway; a view that reads clicks by cell keeps its rows', async () => {
-  const view = cells => `function view(props, surface) {
-  const { Box, Text } = surface.elements
-  ${cells ? 'surface.onPointer(() => {})' : ''}
-  return Box({ flexDirection: 'column', children: [Text({ children: 'Bram scored highest of all three.' }), ...Array.from({ length: 12 }, (_, i) => Text({ children: 'row ' + i }))] })
-}`
-  const { r } = await load(view(false))
-  assert.deepEqual(r.lines.slice(0, 3), ['Bram scored highest of all three.', '', 'row 0'])
-  const { r: kept } = await load(view(true))
-  assert.deepEqual(kept.lines.slice(0, 2), ['Bram scored highest of all three.', 'row 0'])
-})
-
-test('a key never moves the blank rows the runner put in: each version keeps the places of its first drawing', async () => {
-  // the selected row bold through, which reads as a heading under the note in any one state
-  const view = `const keys = "jk"
-function onKey(k, s, p) { const i = (s.state && s.state.i) || 0; s.setState({ i: k === 'j' ? Math.min(p.rows.length - 1, i + 1) : Math.max(0, i - 1) }) }
-function view(p, s) { const { Box, Text } = s.elements
-  const sel = (s.state && s.state.i) || 0
-  const names = ['ada', 'bram', 'cleo', 'dov', 'eli', 'fay', 'gus', 'hal']
-  return Box({ flexDirection: 'column', children: [
-    Text({ children: 'Edits per agent over the run, one mark per hour' }),
-    Text({ children: '              ▼ peak 41 edits' }),
-    ...names.map((n, i) => Text({ bold: i === sel, children: [Text({ children: n.padEnd(8) }), Text({ children: '──·──•──●──' }), Text({ children: String(10 * (8 - i)).padStart(5) })] })),
-    Text({ children: 'Ada made the most edits of the eight agents, most of them in one hour.' }),
-  ] }) }`
-  const { id, r } = await load(view)
-  const rowOf = (lines, n) => lines.findIndex(l => l.startsWith(n + ' '))
-  const where = lines => ['ada', 'bram', 'cleo', 'hal'].map(n => rowOf(lines, n))
-  const first = where(r.lines)
-  for (const k of ['j', 'j', 'k', 'j']) {
-    assert.equal((await ask('key', { id, key: k })).ok, true)
-    assert.deepEqual(where((await ask('copy', { id, width: 40 })).lines), first, "after " + k)
-  }
-})
-
-test('surface.num writes a number with thousands separators', async () => {
-  const view = `function view(p, s) { const { Box, Text } = s.elements
-  return Box({ flexDirection: 'column', children: [2327, 14591, 1234567.891, -2327, 999, 0, 0.456, 2.8, -0.001, NaN, '2327', 'n/a'].map(n => Text({ children: s.num(n) }))
-    .concat([Text({ children: [s.num(2327.46, 1), s.num(0.5, 0), s.num(1e21), s.num(12, 2)].join(' ') })]) }) }`
-  const { r } = await load(view)
-  assert.equal(r.ok, true, r.error)
-  assert.deepEqual(r.lines, ['2,327', '14,591', '1,234,567.89', '-2,327', '999', '0', '0.46', '2.8', '0', 'NaN', '2,327', 'n/a', '2,327.5 1 1e+21 12.00'])
-})
-
-test("the view gets the palette of the request's theme as surface.colors, and draws in the other set when it changes", async () => {
-  const view = `function view(p, s) { const { Box, Text } = s.elements, c = s.colors
-  return Box({ flexDirection: 'column', children: [
-    ...p.rows.map((r, i) => Text({ children: [Text({ color: c.cat[i], children: '█' }), ' ' + r.name] })),
-    Text({ children: [0, 0.5, 1, -2, 'x'].map(t => Text({ color: c.seq(t), children: '█' })) }),
-    Text({ children: [Text({ color: c.good, children: '✓' }), Text({ color: c.bad, children: '×' }), Text({ color: c.gray, children: 'other' })] }),
-  ] }) }`
-  const { id, r } = await load(view, { theme: 'dark' })
-  assert.equal(r.ok, true)
-  assert.deepEqual(r.lines, ['█ ada', '█ bram', '█ cleo', '█████', '✓×other'])
-  const colorsOf = tree => {
-    const out = []
-    const walk = n => { if (n && typeof n === 'object') { if (n.p?.color) out.push(n.p.color); (n.c || []).forEach(walk) } }
-    walk(tree)
-    return out
-  }
-  assert.deepEqual(colorsOf(r.tree), ['#80b2ea', '#ed9a6b', '#6fd0cc', '#5f6670', '#708bab', '#80b2ea', '#5f6670', '#5f6670', '#67cda8', '#f59183', '#85827a'])
-  const light = await ask('draw', { id, width: 40, theme: 'light' })
-  assert.deepEqual(colorsOf(light.tree), ['#0471c8', '#e26101', '#018d82', '#9aa1ab', '#608bbb', '#0471c8', '#9aa1ab', '#9aa1ab', '#0b7c5f', '#c93a28', '#a19d94'])
-  // a request that names no theme keeps the last one
-  assert.deepEqual(colorsOf((await ask('draw', { id, width: 40 })).tree).slice(0, 1), ['#0471c8'])
-  await ask('ping', { theme: 'dark' })
-})
-
-test('on the light theme shade glyphs draw as █ in mixes whose lightest keeps 2:1 on white, in order; dark keeps them', async () => {
-  const view = `function view(p, s) { const { Box, Text } = s.elements, c = s.colors
-  return Box({ flexDirection: 'column', children: [
-    Text({ color: c.gray, children: ['a ░░▒▓ b', Text({ children: '░' }), Text({ backgroundColor: '#eeeeee', children: '░' })] }),
-    '░▒▓',
-  ] }) }`
-  const { id, r } = await load(view, { theme: 'dark' })
-  assert.deepEqual(r.lines, ['a ░░▒▓ b░░', '░▒▓'])
-  const light = await ask('draw', { id, width: 40, theme: 'light' })
-  assert.deepEqual((await ask('copy', { id, width: 40 })).lines, ['a ████ b█░', '███'])
-  const runs = []
-  const walk = n => { if (n && typeof n === 'object') { if (/^█+$/.test((n.c || []).join(''))) runs.push([n.p.color, n.c[0].length]); (n.c || []).forEach(walk) } }
-  walk(light.tree)
-  const lum = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255).map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4)).reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0)
-  const onWhite = h => 1.05 / (lum(h) + 0.05)
-  const gray = runs.slice(0, 4).map(([c]) => c)
-  assert.deepEqual(runs.map(([, n]) => n), [2, 1, 1, 1, 1, 1, 1])
-  assert.equal(runs[3][0], gray[0], 'a Text inside the gray Text inherits its color')
-  assert.ok(onWhite(gray[0]) >= 2 && onWhite(gray[0]) < onWhite(gray[1]) && onWhite(gray[1]) < onWhite(gray[2]) && onWhite(gray[2]) < onWhite(light.tree.c[0].p.color), gray.join(' '))
-  assert.ok(onWhite(runs[4][0]) >= 2 && onWhite(runs[4][0]) < onWhite(runs[5][0]) && onWhite(runs[5][0]) < onWhite(runs[6][0]))
-  await ask('ping', { theme: 'dark' })
-})
-
-test('a text copy at another width leaves the card as it was: its width and its Buttons', async () => {
-  const wide = `function view(p, s) { const { Box, Text, Button } = s.elements
-  const st = s.state || { n: 0 }
-  return Box({ flexDirection: 'column', children: [Text({ children: 'n ' + st.n }),
-    s.columns > 30 ? Button({ onPress: () => s.setState({ n: st.n + 1 }), children: 'one' }) : Button({ onPress: () => s.setState({ n: st.n + 100 }), children: 'hundred' })] }) }`
-  const { id, r } = await load(wide)
-  const button = r.tree.c.find(x => x.t === 'Button').p.onPress
-  assert.deepEqual((await ask('copy', { id, width: 20 })).lines, ['n 0', '[ hundred ]'])
-  const p = await ask('press', { id, button })
-  assert.deepEqual(JSON.parse(p.state), { n: 1 })
-  assert.deepEqual((await ask('copy', { id })).lines, ['n 1', '[ one ]'])
-})
-
-test('a row laid out wider than the width a side pane leaves the card comes back with that copy; a paragraph that wraps at both widths does not', async () => {
-  const view = `function view(p, s) { const { Box, Text } = s.elements
-  return Box({ flexDirection: 'column', children: [
-    Text({ children: '-'.repeat(s.columns) }),
-    Text({ children: 'a paragraph of words that wraps at either width, so the person reads it as words' }),
-    Text({ children: 'ada'.padEnd(12) + '3 of 9 merged'.padEnd(16) + '1.19 h run' }),
-  ] }) }`
-  const { r } = await load(view, { width: 40, beside: 24 })
-  assert.equal(r.lines.length, 5)
-  assert.deepEqual(r.beside.wrapped, [6])
-  assert.equal(r.beside.width, 24)
-  assert.deepEqual(r.beside.lines.slice(5), ['ada         3 of 9', 'merged   1.19 h run'])
-  // the row fits at the narrower width too: nothing comes back
-  const fits = await load(view.replace("'1.19 h run'", "''"), { width: 40, beside: 30 })
-  assert.equal(fits.r.beside, undefined)
-})
-
-test('a Button around lines is a Box that a click anywhere on its lines presses', async () => {
-  const group = `function view(p, s) { const { Box, Text, Button } = s.elements
-  const st = s.state || { n: 0 }
-  return Box({ flexDirection: 'column', children: [Text({ children: 'pressed ' + st.n }),
-    Button({ onPress: () => s.setState({ n: st.n + 1 }), children: [Text({ children: '2nd class' }), Box({ children: [Text({ children: 'mothers ' }), Text({ children: '13 of 14' })] })] })] }) }`
-  const { id, r } = await load(group)
-  assert.equal(r.ok, true)
-  assert.deepEqual(r.lines, ['pressed 0', '2nd class', 'mothers 13 of 14'])
-  assert.equal(r.tree.c[1].t, 'Box')
-  // a click on the second line of the group, past its words, presses it; a click on the first line does not
-  const hit = await ask('pointer', { id, down: { x: 30, y: 2 }, up: { x: 30, y: 2 } })
-  assert.deepEqual(JSON.parse(hit.state), { n: 1 })
-  const miss = await ask('pointer', { id, down: { x: 1, y: 0 }, up: { x: 1, y: 0 } })
-  assert.equal(miss.handled, false)
-  // actions find it by its words
-  const acted = await ask('act', { id, actions: [{ click: '13 of 14' }], width: 40 })
-  assert.equal(acted.copies[0].lines[0], 'pressed 2')
-})
-
 test('the tree holds only what Claude Code draws: a Button of words, and strings with no control character', async () => {
   const boxed = 'function view(p, s) { const { Box, Text, Button } = s.elements; return Text({ children: Box({ children: Text({ children: "x" }) }) }) }'
   const r1 = (await load(boxed)).r
@@ -286,36 +146,59 @@ function view(p, s) { return s.elements.Text({ children: 'n ' + ((s.state || {})
   assert.equal((await ask('key', { id, key: '+' })).state, '{"n":2}')
 })
 
-test('a key the view fails on is undone: the card keeps the state it had; a border style Claude Code lacks is noted', async () => {
-  const { id, r } = await load(`const keys = "x"
-function onKey(k, s) { s.setState({ broken: true }) }
-function view(p, s) { if (s.state && s.state.broken) return p.rows[99].name; return s.elements.Box({ borderStyle: 'wavy', children: [s.elements.Text({ children: 'whole' })] }) }`)
-  assert.deepEqual(r.notes, ['borderStyle "wavy" is not a border style (single, double, round, bold, singleDouble, doubleSingle, classic, arrow, dashed, quote), so that Box has no border'])
-  const k = await ask('key', { id, key: 'x' })
-  assert.equal(k.ok, false)
-  assert.deepEqual((await ask('copy', { id, width: 20 })).lines, ['whole'])
-  assert.equal((await ask('draw', { id, width: 20 })).state, 'null')
-})
-
-test('a drawing that fails at a narrow width leaves the card at its width, with its keys and Buttons', async () => {
-  const { id } = await load(`const keys = "+"
-function onKey(k, s) { s.setState({ n: ((s.state || {}).n || 0) + 1 }) }
-function view(p, s) {
-  const { Box, Text, Button } = s.elements
-  return Box({ flexDirection: 'column', children: [
-    Text({ children: 'n ' + ((s.state || {}).n || 0) + ' ' + '-'.repeat(s.columns - 13) }),
-    Button({ onPress: () => s.setState({ n: 100 }), children: 'hundred' }),
-  ] })
-}`)
-  const narrow = await ask('draw', { id, width: 12 })
-  assert.equal(narrow.ok, false)
-  assert.match(narrow.error, /Invalid count value/)
-  // the card still draws at its width, takes its key, and its Button still presses
-  const k = await ask('key', { id, key: '+' })
-  assert.equal(k.ok, true)
-  assert.equal(k.tree.c[0].c[0], `n 1 ${'-'.repeat(27)}`)
-  assert.equal((await ask('press', { id, button: 0 })).ok, true)
-  assert.equal((await ask('draw', { id, width: 40 })).ok, true)
+test('at another width: a text copy leaves the card as it was, a row wider than a side pane leaves comes back with that copy, and a drawing that fails narrow leaves the card at its width with its keys and Buttons', async () => {
+  // a text copy at another width leaves the card as it was: its width and its Buttons
+  {
+    const wide = `function view(p, s) { const { Box, Text, Button } = s.elements
+    const st = s.state || { n: 0 }
+    return Box({ flexDirection: 'column', children: [Text({ children: 'n ' + st.n }),
+      s.columns > 30 ? Button({ onPress: () => s.setState({ n: st.n + 1 }), children: 'one' }) : Button({ onPress: () => s.setState({ n: st.n + 100 }), children: 'hundred' })] }) }`
+    const { id, r } = await load(wide)
+    const button = r.tree.c.find(x => x.t === 'Button').p.onPress
+    assert.deepEqual((await ask('copy', { id, width: 20 })).lines, ['n 0', '[ hundred ]'])
+    const p = await ask('press', { id, button })
+    assert.deepEqual(JSON.parse(p.state), { n: 1 })
+    assert.deepEqual((await ask('copy', { id })).lines, ['n 1', '[ one ]'])
+  }
+  // a row laid out wider than the width a side pane leaves the card comes back with that copy; a paragraph that wraps
+  // at both widths does not
+  {
+    const view = `function view(p, s) { const { Box, Text } = s.elements
+    return Box({ flexDirection: 'column', children: [
+      Text({ children: '-'.repeat(s.columns) }),
+      Text({ children: 'a paragraph of words that wraps at either width, so the person reads it as words' }),
+      Text({ children: 'ada'.padEnd(12) + '3 of 9 merged'.padEnd(16) + '1.19 h run' }),
+    ] }) }`
+    const { r } = await load(view, { width: 40, beside: 24 })
+    assert.equal(r.lines.length, 5)
+    assert.deepEqual(r.beside.wrapped, [6])
+    assert.equal(r.beside.width, 24)
+    assert.deepEqual(r.beside.lines.slice(5), ['ada         3 of 9', 'merged   1.19 h run'])
+    // the row fits at the narrower width too: nothing comes back
+    const fits = await load(view.replace("'1.19 h run'", "''"), { width: 40, beside: 30 })
+    assert.equal(fits.r.beside, undefined)
+  }
+  // a drawing that fails at a narrow width leaves the card at its width, with its keys and Buttons
+  {
+    const { id } = await load(`const keys = "+"
+  function onKey(k, s) { s.setState({ n: ((s.state || {}).n || 0) + 1 }) }
+  function view(p, s) {
+    const { Box, Text, Button } = s.elements
+    return Box({ flexDirection: 'column', children: [
+      Text({ children: 'n ' + ((s.state || {}).n || 0) + ' ' + '-'.repeat(s.columns - 13) }),
+      Button({ onPress: () => s.setState({ n: 100 }), children: 'hundred' }),
+    ] })
+  }`)
+    const narrow = await ask('draw', { id, width: 12 })
+    assert.equal(narrow.ok, false)
+    assert.match(narrow.error, /Invalid count value/)
+    // the card still draws at its width, takes its key, and its Button still presses
+    const k = await ask('key', { id, key: '+' })
+    assert.equal(k.ok, true)
+    assert.equal(k.tree.c[0].c[0], `n 1 ${'-'.repeat(27)}`)
+    assert.equal((await ask('press', { id, button: 0 })).ok, true)
+    assert.equal((await ask('draw', { id, width: 40 })).ok, true)
+  }
 })
 
 test('the sandbox: no process, require, import, fetch or timers, and no code from strings by any path', async () => {

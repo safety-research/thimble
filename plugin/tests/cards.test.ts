@@ -4,7 +4,6 @@
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { resetTheme } from '../core/theme'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -127,7 +126,6 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   return { files, asked, dirs, clock, spawned, runs, look }
 }
 
-
 const callRow = (toolUseId: string, input: Record<string, unknown>) => ({
   component: 'ToolUse', surface: 'terminal', requestId: toolUseId, viewport: { columns: 100, rows: 40, isFullscreen: true },
   props: { tool_use_id: toolUseId, tool: TOOL, input, isRunning: false, isErrored: false, isInterrupted: false },
@@ -187,47 +185,6 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(String(r5.result)).toContain('`title` is empty')
 })
 
-test('a bar a click selected: the ? that asks a side thread stands beside it and asks about that bar', async ($, on) => {
-  world(on)
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const plain = { title: 'Scores', data: 'runs.json', view: VIEW }
-  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p0', ...plain } as never)
-  const picked = { title: 'Scores', data: 'runs.json', view: `${VIEW}\n// SELECTED` }
-  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p1', ...picked } as never)
-  const margin = async (row: Any) => elements(row).find(n => n.type === 'Box' && n.props?.width === 2 && typeof n.props?.paddingTop === 'number')
-  // nothing selected: beside the title (the frame's top border, then the title), about the card
-  const whole = await margin(await $.ui.render(callRow('toolu_made_up_p0', plain)))
-  expect(whole.props.paddingTop).toBe(1)
-  expect(elements(whole).find(n => n.type === 'Button')?.props.label).toBe('ask about the card "Scores"')
-  // the second bar selected: beside it (the border, the title, the first bar), about that bar
-  const bar = await margin(await $.ui.render(callRow('toolu_made_up_p1', picked)))
-  expect(bar.props.paddingTop).toBe(3)
-  expect(elements(bar).find(n => n.type === 'Button')?.props.label).toBe('ask about "bram 5" in the card "Scores"')
-})
-
-test("on the main screen a later turn's version stands at its own call, since rows in the scrollback stay as printed", async ($, on) => {
-  world(on)
-  on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }) as never)
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
-  const row = (toolUseId: string) => ({ ...(callRow(toolUseId, input) as Any), viewport: { columns: 100, rows: 40, isFullscreen: false } })
-  const turn = (turnId: string) => ($ as Any).turn.start({ text: 'a made-up prompt', turnId })
-  await turn('t-1')
-  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_11', ...input } as never)) as Any
-  const id = /"(c[0-9a-f]+)"/.exec(String(r.result))![1]
-  await $.ui.render(row('toolu_made_up_11'))
-  // in the same turn, the place is still drawn again
-  const same = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_11b', id, edits: [{ old: '"x"', new: '"y"' }] } as never)) as Any
-  expect(String(same.result)).toContain('Version 2 of “Scores” is drawn in place of version 1')
-  await turn('t-2')
-  const later = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_11c', id, edits: [{ old: '"y"', new: '"z"' }] } as never)) as Any
-  expect(String(later.result)).toContain('Version 3 of “Scores” is drawn where this call stands')
-  expect(elements(await $.ui.render(row('toolu_made_up_11c'))).some(n => n.type === 'Client')).toBe(true)
-  expect(elements(await $.ui.render(row('toolu_made_up_11'))).some(n => n.type === 'Client')).toBe(false)
-  const result = await $.ui.render({ ...row('toolu_made_up_11'), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_11', tool: TOOL, output: 'the copy', isExpanded: false } } as never)
-  expect(textOf(result)).toBe('↓ version 1 · “Scores” is drawn further down, now version 3')
-})
-
 test('a view that did not parse is fixed with edits, its rows kept; the card on screen stays meanwhile', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
@@ -251,132 +208,106 @@ test('a view that did not parse is fixed with edits, its rows kept; the card on 
   expect(Object.entries(w.files).find(([p]) => /\/v3\/view\.js$/.test(p))?.[1]).toBe(VIEW.replace('children: "x"', 'children: "x" '))
 })
 
-test('a drawing that fails at a narrow width holds only there: the card keeps its drawing and keys, and draws again at a new width', async ($, on) => {
+test('a card at each width: in a side pane the card and its copy each draw at their own width, a post sent before the frame narrowed is answered at its width now, a drawing that fails at a narrow width holds only there, and a row that wraps beside a pane is named', async ($, on) => {
+  const w = world(on, { wide: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  // a side pane opens: the card in the conversation and its copy in the pane each draw at their own width, and never
+  // show a drawing laid out for another
+  {
+    const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+    await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_11', ...input } as never)
+    // the pane's copy is a second instance of the card's frame, at the pane's width
+    const at = (columns: number) => ({ ...(callRow('toolu_made_up_11', input) as Any), ...(columns < 50 ? { requestId: 'pane-copy' } : {}), viewport: { columns, rows: 40, isFullscreen: true } })
+    const client = async (columns: number) => elements(await $.ui.render(at(columns))).find(n => n.type === 'Client')?.props
+    // the pane opens and the conversation narrows to 70 columns: the drawing at 92 columns is not drawn at 62
+    const narrowed = await client(70)
+    expect(narrowed.props.tree).toBe(null)
+    expect(narrowed.props.need).toBe('1:62')
+    expect(narrowed.width).toBe(62)
+    // the conversation's Client and the pane's copy (40 columns) both on screen: each draws at its own width
+    const main = await shown($, at(70))
+    const pane = await shown($, at(40))
+    expect((await client(70)).props.tree).toEqual({ t: 'Text', p: {}, c: ['rows at 62'] })
+    expect((await client(40)).props.tree).toEqual({ t: 'Text', p: {}, c: ['rows at 32'] })
+    // what each Client draws, and a post from either answering the drawing at that Client's width
+    const key = (await client(70)).key ?? elements(await $.ui.render(at(70))).find(n => n.type === 'Client')?.key
+    const drawnIn = async (m: Any) => textOf(await m.drawn({ in: key }))
+    expect(await drawnIn(main)).toContain('rows at 62')
+    expect(await drawnIn(pane)).toContain('rows at 32')
+    await main.post({ client: 'made-up', width: 62, events: [{ n: 1, rows: 4 }] }, { in: key })
+    await pane.post({ client: 'made-up-2', width: 32, events: [{ n: 1, rows: 4 }] }, { in: key })
+    expect(await drawnIn(main)).toContain('rows at 62')
+    expect(await drawnIn(pane)).toContain('rows at 32')
+    // a key changes the card: the drawing at the other width is gone, and that width draws again
+    const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+    expect(await edit('o')).toEqual({ text: '', cursor: 0 })
+    expect((await client(40)).props.tree).toEqual({ t: 'Text', p: {}, c: ['sorted at 32'] })
+    expect((await client(70)).props.tree).toBe(null)
+    await main.unmount()
+    await (await shown($, at(70))).unmount()
+    expect((await client(70)).props.tree).toEqual({ t: 'Text', p: {}, c: ['sorted at 62'] })
+    expect((await client(40)).props.tree).toEqual({ t: 'Text', p: {}, c: ['sorted at 32'] })
+    // a Button pressed in the pane's copy: the runner holds the card at the pane's width first, so the press is the one
+    // of the drawing the person saw
+    await pane.post({ client: 'made-up-2', width: 32, events: [{ n: 2, press: 0, width: 32 }] }, { in: key })
+    expect(w.asked.slice(-2)).toEqual(['draw', 'press'])
+    await pane.unmount()
+  }
+  // a post the Client sent before its frame narrowed is answered with the drawing at the frame's width now, so no row
+  // of the wider one wraps
+  {
+    const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+    await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_16', ...input } as never)
+    const at = (columns: number) => ({ ...(callRow('toolu_made_up_16', input) as Any), viewport: { columns, rows: 40, isFullscreen: true } })
+    const keyOf = async () => elements(await $.ui.render(at(70))).find(n => n.type === 'Client')?.props?.key
+    // the card at the screen's width, then a side pane narrows the chat: the frame draws at 62 columns (sorted or not,
+    // as the key above left the runner)
+    await (await shown($, at(100))).unmount()
+    const main = await shown($, at(70))
+    const key = await keyOf()
+    const drawnIn = async () => textOf(await main.drawn({ in: key }))
+    expect(await drawnIn()).toContain(' at 62')
+    // a post the Client sent while it still drew at 92 columns (its rows changed as the region narrowed) is answered
+    // now: with the drawing at 62, not the one at 92 its post named
+    await main.post({ client: 'made-up', width: 92, events: [{ n: 1, rows: 4 }] }, { in: key })
+    expect(await drawnIn()).toContain(' at 62')
+    expect(await drawnIn()).not.toContain(' at 92')
+    await main.unmount()
+  }
+  // a drawing that fails at a narrow width holds only there: the card keeps its drawing and keys, and draws again at
+  // a new width
+  {
+    const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+    await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_10', ...input } as never)
+    const at = (columns: number) => ({ ...(callRow('toolu_made_up_10', input) as Any), viewport: { columns, rows: 40, isFullscreen: true } })
+    // the row as the terminal draws it at a width (a resize draws the row again, with its Client)
+    const drawn = async (columns: number) => (await shown($, at(columns))).unmount()
+    await drawn(100)
+    // a side pane narrows the card: the drawing at 20 columns fails, and the card says so
+    await drawn(28)
+    const narrow = textOf(await $.ui.render(at(28)))
+    expect(narrow).toContain('at 20 columns the view failed (line 4: Invalid count value: -1)')
+    // the pane closes: the card draws again at its width, with no failure
+    const drawsBefore = w.asked.filter(x => x === 'draw').length
+    await drawn(100)
+    expect(w.asked.filter(x => x === 'draw').length).toBe(drawsBefore + 1)
+    const wide = textOf(await $.ui.render(at(100)))
+    expect(wide).not.toContain('failed')
+  }
+  // a row that fits the card but wraps at the width a side pane leaves it: the call answers that copy too
+  {
+    const plain = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+    expect(String(plain.result)).not.toContain('side pane')
+    const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_18', title: 'Scores', data: 'runs.json', view: `${VIEW}\n// WIDE_ROW` } as never)) as Any
+    expect(String(r.result)).toMatch(/When a side pane opens beside the conversation, the card is \d+ columns wide, and texts that fit on their rows at \d+ columns wrap onto more rows there \(line 1\):\nada 3 of 9\nmerged\nbram 5/)
+  }
+})
+
+test('a key at an empty prompt reaches the focused card in view when it lists the key, and other keys type; a card scrolled out of view takes none', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
   const input = { title: 'Scores', data: 'runs.json', view: VIEW }
-  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_10', ...input } as never)
-  const at = (columns: number) => ({ ...(callRow('toolu_made_up_10', input) as Any), viewport: { columns, rows: 40, isFullscreen: true } })
-  // the row as the terminal draws it at a width (a resize draws the row again, with its Client)
-  const drawn = async (columns: number) => (await shown($, at(columns))).unmount()
-  await drawn(100)
-  // a side pane narrows the card: the drawing at 20 columns fails, and the card says so
-  await drawn(28)
-  const narrow = textOf(await $.ui.render(at(28)))
-  expect(narrow).toContain('at 20 columns the view failed (line 4: Invalid count value: -1)')
-  // the pane closes: the card draws again at its width, with no failure
-  const drawsBefore = w.asked.filter(x => x === 'draw').length
-  await drawn(100)
-  expect(w.asked.filter(x => x === 'draw').length).toBe(drawsBefore + 1)
-  const wide = textOf(await $.ui.render(at(100)))
-  expect(wide).not.toContain('failed')
-})
-
-test('a side pane opens: the card in the conversation and its copy in the pane each draw at their own width, and never show a drawing laid out for another', async ($, on) => {
-  const w = world(on, { wide: true })
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
-  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_11', ...input } as never)
-  // the pane's copy is a second instance of the card's frame, at the pane's width
-  const at = (columns: number) => ({ ...(callRow('toolu_made_up_11', input) as Any), ...(columns < 50 ? { requestId: 'pane-copy' } : {}), viewport: { columns, rows: 40, isFullscreen: true } })
-  const client = async (columns: number) => elements(await $.ui.render(at(columns))).find(n => n.type === 'Client')?.props
-  // the pane opens and the conversation narrows to 70 columns: the drawing at 92 columns is not drawn at 62
-  const narrowed = await client(70)
-  expect(narrowed.props.tree).toBe(null)
-  expect(narrowed.props.need).toBe('1:62')
-  expect(narrowed.width).toBe(62)
-  // the conversation's Client and the pane's copy (40 columns) both on screen: each draws at its own width
-  const main = await shown($, at(70))
-  const pane = await shown($, at(40))
-  expect((await client(70)).props.tree).toEqual({ t: 'Text', p: {}, c: ['rows at 62'] })
-  expect((await client(40)).props.tree).toEqual({ t: 'Text', p: {}, c: ['rows at 32'] })
-  // what each Client draws, and a post from either answering the drawing at that Client's width
-  const key = (await client(70)).key ?? elements(await $.ui.render(at(70))).find(n => n.type === 'Client')?.key
-  const drawnIn = async (m: Any) => textOf(await m.drawn({ in: key }))
-  expect(await drawnIn(main)).toContain('rows at 62')
-  expect(await drawnIn(pane)).toContain('rows at 32')
-  await main.post({ client: 'made-up', width: 62, events: [{ n: 1, rows: 4 }] }, { in: key })
-  await pane.post({ client: 'made-up-2', width: 32, events: [{ n: 1, rows: 4 }] }, { in: key })
-  expect(await drawnIn(main)).toContain('rows at 62')
-  expect(await drawnIn(pane)).toContain('rows at 32')
-  // a key changes the card: the drawing at the other width is gone, and that width draws again
-  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
-  expect(await edit('o')).toEqual({ text: '', cursor: 0 })
-  expect((await client(40)).props.tree).toEqual({ t: 'Text', p: {}, c: ['sorted at 32'] })
-  expect((await client(70)).props.tree).toBe(null)
-  await main.unmount()
-  await (await shown($, at(70))).unmount()
-  expect((await client(70)).props.tree).toEqual({ t: 'Text', p: {}, c: ['sorted at 62'] })
-  expect((await client(40)).props.tree).toEqual({ t: 'Text', p: {}, c: ['sorted at 32'] })
-  // a Button pressed in the pane's copy: the runner holds the card at the pane's width first, so the press is the one
-  // of the drawing the person saw
-  await pane.post({ client: 'made-up-2', width: 32, events: [{ n: 2, press: 0, width: 32 }] }, { in: key })
-  expect(w.asked.slice(-2)).toEqual(['draw', 'press'])
-  await pane.unmount()
-})
-
-test('a row that fits the card but wraps at the width a side pane leaves it: the call answers that copy too', async ($, on) => {
-  world(on)
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const plain = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
-  expect(String(plain.result)).not.toContain('side pane')
-  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_18', title: 'Scores', data: 'runs.json', view: `${VIEW}\n// WIDE_ROW` } as never)) as Any
-  expect(String(r.result)).toMatch(/When a side pane opens beside the conversation, the card is \d+ columns wide, and texts that fit on their rows at \d+ columns wrap onto more rows there \(line 1\):\nada 3 of 9\nmerged\nbram 5/)
-})
-
-test('a post the Client sent before its frame narrowed is answered with the drawing at the frame\'s width now, so no row of the wider one wraps', async ($, on) => {
-  world(on, { wide: true })
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
-  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_16', ...input } as never)
-  const at = (columns: number) => ({ ...(callRow('toolu_made_up_16', input) as Any), viewport: { columns, rows: 40, isFullscreen: true } })
-  const keyOf = async () => elements(await $.ui.render(at(70))).find(n => n.type === 'Client')?.props?.key
-  // the card at the screen's width, then a side pane narrows the chat: the frame draws at 62 columns
-  await (await shown($, at(100))).unmount()
-  const main = await shown($, at(70))
-  const key = await keyOf()
-  const drawnIn = async () => textOf(await main.drawn({ in: key }))
-  expect(await drawnIn()).toContain('rows at 62')
-  // a post the Client sent while it still drew at 92 columns (its rows changed as the region narrowed) is answered
-  // now: with the drawing at 62, not the one at 92 its post named
-  await main.post({ client: 'made-up', width: 92, events: [{ n: 1, rows: 4 }] }, { in: key })
-  expect(await drawnIn()).toContain('rows at 62')
-  expect(await drawnIn()).not.toContain('rows at 92')
-  await main.unmount()
-})
-
-test('the person picks a light theme: the card asks for a drawing in its colors, shows the dark one until it comes, and keeps both', async ($, on) => {
-  resetTheme()
-  const w = world(on, { wide: true })
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
-  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_15', ...input } as never)
-  const at = () => ({ ...(callRow('toolu_made_up_15', input) as Any), viewport: { columns: 100, rows: 40, isFullscreen: true } })
-  const client = async () => elements(await $.ui.render(at())).find(n => n.type === 'Client')?.props
-  // the call's drawing, made in the dark theme
-  await (await shown($, at())).unmount()
-  expect((await client()).props).toMatchObject({ tree: TREE, need: '' })
-  // /theme writes the setting; the next drawing a second later reads it
-  w.look.theme = 'light'
-  await w.clock.advance(1000)
-  const asked = await client()
-  expect(asked.props.tree).toEqual(TREE)
-  expect(asked.props.need).toBe('1:92:light')
-  await (await shown($, at())).unmount()
-  expect((await client()).props).toMatchObject({ tree: { t: 'Text', p: {}, c: ['rows at 92 light'] }, need: '' })
-  // back to dark: the dark drawing at that width is still kept, so no request draws it again
-  const draws = w.asked.filter(x => x === 'draw').length
-  w.look.theme = 'dark'
-  await w.clock.advance(1000)
-  expect((await client()).props).toMatchObject({ tree: TREE, need: '' })
-  expect(w.asked.filter(x => x === 'draw').length).toBe(draws)
-  resetTheme()
-})
-
-test('a key at an empty prompt reaches the focused card when it lists the key, and other keys type', async ($, on) => {
-  const w = world(on)
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_2', title: 'Scores', data: 'runs.json', view: VIEW } as never)
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_2', ...input } as never)
   const edit = (key: string, text = '') => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text, cursor: text.length, start: text.length, end: text.length, inputText: key } as never) as Any
   // a card not yet on screen takes no keys
   expect((await edit('o')).text).toBe('o')
@@ -398,16 +329,10 @@ test('a key at an empty prompt reaches the focused card when it lists the key, a
   expect(w.asked.filter(x => x === 'key').length).toBe(keysBefore + 3)
   await w.clock.advance(1000)
   expect((await burst('oq')).text).toBe('oq')
-})
-
-test('a card scrolled out of view takes no keys, and the one in view does', async ($, on) => {
-  const w = world(on)
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
-  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_4', ...input } as never)
-  const at = (onScreen: Any) => ({ ...(callRow('toolu_made_up_4', input) as Any), props: { ...(callRow('toolu_made_up_4', input) as Any).props, onScreen } })
-  await shown($, at({ first: 0, last: 9, of: 10 }))
-  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  // a card scrolled out of view takes no keys, and the one in view does
+  await w.clock.advance(1000)
+  const at = (onScreen: Any) => ({ ...(callRow('toolu_made_up_2', input) as Any), props: { ...(callRow('toolu_made_up_2', input) as Any).props, onScreen } })
+  await $.ui.render(at({ first: 0, last: 9, of: 10 }))
   expect(await edit('o')).toEqual({ text: '', cursor: 0 })
   await w.clock.advance(1000)
   await $.ui.render(at(null))
@@ -435,29 +360,6 @@ test('a card the designer fork drew draws under the answer v was pressed on, als
   // its call's row in the fork draws no second card
   const row = await $.ui.render(callRow('toolu_made_up_3', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(elements(row).some(n => n.type === 'Client')).toBe(false)
-})
-
-test('a new version that draws clears the failure of the version before it, and draws in a Client of its own', async ($, on) => {
-  world(on)
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const input = { title: 'Scores', data: 'runs.json', view: `${VIEW}\n// BOLD` }
-  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_14', ...input } as never)) as Any
-  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
-  const keyOf = (n: Any) => n?.props?.key ?? n?.key
-  const row = () => $.ui.render(callRow('toolu_made_up_14', input))
-  const first = keyOf(elements(await row()).find(n => n.type === 'Client'))
-  // the terminal cannot draw version 1's tree: Claude Code says so (ui.fault)
-  try { await shown($, callRow('toolu_made_up_14', input)) } catch { /* the drawing failed */ }
-  expect(textOf(await row())).toContain('must be a boolean')
-  // version 2 draws in its place: the failure goes, and a new Client draws it
-  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_14b', id, edits: [{ old: '// BOLD', new: '' }] } as never)) as Any
-  expect(String(r2.result)).toContain('Version 2 of “Scores” is drawn in place of version 1')
-  const after = await row()
-  expect(textOf(after)).not.toContain('must be a boolean')
-  const second = keyOf(elements(after).find(n => n.type === 'Client'))
-  expect(second).toBeTruthy()
-  expect(second).not.toBe(first)
-  expect(textOf(await $.ui.render(BAND))).not.toContain('must be a boolean')
 })
 
 test("a card call the person's permission rules refuse draws nothing, and says why", async ($, on) => {

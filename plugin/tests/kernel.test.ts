@@ -4,21 +4,16 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { grepHits, readRange } from '../hooks/watch'
 
-test('readRange reads the first and last line a Read result shows', () => {
+test('a Read, a Grep and a Bash call are kept under the session, their lines and files read from each output form; the results reach the model unchanged', async ($, on) => {
+  // readRange reads the first and last line a Read result shows; grepHits reads files and lines from each output mode
   expect(readRange('     3\t{"a": 1}\n     4\t{"a": 2}\n')).toEqual({ from: 3, to: 4 })
   expect(readRange('12→one\n13→two')).toEqual({ from: 12, to: 13 })
   expect(readRange('a picture')).toBe(null)
-})
-
-test('grepHits reads files and lines from each output mode', () => {
   expect(grepHits('Found 2 files\n/d/a.jsonl\n/d/b.md\n').files).toEqual(['/d/a.jsonl', '/d/b.md'])
   const content = grepHits('/d/a.jsonl:12:{"x": "PRECISION ALERT"}\n/d/a.jsonl-13-context\n/d/b.md:4:hi')
   expect(content.files).toEqual(['/d/a.jsonl', '/d/b.md'])
   expect(content.lines).toEqual({ '/d/a.jsonl': [12, 13], '/d/b.md': [4] })
   expect(grepHits('/d/a.jsonl:7').files).toEqual(['/d/a.jsonl'])
-})
-
-test('a Read, a Grep and a Bash call are kept under the session; the results reach the model unchanged', async ($, on) => {
   const files: Record<string, string> = {}
   on('fs.write', (_$, e) => {
     files[e.path] = e.text

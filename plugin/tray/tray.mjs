@@ -21,7 +21,6 @@
 //   scopeText(frame, info)                 what a question asked with the tray open carries for Claude
 //   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it, or
 //                                          did not run: x starts it)
-//   saidOf(gloss)                          what an explainer or an important detail says, in words for an agent
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
 //   drawsHyperlinks(env), fileHref(abs, line)
 //   firstSentence(s)                       a check's reason cut to its first sentence, for a citation's card
@@ -184,13 +183,6 @@ export function aboutOf(f, info = {}) {
   const g = info.gloss || {}
   if (f.kind === 'heads') return `the important detail "${cut(plain(g.title || g.term), 80)}"`
   return `the explainer of "${cut(plain(g.term), 80)}"`
-}
-
-/** What an explainer or an important detail says, in words for a side thread's agent. */
-export function saidOf(g) {
-  if (!g) return ''
-  if (g.kind === 'heads') return `thimble marked them as an important detail, "${plain(g.title || g.term)}": ${(g.bullets || []).map(plain).join(' ')}${g.todo ? ` What to do: ${plain(g.todo)}` : ''}`
-  return `thimble's explainer of them says: ${plain(g.body || g.title)}${g.here ? ` ${plain(g.here)}` : ''}`
 }
 
 /** Where a citation's evidence is, in words for Claude: the cited place, or the code that computed it. */

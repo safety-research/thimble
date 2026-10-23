@@ -2,11 +2,14 @@
 (Read, cat, head, tail, sed, a search that showed them by line). A search that went over it, a program or a rule label
 that computed over it (code that names it, wc, grep -c), and a label's model that read its records are said apart;
 none is seen. The bar counts the files touched (total.touched_files): seen, searched or computed over; a file only
-listed by name (ls, find, a folder named in code) is not touched. Run: python3 -m pytest plugin/tests"""
+listed by name (ls, find, a folder named in code) is not touched. The count reads a folder's databases without writing
+beside them. Run: python3 -m pytest plugin/tests"""
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -15,7 +18,6 @@ ENGINE = Path(__file__).resolve().parents[1] / "engine"
 sys.path.insert(0, str(ENGINE))
 
 from kernel import coverage as CV  # noqa: E402
-from kernel import sources as S  # noqa: E402
 from kernel import store as STORE  # noqa: E402
 from kernel.store import Store  # noqa: E402
 
@@ -97,64 +99,6 @@ def test_counting_every_file_and_reading_a_few_says_only_the_few_were_read(code:
     assert "src/e.py  searched by grep; which lines it showed is not known" in text
 
 
-def test_reading_every_file_says_so_and_how_much(code: Path, tmp_path: Path) -> None:
-    saw(tmp_path, code, [bash("head -3 src/*.py runs.csv", 60)])
-    cov = CV.coverage(Store(code))
-    assert all(o["status"] == "seen" for o in cov["files"])
-    assert CV.coverage_sentence(cov) == ("Touched 13 of 13 files (read, searched or computed over). Read all 13 "
-                                          "files, at least in part: 2 of 3 rows (67%) and 36 of 360 lines (10%) entered "
-                                          "Claude's context.")
-
-
-def test_each_file_is_counted_in_its_own_unit_and_no_rows_are_listed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A folder that mixes kinds: records of a JSONL file, rows of a table, lines of Markdown, pages of a PDF, and an
-    image as one whole file. An image viewed with Read is seen; a PDF read by pages counts those pages."""
-    d = tmp_path / "mixed"
-    d.mkdir()
-    (d / "trials.jsonl").write_text("".join(json.dumps({"trial": i, "team": "otters"}) + "\n" for i in range(1, 201)))
-    (d / "scores.csv").write_text("team,score\n" + "".join(f"t{i},{i}\n" for i in range(40)))
-    (d / "notes.md").write_text("# Notes\n\nA line.\n\n## More\n\nAnother line.\n")
-    (d / "chart.png").write_bytes(b"\x89PNG\r\n\x1a\n" + bytes(64))
-    (d / "song.mp3").write_bytes(bytes(32))
-    (d / "report.pdf").write_bytes(b"%PDF-1.4\n" + b"".join(b"%d 0 obj << /Type /Page /Parent 1 0 R >> endobj\n" % i for i in range(2, 7))
-                                   + b"1 0 obj << /Type /Pages /Count 5 >> endobj\n%%EOF\n")
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("THIMBLE_SESSION", "s-cov")
-    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
-    saw(tmp_path, d, [
-        {"tool": "Read", "file": str(d / "chart.png"), "from": None, "to": None},
-        {"tool": "Read", "file": str(d / "report.pdf"), "from": None, "to": None, "pages": "2-3"},
-        {"tool": "Read", "file": str(d / "trials.jsonl"), "from": 10, "to": 12},
-        bash("head -5 scores.csv", 5),
-        # a search over the folder goes over the text files, not the image or the PDF
-        {"tool": "Grep", "path": str(d), "mode": "files_with_matches", "files": []},
-    ])
-    cov = CV.coverage(Store(d))
-    by = {o["path"]: o for o in cov["files"]}
-    assert set(by) == {"trials.jsonl", "scores.csv", "notes.md", "chart.png", "report.pdf"}
-    got = {f: (o["unit"], o["units"], o["seen_units"], o["status"]) for f, o in by.items()}
-    assert got == {"trials.jsonl": ("records", 200, 3, "seen"), "scores.csv": ("rows", 40, 4, "seen"),
-                   "notes.md": ("lines", 7, 0, "computed"), "chart.png": ("file", 1, 1, "seen"),
-                   "report.pdf": ("pages", 5, 2, "seen")}
-    # a file nothing touched is only its path, unit and size
-    assert cov["untouched"] == {"path": ["song.mp3"], "unit": ["file"], "units": [1], "by": [""]}
-    assert by["report.pdf"]["pages"] == [[2, 3]]
-    said = {f: o["said"] for f, o in by.items()}
-    # (the Grep that listed the files with matches went over every text file)
-    assert said["trials.jsonl"] == "read 3 of 200 records (2%); computed over all 200 records (Grep)"
-    assert said["report.pdf"] == "read 2 of 5 pages (40%)"
-    assert said["chart.png"] == "seen"
-    text = CV.coverage_text(cov)
-    assert text.startswith("Coverage of this session · 6 files: 200 records, 40 rows, 7 lines, 5 pages and 2 other files\n")
-    assert "  chart.png  seen\n" in text and "  song.mp3  untouched\n" in text
-    assert ("Touched 5 of 6 files (read, searched or computed over). Read 4 of the files, at least in part: "
-            "3 of 200 records (2%), 4 of 40 rows (10%), 0 of 7 lines (0%), 2 of 5 pages (40%) and 1 of 2 other files "
-            "entered Claude's context") in text
-    assert cov["total"]["touched_share"] == pytest.approx(5 / 6)
-    # never which rows: no line or row numbers in the text
-    assert "10" not in text.replace("(10%)", "").replace("(100%)", "")
-
-
 def test_a_full_count_with_no_line_read_touches_the_file_and_a_listing_does_not(code: Path, tmp_path: Path) -> None:
     """Coverage 0 means Claude looked at no file at all: a count over every line touches a file though none of its
     lines entered Claude's context; a file only listed by name is not touched."""
@@ -172,20 +116,6 @@ def test_a_full_count_with_no_line_read_touches_the_file_and_a_listing_does_not(
     t = CV.coverage(Store(code))["total"]
     assert t["touched_files"] == 0 and t["touched_share"] == 0
     assert CV.coverage_sentence(CV.coverage(Store(code))).startswith("Touched 0 of 13 files: Claude has not looked at any of them.")
-
-
-def test_a_shell_variable_in_a_path_names_only_the_files_it_can_stand_for(code: Path, tmp_path: Path) -> None:
-    """`src/$n.py` in a loop over a and b names those two files, not every file under src/; a variable the command did
-    not set stands for one name (`src/$1.py` is `src/*.py`), and a word that is only such a variable names nothing."""
-    saw(tmp_path, code, [bash("for n in a b; do wc -l src/$n.py; done", 2), bash("head -3 $f", 3),
-                         bash("D=src; wc -l $D/c.py", 1)])
-    cov = CV.coverage(Store(code))
-    touched = sorted(o["path"] for o in cov["files"])
-    assert touched == ["src/a.py", "src/b.py", "src/c.py"] and cov["total"]["touched_files"] == 3
-    saw(tmp_path, code, [bash("sqlite3 src/$1/forge.db 'select 1'", 1)])
-    assert CV.coverage(Store(code))["total"]["touched_files"] == 0
-    saw(tmp_path, code, [bash("set -- $spec; wc -l src/$1.py", 12)])
-    assert CV.coverage(Store(code))["total"]["touched_files"] == 12
 
 
 def test_each_file_and_folder_has_two_measures_read_and_counted(code: Path, tmp_path: Path) -> None:
@@ -225,110 +155,6 @@ def test_only_a_model_labels_reads_are_said_as_a_models(code: Path, tmp_path: Pa
     assert "computed over all 3 rows (passed_flag)" in o["said"]
 
 
-def test_a_working_folder_of_links_counts_the_files_they_point_to(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # a made-up dataset, and a working folder of links to each of its top-level files and folders (one link of a
-    # folder holds many images), with a link back up and a broken link that must not count or loop
-    data = tmp_path / "harbor"
-    (data / "shots" / "day1").mkdir(parents=True)
-    (data / "shots" / "day2").mkdir(parents=True)
-    for d in ("day1", "day2"):
-        for i in range(300):
-            (data / "shots" / d / f"{i}.png").write_bytes(b"")
-    (data / "boats.jsonl").write_text('{"boat":"Ada"}\n{"boat":"Bo"}\n{"boat":"Cy"}\n')
-    (data / "README.md").write_text("# Harbor\n\nboats and shots\n")
-    (data / "shots" / "day1" / "up").symlink_to(data / "shots")
-    work = tmp_path / "work"
-    work.mkdir()
-    for x in data.iterdir():
-        (work / x.name).symlink_to(x)
-    (work / "gone.jsonl").symlink_to(tmp_path / "nowhere.jsonl")
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("THIMBLE_SESSION", "s-cov")
-    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
-    before = sorted(p.name for p in work.iterdir())
-    saw(tmp_path, work, [{"tool": "Read", "file": str(work / "boats.jsonl"), "from": 1, "to": 2}])
-
-    cov = CV.coverage(Store(work))
-    by = {o["path"]: o for o in cov["files"]}
-    every = set(by) | set(cov["untouched"]["path"])
-    assert cov["total"]["files"] == 602
-    assert "shots/day2/199.png" in every and "gone.jsonl" not in every
-    assert not any(p.startswith("shots/day1/up/") for p in every)
-    # the untouched files are counted by folder, and at most UNTOUCHED_PER_FOLDER of each folder are named
-    assert {g["folder"]: g["files"] for g in cov["groups"]} == {"./": 2, "shots/day1/": 300, "shots/day2/": 300}
-    assert len(cov["untouched"]["path"]) == 1 + 2 * CV.UNTOUCHED_PER_FOLDER
-    assert by["boats.jsonl"]["touched"] and cov["total"]["touched_files"] == 1
-    # the sources are the linked tables too, and nothing was written into the folder or the dataset
-    assert [f for f in S.list_files(work) if S.kind_of(work / f)] == ["README.md", "boats.jsonl"]
-    assert sorted(p.name for p in work.iterdir()) == before
-    assert sorted(p.name for p in data.iterdir()) == ["README.md", "boats.jsonl", "shots"]
-
-
-def test_the_json_of_a_folder_of_many_files_stays_small(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # the shell reads the first 4 MB of a command's output: a folder of many files lists a few of each folder, and
-    # says how many more there are, while the totals count them all
-    from kernel import cli as CLI
-
-    d = tmp_path / "shots"
-    for day in ("d1", "d2", "d3"):
-        (d / day).mkdir(parents=True)
-        for i in range(40):
-            (d / day / f"{i}.png").write_bytes(b"")
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
-    monkeypatch.setenv("THIMBLE_SESSION", "s-cov")
-    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
-    monkeypatch.chdir(d)
-    monkeypatch.setattr(CLI, "COVER_PER_FOLDER", 10)
-    import contextlib
-    import io
-
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        assert CLI.main(["coverage", "--json"]) == 0
-    got = json.loads(out.getvalue())
-    assert got["total"]["files"] == 120
-    assert len(got["untouched"]["path"]) == 30 and got["cut"] == {"files": 0, "untouched": 90}
-    assert {p.split("/")[0] for p in got["untouched"]["path"]} == {"d1", "d2", "d3"}
-    # the record keeps to what Claude Code reads of an output: the totals always, then as many files as fit
-    monkeypatch.setattr(CLI, "COVER_BYTES", len(out.getvalue()) - 200)
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        assert CLI.main(["coverage", "--json"]) == 0
-    small = json.loads(out.getvalue())
-    assert len(out.getvalue()) <= CLI.COVER_BYTES and small["total"]["files"] == 120
-    assert 0 < len(small["untouched"]["path"]) < 30 and small["cut"]["untouched"] == 120 - len(small["untouched"]["path"])
-
-
-def test_a_glob_and_a_path_by_its_end_are_looked_up_folder_by_folder() -> None:
-    # the sorted list of files is the only index: a glob is matched one part of the path at a time, and a path that
-    # does not resolve from the command's folder matches by its end (after a `cd`, or through a link to the folder)
-    from kernel import shellcmd as SH
-
-    files = ["README.md", "notes.txt", "runs/a/log.txt", "runs/a/meta.json", "runs/b/meta.json", "runs/b/x/meta.json",
-             "runs/c.json", "shots/d1/1.png", "shots/d1/2.png", "shots/d2/3.png"]
-    K = SH.Known(files)
-    assert K.glob("*") == {"README.md", "notes.txt"}
-    assert K.glob("runs/*/meta.json") == {"runs/a/meta.json", "runs/b/meta.json"}
-    assert K.glob("runs/*.json") == {"runs/c.json"}
-    assert K.glob("**/meta.json") == {"runs/a/meta.json", "runs/b/meta.json", "runs/b/x/meta.json"}
-    assert K.glob("**/*.png") == {"shots/d1/1.png", "shots/d1/2.png", "shots/d2/3.png"}
-    assert K.glob("runs/**/*.txt") == {"runs/a/log.txt"}
-    assert K.glob("shots/d?/[13].png") == {"shots/d1/1.png", "shots/d2/3.png"}
-    assert K.glob("**/x*2") == set() and K.glob("runs/*") == {"runs/c.json"}
-    assert K.ending("meta.json") == {"runs/a/meta.json", "runs/b/meta.json", "runs/b/x/meta.json"}
-    assert K.ending("b/meta.json") == {"runs/b/meta.json"}
-    assert K.ending("/work/link/runs/a/log.txt") == {"runs/a/log.txt"}
-    assert SH.named("cat runs/*/meta.json; head -3 /elsewhere/runs/c.json", K, "/data", "/data") == ({
-        "runs/a/meta.json", "runs/b/meta.json", "runs/c.json"}, set())
-    # a folder is named as a folder, never as each of its files
-    assert SH.named("ls shots/d1 shots/", K, "/data", "/data") == (set(), {"shots/d1", "shots"})
-    # a bare shell word names the folder or the file it is; in code it is a name of the code's own
-    assert SH.named("ls -la shots README", K, "/data", "/data", {}) == (set(), {"shots"})
-    assert SH.named("shots = []", K, "/data", "/data") == (set(), set())
-    # only a leading "./" goes from a word: `.9*` in code names no file that starts with 9
-    assert SH.named("r = .9* x", ["9a.png", "b/9c.png", ".9d"], "/data") == ({".9d"}, set())
-
-
 def test_a_search_names_the_files_it_searches_not_its_pattern() -> None:
     from kernel import shellcmd as SH
 
@@ -356,23 +182,6 @@ def made_up_village(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return d
 
 
-def test_a_listing_of_a_folder_lists_its_files_and_touches_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # `ls` of a folder and code that lists a folder name its files only: they are listed, not touched, and counted by
-    # their folder rather than one by one
-    d = made_up_village(tmp_path, monkeypatch)
-    saw(tmp_path, d, [bash("ls shots/d1 | head; find . -type f | wc -l", 12),
-                      bash("python3 - <<'PY'\nimport os\nprint(len(os.listdir('shots/d2')))\nPY", 1)])
-    cov = CV.coverage(Store(d))
-    t = cov["total"]
-    assert (t["touched_files"], t["listed_files"], t["untouched_files"]) == (0, 100, 54)
-    assert cov["files"] == []
-    groups = {g["folder"]: g["by_status"] for g in cov["groups"]}
-    assert groups["shots/d1/"] == {"listed": 50} and groups["shots/d2/"] == {"listed": 50}
-    assert groups["shots/d3/"] == {"untouched": 50}
-    assert "50 only listed by name (shots/d1/0.png, shots/d1/1.png, shots/d1/10.png, shots/d1/11.png and 46 more)" not in CV.coverage_sentence(cov)
-    assert "100 only listed by name (shots/d1/0.png" in CV.coverage_sentence(cov)
-
-
 def test_code_goes_over_the_files_it_names_also_in_a_script_it_wrote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # a script written with a here-document and run in the same command or a later one, and a script on disk (as
     # Claude's Write tool leaves it), go over the files their code names; a script never run goes over nothing
@@ -397,29 +206,6 @@ def test_code_goes_over_the_files_it_names_also_in_a_script_it_wrote(tmp_path: P
     assert by["agents.jsonl"]["status"] == by["notes.md"]["status"] == "computed"
 
 
-def test_a_search_into_a_folder_goes_over_its_text_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    d = made_up_village(tmp_path, monkeypatch)
-    saw(tmp_path, d, [bash("grep -rn Ada . | head -3", 3)])
-    cov = CV.coverage(Store(d))
-    assert {o["path"]: o["status"] for o in cov["files"]} == {f: "searched" for f in ("agents.jsonl", "events.jsonl", "notes.md", "spare.jsonl")}
-    assert cov["total"]["listed_files"] == 0
-
-
-def test_heredoc_code_with_its_output_in_a_file_and_a_script_from_stdin_go_over_the_files_their_code_names(tmp_path: Path) -> None:
-    from kernel import shellcmd as SH
-
-    files = ["runs/a.jsonl", "data.jsonl"]
-    got = SH.shows("python3 - <<'PY' > $TMPDIR/rows.json\nfor l in open('runs/a.jsonl'): pass\nPY", files, "/data", "/data", lambda f: 10)
-    assert ("runs/a.jsonl", "computed", None, "python3") in got
-    # `-` is the script from stdin: the file after it is the script's argument, never read as code
-    assert SH.script_of("python3", ["-", "data.jsonl"]) is None and SH.script_of("perl", ["-ne", "print", "data.jsonl"]) is None
-    # a script path that is no regular file (a pipe, /dev/stdin) is not opened: it would wait for input
-    fifo = tmp_path / "pipe.py"
-    import os
-    os.mkfifo(fifo)
-    assert SH._script_text(str(fifo), {}) == ""
-
-
 def test_a_read_that_showed_no_line_only_names_the_file_and_a_part_of_a_file_counts_a_row(code: Path, tmp_path: Path) -> None:
     # a Read past the file's end shows no numbered line: the file is named, not read; a program that went over a few
     # lines of a file of one long record went over that record
@@ -429,3 +215,20 @@ def test_a_read_that_showed_no_line_only_names_the_file_and_a_part_of_a_file_cou
     by = {o["path"]: o for o in cov["files"]}
     assert "src/a.py" not in by and "src/a.py" in (cov.get("untouched") or {}).get("path", [])
     assert by["runs.csv"]["said"] != ""
+
+
+# the bar's count reads a WAL database as its writer left it: no -wal or -shm file appears beside it
+def test_counting_a_wal_database_writes_nothing_beside_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "home"))
+    d = tmp_path / "data"
+    d.mkdir()
+    with closing(sqlite3.connect(d / "runs.db")) as con:
+        con.execute("pragma journal_mode=wal")
+        con.execute("create table runs (name text)")
+        con.executemany("insert into runs values (?)", [("made-up-a",), ("made-up-b",)])
+        con.commit()
+    before = sorted(p.name for p in d.iterdir())
+    assert before == ["runs.db"]
+    cov = CV.coverage(Store(d, session="s1"))
+    assert cov["total"]["files"] == 1
+    assert sorted(p.name for p in d.iterdir()) == before

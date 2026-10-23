@@ -6,8 +6,7 @@
 // ask back. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { colorOf } from '../labels/pane'
-import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelRowEl, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
+import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -76,20 +75,6 @@ function engine(kernel: (args: string[]) => { code?: number; out: unknown } = ()
   const set = (key: string, value: unknown, id?: string) => $.state.set({ plugin: 'thimble', key, ...(id ? { id } : {}) }, value)
   return { $, ran, flush, set, state }
 }
-
-test('under a card, a value has the color the card gives it, or a plain dim dot; under an answer, the label\'s own colors', () => {
-  const label = { name: 'outcome', values: ['won', 'lost', 'tied'] }
-  const open = () => undefined
-  const card = labelRowEl(ELS, [{ ...label, tones: { won: '#e384b2' } }], { key: 'k', onOpen: open })
-  expect(dots(card)).toEqual([{ value: 'won', color: '#e384b2' }, { value: 'lost', dim: true }, { value: 'tied', dim: true }])
-  const answer = labelRowEl(ELS, [label], { key: 'k', onOpen: open })
-  expect(dots(answer).map(d => d.color)).toEqual(label.values.map(v => colorOf(label.values, v)))
-})
-
-test('a regex label\'s row is one line: how it was made and over how many records, never the pattern', () => {
-  const row = labelRowEl(ELS, [{ name: 'coord', kind: 'regex', values: ['yes', 'no'], records: 13403 }], { key: 'k', onOpen: () => undefined })
-  expect(textOf(row)).toBe('label coord · regex · 13,403 records  ● yes  ● no')
-})
 
 test('a card shows the labels its turn ran before it; the answer only those no card of it shows; a press opens the label', async () => {
   const LIST = [

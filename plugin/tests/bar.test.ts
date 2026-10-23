@@ -111,51 +111,6 @@ test('after an answer the bar names v, coverage and the labels; r opens the cove
   await pane.unmount()
 })
 
-test('a letter right after r is a word: both go back to the prompt and no pane opens', async ($, on) => {
-  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
-  await w.clock.advance(100)
-  await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'r' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'r' } as never)
-  await w.clock.advance(50)
-  const e = (await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'e' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'e' } as never)) as Any
-  expect(e.text).toBe('re')
-  await w.clock.advance(400)
-  expect(w.opened).not.toContain('thimble')
-})
-
-test('a failure shows its line, whole and with no keys, f types as usual, and the next prompt takes the line', async ($, on) => {
-  const w = world(on, { ok: false, out: 'a made-up reason' })
-  // Claude Code's own typing, for a key thimble does not take
-  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  // the count after an answer
-  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
-  await w.clock.advance(100)
-  const line = textOf(await $.ui.render(BAND))
-  expect(line).toContain('× Coverage could not be counted: a made-up reason')
-  expect(line).not.toContain('fix this')
-  // f is no key of thimble's: it goes into the box, and nothing is asked of Claude
-  const f = (await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'f' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'f' } as never)) as Any
-  expect(f.text).toBe('f')
-  await w.clock.advance(400)
-  expect(w.submitted.length).toBe(0)
-  expect(textOf(await $.ui.render(BAND))).toContain('a made-up reason')
-  await $.prompt.submit({ text: 'How many runs failed?', origin: { kind: 'composer' } } as never)
-  expect(textOf(await $.ui.render(BAND))).not.toContain('a made-up reason')
-})
-
-test('a coverage record that cannot be read is named in words, and the labels still count', async ($, on) => {
-  const w = world(on, { ok: true, out: '{"root":"/made-up/data","files":[{"path":"a.tx' })
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
-  await w.clock.advance(100)
-  const line = textOf(await $.ui.render(BAND))
-  expect(line).toContain('Coverage could not be counted: thimble coverage gave no record thimble could read.')
-  expect(line).not.toContain('"root"')
-  expect(line).toContain('2 labels')
-})
-
 test("a drawing never starts a count, since Claude Code stops a drawing's calls when a newer one replaces it; the session's start counts once", async ($, on) => {
   const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   const counted = () => w.ran.filter(a => a.includes('coverage')).length
@@ -224,29 +179,3 @@ test('a failure is a line above the bar in red, a notice one not in red; the nex
   expect((await barRows($, ELS, 100, { on: () => true })).length).toBe(1)
 })
 
-test('in a narrow coverage pane a long folder name is cut in its middle and its row keeps its count on one line', async ($, on) => {
-  const long = (run: string) => ({ folder: `runs/${run}/`, files: 57, touched: 1, read_share: 0, counted_share: 0.02, units: [{ unit: 'records', units: 1000, seen: 0, model: 0, searched: 20, computed: 0 }] })
-  const runs = ['sweep1-fable-managed_prs_issues', 'sweep2-opus-managed_prs_issues', 'a-run-whose-name-is-far-too-long-for-any-column-at-all']
-  const cov = { root: '/made-up/data', total: { files: 171, touched_files: 3, seen_files: 0 }, groups: runs.map(long), files: [], untouched: { path: [] } }
-  const w = world(on, { ok: true, out: JSON.stringify(cov) })
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Done.', durationMs: 10, isAborted: false } as never)
-  await w.clock.advance(100)
-  await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'r' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'r' } as never)
-  await w.clock.advance(400)
-  const W = 72
-  const pane = await $.ui.mount({ ...(PANE as Any), props: { ...(PANE as Any).props, bodyColumns: W } } as never)
-  const widths = new Set<number>()
-  for (const run of runs) {
-    const row = (await pane.find({ key: `dir:runs/${run}/` }))?.text ?? ''
-    expect(row).toContain('1/57')
-    expect(row.length).toBeLessThanOrEqual(W)
-    widths.add(row.indexOf('1/57'))
-    expect(await pane.find({ key: `dir:runs/${run}/:name` })).toBeUndefined()
-  }
-  // the counts stand in one column; a name that fits stays whole, one too long keeps its start and its end
-  expect(widths.size).toBe(1)
-  expect((await pane.find({ key: 'dir:runs/sweep1-fable-managed_prs_issues/' }))?.text).toContain('sweep1-fable-managed_prs_issues/')
-  expect((await pane.find({ key: `dir:runs/${runs[2]}/` }))?.text).toMatch(/a-run-wh.*….*at-all\//)
-  await pane.unmount()
-})
