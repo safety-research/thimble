@@ -6,7 +6,7 @@ import { act } from 'react'
 import { afterEach, beforeAll, describe, expect, test, vi } from 'vitest'
 import { api } from '../../src/lib/api'
 import { bus } from '../../src/lib/bus'
-import { StopWriter, WriteAction } from '../../src/report/WriteAction.tsx'
+import { StopWriter, WriteAction, writePhase } from '../../src/report/WriteAction.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 beforeAll(() => {
@@ -61,6 +61,20 @@ describe("the Report bar's Write and Revise", () => {
     expect(b.textContent).toBe('Writing')
     expect(b.disabled).toBe(true)
     expect(document.querySelector('.wu-revise')).toBeNull()
+  })
+
+  test('once the text is saved and the writer still runs, the button reads Checking citations', async () => {
+    const el = await mount(<WriteAction name="report" written busy phase="checking" onWrite={vi.fn()} />)
+    const b = el.querySelector<HTMLButtonElement>('button.btn-primary')!
+    expect(b.textContent).toBe('Checking citations')
+    expect(b.disabled).toBe(true)
+  })
+
+  test("the writer's phase: writing while its write is pending, checking while it runs after its save", () => {
+    expect(writePhase(true, true)).toBe('writing')
+    expect(writePhase(true, false)).toBe('writing')
+    expect(writePhase(false, true)).toBe('checking')
+    expect(writePhase(false, false)).toBeNull()
   })
 })
 

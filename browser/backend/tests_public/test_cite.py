@@ -12,7 +12,26 @@ def test_tier2_unique_table_cell():
     r = cite.resolve("c1", "North 250, South 30.", [{"text/html": html, "text/plain": "..."}])
     assert "[[250|card:c1#assignments/north-desk]]" in r.annotated
     assert "[[30|" not in r.annotated  # a 2-digit integer is too ambiguous to auto-link on uniqueness alone
-    assert r.unresolved == ["30"]
+    # but the table does show it: it is found and left plain, never named as missing from the outputs
+    assert r.unresolved == [] and r.shown == ["30"]
+
+
+def test_a_line_chart_over_time_shows_its_small_values_though_none_links_alone():
+    """A line chart of weekly counts in two series (made-up data): each count stands in the chart's rows, so none of the
+    takeaway's four numbers is missing from the outputs, though each is too small to link on its own. A number no row
+    holds is still missing."""
+    rows = [{"week": "2026-03-02T00:00:00", "count": 3, "state": "accepted"},
+            {"week": "2026-03-09T00:00:00", "count": 7, "state": "accepted"},
+            {"week": "2026-03-02T00:00:00", "count": 5, "state": "declined"},
+            {"week": "2026-03-09T00:00:00", "count": 11, "state": "declined"}]
+    spec = {"mark": "line", "data": {"values": rows},
+            "encoding": {"x": {"field": "week", "type": "temporal"}, "y": {"field": "count", "type": "quantitative"},
+                         "color": {"field": "state", "type": "nominal"}}}
+    chart = [{"application/vnd.vegalite.v5+json": spec, "text/plain": "chart"}]
+    r = cite.resolve("w1", "Accepted went from 3 to 7 while declined went from 5 to 11.", chart)
+    assert r.unresolved == [] and r.shown == ["3", "7", "5", "11"]
+    assert r.annotated == "Accepted went from 3 to 7 while declined went from 5 to 11."
+    assert cite.resolve("w1", "Accepted went from 3 to 8.", chart).unresolved == ["8"]
 
 
 def test_a_day_and_a_month_in_words_cite_a_date_written_in_digits():

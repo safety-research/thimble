@@ -19,6 +19,7 @@ import { mediaOf, mediaUrl, type MediaRef } from '../lib/media'
 import { loadSettings, modelLabel } from '../lib/models'
 import { addressLabel, hiddenPath } from '../lib/refs'
 import { teleport } from '../lib/teleport'
+import { wordsSpanRef } from '../lib/quoteFind'
 import { track } from '../lib/telemetry'
 import type { Cell, Concept, ConceptDetail, ResolvedRef } from '../lib/types'
 import { CanvasContext } from './context'
@@ -196,9 +197,12 @@ function ExampleBody({ refs, quotes, ws, big }: { refs: string[]; quotes: unknow
   }, [ws, refs])
   const entries = useMemo(() => exampleEntries(refs, quotes), [refs, quotes])
   if (!entries.length) return null
+  // an entry's address opens its record at the passage the example quotes (wordsSpanRef), highlighted there
   const open = (r: string) => {
     track('chip-teleport', { target: r, detail: { kind: 'example' } })
-    teleport(r, { browser: true })
+    const quote = entries.find((e) => e.ref === r)?.quotes.find((q) => q.trim()) ?? ''
+    const res = got[r]
+    teleport((res && quote ? wordsSpanRef(res, quote) : null) ?? r, { browser: true })
   }
   const address = (r: string) => <Address r={r} onOpen={open} />
   const lookup = (r: string) => (r in got ? got[r] : undefined)

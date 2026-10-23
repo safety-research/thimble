@@ -777,6 +777,10 @@ card:{cid}, your last card, still has no takeaway. Write it with `edit_card` and
 
 NOT found in this card's outputs, {values}. Cite each where the output shows it, or drop it.
 
+## shown-not-linked
+
+Found in this card's outputs but not linked, {values}: more than one place shows each, or it is a small number that could stand for several places. Link each to the place your words mean, as `[[value|card:{cid}#<column>/<row>]]`.
+
 ## add_card-more
 
 … {more}. `read_ref` on {ref} shows all of it.

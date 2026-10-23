@@ -27,6 +27,7 @@ import { citedTable, placePop, printedTable, TablePreview, useRefLabel } from '.
 import { Spinner } from '../components/Spinner'
 import { api, marksApi } from '../lib/api'
 import { glyphOf } from '../lib/fileGlyph'
+import { wordsSpanRef } from '../lib/quoteFind'
 import { parseRef } from '../lib/refs'
 import { CITED, citedLines, type At, type Grid } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
@@ -228,6 +229,17 @@ function RepairButton({ item }: { item: MarkItem }) {
   )
 }
 
+/** Where a quote's place opens: the span of the words the check found inside the record it cites (wordsSpanRef), so
+ * the File browser highlights them; the record itself when it holds no such words or cannot be read. */
+async function quotedPlace(at: string, words: string): Promise<string> {
+  if (!words.trim()) return at
+  try {
+    return wordsSpanRef(await api.resolveRef(workspaceFromUrl() ?? '', at), words) ?? at
+  } catch {
+    return at
+  }
+}
+
 function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
   const open = useContext(OpenPlace)
   if (ev.kind === 'card') return <CardEvidence ev={ev} value={value} />
@@ -263,10 +275,13 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
     <>
       {places.map((p, i) => {
         const at = `${p.file}#L${String(p.line).split('-')[0]}`
+        // the words the check found on the cited line, which the record opens with highlighted
+        const cited = p.lines?.find((l) => String(l.n) === String(p.line).split('-')[0] && l.highlight)
+        const words = cited?.highlight ? cited.text.slice(cited.highlight[0], cited.highlight[1]) : ''
         return (
           <div key={i} className="mark-ev">
             <div className="refchip-pop-head">
-              <Chip kind="ref" tone="evidence" icon={glyphOf(String(p.file ?? ''))} className="refchip-pop-chip" onClick={() => open(at)}>
+              <Chip kind="ref" tone="evidence" icon={glyphOf(String(p.file ?? ''))} className="refchip-pop-chip" onClick={() => void quotedPlace(at, words).then(open)}>
                 {`${p.file}:${p.line}`}
               </Chip>
               {i === 0 && <span className="refchip-pop-value">{value}</span>}

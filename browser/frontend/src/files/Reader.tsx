@@ -39,8 +39,8 @@ import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
 import { markOpened, useReadyViews, useUpdatedViews } from './viewReady'
-import { compact, errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type ViewProps } from './views/common'
-import { clockOf, keysFor, nameOf, pick, textOf, turnOver } from './views/transcript'
+import { errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type ViewProps } from './views/common'
+import { clockOf, keysFor, nameOf, pick, streamLine, textOf, turnOver } from './views/transcript'
 import { withoutEscapes } from './views/raw'
 import { pickView, scoreViews, viewByType } from './views/registry'
 import { useDelimiter } from './views/table'
@@ -664,10 +664,31 @@ export function useRecordLines(ws: string, ref: string | undefined, path: string
 /** the keys where a record of a log, such as an event, names its agent (backend transcripts.OWNER_KEYS) */
 const AGENT_KEYS = 'agent|agent_name|agent_id'
 
+/** A record with no words to show as one line a person reads, in place of its JSON: each field as `key: value`, a
+ * nested value as `{…}` or `[…]`. Pure. */
+export function fieldsLine(obj: Record<string, unknown>, max = 300): string {
+  const parts: string[] = []
+  for (const [k, v] of Object.entries(obj)) {
+    const shown = v == null ? 'null' : Array.isArray(v) ? (v.length ? '[…]' : '[]') : typeof v === 'object' ? (Object.keys(v).length ? '{…}' : '{}') : String(v)
+    parts.push(`${k}: ${shown.replace(/\s+/g, ' ').slice(0, 80)}`)
+  }
+  return parts.join(' · ').slice(0, max)
+}
+
 /** A record as the loupe and a record's tooltip name it: its index, who and when (the keys the Transcript mode reads,
  * the sniff's else those the record carries; who, without a speaker, the agent the record names, else its type; when as
  * its time of day), and its first two lines of words. */
 export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color: string | null): PreviewRecord {
+  const obj = recordObject(rec)
+  // a Claude Code stream's record reads as the Transcript view shows it, never as its JSON: a message's words and tool
+  // calls, a system record's summary
+  const line = obj && (!hint || hint.format === 'stream') ? streamLine(obj, hint?.wrap) : null
+  if (obj && line != null) {
+    const who = typeof obj.type === 'string' ? obj.type : null
+    const keys = keysFor(hint, [obj])
+    const when = clockOf(pick(obj, keys.time)) ?? clockOf((obj as { timestamp?: unknown }).timestamp)
+    return { line: rec.line, who, when, text: (who && line.startsWith(`${who} · `) ? line.slice(who.length + 3) : line).slice(0, 280), color }
+  }
   const first = (s: string) =>
     s
       .split('\n')
@@ -675,14 +696,18 @@ export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color:
       .slice(0, 2)
       .join('\n')
       .slice(0, 280)
-  const obj = recordObject(rec)
   if (!obj) return { line: rec.line, who: null, when: null, text: first(recordExcerpt(rec)), color }
   const keys = keysFor(hint, [obj])
   const who = nameOf(pick(obj, keys.author)) ?? nameOf(pick(obj, AGENT_KEYS)) ?? (typeof obj.type === 'string' ? obj.type : null)
   const when = clockOf(pick(obj, keys.time))
-  const body = textOf(pick(obj, keys.body)) ?? rec.blocks.find((b) => b.kind !== 'raw')?.text ?? compact(obj, 300)
+  // a JSON line the server sends as text has that text as its block: its JSON, which is no words to show
+  const own = obj !== rec.record ? (rec.record as { text?: unknown }).text : undefined
+  const body = textOf(pick(obj, keys.body)) ?? rec.blocks.find((b) => b.kind !== 'raw' && b.text !== own)?.text ?? fieldsLine(obj)
   return { line: rec.line, who, when, text: first(body), color }
 }
+
+/** ms the records' first paint waits at most for Color by's keys (the file's keys, GET /source/keys) */
+export const COLORS_HOLD_MS = 1500
 
 const NO_LANES: Concept[] = []
 const NO_OFF: ReadonlySet<string> = new Set()
@@ -1244,6 +1269,16 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
   const viewRecords = isTranscript && shown?.path === path ? shown.records : null
   const colorRecords = useMemo(() => viewRecords ?? (delimit ? delimit(records) : records), [viewRecords, delimit, records])
   const color = useColorBy(workspace, path, colored && !binary && !isDatabase, labels, colorRecords, readerLabels.rows, total, quiet, filterHolds)
+  // the records' first paint waits for Color by's keys, which the records' colors come from, so they are drawn with
+  // their colors from the first frame rather than plain and then tinted; at most COLORS_HOLD_MS after the records came
+  const colorsPending = colored && !binary && !isDatabase && color.keys == null
+  const [waitedFor, setWaitedFor] = useState<string | null>(null)
+  useEffect(() => {
+    if (!colorsPending || !loaded) return
+    const t = window.setTimeout(() => setWaitedFor(path), COLORS_HOLD_MS)
+    return () => window.clearTimeout(t)
+  }, [colorsPending, loaded, path])
+  const holdPaint = colorsPending && waitedFor !== path
   const filter = useFilterBy(workspace, path, isTranscript && !binary && !isDatabase, labels, color.fileLabels, color.keys, viewRecords ?? records, readerLabels.rows, total, quiet)
   const filterLabel = isTranscript && filter.choice.by === 'label' ? filter.choice.id : null
   useEffect(() => {
@@ -1503,7 +1538,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                       <div className="reader-noview-reason dim">{noViewReason}</div>
                     </div>
                   )}
-                  {ViewComponent && loaded && !noViewReason && (
+                  {ViewComponent && loaded && !noViewReason && !holdPaint && (
                     <ColorContext.Provider value={colored ? color.colors : null}>
                       <FilterContext.Provider value={isTranscript ? filter.verdict : null}>
                         <FoldContext.Provider value={isTranscript ? fold : null}>
@@ -1514,7 +1549,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
                       </FilterContext.Provider>
                     </ColorContext.Provider>
                   )}
-                  {loading && (
+                  {(loading || (loaded && holdPaint && !noViewReason)) && (
                     <div className="reader-more">
                       <Spinner size={14} label="Loading" />
                     </div>

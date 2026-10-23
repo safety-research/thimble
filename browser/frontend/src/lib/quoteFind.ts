@@ -69,12 +69,21 @@ export function quotedWords(value: string): string[] {
  * from the record as resolveRef answers it; null when the ref is no whole record of a file's line or the record holds
  * none of them. Pure. */
 export function quoteSpanRef(r: ResolvedRef, value: string): string | null {
-  if (r.kind !== 'record' || !r.path || r.line == null || !r.blocks?.length) return null
   for (const words of quotedWords(value)) {
-    for (let k = 0; k < r.blocks.length; k++) {
-      const at = findQuote(r.blocks[k].text ?? '', words)
-      if (at) return `${r.path}#L${r.line}.b${k}:c${at[0]}-${at[1]}`
-    }
+    const span = wordsSpanRef(r, words)
+    if (span) return span
+  }
+  return null
+}
+
+/** The span ref of `words` themselves (a quote the check found, an example's passage) inside the record as resolveRef
+ * answers it, so the File browser opens the record with those words highlighted; null when the ref is no whole record
+ * of a file's line or none of its blocks holds them. Pure. */
+export function wordsSpanRef(r: ResolvedRef, words: string): string | null {
+  if (r.kind !== 'record' || !r.path || r.line == null || !r.blocks?.length || !words.trim()) return null
+  for (let k = 0; k < r.blocks.length; k++) {
+    const at = findQuote(r.blocks[k].text ?? '', words)
+    if (at) return `${r.path}#L${r.line}.b${k}:c${at[0]}-${at[1]}`
   }
   return null
 }
