@@ -94,7 +94,7 @@ export async function request($: Engine, said: string, by: Asker = 'person'): Pr
     ? { text: `A fork of this session is fixing fix ${fix.id} again, with these words, in the background. Keep going.`, fix, failed: false, round }
     : named
       ? { text: `A fork of this session is changing fix ${named.id} in the background. Keep going.`, fix, failed: false, round }
-      : { text: `A fork of this session is fixing it in the background (fix ${fix.id}). Keep going.`, fix, failed: false, round }
+      : { text: `A fork of this session is fixing it in the background (fix ${fix.id}: ${cut(fix.title, 60)}). Keep going.`, fix, failed: false, round }
 }
 
 /** r: the fix again, in a new copy cut from your thimble as it is now, with the earlier change to start from. */

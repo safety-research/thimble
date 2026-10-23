@@ -39,6 +39,8 @@ export type Fix = {
   refines?: number; refines_always?: boolean; on_at?: number
   /** done's answer: the round whose change went into this fix, or the fix it did not fit */
   folded?: number; fold_failed?: number | string
+  /** the Claude Code session whose fixer works on it (new, round, redo): only that session ends it */
+  session?: string | null
 }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
@@ -58,7 +60,20 @@ export type FixLine = {
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
 
 /** `thimble fix …` as the person's own command. `stdin`: words, or the secret of a key press. */
+/** This Claude Code session's id, or '' when Claude Code does not give one. */
+export async function sessionIdNow($: Engine): Promise<string> {
+  try { return String((await $.session.id()) ?? '') } catch { return '' }
+}
+
+/** The verbs that start or end a fixer's work: the kernel records the session on them, and done refuses a fix whose
+ *  fixer works in another session. */
+const SESSION_VERBS = new Set(['new', 'round', 'redo', 'done'])
+
 export async function kernelFix($: Engine, args: string[], o: { stdin?: string; timeoutMs?: number; doing?: string } = {}): Promise<{ ok: boolean; out: string; err: string }> {
+  if (SESSION_VERBS.has(args[0] ?? '')) {
+    const sid = await sessionIdNow($)
+    if (sid) args = [...args, '--session', sid]
+  }
   const root = (await rootHere($)) || (await startDir($))
   const call = () => runThimble($, root, ['fix', ...args], { timeoutMs: o.timeoutMs ?? 120000, ...(o.stdin != null ? { stdin: o.stdin } : {}) })
   const r = o.doing ? await busy($, o.doing, call) : await call()

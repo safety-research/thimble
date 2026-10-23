@@ -21,7 +21,7 @@ import { thimbleHome } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
-import { type Fix, fixesDir, fixesNow, fixOf, jsonOf, kernelFix, refreshFixes, setFixLine } from './fixes'
+import { type Fix, fixesDir, fixesNow, fixOf, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
 import { screenCopy } from './screen'
 
 type Engine = EngineInterface
@@ -47,6 +47,15 @@ export async function setAsker($: Engine, id: number, by: Asker): Promise<void> 
 
 async function fixers($: Engine): Promise<Record<string, number>> {
   return ((await $.state.get(FIXERS)).value ?? {}) as Record<string, number>
+}
+
+/** The fixes whose fixer works in this session: the records name the session (several sessions share the fixes'
+ *  folder, and each knows only its own agents), or, for a record without one, this session started its fixer. Another
+ *  session's fix is listed, but this one never ends it, adds words to it, or tells of it. */
+export async function ownFixes($: Engine, fixes: Fix[]): Promise<Fix[]> {
+  const sid = await sessionIdNow($)
+  const started = new Set(Object.values(await fixers($)))
+  return fixes.filter(f => (f.session ? f.session === sid : started.has(f.id)))
 }
 
 /** The fix a fixer agent works on, or null when the agent is no fixer. */
@@ -157,7 +166,7 @@ function watch($: Engine, id: number): void {
  *  ended (its change is being tested) takes no more words. */
 export async function liveFixer($: Engine): Promise<{ fix: Fix; agentId: string } | null> {
   const list = await refreshFixes($)
-  const working = (list?.fixes ?? []).filter(f => f.state === 'working' && !ending.has(f.id))
+  const working = await ownFixes($, (list?.fixes ?? []).filter(f => f.state === 'working' && !ending.has(f.id)))
   if (!working.length) return null
   let alive: Set<string>
   try {
@@ -201,7 +210,9 @@ export async function fixerEnded($: Engine, e: Any, id: number): Promise<void> {
 }
 
 async function ended($: Engine, e: Any, id: number): Promise<void> {
-  if ((await fixOf($, id))?.state !== 'working') return
+  // the kernel's record as it is now: another session or the shell may have changed it since this session's list
+  const now = (await refreshFixes($))?.fixes.find(f => f.id === id)
+  if (now?.state !== 'working' || !(await ownFixes($, [now])).length) return
   const all = await fixers($)
   delete all[String(e.agentId)]
   await $.state.set(FIXERS, all as never)
@@ -265,6 +276,7 @@ export function testsWord(f: Pick<Fix, 'tests'> | null | undefined): string {
 /** A fix that still says `working` whose fixer no longer runs (its end came while the plugin reloaded, or never
  *  reached it): thimble takes what its copy holds, as at its end. */
 export async function recoverFixers($: Engine, working: Fix[]): Promise<void> {
+  working = await ownFixes($, working)
   if (!working.length) return
   const map = await fixers($)
   let alive: Set<string>

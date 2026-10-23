@@ -27,7 +27,7 @@ import { busyWhile } from '../bar/busy'
 import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
-import { fixerEnded, fixOfAgent, recoverFixers } from './fixer'
+import { fixerEnded, fixOfAgent, ownFixes, recoverFixers } from './fixer'
 import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
@@ -107,7 +107,7 @@ export const registerFix: Register = on => {
       if (l?.kind === 'applied' && (list?.on === false || (lf && lf.state !== 'on'))) await setFixLine($, null)
       // a reload the line waited for: this is it
       else await reloaded($)
-      const working = (list?.fixes ?? []).filter(f => f.state === 'working')
+      const working = await ownFixes($, (list?.fixes ?? []).filter(f => f.state === 'working'))
       for (const f of working) void busyWhile($, `fixing: ${cut(f.title, 36)} · in a copy`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
       await recoverFixers($, working)
       // a newer release: one line says so, once per session (a reload starts the module again)

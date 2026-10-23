@@ -813,3 +813,32 @@ def test_merge_in_a_shell_asks_first_and_a_request_alone_does_not_merge(world, m
     r = FX.done(FX.new("y")["id"], "Y", "", request=True)
     with pytest.raises(FX.FixError, match="none of these fixes changes code"):
         FX.merge([q["id"], r["id"]], press(q["id"]))
+
+
+def test_two_sessions_check_only_their_own_fixes_and_a_copy_that_is_no_checkout_fails_for_r(world):
+    # session A applies fix 1, then asks for fix 2; session B's look for ended fixers must not end it
+    r = made(world)
+    FX.done(r["id"], "Bar says read", "x", session="s-made-up-a")
+    FX.apply(r["id"], press(r["id"]))
+    two = made(world, "make the bar bold", edit=False)
+    assert two["state"] == "working"
+    two = FX.put({**two, "session": "s-made-up-a"})
+    with pytest.raises(FX.FixError, match="another Claude Code session"):
+        FX.done(two["id"], session="s-made-up-b")
+    assert FX.get(two["id"])["state"] == "working"
+    # a check that already ended it (a request, its copy dropped): a second end does not run git anywhere
+    FX.done(two["id"], session="s-made-up-a")
+    assert FX.get(two["id"])["state"] == "request" and FX.get(two["id"])["work"] is None
+    with pytest.raises(FX.FixError, match="nothing to check"):
+        FX.done(two["id"], session="s-made-up-a")
+    # r: a new copy; something in it removes its git link (the folder stays): a clear line, and r works again
+    three = FX.redo(two["id"], session="s-made-up-a")
+    assert three["session"] == "s-made-up-a" and Path(three["work"]).is_dir()
+    (Path(three["work"]) / ".git").unlink()
+    out = FX.done(three["id"], session="s-made-up-a")
+    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "r starts it again" in out["error"]
+    assert out["work"] is None and not Path(three["work"]).exists()
+    again = FX.redo(three["id"], session="s-made-up-a")
+    p = Path(again["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text() + "// bold\n")
+    assert FX.done(again["id"], "Bar bold", "y", session="s-made-up-a")["state"] == "ready"

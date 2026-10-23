@@ -79,6 +79,9 @@ function setup() {
     const ok = (out: unknown) => ({ exitCode: 0, stdout: typeof out === 'string' ? out : JSON.stringify(out), stderr: '' })
     const verb = argv[argv.indexOf('fix') + 1]
     if (verb === 'list') return ok(list())
+    // the kernel records the session whose fixer works on the fix (new, round, redo)
+    const si = argv.indexOf('--session')
+    if (si > 0 && ['new', 'round', 'redo'].includes(verb!)) fix.session = argv[si + 1]
     if (verb === 'new') {
       made = true
       if (stdin) fix.words = [stdin]
@@ -165,7 +168,8 @@ function setup() {
     for (let n = 0; n < 5 && timers.length; n++) for (const fn of timers.splice(0)) await fn()
     await new Promise(r => setTimeout(r, 5))
   }
-  const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).join(' ')).filter(Boolean)
+  // the session the plugin names on new, round, redo and done is left out: one test looks at it
+  const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).join(' ').replace(/ --session \S+/, '')).filter(Boolean)
   /** The fixer's end: its agent idles, and its turn's end reaches the hooks. */
   const end = async (answer: string, agentId = 'agent-fixer-1') => {
     for (const a of agents) if (a.id === agentId) a.status = 'idle'
@@ -192,7 +196,7 @@ test("a request forks the session into its copy with a text copy of the screen; 
   await s.$.state.set({ plugin: 'thimble', key: 'failLine' }, { kind: 'failed', text: 'The card “Runs by day” could not be drawn' })
   await s.call('command.run', { command: 'thimble-fix', args: '' })
   const r = await s.call('command.run', { command: 'thimble-fix', args: "make the bar's coverage item say read" })
-  expect(String(r.text)).toBe('A fork of this session is fixing it in the background (fix 1). Keep going.')
+  expect(String(r.text)).toBe('A fork of this session is fixing it in the background (fix 1: make the bar say read). Keep going.')
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("make the bar's coverage item say read")
   // a fork (no agent type of its own), in the copy, whose first message opens with the fixer's task
   expect(s.spawns[0]).toMatchObject({ subagentType: 'fork', cwd: WORK })
@@ -215,6 +219,27 @@ test("a request forks the session into its copy with a text copy of the screen; 
     expect(String((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-6', agentId, file_path: `${HOME}/fixes/asks/1.json` }, ran)).deny)).toContain('thimble alone')
   }
   expect((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-7', command: 'thimble fix list' }, ran)).result.ran).toBe('thimble fix list')
+})
+
+test("two sessions share the fixes' folder: a fix another session's fixer works on is never ended, given words or told of here", async () => {
+  const s = setup()
+  const other = (id: number, session?: string) => ({ id, title: `a change made elsewhere ${id}`, words: ['made-up words'], rounds: 1, made_in: 'terminal', created: 1761100000, state: 'working', work: `${HOME}/fixes/work/${id}`, commit: null, files: [], tests: null, summary: '', error: null, ...(session ? { session } : {}) })
+  // fix 7: another session's fixer works on it; fix 8: a record with no session, whose fixer this session never started
+  s.others.push(other(7, 's-other'), other(8))
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await s.call('turn.complete', { turnId: 't-main', reason: 'answer', answer: 'ok', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  expect(s.verbs().filter(v => /^done (7|8)\b/.test(v))).toEqual([])
+  // words go to a new fix of this session's, which the kernel records with this session
+  const r = await s.call('command.run', { command: 'thimble-fix', args: "make the bar's coverage item say read" })
+  expect(String(r.text)).toContain('(fix 1: ')
+  expect(s.sent).toEqual([])
+  expect(s.ran.find(x => x.argv.includes('new'))?.argv.slice(-2)).toEqual(['--session', 's-fix'])
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  expect(s.ran.find(x => x.argv.includes('done'))?.argv).toEqual(expect.arrayContaining(['done', '1', '--session', 's-fix']))
+  expect(s.verbs().filter(v => /^done (7|8)\b/.test(v))).toEqual([])
+  expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
 })
 
 test('more words while the fixer works go to the same fixer, as a round of its fix', async () => {
@@ -495,7 +520,7 @@ test('words while the fix applied last is on: the fixer hears of it, and its end
   s.others.push(onFix())
   await s.call('session.start', { cwd: '/made-up/data' })
   const r = await s.call('command.run', { command: 'thimble-fix', args: 'not quite: keep the percent' })
-  expect(String(r.text)).toBe('A fork of this session is fixing it in the background (fix 1). Keep going.')
+  expect(String(r.text)).toBe('A fork of this session is fixing it in the background (fix 1: make the bar say read). Keep going.')
   expect(s.verbs()).toContain('new --made-in terminal --refines 5')
   const first = String(s.spawns[0].prompt)
   expect(first).toContain('The person applied fix 5 ("Bar says read": The bar says read.; asked in the words "say read, not coverage") last')

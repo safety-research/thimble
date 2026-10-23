@@ -518,10 +518,11 @@ REFINABLE = ("on", "off", "ready")
 
 
 def new(words: str, made_in: str = "terminal", title: str | None = None, refines: int | str | None = None,
-        always: bool = False) -> dict[str, Any]:
+        always: bool = False, session: str | None = None) -> dict[str, Any]:
     """A request: a copy cut from mine. `refines`: a fix that is on, off or ready, which these words may change (the
     fixer's end says so, and done folds the change into it; `always`: they change it whatever the end says). Its
-    change is in the copy: mine holds it when it is on, else thimble puts it on the copy first."""
+    change is in the copy: mine holds it when it is on, else thimble puts it on the copy first. `session`: the Claude
+    Code session whose fixer works on it; only that session checks it at the fixer's end."""
     words = (words or "").strip()
     if not words:
         raise FixError("say what should work differently: /thimble-fix make the bar say how many citations failed")
@@ -553,17 +554,18 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, refines
         rec = {"id": fid, "title": (title or short(words)).strip(), "words": [words], "rounds": 1, "made_in": made_in,
                "created": time.time(), "state": "working", "work": str(wt), "base": base, "commit": None, "files": [],
                "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
+               "session": session or None,
                **({"refines": tgt["id"], "refines_always": bool(always)} if tgt else {})}
         return put(rec)
 
 
-def round_(fid: int | str, words: str) -> dict[str, Any]:
-    """More words for a fix whose copy is still there: a new round of the same fix."""
+def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, Any]:
+    """More words for a fix whose copy is still there: a new round of the same fix, whose fixer works in `session`."""
     rec = get(fid)
-    if not rec.get("work") or not Path(rec["work"]).is_dir():
+    if not _is_checkout(rec.get("work")):
         raise FixError(f"fix {rec['id']} has no copy any more; ask for a new fix")
     rec.update(words=[*rec.get("words", []), words.strip()], rounds=int(rec.get("rounds") or 1) + 1, state="working",
-               error=None)
+               error=None, **({"session": session} if session else {}))
     return put(rec)
 
 
@@ -593,11 +595,26 @@ def protected_why(paths: list[str]) -> str:
     return f"it changes {_and(named)}; thimble does not apply changes to its safety files"
 
 
+def _is_checkout(work: str | None) -> bool:
+    """Whether a fix's copy is there and is still a git checkout of its own (a worktree of live). A record without
+    a copy has work None, which must never read as the kernel's own folder."""
+    if not work or not Path(work).is_dir():
+        return False
+    top = git("rev-parse", "--show-toplevel", cwd=work, check=False)
+    return bool(top) and Path(top).resolve() == Path(work).resolve()
+
+
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
-         tests: bool = True, changes: int | str | None = None) -> dict[str, Any]:
+         tests: bool = True, changes: int | str | None = None, session: str | None = None) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the quick tests in
     the sandbox. ready, failed (with the reason), or a request with no code. `changes`: the fixer's end said its
-    change refines that fix (or the person asked to change it, refines_always): a ready change goes into it (fold)."""
+    change refines that fix (or the person asked to change it, refines_always): a ready change goes into it (fold).
+    `session`: the session that asks; a fix whose fixer works in another session is that session's to check."""
+    rec = get(fid)
+    if session and rec.get("session") and rec["session"] != session:
+        raise FixError(f"fix {rec['id']} is being made in another Claude Code session, which checks it when its fixer ends")
+    if rec.get("state") != "working":
+        raise FixError(f"fix {rec['id']} was checked already ({state_word(rec)}), so there is nothing to check")
     rec = _done(fid, title, summary, request, tests)
     target = changes if changes not in (None, "") else rec.get("refines") if rec.get("refines_always") else None
     if target is not None and rec.get("state") == "ready":
@@ -665,9 +682,14 @@ def _take_out(fid: int, why: str) -> dict[str, Any]:
 
 def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool) -> dict[str, Any]:
     rec = get(fid)
-    wt = Path(rec.get("work") or "")
-    if not wt.is_dir():
-        raise FixError(f"fix {rec['id']} has no copy")
+    if not _is_checkout(rec.get("work")):
+        # the copy is gone, or something in it removed its git link: nothing of it can be checked. r makes a new copy
+        _drop_work(rec)
+        rec.update(state="failed", commit=None, files=[], tests=None,
+                   error="its copy of thimble was gone or no longer a git checkout, so thimble could not check it; "
+                         "r starts it again in a new copy")
+        return put(rec)
+    wt = Path(rec["work"])
     if title and title.strip():
         rec["title"] = short(title, 60)
     rec["summary"] = (summary or "").strip()[:2000]
@@ -932,7 +954,7 @@ def not_now(fid: int | str) -> dict[str, Any]:
     return put(rec)
 
 
-def redo(fid: int | str, words: str = "") -> dict[str, Any]:
+def redo(fid: int | str, words: str = "", session: str | None = None) -> dict[str, Any]:
     """r: a new copy, cut from mine as it is now, for the same fix: the fixer gets the person's words again, and the
     earlier change (tmp/<id>/earlier.patch) to start from."""
     rec = get(fid)
@@ -951,6 +973,7 @@ def redo(fid: int | str, words: str = "") -> dict[str, Any]:
         if earlier.strip():
             (tmp_dir(rec["id"]) / "earlier.patch").write_text(earlier)
         rec.update(state="working", work=str(wt), base=base, error=None, tests=None, rounds=int(rec.get("rounds") or 1) + 1,
+                   session=session or None,
                    words=[*rec.get("words", []), *([words.strip()] if words.strip() else [])])
         return put(rec)
 
@@ -2128,12 +2151,12 @@ def cmd(a) -> int:
             if r.get("reload"):
                 print(RELOAD)
         elif verb == "new":
-            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.refines, a.always))
+            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.refines, a.always, a.session))
         elif verb == "round":
-            out_json(round_(a.id, stdin_text() or a.words or ""))
+            out_json(round_(a.id, stdin_text() or a.words or "", a.session))
         elif verb == "done":
             summary = stdin_text() if a.summary == "-" else (a.summary or "")
-            out_json(done(a.id, a.title, summary, a.request, not a.no_tests, a.changes))
+            out_json(done(a.id, a.title, summary, a.request, not a.no_tests, a.changes, a.session))
         elif verb == "apply":
             if a.ask == "-":
                 out_json(apply(a.id, stdin_text()))
@@ -2154,7 +2177,7 @@ def cmd(a) -> int:
         elif verb == "notnow":
             out_json(not_now(a.id))
         elif verb == "redo":
-            out_json(redo(a.id, stdin_text() or a.words or ""))
+            out_json(redo(a.id, stdin_text() or a.words or "", a.session))
         elif verb == "undo":
             out_json(undo(a.id))
         elif verb == "remove":
