@@ -410,11 +410,13 @@ def test_the_kernels_memory_limits_stay_within_bounds_on_any_machine(monkeypatch
     assert view_calls.rss_max() == 20000 * 1024**2
 
 
-async def test_deleting_a_view_lets_go_of_the_kernel_that_holds_its_index(ws, kernels):
+async def test_deleting_a_view_lets_go_of_the_kernel_that_holds_its_index(ws, kernels, monkeypatch):
+    # a first call that a loaded machine slows past SPARE_AFTER_S starts a spare kernel, views-2, beside `views`
+    monkeypatch.setattr(view_calls, "SPARE_AFTER_S", 60.0)
     await views.reader_call(CORPUS, "count", "records", {})
     assert [w.name for w in view_calls._pools[CORPUS]] == ["views"]
     views.delete_view(CORPUS, "count")
-    for _ in range(20):
+    for _ in range(200):
         if kernels.stopped:
             break
         await asyncio.sleep(0.05)
