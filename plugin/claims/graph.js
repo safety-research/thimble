@@ -1013,8 +1013,9 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false } = {})
   const tone = c => toneOf(gi.get(String(c.cluster)) ?? 0)
   const { claim, group, chosen } = selectedOf(data, st)
   const fresh = freshOf(data, st)
-  // `+N new` for a moment: the claims that came in while browsing, else the last look's
-  const head = [headRuns(data, { narrow, fresh: bright ? fresh.size || claims.filter(c => c.turn != null && c.turn === data.last).length : 0 })]
+  // `+N new` for a moment: the claims that came in while browsing, else the last look's. The head counts the store's
+  // clusters, not the cells the map joined them into
+  const head = [headRuns(raw, { narrow, fresh: bright ? fresh.size || claims.filter(c => c.turn != null && c.turn === data.last).length : 0 })]
   for (const g of data.gaps || []) head.push([{ s: `Turn ${g.turn} was not read: `, tone: 'bad' }, { s: cut(g.why || 'the look at the answer failed', W - 24), tone: 'dim' }])
   const none = { claim: null, group: null, chosen: false, cites: 0, shown: null, cut: false, fixes: 0, windowed: false, narrow, cellRows: 0, data, order: [] }
   if (!claims.length) return { head, graph: [], panel: [], ...none }
@@ -1065,10 +1066,10 @@ const result = panel => ({
 })
 
 /** The head: Claims, how many and in how many clusters (`no claims yet` before the first), and `+N new` for a moment
- *  after claims came in. */
+ *  after claims came in. The clusters are the lens's that hold claims (the claims between clusters are none). */
 function headRuns(data, { narrow = false, fresh = 0 } = {}) {
   const n = data.total || 0
-  const groups = (data.groups || []).length
+  const groups = (data.groups || []).filter(g => g.id != null).length
   const out = [{ s: 'Claims', bold: true }]
   if (!n) out.push({ s: ' · no claims yet', tone: 'dim' })
   else out.push({ s: ` · ${n.toLocaleString('en-US')}${narrow ? '' : ` claim${n === 1 ? '' : 's'}`}${groups > 1 ? ` · ${groups} clusters` : ''}`, tone: 'dim' })

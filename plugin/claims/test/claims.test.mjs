@@ -362,7 +362,8 @@ test('fourteen clusters: near clusters join, named for both; past what the map h
   // sixth, which says so; every claim is drawn, and the map and the detail fit the pane, whatever is chosen
   const apart = paneData(build(false))
   const v = graphView(apart, {}, { w: 62, h: 30 })
-  assert.match(rowText(v.head[0]), /^Claims · 60 claims · 6 clusters$/)
+  // the head counts the store's 14 clusters, not the 6 cells the map drew them in
+  assert.match(rowText(v.head[0]), /^Claims · 60 claims · 14 clusters$/)
   assert.deepEqual(v.data.groups.map(g => g.name), ['topic 0', 'topic 1', 'topic 2', 'topic 3', 'topic 4', 'topic 5 + 8 other clusters'])
   const onMap = new Set(v.graph.flatMap(r => r.filter(x => /^g:/.test(x.part || '') && x.s.trim()).map(x => x.part)))
   assert.equal(onMap.size, 6)
