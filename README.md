@@ -46,7 +46,7 @@ scripts/install.sh
 
 Run `claude` in a folder with files you'd like to analyze. thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off; `/plugin` turns thimble off.
 
-![thimble in the terminal: a heatmap card, a side thread on one row, and a reply with checked citations](docs/assets/thimble-term.png)
+![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
 
 ### Browser workbench
 
