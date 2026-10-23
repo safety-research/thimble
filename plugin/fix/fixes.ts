@@ -35,7 +35,7 @@ export type Fix = {
 }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y apply · d diff · n not now), applied (u undo), off (after u),
- *  failed (d diff · r redo · n not now), request (no code), a new release with the fixes replayed on it (update), or a
+ *  failed (d diff · r redo · n not now), request (no code), a new release with the fixes set aside (update), or a
  *  problem with what to do. */
 export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release'; said?: string }
 
@@ -196,32 +196,16 @@ export async function diffText($: Engine, id: number): Promise<string> {
   return r?.ok ? r.out : ''
 }
 
-/** /thimble-fix update, the same as `thimble update` in a shell: the newest release for both modes, the fixes replayed
- *  on it. The line says what came of it, and the session loads it. The words it prints (with the one command for the
- *  pending fixes), for the command's reply. */
-export async function updateFixes($: Engine): Promise<string> {
-  const r = await kernelFix($, ['update', '--json'], { timeoutMs: 600000, doing: 'moving thimble to its newest release' })
-  if (!r.ok) {
-    const said = `thimble did not update: ${cut(r.err.replace(/^thimble update: /, '') || 'thimble update gave nothing', 200)}. Your fixes stay as they were.`
-    await setFixLine($, { id: 0, kind: 'problem', said })
-    return said
-  }
-  const d = jsonOf<Any>(r.out) ?? {}
-  await refreshFixes($)
-  const lines = (Array.isArray(d.lines) ? d.lines : []).map(String).join('\n')
-  if (!d.said) return lines || 'thimble is the newest release.'
-  await setFixLine($, { id: 0, kind: 'update', said: String(d.said) })
-  await tellAtNextPrompt($, 'fix-update', `thimble moved to a new release with the person's fixes:\n${lines}`)
-  await load($, d)
-  return lines
-}
+/** /thimble-fix update: thimble update runs in a shell, not in this session, because it changes the thimble the session
+ *  runs. The reply says so, with the commands. */
+export const UPDATE_IN_SHELL = 'thimble update runs in a shell, not inside Claude Code: it changes the thimble this session runs. In a terminal, run thimble update; it says when to run thimble reapply for your fixes. Then type /reload-plugins here.'
 
 /** At session start, while thimble runs from live: one line when a newer release is out. Nothing moves until the
  *  person runs thimble update (it can take minutes, and a fix that does not fit needs them). */
 export async function checkUpdate($: Engine): Promise<void> {
   const r = await kernelFix($, ['update', '--check', '--json'], { timeoutMs: 60000 }).catch(() => null)
   const d = r?.ok ? jsonOf<Any>(r.out) : null
-  if (d?.newer) await setFixLine($, { id: 0, kind: 'release', said: `thimble ${d.to} is out (you have ${d.from}) · /thimble-fix update, or thimble update in a shell` })
+  if (d?.newer) await setFixLine($, { id: 0, kind: 'release', said: `thimble ${d.to} is out (you have ${d.from}) · in a shell: thimble update` })
 }
 
 /** Claude ran `thimble update` (the pending fixes' prompt asks for --continue): the session loads what it changed at the

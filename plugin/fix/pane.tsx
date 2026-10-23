@@ -36,7 +36,7 @@ const LOOK: Record<string, { g: string; w: string; c?: string; dim?: boolean }> 
   on: { g: '●', w: 'on', c: 'success' }, off: { g: '○', w: 'off', dim: true }, ready: { g: '◆', w: 'ready', c: 'warning' },
   working: { g: '…', w: 'working', dim: true }, failed: { g: '×', w: 'failed', c: 'error' }, redo: { g: '!', w: 'redo', c: 'warning' },
   request: { g: '◇', w: 'request', c: KEY_COLOR }, sent: { g: '↑', w: 'sent', c: KEY_COLOR }, saved: { g: '↓', w: 'saved', dim: true },
-  released: { g: '✓', w: 'released', dim: true }, pending: { g: '!', w: 'pending', c: 'warning' },
+  released: { g: '✓', w: 'released', dim: true }, pending: { g: '○', w: 'off', dim: true },
 }
 
 async function viewNow($: Engine): Promise<View> {
@@ -61,7 +61,8 @@ function noteOf(f: Fix): string {
   if (f.state === 'on' && (f.rounds || 1) > 1) return `${f.rounds} rounds`
   if (f.state === 'ready') return 'waits for y'
   if (f.state === 'working') return 'Claude works on it'
-  if (f.state === 'failed' || f.state === 'redo' || f.state === 'pending') return f.error || ''
+  if (f.state === 'pending') return `${f.note || 'set aside at an update'} · thimble reapply in a shell`
+  if (f.state === 'failed' || f.state === 'redo') return f.error || ''
   if (f.state === 'request') return 'no code'
   if (f.state === 'sent') return f.pr || ''
   if (f.state === 'saved') return 'saved as files'

@@ -15,8 +15,8 @@ workspaces (0.10 cannot open them), and the commands that remove 0.9.
     the sandbox its cards run in (Anthropic's sandbox runtime, pinned by the plugin, in ~/.thimble/srt); on Linux it
     says which system packages the sandbox lacks, with the one command that installs them (it never runs sudo).
     Without the claude command, it prints the two commands to run.
-    It also puts a thimble command in ~/.local/bin, for a shell: thimble fixes lists your changes to thimble, and
-    thimble update moves both products to the newest release with them.
+    It also links the thimble command into ~/.local/bin, for a shell: thimble update moves both products to the
+    newest release, thimble fixes lists your changes to thimble, and thimble --help lists the rest.
   The browser workbench (thimble 0.8's browser mode), from this checkout: the server (uv sync in browser/backend,
     with its test extras), the page and the sandbox runtime (npm ci in browser/frontend, then a build), and a
     thimble-browser launcher in ~/.local/bin. It says how much disk space this takes, about 1 GB. Then it asks how
@@ -28,7 +28,7 @@ Running it again is safe, and updates both.
   --no-browser   install the terminal plugin only
   --no-plugin    install the browser workbench only
   --local        use this checkout as the plugin's marketplace, in place of GitHub (to try a branch)
-  --bin-dir DIR  put the thimble and thimble-browser launchers in DIR
+  --bin-dir DIR  put the thimble command and the thimble-browser launcher in DIR
   --no-setup     do not ask how the browser workbench reaches Claude (the page asks at its first start)
   --remove-0.9   when thimble 0.9 is here, remove it, then install: it shows the steps and runs them only after you
                  answer y, in a terminal (without one, it removes nothing)
@@ -204,6 +204,30 @@ launcher() {
     *) notes+=("$bin_dir is not on your PATH: add it, or run $to by its full path") ;;
   esac
 }
+# link_cli TARGET: bin_dir/thimble, a link to TARGET (the installed plugin's bin/thimble), so that thimble is a command
+# in a shell once bin_dir is on PATH. thimble update points the link at ~/.thimble/fixes/live when Claude Code loads
+# thimble from there; cli-link in thimble's home names the link for it. Another program of that name is left alone.
+link_cli() {
+  local to="$bin_dir/thimble" home="${THIMBLE_HOME:-$HOME/.thimble}"
+  mkdir -p "$bin_dir"
+  if [ -L "$to" ]; then
+    case "$(readlink "$to")" in
+      */plugin/bin/thimble) ;;
+      *) say "$to is another program, so the thimble command was not linked. Pass --bin-dir to put it elsewhere."; return 0 ;;
+    esac
+  elif [ -e "$to" ] && ! grep -q 'written by thimble scripts/install.sh' "$to" 2>/dev/null; then
+    say "$to is another program, so the thimble command was not linked. Pass --bin-dir to put it elsewhere."
+    return 0
+  fi
+  rm -f "$to.tmp"
+  ln -s "$1" "$to.tmp" && mv -f "$to.tmp" "$to"
+  mkdir -p "$home" && printf '%s\n' "$to" > "$home/cli-link"
+  say "The thimble command: $to → $1"
+  case ":$PATH:" in
+    *":$bin_dir:"*) ;;
+    *) notes+=("$bin_dir is not on your PATH, so a new terminal does not find thimble. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"$bin_dir:\$PATH\"") ;;
+  esac
+}
 # sq TEXT: TEXT in single quotes, for a launcher
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
@@ -255,15 +279,9 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
       say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
       node "$at/sandbox/setup.mjs" --probe || notes+=("cards do not draw until the sandbox works: do what the line above says; the next card tries again, in a running claude session too")
     fi
-    # thimble in a shell: the plugin's own command, from ~/.thimble/fixes/live once thimble runs from there
+    # thimble in a shell (thimble update, thimble fixes): a link to the plugin's own command, as 0.9 had it
     if [ -n "$at" ] && [ -x "$at/bin/thimble" ]; then
-      launcher thimble "#!/bin/sh
-# thimble, written by thimble scripts/install.sh: the terminal plugin's command in a shell (thimble fixes, thimble update).
-# It runs the thimble that Claude Code loads: ~/.thimble/fixes/live once your fixes or thimble update put it there.
-live=\"\${THIMBLE_HOME:-\$HOME/.thimble}/fixes/live/plugin/bin/thimble\"
-[ -x \"\$live\" ] && exec \"\$live\" \"\$@\"
-exec $(sq "$at/bin/thimble") \"\$@\"
-"
+      link_cli "$at/bin/thimble"
     fi
     say "The plugin works in a new claude session, in a folder of data files that you trust."
   else

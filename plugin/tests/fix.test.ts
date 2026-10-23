@@ -85,11 +85,6 @@ function setup() {
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
     if (verb === 'diff') return ok('diff --git a/plugin/bar/bar.tsx b/plugin/bar/bar.tsx\n-  coverage\n+  read\n')
     if (verb === 'update' && argv.includes('--check')) return ok({ from: '0.10.2', to: '0.10.3', newer: fix.state === 'on' })
-    if (verb === 'update') {
-      return ok(fix.state === 'on'
-        ? { said: 'thimble 0.10.3 · 1 pending', pending: [1], reload: true, lines: ['thimble 0.10.2 → 0.10.3', '  pending         make the bar say read', '', `  cd ${HOME}/fixes/live && claude "$(cat ${HOME}/fixes/pending/0.10.3.md)"`] }
-        : { said: '', reload: false, lines: ['thimble 0.10.3 is the newest release (0.10.3).'] })
-    }
     return ok({})
   }
   const where = { root: '/made-up/data' }
@@ -252,14 +247,14 @@ test("/thimble-fix alone lists the fixes; d shows the selected fix's diff; u on 
   expect(s.verbs()).toContain('apply 1 --ask -')
 })
 
-test('at session start one line says a newer release is out, once a session; /thimble-fix update moves to it and gives the command for the pending fixes', async () => {
+test('at session start one line says a newer release is out, once a session; /thimble-fix update says to run thimble update in a shell', async () => {
   const s = setup()
   s.fix.state = 'on'
   await s.call('session.start', { cwd: '/made-up/data' })
   await s.tick()
   expect(s.verbs()).toContain('update --check --json')
   expect(s.verbs()).not.toContain('update --json')
-  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 is out (you have 0.10.2) · /thimble-fix update')
+  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 is out (you have 0.10.2) · in a shell: thimble update')
   expect(s.commands).toEqual([])
   // the reload starts the module again: no second look in this session
   await s.call('session.start', { cwd: '/made-up/data' })
@@ -267,14 +262,13 @@ test('at session start one line says a newer release is out, once a session; /th
   expect(s.verbs().filter(v => v === 'update --check --json').length).toBe(1)
   await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
   expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
-  // the person's /thimble-fix update: the release with the fixes on it, the summary, and the session reloads
+  // /thimble-fix update: the session does not move thimble under itself; the reply names the shell's commands
   const r = await s.call('command.run', { command: 'thimble-fix', args: 'update' })
   await s.tick()
-  expect(s.verbs()).toContain('update --json')
-  expect(String(r.text)).toContain('thimble 0.10.2 → 0.10.3')
-  expect(String(r.text)).toContain(`cd ${HOME}/fixes/live && claude "$(cat ${HOME}/fixes/pending/0.10.3.md)"`)
-  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 · 1 pending')
-  expect(s.commands).toEqual(['reload-plugins'])
+  expect(s.verbs()).not.toContain('update --json')
+  expect(String(r.text)).toContain('In a terminal, run thimble update')
+  expect(String(r.text)).toContain('thimble reapply')
+  expect(s.commands).toEqual([])
 })
 
 test("the session opened in live edits live's code, and its thimble update --continue reloads at the end of the turn; other sessions may not", async () => {

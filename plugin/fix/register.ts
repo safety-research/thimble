@@ -22,7 +22,7 @@ import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { fixerCall, fixerCheck, fixerEnded, fixOfAgent, FIXER, recoverFixers } from './fixer'
-import { checkUpdate, fixesDir, fixesNow, fixLineNow, refreshFixes, reloadIfDue, setFixLine, updateFixes, updateRan } from './fixes'
+import { checkUpdate, fixesDir, fixesNow, fixLineNow, refreshFixes, reloadIfDue, setFixLine, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
 import { requestFix } from './request'
@@ -101,7 +101,7 @@ export const registerFix: Register = on => {
 
   on('command.run', { command: 'thimble-fix' }, async ($, e) => {
     const words = String(e.args || '').trim()
-    if (/^update$/i.test(words)) return { text: await updateFixes($) }
+    if (/^update$/i.test(words)) return { text: UPDATE_IN_SHELL }
     if (!words) {
       const placed = await openFixes($)
       return placed ? {} : { text: 'Your fixes open in a pane in a wider terminal. In a shell: thimble fix list' }

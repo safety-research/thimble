@@ -82,10 +82,10 @@ export const TEXTS = {
     reader: 'fix/submit.ts',
     use: 'one model call per fix the person submits',
   },
-  'update-pending': {
-    about: 'apply the fixes that did not fit a new release on top of it, one commit per fix, then record them',
+  reapply: {
+    about: 'bring back the fixes thimble update set aside, each one the new release still needs, once',
     reader: 'engine/kernel/fixes.py',
-    use: 'the prompt of the Claude Code session that the command thimble update prints opens in live',
+    use: 'the first message of the Claude Code session that thimble reapply opens in live',
   },
 }
 
