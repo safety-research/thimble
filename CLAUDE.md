@@ -1,30 +1,79 @@
-# thimble — notes for Claude Code sessions in this repo
+# thimble: notes for Claude Code sessions in this repository
 
-## What install.sh asks
+This repository holds two products: the terminal plugin for Claude Code (`plugin/`) and the browser workbench
+(`browser/`).
 
-install.sh asks nothing. Where there is a choice, it picks a default and its opening screen names it, with the flag that changes it. Pass such a flag only when the user asks for another choice. A flag is kept, so `thimble update` keeps it:
-- **Browser** (`--browser bundled | system | off`). thimble takes screenshots of the cards and views it draws, to check how they look. install.sh test-launches a Chrome or Edge it finds where Playwright looks and uses one that starts, downloading nothing. Otherwise it downloads Playwright's headless Chromium (about 210 MB from Microsoft's Playwright CDN, 650 MB on disk). The opening screen says which in one line.
+## Installing thimble for a user
 
-install.sh adds thimble's plugin to Claude Code with Claude Code's own commands (`claude plugin marketplace add <install folder>`, then `claude plugin install --scope user thimble@<name>`), so `/thimble` works in any `claude` session, and it doesn't ask about it: its opening screen says so. When another thimble install's plugin is in Claude Code already, it leaves that one and prints the commands that switch it. It runs no sudo. Pass `--no-plugin` only when the user asks for that.
+When the user asks you to install thimble (for example "install thimble from
+https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) has the details and the fixes.
 
-install.sh writes no shell startup file. When `~/.local/bin` is not on PATH, or THIMBLE_HOME is not `~/.thimble`, it prints the line a new terminal needs for `thimble`. Offer to add that line to the user's startup file, and add it only on a yes. `claude` and /thimble need neither line.
+1. Ask first, with your question tool (AskUserQuestion) when you have it, which they want:
+   - **The terminal plugin alone**: in their Claude Code sessions, Claude cites its claims, a second Claude checks
+     them, and Claude draws cards of the data. It needs Node.js and Python, and no other access.
+   - **The browser workbench too**: the same work in a web page on this machine. It takes about 1 GB of disk and needs
+     access to the Claude API: an API key, Workload Identity Federation, or their Claude Code sign-in.
+2. thimble 0.9 is here when `~/.local/bin/thimble` or `~/.thimble/app` exists, or when `scripts/install.sh` (step 3)
+   stops with what it found and the commands that remove it. 0.10 does not load while 0.9's plugin is installed.
+   Before you remove anything, tell the user plainly that removing 0.9 deletes its workspaces (cards, notebooks,
+   labels, reports), which 0.10 cannot open, and offer to move them aside first (`mv ~/.thimble/app/workspaces
+   ~/thimble-0.9-workspaces`; a 0.9 clone keeps them in its own `workspaces/`, which removal leaves alone). Remove 0.9
+   only on a yes, with the commands the script printed (for `thimble uninstall`, run `~/.local/bin/thimble uninstall
+   --yes`, since you cannot answer its question; when it fails, the commands it lists after it). Never pass
+   `--remove-0.9`: it needs a terminal. When this session had 0.9 loaded, each tool call then reports "Plugin
+   directory does not exist": tell the user to type `/reload-plugins`, and go on.
+3. Clone the repository (or use the local folder the user names) and run `scripts/install.sh` in it, with
+   `--no-browser` for the plugin alone, and `--no-setup` (step 4 asks instead). Add `--local` when the source is a
+   local folder, so the plugin comes from it. The script checks what is missing first, one line each, and installs
+   nothing until all of it is there. Tell the user what is missing and the command that fixes it, run that command
+   only when the user agrees, then run the script again.
+4. When the workbench was installed, set up how it reaches Claude before you reply. Ask with your question tool:
+   their Claude Code sign-in, an Anthropic API key, or Workload Identity Federation (WIF). Then:
+   - **Claude Code sign-in**: show this text and get a yes: "This uses your Claude subscription through Claude Code
+     and will launch headless Claude Code sessions in the background." Run `thimble-browser --setup --how claude-code
+     --yes`.
+   - **API key**: never see the key. Give the user one command to run in their own terminal (not with `!` here)
+     that writes it from the clipboard to a file only they can read, such as `(umask 077; pbpaste >
+     ~/.thimble-api-key)` on macOS (Linux: `wl-paste` or `xclip -selection clipboard -o`). When they say it is done,
+     run `thimble-browser --setup --key-file ~/.thimble-api-key`. Never read, print or copy that file. Offer to delete it, and delete it only on a yes.
+   - **WIF**: ask for the path of its config file, or offer to look for one; on a yes, run `thimble-browser --setup
+     --find-wif`, which lists the files it can use, by path only. Run `thimble-browser --setup --how wif --wif-file
+     <path>`. Never print the file.
 
-## Installing
+   Each command ends with a check that Claude answers. When the check fails, tell the user what failed and the next
+   step, and run the command again after the fix. Say that the page asks at its first start only when the user
+   chooses to skip this step.
+5. End with a short reply on how to use what was installed:
+   - The plugin: open `claude` in a folder of data files. Claude cites each claim, and a second Claude checks it
+     against the files; a click on the underlined words opens the evidence. The line above the prompt shows the keys:
+     `v` card, `s` squeeze, `c` claims, `r` coverage. A click on `thimble` in that line, or `/thimble-settings`, opens
+     the settings; `/plugin` turns thimble off.
+   - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints.
+6. When the plugin was installed, offer to show it in this session, in one short line: "Type /reload-plugins, then
+   try it." (You cannot type `/reload-plugins` for them; it loads thimble here.) When they answer after the reload,
+   look at `examples/sample/runs.csv` yourself (40 made-up nightly test runs) and answer: did the failures start
+   after the config change? Answer it as thimble's guidance says: one card, and checked citations. Never ask the
+   user to type the question or a path. If the line above the prompt does not show `thimble` after the reload, say
+   that a new `claude` session in a folder of their own files will have it.
 
-When the user asks you to install thimble (for example "install thimble from https://github.com/safety-research/thimble"), do the whole install for them:
+## Working on thimble
 
-1. If `thimble doctor` already runs, say what is installed and offer `thimble update` instead. Otherwise ask which install they want (with AskUserQuestion where it exists):
-   - **Global** (recommended): the latest release into `~/.thimble/app` (`$THIMBLE_HOME/app` when THIMBLE_HOME is set), Node 20+ only for custom views and the sandbox card code and code tickets run in, updated from releases by `thimble update`.
-   - **Dev**: a git clone in a folder they choose, installed in place with the test tools, needs Node 20.19+, 22.13+ or 24+, updated with `git pull` (which `thimble update` runs).
-2. Get the files. Global: in a `mktemp -d` folder download the latest release's `thimble-*.zip`: with gh, `gh release download --repo safety-research/thimble --pattern 'thimble-*.zip'`; without gh, fetch the `browser_download_url` of that asset from `https://api.github.com/repos/safety-research/thimble/releases/latest` with `curl -fsSL`. Unzip it. If there is no release yet, say so and offer Dev. Dev: `git clone https://github.com/safety-research/thimble.git <folder>`; if this session already runs in a checkout, that checkout can be the folder.
-3. Before installing anything, run `bash scripts/install.sh --dry-run` in the unzipped folder or the clone. It changes nothing. It prints one screen (what it found, with the browser it picked for screenshots and what that downloads from where, what it installs where, what it changes in the user's Claude Code setup), then "Nothing to ask". Show the user that screen in brief, with the browser's line, and ask nothing; go on to step 4. When the dry run lists questions (an older install.sh), ask each with AskUserQuestion, in its words and with its answers as the options, and ask nothing else. Don't answer a question for the user, even one whose answer looks obvious: each changes their machine or their Claude Code setup, and only they know what they want of it.
-4. Run `bash scripts/install.sh` there, with a flag only for an answer from step 3 or a choice the user asked for (such as `--browser off`), then (Global) delete the download folder. It prints a line per step; every command it ran, with its output, is in `~/.thimble/install.log`. If it, or its dry run, says Node is missing or too old, tell the user, with the command or the PATH change it names, and offer to do that; do it only on a yes, then run install.sh again. It checks Node first, so fix that before anything else it reports.
-5. Run `thimble doctor` (`~/.local/bin/thimble doctor` while `~/.local/bin` is not on this session's PATH). End with a short reply: where thimble is installed, and that they run `claude` in a folder with their files, where thimble is on in every session; `/thimble browser` opens the browser workbench, and `/plugin` turns thimble on or off (in a session that was open before the install, /reload-plugins first). When install.sh printed a line for the startup file, say whether you added it. For a step install.sh marked with `!`, tell them what it printed under it. Mention doctor's output only for a check that failed.
+[CONTRIBUTING.md](CONTRIBUTING.md) gives the layout of each product and how to test it. `scripts/check.sh` runs every
+check CI runs, and `scripts/check.sh STEP` one of them.
 
-To change the browser later, run install.sh again with `--browser`. When `thimble update` stops because a question has no flag (an older install), ask the questions it lists as in step 3 and run `thimble update` again with their flags, which it passes on to install.sh. An install older than 0.3.0 has a `thimble update` that takes no flags: unzip the latest release and run its `bash scripts/install.sh --dir <the install folder>` with the flags instead. A re-run skips the steps that are done and never downloads the browser again once it is there.
+- A change to a text the plugin's model reads is an edit of its one file (`plugin/prompts/<text>.md`), and follows
+  CONTRIBUTING.md, "Changing what the model reads": change the cause in the text, never add a rule against the
+  symptom.
+- The browser workbench (`browser/`, thimble 0.8's browser mode) keeps its own texts in `browser/prompts/`; it reads
+  none from `plugin/`. `scripts/check.sh parity` checks that they render and name only what its code has.
+- In the plugin, Claude's card views run only in the card runner (`plugin/cards/runner.mjs`), which runs only in
+  Anthropic's sandbox runtime (`plugin/cards/argv.mjs` gives its rules; `plugin/sandbox/` holds the pin and the
+  launcher): no network, reads only the runner's code and the card copies, writes only its own folder. A `vm` context
+  per card keeps the cards apart. When the sandbox cannot start, cards do not run. The hooks never run a view
+  themselves. Keep it that way.
+- The browser's server binds 127.0.0.1 only, and card code runs only in its kernels' sandbox
+  (`browser/backend/app/kernel_wrap.py`). Keep both that way.
+- The repository holds code, and what the code needs. Keep notes, screenshots and design documents out of it.
 
-If anything goes wrong that you can't fix, tell the user they can reach the maintainer, [@mjoerke](https://github.com/mjoerke) on GitHub, and that `thimble feedback "<what went wrong>"` writes a problem report to attach.
-
-If install.sh fails, follow INSTALL.md's Manual install. A Dev install uses the checkout in place (marketplace `thimble`, `backend/.venv`, the UI in `frontend/dist`); a Global install copies the release to `~/.thimble/app` (marketplace `thimble-local`). Both link `~/.local/bin/thimble` to the install's `plugin/bin/thimble`.
-
-CONTRIBUTING.md says how to set up a checkout, run it in development and run the tests.
+The repository is public. The pre-push hook stops a push whose commits hold private details (CONTRIBUTING.md, "Keep
+private details out of commits"). When it does, fix the commit as it says. Never push with `--no-verify`.

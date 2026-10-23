@@ -1,0 +1,7 @@
+                                                     Centered title
+                                        ╭──────────────────────────────────────╮
+                                        │This text is longer than the four rows│
+                                        │of its box can hold, so the box cuts  │
+                                        ╰──────────────────────────────────────╯
+                                                                   right aligned
+                                                                      also right

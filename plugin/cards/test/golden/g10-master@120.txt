@@ -1,0 +1,12 @@
+ada run 1             ╭────────────────────────────────────────────────────────────────────────────────────────────────╮
+                      │ ada, run 3                                                                                     │
+ada run 2             │ 16 tests, 0 failed, 5 minutes. The run read the fixtures from the shared folder and wrote its  │
+                      │ log next to them, so later runs could compare their output with this one.                      │
+ada run 3             │                                                                                                │
+                      │                                                                                                │
+bram run 1            │                                                                                                │
+                      │                                                                                                │
+bram run 2            │                                                                                                │
+                      │                                                                                                │
+bram run 3            │                                                                                                │
+                      ╰────────────────────────────────────────────────────────────────────────────────────────────────╯

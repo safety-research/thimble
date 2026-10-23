@@ -1,0 +1,8 @@
+╭─────────────────────────────────────────────────────╮
+│ What changed                                        │
+│ Between the second and the third run the parser     │
+│ switched to a stricter mode, and from then on every │
+│ run that read the old fixtures failed with the      │
+│ same error about a missing field, which the agents  │
+│ fixed one file at a time instead of all at once.    │
+╰─────────────────────────────────────────────────────╯

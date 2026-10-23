@@ -1,0 +1,8 @@
+agents/agent-07/session-2026-03-14T09-1…
+agents/agent-07/sess…ery-long-name.jsonl
+…/transcript-with-a-very-long-name.jsonl
+agents/agent-07/session-2026-03-14T09-12
+-07/transcript-with-a-very-long-name.jso
+nl
+名前 テスト 結果: 通過 ✓ and 失敗 ✗ in
+one line of mixed width text that wraps

@@ -1,0 +1,168 @@
+// The browser's client for the backend's routes (src/lib/api.ts, src/report/commentsApi.ts). The backend answers only
+// its own origin and refuses a state-changing request whose body is not JSON (backend/app/http_guard.py), so every
+// call goes to a relative /api path (under the browser's own /b/<key> once it holds its key, src/lib/browserKey.ts),
+// every call that changes state sends JSON as JSON, and a workspace name or an id is percent-encoded into its path
+// segment. Every method of every client is called here with fetch stubbed, so a new
+// route is held to the same rules without a line of its own.
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import * as client from '../../src/lib/api.ts'
+import { bus } from '../../src/lib/bus.ts'
+import { commentsApi } from '../../src/report/commentsApi.ts'
+
+type Call = { url: string; method: string; headers: Record<string, string>; body: unknown }
+let calls: Call[] = []
+
+beforeEach(() => {
+  calls = []
+  vi.stubGlobal('location', { origin: 'http://127.0.0.1:8300' })
+  vi.stubGlobal('fetch', async (url: unknown, init: RequestInit = {}) => {
+    calls.push({ url: String(url), method: init.method ?? 'GET', headers: (init.headers ?? {}) as Record<string, string>, body: init.body })
+    return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } })
+  })
+})
+afterEach(() => vi.unstubAllGlobals())
+
+// a workspace name that would change the path if it were not encoded
+const WS = 'my ws/../x?y#z'
+const CLIENTS: Record<string, Record<string, unknown>> = {
+  api: client.api,
+  canvasApi: client.canvasApi,
+  reportApi: client.reportApi,
+  feedbackApi: client.feedbackApi,
+  labelApi: client.labelApi,
+  docsApi: client.docsApi,
+  scaleApi: client.scaleApi,
+  undoApi: client.undoApi,
+  checksApi: client.checksApi,
+  commentsApi,
+}
+
+/** Every method called with the probe workspace first and plain values after it; each request it made. */
+async function callEverything(): Promise<[string, Call[] | string][]> {
+  const out: [string, Call[] | string][] = []
+  for (const [clientName, methods] of Object.entries(CLIENTS)) {
+    for (const [name, fn] of Object.entries(methods)) {
+      if (typeof fn !== 'function') continue
+      calls = []
+      const result = (fn as (...a: unknown[]) => unknown)(WS, 'id-1', 1, 2, 3, 4)
+      if (typeof result === 'string') {
+        out.push([`${clientName}.${name}`, result])
+        continue
+      }
+      await Promise.resolve(result).catch(() => undefined)
+      out.push([`${clientName}.${name}`, calls])
+    }
+  }
+  return out
+}
+
+describe('the API client', () => {
+  test('every request goes to a relative /api path, and every workspace name in a path is encoded', async () => {
+    const all = await callEverything()
+    expect(all.length).toBeGreaterThan(80)
+    for (const [name, made] of all) {
+      const urls = typeof made === 'string' ? [made] : made.map((c) => c.url)
+      if (typeof made !== 'string') expect(made.length, `${name} makes one request`).toBe(1)
+      for (const url of urls) {
+        expect(url, name).toMatch(/^\/api\//)
+        expect(url, name).not.toContain(WS)
+        expect(url, name).not.toMatch(/\/\.\.\//)
+      }
+    }
+  })
+
+  test("once this browser holds its key, every request goes under the browser's own path, which its cookie is scoped to", async () => {
+    // lib/browserKey: the server scopes the cookie to /b/<key>/api/, so a request to /api/ itself would go unsigned
+    const key = 'Ab3_-'.repeat(6)
+    const held = new Map([['thimble-browser-key', key]])
+    vi.stubGlobal('window', {
+      localStorage: { getItem: (k: string) => held.get(k) ?? null, setItem: (k: string, v: string) => void held.set(k, v) },
+      location: { hash: '', search: '', pathname: '/', origin: 'http://127.0.0.1:8300' },
+      history: { state: null, replaceState: () => undefined },
+      addEventListener: () => undefined,
+    })
+    const all = await callEverything()
+    expect(all.length).toBeGreaterThan(80)
+    for (const [name, made] of all) {
+      const urls = typeof made === 'string' ? [made] : made.map((c) => c.url)
+      expect(urls.length, `${name} asks something`).toBeGreaterThan(0)
+      for (const url of urls) expect(url, name).toMatch(new RegExp(`^/b/${key}/api/`))
+    }
+  })
+
+  test('every request that changes state sends JSON, named as JSON', async () => {
+    for (const [name, made] of await callEverything()) {
+      if (typeof made === 'string') continue
+      for (const c of made) {
+        if (c.method === 'GET') continue
+        expect(c.headers['content-type'], name).toBe('application/json')
+        if (c.body != null) expect(() => JSON.parse(String(c.body)), name).not.toThrow()
+      }
+    }
+  })
+
+  test("a message reaches main as an event; the Report tab's Write and the refused card's buttons are clicks of their own routes", async () => {
+    await client.api.postEvent('w', 'main', { text: 'How many reviews?' })
+    await client.api.write('w', 'report', { text: 'Add the review load.', after: 'report:report#p1' })
+    await client.api.startIt('w', 'r1')
+    await client.api.again('w', 'r2')
+    await client.api.buildView('w', 'posts', { model: 'claude-opus-5-5', effort: 'high' })
+    await client.checksApi.run('w', 'unverified', 'report')
+    expect(calls.map((c) => [c.method, c.url, JSON.parse(String(c.body))])).toEqual([
+      ['POST', '/api/ws/w/events', { kind: 'main', payload: { text: 'How many reviews?' } }],
+      ['POST', '/api/ws/w/write', { doc: 'report', text: 'Add the review load.', after: 'report:report#p1' }],
+      ['POST', '/api/ws/w/subagents/start-it', { request: 'r1' }],
+      ['POST', '/api/ws/w/subagents/again', { request: 'r2' }],
+      ['POST', '/api/ws/w/views/posts/build', { model: 'claude-opus-5-5', effort: 'high' }],
+      ['POST', '/api/ws/w/checks/unverified/run', { doc: 'report' }],
+    ])
+    // main opens on an empty chat: the browser has no Start of its own
+    expect('start' in client.api).toBe(false)
+  })
+
+  test("a view proposal's Accept and Reject, and a notice's Try again, are clicks of their own routes", async () => {
+    await client.api.acceptProposal('w', 'agent timeline')
+    await client.api.rejectProposal('w', 'agent timeline')
+    await client.api.proposeNow('w')
+    expect(calls.map((c) => [c.method, c.url])).toEqual([
+      ['POST', '/api/ws/w/views/proposals/agent%20timeline/accept'],
+      ['POST', '/api/ws/w/views/proposals/agent%20timeline/reject'],
+      ['POST', '/api/ws/w/views/propose-now'],
+    ])
+  })
+
+  test('every request the server refuses for want of sign-in (401, signin: true) tells the page it is signed out', async () => {
+    let heard = 0
+    const off = bus.on('signedOut', () => heard++)
+    vi.stubGlobal('fetch', async (url: unknown, init: RequestInit = {}) => {
+      calls.push({ url: String(url), method: init.method ?? 'GET', headers: (init.headers ?? {}) as Record<string, string>, body: init.body })
+      return new Response('{"detail":"sign in","signin":true}', { status: 401, headers: { 'content-type': 'application/json' } })
+    })
+    const silent: string[] = []
+    let asked = 0
+    try {
+      for (const [clientName, methods] of Object.entries(CLIENTS)) {
+        for (const [name, fn] of Object.entries(methods)) {
+          if (typeof fn !== 'function') continue
+          calls = []
+          heard = 0
+          const result = (fn as (...a: unknown[]) => unknown)(WS, 'id-1', 1, 2, 3, 4)
+          if (typeof result === 'string') continue
+          await Promise.resolve(result).catch(() => undefined)
+          if (!calls.length) continue
+          asked++
+          if (!heard) silent.push(`${clientName}.${name}`)
+        }
+      }
+    } finally {
+      off()
+    }
+    expect(asked).toBeGreaterThan(80)
+    expect(silent).toEqual([])
+  })
+
+  test('the routes thimble removed with its headless agents are gone from the client', () => {
+    const names = Object.keys(client.api)
+    for (const gone of ['resumeSession', 'retrySession', 'setSessionMode']) expect(names, gone).not.toContain(gone)
+  })
+})

@@ -1,0 +1,785 @@
+// The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
+// what it says and what it brings; and what the welcome before them says. Every example is the tour's own
+// (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
+// analyst to act acts only on that example, so nothing reaches the server.
+import { DEMO_LINE } from '../lib/demo'
+import { setMarkup, type Api, type Example, type Step } from './engine'
+import reportFigs from './report-figs.json'
+
+const canvasPanel = '[data-panel="canvas"].shell-panel'
+const filesPanel = '[data-panel="files"].shell-panel'
+const reportPanel = '[data-panel="report"].shell-panel'
+const chatSel = '.chat[data-panel="chat"]'
+
+// ---------- the chat: an example exchange in main's chat
+const cite = (v: string) => `<span class="refchip refchip-value refchip-citation">${v}</span>`
+const QUESTION = 'When did payments 4.12.0 go out, and was it still live when INC-312 opened?'
+const ANSWER = (c: (v: string) => string) =>
+  `It went out at ${c('02:06')} UTC (deploys.csv writes UK time, so 03:06 there) and was still live when INC-312 opened at ${c('08:02')}. The rollback to 4.11.3 began at ${c('08:28')}.`
+const chatHtml = `<div class="chat-flow" style="min-height:0">
+  <div class="chat-msg chat-user"><p class="msg-user chat-message">${QUESTION}</p></div>
+  <div class="chat-msg chat-calls"><div class="chat-callrun" data-calls="2" data-state="done"><span class="chat-callrun-head"><button type="button" class="chat-callchip chat-callrun-chip" aria-expanded="false"><span class="chat-callrun-tools"><span class="chat-callrun-tool"><span class="chat-callrun-name">Bash</span><span class="chat-callrun-n">2</span></span></span><svg class="icon icon-chevron-right chat-callchip-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button></span></div></div>
+  <div class="chat-msg chat-assistant"><div class="chat-text"><p>${ANSWER(cite)}</p></div></div>
+</div>`
+const sessionExample = (api: Api): Example => {
+  const list = api.q(`${chatSel} .chat-list`) || api.q(chatSel)
+  // the example is the real chat's markup in a column of the chat panel's own width (real chat-list, chat-flow and
+  // message classes), inset 12px on each side: the real list reaches 2px past the panel on each side and its user
+  // bubble ends flush with the panel's right edge, which would leave nothing of the highlight around it
+  const ex = document.createElement('div')
+  ex.className = 'tour-ex-chat'
+  // its background covers the real chat beneath, under the dim, below the cutout too
+  ex.dataset.ground = '1'
+  ex.style.background = api.groundOf(list)
+  const inner = document.createElement('div')
+  inner.className = 'chat-list'
+  inner.style.cssText = 'margin: 0; padding: 14px 12px 12px; overflow: hidden'
+  setMarkup(inner, chatHtml)
+  inner.prepend(api.tag(inner))
+  ex.append(inner)
+  api.ex.append(ex)
+  const layout = () => {
+    const C = api.rectOf(api.q(chatSel)),
+      L = api.rectOf(list),
+      F = api.rectOf(api.q(`${chatSel} .chat-foot`))
+    if (!C || !L) return
+    Object.assign(ex.style, { left: `${C.x}px`, top: `${L.y}px`, width: `${C.width}px`, height: `${(F ? F.y : C.y + C.height) - L.y}px` })
+  }
+  return { els: { chat: ex, flow: inner }, layout }
+}
+// the chat as the step shows it: the chat panel's own width, from its head to 14px past the end of the example exchange
+const chatContent = (api: Api) => {
+  const C = api.rectOf(api.q(chatSel)),
+    flow = (api.els.flow as HTMLElement | undefined)?.querySelector('.chat-flow')
+  const F = flow && api.rectOf(flow)
+  if (!C || !F) return null
+  return { x: C.x, y: C.y, width: C.width, height: Math.min(C.y + C.height, F.y + F.height + 14) - C.y }
+}
+
+// ---------- Files: the file browser. The File browser stays on through the Files steps (Files, Labels, Views): a view
+// the analyst left open is closed for them, and opened again once the tour moves to another step or ends.
+const viewTabs = (bar: Element | null) => [...(bar?.querySelectorAll<HTMLElement>('.seg-opt') ?? [])]
+let held: { el: HTMLElement; anchor: string | null } | null = null
+const holdsBrowser = (s: Step | undefined) => !!s?.example && [filesExample, labelsExample, viewsExample].includes(s.example)
+/** The File browser on for the step. */
+const holdBrowser = (api: Api) => {
+  const tabs = viewTabs(api.q('.files-views'))
+  const was = tabs.find((e) => e.classList.contains('active'))
+  const browser = tabs.find((e) => /File browser/.test(e.textContent ?? ''))
+  if (browser && was && was !== browser) {
+    held = { el: was, anchor: was.getAttribute('data-anchor') }
+    browser.click()
+  }
+}
+/** A Files step's leave, whether or not its example was drawn: the view opens again unless the next step is a Files
+ * step too. The engine moves to the next step right after a step's leave, so that step is known a microtask later. */
+const releaseBrowser = (api: Api) =>
+  queueMicrotask(() => {
+    if (holdsBrowser(api.step()) || !held) return
+    const { el, anchor } = held
+    held = null
+    const tab = (anchor && api.q(`.files-views .seg-opt[data-anchor="${CSS.escape(anchor)}"]`)) || el
+    if (tab instanceof HTMLElement && tab.isConnected && !tab.classList.contains('active')) tab.click()
+  })
+const filesExample = (api: Api): Example => {
+  holdBrowser(api)
+  return {}
+}
+
+// the Files panel's status strip as an example shows it, saying `meta`, over thimble's own, which names the analyst's
+// open file
+const statusExample = (api: Api, meta: string) => {
+  const real = () => api.q('[data-panel="files"] .pane-status')
+  const wrap = document.createElement('div')
+  wrap.className = 'tour-ex-status'
+  wrap.dataset.ground = '1'
+  const strip = document.createElement('div')
+  strip.className = 'pane-status'
+  for (const [cls, text] of [['pane-status-name', 'Files'], ['pane-status-meta', meta]]) {
+    const span = document.createElement('span')
+    span.className = cls
+    span.textContent = text
+    strip.append(span)
+  }
+  wrap.append(strip)
+  const layout = () => {
+    const el = real()
+    const S = api.rectOf(el)
+    wrap.style.display = S ? '' : 'none'
+    if (!S || !el) return
+    // the strip's glass over the ground of the panel beneath it, as thimble draws it
+    const ground = api.groundOf(el.parentElement)
+    Object.assign(wrap.style, { left: `${S.x}px`, top: `${S.y}px`, width: `${S.width}px`, height: `${S.height}px`, background: ground, borderRadius: getComputedStyle(el).borderRadius })
+  }
+  return { wrap, layout }
+}
+
+// ---------- Views: an example Timeline view over the Files body, with a views bar that has it on. Inside it the analyst
+// may hover, click and scroll (it writes nothing); Esc there still closes the tour.
+const viewsExample = (api: Api): Example => {
+  const realBar = () => api.q('.files-views'),
+    realBody = () => api.q('[data-panel="files"] .files-body')
+  const bar = api.snap('timelineBar', 'tour-ex-viewsbar')
+  bar.style.background = api.groundOf(realBar())
+  const body = document.createElement('div')
+  body.className = 'tour-ex-viewbody'
+  body.style.background = api.groundOf(realBody())
+  const frame = document.createElement('iframe')
+  frame.src = `${import.meta.env.BASE_URL}tour/timeline/view.html?v=12`
+  frame.title = 'Timeline (example)'
+  Object.assign(frame.style, { display: 'block', width: '100%', height: '100%', border: '0' })
+  body.append(frame)
+  const escape = (win: Window | null) => {
+    try {
+      if (!win) return
+      win.addEventListener('keydown', (e) => e.key === 'Escape' && api.end(), true)
+      win.document.querySelectorAll('iframe').forEach((f) => {
+        f.addEventListener('load', () => escape(f.contentWindow))
+        if (f.contentDocument?.readyState === 'complete') escape(f.contentWindow)
+      })
+    } catch {
+      // a frame of another origin keeps its own keys
+    }
+  }
+  frame.addEventListener('load', () => escape(frame.contentWindow))
+  const status = statusExample(api, 'view · Timeline')
+  api.ex.append(bar, body, status.wrap)
+  const layout = () => {
+    const B = api.rectOf(realBar()),
+      D = api.rectOf(realBody())
+    if (B) Object.assign(bar.style, { left: `${B.x}px`, top: `${B.y}px`, width: `${B.width}px`, height: `${B.height}px` })
+    if (D) Object.assign(body.style, { left: `${D.x}px`, top: `${D.y}px`, width: `${D.width}px`, height: `${D.height}px` })
+    status.layout()
+    return !!(B && D)
+  }
+  holdBrowser(api)
+  return { els: { bar, body, frame, status: status.wrap }, layout }
+}
+
+// ---------- the card steps: the example card (the top card of an orientation's deck, captured, in plain words), scaled
+// so it reads comfortably at the window's size. Where a card of width w0 and height h0 goes on the Canvas: as large as
+// fits beside the popover, at most 1100px wide.
+const fitCard = (api: Api, w0: number, h0: number) => {
+  const P = api.rectOf(api.q(canvasPanel))
+  if (!P) return null
+  const availW = P.width - 280 - 14 - 64,
+    availH = P.height - 28 - 96
+  const w = Math.max(320, Math.min(availW, (availH * w0) / h0, 1100))
+  const h = (w * h0) / w0
+  return { w, h, x: P.x + Math.max(32, (P.width - (w + 14 + 280)) / 2), y: P.y + Math.max(40, (P.height - 28 - h) / 2) }
+}
+const cardExample = (api: Api): Example => {
+  // placed in the layer thimble's own ⌘ pointer reaches, with the card's anchors and parts as thimble drew them, so a
+  // ⌘-click picks a row, a click on text picks its line and a ⌘-drag picks the words, as on a real card. The ask box
+  // on it sends nothing (the engine's guard)
+  const w = api.snap('card', 'tour-ex-card', undefined, { keepAnchors: true })
+  const art = w.querySelector('article')!
+  const cell = document.createElement('div')
+  cell.className = 'bcell bcell-kind-timeline is-sized'
+  cell.style.width = '720px'
+  cell.append(art)
+  w.replaceChildren(cell)
+  Object.assign(w.style, { width: '720px', transformOrigin: '0 0' })
+  Object.assign(api.tag(w).style, { left: '50%', right: 'auto', transform: 'translateX(-50%)' })
+  api.host.append(w)
+  // drawn larger than its layout, a box that clips would hide the lower part of the card from the pointer, so nothing
+  // in the example clips
+  for (const el of [w, ...w.querySelectorAll<HTMLElement>('*')]) {
+    const cs = getComputedStyle(el)
+    if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') el.style.overflow = 'visible'
+  }
+  let key = ''
+  // placed again whenever the window, the Canvas panel or the card's height changes; false until it can be placed
+  const layout = () => {
+    const h0 = art.offsetHeight || cell.offsetHeight
+    const P = api.rectOf(api.q(canvasPanel))
+    const size = P ? `${innerWidth}x${innerHeight}|${[P.x, P.y, P.width, P.height].map(Math.round).join()}|${h0}` : ''
+    if (size && size === key) return
+    const f = fitCard(api, 720, h0)
+    if (!f || !h0) return false
+    key = size
+    Object.assign(w.style, { left: `${f.x}px`, top: `${f.y}px`, height: `${h0}px`, transform: `scale(${f.w / 720})` })
+  }
+  return { els: { card: art, wrap: w, real: false }, layout }
+}
+
+// ---------- the right sidebar (shell/LabelsSidebar.tsx), which the top bar's Labels and Comments buttons open, each on
+// its own section. A step about it opens the real one on its section with that button, so the panes make room for it
+// as they do for the analyst, and lays its example (examples.json, captured) over it; the step's end puts the sidebar
+// back as the analyst had it.
+type SideSection = 'labels' | 'comments'
+const realSide = () => [...document.querySelectorAll<HTMLElement>('aside.lside')].find((e) => !e.closest('.tour-root')) ?? null
+const sideButton = (section: string) => document.querySelector<HTMLElement>(`.shell-side-btn[data-side="${section}"]`)
+/** The sidebar open on `section`; what it returns puts it back as it was. */
+const holdSide = (section: SideSection) => {
+  const was = realSide()?.dataset.section ?? null
+  if (was !== section) sideButton(section)?.click()
+  return () => {
+    const now = realSide()?.dataset.section ?? null
+    // a click on the open section's button closes the sidebar, a click on the other's shows that one
+    if (now !== was) sideButton(was ?? now ?? section)?.click()
+  }
+}
+/** The example sidebar on `section`, laid over the real one while it is open. */
+const sideExample = (api: Api, section: SideSection) => {
+  const wrap = api.snap(section === 'labels' ? 'labelsSide' : 'commentsSide', 'tour-ex-side')
+  const aside = wrap.firstElementChild as HTMLElement
+  aside.removeAttribute('data-section')
+  Object.assign(aside.style, { width: '100%', maxWidth: 'none', height: '100%', margin: '0' })
+  Object.assign(api.tag(wrap).style, { top: '14px', right: '44px' })
+  const layout = () => {
+    const S = api.rectOf(realSide())
+    wrap.style.display = S ? '' : 'none'
+    if (S) Object.assign(wrap.style, { left: `${S.x}px`, top: `${S.y}px`, width: `${S.width}px`, height: `${S.height}px` })
+    return !!S
+  }
+  return { wrap, aside, layout }
+}
+
+// ---------- Labels: one agent's transcript in the Transcript view with two labels on it, each in colours of its own:
+// what each step does (four values) and whether it coordinates with other agents (yes/no); the ruler beside it shows
+// both down the whole file. Captured, with the Labels sidebar that lists them, over the real one, which the step opens.
+const labelsExample = (api: Api): Example => {
+  const realReader = () => api.q('[data-panel="files"] .reader')
+  const rd = api.snap('txReader', 'tour-ex-reader')
+  const reader = rd.firstElementChild as HTMLElement
+  reader.querySelectorAll('.reader-tab:not(.active)').forEach((t) => t.remove())
+  Object.assign(rd.style, { display: 'flex', flexDirection: 'column', background: api.groundOf(realReader() || api.q(filesPanel)) })
+  Object.assign(reader.style, { flex: '1', minHeight: '0', overflow: 'hidden' })
+  Object.assign(api.tag(rd).style, { left: '50%', right: 'auto', transform: 'translateX(-50%)' })
+  holdBrowser(api)
+  const side = sideExample(api, 'labels')
+  const putBack = holdSide('labels')
+  const status = statusExample(api, 'agent-05.jsonl · Transcript')
+  api.ex.append(rd, side.wrap, status.wrap)
+  // the transcript opens at line 22 and stays there while the panel's size changes, until anything else scrolls it
+  let pinned = true,
+    setTo: number | null = null
+  const layout = () => {
+    status.layout()
+    const placed = side.layout()
+    let r = api.rectOf(realReader())
+    if (!r) {
+      const p = api.rectOf(api.q(filesPanel)),
+        sd = api.rectOf(api.q('.files-side'))
+      // in a narrow Files panel thimble hides its sidebar: the transcript then takes the whole panel
+      if (p && sd) r = { x: sd.x + sd.width, y: sd.y, width: p.x + p.width - sd.x - sd.width, height: sd.height }
+      else if (p) r = { x: p.x, y: p.y, width: p.width, height: p.height }
+    }
+    if (!r || !placed) return false
+    Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
+    const sc = rd.querySelector<HTMLElement>('.reader-body')
+    if (!sc || !sc.clientHeight) return
+    if (pinned && setTo != null && Math.abs(sc.scrollTop - setTo) > 1) pinned = false
+    if (pinned) {
+      const row = rd.querySelector('[data-line="22"]')
+      if (row) {
+        sc.scrollTop += row.getBoundingClientRect().top - sc.getBoundingClientRect().top - 6
+        setTo = sc.scrollTop
+      }
+    }
+    // the ruler's thumb frames the span on screen, as thimble's does
+    const bar = rd.querySelector<HTMLElement>('.reader-ruler-bar'),
+      thumb = rd.querySelector<HTMLElement>('.reader-ruler-thumb')
+    if (bar && thumb) {
+      const span = sc.scrollHeight - sc.clientHeight
+      const h = Math.max(32, (bar.clientHeight * sc.clientHeight) / sc.scrollHeight)
+      Object.assign(thumb.style, { height: `${h}px`, transform: `translateY(${span > 0 ? ((bar.clientHeight - h) * sc.scrollTop) / span : 0}px)` })
+    }
+  }
+  return { els: { reader: rd, labels: side.wrap, status: status.wrap }, layout, cleanup: putBack }
+}
+
+// ---------- the Report and its checks: the example (a captured report with its figures and the comments of its check
+// "Alternative explanations"), at its own size, or scaled down to a panel narrower than the one it was drawn in
+const reportExample = (api: Api): Example => {
+  const panel = () => api.q(reportPanel)
+  const w = api.snap('reportPanel', 'tour-ex-report')
+  const inner = w.firstElementChild as HTMLElement
+  const [w0, h0] = (inner.getAttribute('data-size') || '1096x848').split('x').map(Number)
+  Object.assign(inner.style, { position: 'absolute', left: '0', top: '0', margin: '0', width: `${w0}px`, height: `${h0}px`, transformOrigin: '0 0' })
+  Object.assign(w.style, { background: api.groundOf(panel()), overflow: 'hidden' })
+  const spacer = w.querySelector<HTMLElement>('.wu-bar-spacer')
+  api.tag(spacer ?? w)
+  asReportNow(w)
+  // the report's first figure, a dense timeline chart, becomes a small table that makes one point in plain words (the
+  // figure markup is the report's own, from its table figure)
+  const first = w.querySelector('figure.wu-fig[data-tour-anchor="card:fb1d3ae9"]'),
+    model = w.querySelector('figure.wu-fig[data-tour-anchor="card:d800bfeb"]')
+  if (first && model) {
+    const fig = model.cloneNode(true) as HTMLElement
+    fig.setAttribute('data-tour-anchor', 'card:connections-limit')
+    const ask = fig.querySelector('.wu-fig-q')
+    if (ask) ask.textContent = 'How close did the database come to its limit of 200 connections?'
+    const rows = [
+      ['02:57, night warning', '181', '4.12.0'],
+      ['07:41, morning warning', '176', '4.12.0'],
+      ['08:04, outage starts', '200, full', '4.12.0'],
+      ['08:40, after the update was undone', '58', '4.11.3'],
+    ]
+    const table = fig.querySelector('table')
+    if (table)
+      setMarkup(
+        table,
+        '<thead><tr><th>When</th><th>Connections in use</th><th>Version running</th></tr></thead><tbody>' + rows.map(([a, b, c]) => `<tr><th>${a}</th><td>${b}</td><td>${c}</td></tr>`).join('') + '</tbody>',
+      )
+    const cap = fig.querySelector('.wu-fig-caption')
+    if (cap) cap.textContent = 'The database came close to its limit only while version 4.12.0 was running.'
+    if (table) table.style.width = '100%'
+    first.replaceWith(fig)
+  }
+  api.ex.append(w)
+  // each chart drawn at the width its figure has, as thimble's Report draws a chart to its figure's width: of the
+  // drawings captured at figure widths from 391 to 688 px (report-figs.json), the nearest, sized to the figure
+  type Cap = { content: number; svg: string }
+  const charts = Object.entries(reportFigs as Record<string, Cap[]>)
+    .map(([id, caps]) => {
+      const fig = w.querySelector(`figure.wu-fig[data-tour-anchor="card:${id}"]`)
+      const box = fig?.querySelector<HTMLElement>('.outputs-vega'),
+        body = fig?.querySelector<HTMLElement>('.wu-fig-body')
+      return box && body && caps.length ? { box, body, caps, at: null as Cap | null, cw: 0 } : null
+    })
+    .filter((c): c is NonNullable<typeof c> => !!c)
+  const fitCharts = () => {
+    for (const c of charts) {
+      const cs = getComputedStyle(c.body)
+      const cw = c.body.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+      if (!(cw > 0) || Math.abs(cw - c.cw) < 0.5) continue
+      c.cw = cw
+      const cap = c.caps.reduce((a, b) => (Math.abs(b.content - cw) < Math.abs(a.content - cw) ? b : a))
+      if (cap !== c.at) {
+        setMarkup(c.box, cap.svg)
+        c.at = cap
+      }
+      const svg = c.box.querySelector('svg')
+      if (!svg) continue
+      const vb = (svg.getAttribute('viewBox') || `0 0 ${svg.getAttribute('width')} ${svg.getAttribute('height')}`).split(/[\s,]+/).map(Number)
+      Object.assign(svg.style, { width: `${cw}px`, height: `${(cw * vb[3]) / vb[2]}px` })
+    }
+  }
+  const rail = w.querySelector<HTMLElement>('.wu-rail')
+  // the page's ruler: with no comments thimble draws it plain (a 10 px bar and a plain thumb), with them a lane of marks
+  const rulerBar = w.querySelector<HTMLElement>('.wu-report > .reader-ruler .reader-ruler-bar'),
+    rulerThumb = rulerBar?.querySelector<HTMLElement>('.reader-ruler-thumb'),
+    rulerMarks = rulerBar?.querySelector<HTMLElement>('img.reader-ruler-marks')
+  const rulerWith = { bar: rulerBar?.style.width || '', thumb: rulerThumb?.className || '' }
+  const rulerPlain = (plain: boolean) => {
+    if (!rulerBar) return
+    rulerBar.style.width = plain ? '10px' : rulerWith.bar
+    if (rulerMarks) rulerMarks.style.display = plain ? 'none' : ''
+    if (rulerThumb) rulerThumb.className = plain ? 'reader-ruler-thumb plain' : rulerWith.thumb
+  }
+  const checkRow = [...w.querySelectorAll<HTMLElement>('.wu-check')].find((e) => /Alternative explanations/.test(e.textContent ?? ''))
+  const checksCount = w.querySelector('.wu-checks-head .wu-count')
+  // the Comments sidebar, which the checks step opens: the checks with their comments, the new one among them once made
+  const side = sideExample(api, 'comments')
+  const sideRow = side.aside.querySelector<HTMLElement>('[data-category="alternative-explanations"]')
+  const sideCount = side.aside.querySelector('.lside-heading .lside-n')
+  let putBack: (() => void) | null = null
+  const els = {
+    root: w,
+    page: w.querySelector<HTMLElement>('.wu-page'),
+    real: false,
+    k: 1,
+    checkRow,
+    checksCount,
+    checksShown: false,
+    side: null as HTMLElement | null,
+    hideChecks: () => {},
+    showMargin: () => {},
+    showChecks: () => {},
+    showSide: () => {},
+    hideSide: () => {},
+  }
+  els.showSide = () => {
+    if (!putBack) putBack = holdSide('comments')
+    if (!side.wrap.isConnected) api.ex.append(side.wrap)
+    els.side = side.wrap
+  }
+  els.hideSide = () => {
+    putBack?.()
+    putBack = null
+    side.wrap.remove()
+    els.side = null
+  }
+  // the check's comment cards, placed as thimble's margin places them (report/Margin.tsx): each 8px above its passage's
+  // first line, stacked 8px apart so no two meet; measured again every frame, since the page's width, its fonts and
+  // the figures move the passages
+  const placeComments = () => {
+    if (!rail) return
+    const base = rail.getBoundingClientRect().top
+    const want: { card: HTMLElement; top: number; h: number }[] = []
+    for (const card of rail.querySelectorAll<HTMLElement>('.wu-cm')) {
+      const id = card.getAttribute('data-comment')
+      const passage = id && w.querySelector(`[data-cids~="${id}"]`)
+      if (passage) want.push({ card, top: (passage.getBoundingClientRect().top - base) / els.k - 8, h: card.offsetHeight })
+    }
+    want.sort((a, b) => a.top - b.top)
+    let floor = -Infinity
+    for (const it of want) {
+      const top = Math.round(Math.max(it.top, floor))
+      it.card.style.top = `${top}px`
+      floor = top + it.h + 8
+    }
+  }
+  // with no check comments, thimble's Report has no margin (ReportPage.tsx draws .wu-rail only for comments, or for a
+  // check that is on), so the text column takes the page's width; the margin comes with the comments on the next step
+  els.hideChecks = () => {
+    els.checksShown = false
+    w.classList.add('tour-checks-hidden')
+    if (rail) rail.style.display = 'none'
+    rulerPlain(true)
+    if (checkRow) checkRow.style.display = 'none'
+    if (checksCount) checksCount.textContent = '3'
+    if (sideRow) sideRow.style.display = 'none'
+    if (sideCount) sideCount.textContent = '0'
+  }
+  // the margin alone, empty, as thimble stands it while a check is on and before its comments come
+  els.showMargin = () => {
+    if (rail) rail.style.display = ''
+  }
+  els.showChecks = () => {
+    els.checksShown = true
+    w.classList.remove('tour-checks-hidden')
+    if (rail) rail.style.display = ''
+    rulerPlain(false)
+    if (checkRow) checkRow.style.display = ''
+    if (checksCount) checksCount.textContent = '4'
+    if (sideRow) sideRow.style.display = ''
+    if (sideCount) sideCount.textContent = '4'
+  }
+  els.hideChecks()
+  const layout = () => {
+    const r = api.rectOf(panel())
+    if (!r) return false
+    if (els.side) side.layout()
+    Object.assign(w.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
+    const k = Math.min(1, r.width / w0)
+    els.k = k
+    Object.assign(inner.style, { width: `${r.width / k}px`, height: `${r.height / k}px`, transform: k < 1 ? `scale(${k})` : '' })
+    fitCharts()
+    placeComments()
+    // the ruler's thumb frames the span of the page on screen, as thimble's does
+    const pg = els.page
+    if (rulerBar && rulerThumb && pg?.scrollHeight) {
+      const span = pg.scrollHeight - pg.clientHeight,
+        H = rulerBar.clientHeight
+      const h = Math.min(H, Math.max(els.checksShown ? 96 : 32, (H * pg.clientHeight) / pg.scrollHeight))
+      const at = `translateY(${span > 0 ? ((H - h) * pg.scrollTop) / span : 0}px)`
+      if (rulerThumb.style.transform !== at) Object.assign(rulerThumb.style, { height: `${h}px`, transform: at })
+    }
+  }
+  return { els, layout, cleanup: () => els.hideSide() }
+}
+/** The captured Report (examples.json) as the Report stands now: no Slides, Story or Video beside it; the cards an
+ * orientation made listed under Your work; a figure's caption whole, as text, with no scroll of its own (the capture
+ * has the field it was once edited in); and the checks in the sidebar's Comments pane. */
+const asReportNow = (w: HTMLElement) => {
+  w.querySelectorAll('.wu-types .seg-opt').forEach((b) => {
+    if (/^(slides|story|video)$/.test(b.querySelector('[data-doc-chip]')?.getAttribute('data-doc-chip') ?? '')) b.remove()
+  })
+  const orient = w.querySelector('.wu-sec[data-section="orientation"]'),
+    yours = w.querySelector('.wu-sec[data-section="yours"]')
+  if (orient && yours) {
+    const rows = [...orient.querySelectorAll('.wu-card-row')]
+    yours.querySelector('.wu-sec-head')?.after(...rows)
+    const n = yours.querySelector('.wu-sec-head .wu-count')
+    if (n) n.textContent = String(yours.querySelectorAll('.wu-card-row').length)
+    orient.remove()
+  }
+  w.querySelectorAll<HTMLTextAreaElement>('textarea.wu-fig-caption').forEach((ta) => {
+    const cap = document.createElement('div')
+    cap.className = 'wu-fig-caption chat-text wu-fig-caption-read'
+    const p = document.createElement('p')
+    p.textContent = ta.value
+    cap.append(p)
+    ta.replaceWith(cap)
+  })
+  const checks = w.querySelector('.wu-checks')
+  checks?.setAttribute('aria-label', 'Comments')
+  const name = checks?.querySelector('.wu-checks-head .wu-sec-name')
+  if (name) name.textContent = 'Comments'
+}
+// the page scrolled so `el` stands `above` px (as drawn) from the page's top
+const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth = true) => {
+  const page = api.els.page as HTMLElement | null
+  if (!page || !el) return
+  const k = api.els.k || 1
+  const top = (el.getBoundingClientRect().top - page.getBoundingClientRect().top) / k + page.scrollTop - above
+  page.scrollTo({ top: Math.max(0, top), behavior: smooth ? 'smooth' : 'auto' })
+}
+const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
+
+/** What the steps about the chat and the ⌘-click box say: on a demo page (`demo`, lib/demo), that thimble isn't
+ * connected to Claude there, so the chat takes no typing, and what the chat is once it is. True however the workbench
+ * reaches Claude: an API key, Workload Identity Federation or the Claude Code sign-in. */
+export function sessionTexts(demo: boolean): { chat: [string, string]; ask: string } {
+  if (!demo) {
+    return {
+      chat: ['Your chat with Claude', 'Ask Claude anything about the files here.'],
+      ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
+    }
+  }
+  return {
+    chat: ['The chat', "This is a demo and thimble isn't connected to Claude, so you can't type here. With Claude connected, ask it anything about the files here."],
+    ask: 'Type a question and press Enter. With Claude connected, the answer comes in a new thread in the chat.',
+  }
+}
+
+/** What the welcome says before its buttons, a paragraph of markup each: on a demo page (`demo`, lib/demo) DEMO_LINE
+ * first, its span in backticks drawn as code, then the question; elsewhere the question and that the tour uses example
+ * data. */
+export function welcomeTexts(demo: boolean): string[] {
+  const ask = 'Would you like a short tour?'
+  if (demo) return [DEMO_LINE.replace(/`([^`]*)`/g, '<code>$1</code>'), ask]
+  return [`${ask} The demo tour uses <b>example data</b>.`]
+}
+
+/** The tour, for the ask key written `key` (⌘ or ⌥ on a Mac, Ctrl or Alt elsewhere, as Settings picks). With the chat
+ * column folded (`chat` false) the steps about the chat are left out; on a demo page (`demo`) they say it is a demo
+ * (sessionTexts). */
+export function tourSteps(key: string, chat = true, demo = false): Step[] {
+  const said = sessionTexts(demo)
+  const steps: Step[] = [
+    {
+      tab: 'files', needsChat: true, example: sessionExample, anchor: chatContent, place: 'right', align: 'start', pad: 0, radius: 12,
+      title: said.chat[0],
+      body: said.chat[1],
+    },
+    {
+      tab: 'files', example: filesExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
+      title: 'Files',
+      body: 'The file browser lists the folder’s files. Click one to read it.',
+    },
+    {
+      tab: 'files', example: labelsExample, leave: releaseBrowser, place: 'left', align: 'end', pad: 0, radius: 0,
+      // the transcript first, so the popover stands beside it; the sidebar and the button that opens it
+      anchor: (api) => [api.els.reader, api.els.labels, sideButton('labels')],
+      scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
+      scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
+      title: 'Labels',
+      body: 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.',
+    },
+    {
+      tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
+      interact: (api) => api.els.frame ?? null,
+      title: 'Views',
+      body: 'thimble also proposes views, custom-generated just for your corpus, like this Timeline of every event.',
+    },
+    {
+      tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6,
+      anchor: (api) => api.els.card,
+      title: 'Cards on the Canvas',
+      body: 'Cards help make agents’ work visible. Hover over an underlined value to see its source.',
+      // the analyst's own hover on a value shows its source, as the demo does
+      chips: (api, chip) => {
+        api.stopDemo()
+        api.showSource(chip)
+      },
+      // twice: a pointer rests on the card's 08:04 and its source shows
+      demo: async (api) => {
+        for (let k = 0; k < 2; k++) {
+          const card = api.els.card as HTMLElement
+          const chip = [...card.querySelectorAll('.refchip-value')].find((c) => c.textContent?.trim() === '08:04') || card.querySelector('.refchip-value')
+          const c = chip && api.rectOf(chip)
+          if (!chip || !c) return
+          api.cursor.show(c.x + c.width / 2 + 170, c.y - 90)
+          await api.sleep(450)
+          // the pointer follows the value while it glides, should the card move meanwhile
+          await api.cursor.move(() => {
+            const r = api.rectOf(chip)
+            return r && { x: r.x + r.width / 2, y: r.y + r.height * 0.6 }
+          }, undefined, 950)
+          await api.sleep(300)
+          const src = api.showSource(chip, { demo: true })
+          await api.sleep(2600)
+          await api.cursor.move(c.x + c.width / 2 + 220, c.y - 120, 600)
+          src?.remove()
+          api.cursor.hide()
+          await api.sleep(900)
+        }
+      },
+    },
+    {
+      tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6, try: true, gateNext: true,
+      anchor: (api) => api.els.card,
+      advanceOn: (api) => api.realBox(),
+      title: `${key}-click to ask`,
+      body: `Hold <span class="kbd">${key}</span> and click on anything in thimble to chat about it.`,
+      after: 'Now try it yourself: Next unlocks once you have.',
+      // once the demo is over, a cue on the card points at an entry to try it on
+      cue: (api) => {
+        const card = api.els.card as HTMLElement | undefined
+        const row = card && [...card.querySelectorAll('.canvas-tl-row')].find((r) => r.querySelector('.canvas-tl-time')?.textContent?.trim() === '08:29')
+        const target = row?.querySelector('.canvas-tl-label')
+        return card && target ? { target, within: card, label: `${key}-click here` } : null
+      },
+      // as the real app does it: the pointer holds ⌘ (its key shown held down) and drags over a few words of one entry of
+      // the timeline; the words are selected, lit as thimble lights a selection, and the ask box opens under them with a
+      // question typed; then it is the analyst's turn
+      demo: async (api) => {
+        const card = api.els.card as HTMLElement
+        const label = [...card.querySelectorAll('.canvas-tl-row')].find((r) => r.querySelector('.canvas-tl-time')?.textContent?.trim() === '08:04')?.querySelector('.canvas-tl-label')
+        const node = label && ([...label.childNodes].find((n) => n.nodeType === 3 && n.textContent?.trim()) as Text | undefined)
+        if (!label || !node) return
+        // the first few words of the entry, up to its first punctuation
+        const words = (node.textContent ?? '').split(/[;,:]/)[0].match(/^\S+(\s+\S+){0,3}/)?.[0] ?? ''
+        if (!words) return
+        const at = (k: number) => {
+          const r = document.createRange()
+          r.setStart(node, k)
+          r.setEnd(node, Math.min(node.length, k + 1))
+          const b = r.getBoundingClientRect()
+          return { x: b.left, y: b.top + b.height / 2 }
+        }
+        const a = at(0),
+          z = at(words.length - 1)
+        // the key badge beside the drag, never over text: at the row's height, past the end of the longest text in the
+        // band it spans, inside the card
+        const badgeAt = () => {
+          const C = card.getBoundingClientRect(),
+            H = 46,
+            W = 132
+          const top = a.y - H / 2
+          let right = 0
+          const walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT)
+          for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+            if (!n.textContent?.trim()) continue
+            const r = document.createRange()
+            r.selectNodeContents(n)
+            for (const b of r.getClientRects()) if (b.bottom > top - 4 && b.top < top + H + 4) right = Math.max(right, b.right)
+          }
+          return { x: Math.min(right + 28, C.right - W - 12), y: top }
+        }
+        api.cursor.show(a.x + 160, a.y - 150)
+        await api.sleep(400)
+        await api.cursor.move(a.x, a.y, 900)
+        await api.sleep(250)
+        api.cursor.cmd(true, badgeAt())
+        await api.sleep(700)
+        const sel = getSelection()!
+        // the words select as they do under a real ⌘-drag: selectable, in the selection's wash
+        label.classList.add('tour-selecting')
+        const n = 14
+        for (let k = 1; k <= n; k++) {
+          sel.setBaseAndExtent(node, 0, node, Math.round((words.length * k) / n))
+          await api.cursor.move(a.x + ((z.x + 6 - a.x) * k) / n, a.y, 40)
+        }
+        await api.sleep(750)
+        const range = document.createRange()
+        range.setStart(node, 0)
+        range.setEnd(node, words.length)
+        sel.removeAllRanges()
+        label.classList.remove('tour-selecting')
+        const m = api.mockAskRange(range)
+        await api.sleep(250)
+        api.cursor.cmd(false)
+        await api.sleep(350)
+        if (m) await api.type(m.input, 'Why did the database run out of connections?')
+        await api.sleep(1800)
+        m?.remove()
+        api.cursor.hide()
+        await api.sleep(250)
+      },
+      leave: () => {
+        getSelection()?.removeAllRanges()
+        document.querySelectorAll('.tour-selecting').forEach((e) => e.classList.remove('tour-selecting'))
+      },
+    },
+    {
+      sub: true, tab: 'canvas', try: true, nextWhenGone: true, backOnEsc: true, place: ['right', 'left', 'bottom', 'top'], align: 'center', pad: 6,
+      // the card with its highlight and the ask box the page's own pointer drew on it
+      anchor: (api) => {
+        const real = api.realBox()
+        if (!real) return null
+        const parts = [...document.querySelectorAll('.pointer-hl, .pointer-hl-line')].filter((e) => !e.closest('.tour-root')).concat([real])
+        return api.unionOf([api.els.card, ...parts].map(api.rectOf))
+      },
+      // moving on closes the ask box, which would otherwise stay open over the next surface
+      leave: (api) => {
+        if (api.realBox()) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        api.closeMock()
+      },
+      title: `${key}-click to ask`,
+      body: said.ask,
+    },
+    {
+      // the whole Report surface: its bar (with Export), the cards and checks, and the page
+      tab: 'report', example: reportExample, anchor: reportPanel, place: 'left', align: 'start', pad: 0, radius: 12,
+      title: 'The Report',
+      body: 'Your report, with cards as its figures. Write it yourself or ask Claude to revise it. Export it when it is done.',
+      scroll: (api) => api.els.page ?? null,
+      // the check is made on the next step: until then the report shows none of its comments, and no Comments sidebar
+      demo: async (api) => {
+        api.els.hideSide?.()
+        api.els.hideChecks?.()
+      },
+    },
+    {
+      // the Report, the Comments sidebar beside it and the button that opens it
+      tab: 'report', example: reportExample, place: 'left', align: 'start', pad: 0, radius: 12,
+      anchor: (api) => [reportPanel, ...(api.els.side ? [api.els.side, sideButton('comments')] : [])],
+      title: 'Checks',
+      body: 'Checks read the report and the cards, and comment on what they find. Press + under Comments to add one: say what to look for, in a line. Comments, at the top, lists the checks and their comments.',
+      note: 'Reopen this tour from Settings.',
+      scroll: (api) => api.els.page ?? null,
+      leave: (api) => api.els.hideSide?.(),
+      // + in the Report's Comments pane opens a new check, which is named and described; it runs, its comments sit beside
+      // the passages they are about, and the Comments sidebar opens beside the Report with the check and its comments
+      demo: async (api) => {
+        const plus = inReport(api, '.wu-checks-add')
+        const p = api.rectOf(plus)
+        if (!plus || !p) return
+        if (api.els.checksShown) return api.els.showSide()
+        api.els.hideChecks()
+        api.cursor.show(p.x + 180, p.y - 140)
+        await api.sleep(500)
+        await api.cursor.move(p.x + p.width / 2, p.y + p.height / 2, 900)
+        await api.sleep(250)
+        await api.cursor.click()
+        const card = api.snap('checkCard').firstElementChild as HTMLElement
+        card.dataset.demo = '1'
+        card.classList.add('tour-in')
+        api.fx.append(card)
+        const aside = api.rectOf(plus.closest('aside') || plus.parentElement)
+        const left = (aside ? aside.x + aside.width : p.x + p.width) + 10
+        Object.assign(card.style, { position: 'absolute', left: `${Math.min(left, innerWidth - 352)}px`, top: `${Math.max(12, Math.min(innerHeight - card.offsetHeight - 12, p.y - 70))}px` })
+        const name = card.querySelector('input'),
+          text = card.querySelector('textarea'),
+          runBtn = [...card.querySelectorAll('button')].find((b) => /Run/.test(b.textContent ?? ''))
+        await api.sleep(400)
+        if (name) await api.type(name, 'Alternative explanations', 45)
+        await api.sleep(300)
+        if (text) await api.type(text, 'Where the report names a cause, look for another explanation the records support.', 30)
+        runBtn?.removeAttribute('disabled')
+        const b = api.rectOf(runBtn)
+        await api.sleep(400)
+        if (b) {
+          await api.cursor.move(b.x + b.width / 2, b.y + b.height / 2, 700)
+          await api.sleep(200)
+          await api.cursor.click()
+        }
+        card.remove()
+        api.cursor.hide()
+        // the check is on: thimble stands the margin at once, empty until the comments come
+        api.els.showMargin()
+        await api.sleep(700)
+        // the check is in the pane and its comments appear beside their passages, and stay; then the page goes to the first
+        api.els.showChecks()
+        const row = api.els.checkRow as HTMLElement | undefined
+        if (row) {
+          row.classList.add('anchor-flash')
+          window.setTimeout(() => row.classList.remove('anchor-flash'), 1600)
+        }
+        await api.sleep(1300)
+        scrollTo(api, inReport(api, '.wu-cm'), 220)
+        await api.sleep(1500)
+        // the Comments sidebar, where every check and its comments are listed
+        api.els.showSide()
+        await api.sleep(1200)
+        scrollTo(api, inReport(api, '.wu-cm'), 220)
+      },
+    },
+  ]
+  return steps.filter((s) => chat || !s.needsChat)
+}

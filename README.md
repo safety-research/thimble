@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/thimble-banner.svg" alt="thimble" width="100%"></p>
 
-**thimble** is an open source Claude Code plugin for human oversight. It opens a workbench where you and Claude make sense of large volumes of agent output together. Where Claude Code answers in paragraphs that are hard to understand and verify, thimble answers visually, with charts and cards that cite every claim.
+**thimble is a Claude Code plugin for making sense of large volumes of agent outputs.** It gives Claude tools to cite, visualize and label your data, and gives you an interface to understand and verify Claude's work faster.
 
 > [!CAUTION]
 > - **thimble is in alpha.** It changes daily, so expect bugs and rough edges.
@@ -8,9 +8,17 @@
 
 For feedback, bug reports, or anything else, please reach out to [@mjoerke](https://github.com/mjoerke). I would love to hear from you!
 
-## Demo
-
 https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
+
+## Features
+
+- **Cards**: interactive graphs of your data, drawn in the terminal, that you can click and ask about. `v` draws one for the last answer.
+- **Citations**: every claim points to the code output or file line that shows it, and a second Claude checks each one against your files.
+- **Labels** (`l`): records sorted into categories by a rule or a model's reading, which you can open and correct.
+- **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
+- **Claims** (`c`): everything the session has concluded, as a map, with what was corrected and why.
+- **Squeeze** (`s`): the last answer, shorter or longer, or with its interpretation and background.
+- **Side threads** (`t`): ask about a passage or part of a card without derailing the session.
 
 ## Installation
 
@@ -19,63 +27,40 @@ https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
 ```
 claude "install thimble from https://github.com/safety-research/thimble"
 ```
-Instructions for agents installing thimble on the user's behalf are in [CLAUDE.md](CLAUDE.md).
+
+Claude asks whether you want the terminal plugin, the browser workbench, or both, and helps with anything missing. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
 
 ### Manual installation
 
-1. Download the zip from the [latest release](https://github.com/safety-research/thimble/releases/latest).
-2. Unzip it.
-3. Run `bash scripts/install.sh` inside the unzipped folder.
+```
+git clone https://github.com/safety-research/thimble
+cd thimble
+scripts/install.sh
+```
 
-For a development build, clone the repo and run `bash scripts/install.sh`. See [INSTALL.md](INSTALL.md) for detailed installation instructions.
+`scripts/install.sh --no-browser` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
 
 ## Usage
 
-Run `claude` in a folder with files you'd like to analyze. By default, thimble is enabled in every session. You can toggle
-thimble on and off using `/plugin`.
+### Terminal plugin
 
-![thimble in the terminal: cards under Claude's reply, and the citation panel beside the chat](docs/assets/thimble-term.png)
+Run `claude` in a folder with files you'd like to analyze. thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off; `/plugin` turns thimble off.
 
-Type `/thimble browser` to open the same session in the browser workbench.
+![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
 
-![the same session in the browser workbench](docs/assets/thimble-browser.png)
+### Browser workbench
 
-## Commands
+Run `thimble-browser` in a folder of files to open the browser workbench.
 
-**Inside a Claude Code session**
-
-| Command | What it does |
-|---|---|
-| `/thimble` | open thimble's panel in the terminal |
-| `/thimble browser` | open the browser workbench on this session, signed in |
-| `/thimble coverage`, `/thimble citations`, `/thimble checks` | open the panel at that section |
-| `/thimble fresh` | archive this workspace and open an empty one |
-| `/thimble restore [<name>]` | bring an archived workspace back |
-| `/thimble:orient [focus]` | start an orientation |
-| `/thimble:label <name> [definition]` | define a label and apply it to the records |
-| `/thimble:write [report\|slides\|story] [request]` | start a writer on a document (in the browser workbench) |
-| `/config` → thimble | turn single features on or off: view proposals, labels, checks, citation marks, coverage, card check |
-
-**From a shell** (`thimble help` lists every command)
-
-| Command | What it does |
-|---|---|
-| `thimble` | start Claude Code in this folder and open the browser workbench; `thimble -c` continues the last session |
-| `thimble open` | open the browser workbench for this folder's running session |
-| `thimble demo` | download the [demo datasets](demos/README.md) and open them in the browser |
-| `thimble list`, `thimble purge <id>` | list the workspaces, or delete one |
-| `thimble doctor` | a checklist of what is installed and running, with the fix for each problem (`--verbose` for the details) |
-| `thimble unpair` | sign out every browser |
-| `thimble feedback` | write a problem report (a zip) |
-| `thimble update`, `thimble uninstall` | update to the latest release, or uninstall |
+![the browser workbench answering whether agents reviewed before approving: a chat answer with citations, an agent transcript colored by an activity label, a timeline of every agent's labeled work and approvals, and a table of what each approver ran](docs/assets/thimble-browser.png)
 
 ## Requirements
 
-Claude Code (tested with 2.1.301), with its hooks modules on, macOS or Linux, and Python 3.12+ ([uv](https://docs.astral.sh/uv/) recommended). Node 20+ is needed for custom views (the viewers the dev agent builds for your data), for the sandbox card code and code tickets run in, and for a development build. 
+Claude Code, macOS or Linux, Python 3.10+ and Node.js 22.18+. The browser workbench also needs [uv](https://docs.astral.sh/uv/) and about 1 GB of disk.
 
 ## Security & Privacy
 
-thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). thimble runs on top of Claude Code: it does not collect any data of its own and all authentication and billing is managed by `claude`. It starts no Claude Code session of its own: its agents run as subagents of your session, in its permission mode, and its model calls through your session's own client.
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). The plugin runs inside your Claude Code session: it collects no data of its own, its model calls go through your session, and Claude's card code runs in Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime) with no network.
 
 ## License
 

@@ -1,0 +1,89 @@
+/* A mark on the words of a claim (marks/Mark.tsx), drawn as a card's citation is (refchip.css .refchip-value): the
+   words in the text's own color, underlined in that color, no tint at rest; the citations' light purple tint
+   (--cite-tint) behind them on hover and while its label is open, so the open one is easy to find. A mark the check
+   could not confirm: red words, underlined, × after them, and a soft red tint (--cite-tint-failed) on hover and while
+   open. Back-to-back marks keep a small gap, so they read as two. Its label is RefChip's (.refchip-pop), at most
+   560 px wide. */
+:root { --cite-line: #8b3fd9; --cite-tint: rgba(135, 0, 255, 0.1); --cite-tint-failed: rgba(201, 58, 40, 0.1); }
+:root[data-paper='dark'] { --cite-line: #b36bff; --cite-tint: rgba(179, 107, 255, 0.24); --cite-tint-failed: rgba(255, 138, 122, 0.2); }
+.mark { position: relative; }
+/* a claim's mark is words of the sentence: inline in the text's own face, so it wraps with the line and its underline
+   sits under the words, never the small inline-block of the status marks (components.css .mark) */
+.mark[data-mark-look] { display: inline; flex: initial; font: inherit; vertical-align: baseline; }
+.mark-words {
+  display: inline;
+  margin: 0 1.5px;
+  color: inherit;
+  background: none;
+  text-decoration-line: underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--cite-line);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  transition: var(--transition-color), background-color var(--dur-fast) var(--ease-out);
+}
+.mark-words:hover,
+.mark-words:focus-visible,
+.mark.is-open .mark-words {
+  background: var(--cite-tint);
+  outline: none;
+}
+.mark.is-failed .mark-words { color: var(--status-negative); text-decoration-color: currentColor; }
+.mark.is-failed .mark-words:hover,
+.mark.is-failed .mark-words:focus-visible,
+.mark.is-failed.is-open .mark-words { background: var(--cite-tint-failed); }
+.mark-glyph { margin-left: 0.3em; margin-right: 1.5px; color: var(--status-negative); }
+.mark-spin { margin-left: 2px; vertical-align: -1px; color: var(--text-tertiary); }
+/* the links toggle is off (lib/links): a mark reads as plain text, as a cited number does */
+:root[data-links='off'] .mark .mark-words,
+:root[data-links='off'] .mark .mark-words:hover {
+  color: inherit;
+  background: none;
+  text-decoration-line: none;
+}
+
+/* the label: content wide, up to 560 px; each place's head over its lines */
+.refchip-pop.mark-pop {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  max-width: min(560px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+.mark-pop .refchip-lines { margin-top: 6px; }
+.mark-pop-why {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--status-negative);
+}
+.mark-pop-state { color: var(--text-tertiary); }
+/* a failed mark's reason beside Repair; a corrected mark's earlier words under nothing but its evidence */
+.mark-pop-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mark-pop-head .mark-pop-why { flex: 1 1 auto; min-width: 0; }
+.mark-pop-repair { flex: none; }
+.mark-pop-repair-error { color: var(--status-negative); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mark-pop-was { color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mark-ev { display: flex; flex-direction: column; min-width: 0; }
+.mark-pop .mark-ev-code {
+  margin: 6px 0 0;
+  padding-top: 6px;
+  max-height: 6.8em;
+  overflow: auto;
+  border-top: 1px solid var(--border-hairline);
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* the marked words: the accent's wash a cited table cell takes (refchip.css .cite-cell) */
+.mark-pop .refchip-lines .cite-cell { border-radius: 2px; }
+.mark-ev-more { color: var(--text-tertiary); }
+.mark-ev-n { display: inline-block; min-width: 3ch; margin-right: 1ch; color: var(--text-tertiary); text-align: right; user-select: none; }
+
+/* the line under a reply some of whose marks failed: how many */
+.marks-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font: var(--type-body-sm); }
+.marks-foot-counts { display: flex; gap: 10px; color: var(--text-tertiary); }
+.marks-foot-n.is-failed { color: var(--status-negative); }

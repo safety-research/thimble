@@ -1,12 +1,24 @@
-# The checks every push and pull request must pass, which can also be run by hand from the Actions tab. Each step is
-# one step of scripts/check.sh, the command a contributor runs locally, so CI and a local run check the same things.
-# The steps run in two jobs side by side, the type check and build of the UI in one and everything else in the other,
-# and the job `checks`, the status the main branch requires, passes only when both did.
+# The checks every push and pull request runs, which can also be run by hand from the Actions tab. Each job after the
+# scan runs steps of scripts/check.sh, the command a contributor runs locally, so CI and a local run check the same
+# things:
+#
+#   scan            scripts/scan.sh over the new commits, with its generic patterns (CI has no private lists)
+#   plugin          the terminal plugin: its validation, hooks tests, Node tests (the card runner in its sandbox, with
+#                   bubblewrap, socat and ripgrep) and Python tests
+#   parity          the browser's shared prompts still apply to the plugin's texts (browser/prompts/shared.json)
+#   browser-server  the browser workbench's server tests, with bubblewrap and the sandbox runtime
+#   browser-page    the browser workbench's page: type check, unit tests and build
+#
+# Claude Code comes from npm (@anthropic-ai/claude-code), pinned to a version the plugin was tested with. Its
+# `claude plugin validate` and `claude plugin test` need no login.
 name: checks
 
 on:
   push:
+    branches: [main]
+  # a draft pull request runs nothing; marking it ready for review runs the checks, and so does each push after that
   pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -17,60 +29,94 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  backend:
+  scan:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false  # the steps after it run a pull request's code, which needs no token
+          fetch-depth: 0  # the scan reads the history of the pushed commits
 
-      - name: Install gitleaks
+      - name: Scan the new commits for private paths and secrets
         env:
-          VERSION: 8.30.1
-          SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          curl -sSfL -o "$RUNNER_TEMP/gitleaks.tgz" \
-            "https://github.com/gitleaks/gitleaks/releases/download/v$VERSION/gitleaks_${VERSION}_linux_x64.tar.gz"
-          echo "$SHA256  $RUNNER_TEMP/gitleaks.tgz" | sha256sum -c -
-          mkdir -p "$RUNNER_TEMP/bin" && tar -xzf "$RUNNER_TEMP/gitleaks.tgz" -C "$RUNNER_TEMP/bin" gitleaks
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            scripts/scan.sh --generic "$BASE..$HEAD_SHA"
+          else  # a new branch, a force push or a manual run: the commits no other branch has
+            scripts/scan.sh --generic "$HEAD_SHA" --not --exclude="origin/$GITHUB_REF_NAME" --remotes=origin
+          fi
 
-      # first, since it needs nothing installed and fails in seconds
-      - name: Content
-        run: scripts/check.sh content
-
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+  plugin:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLAUDE_CODE_VERSION: 2.1.307
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
+          persist-credentials: false
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          node-version: 22
 
-      - name: Cache the headless Chromium
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'backend/uv.lock') }}
+          version: "0.12.1"  # the uv that wrote browser/backend/uv.lock; a newer one rewrites the lockfile
 
-      # the frontend's packages and Chromium too, which a backend test (a worked example's view page) and the browser
-      # checks drive
-      - name: Install
-        run: scripts/check.sh install
+      - name: Install Claude Code
+        run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
 
-      - name: Backend
-        run: scripts/check.sh backend
+      - name: Install Python with pandas and pytest
+        run: |
+          uv venv --python 3.12 "$RUNNER_TEMP/py"
+          uv pip install --python "$RUNNER_TEMP/py/bin/python" pandas pytest
+          echo "THIMBLE_PYTHON=$RUNNER_TEMP/py/bin/python" >> "$GITHUB_ENV"
 
-      # in the Chromium that Install put in; under CI (which Actions sets) a Chromium that does not start fails the step
-      # instead of skipping it
-      - name: Browser
-        run: scripts/check.sh browser
+      - name: Install the sandbox's system packages, and let bubblewrap make its namespaces (the runner's AppArmor keeps it from them)
+        run: |
+          sudo apt-get install -y bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
-  frontend:
+      - name: Validate the plugin
+        run: scripts/check.sh validate
+
+      - name: Hooks tests
+        run: scripts/check.sh plugin
+
+      - name: Node tests
+        run: scripts/check.sh node
+
+      - name: Python tests
+        run: scripts/check.sh python
+
+  parity:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22  # the test also reads the plugin's prompt registry with Node
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.1"  # the uv that wrote browser/backend/uv.lock; a newer one rewrites the lockfile
+
+      - name: Shared prompts
+        run: scripts/check.sh parity
+
+  browser-server:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -78,38 +124,91 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
-        with:
-          enable-cache: true
-          cache-dependency-glob: backend/uv.lock
-
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: browser/frontend/package-lock.json
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.1"  # the uv that wrote browser/backend/uv.lock; a newer one rewrites the lockfile
+
+      - name: Install the sandbox's system packages, and let bubblewrap make its namespaces (the runner's AppArmor keeps it from them)
+        run: |
+          sudo apt-get install -y bubblewrap socat ripgrep
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # the content check's secret scan runs gitleaks, and under CI its test fails without it
+      - name: Install gitleaks
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  # gitleaks_8.30.1_linux_x64.tar.gz
+        run: |
+          tgz="$RUNNER_TEMP/gitleaks.tar.gz"
+          curl -fsSL -o "$tgz" "https://github.com/gitleaks/gitleaks/releases/download/v$GITLEAKS_VERSION/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "$GITLEAKS_SHA256  $tgz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          tar -xzf "$tgz" -C "$RUNNER_TEMP/gitleaks" gitleaks
+          echo "$RUNNER_TEMP/gitleaks" >> "$GITHUB_PATH"
 
       - name: Cache the headless Chromium
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json', 'backend/uv.lock') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('browser/frontend/package-lock.json', 'browser/backend/uv.lock') }}
 
-      - name: Install
-        run: scripts/check.sh install
+      # the view checks load pages in the headless Chromium of the page's and the server's Playwright, and the sandbox
+      # runtime the kernel runs in comes with the page's packages
+      - name: Install the server's and the page's packages, and their headless Chromium
+        run: browser/scripts/check.sh install
 
-      - name: Frontend
-        run: scripts/check.sh frontend
+      # without the sandbox runtime, or without working namespaces, the server tests of the sandbox skip, so this fails
+      - name: Sandbox check (runs a command in bubblewrap and in the sandbox runtime)
+        working-directory: browser/backend
+        run: |
+          python3 -I -c '
+          import sys; sys.path.insert(0, ".")
+          from pathlib import Path
+          from app import kernel_wrap, srt
+          root, node = Path("..").resolve(), srt.node()
+          why = srt.missing(root, node) or ("" if kernel_wrap.works() else "bubblewrap cannot make its namespaces here") \
+              or ("" if kernel_wrap.srt_works(node, srt.package(root)) else "the sandbox runtime cannot run a command here")
+          print(why or "the sandbox works: bubblewrap, and the sandbox runtime from browser/frontend")
+          sys.exit(1 if why else 0)'
 
+      - name: Server tests
+        run: scripts/check.sh server
+
+  browser-page:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: browser/frontend/package-lock.json
+
+      - name: Type check, unit tests and build (after npm ci)
+        run: scripts/check.sh page
+
+  # the check main's ruleset requires: it passes only when every job above passed
   checks:
-    needs: [backend, frontend]
-    if: always()  # a skipped required job counts as passed, so this one runs, and fails, whatever the others did
+    needs: [scan, plugin, parity, browser-server, browser-page]
+    # a skipped required job counts as passed, so this one runs, and fails, whatever the others did (a draft runs none)
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Both jobs passed
+      - name: All jobs passed
         env:
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          echo "backend and frontend: $RESULTS"
+          echo "scan, plugin, parity, browser-server and browser-page: $RESULTS"
           for r in $RESULTS; do [ "$r" = success ] || exit 1; done

@@ -1,0 +1,48 @@
+# thimble's defaults for a matplotlib figure on a card. notebook._launch points a kernel's MATPLOTLIBRC here (unless
+# the environment names one); a matplotlibrc in the corpus's root folder still wins.
+#
+# Figures follow the chart style (frontend/src/lib/vizTheme.ts, the --viz-* tokens of styles/tokens.css): no figure or
+# axes fill, the series in order, label-gray chrome with hairline axes and a faint y grid. The colors are the Warm
+# paper's with the default accent, and an inlined figure maps each back to its token (frontend/src/lib/svg.ts), so its
+# series follow the paper and the accent as a Vega chart's do. 7.2 in fills a card body at the default card width,
+# where a point is 4/3 px: text is 8.25 pt (--viz-size, 11 px), a title 9.75 pt (--viz-size-title, 13 px) and a line
+# 1.125 pt (--viz-line, 1.5 px). Text is written as SVG text in the page's faces (page_fonts.py), with matplotlib's
+# defaults after them.
+
+axes.prop_cycle: cycler('color', ['0471c8', 'e26101', '018d82', 'c8367b', 'a08319', '5e4bd6', '306602'])
+image.cmap: cividis
+
+figure.figsize: 7.2, 4.0
+figure.facecolor: none
+axes.facecolor: none
+savefig.facecolor: none
+savefig.transparent: True
+
+font.size: 8.25
+axes.titlesize: 9.75
+axes.titleweight: normal
+axes.titlelocation: left
+axes.labelsize: 8.25
+xtick.labelsize: 8.25
+ytick.labelsize: 8.25
+legend.fontsize: 8.25
+legend.frameon: False
+
+text.color: 64625b
+axes.labelcolor: 64625b
+xtick.color: 64625b
+ytick.color: 64625b
+axes.edgecolor: a19d94
+axes.linewidth: 0.8
+axes.spines.top: False
+axes.spines.right: False
+axes.grid: True
+axes.grid.axis: y
+grid.color: cfcbc2
+grid.linewidth: 0.6
+lines.linewidth: 1.125
+
+svg.fonttype: none
+font.family: sans-serif
+font.sans-serif: Hanken Grotesk, DejaVu Sans, Bitstream Vera Sans, Computer Modern Sans Serif, Lucida Grande, Verdana, Geneva, Lucid, Arial, Helvetica, Avant Garde, sans-serif
+font.monospace: Geist Mono, DejaVu Sans Mono, Bitstream Vera Sans Mono, Computer Modern Typewriter, Andale Mono, Nimbus Mono L, Courier New, Courier, Fixed, Terminal, monospace

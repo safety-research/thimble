@@ -1,21 +1,18 @@
-data/*
-workspaces/
-/dev/
-frontend/dev/
-backend/.venv
 __pycache__/
 *.pyc
 .pytest_cache/
-frontend/node_modules/
-frontend/dist/
-frontend/*.tsbuildinfo
-# the types Claude Code writes beside the plugin's hooks module when it loads the plugin from this checkout, and the
-# tsconfig.json it writes to point at them
+.venv/
+node_modules/
+# the types Claude Code writes beside the plugin's hooks module when it loads the plugin from this checkout
 plugin/.claude-plugin/types/
-plugin/tsconfig.json
-release/
+# what thimble writes when a session runs in a folder of this checkout
+/thimble/
+/examples/sample/thimble/
 .claude/settings.local.json
 .claude/worktrees/
 .DS_Store
 *.log
-!plugin/viewers/*/sample/**/*.log
+# the browser workbench: the page's build, and what the install script and its tests write
+browser/frontend/dist/
+browser/frontend/*.tsbuildinfo
+browser/frontend/test-results/

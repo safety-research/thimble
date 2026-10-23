@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# thimble-browser: starts thimble's browser workbench (thimble 0.8's browser mode) on a folder of files. scripts/install.sh,
+# at the top of the repository, installs what it needs and puts a launcher for it on PATH. Here it builds the page again
+# when its sources are newer than the build, then starts the server on 127.0.0.1, opens the folder as a workspace and
+# prints the page's sign-in link (backend app/cli.py `browser`). The server runs the chat and thimble's agents itself, on
+# the way to reach Claude chosen at install or in the page: an Anthropic API key, your Claude Code sign-in, or Workload
+# Identity Federation. Ctrl-C stops the server. The workspace's cards, canvas, reports and labels stay from one start to
+# the next; the chat with Claude starts anew each time, as in Claude Code, unless --continue or --resume names one.
+#
+#   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given; opens a new chat
+#   thimble-browser -c | --continue       continue the folder's latest chat
+#   thimble-browser -r | --resume [ID]    pick an earlier chat from a list (or open chat ID)
+#   thimble-browser --setup               choose how the workbench reaches Claude, and check it
+#   thimble-browser --setup --how claude-code --yes | --key-file F | --how wif --wif-file F   the same, without asking
+#   thimble-browser --setup --find-wif    list the Workload Identity Federation config files found, by path
+#
+# The workbench keeps its workspaces and its choice in ~/.thimble-browser, or in THIMBLE_BROWSER_HOME, apart from the
+# terminal plugin's ~/.thimble. The server listens on 127.0.0.1, on port 8300 or the next free one (--port N takes N alone).
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+
+folder="" setup=0 setup_args=() chat=new
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -c | --continue) chat=continue; shift ;;
+    -r | --resume)
+      chat=pick; shift
+      # an id, not a folder, takes the place of the list
+      if [ $# -gt 0 ] && [[ "$1" =~ ^[A-Za-z0-9_-]+$ ]] && [ ! -d "$1" ]; then chat="$1"; shift; fi ;;
+    --resume=*) chat="${1#--resume=}"; shift ;;
+    --port) [ $# -ge 2 ] || { echo "thimble-browser: --port needs a number" >&2; exit 2; }; export THIMBLE_PORT="$2"; shift 2 ;;
+    --port=*) export THIMBLE_PORT="${1#--port=}"; shift ;;
+    --setup) setup=1; shift; setup_args=("$@"); break ;;
+    -h | --help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "thimble-browser: unknown option $1 (see --help)" >&2; exit 2 ;;
+    *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else echo "thimble-browser: $1 is not a folder" >&2; exit 2; fi; shift ;;
+  esac
+done
+
+export THIMBLE_HOME="${THIMBLE_BROWSER_HOME:-$HOME/.thimble-browser}"
+mkdir -p "$THIMBLE_HOME" && chmod 700 "$THIMBLE_HOME"
+# the workspaces (cards, chats, reports) live in the home too, not in this checkout
+export THIMBLE_WORKSPACES_DIR="${THIMBLE_WORKSPACES_DIR:-$THIMBLE_HOME/workspaces}"
+py="$root/backend/.venv/bin/python"
+[ -x "$py" ] || {
+  echo "thimble-browser: $root/backend/.venv is missing: run scripts/install.sh at the top of the repository" >&2; exit 1; }
+
+if [ "$setup" = 1 ]; then
+  cd "$root/backend" && exec "$py" -m app.claude_access setup "${setup_args[@]}"
+fi
+
+# the page is built the first time, and again when its sources are newer than the build (after a pull, say)
+fe="$root/frontend"
+if [ ! -f "$fe/dist/index.html" ] || [ -n "$(find "$fe/src" "$fe/index.html" "$fe/package-lock.json" \
+     -newer "$fe/dist/index.html" -print -quit 2>/dev/null)" ]; then
+  echo "thimble-browser: building the page..."
+  [ -d "$fe/node_modules" ] || npm --prefix "$fe" ci --no-audit --no-fund
+  npm --prefix "$fe" run build >/dev/null
+fi
+here="$(cd "${folder:-.}" && pwd -P)"
+cd "$root/backend"
+exec "$py" -m app.cli browser --cwd "$here" --chat "$chat"

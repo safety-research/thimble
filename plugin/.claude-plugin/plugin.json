@@ -1,50 +1,60 @@
 {
   "name": "thimble",
-  "displayName": "thimble",
-  "description": "thimble beside a Claude Code session for making sense of a corpus of files. In every session the plugin loads with about 21 tokens (one deferred tool, load_thimble) and starts no server; thimble turns on at the first data-file read, /thimble or a call of load_thimble, and then draws its cards, citations, coverage and checks in the terminal and keeps its panel there. /thimble browser, or a press in the panel, opens the browser workbench (chat, files, a canvas of cards and a report) on the same session, signed in. One MCP server (the thimble tools), one hooks module (hooks/register.ts: the agent bridge and file guard, then the terminal UI), the /thimble skill and the skills of thimble's commands. The orientation, its critic, a writer, the builder and the reviewer of a view, each run of a check and the agent of a code ticket are subagents of the session, of the types the hooks module registers.",
-  "version": "0.9.1",
+  "description": "thimble for Claude Code: Claude adds a citation to each claim you would check in its replies, and a second Claude checks each one against the files after the reply; a click on a citation opens its evidence. Claude draws interactive cards of the data, and v draws one of the last answer. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s squeezes or stretches a reply, or catches up on several; after each reply an observer explains terms you may not know, points out important details and keeps the session's claims (c); t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read.",
   "author": {
     "name": "Matthew Joerke"
   },
+  "homepage": "https://github.com/safety-research/thimble",
   "repository": "https://github.com/safety-research/thimble",
   "license": "Apache-2.0",
-  "mcpServers": "./.mcp.json",
-  "types": "./hooks/term/types/index.d.ts",
+  "types": "./types/index.d.ts",
   "userConfig": {
-    "viewProposals": {
+    "marks": {
       "type": "boolean",
-      "title": "View proposals",
-      "description": "After a turn, thimble may propose a view of the files: a page that shows their records in a form the files hide.",
+      "title": "Citations",
+      "description": "Claude adds a citation to each claim you would check, and a second Claude checks each one after the reply.",
       "default": true
     },
-    "labels": {
+    "cards": {
       "type": "boolean",
-      "title": "Labels",
-      "description": "Labels that a model applies to every record of a file, and their lists of records no category fit.",
+      "title": "Cards",
+      "description": "Claude draws interactive cards, and v draws one of the last answer.",
       "default": true
     },
-    "checks": {
+    "squeeze": {
       "type": "boolean",
-      "title": "Checks",
-      "description": "Checks that read Claude's answers and documents and comment on passages, which the terminal highlights.",
+      "title": "Squeeze and catch-up",
+      "description": "s makes an answer shorter or longer, and catches you up on replies you missed. One rewrite each time you ask.",
       "default": true
     },
-    "citationMarks": {
+    "explain": {
       "type": "boolean",
-      "title": "Citation marks",
-      "description": "A check mark or a red cross on each citation, after thimble checks that the cited place holds the value.",
+      "title": "Explainers",
+      "description": "Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.",
       "default": true
     },
-    "coverage": {
+    "details": {
       "type": "boolean",
-      "title": "Coverage",
-      "description": "What Claude read or searched of the data files in this session, under answers and in the panel.",
+      "title": "Important details",
+      "description": "Marks the details of an answer that are easy to miss and change what it means. A small part of the call after each reply.",
       "default": true
     },
-    "cardCheck": {
+    "claims": {
       "type": "boolean",
-      "title": "Card check",
-      "description": "After a card is made or changed, a check of its takeaway and its citations against its output.",
+      "title": "Claims",
+      "description": "c opens what Claude and you claimed in the session, with sources; the bar counts them. The largest part of the call after each reply.",
+      "default": true
+    },
+    "counts": {
+      "type": "boolean",
+      "title": "Labels and coverage on the bar",
+      "description": "The bar shows how much of the data Claude has seen and how many labels there are. No model call: thimble counts the files after each turn.",
+      "default": true
+    },
+    "squeezeCards": {
+      "type": "boolean",
+      "title": "Squeeze changes cards (experimental)",
+      "description": "When s makes an answer much shorter or longer, or writes it for another reader, it may edit, add or leave out a card with the text. 0 brings the cards back as they were. Each rewrite also reads the cards.",
       "default": true
     }
   }

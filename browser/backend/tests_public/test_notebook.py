@@ -1,0 +1,160 @@
+"""app.notebook's kernels: a cell runs and its output is stored; it runs in the workspace's scratch mirror of the
+corpus, so its writes never reach the corpus; and the kernel's environment holds no credential.
+
+Each test gets a fresh workspace dir (workspaces_tmp) and shuts its kernel down at the end. Kernel startup takes a
+second or two, so timeouts are generous."""
+from __future__ import annotations
+
+import json
+import threading
+
+import httpx
+import pytest
+from fastapi import FastAPI
+
+from app import config, notebook
+
+
+@pytest.fixture()
+def corpus(workspaces_tmp) -> str:
+    """The corpus to run against: the synthetic `mini`, with the test's own workspaces."""
+    return "mini"
+
+
+@pytest.fixture(autouse=True)
+async def _kernels_down():
+    yield
+    await notebook.shutdown_all()
+
+
+@pytest.fixture()
+def app() -> FastAPI:
+    # only our router, so these tests do not depend on other owners' modules importing cleanly
+    a = FastAPI()
+    a.include_router(notebook.router, prefix="/api")
+    return a
+
+
+@pytest.fixture()
+async def client(app):
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t", timeout=180) as c:
+        yield c
+
+
+def _text(cell: dict) -> str:
+    return "".join(b.get("text/plain", "") for b in cell["outputs"] if "_stream" in b)
+
+
+async def test_create_and_run_print(client, corpus, workspaces_tmp):
+    r = await client.post(f"/api/ws/{corpus}/notebooks/main/cells", json={"code": "print(1+1)"})
+    assert r.status_code == 200
+    cell = r.json()
+    assert len(cell["id"]) == 8 and cell["status"] == "idle" and cell["exec_count"] is None
+    assert cell["created_by"] == "user" and cell["outputs"] == []
+
+    r = await client.post(f"/api/ws/{corpus}/notebooks/main/cells/{cell['id']}/run")
+    assert r.status_code == 200
+    ran = r.json()
+    assert ran["id"] == cell["id"]
+    assert ran["status"] == "ok"
+    assert ran["exec_count"] == 1
+    assert ran["outputs"] == [{"text/plain": "2\n", "_stream": "stdout"}]
+
+    # persisted as plain json in the workspace dir (notebooks/<id>.json)
+    on_disk = json.loads((workspaces_tmp / corpus / "notebooks" / "main.json").read_text())
+    assert on_disk["cells"][0]["outputs"] == ran["outputs"] and on_disk["id"] == "main"
+    assert ran["notebook"] == "main" and cell["notebook"] == "main"
+    assert (await client.get(f"/api/ws/{corpus}/notebooks/main")).json() == on_disk
+
+
+async def test_kernel_cwd_is_the_scratch_mirror_and_writes_never_reach_the_corpus(corpus):
+    """The kernel starts in workspaces/<c>/scratch, a symlink mirror of the corpus, so relative
+    reads work while every file a cell creates lands in scratch — never in the corpus directory."""
+    corpus_dir = config.corpus_dir(corpus)
+    scratch = config.workspace_dir(corpus) / notebook.SCRATCH_DIR
+    cell = await notebook.run_code(corpus, "import os, glob\n"
+                                           "print(os.getcwd()); print(os.path.exists('manifest.json'))\n"
+                                           "print(os.path.realpath('manifest.json'))\n"
+                                           "print(len(glob.glob('agents/*')) > 0, os.path.isdir('agents'))\n"
+                                           "import sqlite3; sqlite3.connect('made-by-a-cell.db').close()\n"
+                                           "open('notes.txt', 'w').write('x')", "user")
+    assert cell["status"] == "ok", cell["outputs"]
+    lines = _text(cell).splitlines()
+    assert lines[0] == str(scratch) and lines[1] == "True"
+    assert lines[2] == str((corpus_dir / "manifest.json").resolve())  # read through the link
+    assert lines[3] == "True True"  # directories are real (walk/glob descend), files are links
+    assert (scratch / "made-by-a-cell.db").is_file() and (scratch / "notes.txt").is_file()
+    assert not (corpus_dir / "made-by-a-cell.db").exists() and not (corpus_dir / "notes.txt").exists()
+    # the mirror is rebuilt on the next kernel start and leaves what the cell made alone
+    await notebook.shutdown_all()
+    cell = await notebook.run_code(corpus, "import os; print(os.path.exists('notes.txt'), os.path.islink('manifest.json'))", "user")
+    assert _text(cell).strip() == "True True"
+
+
+def test_kernel_env_drops_secrets(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-FAKE")
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", "wrkspc_x")
+    monkeypatch.setenv("CI_ACCESS_TOKEN", "ci_x")
+    monkeypatch.setenv("SOME_SERVICE_TOKEN", "t")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-FAKE")  # the CLI's long-lived token: CLAUDE_* and TOKEN both catch it
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/tmp/cfg")
+    monkeypatch.setenv("HARMLESS", "1")
+    env = notebook.kernel_env()
+    for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_WORKSPACE_ID", "CI_ACCESS_TOKEN", "SOME_SERVICE_TOKEN",
+              "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"):
+        assert k not in env
+    assert env["HARMLESS"] == "1" and "PATH" in env
+
+
+async def test_a_large_output_is_unpacked_off_the_event_loop(corpus, monkeypatch):
+    """A call whose output is tens of megabytes, as a view's reader can return: the kernel's message is unpacked, its
+    signature checked over every byte and its JSON parsed, in a thread, so the server's loop keeps turning."""
+    from jupyter_client.session import Session
+
+    loop_thread = threading.get_ident()
+    seen: list[tuple[int, bool]] = []
+    deserialize = Session.deserialize
+
+    def spy(self, msg_list, content=True, copy=True):
+        seen.append((sum(len(m) for m in msg_list), threading.get_ident() == loop_thread))
+        return deserialize(self, msg_list, content, copy)
+
+    monkeypatch.setattr(Session, "deserialize", spy)
+    outputs, _, status = await notebook.execute_on(
+        corpus, "big", "from IPython.display import publish_display_data\n"
+                       "publish_display_data({'text/plain': 'x' * 80_000_000})")
+    assert status == "ok" and len(outputs[0]["text/plain"]) == 80_000_000
+    large = [on_loop for size, on_loop in seen if size > notebook.MSG_INLINE_BYTES]
+    assert large and not any(large), "a large message was unpacked on the event loop"
+
+
+async def test_a_card_made_is_announced_with_who_made_it_and_an_edit_is_not(corpus, monkeypatch):
+    """The workspace record of a card made names its maker (`by`), so the page goes to a card Claude made and leaves a
+    card the person made where it is (frontend lib/follow.ts); later records of the card carry no maker."""
+    from app import investigation
+
+    sent: list[dict] = []
+    monkeypatch.setattr(investigation, "emit", lambda c, inv, ev: sent.append(ev))
+    mine = notebook.insert_cell(corpus, "main", notebook.new_cell("code", "user", code="1"))
+    claude = notebook.insert_cell(corpus, "main", notebook.new_cell("code", "main", code="2"))
+    notebook.edit_cell(corpus, claude["id"], title="Two")
+    made = {e["cell"]: e for e in sent if e.get("op") == "created"}
+    assert made[mine["id"]]["by"] == "user" and made[claude["id"]]["by"] == "main"
+    later = [e for e in sent if e.get("cell") == claude["id"] and e.get("op") != "created"]
+    assert later and all("by" not in e for e in later)
+
+
+async def test_a_card_a_chat_made_is_announced_with_that_chat_s_role(corpus, monkeypatch):
+    """A card made by a chat (`chat:<id>`) carries the chat's role (`by_role`), so the page does not follow a card that a
+    chat working in the background made, such as a writer's figure (frontend lib/follow.ts)."""
+    from app import agents, investigation
+
+    sent: list[dict] = []
+    monkeypatch.setattr(investigation, "emit", lambda c, inv, ev: sent.append(ev))
+    writer = agents.new_agent(corpus, "writer", "Report", announce=False)
+    figure = notebook.insert_cell(corpus, "main", notebook.new_cell("code", f"chat:{writer['id']}", code="1"))
+    plain = notebook.insert_cell(corpus, "main", notebook.new_cell("code", "main", code="2"))
+    gone = notebook.insert_cell(corpus, "main", notebook.new_cell("code", "chat:abcd1234", code="3"))
+    made = {e["cell"]: e for e in sent if e.get("op") == "created"}
+    assert made[figure["id"]]["by_role"] == "writer"
+    assert "by_role" not in made[plain["id"]] and "by_role" not in made[gone["id"]]

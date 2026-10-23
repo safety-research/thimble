@@ -1,0 +1,2157 @@
+"""Which files read as a transcript, and the turns of a whole-file JSON transcript.
+
+sniff(path, rel) reads only the head of one file (HEAD_BYTES) and answers whether it looks even close to a transcript,
+in any format: a Claude Code stream, JSON lines of messages or of whole conversations, a JSON file holding message lists
+(a chat export, an eval log, a plain list of messages) or a store of messages by id that its conversations list (an
+agent harness's), read by the parse that reads the whole file (a large file's head cut after its last whole item and
+closed, _json_prefix), a CSV or TSV file with a speaker column and a text column, or a
+text or markdown chat log whose lines start turns (`User: …`, `**Assistant:** …`, `[10:32] alice: …`, `<bob> …`,
+`## Human`, `2026-09-01 10:00 [user] …`, Claude Code's /export with `> ` and `⏺ `, aider's chat history). The answer is kept per path while its size and mtime_ns stay the same, so the File browser asks on every
+open and no corpus is walked. A false positive costs one more mode beside Raw, so the rules are lenient: a key names
+who speaks in any case style and nesting (`speakerName`, `agent_speaker_id`, `data.speakerId`), but JSON lines read as
+messages only when several of them take turns (_takes_turns), and a markdown file's front matter is never a chat log.
+
+The answer, or None:
+    {"format": "stream" | "messages" | "conversations" | "json" | "csv" | "text", "score": 0..1,
+     "keys"?: {"speaker", "text", "time"}   where a message keeps them (dotted paths into a record, or CSV columns;
+                                             "a|b" for who speaks under either key), and for whole conversations,
+                                             "list": the key of their list of messages,
+     "wrap"?: str                            a stream whose records each nest a stream record under this key,
+     "pair"?: [str, str]                     for conversations that are a prompt and its response, their two keys,
+     "lines"?: true                          JSON lines in a file the server pages as text (not named .jsonl),
+     "style"?: str, "speakers"?: [str]       a text chat log's style of turn line, and who may start a turn in it,
+     "delimiter"?: str}
+A score of STRONG makes Transcript the file's first mode; WEAK only offers it.
+
+JSON lines are shown from the records the File browser pages; parse_turns() parses a whole-file JSON transcript into
+turns, each with the line of the file it stands on, for the Transcript mode to page through: GET
+/corpora/{c}/source/turns. A turn in any format carries the fields its record keeps about it (turn_fields: its role or
+source, the model, the tools it calls, its metadata), which Color by and Filter by offer (source_keys), and what it
+holds beyond its words (turn_blocks: its reasoning, its tool calls and their results, in any of the formats' shapes),
+which the Transcript mode shows as a Claude Code stream's blocks. A whole-file JSON of any size is offered Transcript;
+its turns are parsed off the event loop.
+Where that parse finds no turns (415), the sniff says None for that version of the file from then on, and the File
+browser opens the mode it would otherwise use.
+
+turn_of(line, style) reads one line of a text chat log: who speaks, when, and where the words start.
+
+speaker_names() gives the names a corpus has for speakers that a file names only by id (GET
+/corpora/{c}/source/speakers): an agents.jsonl beside the file, whose records each carry an id and a name.
+"""
+from __future__ import annotations
+
+import bisect
+import csv
+import datetime as _dt
+import functools
+import io
+import itertools
+import json
+import os
+import re
+import threading
+from collections import ChainMap, OrderedDict
+from collections.abc import Iterable, Iterator
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+
+from . import config
+
+router = APIRouter()
+
+HEAD_BYTES = 256 * 1024  # of a file's head that the sniff reads
+TEXT_HEAD_LINES = 400  # non-empty lines of a text file's head the sniff looks at
+FRONT_MATTER_MAX = 400  # lines a front matter may take before its closing fence
+KEY_MAX = 64  # characters of a key whose words the sniff reads (_key_words)
+JSONL_HEAD_LINES = 60
+STRONG = 0.95
+WEAK = 0.5
+TURN_TEXT_MAX = 20_000  # characters of one turn's text a page carries
+TURNS_PAGE_MAX = 500
+SNIFF_CACHE_MAX = 4096
+TURNS_CACHE_MAX = 4
+PARSING_MAX = 64
+
+SPEAKER_KEYS = ("role", "speaker", "sender", "author", "from", "user", "username", "participant", "character", "who",
+                "nick", "persona")
+# A key names who speaks when one of its words (speakerName, agent_speaker_id, Author-Name) is a speaker word and its
+# last word is a speaker word or one of SPEAKER_TAILS. A key whose speaker words are all weak names who speaks only in
+# a record that also carries a time, since without one a record with a `name` and a `body` is as likely a page as a post.
+SPEAKER_WORDS = frozenset(SPEAKER_KEYS) | {"nickname", "poster", "writer"}
+WEAK_SPEAKER_WORDS = frozenset({"name", "editor", "label", "agent"})
+SPEAKER_TAILS = SPEAKER_WORDS | WEAK_SPEAKER_WORDS | {"handle", "login", "display", "id", "uuid", "type", "kind"}
+# words that make a key name someone other than who speaks, or something about them
+NOT_SPEAKER_WORDS = frozenset({"to", "recipient", "recipients", "receiver", "target", "reply", "replied", "mention",
+                               "mentions", "mentioned", "parent", "count", "num", "number", "is", "has", "last", "next",
+                               "date", "time", "timestamp"})
+TEXT_KEYS = ("content", "text", "message", "body", "value", "parts", "utterance", "msg", "change_summary")
+TEXT_TAILS = frozenset({"text", "content", "body", "message", "msg", "utterance"})  # of a compound text key (messageText)
+TIME_KEYS = ("timestamp", "ts", "time", "created_at", "create_time", "date", "datetime", "sent_at", "created")
+TIME_TAILS = frozenset({"time", "timestamp", "ts", "date", "datetime"})  # of a compound time key (createdTime)
+TIME_AT = frozenset({"created", "sent", "posted", "published", "written", "updated"})  # of `<word>_at` (sentAt)
+# keys whose value names who speaks only when it is a role word, such as LangChain's {"type": "human", "data": {...}}
+# or an ATIF trajectory's steps' {"source": "user"}
+ROLE_TYPE_KEYS = ("type", "role", "kind", "source")
+WRAP_KEYS = ("message", "data", "msg", "payload")  # where a record nests its message (payload: Codex CLI's logs)
+# where a record that holds no message of its own may nest one, or nest a Claude Code stream record (the Agent SDK's
+# messages kept under `content` beside a database row's own columns)
+MORE_WRAPS = ("content", "record", "event", "entry", "item")
+MIN_TURNS = 3  # turn-like records a head needs when its speakers are not role words
+TITLE_KEYS = ("title", "name", "subject", "channel", "topic", "thread_title", "id", "uuid")
+LIST_KEYS = ("messages", "chat_messages", "conversation", "conversations", "turns", "dialogue", "dialog", "chat",
+             "history", "utterances", "transcript", "thread", "replies", "output", "contents")
+POOL_SAMPLE = 200  # values of a mapping under one of LIST_KEYS read to tell whether it maps ids to messages
+SYSTEM_KEYS = ("system", "system_prompt")  # where a record keeps its system prompt beside its messages
+OWNER_KEYS = ("agent", "agent_name", "agent_id")  # whose conversations a record keeps, for their titles
+FORK_KEYS = ("forked_from", "fork_of", "branched_from")  # the conversation a conversation forked from
+FORK_AT_KEYS = ("forked_at", "fork_at", "branched_at")  # how many of that conversation's messages it starts with
+PAIR_KEYS = (("prompt", "response"), ("prompt", "completion"), ("question", "answer"), ("instruction", "output"),
+             ("input", "output"))
+# stream_event: a raw API stream event (the Agent SDK's --include-partial-messages)
+STREAM_TYPES = {"assistant", "user", "system", "tool_progress", "result", "stream_event"}
+# an agent's tool record (a tool call and its result on one line, as many harnesses log them, not the Claude Code
+# stream's two records): a tool-name key beside a call key or a result key
+TOOL_NAME_KEYS = ("tool_name", "tool")
+TOOL_CALL_KEYS = ("tool_call", "tool_input", "tool_args", "arguments", "function_call")
+TOOL_RESULT_KEYS = ("tool_result", "tool_response", "observation")
+# a turn's fields (turn_fields): the objects where a message keeps metadata about itself (ATIF's `extra`), whose fields
+# are the turn's too; the last words of a key that names one record (an id); the content blocks that call a tool; and
+# the characters of a value past which it is a text, not a kind (source_keys.VALUE_CHARS)
+META_KEYS = ("metadata", "meta", "extra", "attributes")
+ID_TAILS = frozenset({"id", "uuid", "ids"})
+TOOL_BLOCKS = frozenset({"tool_use", "server_tool_use", "function_call"})
+FIELD_CHARS = 80
+# a turn's blocks (turn_blocks): content blocks and items by their `type` (Anthropic's, the Responses API's, Inspect's),
+# the keys where a message keeps its reasoning, its tool calls and their results (an ATIF step's `observation`), and
+# where a tool call keeps its name, its arguments and its id, and a result its output and the id of its call
+TEXT_TYPES = frozenset({"text", "input_text", "output_text"})
+THINK_TYPES = frozenset({"thinking", "reasoning", "reasoning_text", "thoughts", "reasoning_recap"})
+CALL_TYPES = TOOL_BLOCKS | {"tool_call", "custom_tool_call", "local_shell_call", "mcp_tool_use", "mcp_call",
+                            "computer_call", "web_search_call", "file_search_call", "code_interpreter_call"}
+RESULT_TYPES = frozenset({"tool_result", "function_call_output", "custom_tool_call_output", "local_shell_call_output",
+                          "computer_call_output", "mcp_tool_result", "web_search_tool_result", "tool_response",
+                          "function_response", "code_execution_tool_result"})
+REASONING_KEYS = ("reasoning_content", "reasoning", "thinking", "thinking_blocks", "thoughts", "thought")
+CALLS_KEYS = ("tool_calls", "toolCalls", "function_calls")
+RESULTS_KEYS = ("observation", "observations", "tool_results", "tool_result", "tool_response")
+CALL_NAME_KEYS = ("function_name", "name", "tool_name", "tool", "function", "recipient")
+CALL_ARGS_KEYS = ("arguments", "args", "input", "parameters", "action", "code", "query")
+CALL_ID_KEYS = ("tool_call_id", "call_id", "id", "tool_use_id")
+RESULT_ID_KEYS = ("source_call_id", "tool_call_id", "call_id", "tool_use_id", "id")
+CALL_SPEAKERS = frozenset({"function_call", "tool_call"})  # who speaks a turn that is a tool call (ShareGPT's)
+STEP_KEYS = ("step_id", "step", "step_index", "step_number")  # a record's own number among its conversation's (ATIF's)
+OUTPUT_KEYS = ("content", "output", "result", "results", "response", "text", "outputs", "source", "data")
+CALL_TAILS = ("_tool_use", "_call")  # of a call's type (`web_search_call`, `mcp_tool_use`)
+RESULT_TAILS = ("_tool_result", "_call_output")  # of a result's type (`web_fetch_tool_result`)
+CHATGPT_RESULTS = frozenset({"execution_output", "tether_browsing_display", "system_error"})  # a ChatGPT tool's output
+# where a person object keeps its name: these keys, then a key of NAME_NORMS in any case style (`displayName`), then
+# its role or id
+NAME_FIELDS = ("name", "display_name", "username", "real_name")
+NAME_NORMS = frozenset({"name", "displayname", "username", "realname", "fullname", "nickname", "nick", "handle", "login"})
+NAME_LAST = ("role", "id")
+
+ROLE_WORDS = {"user", "assistant", "human", "ai", "system", "bot", "claude", "chatgpt", "gpt", "model", "agent", "me",
+              "you", "interviewer", "interviewee", "q", "a", "question", "answer", "customer", "support", "operator",
+              "tool", "moderator", "host", "guest", "narrator", "student", "teacher", "patient", "doctor", "client",
+              "therapist", "gemini", "llm", "copilot", "developer"}
+NOT_SPEAKERS = {"info", "debug", "warn", "warning", "error", "fatal", "trace", "critical", "notice", "note", "notes",
+                "todo", "fixme", "example", "examples", "usage", "returns", "return", "args", "arguments", "params",
+                "parameters", "raises", "see", "tip", "important", "caution", "http", "https", "ftp", "file", "step",
+                "summary", "status", "result", "results", "output", "input", "source", "date", "version", "author",
+                "license", "title", "description", "tags", "type", "id", "name", "url", "link", "path", "total",
+                "default", "required", "optional", "answer key", "figure", "table", "chapter", "section", "page"}
+
+TEXTISH = {"", ".txt", ".text", ".md", ".markdown", ".log", ".chat", ".transcript", ".vtt", ".srt", ".rst", ".org",
+           ".irc"}
+JSONLISH = {".jsonl", ".ndjson", ".jsonlines"}
+JSONDOC = {".json", ".traj"}  # a whole JSON document (.traj: SWE-agent's trajectories)
+DELIMITED = {".csv": ",", ".tsv": "\t"}
+
+_NAME = r"[^\W\d_][\w .'@&+-]{0,38}?"
+_CLOCK = r"\d{1,2}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?(?:\s?[APap]\.?[Mm]\.?)?"
+_DATE = r"\d{1,4}[/.-]\d{1,2}[/.-]\d{1,4}"
+_STAMP = rf"(?:{_DATE}[ T,]+)?{_CLOCK}(?:Z|[+-]\d{{2}}:?\d{{2}}|\s?UTC)?"  # a clock, after a date or not, with a zone or not
+# A turn's first line in a text chat log, by style: (name, regex). Each has the group `speaker` (or `speaker2`), may
+# have `time` (or `time2`), and the words of the turn start at the end of the match.
+STYLES: list[tuple[str, re.Pattern[str]]] = [
+    ("whatsapp", re.compile(rf"^\[?(?P<time>{_DATE},?\s+{_CLOCK})\]?\s*(?:[-–]\s+)?(?P<speaker>{_NAME}):\s")),
+    ("bracket", re.compile(rf"^\[(?P<time>[^\]\n]{{3,40}})\]\s*(?:<[@+%]?(?P<speaker2>[^>\n]{{1,40}})>\s?|(?P<speaker>{_NAME}):\s?)")),
+    ("irc", re.compile(rf"^(?:(?P<time>{_CLOCK})\s+)?<[@+%]?(?P<speaker>[^>\s]{{1,40}})>\s")),
+    ("vtt", re.compile(r"^<v\s+(?P<speaker>[^>\n]{1,40})>")),
+    ("bold", re.compile(rf"^\s*(?:[-*>]\s+)?\*\*(?P<speaker>{_NAME})\s*(?:\((?P<time>[^)\n]{{1,40}})\))?\s*:?\s*\*\*"
+                        rf"\s*(?:\((?P<time2>{_STAMP}|{_DATE})\))?\s*:?\s*")),
+    ("heading", re.compile(rf"^#{{1,4}}\s+(?P<speaker>{_NAME})\s*(?:\((?P<time>[^)\n]{{1,40}})\))?\s*:?\s*$")),
+    ("clock-name", re.compile(rf"^\(?(?P<time>{_CLOCK})\)?\s+[-–]?\s*(?P<speaker>{_NAME}):\s")),
+    ("name-clock", re.compile(rf"^(?P<speaker>{_NAME})\s*[(\[](?P<time>{_STAMP})[)\]]\s*:?\s*")),
+    ("slack", re.compile(rf"^(?P<speaker>{_NAME})\s{{2,}}(?P<time>{_CLOCK})\s*$")),
+    ("tagged", re.compile(rf"^(?:(?P<time>{_DATE}[ T]{_CLOCK}\S*)\s+)?\[(?P<speaker>{_NAME})\]:?\s")),
+    ("cc", re.compile(r"^(?P<mark>[>⏺●])\s(?=\S)")),
+    ("aider", re.compile(r"^(?P<mark>####)\s")),
+    ("colon", re.compile(rf"^\s*(?:>\s*)?(?P<speaker>{_NAME})\s*:(?:\s+|$)")),
+]
+# who a mark that starts a turn stands for: Claude Code's /export (`> ` the user's prompt, `⏺ ` or `● ` Claude's reply)
+# and aider's chat history (`#### ` the user's message)
+MARKS = {">": "User", "⏺": "Claude", "●": "Claude", "####": "User"}
+AIDER_HEAD = "# aider chat started at"
+AIDER_OUTPUT = "Aider"  # who speaks a run of aider's own `> ` lines
+AIDER_REPLY = "Assistant"
+_STYLE = dict(STYLES)
+# the styles that a line of prose or of a document's headings rarely has, so many turns in them make a strong case
+# without role words
+DISTINCT_STYLES = {"whatsapp", "bracket", "irc", "vtt", "clock-name", "name-clock", "slack"}
+
+_lock = threading.Lock()
+_SNIFFS: "OrderedDict[str, tuple[tuple[int, int], dict[str, Any] | None]]" = OrderedDict()
+_TURNS: "OrderedDict[str, tuple[tuple[int, int], dict[str, Any]]]" = OrderedDict()
+_PARSING: dict[str, threading.Lock] = {}  # per file, so a file asked for twice at once is parsed once
+
+
+# --------------------------------------------------------------------------- messages
+
+
+def _name_of(v: Any) -> str | None:
+    """Who a speaker value names: a short one-line string, a number (an id), or a person object's name."""
+    if isinstance(v, str):
+        s = v.strip()
+        return s if 0 < len(s) <= 80 and "\n" not in s else None
+    if isinstance(v, int) and not isinstance(v, bool):
+        return str(v)
+    if isinstance(v, dict):
+        for k in NAME_FIELDS:
+            got = _name_of(v.get(k))
+            if got:
+                return got
+        for k, x in v.items():
+            if isinstance(k, str) and _norm(k) in NAME_NORMS:
+                got = _name_of(x)
+                if got:
+                    return got
+        for k in NAME_LAST:
+            got = _name_of(v.get(k))
+            if got:
+                return got
+    return None
+
+
+_CAMEL = re.compile(r"([a-z0-9])([A-Z])")
+_CAPS = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _key_words(key: str) -> tuple[str, ...]:
+    """A key's words, in any case style: `agent_speaker_id`, `speakerName`, `Speaker-Type`, `userID`; none for a key
+    longer than KEY_MAX, which names no speaker, text or time."""
+    return _split_key(key) if len(key) <= KEY_MAX else ()
+
+
+@functools.lru_cache(maxsize=4096)
+def _split_key(key: str) -> tuple[str, ...]:
+    return tuple(_WORD.findall(_CAPS.sub(r"\1 \2", _CAMEL.sub(r"\1 \2", key)).lower()))
+
+
+def _speaker_rank(key: str) -> tuple[int, int, int, int] | None:
+    """How surely a key's name says it holds who speaks, lower first: (weak, tail, compound, order), the tail 0 for a
+    name, 1 for an id, 2 for a type, or a role beside another word (`speaker_type`); None for a key that names no
+    speaker."""
+    return _rank_key(key) if len(key) <= KEY_MAX else None
+
+
+@functools.lru_cache(maxsize=4096)
+def _rank_key(key: str) -> tuple[int, int, int, int] | None:
+    words = _key_words(key)
+    if not words or len(words) > 4 or words[-1] not in SPEAKER_TAILS or "".join(words) == "useragent":
+        return None
+    if any(w in NOT_SPEAKER_WORDS for w in words):
+        return None
+    strong = any(w in SPEAKER_WORDS for w in words)
+    if not strong and not any(w in WEAK_SPEAKER_WORDS for w in words):
+        return None
+    tail = words[-1]
+    rank = 1 if tail in ("id", "uuid") else 2 if tail in ("type", "kind") or (tail == "role" and len(words) > 1) else 0
+    single = len(words) == 1
+    order = SPEAKER_KEYS.index(words[0]) if single and words[0] in SPEAKER_KEYS else len(SPEAKER_KEYS)
+    if single and words[0] == "name":  # after the other weak keys: it names a page or a thread as often as who speaks
+        order += 1
+    return (0 if strong else 1, rank, 0 if single else 1, order)
+
+
+def _speaker_key(obj: dict[str, Any], skip: str | None, timed: bool) -> str | None:
+    """The key of `obj` that most surely holds who speaks (_speaker_rank) and holds a name; a weak one only when the
+    record carries a time (`timed`)."""
+    best: tuple[tuple[int, int, int, int], str] | None = None
+    for k, v in obj.items():
+        if not isinstance(k, str) or k == skip:
+            continue
+        rank = _speaker_rank(k)
+        if rank is None or (rank[0] and not timed) or not _name_of(v):
+            continue
+        if best is None or rank < best[0]:
+            best = (rank, k)
+    return best[1] if best else None
+
+
+def _time_key(obj: dict[str, Any]) -> str | None:
+    """The key of a record's time: one of TIME_KEYS, else a key whose last word says it is one (`createdTime`,
+    `sentAt`)."""
+    got = _first(obj, TIME_KEYS)
+    if got:
+        return got
+    for k, v in obj.items():
+        if not isinstance(k, str) or v in (None, "") or isinstance(v, (dict, list, bool)):
+            continue
+        words = _key_words(k)
+        if words and (words[-1] in TIME_TAILS or (len(words) == 2 and words[1] == "at" and words[0] in TIME_AT)):
+            return k
+    return None
+
+
+def _text_of(v: Any, depth: int = 0) -> str | None:
+    """The words a text value holds: a string, the text parts of a list, or an object's own text or parts."""
+    if isinstance(v, str):
+        return v
+    if depth > 3:
+        return None
+    if isinstance(v, list):
+        parts = [t for t in (_text_of(x, depth + 1) for x in v) if t]
+        return "\n\n".join(parts) if parts else ("" if not v else None)
+    if isinstance(v, dict):
+        for k in ("text", "parts", "content", "value", "thinking", "result"):
+            if k in v:
+                got = _text_of(v[k], depth + 1)
+                if got is not None:
+                    return got
+        if v.get("type") == "tool_use":
+            return f"{v.get('name') or 'tool'} {json.dumps(v.get('input'), ensure_ascii=False)[:2000]}"
+    return None
+
+
+def _time_of(v: Any) -> str | None:
+    """A time value as text: as written, or an ISO stamp in UTC for seconds or milliseconds since 1970."""
+    if isinstance(v, str) and re.fullmatch(r"\d{9,13}(?:\.\d+)?", v.strip()):
+        v = float(v)
+    if isinstance(v, str) and v.strip():
+        return v.strip()[:40]
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 1e8:
+        secs = v / 1000 if v > 1e11 else v  # milliseconds when it is too large for seconds
+        try:
+            return _dt.datetime.fromtimestamp(secs, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (OverflowError, OSError, ValueError):
+            return None
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return str(v)
+    return None
+
+
+def _first(obj: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    return next((k for k in keys if obj.get(k) not in (None, "", [], {})), None)
+
+
+def message_keys(obj: Any, timed: bool = False, depth: int = 0) -> dict[str, str] | None:
+    """The keys of a record that hold a message (dotted for a nested one, as `message.author`): {speaker, text, time?},
+    or None when it holds none. `timed` when a record around it carries the time."""
+    if not isinstance(obj, dict) or depth > 3:
+        return None
+    outer_time = _time_key(obj)
+    for wrap in WRAP_KEYS:
+        inner = obj.get(wrap)
+        if isinstance(inner, dict):
+            got = message_keys(inner, timed or bool(outer_time), depth + 1)
+            if got:
+                out = {k: f"{wrap}.{v}" for k, v in got.items()}
+            elif (text := _text_key(inner)) and (role := _role_key(obj)):
+                out = {"speaker": role, "text": f"{wrap}.{text}"}
+            else:
+                continue
+            if "time" not in out and outer_time:
+                out["time"] = outer_time
+            return out
+    got = _own_message_keys(obj, timed)
+    if got is not None or depth:
+        return got
+    for wrap in MORE_WRAPS:
+        inner = obj.get(wrap)
+        if isinstance(inner, dict) and (got := message_keys(inner, bool(outer_time), depth + 1)):
+            out = {k: f"{wrap}.{v}" for k, v in got.items()}
+            if "time" not in out and outer_time:
+                out["time"] = outer_time
+            return out
+    return None
+
+
+def _own_message_keys(obj: dict[str, Any], timed: bool) -> dict[str, str] | None:
+    """message_keys among a record's own keys, nested ones aside."""
+    text = _text_key(obj)
+    if text is None:
+        return None
+    time = _time_key(obj)
+    speaker = _speaker_key(obj, text, timed or bool(time)) or _role_key(obj) or _class_key(obj)
+    if speaker is None:
+        return None
+    out = {"speaker": speaker, "text": text}
+    if time:
+        out["time"] = time
+    return out
+
+
+def _text_key(obj: dict[str, Any]) -> str | None:
+    """The key of a record's words: one of TEXT_KEYS, else a key of a string whose last word says it holds words
+    (`messageText`, `body_text`)."""
+    got = next((k for k in TEXT_KEYS if k in obj and (_text_of(obj[k]) is not None or _holds_blocks(obj[k]))), None)
+    if got:
+        return got
+    for k, v in obj.items():
+        if isinstance(k, str) and isinstance(v, str) and k not in REASONING_KEYS:
+            words = _key_words(k)
+            if 2 <= len(words) <= 3 and words[-1] in TEXT_TAILS:
+                return k
+    # a message that only calls tools (OpenAI's `"content": null` beside its `tool_calls`)
+    if any(isinstance(obj.get(k), list) and obj[k] for k in CALLS_KEYS) or isinstance(obj.get("function_call"), dict):
+        return next((k for k in TEXT_KEYS if k in obj), "content")
+    return None
+
+
+def _role_key(obj: dict[str, Any]) -> str | None:
+    """The key of ROLE_TYPE_KEYS whose value is a role word, such as `"type": "human"`."""
+    return next((k for k in ROLE_TYPE_KEYS if isinstance(obj.get(k), str) and obj[k].strip().lower() in ROLE_WORDS), None)
+
+
+def _class_key(obj: dict[str, Any]) -> str | None:
+    """Who speaks a message kept as a message or event class's fields (AutoGen's `{"type": "AssistantMessage",
+    "source": "coder"}`, `ToolCallRequestEvent`): its `source`, else its type; None for any other record."""
+    t = obj.get("type")
+    if isinstance(t, str) and t.endswith(("Message", "Event")) and len(t) <= 40:
+        return "source" if _name_of(obj.get("source")) else "type"
+    return None
+
+
+def _get(obj: Any, dotted: str) -> Any:
+    """A record's value at a dotted key; for `a|b`, the first of the keys that holds a value."""
+    if "|" in dotted:
+        for alt in dotted.split("|"):
+            v = _get(obj, alt)
+            if v not in (None, "", [], {}):
+                return v
+        return None
+    for part in dotted.split("."):
+        if not isinstance(obj, dict):
+            return None
+        obj = obj.get(part)
+    return obj
+
+
+def message_of(obj: Any) -> dict[str, Any] | None:
+    """A record as one turn {speaker, text, time?, fields, blocks?}, or None: a message, or a tool call, its output or a
+    reasoning step kept as a record of its own (tool_item). A turn whose record holds more than words carries its
+    blocks (turn_blocks), which the Transcript mode shows in place of its text."""
+    keys = message_keys(obj)
+    if keys is None:
+        item = tool_item(obj)
+        if item is None:
+            return None
+        speaker, src, wrap = item
+        blocks = [b for b in [_part_block(src)] if b]
+        out = {"speaker": speaker, "text": "\n\n".join(b["text"] for b in blocks if b["kind"] != "tool_use")}
+        tk = _time_key(obj) or (f"{wrap}.{_time_key(src)}" if wrap and _time_key(src) else None)
+        if tk and (t := _time_of(_get(obj, tk))):
+            out["time"] = t
+        out["fields"] = turn_fields(obj)
+        out["blocks"] = blocks
+        return out
+    speaker = _name_of(_get(obj, keys["speaker"])) or ""
+    out = {"speaker": speaker, "text": _text_of(_get(obj, keys["text"])) or ""}
+    if "time" in keys and (t := _time_of(_get(obj, keys["time"]))):
+        out["time"] = t
+    out["fields"] = turn_fields(obj, keys)
+    role = _role(speaker)
+    # a tool speaks when who speaks says so, or a person object's role does where its name names the tool (a ChatGPT
+    # export's {role: tool, name}), or the record's type (AutoGen's `ToolCallExecutionEvent` from an agent)
+    who = _get(obj, keys["speaker"])
+    tool = role == "tool" or any(isinstance(v, str) and _role(v) == "tool" for v in (
+        who.get("role") if isinstance(who, dict) else None, obj.get("type")))
+    kind = obj.get("type") if isinstance(obj.get("type"), str) else ""
+    words = ("tool_result" if tool else "tool_use" if speaker.lower() in CALL_SPEAKERS
+             else "thinking" if kind.lower().startswith(("thought", "reasoning", "thinking")) else "text")
+    if blocks := turn_blocks(obj, keys, words=words, tags=role != "system"):
+        out["blocks"] = blocks
+    step = next(((k, v) for k in STEP_KEYS if isinstance(v := obj.get(k), int) and not isinstance(v, bool)), None)
+    if step:
+        out["step"], out["step_key"] = step[1], step[0]
+    return out
+
+
+def tool_item(obj: Any) -> tuple[str, dict[str, Any], str] | None:
+    """A record that is one tool call, its output or a reasoning step with no speaker of its own (the Responses API's
+    items, kept under one of WRAP_KEYS as Codex CLI logs them): (who it stands for, the item, that key or ""); None for
+    any other record."""
+    if not isinstance(obj, dict):
+        return None
+    for wrap in ("", *WRAP_KEYS):
+        src = obj.get(wrap) if wrap else obj
+        if isinstance(src, dict) and not src.get("role") and isinstance(t := src.get("type"), str):
+            if t in CALL_TYPES or t in THINK_TYPES or t.endswith(CALL_TAILS):
+                return "assistant", src, wrap
+            if t in RESULT_TYPES or t.endswith(RESULT_TAILS):
+                return "tool", src, wrap
+    return None
+
+
+def is_turn(obj: Any) -> bool:
+    """Whether a record is a turn: a message, or a tool call, its output or a reasoning step of its own (tool_item)."""
+    return message_keys(obj) is not None or tool_item(obj) is not None
+
+
+def _think_text(v: Any, depth: int = 0) -> str:
+    """The words of a reasoning value: a string, the parts of a list, or an object's heading (a summary, a subject) over
+    its words; "" for a redacted one."""
+    if isinstance(v, str):
+        return v.strip()
+    if depth > 3:
+        return ""
+    if isinstance(v, list):
+        return "\n\n".join(t for t in (_think_text(x, depth + 1) for x in v) if t)
+    if isinstance(v, dict):
+        if v.get("redacted") is True or v.get("type") == "redacted_thinking":
+            return ""
+        head = next((s for k in ("subject", "summary", "title") if (s := _think_text(v.get(k), depth + 1))), "")
+        body = next((s for k in ("thinking", "reasoning", "text", "content", "description", "thoughts")
+                     if (s := _think_text(v.get(k), depth + 1))), "")
+        return f"{head}\n{body}" if head and body and head != body else head or body
+    return ""
+
+
+def _output_text(v: Any, depth: int = 0) -> str:
+    """A tool result's output as text: a string, the text parts of a list, an object's output (OUTPUT_KEYS), else the
+    object as indented JSON."""
+    if isinstance(v, str):
+        return v
+    if v is None:
+        return ""
+    if depth < 4 and isinstance(v, list):
+        images = ("image", "image_url", "input_image")
+        parts = [_output_text(x, depth + 1) for x in v if not (isinstance(x, dict) and x.get("type") in images)]
+        return "\n".join(p for p in parts if p)
+    if depth < 4 and isinstance(v, dict):
+        got = next((v[k] for k in OUTPUT_KEYS if v.get(k) not in (None, "", [], {})), None)
+        if got is not None:
+            return _output_text(got, depth + 1)
+        if isinstance(v.get("url"), str):  # a search result: its title, its address, its snippet
+            return "\n".join(str(x) for k, x in v.items() if k not in ("type", "encrypted_content")
+                             and isinstance(x, (str, int, float)) and not isinstance(x, bool) and str(x).strip())
+    return json.dumps(v, indent=2, ensure_ascii=False)
+
+
+def _first_str(obj: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    return next((v.strip() for k in keys if isinstance(v := obj.get(k), str) and v.strip()), None)
+
+
+def _call_block(call: dict[str, Any], name: str | None = None) -> dict[str, Any]:
+    """A tool call as a block: `<name>\n<arguments>`, arguments kept as a JSON string (OpenAI's) parsed and indented, as a
+    Claude Code stream's tool call reads; with the call's id, which _paired reads."""
+    fn = call.get("function") or call.get("custom")  # OpenAI's function call, or its custom tool's
+    name = name or _first_str(call, CALL_NAME_KEYS) or (_first_str(fn, ("name",)) if isinstance(fn, dict) else None)
+    name = name or (call.get("type") if isinstance(call.get("type"), str) else None) or "tool"
+    args = next((call[k] for k in CALL_ARGS_KEYS if call.get(k) is not None), None)
+    if args is None and isinstance(fn, dict):
+        args = next((fn[k] for k in CALL_ARGS_KEYS if fn.get(k) is not None), None)
+    if isinstance(args, str) and args.strip()[:1] in ("{", "["):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            pass
+    body = args if isinstance(args, str) else "" if args is None else json.dumps(args, indent=2, ensure_ascii=False)
+    out = {"kind": "tool_use", "text": f"{name}\n{body}" if body else name}
+    if (ident := _first_str(call, CALL_ID_KEYS)) is not None:
+        out["id"] = ident
+    return out
+
+
+def _result_block(v: Any, src: dict[str, Any] | None = None) -> dict[str, Any]:
+    """A tool result as a block: its output (_output_text), an object kept as a JSON string (Codex CLI's `{"output",
+    "metadata"}`) read as that object, its other fields after its output; with the id of its call, which _paired reads."""
+    if isinstance(v, str) and v.lstrip()[:1] == "{":
+        try:
+            obj = json.loads(v)
+        except ValueError:
+            obj = None
+        if isinstance(obj, dict) and (key := next((k for k in OUTPUT_KEYS if isinstance(obj.get(k), str)), None)):
+            rest = {k: x for k, x in obj.items() if k != key}
+            v = obj[key] + (f"\n\n{json.dumps(rest, ensure_ascii=False)}" if rest else "")
+    out = {"kind": "tool_result", "text": _output_text(v)}
+    if src is not None and (ident := _first_str(src, RESULT_ID_KEYS)) is not None:
+        out["for"] = ident
+    return out
+
+
+def _part_block(b: Any, name: str | None = None) -> dict[str, Any] | None:
+    """One content block or item as a block {kind, text}: words, reasoning, a tool call or its result, by its `type` (or
+    a ChatGPT export's `content_type`), or a Gemini part's `functionCall`, `functionResponse`, code or thought; None for
+    one with nothing to show (an image, a redacted thought). `name`: the tool a call goes to when the block does not say
+    (a ChatGPT message's `recipient`)."""
+    if isinstance(b, str):
+        return {"kind": "text", "text": b} if b.strip() else None
+    if not isinstance(b, dict):
+        return None
+    t = b.get("type") or b.get("content_type")
+    if isinstance(fc := b.get("functionCall"), dict):
+        return _call_block(fc)
+    if isinstance(fr := b.get("functionResponse"), dict):
+        return _result_block(fr.get("response", fr), fr)
+    if isinstance(ec := b.get("executableCode"), dict):
+        return _call_block({"name": ec.get("language") or "code", "code": ec.get("code")})
+    if isinstance(cr := b.get("codeExecutionResult"), dict):
+        return _result_block(cr.get("output"))
+    if t is None and isinstance(b.get("name"), str) and "arguments" in b:  # a call with no type (AutoGen's)
+        return _call_block(b)
+    if t in THINK_TYPES or b.get("thought") is True:
+        text = _think_text(b)
+        return {"kind": "thinking", "text": text} if text else None
+    if t == "code":  # a ChatGPT message's code, run by the tool it goes to
+        return _call_block({"name": name or b.get("language") or "code", "code": b.get("text")})
+    if t in CALL_TYPES or (isinstance(t, str) and t.endswith(CALL_TAILS)):
+        return _call_block(b)
+    if t in RESULT_TYPES or t in CHATGPT_RESULTS or (isinstance(t, str) and t.endswith(RESULT_TAILS)):
+        return _result_block(next((b[k] for k in OUTPUT_KEYS if b.get(k) not in (None, "", [], {})), ""), b)
+    text = _text_of(b) or (b["refusal"] if isinstance(b.get("refusal"), str) else None)
+    return {"kind": "text", "text": text} if text and text.strip() else None
+
+
+# reasoning, tool calls and tool results tagged in a message's words, each tag at the start of a line (Hermes' and
+# Qwen's chat templates: `<think>`, `<tool_call>{"name", "arguments"}</tool_call>`, `<tool_response>`)
+TAG_KINDS = {"think": "thinking", "thinking": "thinking", "reasoning": "thinking", "tool_call": "tool_use",
+             "function_call": "tool_use", "tool_response": "tool_result", "tool_result": "tool_result",
+             "function_response": "tool_result"}
+_TAGGED = re.compile(r"(?:^|(?<=\n))[ \t]*<(" + "|".join(TAG_KINDS) + r")>\s*(.*?)\s*</\1>[ \t]*\n?", re.S)
+
+
+def _tagged(text: str) -> list[dict[str, Any]]:
+    """A message's words as blocks: the reasoning, tool calls and tool results tagged in them (TAG_KINDS), a call or a
+    result read as JSON when it is, and the words between as text; the words as one text block when they tag none."""
+    out: list[dict[str, Any]] = []
+    at = 0
+    for m in _TAGGED.finditer(text):
+        if text[at:m.start()].strip():
+            out.append({"kind": "text", "text": text[at:m.start()].strip()})
+        kind, body = TAG_KINDS[m.group(1)], m.group(2)
+        try:
+            obj = json.loads(body) if kind != "thinking" else None
+        except ValueError:
+            obj = None
+        if kind == "thinking":
+            out.append({"kind": "thinking", "text": body})
+        elif kind == "tool_use":
+            out.append(_call_block(obj) if isinstance(obj, dict) else {"kind": "tool_use", "text": body})
+        else:
+            out.append(_result_block(obj["content"] if isinstance(obj, dict) and "content" in obj else body))
+        at = m.end()
+    if not out:
+        return [{"kind": "text", "text": text}]
+    if text[at:].strip():
+        out.append({"kind": "text", "text": text[at:].strip()})
+    return out
+
+
+def _results(v: Any) -> list[dict[str, Any]]:
+    """The tool results a message keeps (an ATIF step's `observation`: {results: [{source_call_id, content}]}, a list of
+    results, or one) as blocks."""
+    if isinstance(v, dict) and isinstance(v.get("results"), list):
+        v = v["results"]
+    items = v if isinstance(v, list) else [v]
+    return [_result_block(x, x if isinstance(x, dict) else None) for x in items if x not in (None, "", [], {})]
+
+
+def _paired(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Blocks with each tool result right after the call whose id it names, a call listed twice (a content block and a
+    `tool_calls` entry) once, and words in a row as one block; the ids dropped."""
+    calls = {b["id"] for b in blocks if b["kind"] == "tool_use" and b.get("id")}
+    later: dict[str, list[dict[str, Any]]] = {}
+    for b in blocks:
+        if b["kind"] == "tool_result" and b.get("for") in calls:
+            later.setdefault(b["for"], []).append(b)
+    out, seen = [], set()
+    for b in blocks:
+        if b["kind"] == "tool_result" and b.get("for") in calls:
+            continue
+        if b["kind"] == "tool_use" and b.get("id"):
+            if b["id"] in seen:
+                continue
+            seen.add(b["id"])
+        out.append(b)
+        if b["kind"] == "tool_use" and b.get("id") in later:
+            out.extend(later.pop(b["id"]))
+    merged: list[dict[str, Any]] = []
+    for b in out:
+        if b["kind"] == "text" and merged and merged[-1]["kind"] == "text":  # words a citation split (Anthropic's)
+            merged[-1]["text"] += b["text"]
+        else:
+            merged.append({"kind": b["kind"], "text": b["text"]})
+    return merged
+
+
+def _tagged_call(text: str) -> dict[str, Any]:
+    """A call written as JSON words ({"name", "arguments"}) as a tool call block; other words as a call named by them."""
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        obj = None
+    return _call_block(obj) if isinstance(obj, dict) else {"kind": "tool_use", "text": text}
+
+
+def _holds_blocks(v: Any) -> bool:
+    """Whether a value is content blocks of which one is more than words (a Gemini message's parts that only call a
+    function), or a message object that keeps them as its `parts` (a Google ADK event's `content`)."""
+    if isinstance(v, dict):
+        v = v.get("parts")
+    return isinstance(v, list) and any((b := _part_block(x)) is not None and b["kind"] != "text" for x in v[:50])
+
+
+def turn_blocks(obj: Any, keys: dict[str, str] | None = None, words: str = "text",
+                tags: bool = True) -> list[dict[str, Any]]:
+    """What a message record holds beyond its words, with its words, as blocks {kind, text} in order: its reasoning
+    (REASONING_KEYS), its content's blocks (_part_block) or its words, the tool calls it lists (CALLS_KEYS, OpenAI's
+    `function_call`) and their results (RESULTS_KEYS: an ATIF step's `observation`), each result right after the call it
+    answers when their ids match. Words that tag reasoning or tool calls in line are read as those (_tagged), but for
+    `tags` off (a system prompt, which shows the tags it asks for). `words` says what a message's words are when they
+    are not words: a tool's output (`tool_result`), a tool call (`tool_use`: ShareGPT's `function_call` turn), or
+    reasoning (`thinking`: AutoGen's `ThoughtEvent`). Empty for a message that holds only words, which shows as its
+    text."""
+    if not isinstance(obj, dict):
+        return []
+    keys = keys if keys is not None else message_keys(obj)
+    if keys is None:
+        return []
+    prefix = keys["text"].rpartition(".")[0]
+    inner = _get(obj, prefix) if prefix else obj
+    srcs = [s for s in ((inner, obj) if inner is not obj else (obj,)) if isinstance(s, dict)]
+    blocks: list[dict[str, Any]] = []
+    reasoning = next((s for src in srcs for k in REASONING_KEYS if (s := _think_text(src.get(k)))), "")
+    content = _get(obj, keys["text"])
+    if isinstance(content, dict) and not (content.get("type") or content.get("content_type")):
+        # a message object kept whole as the words (a Google ADK event's `content`: {role, parts})
+        content = next((content[k] for k in ("parts", "content") if isinstance(content.get(k), list)), content)
+    recipient = _first_str(srcs[0], ("recipient",)) if srcs else None
+    parts = content if isinstance(content, list) else [content] if isinstance(content, dict) else []
+    if parts:
+        blocks.extend(b for b in (_part_block(x, recipient) for x in parts) if b)
+    elif text := _text_of(content):
+        blocks.append({"kind": "text", "text": text})
+    # the reasoning first, unless the words repeat it (SWE-agent's `thought`, the start of its message)
+    if reasoning and not any(b["kind"] == "text" and reasoning in b["text"] for b in blocks):
+        blocks.insert(0, {"kind": "thinking", "text": reasoning})
+    if tags:
+        blocks = [x for b in blocks for x in (_tagged(b["text"]) if b["kind"] == "text" and "<" in b["text"] else [b])]
+    if words != "text":
+        make = {"tool_result": _result_block, "tool_use": _tagged_call}.get(words, lambda t: {"kind": words, "text": t})
+        blocks = [make(b["text"]) if b["kind"] == "text" else b for b in blocks]
+    tool = words == "tool_result"
+    for src in srcs:
+        for k in CALLS_KEYS:
+            for call in src.get(k) if isinstance(src.get(k), list) else ():
+                if isinstance(call, dict):
+                    blocks.append(_call_block(call))
+                    # a call that keeps its own result (Gemini CLI's)
+                    res = next((call[r] for r in ("result", "output", "response") if call.get(r) not in (None, "", [], {})), None)
+                    if res is not None:
+                        blocks.append(_result_block(res))
+        if isinstance(fc := src.get("function_call"), dict):
+            blocks.append(_call_block(fc))
+        for k in RESULTS_KEYS:
+            if src.get(k) not in (None, "", [], {}):
+                blocks.extend(_results(src[k]))
+        # the error a message reports (an Inspect tool message's `error`: {type, message})
+        err = src.get("error")
+        if isinstance(err, dict):
+            err = _first_str(err, ("message", "error", "detail", "type"))
+        if isinstance(err, str) and err.strip():
+            blocks.append({"kind": "tool_result" if tool else "text", "text": f"Error: {err.strip()}"})
+    return _paired(blocks) if any(b["kind"] != "text" for b in blocks) else []
+
+
+def _field(v: Any) -> Any:
+    """A value as a turn's field: a number, a boolean, or a string cut one character past FIELD_CHARS, so that
+    source_keys still reads a text as a text (and does not offer its key) while the turn does not carry all of it; None
+    for any other value."""
+    if isinstance(v, str):
+        return v[:FIELD_CHARS + 1] if v else None
+    return v if isinstance(v, (bool, int, float)) else None
+
+
+def tool_names(obj: Any, inner: Any = None) -> list[str]:
+    """The names of the tools a message calls, each once in order: its `tool_calls` (ATIF's `function_name`, OpenAI's
+    `function.name`, a plain `function` or `name`), its `function_call`, and its content blocks that call one
+    (TOOL_BLOCKS), in the record and in `inner`, the object that keeps its message."""
+    out: list[str] = []
+
+    def add(name: Any) -> None:
+        if isinstance(name, str) and name.strip() and len(name) <= FIELD_CHARS and name.strip() not in out:
+            out.append(name.strip())
+
+    for src in (obj, inner) if inner is not obj else (obj,):
+        if not isinstance(src, dict):
+            continue
+        calls = src.get("tool_calls")
+        for call in calls if isinstance(calls, list) else ():
+            if isinstance(call, dict):
+                fn = call.get("function")
+                add(call.get("function_name") or call.get("name") or (fn.get("name") if isinstance(fn, dict) else fn))
+        if isinstance(fc := src.get("function_call"), dict):
+            add(fc.get("name"))
+        content = src.get("content")
+        for block in content if isinstance(content, list) else ():
+            if isinstance(block, dict) and block.get("type") in TOOL_BLOCKS:
+                add(block.get("name"))
+        if src.get("type") in CALL_TYPES and not src.get("role"):  # a tool call that is a record of its own (tool_item)
+            add(src.get("name"))
+    return out
+
+
+def turn_fields(obj: Any, keys: dict[str, str] | None = None) -> dict[str, Any]:
+    """The fields a message record carries about its turn, which Color by and Filter by offer (source_keys): the scalar
+    fields of the record and of the object that keeps its message (dotted, as `message.model`), and those of the
+    metadata either keeps (META_KEYS, as `extra.phase`), but for its words, its time and its ids; the tools it calls
+    (`tool`, their names joined); and who speaks (`speaker`) when none of those fields holds them (an author kept as an
+    object). `keys` are the record's message_keys, read here when not given; a record that holds no message gives its
+    own fields and its tools, and a tool call's or output's of its own (tool_item) those of the object that keeps it (a
+    Codex CLI record's `payload`)."""
+    if not isinstance(obj, dict):
+        return {}
+    keys = keys if keys is not None else message_keys(obj)
+    skip = {keys["text"], keys.get("time")} if keys else set()
+    prefix = keys["text"].rpartition(".")[0] if keys else ((item := tool_item(obj)) and item[2]) or ""
+    inner = _get(obj, prefix) if prefix else obj
+    out: dict[str, Any] = {}
+    bases = [("", obj)] + ([(prefix + ".", inner)] if prefix and isinstance(inner, dict) else [])
+    places = bases + [(f"{at}{m}.", src[m]) for at, src in bases for m in META_KEYS if isinstance(src.get(m), dict)]
+    for at, src in places:
+        for k, v in src.items():
+            name = f"{at}{k}"
+            words = _key_words(k) if isinstance(k, str) else ()
+            if name in skip or not words or words[-1] in ID_TAILS or name in out:
+                continue
+            if (f := _field(v)) is not None:
+                out[name] = f
+    if (tools := tool_names(obj, inner)) and "tool" not in out:
+        out["tool"] = ", ".join(tools)
+    speaker = _name_of(_get(obj, keys["speaker"])) if keys else None
+    if speaker and speaker not in out.values() and "speaker" not in out:
+        out["speaker"] = speaker
+    return out
+
+
+def record_fields(obj: Any) -> dict[str, Any]:
+    """The fields of a JSON line's turn (turn_fields) that are not its own keys, which Color by reads beside them: those
+    of the message it nests, its metadata's, its tools and who speaks. Empty for a record that is no object."""
+    if not isinstance(obj, dict):
+        return {}
+    return {k: v for k, v in turn_fields(obj).items() if k not in obj}
+
+
+def _mostly(items: list[Any], test) -> bool:
+    dicts = [x for x in items if isinstance(x, dict)]
+    return bool(dicts) and sum(1 for x in dicts if test(x)) >= max(1, len(dicts) // 2) and len(dicts) >= len(items) // 2
+
+
+def conversation_of(obj: Any) -> list[dict[str, Any]] | None:
+    """The turns of a record that holds a whole conversation: a list of messages under one of LIST_KEYS, after the
+    system prompt the record keeps beside them (_system_turn), a ChatGPT export's `mapping`, or a prompt and its
+    response; None otherwise."""
+    if not isinstance(obj, dict):
+        return None
+    mapping = obj.get("mapping")
+    if isinstance(mapping, dict) and mapping:
+        return _chatgpt_turns(obj, mapping)
+    for k in LIST_KEYS:
+        v = obj.get(k)
+        if isinstance(v, list) and v and _mostly(v, is_turn):
+            turns = [m for m in map(message_of, v) if m is not None]
+            system = _system_turn(obj)
+            if system and not (turns and turns[0]["text"] == system["text"]):
+                turns.insert(0, system)
+            return turns
+    for a, b in PAIR_KEYS:
+        if isinstance(obj.get(a), str) and isinstance(obj.get(b), str):
+            return [{"speaker": a, "text": obj[a], "fields": {"speaker": a}},
+                    {"speaker": b, "text": obj[b], "fields": {"speaker": b}}]
+    return None
+
+
+def _system_turn(obj: dict[str, Any]) -> dict[str, Any] | None:
+    """The system prompt a record keeps beside its messages (Anthropic's `system`: a string, or a list of text blocks)
+    as a turn, shown as a system message in the list would be; None when it keeps none."""
+    for k in SYSTEM_KEYS:
+        v = obj.get(k)
+        if isinstance(v, list) and v and all(isinstance(b, str) or (isinstance(b, dict) and isinstance(b.get("text"), str)) for b in v):
+            text = _text_of(v)
+        elif isinstance(v, str):
+            text = v
+        else:
+            continue
+        if text and text.strip():
+            return {"speaker": "system", "text": text, "fields": {"speaker": "system"}}
+    return None
+
+
+def _pool_key(ident: Any) -> str | None:
+    """The key of an id -> message mapping a conversation's id stands for: JSON keys are strings, so a number's text."""
+    if isinstance(ident, str):
+        return ident
+    if isinstance(ident, int) and not isinstance(ident, bool):
+        return str(ident)
+    return None
+
+
+def _message_pool(obj: dict[str, Any]) -> dict[str, Any] | None:
+    """The mapping of ids to messages a record keeps under one of LIST_KEYS (`"messages": {"<id>": {role, content},
+    …}`), whose messages its conversations list by id; None when it keeps none."""
+    for k in LIST_KEYS:
+        v = obj.get(k)
+        if isinstance(v, dict) and v and _mostly(list(itertools.islice(v.values(), POOL_SAMPLE)), lambda x: message_keys(x) is not None):
+            return v
+    return None
+
+
+def _owner_of(obj: dict[str, Any]) -> str:
+    """Whose conversations a record keeps (its `agent`), for their titles; "" when it does not say."""
+    return next((n for k in OWNER_KEYS if (n := _name_of(obj.get(k)))), "")
+
+
+class _Walk:
+    """What conversations_in carries through a document: each conversation's list of message ids read so far, by its
+    id and by its key (where a fork finds the conversation it forked from), and how many conversations listed messages
+    by id."""
+
+    def __init__(self) -> None:
+        self.lists: dict[str, list[Any]] = {}
+        self.listed = 0
+
+
+def _listed(conv: dict[str, Any], pool: Any, outer: str, key: str, walk: _Walk) -> tuple[str, list[dict[str, Any]]] | None:
+    """A conversation that lists its messages by id (`"messages": ["<id>", …]`) in `pool`, an id -> message mapping
+    beside it or around it: (title, turns), titled by its id (or the key it is kept under) after whose it is (`outer`).
+    A fork (FORK_KEYS) of a conversation read before starts where it leaves it: after the messages they share (at most
+    FORK_AT_KEYS' count, when the record gives one), so the shared start is not read twice, and its title says so
+    (`c2 (forked from c1 after message 12)`). None for a record whose lists hold no ids of `pool`."""
+    ids = None
+    for k in LIST_KEYS:
+        v = conv.get(k)
+        if isinstance(v, list) and v:
+            sample = v[:POOL_SAMPLE]
+            if sum(1 for i in sample if (pk := _pool_key(i)) is not None and pk in pool) * 2 >= len(sample):
+                ids = v
+                break
+    if ids is None:
+        return None
+    walk.listed += 1
+    name = _title_of(conv) or key
+    parent = next((str(v) for k in FORK_KEYS if isinstance(v := conv.get(k), (str, int)) and not isinstance(v, bool)
+                   and str(v).strip()), None)
+    base = walk.lists.get(parent) if parent else None
+    skip = 0
+    if base is not None:
+        common = next((n for n, (a, b) in enumerate(zip(ids, base)) if a != b), min(len(ids), len(base)))
+        at = next((v for k in FORK_AT_KEYS if isinstance(v := conv.get(k), int) and not isinstance(v, bool)), None)
+        skip = at if at is not None and 0 < at <= common else common
+    for n in (name, key):
+        if n:
+            walk.lists[n] = ids
+    turns = []
+    for ident in ids[skip:]:
+        pk = _pool_key(ident)
+        msg = pool.get(pk) if pk is not None else None
+        t = message_of(msg) if msg is not None else None
+        if t is not None:
+            t["id"] = pk
+            turns.append(t)
+    label = name
+    if parent:
+        label = f"{name} (forked from {parent} after message {skip})" if skip else f"{name} (forked from {parent})"
+    return (f"{outer} · {label}" if outer and label and outer != name else label or outer), turns
+
+
+def _pool_turns(pool: dict[str, Any]) -> list[dict[str, Any]]:
+    """The messages of an id -> message mapping that no conversation lists, in the order of their times when each has
+    one and they compare (numbers, or ISO stamps), else in the mapping's order."""
+    rows: list[tuple[Any, dict[str, Any]]] = []
+    for ident, msg in pool.items():
+        keys = message_keys(msg)
+        if keys is None:
+            continue
+        t = message_of(msg)
+        if t is None:
+            continue
+        t["id"] = ident
+        rows.append((_get(msg, keys["time"]) if "time" in keys else None, t))
+    whens = [w for w, _ in rows]
+    if whens and (all(isinstance(w, (int, float)) and not isinstance(w, bool) for w in whens)
+                  or all(isinstance(w, str) and _ISO.match(w.strip()) for w in whens)):
+        rows.sort(key=lambda r: r[0])
+    return [t for _, t in rows]
+
+
+def _chatgpt_turns(conv: dict[str, Any], mapping: dict[str, Any]) -> list[dict[str, Any]]:
+    """A ChatGPT export's conversation in order: from its current node back to the root, reversed; empty system nodes
+    left out."""
+    node_id = conv.get("current_node")
+    if node_id not in mapping:
+        node_id = next((k for k, v in reversed(list(mapping.items())) if isinstance(v, dict) and not v.get("children")), None)
+    chain: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    while isinstance(node_id, str) and node_id in mapping and node_id not in seen:
+        seen.add(node_id)
+        node = mapping[node_id] if isinstance(mapping[node_id], dict) else {}
+        chain.append(node)
+        node_id = node.get("parent")
+    out = []
+    for node in reversed(chain):
+        msg = node.get("message")
+        if not isinstance(msg, dict):
+            continue
+        turn = message_of(msg) or {}
+        text = turn.get("text") or ""
+        if not text.strip() and not turn.get("blocks"):
+            continue
+        speaker = _name_of(msg.get("author")) or turn.get("speaker") or ""
+        fields = dict(turn.get("fields") or turn_fields(msg))
+        if speaker and speaker not in fields.values():
+            fields.setdefault("speaker", speaker)
+        t = {"speaker": speaker, "text": text, "id": node.get("id") or msg.get("id"), "fields": fields}
+        if turn.get("blocks"):
+            t["blocks"] = turn["blocks"]
+        if (when := _time_of(msg.get("create_time"))) is not None:
+            t["time"] = when
+        out.append(t)
+    return out
+
+
+def is_stream(obj: Any) -> bool:
+    return isinstance(obj, dict) and obj.get("type") in STREAM_TYPES and (
+        isinstance(obj.get("message"), dict) or isinstance(obj.get("session_id"), str) or isinstance(obj.get("uuid"), str))
+
+
+def is_tool_record(obj: Any) -> bool:
+    """A record that logs one tool call with its result (an agent harness's `{tool_name, tool_call, tool_result}`), so a
+    transcript's tool turns count toward it beside its spoken turns."""
+    if not isinstance(obj, dict):
+        return False
+    has_name = any(isinstance(obj.get(k), str) and obj.get(k) for k in TOOL_NAME_KEYS)
+    return has_name and (any(k in obj for k in TOOL_CALL_KEYS) or any(k in obj for k in TOOL_RESULT_KEYS))
+
+
+def stream_wrap(obj: Any) -> str | None:
+    """Where a record holds a Claude Code stream record: "" for one that is one, the key of one it nests (MORE_WRAPS,
+    WRAP_KEYS), else None."""
+    if is_stream(obj):
+        return ""
+    if isinstance(obj, dict):
+        for k in (*MORE_WRAPS, *WRAP_KEYS):
+            if is_stream(obj.get(k)):
+                return k
+    return None
+
+
+def _title_of(obj: Any) -> str:
+    if isinstance(obj, dict):
+        for k in TITLE_KEYS:
+            v = obj.get(k)
+            if isinstance(v, dict):
+                v = _name_of(v)
+            if isinstance(v, (str, int)) and not isinstance(v, bool) and str(v).strip():
+                return str(v).strip()[:120]
+    return ""
+
+
+def conversations_in(data: Any, depth: int = 0, title: str = "", pool: Any = None, walk: _Walk | None = None,
+                     key: str = "") -> list[tuple[str | None, list[dict[str, Any]]]]:
+    """Every conversation a parsed JSON document holds, in order, each as (title, turns): a list of messages, a record
+    holding one (conversation_of), a conversation that lists its messages by id in an id -> message mapping beside it or
+    around it (_message_pool, _listed), or anything nesting those, down to a few levels. A record that keeps such a
+    mapping gives its system prompt first, as (None, [turn]), a turn of no conversation, since it stands before them
+    all; and when no conversation lists the mapping's messages, they are one conversation (_pool_turns)."""
+    walk = walk or _Walk()
+    if depth > 5:
+        return []
+    if isinstance(data, list):
+        if data and _mostly(data, is_turn):
+            return [(title, [m for m in map(message_of, data) if m is not None])]
+        out: list[tuple[str | None, list[dict[str, Any]]]] = []
+        for item in data:
+            # under an id -> message mapping, a conversation's own id follows the title of whose it is (_listed)
+            out.extend(conversations_in(item, depth + 1, _title_of(item) if pool is None else title, pool, walk))
+        return out
+    if isinstance(data, dict):
+        turns = conversation_of(data)
+        if turns:
+            return [(_title_of(data) or title, turns)]
+        own = _message_pool(data)
+        reach = own if pool is None else pool if own is None else ChainMap(own, pool)
+        if reach is not None and (got := _listed(data, reach, title, key, walk)) is not None:
+            return [got]
+        out = []
+        system = _system_turn(data) if own is not None else None
+        if system:
+            out.append((None, [system]))
+        inner = _title_of(data) or _owner_of(data) or title
+        listed = walk.listed
+        for k, v in data.items():
+            if v is own or (system and k in SYSTEM_KEYS) or not isinstance(v, (list, dict)):
+                continue
+            out.extend(conversations_in(v, depth + 1, inner, reach, walk, str(k)))
+        if own is not None and walk.listed == listed:
+            out.append((inner, _pool_turns(own)))
+        return out
+    return []
+
+
+# --------------------------------------------------------------------------- the sniff
+
+
+def _stat_key(path: Path) -> tuple[int, int] | None:
+    try:
+        st = path.stat()
+    except OSError:
+        return None
+    return st.st_size, st.st_mtime_ns
+
+
+def sniff(path: Path, rel: str) -> dict[str, Any] | None:
+    """Whether the file reads as a transcript, from its head (module note); kept per path and (size, mtime_ns)."""
+    key = _stat_key(path)
+    if key is None:
+        return None
+    k = str(path)
+    with _lock:
+        hit = _SNIFFS.get(k)
+        if hit is not None and hit[0] == key:
+            _SNIFFS.move_to_end(k)
+            return hit[1]
+    try:
+        with open(path, "rb") as f:
+            head = f.read(HEAD_BYTES)
+    except OSError:
+        return None
+    try:
+        got = sniff_bytes(head, rel, complete=key[0] <= len(head))
+    except Exception:  # noqa: BLE001 — a file the sniff cannot read is no transcript
+        got = None
+    with _lock:
+        _SNIFFS[k] = (key, got)
+        _SNIFFS.move_to_end(k)
+        while len(_SNIFFS) > SNIFF_CACHE_MAX:
+            _SNIFFS.popitem(last=False)
+    return got
+
+
+def sniff_bytes(head: bytes, rel: str, complete: bool = False) -> dict[str, Any] | None:
+    """The sniff over a file's first bytes; `complete` when they are the whole file."""
+    if b"\0" in head[:8192]:
+        return None
+    text = head.decode("utf-8", "replace")
+    if not complete:
+        cut = text.rfind("\n")
+        text = text[:cut] if cut > 0 else text
+    suffix = Path(rel).suffix.lower()
+    stripped = text.lstrip("﻿ \t\r\n")
+    jsonish = suffix in JSONDOC or (suffix in TEXTISH and suffix not in (".md", ".markdown"))
+    if suffix in JSONLISH or (jsonish and stripped[:1] == "{"):
+        got = _sniff_jsonl(stripped, parsed=suffix == ".jsonl")
+        if got is not None or suffix in JSONLISH:
+            return got
+    if suffix in JSONDOC or (jsonish and stripped[:1] in ("[", "{")):
+        got = _sniff_json(stripped, complete)
+        if got is not None or suffix in JSONDOC:
+            return got
+    if suffix in DELIMITED:
+        return _sniff_csv(text, DELIMITED[suffix])
+    if suffix in TEXTISH:
+        return sniff_text(text, markdown=suffix in (".md", ".markdown"))
+    return None
+
+
+def _sniff_jsonl(text: str, parsed: bool) -> dict[str, Any] | None:
+    """JSON lines: a Claude Code stream, messages, or whole conversations, by what most of the head's records are. In
+    a file not named as JSON lines, the first line must be a record of its own, so a pretty-printed document is not
+    read by the few lines that hold a whole object."""
+    recs = []
+    for k, ln in enumerate(x for x in text.split("\n")[:JSONL_HEAD_LINES] if x.strip()):
+        try:
+            recs.append(json.loads(ln))
+        except ValueError:
+            if k == 0 and not parsed:
+                return None
+            continue
+    objs = [r for r in recs if isinstance(r, dict)]
+    if len(objs) < 1 or (len(recs) > 1 and len(objs) < 2):
+        return None
+    lines = {} if parsed else {"lines": True}
+    n = len(objs)
+    wraps = [w for w in map(stream_wrap, objs) if w is not None]
+    if len(wraps) * 5 >= n * 3:
+        # a stream in a file paged as text shows as posts, under the keys its messages keep; one nested in each record
+        # says under which key (`wrap`)
+        keyed = [k for k in map(message_keys, objs) if k]
+        wrap = _commonest(wraps)
+        return {"format": "stream", "score": 1.0, **({"wrap": wrap} if wrap else {}), **lines,
+                **({"keys": _commonest(keyed)} if lines and keyed else {})}
+    convs = sum(1 for r in objs if conversation_of(r))
+    if convs * 2 >= n:
+        found = [k for k in map(_conversation_keys, objs) if k]
+        return {"format": "conversations", "score": STRONG, **lines, **(_commonest(found) if found else {})}
+    keyed_objs = [(r, k) for r in objs if (k := message_keys(r))]
+    # tool records carry no words of their own, so they are not keyed; an agent transcript's spoken turns and tool turns
+    # together must dominate the head, and it needs a spoken turn or two to name who speaks
+    tools = sum(1 for r in objs if is_tool_record(r))
+    items = sum(1 for r in objs if not message_keys(r) and tool_item(r))
+    covered = len(keyed_objs) + tools + items
+    if not keyed_objs or not (covered * 2 >= n or (covered >= 2 and covered * 5 >= n)):
+        return None
+    best = _commonest([k for _, k in keyed_objs])
+    speakers = [s for r, _ in keyed_objs if (s := _name_of(_get(r, best["speaker"])))]
+    if not _takes_turns(speakers):
+        return None
+    others = _other_speakers(objs, best)
+    if others:
+        best = {**best, "speaker": "|".join([best["speaker"], *others])}
+    with_speaker = sum(1 for r in objs if _name_of(_get(r, best["speaker"])))
+    roles = sum(1 for s in speakers if s.lower() in ROLE_WORDS) * 2 >= len(speakers)
+    sure_key = roles or _sure_speaker_key(best["speaker"].split("|")[0].rsplit(".", 1)[-1])
+    strong = (len(keyed_objs) * 2 >= n and with_speaker * 10 >= n * 7 and sure_key
+              and _in_time_order([_get(r, best["time"]) for r in objs] if "time" in best else []))
+    if tools or items:
+        # an agent transcript: spoken turns interleaved with tool calls, read in file order (its records number
+        # themselves, so the sniff does not weigh time). The view (`tools`) shows the calls and their results as blocks.
+        agent_strong = sure_key and covered * 2 >= n
+        return {"format": "messages", "score": STRONG if (strong or agent_strong) else WEAK, "keys": best,
+                **({"tools": True} if tools else {}), **lines}
+    return {"format": "messages", "score": STRONG if strong else WEAK, "keys": best, **lines}
+
+
+def _sure_speaker_key(leaf: str) -> bool:
+    """Whether a key names who speaks by name or role (`author`, `speakerName`, `role`), not by an id or a type
+    (`user_id`, `speaker_type`)."""
+    words, rank = _key_words(leaf), _speaker_rank(leaf)
+    return (rank is not None and rank[:2] == (0, 0)) or (len(words) == 1 and words[0] in ROLE_TYPE_KEYS)
+
+
+def _speaker_leaf(data: Any, sample: int = 200) -> str | None:
+    """The commonest key (its last part) under which the first `sample` messages a parsed JSON document holds keep who
+    speaks, or None."""
+    leaves: dict[str, int] = {}
+    stack: list[tuple[Any, int]] = [(data, 0)]
+    while stack and sum(leaves.values()) < sample:
+        x, depth = stack.pop()
+        if isinstance(x, dict):
+            keys = message_keys(x)
+            if keys:
+                leaf = keys["speaker"].rsplit(".", 1)[-1]
+                leaves[leaf] = leaves.get(leaf, 0) + 1
+                continue
+            items: Any = x.values()
+        elif isinstance(x, list):
+            items = reversed(x)
+        else:
+            continue
+        if depth < 6:
+            stack.extend((v, depth + 1) for v in items if isinstance(v, (dict, list)))
+    return max(leaves, key=leaves.__getitem__) if leaves else None
+
+
+def _takes_turns(speakers: list[str]) -> bool:
+    """Whether the speakers of a head's turn-like records take turns: role words (a user and an assistant) in at least
+    two, else MIN_TURNS or more in which some speaker speaks again and most do not speak only once, so a file of
+    documents each by its own author is no transcript."""
+    if len(speakers) < 2:
+        return False
+    counts: dict[str, int] = {}
+    for s in speakers:
+        counts[s.lower()] = counts.get(s.lower(), 0) + 1
+    if sum(c for s, c in counts.items() if s in ROLE_WORDS) * 2 >= len(speakers):
+        return True
+    return len(speakers) >= MIN_TURNS and max(counts.values()) >= 2 and len(counts) <= max(2, len(speakers) * 0.8)
+
+
+def _other_speakers(objs: list[dict[str, Any]], keys: dict[str, str]) -> list[str]:
+    """The keys that hold who speaks in the records where `keys["speaker"]` holds no one (a village's agents' actions
+    beside its people's talk), most used first, at most three, beside it in the same nested record."""
+    prefix, _, _ = keys["speaker"].rpartition(".")
+    counts: dict[str, int] = {}
+    for r in objs:
+        if _name_of(_get(r, keys["speaker"])) or tool_item(r):
+            continue
+        inner = _get(r, prefix) if prefix else r
+        if isinstance(inner, dict) and (k := _speaker_key(inner, keys.get("text", "").rsplit(".", 1)[-1], "time" in keys)):
+            counts[k] = counts.get(k, 0) + 1
+    ranked = sorted(counts, key=lambda k: -counts[k])[:3]
+    return [f"{prefix}.{k}" if prefix else k for k in ranked]
+
+
+_ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def _in_time_order(values: list[Any]) -> bool:
+    """Whether a head's records follow their times, forward or back (a transcript reads in order; rows of a table in
+    any order read better as the table): true when at most a fifth of the steps between times go the other way, and
+    when too few times compare (ISO stamps or numbers) to tell."""
+    keys: list[Any] = []
+    for v in values:
+        if isinstance(v, str) and _ISO.match(v.strip()):
+            keys.append(v.strip()[:10] + " " + v.strip()[11:])
+        elif isinstance(v, (int, float)) and not isinstance(v, bool):
+            keys.append(float(v))
+    keys = [k for k in keys if type(k) is type(keys[0])] if keys else []
+    if len(keys) < 3:
+        return True
+    steps = list(zip(keys, keys[1:]))
+    up = sum(1 for a, b in steps if b >= a)
+    down = sum(1 for a, b in steps if b <= a)
+    return max(up, down) * 5 >= len(steps) * 4
+
+
+def _commonest(items: list[Any]) -> Any:
+    counts: dict[str, int] = {}
+    for it in items:
+        k = json.dumps(it, sort_keys=True)
+        counts[k] = counts.get(k, 0) + 1
+    return json.loads(max(counts, key=counts.__getitem__))
+
+
+def _conversation_keys(obj: Any) -> dict[str, Any] | None:
+    """Where a record holding a whole conversation keeps it, for the Transcript mode to read its turns:
+    {"keys": {"list", "speaker", "text", "time"?}} for a list of messages, {"pair": [prompt key, response key]} for a
+    prompt and its response; None for any other (a ChatGPT export's `mapping`)."""
+    if not isinstance(obj, dict):
+        return None
+    for k in LIST_KEYS:
+        v = obj.get(k)
+        if isinstance(v, list) and v and _mostly(v, is_turn) and (found := [m for m in map(message_keys, v) if m]):
+            return {"keys": {"list": k, **_commonest(found)}}
+    for a, b in PAIR_KEYS:
+        if isinstance(obj.get(a), str) and isinstance(obj.get(b), str):
+            return {"pair": [a, b]}
+    return None
+
+
+def _sniff_json(text: str, complete: bool) -> dict[str, Any] | None:
+    """A whole JSON document holding messages, read by the parse that reads the whole file (conversations_in): over the
+    whole document when the head is the whole file, else over the data its head holds (_json_prefix), so the sniff
+    offers Transcript only for messages that parse_turns finds."""
+    if complete:
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = None
+    else:
+        data = _json_prefix(text)
+    if data is None:
+        return None
+    convs = conversations_in(data)
+    n = sum(len(t) for _, t in convs)
+    if n < 2:
+        return {"format": "json", "score": WEAK} if n else None
+    # messages under a key that names no speaker outright (`user_id`, `label`, `agentName`) are a transcript only when
+    # their speakers take turns, and a sure one only under a key that names them
+    said = [t for _, turns in convs for t in turns if t.get("speaker")][:400]
+    speakers = [t["speaker"] for t in said]
+    # who speaks, or a role a turn's fields name (an ATIF step's `source` beside its model)
+    if sum(1 for t in said if _role(t["speaker"]) != "other" or any(
+            isinstance(v := (t.get("fields") or {}).get(k), str) and _role(v) != "other" for k in ROLE_TYPE_KEYS)) * 2 >= len(said):
+        return {"format": "json", "score": STRONG}
+    leaf = _speaker_leaf(data)
+    if leaf in SPEAKER_KEYS:
+        return {"format": "json", "score": STRONG}
+    if not _takes_turns(speakers):
+        return None
+    return {"format": "json", "score": STRONG if leaf and _sure_speaker_key(leaf) else WEAK}
+
+
+# a token of JSON that the cut of a head goes by: a whole string (possessive, so a long one passes in one step), a
+# bracket, a comma, or a lone quote, which opens a string the head cuts
+_JSON_TOKEN = re.compile(r'"(?:[^"\\]++|\\.)*+"|[\[\]{},]|"', re.S)
+
+
+def _json_prefix(text: str) -> Any:
+    """The data a JSON document's head holds: the head cut after its last whole item, with each list and object still
+    open there closed, so that a file larger than the head is read by the same parse as a whole one. None when the head
+    holds no such prefix, or more than one document."""
+    stack: list[str] = []
+    cut, depth = -1, 0
+    for m in _JSON_TOKEN.finditer(text):
+        c = text[m.start()]
+        if c == '"':
+            if m.end() - m.start() == 1:
+                break  # a string the head cuts
+            continue
+        if c in "[{":
+            stack.append("]" if c == "[" else "}")
+            cut, depth = m.end(), len(stack)
+        elif c in "]}":
+            if not stack:
+                return None
+            stack.pop()
+            cut, depth = m.end(), len(stack)
+            if not stack:
+                break  # the whole document (a second one after it is no JSON document)
+        else:  # a comma: the item before it is whole
+            cut, depth = m.start(), len(stack)
+    if cut < 0:
+        return None
+    try:
+        return json.loads(text[:cut] + "".join(reversed(stack[:depth])))
+    except ValueError:
+        return None
+
+
+def _norm(col: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", col.lower())
+
+
+CSV_SPEAKER = ("role", "speaker", "speakername", "author", "authorname", "sender", "sendername", "from", "user",
+               "username", "displayname", "participant", "character", "who", "nick", "persona", "name", "agent")
+CSV_TEXT = ("content", "text", "message", "messagetext", "body", "utterance", "msg", "transcript", "response", "value",
+            "line", "dialogue", "sentence", "comment", "turn")
+CSV_TIME = ("timestamp", "ts", "time", "date", "datetime", "createdat", "sentat", "start", "starttime", "created")
+
+
+def _sniff_csv(text: str, sep: str) -> dict[str, Any] | None:
+    """A CSV or TSV file whose first line names a speaker column and a text column; a speaker column named in another
+    way (Speaker Name, agent_speaker_id) counts when its speakers take turns (_takes_turns)."""
+    try:
+        rows = list(csv.reader(io.StringIO(text), delimiter=sep))[:200]
+    except csv.Error:
+        return None
+    if len(rows) < 2:
+        return None
+    header = [c.strip() for c in rows[0]]
+    norm = [_norm(c) for c in header]
+
+    def col(names: tuple[str, ...]) -> int | None:
+        for name in names:
+            if name in norm:
+                return norm.index(name)
+        return None
+
+    s, t, w = col(CSV_SPEAKER), col(CSV_TEXT), col(CSV_TIME)
+    lenient = s is None
+    if s is None:
+        # a speaker column named in any case style (Speaker Name, agent_speaker_id), a weak one beside a time column
+        ranked = sorted((r, i) for i, h in enumerate(header) if (r := _speaker_rank(h)) is not None and (not r[0] or w is not None))
+        s = ranked[0][1] if ranked else None
+    if t is None:
+        t = next((i for i, h in enumerate(header) if 2 <= len(ws := _key_words(h)) <= 3 and ws[-1] in TEXT_TAILS), None)
+    if s is None or t is None or s == t:
+        return None
+    keys = {"speaker": header[s], "text": header[t]}
+    if w is not None:
+        keys["time"] = header[w]
+    values = [r[s].strip() for r in rows[1:] if len(r) > max(s, t)]
+    if lenient and not _takes_turns([v for v in values if v]):
+        return None
+    recurs = len(values) >= 2 and len(set(values)) < len(values)
+    strong = norm[s] in CSV_SPEAKER[:12] and recurs
+    return {"format": "csv", "score": STRONG if strong else WEAK, "keys": keys, "delimiter": sep}
+
+
+def turn_of(line: str, style: str) -> dict[str, Any] | None:
+    """The turn a text chat log's line starts, in `style`: {speaker, time?, at}, `at` the UTF-16 offset where its words
+    start; None for a line that goes on the turn before it."""
+    rx = _STYLE.get(style)
+    m = rx.match(line) if rx else None
+    if not m:
+        return None
+    groups = m.groupdict()
+    speaker = MARKS.get(groups.get("mark") or "") or groups.get("speaker") or groups.get("speaker2")
+    speaker = (speaker or "").strip()
+    if not _speaker_ok(speaker):
+        return None
+    out: dict[str, Any] = {"speaker": speaker, "at": _utf16_len(line[:m.end()])}
+    time = groups.get("time") or groups.get("time2")
+    if time:
+        out["time"] = time.strip()
+    return out
+
+
+def _utf16_len(text: str) -> int:
+    return len(text.encode("utf-16-le", "surrogatepass")) // 2
+
+
+def _speaker_ok(speaker: str) -> bool:
+    low = speaker.lower().strip()
+    return bool(low) and low not in NOT_SPEAKERS and len(low.split()) <= 4 and not low.startswith(("http", "www."))
+
+
+# the first line of a front matter: a YAML `key:`, a TOML `key =` or a TOML `[table]`
+_FRONT_KEY = re.compile(r"""^(?:["']?[^\W\d][\w .-]*["']?\s*(?::(?=\s|$)|=)|\[[^\]\n]+\]\s*$)""")
+
+
+def front_matter_lines(lines: list[str]) -> int:
+    """How many of a file's first lines its front matter takes (YAML between `---` lines, TOML between `+++` lines),
+    both fences counted; 0 for a file with none, or whose first line inside is no key, as a paragraph between two rules."""
+    if not lines or lines[0].lstrip("\ufeff").strip() not in ("---", "+++"):
+        return 0
+    fence = lines[0].lstrip("\ufeff").strip()
+    first = next((ln for ln in lines[1:FRONT_MATTER_MAX] if ln.strip() and not ln.lstrip().startswith("#")), "")
+    if not _FRONT_KEY.match(first):
+        return 0
+    for i in range(1, min(len(lines), FRONT_MATTER_MAX)):
+        if lines[i].strip() == fence or (fence == "---" and lines[i].strip() == "..."):
+            return i + 1
+    return 0
+
+
+def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
+    """A text or markdown chat log: the style whose turn lines recur most in the head, with at least two speakers who
+    take turns, one of them more than once. In markdown, which reads well rendered, the sniff is sure only when turn
+    lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first. A
+    front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's nested keys)."""
+    raw = text.split("\n")
+    lines = [ln for ln in raw[front_matter_lines(raw):] if ln.strip()][:TEXT_HEAD_LINES]
+    if len(lines) < 2:
+        return None
+    best: tuple[float, str, int, dict[str, int]] | None = None
+    for name, rx in STYLES:
+        counts: dict[str, int] = {}
+        turns = 0
+        hits = [(ln, t) for ln in lines if (t := turn_of(ln, name)) is not None]
+        if name == "colon" and hits:
+            # a chat log's turns start at its shallowest indent, a YAML file's repeated keys under parents shallower
+            # than them: only the shallowest indent that two `Word:` lines share counts
+            by_indent: dict[int, list[tuple[str, dict[str, Any]]]] = {}
+            for ln, t in hits:
+                by_indent.setdefault(len(ln) - len(ln.lstrip()), []).append((ln, t))
+            hits = next((by_indent[n] for n in sorted(by_indent) if len(by_indent[n]) >= 2), [])
+        for _, t in hits:
+            turns += 1
+            low = t["speaker"].lower()
+            counts[low] = counts.get(low, 0) + 1
+        if turns < 2 or len(counts) < 1:
+            continue
+        if name == "cc" and len(counts) < 2:
+            continue  # a prompt and a reply, so quoted lines alone are no export
+        if name == "aider" and not any(ln.startswith(AIDER_HEAD) for ln in lines):
+            continue
+        roles = sum(n for s, n in counts.items() if s in ROLE_WORDS or re.fullmatch(r"(speaker|person|participant|agent)[ _-]?\w{1,3}", s))
+        repeated = max(counts.values()) >= 2
+        few = len(counts) <= max(2, turns * 0.6)
+        if not (repeated and few and (len(counts) >= 2 or roles >= 2)):
+            continue
+        if turns < 3 and roles < 2:
+            continue
+        rank = turns + 2 * roles
+        if best is None or rank > best[0]:
+            best = (rank, name, turns, counts)
+    if best is None:
+        return None
+    _, name, turns, counts = best
+    roles = sum(n for s, n in counts.items() if s in ROLE_WORDS)
+    strong = name in ("cc", "aider") or (
+        (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines)))
+    out: dict[str, Any] = {"format": "text", "score": STRONG if strong else WEAK, "style": name}
+    if name not in DISTINCT_STYLES and name != "aider":
+        # a heading, a bold label or a `Word:` line starts a turn only for a speaker the head shows taking turns
+        out["speakers"] = sorted(s for s, n in counts.items() if n >= 2 or s in ROLE_WORDS)
+    return out
+
+
+# --------------------------------------------------------------------------- whole-file turns
+
+
+# a run of characters every JSON writer leaves as they are (no quote, backslash, slash, <, >, &, apostrophe, brace or
+# character past ASCII), so it stands verbatim in the raw file whatever wrote it
+_VERBATIM = re.compile(r"[A-Za-z0-9 !#$%()*+,\-.:;=?@\[\]^_`|~]{3,}")
+LOCATE_BACK = 1_000_000  # characters before the last turn found that a turn not found after it is looked for in
+
+
+class _Locator:
+    """Sets each turn's `line`: where its words (else its id) stand in the raw text, looked for after the turn before
+    and, failing that, a little before it; a turn not found keeps the line of the one before. The searches scan at most
+    a few times the text in all, so a file whose words the needles miss costs a few passes, not one per turn."""
+
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+        self.pos = 0  # where the next search starts
+        self.line_pos = 0  # an offset whose line is known: line_at
+        self.line_at = 1
+        self.budget = 6 * len(raw) + (1 << 20)
+
+    def place(self, turns: list[dict[str, Any]]) -> None:
+        raw = self.raw
+        for t in turns:
+            found, size = -1, 1
+            for needle in (_needles(t) if self.budget > 0 else ()):
+                at = raw.find(needle, self.pos)
+                self.budget -= (at - self.pos) if at >= 0 else (len(raw) - self.pos)
+                if at < 0:
+                    lo = max(0, self.pos - LOCATE_BACK)
+                    at = raw.find(needle, lo, self.pos)
+                    self.budget -= self.pos - lo
+                if at >= 0:
+                    found, size = at, len(needle)
+                    break
+                if self.budget <= 0:
+                    break
+            if found >= 0:
+                if found >= self.line_pos:
+                    self.line_at += raw.count("\n", self.line_pos, found)
+                else:
+                    self.line_at -= raw.count("\n", found, self.line_pos)
+                self.line_pos = found
+                self.pos = found + size
+            t["line"] = self.line_at
+
+
+def _needles(t: dict[str, Any]) -> list[str]:
+    """What to look for to find a turn in the raw JSON: the first verbatim run of its words (for a turn with none, its
+    step's number (STEP_KEYS) as JSON writes it, else a block's words: a tool's output, its reasoning), after a quote
+    when it starts them; else its first words as JSON writes them, escaped or not; else its id; else the name of the tool
+    it calls."""
+    text = t.get("text") or ""
+    out: list[str] = []
+    if not text.strip() and t.get("step_key"):  # with a space or without
+        out += [f'"{t["step_key"]}": {t["step"]}', f'"{t["step_key"]}":{t["step"]}']
+    elif not text.strip():
+        text = next((b["text"] for b in t.get("blocks") or () if b["kind"] != "tool_use" and b["text"].strip()), "")
+    m = _VERBATIM.search(text, 0, 400)
+    if m:
+        run = m.group()[:60].rstrip()
+        if m.start() == 0:
+            out.append('"' + run)
+        if len(run.strip()) >= 3:
+            out.append(run.strip())
+    elif text.strip():
+        piece = text.strip()[:40]
+        out.append(json.dumps(piece, ensure_ascii=False)[1:-1])
+        out.append(json.dumps(piece)[1:-1])
+    if t.get("id"):
+        out.append(json.dumps(str(t["id"]))[1:-1])
+    if not out and (call := next((b["text"] for b in t.get("blocks") or () if b["kind"] == "tool_use"), None)):
+        out.append(json.dumps(call.split("\n", 1)[0]))  # a call's name, as JSON writes it
+    return list(dict.fromkeys(n for n in out if len(n) >= 2))
+
+
+def _role(speaker: str) -> str:
+    low = speaker.lower()
+    for tail in ("message", "event"):  # a message class's name (AutoGen's `AssistantMessage`, `ToolCallExecutionEvent`)
+        if low.endswith(tail) and len(low) > len(tail):
+            low = low[:-len(tail)].rstrip("_ ")
+            if low.startswith(("function", "tool")) and low.endswith(("result", "response", "output", "execution")):
+                return "tool"
+            break
+    if low in ("user", "human", "me", "customer", "client", "student", "patient", "interviewee", "prompt", "question",
+               "instruction", "input"):
+        return "user"
+    if low in ("assistant", "ai", "bot", "model", "claude", "chatgpt", "gpt", "gemini", "llm", "copilot", "agent",
+               "response", "completion", "answer", "output", "function_call", "tool_call"):
+        return "assistant"
+    if low in ("system", "developer"):
+        return "system"
+    if low in ("tool", "function", "ipython", "observation", "function_response", "tool_response"):
+        return "tool"
+    return "other"
+
+
+def parse_turns(path: Path, rel: str) -> dict[str, Any]:
+    """Every turn of a whole-file JSON transcript, or of JSON lines the server pages as text, with the groups
+    (conversations) they belong to; kept for the last few files read, and read once however many ask for it at the same
+    time. Raises HTTPException 415 when the file holds no turns."""
+    k = str(path)
+    with _lock:
+        busy = _PARSING.get(k)
+        if busy is None:
+            if len(_PARSING) >= PARSING_MAX:
+                for name in [n for n, lk in _PARSING.items() if not lk.locked()]:
+                    del _PARSING[name]
+            busy = _PARSING[k] = threading.Lock()
+    with busy:
+        return _parse_turns(path, rel)
+
+
+def _parse_turns(path: Path, rel: str) -> dict[str, Any]:
+    key = _stat_key(path)
+    if key is None:
+        raise HTTPException(404, f"no such file: {rel}")
+    k = str(path)
+    with _lock:
+        hit = _TURNS.get(k)
+        if hit is not None and hit[0] == key:
+            _TURNS.move_to_end(k)
+            return hit[1]
+    raw = path.read_bytes().decode("utf-8", "replace")
+    groups: list[dict[str, Any]] = []
+    turns: list[dict[str, Any]] = []
+    whole: Any = None
+    try:
+        whole = json.loads(raw)
+    except ValueError:
+        whole = None
+    if whole is not None:
+        locator = _Locator(raw)
+        for title, conv in conversations_in(whole):
+            if not conv:
+                continue
+            if title is not None:  # None: turns of no conversation (a system prompt before them all)
+                groups.append({"title": title, "first": len(turns)})
+                for t in conv:
+                    t["group"] = len(groups) - 1
+            locator.place(conv)
+            turns.extend(conv)
+        _on_records(path, rel, turns)
+        for t, (_first, last) in zip(turns, turn_extents(turns)):
+            t["end"] = last
+    else:
+        for n, ln in enumerate(raw.split("\n"), 1):
+            if not ln.strip():
+                continue
+            try:
+                obj = json.loads(ln)
+            except ValueError:
+                continue
+            conv = conversation_of(obj)
+            if conv:
+                groups.append({"title": _title_of(obj) or f"line {n}", "first": len(turns), "line": n})
+                for t in conv:
+                    t.update(line=n, group=len(groups) - 1)
+                turns.extend(conv)
+                continue
+            m = message_of(obj)
+            if m is not None:
+                m["line"] = n
+                turns.append(m)
+    if not turns:
+        # the sniff, which read only the head, says so too from now on: the File browser stops offering Transcript for
+        # this version of the file and opens the mode it would otherwise use
+        with _lock:
+            _SNIFFS[k] = (key, None)
+            _SNIFFS.move_to_end(k)
+            while len(_SNIFFS) > SNIFF_CACHE_MAX:
+                _SNIFFS.popitem(last=False)
+        raise HTTPException(415, f"{rel} holds no messages to show as a transcript")
+    count: dict[int, int] = {}
+    for t in turns:
+        t["role"] = _role(t.get("speaker") or "")
+        t.pop("id", None)
+        # the turn's own number, which the Transcript mode shows where a record shows its line: its step's (ATIF's
+        # `step_id`), else its place in its conversation
+        g = t.get("group", -1)
+        count[g] = count.get(g, 0) + 1
+        step = t.pop("step", None)
+        t.pop("step_key", None)
+        t["n"] = step if step is not None else count[g]
+    out = {"turns": turns, "groups": groups}
+    with _lock:
+        _TURNS[k] = (key, out)
+        _TURNS.move_to_end(k)
+        while len(_TURNS) > TURNS_CACHE_MAX:
+            _TURNS.popitem(last=False)
+    return out
+
+
+def _on_records(path: Path, rel: str, turns: list[dict[str, Any]]) -> None:
+    """Each turn that is the one turn of a record of its JSON document (an ATIF step `#/steps/3`, records.json_index)
+    names that record (`ref`) and its first line (`rec_line`), where labels mark it: a label of the record colors and
+    filters the turn, its marks show in the turn's gutter, and a citation of the record opens at the turn (turns_page).
+    The turn still stands on the line of its words. A record that holds many turns (a chat export's conversation) names
+    none of them."""
+    from . import records  # noqa: PLC0415 — records imports corpus, which imports this module
+
+    try:
+        idx = records.json_index(path) if records.reader_of(path, rel) == "json" else None
+    except (OSError, ValueError):
+        idx = None
+    if idx is None or not turns:
+        return
+    held: dict[int, list[dict[str, Any]]] = {}
+    for t in turns:
+        i = bisect.bisect_right(idx.lines, t["line"]) - 1
+        if i >= 0 and idx.lines[i] <= t["line"] <= idx.end_lines[i]:
+            held.setdefault(i, []).append(t)
+    for i, ts in held.items():
+        if len(ts) == 1:
+            ts[0]["rec_line"] = idx.lines[i]
+            ts[0]["rec_end"] = idx.end_lines[i]
+            ts[0]["ref"] = f"{rel}#{idx.pointers[i]}"
+
+
+def turn_extents(turns: list[dict[str, Any]]) -> list[tuple[int, int]]:
+    """Each turn of a whole-file JSON transcript as the lines it covers, (first, last): from the line its record starts
+    on (`rec_line`), else the line of its words, through the line before the next turn's first; the last turn through
+    the end of its record (`rec_end`), else its own line. The reader's strip colors these lines for the turn, so that a
+    turn of many lines is a band as tall as it, not a tick on its first line. Pure."""
+    firsts = [t.get("rec_line") or t["line"] for t in turns]
+    out = []
+    for k, (t, first) in enumerate(zip(turns, firsts)):
+        last = firsts[k + 1] - 1 if k + 1 < len(turns) else (t.get("rec_end") or t["line"])
+        out.append((first, max(first, last)))
+    return out
+
+
+def _quote_forms(quote: str) -> list[str]:
+    """The words a span of the raw file quotes, as a turn's parsed text would hold them: JSON-decoded when they read as
+    the body of a JSON string, then as written."""
+    forms = []
+    try:
+        decoded = json.loads('"' + quote + '"')
+    except ValueError:
+        decoded = None
+    if isinstance(decoded, str):
+        forms.append(decoded.strip())
+    forms.append(quote.strip())
+    return [q for q in dict.fromkeys(forms) if q]
+
+
+def _words(t: dict[str, Any]) -> str:
+    """All the words a turn shows: its text, then its blocks' (a tool call's arguments, its output, its reasoning)."""
+    blocks = t.get("blocks")
+    return "\n\n".join([t.get("text") or "", *(b["text"] for b in blocks)]) if blocks else t.get("text") or ""
+
+
+def _cited_turn(turns: list[dict[str, Any]], on_line: list[int], quote: str) -> tuple[int, int, int] | None:
+    """(index, start, end) of the first turn of `on_line` whose text holds `quote`, with the offsets into its text: an
+    exact match in any of them first, then refs._find_quote's loose match while their text is small enough. None when no
+    turn holds it."""
+    from . import refs  # noqa: PLC0415
+
+    forms = _quote_forms(quote)
+    for i in on_line:
+        text = _words(turns[i])
+        for q in forms:
+            at = text.find(q)
+            if at >= 0:
+                return i, at, at + len(q)
+    if sum(len(_words(turns[i])) for i in on_line) > refs.QUOTE_LOOSE_MAX_BYTES:
+        return None
+    for i in on_line:
+        text = _words(turns[i])
+        for q in forms:
+            found = refs._find_quote(text, q)
+            if found:
+                return i, found[0], found[1]
+    return None
+
+
+def turns_page(path: Path, rel: str, start: int = 0, count: int = 100, line: int | None = None,
+               quote: str | None = None) -> dict[str, Any]:
+    """A page of parse_turns: `count` turns from index `start`, or, given a `line`, from a few turns before the turn it
+    cites. That turn is the first standing on `line` (or whose record starts there: `rec_line`, _on_records) whose text
+    holds `quote` (the words a span of that line quotes), else the first standing on `line`, else the last before it. A
+    turn found by its quote is `cited`: {i, quote}, the words as its text (or its blocks) hold them. Each turn's text is
+    cut at TURN_TEXT_MAX (`cut` says so), the cited turn's not before the quote's end, and so is each of its blocks
+    (turn_blocks); a turn with fields (turn_fields) carries them, for Color by and Filter by, and one that is its
+    record's names it (`ref`, `rec_line`). A whole-file JSON document's turn gives the last line it covers (`end`,
+    turn_extents). `groups` holds the conversations the page's turns belong to, by index, and `n_groups` how many the
+    file holds. Each turn's `n` is its own number: its step's, else its place in its conversation (parse_turns)."""
+    parsed = parse_turns(path, rel)
+    turns = parsed["turns"]
+    count = max(1, min(count, TURNS_PAGE_MAX))
+    cited: tuple[int, int, int] | None = None
+    if line is not None:
+        on_line = [i for i, t in enumerate(turns) if t["line"] == line or t.get("rec_line") == line]
+        cited = _cited_turn(turns, on_line, quote) if quote and on_line else None
+        if cited:
+            at = cited[0]
+        elif on_line:
+            at = on_line[0]
+        else:
+            at = max((i for i, t in enumerate(turns) if t["line"] < line), default=0)
+        start = max(0, at - min(5, count - 1))
+    start = max(0, min(start, len(turns)))
+    page = []
+    for i, t in enumerate(turns[start:start + count], start):
+        text = t.get("text") or ""
+        keep = max(TURN_TEXT_MAX, cited[2]) if cited and cited[0] == i else TURN_TEXT_MAX
+        item = {"i": i, "n": t["n"], "line": t["line"], "speaker": t.get("speaker") or "", "role": t["role"], "text": text[:keep]}
+        if len(text) > keep:
+            item["cut"] = len(text)
+        for k in ("time", "group", "ref", "rec_line", "end"):
+            if k in t:
+                item[k] = t[k]
+        if t.get("fields"):
+            item["fields"] = t["fields"]
+        if t.get("blocks"):
+            item["blocks"] = [{"kind": b["kind"], "text": b["text"][:keep], **({"cut": len(b["text"])} if len(b["text"]) > keep else {})}
+                              for b in t["blocks"]]
+        page.append(item)
+    groups = parsed["groups"]
+    touched = sorted({t["group"] for t in page if "group" in t})
+    out = {"path": rel, "total": len(turns), "start": start, "turns": page, "n_groups": len(groups),
+           "groups": {str(g): groups[g] for g in touched}}
+    if cited:
+        i, a, b = cited
+        out["cited"] = {"i": i, "quote": _words(turns[i])[a:b]}
+    return out
+
+
+@router.get("/corpora/{c}/source/turns")
+def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | None = None, block: int | None = None,
+              char_start: int | None = None, char_end: int | None = None) -> dict[str, Any]:
+    """A page of the turns of a JSON transcript (turns_page): 415 for one with no turns. `block`, `char_start` and
+    `char_end` with `line` are a span of the raw file (`<path>#L<line>.b<block>:c<char_start>-<char_end>`, UTF-16
+    offsets), whose words pick the turn the page opens at."""
+    from . import corpus  # noqa: PLC0415 — corpus imports nothing from here
+
+    root = corpus._corpus(c)
+    p = corpus._file(root, path)
+    quote = None
+    if line is not None and block is not None and char_start is not None and char_end is not None and char_end > char_start:
+        from . import refs  # noqa: PLC0415
+
+        try:
+            quote = refs.resolve_base(root, f"{path}#L{line}.b{block}:c{char_start}-{char_end}").get("excerpt")
+        except refs.RefError:
+            quote = None
+    return turns_page(p, path, start, count, line, quote)
+
+
+def _aider_turns(texts: Iterable[Any]) -> Iterator[dict[str, Any] | None]:
+    """aider's chat history as turns, per line the turn it starts or None: a run of `#### ` lines is the user's message,
+    a run of `> ` lines aider's own output, and the first other line after either starts the model's reply."""
+    prev = ""
+    for text in texts:
+        if not isinstance(text, str) or not text.strip():
+            yield None
+            continue
+        kind, turn = "reply", None
+        if text.startswith(AIDER_HEAD):
+            kind = "head"
+        elif text.startswith("#### "):
+            kind = "user"
+            if prev != "user":
+                turn = {"speaker": MARKS["####"], "at": 5}
+        elif text.startswith(">"):
+            kind = "aider"
+            if prev != "aider":
+                turn = {"speaker": AIDER_OUTPUT, "at": 2 if text.startswith("> ") else 1}
+        elif prev in ("user", "aider"):
+            turn = {"speaker": AIDER_REPLY, "at": 0}
+        yield turn
+        prev = kind
+
+
+def text_turns(texts: Iterable[Any], hint: dict[str, Any]) -> Iterator[dict[str, Any] | None]:
+    """Per line of a text chat log the sniff read as `hint`, the turn it starts (turn_of, aider's runs of lines), else
+    None: only for the speakers the sniff names when it names them, or a role such as `System` that first speaks past
+    the head."""
+    if hint.get("style") == "aider":
+        yield from _aider_turns(texts)
+        return
+    speakers = set(hint["speakers"]) if "speakers" in hint else None
+    for text in texts:
+        t = turn_of(text, hint["style"]) if isinstance(text, str) else None
+        ok = t is not None and (speakers is None or t["speaker"].lower() in speakers or t["speaker"].lower() in ROLE_WORDS)
+        yield t if ok else None
+
+
+def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
+    """A page of a file's records with what the Transcript mode needs: the sniff (`transcript`) when the file reads as
+    one; for a text chat log each record that starts a turn its `meta.turn` (text_turns); and the fields of each
+    record's turn that Color by reads beside its own keys (`meta.fields`): who starts a turn of a chat log, and of JSON
+    lines of messages those of record_fields. A JSON line whose turn holds more than words carries its blocks
+    (turn_blocks) as `meta.blocks`, and who it stands for as `meta.speaker` when it is a tool call or output of its own
+    (tool_item); a line holding a whole conversation of such turns carries them as `meta.turns`."""
+    hint = sniff(path, rel)
+    if hint is None:
+        return page
+    page["transcript"] = hint
+    records = page.get("records") or []
+    if hint["format"] == "text":
+        texts = [rec.get("record", {}).get("text") if isinstance(rec.get("record"), dict) else None for rec in records]
+        for rec, t in zip(records, text_turns(texts, hint)):
+            if t is not None:
+                meta = rec.setdefault("meta", {})
+                meta["turn"] = t
+                meta["fields"] = {"speaker": t["speaker"]}
+    elif hint["format"] in ("stream", "messages", "conversations"):
+        for rec in records:
+            obj = rec.get("record")
+            if hint.get("lines") and isinstance(obj, dict) and isinstance(obj.get("text"), str):
+                obj = _json_object(obj["text"])
+            if hint["format"] == "conversations":
+                turns = conversation_of(obj) or []
+                if any(t.get("blocks") for t in turns):
+                    rec.setdefault("meta", {})["turns"] = [_page_turn(t) for t in turns]
+                continue
+            if fields := record_fields(obj):
+                rec.setdefault("meta", {})["fields"] = fields
+            if hint["format"] == "messages" and (turn := message_of(obj)) and turn.get("blocks"):
+                meta = rec.setdefault("meta", {})
+                meta["blocks"] = _page_turn(turn)["blocks"]
+                if message_keys(obj) is None:
+                    meta["speaker"] = turn["speaker"]
+    return page
+
+
+def _page_turn(t: dict[str, Any]) -> dict[str, Any]:
+    """A turn as a page of records carries it: who speaks, the time, its words and its blocks, each cut at
+    TURN_TEXT_MAX."""
+    out = {"speaker": t.get("speaker") or "", "text": (t.get("text") or "")[:TURN_TEXT_MAX]}
+    if t.get("time"):
+        out["time"] = t["time"]
+    if t.get("blocks"):
+        out["blocks"] = [{"kind": b["kind"], "text": b["text"][:TURN_TEXT_MAX]} for b in t["blocks"]]
+    return out
+
+
+def _json_object(text: str) -> dict[str, Any] | None:
+    """A line's JSON object, or None for a line that holds none."""
+    if not text.lstrip().startswith("{"):
+        return None
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None
+    return obj if isinstance(obj, dict) else None
+
+
+# --------------------------------------------------------------------------- speakers' names
+
+NAMES_FILE_MAX = 8 * 1024 * 1024  # bytes of a file named for the speakers (agents.jsonl) read for their names
+NAMES_OTHER_MAX = 1024 * 1024  # bytes of any other file read for them
+NAMES_FILES = 16  # files of each kind, per folder, read for them
+NAMES_SCAN_MAX = 2000  # entries of a folder looked at for such files
+NAMES_PER_FILE = 100_000  # ids one file's names are kept for
+NAMES_IDS_MAX = 200  # ids one request asks names for
+NAMES_CACHE_MAX = 64
+NAMES_EXT = JSONLISH | {".json"} | set(DELIMITED)
+# words of a speaker key that say nothing of whose id it holds
+GENERIC_KEY_WORDS = frozenset({"id", "uuid", "speaker", "data", "message", "msg", "payload", "sender", "author", "from"})
+# an id no other kind of record's id equals by chance (a uuid, a hash), so a file of any name may give its name
+DISTINCT_ID = re.compile(r"(?=[\w-]*\d)(?=[\w-]*[A-Za-z])[\w-]{12,}")
+_NAMES: "OrderedDict[str, tuple[tuple[int, int], dict[str, str]]]" = OrderedDict()
+
+
+def _singular(word: str) -> str:
+    return word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+
+
+def _table_records(path: Path) -> list[dict[str, Any]]:
+    """The records of a small JSON lines, JSON or CSV file that are objects: a JSON file's list, or the first list of
+    objects its top level holds."""
+    text = path.read_text(encoding="utf-8", errors="replace")
+    ext = path.suffix.lower()
+    if ext in DELIMITED:
+        return list(csv.DictReader(io.StringIO(text), delimiter=DELIMITED[ext]))
+    if ext in JSONLISH:
+        out = []
+        for line in text.splitlines():
+            if line.strip():
+                try:
+                    v = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(v, dict):
+                    out.append(v)
+        return out
+    data = json.loads(text)
+    if isinstance(data, dict):
+        data = next((v for v in data.values() if isinstance(v, list) and v and isinstance(v[0], dict)), [])
+    return [v for v in data if isinstance(v, dict)] if isinstance(data, list) else []
+
+
+def _own_name(rec: dict[str, Any]) -> str | None:
+    for k in NAME_FIELDS:
+        v = rec.get(k)
+        if isinstance(v, str) and 0 < len(v.strip()) <= 80 and "\n" not in v:
+            return v.strip()
+    for k, v in rec.items():
+        if isinstance(k, str) and _norm(k) in NAME_NORMS and isinstance(v, str) and 0 < len(v.strip()) <= 80 and "\n" not in v:
+            return v.strip()
+    return None
+
+
+def _id_names(path: Path) -> dict[str, str]:
+    """Each id of the file's records to its name: a record's `id`, `uuid` or `<the file's thing>_id` (agent_id in
+    agents.csv) beside its own name (NAME_FIELDS, any case style); {} for a file whose records carry none. Kept per path
+    and (size, mtime_ns)."""
+    key = _stat_key(path)
+    if key is None or key[0] > NAMES_FILE_MAX:
+        return {}
+    k = str(path)
+    with _lock:
+        hit = _NAMES.get(k)
+        if hit is not None and hit[0] == key:
+            _NAMES.move_to_end(k)
+            return hit[1]
+    thing = _singular(_split_key(path.stem)[-1]) if _split_key(path.stem) else ""
+    id_norms = {"id", "uuid", f"{thing}id", f"{thing}uuid"}
+    out: dict[str, str] = {}
+    try:
+        for rec in _table_records(path):
+            ident = next((v for kk, v in rec.items() if isinstance(kk, str) and _norm(kk) in id_norms
+                          and isinstance(v, (str, int)) and not isinstance(v, bool) and str(v).strip()), None)
+            name = _own_name(rec)
+            if ident is not None and name and name != str(ident).strip():
+                out.setdefault(str(ident).strip(), name)
+                if len(out) >= NAMES_PER_FILE:
+                    break
+    except (OSError, ValueError, csv.Error, RecursionError):
+        out = {}
+    with _lock:
+        _NAMES[k] = (key, out)
+        _NAMES.move_to_end(k)
+        while len(_NAMES) > NAMES_CACHE_MAX:
+            _NAMES.popitem(last=False)
+    return out
+
+
+def _name_files(corpus: Path, rel: str, words: set[str]) -> tuple[list[Path], list[Path]]:
+    """The JSON lines, JSON and CSV files beside the file `rel` and at the corpus's top, inside the corpus, that may
+    name its speakers: (those named for what one of `words` names, the others of at most NAMES_OTHER_MAX bytes), up to
+    NAMES_FILES of each, by name."""
+    folder = rel.rsplit("/", 1)[0] if "/" in rel else ""
+    related: list[Path] = []
+    others: list[Path] = []
+    for sub in dict.fromkeys([folder, ""]):
+        names: list[str] = []
+        room = {True: NAMES_FILES, False: NAMES_FILES}
+        try:
+            base = config.safe_corpus_path(corpus, sub) if sub else corpus
+            with os.scandir(base) as it:
+                for i, e in enumerate(it):
+                    if i >= NAMES_SCAN_MAX:
+                        break
+                    if os.path.splitext(e.name)[1].lower() in NAMES_EXT and f"{sub}/{e.name}".lstrip("/") != rel:
+                        names.append(e.name)
+        except (OSError, ValueError):
+            continue
+        for name in sorted(names):
+            stem = _split_key(os.path.splitext(name)[0])
+            mine = bool(stem) and _singular(stem[-1]) in words
+            if not room[mine]:
+                continue
+            try:
+                p = config.safe_corpus_path(corpus, f"{sub}/{name}".lstrip("/"))
+                size = p.stat().st_size if p.is_file() else -1
+            except (OSError, ValueError):
+                continue
+            if 0 <= size <= (NAMES_FILE_MAX if mine else NAMES_OTHER_MAX):
+                (related if mine else others).append(p)
+                room[mine] -= 1
+    return related, others
+
+
+def speaker_names(corpus: Path, rel: str, key: str, ids: list[str]) -> dict[str, str]:
+    """The names the corpus gives speaker ids that the file `rel` keeps under `key` (`agent_speaker_id|user_speaker_id`):
+    each id's name in a file beside it or at the corpus's top whose records carry that id and a name. A file named for
+    what a word of the key names (agents.jsonl for `agent_speaker_id`, not agent_goals.jsonl) answers for any id, any
+    other file only for a distinct id (DISTINCT_ID), since a small number or a short word is an id in many tables."""
+    words = {_singular(w) for alt in key.split("|") for w in _key_words(alt.rsplit(".", 1)[-1])} - GENERIC_KEY_WORDS
+    related, others = _name_files(corpus, rel, words)
+    out: dict[str, str] = {}
+    for ident in ids:
+        for p in related + (others if DISTINCT_ID.fullmatch(ident) else []):
+            name = _id_names(p).get(ident)
+            if name:
+                out[ident] = name
+                break
+    return out
+
+
+@router.get("/corpora/{c}/source/speakers")
+def get_speaker_names(c: str, path: str, key: str, ids: str = "") -> dict[str, Any]:
+    """`?path=&key=&ids=a,b`: {names: {id: name}}, the names the corpus gives the file's speaker ids (speaker_names), for
+    up to NAMES_IDS_MAX ids."""
+    from . import corpus  # noqa: PLC0415 — corpus imports nothing from here
+
+    root = corpus._corpus(c)
+    corpus._file(root, path)
+    wanted = [i for i in dict.fromkeys(s.strip() for s in ids.split(",")) if i][:NAMES_IDS_MAX]
+    return {"names": speaker_names(root, path, key, wanted) if wanted else {}}

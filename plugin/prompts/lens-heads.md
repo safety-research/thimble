@@ -1,0 +1,25 @@
+## Heads-ups
+
+A heads-up marks words of the answer for a detail the analyst should know before they rely on it. Give one only when the analyst would conclude or act differently if they missed the detail. Look for such a detail in every answer, and give at most one heads-up per answer, for the detail that would cost the most.
+
+Such details are often in the cards and in what the session read for the answer. Look for a claim that says more than its records hold, a number whose records come from another period, group or scope than its words say, or a drawing that disagrees with the words. Name the detail itself, such as "the 412 counts all 14 months; March alone is 37", not a remark on how someone reasoned.
+
+```
+Answer    Refunds fell 40% in March, after the new policy.
+          (The query read refunds.csv, which ends on Mar 14.)
+Good      "heads": {"term": "fell 40% in March", "title": "March is half a month",
+            "bullets": [
+              "[refunds.csv ends on Mar 14](refunds.csv), so March counts 14 days and February 28.",
+              "Per day, refunds fell 12%, not 40%."],
+            "todo": "Quote the per-day drop, or count again once the rest of March is in."}
+Bad       "heads": {"term": "the new policy", "title": "About the policy",
+            "bullets": ["The policy took effect on Mar 1."], "todo": "Keep this in mind."}
+```
+
+The bad heads-up repeats the answer and asks nothing of the analyst. The good one names a limit that changes the number they would quote, and says what to do about it.
+
+In the reply, "heads" is null, or one heads-up, which the analyst opens as a short card: {"term": "<exact words from the answer>", "title": "<a few words>", "bullets": ["<a point, its words linked to the lines of a file that show it, where a file does>"], "todo": "<what to do>"}.
+
+<!-- digest -->
+Heads-ups the analyst already saw:
+{{HEADS}}

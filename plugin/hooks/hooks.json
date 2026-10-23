@@ -1,50 +1,8 @@
 {
-  "description": "How thimble follows a Claude Code session once thimble is on in it (plugin/bin/.thimble-watch). Every hook exits in its first shell line unless thimble is on in the session: <thimble home>/up/<session id>.active, the marker activation writes (bin/thimble activate), or, where Claude Code gives a hook no session id, the folder's marker; so a coding session in which thimble never turned on starts no Python. The watcher wakes main with each event for it, such as a label's end or a thread's question from the terminal or the browser. SessionStart's watcher (--start) runs before the session's marker exists, since the terminal UI's activation writes it a few seconds into the session (and --rekey after /clear or /resume), so in an interactive session (CLAUDE_CODE_ENTRYPOINT cli, never `claude -p`, which waits for this hook) its shell line waits up to a minute for the marker; no other hook runs while main is idle, so without it the analyst's first question from the browser would wait for a prompt typed in the terminal. Until a press of the browser workbench it takes them from the workspace's files, and after the press from thimble's server. As each turn of main's begins and ends, the permission mode Claude Code reports for it is recorded, and Manual mode shows a notice. As each turn of main's begins, the events held for main (an ended orientation, writer or view build, a label) are added to its prompt, and the terminal prints what the analyst wrote, which Claude Code shows of a woken turn only as the fixed summary. A permission request is only told to the server, after a press, and waits in the terminal: the hook prints nothing and decides nothing. thimble's agents are subagents of main, of the types thimble's hooks module registers (thimble:<role>): their hooks write the workspace's files first and post to the server only after a press. An Agent or SendMessage call, main's or a subagent's, goes through --agent-check, which lets a start or a follow-up of thimble's agents through only when the analyst asked for it (a pending request in subagents.json) and refuses a second fork of a thread; SubagentStart and SubagentStop record each agent's runs, a PreToolUse hook on thimble's tools (main's shim's, and each agent's own shim's, thimble-<role>) records which agent makes each call, a PreToolUse hook on SubagentHandback (--handback, which hooks.json starts only for an agent of type thimble:check or thimble:call) takes the report of such an agent that thimble's module started and refuses the call, ending the agent's turn, so the report never reaches main, a PreToolUse hook on Bash, Agent and Task (--foreground, which hooks.json starts only for an agent of type thimble:check) refuses a check's start of work in the background, so a check's run ends with its turn and Claude Code sends main no notification of it, the fork guard (a PreToolUse hook on every tool, which exits in its first shell line unless a fork runs) refuses each call of a fork of main that thimble's module started for a model call, such as a view proposal's, PermissionDenied records a start auto mode refused, SessionEnd records main's end. After each call, an agent of thimble's or a descendant of one is told its ref and when its work folder grows past its budget, and after main's own start of a thread's fork or of one of thimble's agents, main is told to end its turn on it. SessionStart for clear, resume and compact first moves the session's marker and its agents to the new session (--rekey: for /resume the marker with its guidance record and guide marker; for /clear the marker with a new guide marker, and the guidance owed again), then prints main's guidance again (bin/thimble prompt main --if-active --unless-mod), which /clear takes out of the conversation and /compact cuts short, only where no terminal UI ran activation, since the terminal UI delivers it itself. The UserPromptExpansion hook of /thimble runs just before the skill's commands, outside Claude Code's Bash sandbox (bin/thimble server up --hook): /thimble alone turns thimble on (no server); /thimble browser opens the browser workbench, and it and another action that needs the server leave what they printed for the skill's command.",
   "modules": ["./register.ts"],
   "hooks": {
-    "SessionStart": [
-      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --start", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble"}]},
-      {"matcher": "clear|resume|compact", "hooks": [{"type": "command", "command": "in=$(cat); printf '%s' \"$in\" | \"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --rekey; printf '%s' \"$in\" | \"${CLAUDE_PLUGIN_ROOT}/bin/thimble\" prompt main --if-active --unless-mod --session \"$CLAUDE_CODE_SESSION_ID\" --cwd \"$CLAUDE_PROJECT_DIR\" --lead 'Your thimble prompt follows. /thimble gave it to you, and /clear or /compact has since taken it out of this conversation or cut it short. It is yours for the rest of this session, as if it were part of your system prompt. When Claude Code shows only the start of it and names a file that holds all of it, Read that file before you reply to anything.' 2>/dev/null || true", "timeout": 30}]}
-    ],
-    "UserPromptExpansion": [
-      {"matcher": "thimble:thimble", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/thimble\" server up --hook >/dev/null 2>&1", "timeout": 600}]}
-    ],
-    "Stop": [
-      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble"}]},
-      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --mode", "timeout": 10}]}
-    ],
-    "UserPromptSubmit": [
-      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble"}]},
-      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --held", "timeout": 10}]},
-      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --mode", "timeout": 10}]}
-    ],
     "PreToolUse": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\"", "asyncRewake": true, "timeout": 86400, "rewakeMessage": "thimble browser event:", "rewakeSummary": "thimble"}]},
-      {"matcher": "Agent|Task|SendMessage", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --agent-check", "timeout": 10}]},
-      {"matcher": "mcp__plugin_thimble_thimble__.*|mcp__thimble-[a-z-]+__.*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --caller", "timeout": 5}]},
-      {"matcher": "SubagentHandback", "hooks": [{"type": "command", "command": "in=$(cat); case \"$in\" in *'\"thimble:check\"'*|*'\"thimble:call\"'*) printf '%s' \"$in\" | \"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --handback;; esac", "timeout": 10}]},
-      {"matcher": "Bash|Agent|Task", "hooks": [{"type": "command", "command": "in=$(cat); case \"$in\" in *'\"thimble:check\"'*) printf '%s' \"$in\" | \"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --foreground;; esac", "timeout": 10}]}
-    ],
-    "PostToolUse": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --agents", "timeout": 10}]}
-    ],
-    "PostToolUseFailure": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --agents", "timeout": 10}]}
-    ],
-    "SubagentStart": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --subagent-start", "timeout": 10}]}
-    ],
-    "SubagentStop": [
-      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --subagent-stop", "timeout": 10}]}
-    ],
-    "PermissionRequest": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --permission", "timeout": 10}]}
-    ],
-    "PermissionDenied": [
-      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --denied", "timeout": 10}]}
-    ],
-    "SessionEnd": [
-      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/.thimble-watch\" --end", "timeout": 5}]}
+      { "matcher": "Read|Grep|Glob|Write", "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/temp-allow.sh\"" }] }
     ]
   }
 }
