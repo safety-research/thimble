@@ -35,6 +35,7 @@ import { SPIN } from '../bar/busy'
 import { failNotice } from '../bar/notice'
 import { cardWidth, frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
+import { quiet } from '../core/askcell.js'
 import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
@@ -226,8 +227,9 @@ function keysRow($: Engine, els: Any, t: Thread | null, more: PaneKey[] = []): A
     Text({ key: 'keys-gap', children: ' ' }),
     Box({ key: 'thread-keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
       ...(i ? [Text({ key: `thread-key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
-      // a plain Button draws its key and label itself; children would draw them twice
-      Button({ key: `thread-key-${x.k}`, plain: true, dimColor: true, hotkey: x.k, label: x.label, onPress: x.onPress }),
+      // a plain Button draws its key and label itself; children would draw them twice. Under the pointer its label
+      // brightens and underlines, never Claude Code's inverse (askcell.js quiet), as the other panes' keys do
+      Button({ key: `thread-key-${x.k}`, plain: true, dimColor: true, hotkey: x.k, label: x.label, hover: quiet(`thread-key-${x.k}`), onPress: x.onPress }),
     ]) }),
   ]
 }
@@ -391,7 +393,7 @@ async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> 
   const { W, H } = sizeOf(e)
   const top: Any[] = []
   // the way back to the list, when the list opened it (esc closes the pane)
-  if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', onPress: () => listThreads($), children: [Text({ color: 'suggestion', children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
+  if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', hover: quiet('thread-back'), onPress: () => listThreads($), children: [Text({ color: 'suggestion', children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
   const subject = await subjectOfPane($, e, els, t, W)
   const keys = keysRow($, els, t, subject.keys)
   const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - top.length - keys.length))

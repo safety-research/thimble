@@ -26,6 +26,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { messageOf } from '../core/answers'
+import { quiet } from '../core/askcell.js'
 import { tellOpened } from '../core/engaged'
 import { failNotice } from '../bar/notice'
 import { openPane, paneNow } from '../core/pane'
@@ -184,7 +185,7 @@ function keysRow(els: Any, keys: Key[]): unknown {
   const { Box, Button, Text } = els
   return Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
     ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
-    Button({ key: x.id ?? `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: x.label })] }),
+    Button({ key: x.id ?? `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, hover: quiet(`claims-${x.id ?? `key-${x.k}`}`), onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: x.label })] }),
   ]) })
 }
 

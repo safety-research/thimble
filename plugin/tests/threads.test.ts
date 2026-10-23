@@ -282,6 +282,8 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   expect(m.props.label).toBe('send this answer to Claude')
   expect(m.props.dimColor).toBe(true)
   expect(m.props.children).toBe(undefined)
+  // under the pointer its words brighten, never Claude Code's inverse of a plain Button
+  expect(m.props.hover?.inverse).toBe(false)
   const kids = tree.props.children as Any[]
   expect(kids.indexOf(all.find(n => n.props?.key === 'thread-keys'))).toBe(kids.findIndex((n: Any) => n.props?.key === 'entry-gap') - 1)
 })

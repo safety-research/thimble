@@ -176,6 +176,8 @@ test('a key in the labels pane (j, v) redraws it and Esc still closes it: each o
   const draw = async () => nodes(await drawLabels($, { props: { bodyColumns: 90, scroll: { bodyRows: 40 } } }, (await paneNow($))?.args, ELS))
   await openLabels($, { label: 'sorry' })
   expect(opens[0]).toMatchObject({ focus: true, closeOnEscape: true, rows: 28 })
+  // the keys' row: under the pointer a key's words brighten, never Claude Code's inverse of a plain Button
+  expect((await draw()).filter(n => n.type === 'Button' && /^key-/.test(String(n.props.key))).every(n => n.props.hover?.inverse === false)).toBe(true)
   await (await draw()).find(n => n.type === 'Button' && n.props.hotkey === 'j').props.onPress()
   await (await draw()).find(n => n.type === 'Button' && n.props.hotkey === 'v').props.onPress()
   expect(opens.length).toBe(3)

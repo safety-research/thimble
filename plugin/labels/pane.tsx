@@ -18,6 +18,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { rootHere, startDir } from '../core/env'
+import { quiet } from '../core/askcell.js'
 import { openPane, PANE_ID } from '../core/pane'
 import { cut, cutWords, textWidth } from '../core/text.js'
 import { checkRecord, labelsData } from './labels'
@@ -305,7 +306,7 @@ async function labelView($: Engine, els: Any, root: string, show: (p: string) =>
 
   // ---- the keys, each also a press
   const keys: unknown[] = []
-  const key = (k: string, label: string, onPress: () => unknown) => keys.push(Button({ key: `key-${k}`, plain: true, hotkey: k, label, onPress }))
+  const key = (k: string, label: string, onPress: () => unknown) => keys.push(Button({ key: `key-${k}`, plain: true, hotkey: k, label, hover: quiet(`labels-key-${k}`), onPress }))
   if (recs.length) {
     key('j', 'next record', () => step(1))
     key('k', 'previous', () => step(-1))
