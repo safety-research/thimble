@@ -65,6 +65,8 @@ export type OverviewPaint =
       at: readonly number[]
       colors: readonly (string | null)[]
       off: readonly boolean[]
+      /** the lines the bins cut (rowBins) */
+      lines?: number
     }
   | {
       kind: 'counts'
@@ -72,6 +74,8 @@ export type OverviewPaint =
       counts: readonly (readonly number[])[]
       colors: readonly string[]
       off: readonly boolean[]
+      /** the lines the bins cut (rowBins) */
+      lines?: number
     }
   | { kind: 'density'; bytes: readonly number[] }
   | { kind: 'none' }
@@ -157,16 +161,35 @@ type FrameGeom = ReturnType<typeof frameGeom>
 /** A length in css px moved onto the device's pixel grid at `dpr`, so that an edge there is drawn sharp. Pure. */
 export const snap = (v: number, dpr: number): number => Math.round(v * dpr) / dpr
 
+/** The bins of `bins` that device row `y` of a track `h` rows tall shows, from `a` to before `b`. With `lines`, the
+ * lines the bins cut (the server's binning, binLines), the bins of the lines the row covers: each line, a record, takes
+ * its share of the track, and a row shorter than a line takes the line its middle is on, so that the records meet with
+ * no gap between them on a file of fewer lines than bins (whose bins between two lines hold none). Without, the bins in
+ * the row's share. Pure. */
+export function rowBins(y: number, h: number, bins: number, lines?: number): [number, number] {
+  if (lines && lines > 0) {
+    let lo = Math.floor((y * lines) / h)
+    let hi = Math.min(lines, Math.floor(((y + 1) * lines) / h))
+    if (hi <= lo) {
+      lo = Math.max(0, Math.min(lines - 1, Math.floor(((y + 0.5) * lines) / h)))
+      hi = lo + 1
+    }
+    const a = Math.min(bins - 1, Math.floor((lo * bins) / lines))
+    return [a, Math.min(bins, Math.max(a + 1, Math.floor(((hi - 1) * bins) / lines) + 1))]
+  }
+  const a = Math.min(bins - 1, Math.floor((y * bins) / h))
+  return [a, Math.min(bins, Math.max(a + 1, Math.floor(((y + 1) * bins) / h)))]
+}
+
 /** Per device pixel row of a track `h` rows tall, the value most records in it have: of `counts` (per value, its
- * records in each bin, every value over the same bins), the one with the most records in the bins the row covers, the
- * first of those as many; -1 for a row whose bins hold none. Pure. */
-export function majorityRows(counts: readonly (ArrayLike<number>)[], h: number): Int32Array {
+ * records in each bin, every value over the same bins, which cut `lines` lines: rowBins), the one with the most records
+ * in the bins the row covers, the first of those as many; -1 for a row whose bins hold none. Pure. */
+export function majorityRows(counts: readonly (ArrayLike<number>)[], h: number, lines?: number): Int32Array {
   const out = new Int32Array(Math.max(0, h)).fill(-1)
   const bins = counts.length ? counts[0].length : 0
   if (!bins) return out
   for (let y = 0; y < h; y++) {
-    const a = Math.min(bins - 1, Math.floor((y * bins) / h))
-    const b = Math.min(bins, Math.max(a + 1, Math.floor(((y + 1) * bins) / h)))
+    const [a, b] = rowBins(y, h, bins, lines)
     let best = -1
     let most = 0
     for (let v = 0; v < counts.length; v++) {
@@ -198,7 +221,7 @@ export function labelPaint(k: Pick<Concept, 'id' | 'labels' | 'classes'>, ruler:
     })
     return row
   })
-  return { kind: 'counts', counts, colors: lit.map((c) => colourVar(c.color)), off: lit.map((c) => off.has(c.name)) }
+  return { kind: 'counts', counts, colors: lit.map((c) => colourVar(c.color)), off: lit.map((c) => off.has(c.name)), lines: ruler.total }
 }
 
 /** The color a paint gives the bin line `line` of `total` falls in, as the strip draws it: a key's rank's, a label's
@@ -237,17 +260,54 @@ export const binOfRow = (y: number, h: number, bins: number): number => Math.max
 export const SNAP_PX = 4
 export const THIN_PX = 8
 
+/** Per device pixel row of a track `h` rows tall, the rank a key's paint (`at`, a rank per bin over `lines` lines)
+ * shows: with `lines`, the rank most of the row's bins hold (rowBins), the first of those as many, -1 where none holds
+ * one; without, the rank of the bin at the row's middle. Pure. */
+export function rankRows(at: readonly number[], h: number, lines?: number): Int32Array {
+  const out = new Int32Array(Math.max(0, h)).fill(-1)
+  const bins = at.length
+  if (!bins) return out
+  const seen = new Map<number, number>()
+  for (let y = 0; y < h; y++) {
+    if (!lines) {
+      out[y] = at[binOfRow(y, h, bins)]
+      continue
+    }
+    const [a, b] = rowBins(y, h, bins, lines)
+    if (b - a === 1) {
+      out[y] = at[a]
+      continue
+    }
+    seen.clear()
+    let best = -1
+    let most = 0
+    for (let i = a; i < b; i++) {
+      const r = at[i]
+      if (r < 0) continue
+      const n = (seen.get(r) ?? 0) + 1
+      seen.set(r, n)
+      if (n > most) {
+        most = n
+        best = r
+      }
+    }
+    out[y] = best
+  }
+  return out
+}
+
 /** Per device pixel row of a strip `rows` tall, the value its paint colors the row in (a key's rank, a label's value),
  * as the strip draws it; -1 for a row in no value, in grey or in a value turned off. Pure. */
 export function rowValues(paint: OverviewPaint, rows: number): Int32Array {
   const out = new Int32Array(Math.max(0, rows)).fill(-1)
   if (paint.kind === 'bins' && paint.at.length) {
+    const at = rankRows(paint.at, rows, paint.lines)
     for (let y = 0; y < rows; y++) {
-      const r = paint.at[binOfRow(y, rows, paint.at.length)]
+      const r = at[y]
       if (r >= 0 && paint.colors[Math.min(r, paint.colors.length - 1)] && !paint.off[Math.min(r, paint.off.length - 1)]) out[y] = r
     }
   } else if (paint.kind === 'counts' && paint.counts.length) {
-    const at = majorityRows(paint.counts, rows)
+    const at = majorityRows(paint.counts, rows, paint.lines)
     for (let y = 0; y < rows; y++) if (at[y] >= 0 && !paint.off[at[y]]) out[y] = at[y]
   }
   return out
@@ -305,13 +365,13 @@ function drawnSpan(from: number, to: number, k: number, h: number): [number, num
 function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: number, cw: number, H: number, min: number, colourOf: (c: string) => string) {
   const runs: [number, number, string][] = []
   if (paint.kind === 'bins' && paint.at.length) {
-    const bins = paint.at.length
+    const at = rankRows(paint.at, H, paint.lines)
     let runStart = 0
     let runColour: string | null = null
     for (let y = 0; y <= H; y++) {
       let colour: string | null = null
       if (y < H) {
-        const rank = paint.at[binOfRow(y, H, bins)]
+        const rank = at[y]
         const c = rank >= 0 && !paint.off[Math.min(rank, paint.off.length - 1)] ? paint.colors[Math.min(rank, paint.colors.length - 1)] : null
         colour = c ? colourOf(c) : null
       }
@@ -323,7 +383,7 @@ function paintLane(ctx: CanvasRenderingContext2D, paint: OverviewPaint, x0: numb
     }
   } else if (paint.kind === 'counts' && paint.counts.length) {
     // each row in the one value most of its records have
-    const at = majorityRows(paint.counts, H)
+    const at = majorityRows(paint.counts, H, paint.lines)
     let y = 0
     while (y < H) {
       const v = at[y]

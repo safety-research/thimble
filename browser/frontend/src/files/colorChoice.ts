@@ -234,9 +234,10 @@ export const pickedChips = (chips: readonly ColorValue[], picked: Readonly<Recor
 
 export const writeColor = (ws: string, path: string, kept: ColorKept): void => writeStorage(colorKey(ws, path), kept)
 
-/** A key's lane of the overview: its commonest value per bin (the server's `at`, a rank), each rank in its palette color
- * or the one picked for its value (`picked`, by value), Other past the palette, a value in `off` without color. Pure. */
-export function keyPaint(k: SourceKey, picked: Readonly<Record<string, number>> | undefined, off: ReadonlySet<string>): OverviewPaint {
+/** A key's lane of the overview: its commonest value per bin (the server's `at`, a rank, its bins over `lines` lines),
+ * each rank in its palette color or the one picked for its value (`picked`, by value), Other past the palette, a value
+ * in `off` without color. Pure. */
+export function keyPaint(k: SourceKey, picked: Readonly<Record<string, number>> | undefined, off: ReadonlySet<string>, lines?: number): OverviewPaint {
   const ranks = Math.max(1, k.values.length)
   const valueAt = (r: number) => (r < KEY_COLORS ? (k.values[r]?.value ?? '') : OTHER)
   const pickOf = (r: number) => picked?.[valueAt(r)]
@@ -245,6 +246,7 @@ export function keyPaint(k: SourceKey, picked: Readonly<Record<string, number>> 
     at: k.at,
     colors: Array.from({ length: ranks }, (_, r) => (pickOf(r) ? `var(--label-${pickOf(r)})` : keyColor(r))),
     off: Array.from({ length: ranks }, (_, r) => off.has(valueAt(r))),
+    ...(lines ? { lines } : {}),
   }
 }
 

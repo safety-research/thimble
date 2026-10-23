@@ -5,7 +5,7 @@
 // per lane (the find's in the accent, each color lane the record's own color once it is read, the strip's color for its
 // bin, faded, until then), its metadata (its time and who said it) and the start of its text.
 import { describe, expect, test } from 'vitest'
-import { binOfRow, colorLanes, followOf, frameGeom, frameOf, FRAME_MIN_PX, labelPaint, lineAt, majorityRows, paintAt, PLAIN_PX, recordRow, rowValues, snap, snapPatch, stripWidth, ticksIn, type LoupeRecord, type OverviewPaint } from '../../src/files/Tracks'
+import { binOfRow, colorLanes, rankRows, rowBins, followOf, frameGeom, frameOf, FRAME_MIN_PX, labelPaint, lineAt, majorityRows, paintAt, PLAIN_PX, recordRow, rowValues, snap, snapPatch, stripWidth, ticksIn, type LoupeRecord, type OverviewPaint } from '../../src/files/Tracks'
 import type { LabelRuler } from '../../src/lib/types'
 
 describe('the thumb stands as a scrollbar\'s', () => {
@@ -63,6 +63,20 @@ describe('the overview takes one value per pixel row', () => {
     expect(fine.every((v) => v >= -1 && v <= 2)).toBe(true)
   })
 
+  test('on a file of fewer lines than bins, each line takes its share of the rows, with no row between two lines empty', () => {
+    // 4 lines over 20 bins (the server's binning: line i in bin ⌊i · 20 / 4⌋ = 0, 5, 10, 15), drawn on 8 rows
+    expect(Array.from({ length: 8 }, (_, y) => rowBins(y, 8, 20, 4))).toEqual([[0, 1], [0, 1], [5, 6], [5, 6], [10, 11], [10, 11], [15, 16], [15, 16]])
+    const counts = [Array.from({ length: 20 }, (_, b) => (b === 0 || b === 5 ? 1 : 0)), Array.from({ length: 20 }, (_, b) => (b === 15 ? 1 : 0))]
+    // lines 1 and 2 the first value, line 3 none, line 4 the second: one block of four rows, two empty, two of the second
+    expect(Array.from(majorityRows(counts, 8, 4))).toEqual([0, 0, 0, 0, -1, -1, 1, 1])
+    // without the lines, the empty bins between them leave gaps
+    expect(Array.from(majorityRows(counts, 8)).filter((v) => v < 0).length).toBeGreaterThan(2)
+    // more lines than rows: each row the value most of its lines have
+    const at = Array.from({ length: 20 }, (_, b) => (b < 6 ? 0 : b < 7 ? -1 : 1))
+    expect(Array.from(rankRows(at, 4, 10))).toEqual([0, 0, 1, 1])
+    expect(Array.from(rankRows([0, -1, 1, 1], 4))).toEqual([0, -1, 1, 1])
+  })
+
   test("a label's paint is its highlighted values' records per bin, from the ruler's counts, those turned off without color", () => {
     const k = {
       id: 'k1',
@@ -80,7 +94,7 @@ describe('the overview takes one value per pixel row', () => {
       labels: [{ concept_id: 'k1', bins: { coordination: [0, 2], 'link posting': [0, 1, 2], other: [3] }, counts: { coordination: [9, 1], 'link posting': [2, 7, 4], other: [30] } }],
     }
     const paint = labelPaint(k, ruler, new Set(['link posting']))
-    expect(paint).toEqual({ kind: 'counts', counts: [[9, 0, 1, 0], [2, 7, 4, 0]], colors: ['var(--label-1)', 'var(--label-2)'], off: [false, true] })
+    expect(paint).toEqual({ kind: 'counts', counts: [[9, 0, 1, 0], [2, 7, 4, 0]], colors: ['var(--label-1)', 'var(--label-2)'], off: [false, true], lines: 400 })
     // a ruler that gives no counts: a bin that holds a value counts one
     const bare = labelPaint(k, { ...ruler, labels: [{ concept_id: 'k1', bins: ruler.labels[0].bins }] }, new Set())
     expect(bare && bare.kind === 'counts' && bare.counts).toEqual([[1, 0, 1, 0], [1, 1, 1, 0]])

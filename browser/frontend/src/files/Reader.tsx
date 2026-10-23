@@ -1257,7 +1257,7 @@ function FileReader({ workspace, path, kind, targetRef, lead, end, labels, only,
     (c: ColorChoice, off: ReadonlySet<string>): OverviewPaint | null => {
       if (c.by === 'key') {
         const k = color.keys?.keys.find((x) => x.key === c.key)
-        return k ? keyPaint(k, color.pickedOf(choiceId(c)), off) : null
+        return k ? keyPaint(k, color.pickedOf(choiceId(c)), off, color.keys?.total) : null
       }
       if (c.by === 'label') {
         const k = lanes.find((x) => x.id === c.id)
