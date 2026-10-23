@@ -634,6 +634,41 @@ def test_a_card_s_printed_line_is_evidence_and_a_printed_table_reads_as_a_table(
     assert t["cols"] == ["merged", "total"] and t["rows"][t["at"]["r"]]["label"] == "agent-07" and t["cols"][t["at"]["c"]] == "merged"
 
 
+RUNS = [{"id": "c7d2e4", "title": "Hours and issues by model and setup", "outputs": [
+    {"out": 0, "corner": "run", "cells": [["issues closed", "opus emergent", "243"], ["hours", "opus emergent", "3.7"],
+                                          ["issues closed", "opus managed", "104"], ["hours", "opus managed", "2.5"]]},
+    {"out": 1, "lines": [[1, "model  setup       PRs  hours"], [2, "opus   emergent    164    3.7"], [3, "opus   managed      40    2.5"]]},
+]}]
+
+
+def test_words_that_hold_a_range_or_a_pair_cite_a_place_for_each_value():
+    # a range across two lines of a card's printed output: each value stands on one of the cited lines
+    lines = {"ref": ["card:c7d2e4@out1#L2", "card:c7d2e4@out1#L3"]}
+    r = check_mark(mark("2.5 to 3.7 hours"), {**card(""), "evidence": lines}, [], "/data", cards=RUNS)
+    assert r["status"] == "verified", r
+    ev = r["evidence"]
+    assert [ev["output"][a:b] for a, b in ev["highlight"]] == ["3.7", "2.5"]
+    t = ev["table"]
+    assert {(t["rows"][x["r"]]["label"], t["cols"][x["c"]]) for x in [t["at"], *t["also"]]} == {("opus", "hours")} | set()
+    assert sorted(t["rows"][x["r"]]["values"][x["c"]] for x in [t["at"], *t["also"]]) == ["2.5", "3.7"]
+    # a range of lines names the same places
+    assert check_mark(mark("2.5 to 3.7 hours"), card("card:c7d2e4@out1#L2-L3"), [], "/data", cards=RUNS)["status"] == "verified"
+    # a pair across two cells, given as a list of evidence objects: one table, both cells cited
+    pair = [{"ref": "card:c7d2e4#issues%20closed/opus%20emergent"}, {"ref": "card:c7d2e4#issues%20closed/opus%20managed"}]
+    r = check_mark(mark("243 against 104"), {**card(""), "evidence": pair}, [], "/data", cards=RUNS)
+    assert r["status"] == "verified", r
+    t = r["evidence"]["table"]
+    assert sorted(t["rows"][x["r"]]["values"][x["c"]] for x in [t["at"], *t["also"]]) == ["104", "243"]
+    # one place for a pair still fails, and a wrong pair fails at both places
+    one = check_mark(mark("243 against 104"), card("card:c7d2e4#issues%20closed/opus%20emergent"), [], "/data", cards=RUNS)
+    assert one["status"] == "failed" and "104" in one["reason"]
+    wrong = check_mark(mark("243 against 105"), {**card(""), "evidence": pair}, [], "/data", cards=RUNS)
+    assert wrong["status"] == "failed" and wrong["failedBy"] == "evidence" and "105" in wrong["reason"], wrong
+    # a correction of a pair stands at its places
+    fixed = check_mark(mark("243 against 105"), {**card("", "corrected", {"words": "243 against 104"}), "evidence": pair}, [], "/data", cards=RUNS)
+    assert fixed["status"] == "corrected" and fixed["shown"] == "243 against 104"
+
+
 def test_computed_output_that_is_a_printed_dataframe_carries_its_table():
     out = "            merged  total\nagent                  \nagent-03         4     10\nagent-07        12     40\n"
     r = check_mark(mark("12"), computed("agent-07        12     40"), [call(CODE, out)], "/data")

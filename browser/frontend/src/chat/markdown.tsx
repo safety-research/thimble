@@ -5,7 +5,7 @@
 // hidden from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns
 // the markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta
 // re-parses only the tail.
-import { Fragment, createContext, memo, useContext, useState, type JSX, type ReactNode } from 'react'
+import { Fragment, createContext, memo, useContext, useMemo, useState, type JSX, type ReactNode } from 'react'
 import Markdown, { type Components, type ExtraProps, type Options } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { Element, Properties, Root, Text } from 'hast'
@@ -17,7 +17,7 @@ import { GlyphCites, RefChip } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
 import { parseRef, shownValue, splitValueRef } from '../lib/refs'
 import { Mark, MarkItems } from '../marks/Mark'
-import { MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
+import { asChecked, MARK_HREF, withMarkHrefs, type MarkItem } from '../marks/marks'
 
 export interface ChipCtx {
   workspace: string
@@ -284,10 +284,12 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { 
 export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, marks }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; marks?: readonly AnswerMark[] }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
+  // once checked, the text reads as the check left it: its rewritten sentences and corrected words in place
+  const read = useMemo(() => (checks && !streaming ? asChecked(text, checks) : { text, checks: checks ?? [] }), [text, checks, streaming])
   // each mark's href names its order in the whole text, so a block cut from it still finds its check
-  const marked = withMarkHrefs(text)
+  const marked = withMarkHrefs(read.text)
   return (
-    <MarkItems.Provider value={{ items: checks ?? [], streaming: !!streaming }}>
+    <MarkItems.Provider value={{ items: read.checks, streaming: !!streaming }}>
       <GlyphCites.Provider value={true}>
         {!chunked && !streaming ? (
           <MarkdownBlock text={marked} marks={marks} />

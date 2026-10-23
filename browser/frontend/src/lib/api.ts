@@ -886,6 +886,12 @@ export const undoApi = {
 // --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
 import type { CardCheckStatus, Check, CheckCover, CheckPatch, CheckRun } from './types'
 
+export const marksApi = {
+  /** `POST /marks/repair`: check a failed citation again and make it correct (backend marks.repair); a 409 says why
+   * it cannot start. */
+  repair: (c: string, body: { turn: string; n: number } | { card: string; k: number }) => j<{ ok: boolean }>(`${ws(c)}/marks/repair`, { method: 'POST', body: JSON.stringify(body) }),
+}
+
 export const checksApi = {
   /** `GET /checks`: every check of the workspace, the built-ins first, each with its latest run per document. */
   list: (c: string) => j<Check[]>(`${ws(c)}/checks`),

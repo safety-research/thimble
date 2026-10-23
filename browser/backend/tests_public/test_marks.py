@@ -317,3 +317,72 @@ def test_a_marked_number_in_a_takeaway_is_left_for_the_check():
 
     res = cite.resolve("abc12345", "agent-07 merged [12](#) pull requests", [TABLE])
     assert res.annotated == "agent-07 merged [12](#) pull requests" and not res.links
+
+
+RUNS = {"text/html": "<table><thead><tr><th>run</th><th>issues closed</th><th>hours</th></tr></thead><tbody>"
+                     "<tr><th>opus emergent</th><td>243</td><td>3.7</td></tr>"
+                     "<tr><th>opus managed</th><td>104</td><td>2.5</td></tr></tbody></table>"}
+RUNS_PRINTED = {"text/plain": "model  setup       PRs  hours\nopus   emergent    164    3.7\nopus   managed      40    2.5\n"}
+
+
+def test_words_with_a_range_or_a_pair_cite_a_place_for_each_value(_fresh):
+    """A range across two lines of a card's output and a pair across two cells are verified when each value stands in
+    one of the cited places; a wrong pair still fails."""
+    cid = _seed_card("", [RUNS, RUNS_PRINTED])
+    cards = marks.session_cards(CORPUS)
+    ev = marks.evidence()
+    places = [line for line in ev.card_index(cards).splitlines() if "\t" in line]
+    emergent = next(p.split("\t")[0] for p in places if p.endswith("\t243"))
+    managed = next(p.split("\t")[0] for p in places if p.endswith("\t104"))
+    lines = [p.split("\t")[0] for p in places if "@out1#L" in p and ("3.7" in p or "2.5" in p)]
+    rng = ev.check_mark({"n": 1, "words": "2.5 to 3.7 hours"}, {"kind": "card", "status": "verified", "evidence": {"ref": lines}}, [], "/", cards=cards)
+    assert rng["status"] == "verified", rng
+    assert [rng["evidence"]["output"][a:b] for a, b in rng["evidence"]["highlight"]] == ["3.7", "2.5"]
+    pair = {"kind": "card", "status": "verified", "evidence": [{"ref": emergent}, {"ref": managed}]}
+    got = ev.check_mark({"n": 1, "words": "243 against 104"}, pair, [], "/", cards=cards)
+    assert got["status"] == "verified", got
+    t = got["evidence"]["table"]
+    assert sorted(t["rows"][x["r"]]["values"][x["c"]] for x in [t["at"], *t["also"]]) == ["104", "243"]
+    wrong = ev.check_mark({"n": 1, "words": "243 against 105"}, pair, [], "/", cards=cards)
+    assert wrong["status"] == "failed" and "105" in wrong["reason"]
+    assert cid
+
+
+def test_the_repair_request_is_the_terminal_s():
+    terminal = (marks.PLUGIN / "marks" / "checker.ts").read_text(encoding="utf-8")
+    for text in (marks.REPAIR_NOT_RUN, marks.REPAIR_FIRST, *marks.REPAIR_TASK):
+        for part in text.replace("{n}", "\0").replace("{found}", "\0").split("\0"):
+            assert part in terminal, f"the terminal's repairRequest no longer says {part!r}: look at marks.REPAIR_*"
+
+
+def test_repair_checks_a_failed_mark_again_and_main_hears_how_it_ended(_fresh, monkeypatch):
+    """Repair on a failed mark of a reply: it is checking again, a fork of main reads the checker's text with the
+    terminal's repair request, and the validator decides; main hears of that one mark."""
+    _seed_card("", [RUNS])
+    cards = marks.session_cards(CORPUS)
+    emergent, managed = (f"card:{cards[0]['id']}#issues%20closed/opus%20{s}" for s in ("emergent", "managed"))
+    turn = marks.new_turn()
+    failed = {"n": 1, "piece": 0, "k": 0, "words": "243 against 105", "sentence": "Opus closed [243 against 105] issues.",
+              "status": "failed", "failedBy": "check", "reason": "The card shows 104, not 105.", "shown": "243 against 105"}
+    marks._save(CORPUS, {"turn": turn, "items": [failed]})
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        assert [m["status"] for m in marks.stored(CORPUS, turn)["items"]] == ["checking"]
+        out = [{"mark": 1, "kind": "card", "evidence": [{"ref": emergent}, {"ref": managed}], "status": "corrected",
+                "correction": {"words": "243 against 104"}, "reason": "the card shows 243 and 104"}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    async def go():
+        assert await marks.repair(CORPUS, turn=turn, n=1, fork=fork) == ""
+        await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+        assert await marks.repair(CORPUS, turn=turn, n=1, fork=fork) == "this citation is not one that failed"
+
+    asyncio.run(go())
+    assert "The analyst pressed x to repair citation 1." in seen[0] and "found it wrong: \"The card shows 104" in seen[0]
+    (m,) = marks.stored(CORPUS, turn)["items"]
+    assert m["status"] == "corrected" and m["shown"] == "243 against 104" and m["was"] == "243 against 105", m
+    (c, said), = [t for t in _fresh if not t[1].startswith("notice")]
+    assert "pressed Repair" in said and '"243 against 105" is corrected to "243 against 104"' in said

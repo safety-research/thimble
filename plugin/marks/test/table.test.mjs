@@ -23,3 +23,10 @@ test("a cited row's name is the tinted part when no column is cited", () => {
   assert.equal(row.text.slice(...row.spans[0]), 'agent-03')
   assert.equal(tableLines({ ...t, at: { r: 5, c: 0 } }), null)
 })
+
+test('a range or a pair cites more than one cell: each cited row is a line, its cells tinted', () => {
+  const [head, first, second] = tableLines({ ...t, at: { r: 1, c: 1 }, also: [{ r: 0, c: 1 }] }, 80)
+  assert.equal(head.text, 'agent     merged  total  share')
+  assert.equal(first.text.slice(...first.spans[0]), '40')
+  assert.equal(second.text.slice(...second.spans[0]), '10')
+})

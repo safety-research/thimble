@@ -557,21 +557,31 @@ export function citedColumns(grid: Grid, at: At): { cols: number[]; index: boole
 /** A table the citation check read (marks.ts EvidenceTable: a card's cell, printed output that is a table) as a Grid
  * and its cited cell; the cell of a row cited by its name alone is the first of its values that shows `value`, else its
  * first value. Null for anything else. Pure. */
-export function printedTable(t: unknown, value?: string): { grid: Grid; at: At } | null {
-  const x = t as { corner?: unknown; cols?: unknown; rows?: unknown; at?: { r?: unknown; c?: unknown } } | null
+export function printedTable(t: unknown, value?: string): { grid: Grid; at: At; also?: At[] } | null {
+  const x = t as { corner?: unknown; cols?: unknown; rows?: unknown; at?: { r?: unknown; c?: unknown }; also?: unknown } | null
   if (!x || !Array.isArray(x.cols) || !Array.isArray(x.rows) || !x.at || typeof x.at.r !== 'number') return null
   const rows = (x.rows as { label?: unknown; values?: unknown }[]).map((r) => ({ label: String(r.label ?? ''), values: Array.isArray(r.values) ? r.values.map((v) => String(v ?? '')) : [] }))
   const r = x.at.r
   if (!rows[r]) return null
   let c = typeof x.at.c === 'number' ? x.at.c : -1
   if (c < 0) c = Math.max(0, value ? rows[r].values.findIndex((v) => !!valueSpan(v, value)) : 0)
-  return { grid: { corner: String(x.corner ?? ''), cols: (x.cols as unknown[]).map(String), rows }, at: { r, c } }
+  // the other cited cells of words that hold several values (a range, a pair)
+  const also = (Array.isArray(x.also) ? (x.also as { r?: unknown; c?: unknown }[]) : []).filter((a) => typeof a?.r === 'number' && typeof a?.c === 'number' && rows[a.r as number]).map((a) => ({ r: a.r as number, c: a.c as number }))
+  return { grid: { corner: String(x.corner ?? ''), cols: (x.cols as unknown[]).map(String), rows }, at: { r, c }, ...(also.length ? { also } : {}) }
 }
 
 /** A table's cell in a compact table: the header, two rows above and below it, and only the columns it needs to read
  * (citedColumns), the cell marked. It reads as tables read everywhere (outputs.css). */
-export function TablePreview({ grid, at }: { grid: Grid; at: At }) {
-  const w = { rows: cellWindow(grid, at, 2, 1).rows, ...citedColumns(grid, at) }
+export function TablePreview({ grid, at, also = [] }: { grid: Grid; at: At; also?: At[] }) {
+  // every cited cell (a range or a pair cites more than one): the rows around each, the columns each needs
+  const cited = [at, ...also]
+  const own = cited.map((x) => citedColumns(grid, x))
+  const w = {
+    rows: [...new Set(cited.flatMap((x) => cellWindow(grid, x, 2, 1).rows))].sort((a, b) => a - b),
+    cols: [...new Set(own.flatMap((x) => x.cols))].sort((a, b) => a - b),
+    index: own.some((x) => x.index),
+  }
+  const isCited = (r: number, c: number) => cited.some((x) => x.r === r && x.c === c)
   const first = w.rows[0] ?? 0
   const last = w.rows[w.rows.length - 1] ?? 0
   return (
@@ -594,7 +604,7 @@ export function TablePreview({ grid, at }: { grid: Grid; at: At }) {
                 {w.index && <th>{grid.rows[r].label}</th>}
                 {w.cols.map((c) => {
                   const v = grid.rows[r].values[c] ?? ''
-                  const cls = [isNumericCell(v) ? 'outputs-num' : '', r === at.r && c === at.c ? CITED : ''].filter(Boolean).join(' ')
+                  const cls = [isNumericCell(v) ? 'outputs-num' : '', isCited(r, c) ? CITED : ''].filter(Boolean).join(' ')
                   return (
                     <td key={c} className={cls || undefined}>
                       {v}

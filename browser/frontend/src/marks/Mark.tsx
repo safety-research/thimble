@@ -14,19 +14,23 @@
 //
 // Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked.
 //
-// A failed mark's label says why in one line first. Escape, a press outside, or a second click closes it.
+// A failed mark's label says why in one line first, with Repair, which checks it again and makes it correct (the
+// terminal's x); a corrected one's says what it was. Words that hold several values (a range, a pair) cite a place for
+// each: their cells are marked in one table, their lines in one output. Escape, a press outside, or a second click
+// closes it.
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
 import { citedTable, placePop, printedTable, TablePreview, useRefLabel } from '../components/RefChip'
 import { Spinner } from '../components/Spinner'
-import { api } from '../lib/api'
+import { api, marksApi } from '../lib/api'
 import { glyphOf } from '../lib/fileGlyph'
 import { parseRef } from '../lib/refs'
 import { CITED, citedLines, type At, type Grid } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
 import { workspaceFromUrl } from '../lib/workspace'
-import { failedWhy, LOOK_WORD, lookOf, type Evidence, type MarkItem, type MarkLook } from './marks'
+import { canRepair, failedWhy, LOOK_WORD, lookOf, wasLine, type Evidence, type MarkItem, type MarkLook } from './marks'
 
 /** The marks of the text being drawn, by their order in it, and whether the text still streams. */
 export const MarkItems = createContext<{ items: readonly (MarkItem | undefined)[]; streaming: boolean }>({ items: [], streaming: false })
@@ -115,7 +119,13 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
   }
 
   const corrected = item?.status === 'corrected' && item.shown
+  // a narrowing cites only a part of the words: the rest stays, as Claude's own words, outside the citation
+  const whole = item?.words != null ? plain(item.words) : ''
+  const part = corrected && item.narrowed ? whole.indexOf(plain(item.shown!)) : -1
+  const [before, after] = part >= 0 ? [whole.slice(0, part), whole.slice(part + plain(item!.shown!).length)] : ['', '']
   return (
+    <>
+    {before}
     <span className={`mark is-${look}${pop ? ' is-open' : ''}`} data-mark-look={look} data-ref={cardRef(item)}>
       {/* a span, not a button, so long words wrap with the line as the text around them does */}
       <span
@@ -148,6 +158,8 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
           document.body,
         )}
     </span>
+    {after}
+    </>
   )
 }
 
@@ -167,19 +179,51 @@ function MarkEvidence({ item, look }: { item: MarkItem | undefined; look: MarkLo
         {look === 'checking' && <Spinner size={10} label="checking" />} {LOOK_WORD[look]}
       </div>
     )
-  const evs = item.evidence ? (Array.isArray(item.evidence) ? item.evidence : [item.evidence]) : []
+  const given = item.evidence ? (Array.isArray(item.evidence) ? item.evidence : [item.evidence]) : []
+  // a card's places in another card or output (words with several values) show each in turn
+  const evs = given.flatMap((ev) => (ev.kind === 'card' ? [ev, ...(ev.more ?? [])] : [ev]))
   const value = plain(item.shown ?? item.words)
+  const was = wasLine(item)
   return (
     <>
       {look === 'failed' && (
-        <div className="mark-pop-why" title={failedWhy(item)}>
-          {failedWhy(item)}
+        <div className="mark-pop-head">
+          <div className="mark-pop-why" title={failedWhy(item)}>
+            {failedWhy(item)}
+          </div>
+          {canRepair(item) && <RepairButton item={item} />}
+        </div>
+      )}
+      {was && (
+        <div className="mark-pop-was" title={was}>
+          {was}
         </div>
       )}
       {evs.map((ev, i) => (
         <EvidenceView key={i} ev={ev} value={value} />
       ))}
     </>
+  )
+}
+
+/** Repair: check a failed mark again and make it correct (backend marks.repair, the terminal's x). The mark turns to
+ * checking when the server's record of it comes back; a refusal says why in place of the button. */
+function RepairButton({ item }: { item: MarkItem }) {
+  const [state, setState] = useState<{ busy: boolean; error?: string }>({ busy: false })
+  const repair = () => {
+    const ws = workspaceFromUrl() ?? ''
+    const body = item.card ? { card: item.card, k: item.k } : { turn: item.turn!, n: item.n }
+    setState({ busy: true })
+    marksApi.repair(ws, body).then(
+      () => setState({ busy: true }),
+      (e: unknown) => setState({ busy: false, error: e instanceof Error ? e.message : String(e) }),
+    )
+  }
+  if (state.error) return <span className="mark-pop-repair-error" title={state.error}>Repair did not start: {state.error}</span>
+  return (
+    <Button variant="secondary" size="sm" className="mark-pop-repair" busy={state.busy} disabled={state.busy} onClick={repair}>
+      Repair
+    </Button>
   )
 }
 
@@ -196,7 +240,7 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
           </Chip>
           <span className="refchip-pop-value">{value}</span>
         </div>
-        <TablePreview grid={printed.grid} at={printed.at} />
+        <TablePreview grid={printed.grid} at={printed.at} also={printed.also} />
         {ev.code ? <pre className="refchip-lines mono mark-ev-code">{ev.code}</pre> : null}
       </div>
     )
@@ -295,7 +339,7 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
         {!table ? <span className="refchip-pop-value">{value}</span> : null}
       </div>
       {table ? (
-        <TablePreview grid={table.grid} at={table.at} />
+        <TablePreview grid={table.grid} at={table.at} also={'also' in table ? table.also : undefined} />
       ) : ev.output != null ? (
         <div className="refchip-lines mono">{outputLines(ev.output, ev.highlight ?? [])}</div>
       ) : got.state === 'lines' ? (

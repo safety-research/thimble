@@ -113,3 +113,45 @@ test("the check's notes on the sentences around the marks are not shown: neither
   expect(pop?.textContent).not.toContain(note)
   expect(el.textContent).not.toContain(note)
 })
+
+test('a corrected verdict shows the corrected words in the reply, a rewritten sentence in place of its own, and what it was in the label', async () => {
+  const checks = [
+    item(0, '2.5 to 3.7', { status: 'corrected', shown: '0.5 to 1.7', was: '2.5 to 3.7', sentence: 'Opus took [2.5 to 3.7] hours on [40] runs.', rewrite: 'Opus took [0.5 to 1.7] hours, over [40] runs.' }),
+    item(1, '40', {}),
+    item(2, '15 of 40', { status: 'corrected', shown: '12 of 40', was: '15 of 40' }),
+    item(3, 'merged 12 (all of them)', { status: 'corrected', shown: 'merged 12', was: 'merged 12 (all of them)', narrowed: true }),
+  ]
+  const el = await mount(<ChatMarkdown text="Opus took [2.5 to 3.7](#) hours on [40](#) runs. Then [15 of 40](#) merged. It [merged 12 (all of them)](#) today." checks={checks} />)
+  expect(el.textContent).toBe('Opus took 0.5 to 1.7 hours, over 40 runs. Then 12 of 40 merged. It merged 12 (all of them) today.')
+  expect([...el.querySelectorAll('.mark-words')].map((m) => m.textContent)).toEqual(['0.5 to 1.7', '40', '12 of 40', 'merged 12'])
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  expect(document.querySelector('.mark-pop .mark-pop-was')?.textContent).toBe('sentence rewritten; was Opus took 2.5 to 3.7 hours on 40 runs.')
+})
+
+test('a failed mark can be repaired from its label, as x repairs it in the terminal', async () => {
+  const { marksApi } = await import('../../src/lib/api.ts')
+  const sent: unknown[] = []
+  const was = marksApi.repair
+  marksApi.repair = async (_c, body) => (sent.push(body), { ok: true })
+  try {
+    const el = await mount(<ChatMarkdown text="[243 against 104](#) issues" checks={[item(0, '243 against 104', { status: 'failed', failedBy: 'evidence', reason: 'The card shows 243, not 104.', turn: 'bbbbbbbb' })]} />)
+    await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await settle()
+    const button = document.querySelector<HTMLButtonElement>('.mark-pop .mark-pop-repair')
+    expect(button?.textContent).toContain('Repair')
+    await act(async () => button!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(sent).toEqual([{ turn: 'bbbbbbbb', n: 1 }])
+  } finally {
+    marksApi.repair = was
+  }
+})
+
+test('words with two values cite two cells: one table, both cells marked', async () => {
+  const table = { corner: 'run', cols: ['issues closed'], rows: [{ label: 'opus emergent', values: ['243'] }, { label: 'opus managed', values: ['104'] }], at: { r: 0, c: 0 }, also: [{ r: 1, c: 0 }] }
+  const ev = { kind: 'card' as const, card: 'c7d2e4', title: 'Issues', ref: 'card:c7d2e4#issues%20closed/opus%20emergent', value: '243', table }
+  const el = await mount(<ChatMarkdown text="[243 against 104](#) issues" checks={[item(0, '243 against 104', { evidence: ev })]} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  expect([...document.querySelectorAll('.mark-pop .cite-cell')].map((c) => c.textContent)).toEqual(['243', '104'])
+})
