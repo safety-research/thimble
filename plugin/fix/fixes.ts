@@ -46,8 +46,14 @@ export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string
  *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
  *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. `changed`
  *  (ready): a round changed this fix, which was on, off or ready; `notFolded` (ready): the fix a round was to change,
- *  which its change did not fit, so it is a new fix. */
-export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release'; said?: string; open?: boolean; reload?: 'pending' | 'restart'; changed?: boolean; notFolded?: number | string }
+ *  which its change did not fit, so it is a new fix. ask: the fixer could not tell which fix the words are for, and
+ *  the line asks (a number key for a fix, 0 a new fix, n never mind). */
+export type FixLine = {
+  id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release' | 'ask'; said?: string; open?: boolean; reload?: 'pending' | 'restart'
+  changed?: boolean; notFolded?: number | string
+  /** ask: the fixes the words may be for (a number key each), the words, and who asked */
+  choices?: number[]; words?: string; by?: 'person' | 'claude'
+}
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
 

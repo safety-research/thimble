@@ -82,6 +82,11 @@ export const TEXTS = {
     reader: 'fix/share.ts',
     use: 'one model call per fix the person shares',
   },
+  'fix-merge': {
+    about: "one title and summary for several of the person's fixes that become one",
+    reader: 'fix/merge.ts',
+    use: 'one model call when the person merges fixes in Your fixes',
+  },
   reapply: {
     about: 'bring back the fixes thimble update set aside, each one the new release still needs, once',
     reader: 'engine/kernel/fixes.py',

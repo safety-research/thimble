@@ -456,6 +456,7 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
     thimble fix share N              post fix N as a GitHub issue; you check it before it goes
     thimble fix off N | on N         turn fix N off, or on (on asks for your key in the terminal)
     thimble fix off | on             all your fixes off (the plain release), or on again
+    thimble fix merge A B C          fixes B and C become part of fix A: one change, one title (asks y/N first)
 
 Ask for a fix in Claude Code or the browser: /thimble-fix <what should work differently>. A fix goes on only by your
 key: y on the fix in thimble, or thimble fix apply N in your own terminal."""
@@ -554,10 +555,11 @@ def main(argv: list[str] | None = None) -> int:
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
     p.add_argument("verb", nargs="?", default="list",
-                   choices=("list", "show", "diff", "export", "share", "off", "on", "update", "new", "round", "done", "apply", "notnow",
+                   choices=("list", "show", "diff", "export", "share", "off", "on", "update", "new", "round", "done", "apply", "merge", "notnow",
                             "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
     p.add_argument("id", nargs="?")
     p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
+    p.add_argument("more", nargs="*", help=argparse.SUPPRESS)  # merge: the third fix and on
     p.add_argument("--json", action="store_true")
     p.add_argument("--to", metavar="DIR")
     p.add_argument("--no-open", dest="no_open", action="store_true", help="share: write the page, do not open it")
