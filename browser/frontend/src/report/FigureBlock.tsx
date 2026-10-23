@@ -9,7 +9,7 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { SideMenuExtension, type BlockNoteEditor } from '@blocknote/core'
 import { ChatMarkdown } from '../chat/markdown'
-import { takeawayChecks } from '../marks/marks'
+import { CITATION, takeawayChecks } from '../marks/marks'
 import { CardBody } from '../canvas/bodies'
 import { useConceptDetail, useConcepts } from '../canvas/concepts'
 import { CanvasContext } from '../canvas/context'
@@ -375,7 +375,7 @@ function Figure({ ws, id, cellRef, caption, stored, readOnly, bare = false, onCa
               role={editable ? 'textbox' : undefined}
               aria-label={editable ? 'Caption' : undefined}
               tabIndex={editable ? 0 : undefined}
-              onClick={editable ? (e) => !(e.target as Element).closest('.refchip') && setEditing({ at: { x: e.clientX, y: e.clientY } }) : undefined}
+              onClick={editable ? (e) => !(e.target as Element).closest(CITATION) && setEditing({ at: { x: e.clientX, y: e.clientY } }) : undefined}
               onKeyDown={editable ? (e) => e.key === 'Enter' && (e.preventDefault(), setEditing({ at: null })) : undefined}
             >
               {take && <ChatMarkdown text={take} checks={cell && take === takeaway ? takeawayChecks(cell) : undefined} />}

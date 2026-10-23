@@ -126,6 +126,10 @@ export const LOOK_WORD: Record<MarkLook, string> = {
   failed: 'not confirmed',
 }
 
+/** A citation in drawn text, for a closest() test: a ref's chip (components/RefChip) or a mark (Mark.tsx), which is how
+ * a card's value is cited. A click on one opens its evidence, never the editor of the text it stands in. */
+export const CITATION = '.refchip, .mark'
+
 /** The href a mark is written with for the markdown parser: `#mark-<k>`, its order among the text's marks. */
 export const MARK_HREF = /^#mark-(\d+)$/
 

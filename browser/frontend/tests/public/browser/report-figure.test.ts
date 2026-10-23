@@ -8,7 +8,8 @@
 //   - a locked figure's lock at rest stands inside the card, under the actions' lock;
 //   - the card sidebar lists no Orientation section: a card of an earlier orientation's deck lists under Your work;
 //   - the column takes the pane's width, the text keeping a card's width; the caption that says the card's takeaway
-//     shows it whole, with its citation, and no scroll of its own.
+//     shows it whole, with its citation (a card's value is cited by a mark, marks/Mark.tsx), and no scroll of its own;
+//   - a click on the citation opens its evidence and leaves the caption as it is; a click on its words edits it.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -235,25 +236,33 @@ test("the figure takes the pane's width and shows the card's takeaway whole, wit
     assert.ok(para.right - para.left <= 720, `the text keeps a card's width ${JSON.stringify(para)}`)
     const cap = await page.evaluate(() => {
       const el = document.querySelector<HTMLElement>('figure.wu-fig .wu-fig-caption')!
-      const chip = el.querySelector<HTMLElement>('.refchip-citation')
+      const chip = el.querySelector<HTMLElement>('.mark[data-ref="card:c1#edits/1"] .mark-words')
       return { text: el.textContent ?? '', chip: chip?.textContent ?? null, scroll: el.scrollHeight - el.clientHeight, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) }
     })
     assert.equal(cap.chip, '10:00', `the cited number is a citation ${JSON.stringify(cap)}`)
     assert.ok(cap.text.includes('the last hour holds only the small changes'), 'the whole takeaway is shown')
     assert.ok(cap.scroll <= 1 && cap.lines >= 3, `no scroll of its own ${JSON.stringify(cap)}`)
 
+    // a click on the citation opens its evidence, pinned, and does not edit the caption
+    await page.click('figure.wu-fig .wu-fig-caption .mark-words')
+    await page.waitForSelector('.refchip-pop.mark-pop', { timeout: 5000 })
+    await page.waitForTimeout(300)
+    assert.equal(await page.locator('figure.wu-fig .wu-fig-caption.refedit').count(), 0, 'a click on the citation does not edit the caption')
+    await page.keyboard.press('Escape')
+    await page.waitForSelector('.refchip-pop.mark-pop', { state: 'detached', timeout: 5000 })
+
     // a click on the caption's words edits it, with the citation as a token; leaving it unchanged changes nothing
     await page.click('figure.wu-fig .wu-fig-caption', { position: { x: 400, y: 4 } })
     await page.waitForSelector('figure.wu-fig .wu-fig-caption.refedit .refedit-token', { timeout: 5000 })
     await page.keyboard.press('Escape')
-    await page.waitForSelector('figure.wu-fig .wu-fig-caption .refchip-citation', { timeout: 5000 })
+    await page.waitForSelector('figure.wu-fig .wu-fig-caption .mark-words', { timeout: 5000 })
     // words typed into it are kept, and the citation with them
     await page.click('figure.wu-fig .wu-fig-caption', { position: { x: 400, y: 4 } })
     await page.waitForSelector('figure.wu-fig .wu-fig-caption.refedit', { timeout: 5000 })
     await page.keyboard.type(' Noted by the reader.')
     await page.keyboard.press('Enter')
     await page.waitForFunction(() => document.querySelector('figure.wu-fig .wu-fig-caption:not(.refedit)')?.textContent?.includes('Noted by the reader.'), null, { timeout: 5000 })
-    assert.equal(await page.locator('figure.wu-fig .wu-fig-caption .refchip-citation').count(), 1, 'the edited caption keeps its citation')
+    assert.equal(await page.locator('figure.wu-fig .wu-fig-caption .mark-words').count(), 1, 'the edited caption keeps its citation')
     if (process.env.SHOT) await page.screenshot({ path: process.env.SHOT })
     // the top bar's toggle names what it hides
     assert.equal(await page.locator('button.shell-links[aria-label="Hide citations"]').count(), 1)
