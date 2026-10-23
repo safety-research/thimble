@@ -65,7 +65,7 @@ declare module 'claude-code' {
       /** the id of main's turn that runs, null when none runs (core/turn.ts) */
       mainTurn: string | null
       /** which agents are thimble's forks, and their kind (core/forks.ts) */
-      forks: Record<string, 'checker' | 'designer' | 'thread'>
+      forks: Record<string, 'checker' | 'designer' | 'thread' | 'fixer'>
       /** what Claude reads with the person's next prompt, by key (core/tell.ts) */
       tell: Record<string, string>
       /** the session's temp folder, as a real path (core/home.ts tempDir) */
@@ -100,6 +100,24 @@ declare module 'claude-code' {
       thread: StateFamily<unknown>
       /** goes up when a thread changes: the bar's count and the thread list draw again */
       threadsGen: number
+
+      // ---- fixes (fix/): the person's changes to their own thimble; the kernel keeps the records (fixes.jsonl)
+      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read (fixes.ts) */
+      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number } | null
+      /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem (fixes.ts FixLine) */
+      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string } | null
+      /** whether this session looked for a newer release already (register.ts) */
+      fixUpdated: boolean
+      /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
+      fixers: Record<string, number>
+      /** the start of the command each fix's fixer runs a shell command with, in the sandbox, by the fix's id */
+      fixerBox: Record<string, string[]>
+      /** what Your fixes shows (pane.tsx): the selected fix, the marked ones, whether the diff shows */
+      fixView: { sel: number | null; marked: number[]; diff: boolean } | null
+      /** the submit preview: the fixes it walks, the one it shows, and why a draft could not be made */
+      fixSubmit: { ids: number[]; at: number; problem?: string } | null
+      /** a fix's draft as the preview reads it, by the fix's id (pane.tsx) */
+      fixDraft: StateFamily<unknown>
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
       /** a record's state beside its text, by its id (a row, or `<host row>#cu` for a catch-up): { running, want,

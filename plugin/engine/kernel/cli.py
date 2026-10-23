@@ -10,6 +10,10 @@ session's permission mode and sandbox like any other command.
                                                (--wait waits for it; thimble label --help says more)
     thimble coverage [--all]                   what entered Claude's context, what was only computed over, and what
                                                was never touched (of this session, or of every session)
+    thimble fix [list|show ID|diff ID|export ID [--to DIR]|off|on|update]
+                                               your changes to thimble: list them, read one, save one as files, turn
+                                               them all off (the plain release) or on again. In thimble,
+                                               /thimble-fix <words> asks for one and /thimble-fix lists them
 
 Add --json to label or coverage for the whole record.
 """
@@ -421,9 +425,29 @@ def _label(st: Store, a: argparse.Namespace) -> int:
     return 0
 
 
+FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engine/kernel/fixes.py says how).
+
+    thimble fix list                 every fix: on, off, redo, a request with no code, sent, released
+    thimble fix show ID              one fix: your words, what it does, its files and tests
+    thimble fix diff ID              its change
+    thimble fix export ID [--to DIR] its patch and its record as files in DIR (default: here); nothing is sent
+    thimble fix off                  thimble as the plain release; your fixes are kept
+    thimble fix on                   your fixes on again
+    thimble fix update               a newer release, with your fixes replayed on it (thimble does this at each start)
+
+Ask for a fix in thimble: /thimble-fix <what should work differently>. Applying a fix and submitting one need your key
+in thimble, never a shell command."""
+
+
+def cmd_fix(a: argparse.Namespace) -> int:
+    from . import fixes as FX  # noqa: PLC0415
+
+    return FX.cmd(a)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{label,coverage}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{label,coverage,fix}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
@@ -459,13 +483,32 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_coverage)
+    p = sub.add_parser("fix", help="your changes to thimble", description=FIX_HELP,
+                       formatter_class=argparse.RawDescriptionHelpFormatter)
+    # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
+    p.add_argument("verb", nargs="?", default="list",
+                   choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "done", "apply", "notnow",
+                            "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
+    p.add_argument("id", nargs="?")
+    p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--to", metavar="DIR")
+    p.add_argument("--words", help=argparse.SUPPRESS)
+    p.add_argument("--title", help=argparse.SUPPRESS)
+    p.add_argument("--summary", help=argparse.SUPPRESS)
+    p.add_argument("--made-in", dest="made_in", default="terminal", help=argparse.SUPPRESS)
+    p.add_argument("--request", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--no-tests", dest="no_tests", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--answer", choices=("pr", "file"), default="file", help=argparse.SUPPRESS)
+    p.add_argument("--ask", help=argparse.SUPPRESS)
+    p.set_defaults(fn=cmd_fix)
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help", "help"):
         # the commands in one screen: argparse's usage lines would only repeat them
         print(__doc__.strip())
         return 0
     if not args[0].startswith("-") and args[0] not in sub.choices:
-        ap.error(f"no command {args[0]!r}: the commands are label and coverage")
+        ap.error(f"no command {args[0]!r}: the commands are label, coverage and fix")
     a = ap.parse_args(args)
     if not getattr(a, "fn", None):
         print(__doc__.strip())
