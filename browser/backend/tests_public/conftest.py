@@ -393,14 +393,15 @@ def _view_tickets_held(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_held_events():
-    """The quiet events events.post holds for the next event and the modes main's hooks reported are module state:
-    none carries over from another test."""
+    """The quiet events events.post holds for the next event, the modes main's hooks reported and the session that is
+    main in each workspace (a runtime turn makes one) are module state: none carries over from another test, so a test
+    that runs after a turn on the same xdist worker still sees no main session where it made none."""
     from app import events, session
 
-    for held in (events._held, session._modes):
+    for held in (events._held, session._modes, session._live):
         held.clear()
     yield
-    for held in (events._held, session._modes):
+    for held in (events._held, session._modes, session._live):
         held.clear()
 
 
