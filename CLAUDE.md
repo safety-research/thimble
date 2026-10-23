@@ -22,9 +22,9 @@ https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) 
    script again.
 4. End with a short reply on how to use what was installed:
    - The plugin: open `claude` in a folder of data files. Claude cites each claim, and a second Claude checks it
-     against the files; a click on the underlined words opens the evidence. The line above the prompt shows the keys: `v` card, `s` squeeze, `c` claims, `r`
-     coverage. A click on `thimble` in that line, or `/thimble-settings`, opens the settings; `/plugin` turns thimble
-     off.
+     against the files; a click on the underlined words opens the evidence. The line above the prompt shows the keys:
+     `v` card, `s` squeeze, `c` claims, `r` coverage. A click on `thimble` in that line, or `/thimble-settings`, opens
+     the settings; `/plugin` turns thimble off.
    - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints. The page asks at
      its first start how it reaches Claude (an API key, Workload Identity Federation, or the Claude Code sign-in);
      `thimble-browser --setup` asks again.
