@@ -1,6 +1,7 @@
-// submit.ts: submitting fixes, from Your fixes (mark, then s). For each fix Claude drafts a title and a summary in one
-// model call (prompts/fix-draft.md); thimble's privacy scan (`thimble fix draft`, engine/kernel/privacy.py) removes the
-// details of the person's data and machine from them, the person's words and the diff; the preview (pane.tsx,
+// submit.ts: submitting fixes as a pull request, which no key leads to now: s in Your fixes shares a fix as a GitHub
+// issue the person submits themselves (share.ts). For each fix Claude drafts a title and a summary in one model call
+// (share.ts drafted, prompts/fix-draft.md); thimble's privacy scan (`thimble fix draft`, engine/kernel/privacy.py)
+// removes the details of the person's data and machine from them, the person's words and the diff; the preview (pane.tsx,
 // kind fixsubmit) shows the exact text that leaves. Only the person's key sends it: y opens a pull request from their
 // fork, w saves the same text as files, k keeps a detail the scan removed. Each press makes a secret held only here
 // (fixes.ts keyPress), so Claude's shell cannot send.
@@ -11,12 +12,9 @@ import type { EngineInterface } from 'claude-code'
 import { thimbleHome } from '../core/home'
 import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
-import { cut, cutWords } from '../core/text.js'
-import { modelWhy } from '../core/why.js'
-import { jsonIn } from '../observer/reply.mjs'
-import { promptText } from '../prompts/prompts'
-import { tracked } from '../telemetry/telemetry'
-import { diffText, fixesDir, fixOf, jsonOf, kernelFix, pressKey, refreshFixes, shownPath } from './fixes'
+import { cut } from '../core/text.js'
+import { fixesDir, jsonOf, kernelFix, pressKey, refreshFixes, shownPath } from './fixes'
+import { drafted } from './share'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,33 +48,6 @@ export async function submitNow($: Engine): Promise<{ ids: number[]; at: number;
   return ((await $.state.get(SUBMIT)).value ?? null) as { ids: number[]; at: number; problem?: string } | null
 }
 
-/** Claude's title and summary for one fix: one model call over the person's words, what the fixer said, the change. */
-async function drafted($: Engine, id: number): Promise<{ title: string; summary: string } | string> {
-  const f = await fixOf($, id)
-  if (!f) return `There is no fix ${id}.`
-  const diff = f.commit ? await diffText($, id) : ''
-  const prompt = [
-    "The person's words, each round:", ...(f.words || []).map((w, i) => `<round n="${i + 1}">${w}</round>`), '',
-    `What the fix does, as its author said it: ${f.summary || '(nothing said)'}`, '',
-    `Files: ${(f.files || []).map(x => `${x.path} +${x.add ?? 0} −${x.del ?? 0}`).join('; ') || 'none (a request with no code)'}`,
-    `Tests: ${f.tests || 'not run'}`, '',
-    'The change:', '<diff>', cut(diff, 24000), '</diff>',
-  ].join('\n')
-  let r: Any
-  try {
-    const system = await promptText($, 'fix-draft')
-    const req = { model: 'opus', maxTokens: 2000, timeoutMs: 120000, system: [{ text: system, cache: true }], prompt }
-    r = await tracked($, { feature: 'fix', prompt: 'fix-draft', doing: `drafting fix ${id}`, model: req.model, extra: { fix: id } }, () => $.model.complete(req as Any))
-  } catch (err) {
-    return `Claude did not draft fix ${id}: ${String((err as Error)?.message || err).slice(0, 200)}`
-  }
-  if (!r?.isAnswered) return `Claude did not draft fix ${id}: ${modelWhy(r) || 'no answer'}`
-  const d = jsonIn(String(r.text || '')) as Any
-  const title = cutWords(String(d?.title || f.title || '').trim(), 72)
-  const summary = String(d?.summary || '').trim()
-  return title ? { title, summary } : `Claude's draft of fix ${id} had no title.`
-}
-
 /** s in Your fixes: each marked fix drafted and scanned, then the preview of the first. Nothing is sent. */
 export async function submitFixes($: Engine, ids: number[]): Promise<void> {
   const ok: number[] = []
@@ -84,13 +55,13 @@ export async function submitFixes($: Engine, ids: number[]): Promise<void> {
   for (const id of ids) {
     const d = await drafted($, id)
     if (typeof d === 'string') { problem ||= d; continue }
-    const r = await kernelFix($, ['draft', String(id)], { stdin: JSON.stringify(d), timeoutMs: 180000, doing: `scanning fix ${id}` })
+    const r = await kernelFix($, ['draft', String(id)], { stdin: JSON.stringify({ title: d.title, summary: d.summary }), timeoutMs: 180000, doing: `scanning fix ${id}` })
     if (!r.ok) { problem ||= `Fix ${id} was not drafted: ${cut(r.err || 'the scan gave nothing', 200)}`; continue }
     await $.state.set({ ...DRAFT, id: String(id) }, null as never)
     await loadDraft($, id)
     ok.push(id)
   }
-  await $.state.set(SUBMIT, { ids: ok, at: 0, ...(problem ? { problem } : {}) } as never)
+  await $.state.set({ plugin: 'thimble', key: 'fixSubmit' }, { ids: ok, at: 0, ...(problem ? { problem } : {}) } as never)
   await openPane($, 'fixsubmit', {}, ok.length > 1 ? `Submit ${ok.length} fixes` : 'Submit your fix', { focus: true })
 }
 

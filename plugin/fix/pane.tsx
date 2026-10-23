@@ -5,13 +5,18 @@
 //                redo, request, sent, saved), its title, its date and a note; under the list what the selected fix
 //                changed: the person's words, what Claude did, its files and tests. j k move, ↵ selects, m marks, y
 //                turns a ready or off fix on (only this press does: the fix's code then runs as thimble), u turns an
-//                on fix off, r redo, s submits the marked fixes (or the selected one), x removes, a turns every fix
+//                on fix off, r redo, s shares the marked fixes (or the selected one), x removes, a turns every fix
 //                off or on.
+//   Share        after s, in place of the selected fix: for each fix shared, what the privacy check took out, whether
+//                its share page opened in the browser (share.ts), and what to do there; o opens the page again, c
+//                copies the GitHub link for a machine with no browser. Nothing is sent from here.
 //   Submit       for the fix the walk is on: where it goes and as whom, each detail the scan removed with its
 //                placeholder and why, and the exact text that leaves. y sends (a pull request), w saves the same text
-//                as files, k keeps the first detail that can be kept, esc cancels. Only these presses send.
+//                as files, k keeps the first detail that can be kept, esc cancels. Only these presses send. No key
+//                leads here now: s shares instead (openSubmit still opens it).
 //
-//   state: fixView (the selection, the marks, the diff), fixSubmit and fixDraft (submit.ts)
+//   state: fixView (the selection, the marks, the diff, the share), fixShare (share.ts), fixSubmit and fixDraft
+//   (submit.ts)
 import type { EngineInterface } from 'claude-code'
 
 import { quiet } from '../core/askcell.js'
@@ -21,6 +26,7 @@ import { ACCENT } from '../core/theme'
 import { testsWord } from './fixer'
 import { allOffOn, applyFix, type Fix, fixesNow, refreshFixes, removeFix, shownPath, sizeOf, undoFix } from './fixes'
 import { redoFix } from './request'
+import { copyLink, openAgain, type ShareState, shareFixes, shareNow } from './share'
 import { type Draft, draftNow, type Hit, submitAction, submitFixes, submitNow, submitSkip } from './submit'
 
 type Engine = EngineInterface
@@ -31,7 +37,7 @@ const VIEW = { plugin: 'thimble', key: 'fixView' } as const
 /** A key the person can press, in thimble's accent as the bar draws its keys (core/theme.ts). */
 const KEY_COLOR = ACCENT
 
-type View = { sel: number | null; marked: number[]; diff: boolean }
+type View = { sel: number | null; marked: number[]; diff: boolean; share: boolean }
 
 /** How each state is drawn: a glyph, its word, its color. */
 const LOOK: Record<string, { g: string; w: string; c?: string; dim?: boolean }> = {
@@ -42,7 +48,7 @@ const LOOK: Record<string, { g: string; w: string; c?: string; dim?: boolean }> 
 }
 
 async function viewNow($: Engine): Promise<View> {
-  return { sel: null, marked: [], diff: false, ...(((await $.state.get(VIEW)).value ?? {}) as Partial<View>) }
+  return { sel: null, marked: [], diff: false, share: false, ...(((await $.state.get(VIEW)).value ?? {}) as Partial<View>) }
 }
 
 async function setView($: Engine, v: Partial<View>): Promise<void> {
@@ -54,7 +60,7 @@ export async function openFixes($: Engine, o: { sel?: number; diff?: boolean } =
   const list = await refreshFixes($)
   const v = await viewNow($)
   const sel = o.sel ?? v.sel ?? list?.fixes[0]?.id ?? null
-  await setView($, { sel, diff: !!o.diff })
+  await setView($, { sel, diff: !!o.diff, share: false })
   return openPane($, 'fixes', {}, 'Your fixes', { focus: true })
 }
 
@@ -93,6 +99,35 @@ function diffRows(els: Any, diff: string, width: number): Any[] {
   })
 }
 
+/** After s: each fix shared, what the privacy check took out, whether its page opened, and what to do on it. */
+async function shareRows($: Engine, els: Any, s: ShareState): Promise<Any[]> {
+  const { Text } = els
+  const out: Any[] = []
+  const check = (key: string, words: string) => Text({ key, children: [Text({ key: 'g', color: 'success', children: '  ✓ ' }), Text({ key: 'w', children: words })] })
+  for (const id of s.ids) {
+    const it = s.items.find(x => x.id === id)
+    if (!it) {
+      out.push(Text({ key: `sh${id}`, children: [Text({ key: 'a', bold: true, children: `Share fix ${id}` }), Text({ key: 'b', dimColor: true, children: ': Claude writes the text…' })] }))
+      continue
+    }
+    out.push(Text({ key: `sh${id}`, bold: true, wrap: 'wrap', children: `Share fix ${id}: ${it.title}` }))
+    if (it.problem) {
+      out.push(Text({ key: `shp${id}`, color: 'error', wrap: 'wrap', children: `  × ${it.problem}` }))
+      continue
+    }
+    out.push(check(`sht${id}`, `privacy check: ${it.took}`))
+    out.push(it.opened ? check(`sho${id}`, 'opened the share page in your browser') : Text({ key: `sho${id}`, wrap: 'wrap', children: `  · no browser to open here; the share page is ${await shownPath($, it.page || '')}` }))
+    if (it.shortened) out.push(Text({ key: `shl${id}`, dimColor: true, wrap: 'wrap', children: '  · the text is longer than a GitHub link holds, so the link has the first part of it' }))
+    if (it.note) out.push(Text({ key: `shn${id}`, color: 'warning', wrap: 'wrap', children: `  · ${it.note}` }))
+  }
+  if (s.items.some(x => !x.problem)) {
+    out.push(Text({ key: 'shg', children: ' ' }))
+    out.push(Text({ key: 'shw', wrap: 'wrap', children: 'On the share page: check the title and text, then Open a GitHub issue. GitHub opens its own page with your text filled in; paste your screenshot there if you added one, and press Submit. Nothing leaves your computer until you press Submit there.' }))
+    out.push(Text({ key: 'shr', dimColor: true, wrap: 'wrap', children: 'No browser here (a remote machine)? c copies the GitHub link, to open on your computer.' }))
+  }
+  return out
+}
+
 export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Promise<unknown> {
   const { Box, Button, Text } = els
   const W = Math.max(40, Number(e.props?.bodyColumns) || 80)
@@ -124,22 +159,28 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
       Text({ key: 'n', ...(f.state === 'redo' || f.state === 'failed' ? { color: 'warning' } : { dimColor: true }), children: cut(noteOf(f), Math.max(8, W - tw - 30)) }),
     ] })
   })
-  // what the selected fix changed, in a few lines, as d on the line shows it
+  // what the selected fix changed, in a few lines, as d on the line shows it; after s, what sharing did
   const detail: Any[] = [Text({ key: 'rule', dimColor: true, children: '─'.repeat(Math.min(W, 60)) })]
-  detail.push(Text({ key: 'st', children: [Text({ key: 'a', bold: true, children: sel.title }), Text({ key: 'b', dimColor: true, children: `  fix ${sel.id}${sel.commit ? ` · commit ${sel.commit.slice(0, 7)}` : ''} · made in ${sel.made_in || 'terminal'}` })] }))
+  const shared = v.share ? await shareNow($) : null
   const labeled = (key: string, label: string, text: string, tone: Any = {}) => Box({ key, flexDirection: 'row', width: W, children: [
     Box({ key: 'l', width: 12, flexShrink: 0, children: [Text({ key: 't', dimColor: true, children: label.padEnd(12) })] }), Box({ key: 'v', flexShrink: 1, children: [Text({ key: 't', wrap: 'wrap', ...tone, children: text })] }),
   ] })
-  for (const [i, w] of (sel.words || []).entries()) detail.push(labeled(`w${i}`, i ? 'then' : 'You asked', cut(w, 400)))
-  if (sel.summary) detail.push(labeled('sum', 'Claude did', sel.summary))
-  if (sel.files?.length) detail.push(labeled('files', 'Changed', `${sizeOf(sel)} · ${testsWord(sel)} · ${sel.rounds || 1} round${(sel.rounds || 1) === 1 ? '' : 's'}`))
-  if ((sel.state === 'failed' || sel.state === 'redo') && sel.error) detail.push(labeled('why', 'Why', `${sel.state === 'redo' ? 'It does not fit your thimble now' : 'It did not pass'}: ${sel.error}. r asks Claude to redo it; your words and the old change are kept.`, { color: 'warning' }))
+  if (shared) {
+    // what sharing did stands in for the fix's details until the person moves
+    detail.push(...(await shareRows($, els, shared)))
+  } else {
+    detail.push(Text({ key: 'st', children: [Text({ key: 'a', bold: true, children: sel.title }), Text({ key: 'b', dimColor: true, children: `  fix ${sel.id}${sel.commit ? ` · commit ${sel.commit.slice(0, 7)}` : ''} · made in ${sel.made_in || 'terminal'}` })] }))
+    for (const [i, w] of (sel.words || []).entries()) detail.push(labeled(`w${i}`, i ? 'then' : 'You asked', cut(w, 400)))
+    if (sel.summary) detail.push(labeled('sum', 'Claude did', sel.summary))
+    if (sel.files?.length) detail.push(labeled('files', 'Changed', `${sizeOf(sel)} · ${testsWord(sel)} · ${sel.rounds || 1} round${(sel.rounds || 1) === 1 ? '' : 's'}`))
+    if ((sel.state === 'failed' || sel.state === 'redo') && sel.error) detail.push(labeled('why', 'Why', `${sel.state === 'redo' ? 'It does not fit your thimble now' : 'It did not pass'}: ${sel.error}. r asks Claude to redo it; your words and the old change are kept.`, { color: 'warning' }))
+  }
   const canUse = (sel.state === 'off' || sel.state === 'ready') && !!sel.commit
   const use = async () => say(canUse ? await applyFix($, sel.id) : `Fix ${sel.id} is ${sel.state}: there is nothing to turn on.`)
   const undo = async () => say(sel.state === 'on' ? await undoFix($, sel.id) : `Fix ${sel.id} is ${sel.state}, not on.`)
   const move = (d: number) => async () => {
     const i = Math.max(0, Math.min(fixes.length - 1, fixes.findIndex(f => f.id === sel.id) + d))
-    await setView($, { sel: fixes[i]!.id, diff: false })
+    await setView($, { sel: fixes[i]!.id, diff: false, share: false })
   }
   const mark = async () => {
     const m = new Set(v.marked)
@@ -147,17 +188,23 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
     else m.add(sel.id)
     await setView($, { marked: [...m] })
   }
-  const submit = async () => {
+  const share = async () => {
     const ids = v.marked.length ? v.marked : [sel.id]
-    await setView($, { marked: [] })
-    await submitFixes($, ids)
+    await setView($, { marked: [], diff: false, share: true })
+    await shareFixes($, ids)
   }
+  // o and c act on the shared fix the list has selected, else the first one shared
+  const sharedOne = shared?.items.find(x => x.id === sel.id && !x.problem) ?? shared?.items.find(x => !x.problem)
   const key = keys(els, [
     ['j', 'down', move(1)], ['k', 'up', move(-1)], ['m', 'mark', mark],
     ...(sel.state === 'on' ? [['u', 'undo', undo] as [string, string, () => unknown]] : [['y', 'use it now', use] as [string, string, () => unknown]]),
     ['r', 'redo', async () => say(await redoFix($, sel.id))],
-    ['s', v.marked.length > 1 ? `submit ${v.marked.length}` : 'submit', submit], ['x', 'remove', async () => say(await removeFix($, sel.id))],
+    ['s', v.marked.length > 1 ? `share ${v.marked.length}` : 'share', share], ['x', 'remove', async () => say(await removeFix($, sel.id))],
     ['a', list?.on === false ? 'all on' : 'all off', async () => say(await allOffOn($, list?.on === false))],
+    ...(sharedOne ? [
+      ['o', 'open the page again', async () => say(await openAgain($, sharedOne.id))] as [string, string, () => unknown],
+      ['c', 'copy the link', async () => say(await copyLink($, sharedOne.url || ''))] as [string, string, () => unknown],
+    ] : []),
   ])
   return Box({ flexDirection: 'column', width: W, children: [head, Text({ key: 'g1', children: ' ' }), ...rows, Text({ key: 'g2', children: ' ' }), ...detail, Text({ key: 'g3', children: ' ' }), key] })
 }

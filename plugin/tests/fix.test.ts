@@ -65,6 +65,8 @@ function setup() {
   const sent: { to: Any; text: string }[] = []
   const agents: { id: string; status: string }[] = []
   const config: { key: string; value: unknown }[] = []
+  const copied: string[] = []
+  const asked: Any[] = []
   const fix: Any = { id: 1, title: 'make the bar say read', words: ["make the bar's coverage item say read"], rounds: 1, made_in: 'terminal', created: 1761200000, state: 'working', work: WORK, commit: null, files: [], tests: null, summary: '', error: null }
   // the kernel's records: none until the first request
   let made = false
@@ -92,6 +94,10 @@ function setup() {
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
     if (verb === 'diff') return ok('diff --git a/plugin/bar/bar.tsx b/plugin/bar/bar.tsx\n-  coverage\n+  read\n')
     if (verb === 'update') return ok(fix.state === 'on' ? { said: 'thimble 0.10.3 · 1 fix carried', carried: [1], reload: true } : { said: '', reload: false })
+    if (verb === 'share') {
+      const given = stdin ? JSON.parse(stdin) : null
+      return ok({ id: 1, title: given?.title || fix.title, took: 'took 1 file name out of the text', opened: true, page: `${HOME}/fixes/share/1/index.html`, url: 'https://github.com/safety-research/thimble/issues/new?title=Bar%20says%20read&body=What%20was%20wrong', shortened: false, text: given ? 'claude' : 'earlier' })
+    }
     return ok({})
   }
   const $: Any = {
@@ -116,7 +122,8 @@ function setup() {
     config: { list: async () => config },
     process: { run: async (argv: string[], o: Any = {}) => { ran.push({ argv, ...(o.stdin != null ? { stdin: o.stdin } : {}) }); return argv.includes('fix') ? kernel(argv, o.stdin) : { exitCode: 0, stdout: '', stderr: '' } } },
     command: { run: async (c: Any) => { commands.push(c.command); return {} }, register: async () => ({ command: 'thimble-fix' }) },
-    ui: { toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: () => undefined },
+    model: { complete: async (req: Any) => { asked.push(req); return { isAnswered: true, text: JSON.stringify({ title: 'Bar says coverage, not read', wrong: 'The bar said coverage after Claude read a file.', fixed: 'The bar says read.' }) } } },
+    ui: { copy: async (o: Any) => { copied.push(o.text); return { isCopied: true } }, toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: () => undefined },
   }
   /** An event through the module's hooks that admit it, in order, then `base`. */
   const call = (event: string, e: Any, base: (e: Any) => Any = async x => x) => {
@@ -136,7 +143,7 @@ function setup() {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, made: () => { made = true }, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs }
+  return { $, call, tick, end, made: () => { made = true }, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked }
 }
 
 /** A request, and the fixer's end with what it says. */
@@ -375,4 +382,38 @@ test('the text copy of a drawing: a row side by side, a column one under another
     Markdown({ text: 'a **link**' }),
   ] })
   expect(screenText(drawn)).toBe('thimble  r coverage 43%\na **link**')
+})
+
+test("s in Your fixes shares the selected fix: Claude's text, then the share page; o opens it again and c copies the link", async () => {
+  const s = setup()
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  await s.call('command.run', { command: 'thimble-fix', args: '' })
+  const e = { props: { bodyColumns: 100 } }
+  let drawn = await drawFixes(s.$, e, {}, ELS)
+  expect(buttons(drawn)['key-s']!.label).toBe('share')
+  await buttons(drawn)['key-s']!.onPress()
+  // one model call with the fix-draft text, then the kernel's share with Claude's text on stdin; never draft or send
+  expect(s.asked.length).toBe(1)
+  expect(s.asked[0].system[0].text).toBe('PROMPT fix-draft')
+  expect(s.asked[0].prompt).toContain("<round n=\"1\">make the bar's coverage item say read</round>")
+  const share = s.ran.find(x => x.argv.includes('share'))
+  expect(share?.argv.slice(-4)).toEqual(['1', '--json', '--draft', '-'])
+  expect(JSON.parse(String(share?.stdin))).toEqual({ title: 'Bar says coverage, not read', wrong: 'The bar said coverage after Claude read a file.', fixed: 'The bar says read.' })
+  expect(s.verbs().some(v => /^(?:draft|send)\b/.test(v))).toBe(false)
+  drawn = await drawFixes(s.$, e, {}, ELS)
+  const text = textOf(drawn)
+  expect(text).toContain('Share fix 1: Bar says coverage, not read')
+  expect(text).toContain('  ✓ privacy check: took 1 file name out of the text')
+  expect(text).toContain('  ✓ opened the share page in your browser')
+  expect(text).toContain('Nothing leaves your computer until you press Submit there.')
+  // o: the page again from the same text, no model call; c: the link on the clipboard
+  expect([buttons(drawn)['key-o']!.label, buttons(drawn)['key-c']!.label]).toEqual(['open the page again', 'copy the link'])
+  await buttons(drawn)['key-o']!.onPress()
+  expect(s.asked.length).toBe(1)
+  expect(s.ran.filter(x => x.argv.includes('share')).at(-1)?.argv.slice(-2)).toEqual(['1', '--json'])
+  await buttons(drawn)['key-c']!.onPress()
+  expect(s.copied).toEqual(['https://github.com/safety-research/thimble/issues/new?title=Bar%20says%20read&body=What%20was%20wrong'])
+  // moving in the list shows the fix again
+  await buttons(drawn)['key-j']!.onPress()
+  expect(textOf(await drawFixes(s.$, e, {}, ELS))).not.toContain('Share fix 1')
 })
