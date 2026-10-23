@@ -34,3 +34,41 @@ test('/thimble-settings opens the switches; a press turns one off through Claude
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeUndefined()
   await pane.unmount()
 })
+
+test("the settings' Color row: six samples, ▸ on purple; a press on teal keeps it through Claude Code and draws thimble's name and keys in teal at once", async ($, on) => {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
+  mock.clock(on, { now: 0 })
+  const rows: Record<string, boolean | string> = { marks: true, cards: true, counts: true, color: 'purple' }
+  const set: Any[] = []
+  on('config.list', () => ({ value: Object.entries(rows).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })) }))
+  on('config.set', (_$: unknown, e: Any) => { set.push(e); rows[String(e.key).split('.').pop()!] = e.value; return { value: e.value } })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('fs.exists', () => ({ value: false }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  const names = ['purple', 'blue', 'teal', 'green', 'orange', 'yellow']
+  for (const n of names) expect((await pane.find({ key: `color-${n}` }))?.text).toContain(n)
+  expect((await pane.find({ key: 'color-purple' }))?.text).toContain('▸')
+  expect((await pane.find({ key: 'color-teal' }))?.text).not.toContain('▸')
+  expect((await pane.find({ type: 'Text', text: 'thimble' }))?.props?.color).toBe('merged')
+
+  await pane.press({ key: 'color-teal' })
+  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.color', value: 'teal' })])
+  expect((await pane.find({ key: 'color-teal' }))?.text).toContain('▸')
+  expect((await pane.find({ key: 'color-purple' }))?.text).not.toContain('▸')
+  // the preview's name and its keys (v card) in the new color
+  expect((await pane.find({ type: 'Text', text: 'thimble' }))?.props?.color).toBe('planMode')
+  expect((await pane.find({ type: 'Text', text: 'v card' }))?.children?.[0]?.props?.color).toBe('planMode')
+  await pane.unmount()
+  // purple again, for the other tests
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  const again = await $.ui.mount(PANE)
+  await again.press({ key: 'color-purple' })
+  expect((await again.find({ type: 'Text', text: 'thimble' }))?.props?.color).toBe('merged')
+  await again.unmount()
+})

@@ -48,7 +48,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 
 | What | Where |
 |---|---|
-| the manifest: name, the switches (Citations, Cards, Squeeze and catch-up, Explainers, Important details, Claims, Labels and coverage on the bar, Squeeze changes cards); a release commit adds its version (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit) | `plugin/.claude-plugin/plugin.json` |
+| the manifest: name, the switches (Citations, Cards, Squeeze and catch-up, Explainers, Important details, Claims, Labels and coverage on the bar, Squeeze changes cards) and thimble's color; a release commit adds its version (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit) | `plugin/.claude-plugin/plugin.json` |
 | the `thimble` command (`label`, `coverage`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
 | the hooks module, its order, the session's PATH and TMPDIR, the command hook that lets Claude read thimble's temp folder without a dialog (`temp_allow.py`), which files Claude read (for coverage), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |
@@ -63,7 +63,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | the features that act on answers, each meeting the rest through its `seam.ts` (`core/answerview.ts` calls them): squeeze, stretch and catch-up; the explainers and important details; the claims; the side threads; the citation and explanation tray | `plugin/squeeze/`, `plugin/explain/`, `plugin/claims/`, `plugin/threads/`, `plugin/tray/` |
 | the line above the prompt: busy step, failure line, counts | `plugin/bar/` |
 | the settings and coverage panes | `plugin/panes/` |
-| the switches, `featureOn(key)`, `/thimble-settings` | `plugin/settings/` |
+| the switches, `featureOn(key)`, thimble's colors (`COLORS`, read by `core/theme.ts` `accent()`), `/thimble-settings` | `plugin/settings/` |
 | a `--prompt` label's model reads, and the labels pane; the labels an answer or a card used, and the ask before a large label run (`use.ts`) | `plugin/labels/` |
 | each model call and turn in the session's events, per feature (`thimble dev stats`) | `plugin/telemetry/` |
 | every `$.state` key, one block per module | `plugin/types/index.d.ts` |

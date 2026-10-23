@@ -5,6 +5,9 @@
 // it. Each is a field of the plugin's userConfig (.claude-plugin/plugin.json, with the same key, title and default),
 // so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again with the
 // new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key) when it acts.
+//
+// thimble's color is one more field of the same userConfig (COLOR, a string): the name of one of COLORS. Claude Code
+// keeps it as it keeps the switches; core/theme.ts accent() asks colorNow() each time thimble draws.
 
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `does`:
  *  one line on what the person gets and what it costs, the field's description (a test checks). `lenses`: the lenses of
@@ -44,7 +47,26 @@ export const SWITCHES = [
   },
 ]
 
+/** thimble's colors, in the order the settings pane shows them: `name`, the value Claude Code keeps; `key`, the
+ *  Claude Code theme key it draws in, which Claude Code resolves to a shade that reads in the person's theme (light,
+ *  dark, ANSI). Purple, the first, is Claude Code's color for a merged pull request, and thimble's by default. */
+export const COLORS = [
+  { name: 'purple', key: 'merged' },
+  { name: 'blue', key: 'ide' },
+  { name: 'teal', key: 'planMode' },
+  { name: 'green', key: 'success' },
+  { name: 'orange', key: 'claude' },
+  { name: 'yellow', key: 'warning' },
+]
+
+/** thimble's color as a userConfig field (.claude-plugin/plugin.json, with the same key, title and default). */
+export const COLOR = {
+  key: 'color', title: 'Color', default: 'purple',
+  does: `thimble's color, on its name in the bar and the keys it names: ${COLORS.map(c => c.name).join(', ')}.`,
+}
+
 const BY_KEY = new Map(SWITCHES.map(s => [s.key, s]))
+const COLOR_BY_NAME = new Map(COLORS.map(c => [c.name, c]))
 
 let current = {}
 
@@ -67,7 +89,20 @@ export function switchesFrom(values) {
  *  loads the plugin again with the same value. */
 export function noteChange(key, value) {
   if (BY_KEY.has(key) && typeof value === 'boolean') current = { ...current, [key]: value }
+  if (key === COLOR.key && COLOR_BY_NAME.has(value)) current = { ...current, [key]: value }
 }
+
+/** A color by its name, or null. */
+export const colorOf = name => COLOR_BY_NAME.get(name) ?? null
+
+/** The color's name as `values` holds it: one of COLORS, else the default. */
+export function colorFrom(values) {
+  const v = values ? values[COLOR.key] : undefined
+  return colorOf(v) ? v : COLOR.default
+}
+
+/** The color's name now, from the plugin's options and a change made a moment ago. */
+export const colorNow = () => colorFrom(current)
 
 /** Whether a feature acts now: its option when it is a boolean, else its default. `observer` is whether the look after
  *  each reply runs: while a feature one of whose lenses it serves is on. */

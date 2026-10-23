@@ -56,6 +56,12 @@
       "title": "Squeeze changes cards (experimental)",
       "description": "When s makes an answer much shorter or longer, or writes it for another reader, it may edit, add or leave out a card with the text. 0 brings the cards back as they were. Each rewrite also reads the cards.",
       "default": true
+    },
+    "color": {
+      "type": "string",
+      "title": "Color",
+      "description": "thimble's color, on its name in the bar and the keys it names: purple, blue, teal, green, orange, yellow.",
+      "default": "purple"
     }
   }
 }
