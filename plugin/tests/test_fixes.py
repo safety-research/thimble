@@ -344,3 +344,16 @@ def test_a_new_release_carries_the_fixes_that_fit_and_marks_the_rest(world, monk
     release_commit(world, "plugin/third.md", "y\n", "a third change")
     monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
     assert FX.update()["redo"] == [c["id"]] and not (FX.live_dir() / "plugin" / "more.md").exists()
+
+
+def test_a_data_file_named_like_one_of_thimbles_goes_from_the_words_and_stays_in_the_diff(world, monkeypatch):
+    r = FX.new("after Claude read package.json, the bar should say read")
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text() + "// a test reads a made-up package.json\n")
+    FX.done(r["id"], "Bar says read", "")
+    monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["package.json"]})
+    FX.draft(r["id"], "Bar says read", "The bar says read, as package.json showed.", None)
+    pr = (FX.home() / "drafts" / "1" / "pr.md").read_text()
+    patch = (FX.home() / "drafts" / "1" / "fix.patch").read_text()
+    assert "package.json" not in pr and "after Claude read ‹data file›" in pr
+    assert "+// a test reads a made-up package.json" in patch

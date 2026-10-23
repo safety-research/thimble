@@ -1209,7 +1209,12 @@ def draft(fid: int | str, title: str, summary: str, st: Store | None) -> dict[st
     held_parts, _held = _protect(parts, paths)
     base_files = _base_files(base)
     known = _known(base)
-    terms = _widen(session_terms(st), "\n".join(held_parts.values()), known, base_files)
+    found = session_terms(st)
+    text = "\n".join(held_parts.values())
+    # the diff keeps a file name that thimble's repository has (a test's made-up fixture), so that it still applies;
+    # the words the person and Claude wrote lose every name from the person's folder
+    terms = _widen(found, text, known, base_files)
+    words_terms = _widen(found, text, known, set())
     added = sorted(set(re.findall(r"^\+\+\+ b/(\S+)$", diff, re.M)) - base_files)
     if added:
         named, _ = P.scan({"diff": "\n".join(added)}, {k: v for k, v in terms.items() if k != "path"}, known,
@@ -1217,7 +1222,13 @@ def draft(fid: int | str, title: str, summary: str, st: Store | None) -> dict[st
         if named:
             raise FixError("a new file of the fix is named after your data; ask Claude to give it a made-up name (r)")
     repo_paths = [(str(live_dir()) + os.sep, ""), (str(PLUGIN) + os.sep, "plugin/")]
-    hits, notes = P.scan(held_parts, terms, known, repo_paths, allow=[base])
+    hits, notes = P.scan({k: v for k, v in held_parts.items() if k != "diff"}, words_terms, known, repo_paths, allow=[base])
+    if "diff" in held_parts:
+        more, notes2 = P.scan({"diff": held_parts["diff"]}, terms, known, repo_paths, allow=[base])
+        hits += more
+        notes += [n for n in notes2 if n not in notes]
+    for i, h in enumerate(hits, 1):
+        h["id"] = f"h{i}"
     d = home() / "drafts" / str(rec["id"])
     old = {(h["where"], h["found"]): h["kept"] for h in read_json(d / "scan.json") or []}
     for h in hits:
