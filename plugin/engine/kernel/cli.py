@@ -11,7 +11,8 @@ In a shell:
     thimble fix show N             what fix N does, in a few lines
     thimble fix diff N             fix N's change to thimble's code
     thimble fix apply N            use a ready fix now (it asks y/N first)
-    thimble fix share N [--open]   a link that posts fix N as a GitHub issue; you check it on GitHub first
+    thimble file issue N [--open]  a link that posts fix N as a GitHub issue; you check it on GitHub first
+    thimble file pr N              open a pull request with fix N's code on the public repo (asks first)
     thimble fix off [N]            one fix off, or all of them (the plain release)
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
     thimble fix merge A B C        fixes B and C become part of fix A: one change, one title (asks y/N first)
@@ -458,7 +459,9 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
     thimble fix show N               what fix N does, in a few lines
     thimble fix diff N               fix N's change to thimble's code
     thimble fix apply N              use a ready fix now (it asks y/N first)
-    thimble fix share N [--open]     a link that posts fix N as a GitHub issue; you check it on GitHub first
+    thimble file issue N [--open]    a link that posts fix N as a GitHub issue; you check it on GitHub first
+    thimble file pr N [--yes]        open a pull request with fix N's code on the public repo (asks first;
+                                     needs gh, GitHub's command line tool; --yes skips the question)
     thimble fix off N | on N         turn fix N off, or on (on asks for your key in the terminal)
     thimble fix off | on             all your fixes off (the plain release), or on again
     thimble fix merge A B C          fixes B and C become part of fix A: one change, one title (asks y/N first)
@@ -468,6 +471,17 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
 Fixes act across your sessions, so they are listed and managed here, in a shell. Ask for a fix in Claude Code or the
 browser: /thimble-fix <what should work differently>. A fix goes on only by your key: y on the fix's line in thimble,
 or thimble fix apply N in your own terminal."""
+
+
+FILE_HELP = """Send one of your fixes to thimble's public repository on GitHub, so that thimble's authors can see it.
+
+    thimble file issue N [--open]    a link that posts fix N as a GitHub issue; you read the text on GitHub and press
+                                     Submit there (--open opens the link in your browser)
+    thimble file pr N [--yes]        a pull request with fix N's code, from your GitHub account. It shows the title,
+                                     the text, the files and the privacy check, and asks y/N first (--yes skips the
+                                     question). It needs gh, GitHub's command line tool, signed in (gh auth login)
+
+Both take your names, paths and the names of your data out of the text first. Run them in your own terminal."""
 
 
 UPDATE_HELP = """thimble update: the newest thimble release (its newest vX.Y.Z tag on GitHub), for the terminal plugin and the
@@ -494,11 +508,14 @@ def cmd_update(a: argparse.Namespace) -> int:
 def cmd_fix(a: argparse.Namespace) -> int:
     from . import fixes as FX  # noqa: PLC0415
 
-    if a.verb == "share":
-        from . import share as SH  # noqa: PLC0415
-
-        return SH.cmd(a)
     return FX.cmd(a)
+
+
+def cmd_file(a: argparse.Namespace) -> int:
+    """thimble file issue N | thimble file pr N: a fix sent to thimble's public repository (kernel/share.py)."""
+    from . import share as SH  # noqa: PLC0415
+
+    return SH.cmd(a) if a.verb == "issue" else SH.pr_cmd(a)
 
 
 def cmd_reapply(a: argparse.Namespace) -> int:
@@ -507,23 +524,28 @@ def cmd_reapply(a: argparse.Namespace) -> int:
     return FX.cmd_reapply(a)
 
 
+def _shares(line: str) -> bool:
+    """A help line of share.py's commands (thimble file issue, thimble file pr), or the line that goes on from one."""
+    return "thimble file " in line or "needs gh, GitHub's" in line
+
+
 def _no_share(text: str) -> str:
     from . import fixes as FX  # noqa: PLC0415
 
-    return text if FX.can_share() else "\n".join(x for x in text.splitlines() if "thimble fix share" not in x)
+    return text if FX.can_share() else "\n".join(x for x in text.splitlines() if not _shares(x))
 
 
 def _help() -> str:
-    """thimble --help: this file's text, without the share line while this thimble has no thimble fix share."""
+    """thimble --help: this file's text, without the file lines while this thimble has no thimble file."""
     from . import fixes as FX  # noqa: PLC0415
 
     lines = __doc__.strip().splitlines()
-    return "\n".join(x for x in lines if FX.can_share() or "thimble fix share" not in x)
+    return "\n".join(x for x in lines if FX.can_share() or not _shares(x))
 
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,browser,demo,doctor,label,coverage}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,browser,demo,doctor,label,coverage}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
@@ -563,15 +585,13 @@ def main(argv: list[str] | None = None) -> int:
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
     p.add_argument("verb", nargs="?", default="list",
-                   choices=("list", "show", "diff", "export", "share", "off", "on", "update", "new", "round", "again", "done", "apply", "merge", "notnow",
+                   choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "again", "done", "apply", "merge", "notnow",
                             "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
     p.add_argument("id", nargs="?")
     p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
     p.add_argument("more", nargs="*", help=argparse.SUPPRESS)  # merge: the third fix and on
     p.add_argument("--json", action="store_true")
     p.add_argument("--to", metavar="DIR")
-    p.add_argument("--open", dest="open", action="store_true", help="share: open the GitHub link in your browser too")
-    p.add_argument("--draft", help=argparse.SUPPRESS)  # share: Claude's draft as JSON on stdin (-)
     p.add_argument("--words", help=argparse.SUPPRESS)
     p.add_argument("--title", help=argparse.SUPPRESS)
     p.add_argument("--summary", help=argparse.SUPPRESS)
@@ -586,6 +606,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--answer", choices=("pr", "file"), default="file", help=argparse.SUPPRESS)
     p.add_argument("--ask", help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_fix)
+    p = sub.add_parser("file", help="send a fix to thimble's public repository: an issue, or a pull request",
+                       description=FILE_HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("verb", choices=("issue", "pr"), metavar="issue|pr")
+    p.add_argument("id", nargs="?")
+    p.add_argument("--json", action="store_true", help="issue: the whole record, as JSON")
+    p.add_argument("--open", dest="open", action="store_true", help="issue: open the GitHub link in your browser too")
+    p.add_argument("--draft", help=argparse.SUPPRESS)  # issue: Claude's draft as JSON on stdin (-)
+    p.add_argument("--yes", action="store_true", help="pr: open the pull request without asking (for scripts)")
+    p.set_defaults(fn=cmd_file)
     p = sub.add_parser("update", help="the newest thimble release, for both modes", description=UPDATE_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--continue", dest="cont", action="store_true",

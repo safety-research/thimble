@@ -85,8 +85,9 @@ async function startFromSkill($: Engine, words: string): Promise<string> {
     : [`thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix ${r.fix.id}, "${r.fix.title}").`, mayJoin(r.fix), `The person sees on the bar while it works, and decides with a key whether to use the fix. ${then} thimble tells you when the fix ends.`].filter(Boolean).join(' ')
 }
 
-/** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), never Claude's. */
-const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|again|done|apply|merge|notnow|redo|undo|remove|sandbox|draft|keep|send)\b/
+/** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), and `thimble file issue` and
+ *  `thimble file pr`, which post the person's fix publicly from their own terminal: never Claude's. */
+const OWN_VERBS = /\bthimble\s+(?:fix\s+(?:new|round|again|done|apply|merge|notnow|redo|undo|remove|sandbox|draft|keep|send)|file\s+(?:issue|pr))\b/
 
 /** The fixers this load knows, so a guard that fails can still refuse their calls. */
 /** Whether this session looked for a newer release already (kept across a reload of the module). */
@@ -116,7 +117,7 @@ export function normal(p: string): string {
 async function refusal($: Engine, e: Any): Promise<string | null> {
   if (e.tool === 'Bash') {
     return OWN_VERBS.test(String(e.command ?? ''))
-      ? 'Only thimble and the person do that: /thimble-fix asks for a fix, and the person applies or submits it with a key in thimble. `thimble fix list`, `show`, `diff`, `export`, `off` and `on` are yours to run.'
+      ? 'Only thimble and the person do that: /thimble-fix asks for a fix, the person applies it with a key in thimble, and sends it with `thimble file issue` or `thimble file pr` in their own terminal. `thimble fix list`, `show`, `diff`, `export`, `off` and `on` are yours to run.'
       : null
   }
   const p = normal(String(e.file_path ?? e.notebook_path ?? ''))

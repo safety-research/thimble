@@ -1,5 +1,5 @@
 """Share on a fix in the browser (app/fix_share.py): the analyst's click alone; Claude's text, then the plugin kernel's
-GitHub link (`thimble fix share`, run for real on a made-up fix record); and when Claude writes no text, the link still
+GitHub link (`thimble file issue`, run for real on a made-up fix record); and when Claude writes no text, the link still
 comes, with why. Nothing is sent. All data here is made up."""
 from __future__ import annotations
 

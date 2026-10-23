@@ -683,10 +683,12 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert rows[3].endswith('"the bar should say read, not coverage"') and "like the untouched" not in "\n".join(rows)
     assert rows[8:] == [
         "What next",
-        f"  thimble fix show {a}     what fix {a} does, in a few lines",
-        f"  thimble fix share {a}    post fix {a} as a GitHub issue (you check it before it goes)",
-        f"  thimble fix off {a}      turn a fix off; thimble fix on {a} turns it back on",
-        "  thimble update         get the newest thimble and keep your fixes",
+        f"  thimble fix show {a}       what fix {a} does, in a few lines",
+        f"  thimble fix merge {a} {c}    make them one fix (it asks y/N first)",
+        f"  thimble fix off {a}        turn a fix off; thimble fix on {a} turns it back on",
+        f"  thimble file issue {a}     post fix {a} as a GitHub issue (you check it before it goes)",
+        f"  thimble file pr {a}        open a pull request with fix {a}'s code (asks first)",
+        "  thimble update           get the newest thimble and keep your fixes",
         "  New fix: in Claude Code or the browser, /thimble-fix <what should work differently>"]
     assert "fix diff" not in "\n".join(rows)
     assert cli.main(["fix", "show", str(c)]) == 0
@@ -695,7 +697,9 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert shown[1] == '  You asked     "the legend should count the files nobody read like the untouched ones"'
     assert shown[2] == "  Claude did    The coverage legend says how many files are untouched."
     assert shown[3] == "  Changed       1 file · tests pass"
-    assert shown[5:] == [f"  thimble fix share {c}    post it as a GitHub issue", f"  thimble fix off {c}      turn it off"]
+    assert shown[5:] == [f"  thimble file issue {c}    post it as a GitHub issue",
+                         f"  thimble file pr {c}       open a pull request with its code on the public repo (asks first)",
+                         f"  thimble fix off {c}       turn it off"]
     # off and on one fix in a shell: on needs the person's y in their terminal, never Claude's Bash tool
     assert cli.main(["fix", "off", str(c)]) == 0 and FX.get(c)["state"] == "off"
     assert capsys.readouterr().out.startswith(f"Fix {c} is off: Legend counts untouched.")
@@ -713,13 +717,13 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert cli.main(["--help"]) == 0
     help_ = capsys.readouterr().out
     for line in ("thimble update ", "thimble reapply ", "thimble fixes ", "thimble fix show N", "thimble fix apply N",
-                 "thimble fix share N", "thimble fix off [N]", "thimble fix on [N]", "thimble fix merge A B C",
+                 "thimble file issue N", "thimble file pr N", "thimble fix off [N]", "thimble fix on [N]", "thimble fix merge A B C",
                  "thimble fix diff N", "thimble fix remove N", "thimble fix export N"):
         assert f"\n    {line}" in help_, line
     assert all(f"thimble {w}" not in help_ for w in ("doctor", "demo", "browser"))
     assert help_.index("thimble fix on [N]") < help_.index("Claude runs these in a session") < help_.index("thimble label [NAME]")
     monkeypatch.setattr(FX, "can_share", lambda: False)
-    assert cli.main(["--help"]) == 0 and "thimble fix share" not in capsys.readouterr().out
+    assert cli.main(["--help"]) == 0 and "thimble file" not in capsys.readouterr().out
 
 
 def test_the_shell_command_is_a_link_that_follows_live(world, tmp_path, monkeypatch):

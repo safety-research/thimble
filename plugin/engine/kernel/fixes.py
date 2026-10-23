@@ -1595,7 +1595,7 @@ def listing() -> dict[str, Any]:
 
 
 def can_share() -> bool:
-    """Whether this thimble has `thimble fix share` (kernel/share.py)."""
+    """Whether this thimble has `thimble file issue` and `thimble file pr` (kernel/share.py)."""
     return (Path(__file__).resolve().parent / "share.py").is_file()
 
 
@@ -1651,6 +1651,9 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
         asked = f'"{short(_first_line(r), room - 2)}"' if _first_line(r) else ""
         out.append(f"  {r['id']:>{iw}}  {_state_paint(c, r, d['on'], sw)}  {short(titles[r['id']], tw):<{tw}}   "
                    f"{_date(r.get('created')):<5}   {asked}".rstrip())
+    prs = [r for r in fixes if r.get("pr")]
+    if prs:
+        out += ["", *[c("dim", f"  fix {r['id']} has a pull request: {r['pr']}") for r in prs]]
     on_ids = [r["id"] for r in fixes if words[r["id"]] == "on"]
     off_ids = [r["id"] for r in fixes if r.get("state") in ("off", "ready")]
     first = fixes[0]["id"]
@@ -1659,13 +1662,19 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
         k = len(d["aside"])
         nxt.append(("thimble reapply", f"Claude brings back the {k} fix{'' if k == 1 else 'es'} thimble update set aside"))
     nxt.append((f"thimble fix show {first}", f"what fix {first} does, in a few lines"))
-    if can_share():
-        nxt.append((f"thimble fix share {first}", f"post fix {first} as a GitHub issue (you check it before it goes)"))
+    can_merge = [r["id"] for r in fixes if r.get("state") in (*REFINABLE, "request")]
+    if len(can_merge) >= 2:
+        nxt.append((f"thimble fix merge {can_merge[0]} {can_merge[1]}", "make them one fix (it asks y/N first)"))
     if on_ids:
         n = on_ids[0]
         nxt.append((f"thimble fix off {n}", f"turn a fix off; {c('cmd', f'thimble fix on {n}')} turns it back on"))
     elif off_ids:
         nxt.append((f"thimble fix on {off_ids[0]}", "turn a fix on (it asks for your key here)"))
+    if can_share():
+        nxt.append((f"thimble file issue {first}", f"post fix {first} as a GitHub issue (you check it before it goes)"))
+        code = [r["id"] for r in fixes if r.get("state") in ("on", "ready") and r.get("commit") and not r.get("pr")]
+        if code:
+            nxt.append((f"thimble file pr {code[0]}", f"open a pull request with fix {code[0]}'s code (asks first)"))
     if not d["aside"]:
         nxt.append(("thimble update", "get the newest thimble and keep your fixes"))
     cw = max(len(k) for k, _ in nxt) + 4
@@ -1695,6 +1704,8 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
         out += _wrapped("You asked" if i == 0 else "Then", f'"{" ".join(w.split())}"', width)
     if str(r.get("summary") or "").strip():
         out += _wrapped("Claude did", " ".join(str(r["summary"]).split()), width)
+    if r.get("pr"):
+        out += _wrapped("Pull request", str(r["pr"]), width)
     files = r.get("files") or []
     p = r.get("pending") or {}
     if r.get("state") == "pending":
@@ -1718,7 +1729,9 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     if s == "pending":
         acts.append(("thimble reapply", "Claude checks it against the release and brings it back"))
     if s in ("on", "off", "ready", "sent") and can_share():
-        acts.append((f"thimble fix share {r['id']}", "post it as a GitHub issue"))
+        acts.append((f"thimble file issue {r['id']}", "post it as a GitHub issue"))
+    if s in ("on", "ready") and r.get("commit") and not r.get("pr") and can_share():
+        acts.append((f"thimble file pr {r['id']}", "open a pull request with its code on the public repo (asks first)"))
     if s == "on" and is_on():
         acts.append((f"thimble fix off {r['id']}", "turn it off"))
     elif s in ("off", "ready"):
@@ -2149,7 +2162,7 @@ def send(fid: int | str, answer: str, secret: str | None) -> dict[str, Any]:
     check_ask(rec["id"], secret)
     d = home() / "drafts" / str(rec["id"])
     if not (d / "pr.md").exists():
-        raise FixError(f"fix {rec['id']} has no draft; thimble fix share {rec['id']} shares it")
+        raise FixError(f"fix {rec['id']} has no draft; thimble file issue {rec['id']} posts it as an issue")
     out_dir = home() / "sent" / str(rec["id"])
     out_dir.mkdir(parents=True, exist_ok=True)
     for name in ("pr.md", "fix.patch", "title"):

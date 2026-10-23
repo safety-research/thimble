@@ -1,5 +1,5 @@
-"""thimble fix share (engine/kernel/share.py): the share draft and its privacy scan, the GitHub link (its encoding and its
-length cap), and what `thimble fix share ID` prints. Nothing is sent: the command that would open the link is a fake. The world is test_fixes.py's made-up thimble 0.10.2. All data here is made up."""
+"""thimble file issue (engine/kernel/share.py): the share draft and its privacy scan, the GitHub link (its encoding and its
+length cap), and what `thimble file issue ID` prints. Nothing is sent: the command that would open the link is a fake. The world is test_fixes.py's made-up thimble 0.10.2. All data here is made up."""
 from __future__ import annotations
 
 import json
@@ -116,7 +116,7 @@ def test_the_shell_prints_the_link_and_opens_it_only_when_asked(world, monkeypat
     monkeypatch.chdir(tmp_path / "shell")  # the shell stands in a folder of its own
     monkeypatch.setattr(FX, "session_terms", lambda st: {"file": ["board-7.jsonl"]})
     FX.write_json(SH.share_dir(rec["id"]) / "given.json", DRAFT)
-    assert CLI.main(["fix", "share", str(rec["id"])]) == 0
+    assert CLI.main(["file", "issue", str(rec["id"])]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "Share fix 1: Bar says read for coverage"
     assert out[1] == "  ✓ privacy check: took 1 file name out of the text"
@@ -128,7 +128,7 @@ def test_the_shell_prints_the_link_and_opens_it_only_when_asked(world, monkeypat
     time.sleep(0.3)
     assert not opened.exists()
     # --open opens GitHub's page itself, once (the opener runs on its own, so its log may come a moment later)
-    assert CLI.main(["fix", "share", str(rec["id"]), "--open"]) == 0
+    assert CLI.main(["file", "issue", str(rec["id"]), "--open"]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[2] == "  ✓ opened the link in your browser"
     for _ in range(50):
@@ -137,12 +137,12 @@ def test_the_shell_prints_the_link_and_opens_it_only_when_asked(world, monkeypat
         time.sleep(0.1)
     assert opened.read_text().split() == [out[-1]]
     # --json, as the plugin and the browser call it, with Claude's draft on stdin
-    p = subprocess.run([sys.executable, str(Path(SH.__file__).resolve().parents[1] / "thimble.py"), "fix", "share", "1",
+    p = subprocess.run([sys.executable, str(Path(SH.__file__).resolve().parents[1] / "thimble.py"), "file", "issue", "1",
                         "--json", "--draft", "-"], input=json.dumps(DRAFT), capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     d = json.loads(p.stdout)
     assert d["opened"] is False and d["text"] == "claude" and d["title"] == DRAFT["title"] and "page" not in d
-    assert CLI.main(["fix", "share", "9"]) == 1
+    assert CLI.main(["file", "issue", "9"]) == 1
     assert "there is no fix 9" in capsys.readouterr().err
 
 

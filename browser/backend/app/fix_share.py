@@ -3,7 +3,7 @@ the terminal's Your fixes does (plugin/fix/share.ts).
 
     POST /api/fixes/{fid}/share       Claude writes the title, what was wrong and how it was fixed (the plugin's
                                       prompts/fix-draft.md, on the dev row's model of Settings); then the kernel's
-                                      `thimble fix share ID` (plugin/engine/kernel/share.py) takes the analyst's names and
+                                      `thimble file issue ID` (plugin/engine/kernel/share.py) takes the analyst's names and
                                       values out of it and gives GitHub's new-issue link with the text, and what it took out
 
 The analyst opens the link in their own tab, reads the text on GitHub's page and presses Submit there. Nothing
@@ -42,21 +42,22 @@ def plugin_dir() -> Path:
     return config.REPO_ROOT.parent / "plugin"
 
 
-def kernel(args: list[str], *, stdin: str | None = None, timeout: float = 120) -> tuple[bool, str, str]:
-    """`thimble fix ARGS` as the analyst's own command, in the plugin's home: (ok, stdout, the error's last line)."""
+def kernel(args: list[str], *, stdin: str | None = None, timeout: float = 120, cmd: str = "fix") -> tuple[bool, str, str]:
+    """`thimble fix ARGS` (or `thimble file ARGS`, cmd "file") as the analyst's own command, in the plugin's home: (ok,
+    stdout, the error's last line)."""
     env = {**config.passed_environ(), "THIMBLE_HOME": str(plugin_home()), "THIMBLE_SESSION": "person-browser",
            "PYTHONDONTWRITEBYTECODE": "1"}
     env.pop("THIMBLE_ROOT", None)
     try:
-        p = subprocess.run([sys.executable, "-I", str(plugin_dir() / "engine" / "thimble.py"), "fix", *args],
+        p = subprocess.run([sys.executable, "-I", str(plugin_dir() / "engine" / "thimble.py"), cmd, *args],
                            input=stdin if stdin is not None else "", capture_output=True, text=True, timeout=timeout,
                            env=env, cwd=str(Path.home()))
     except subprocess.TimeoutExpired:
-        return False, "", f"thimble fix {args[0]} took longer than {int(timeout)} s"
+        return False, "", f"thimble {cmd} {args[0]} took longer than {int(timeout)} s"
     except OSError as e:
-        return False, "", f"thimble fix could not run: {e}"
+        return False, "", f"thimble {cmd} could not run: {e}"
     lines = (p.stderr or "").strip().splitlines()
-    return p.returncode == 0, p.stdout, re.sub(r"^thimble fix \w+: ", "", lines[-1] if lines else "")
+    return p.returncode == 0, p.stdout, re.sub(r"^thimble (?:fix|file) \w+: ", "", lines[-1] if lines else "")
 
 
 def _prompt(rec: dict[str, Any], diff: str) -> str:
@@ -134,10 +135,11 @@ async def share_route(fid: int, http: Request, body: ShareBody | None = None) ->
         raise HTTPException(404, err or f"there is no fix {fid}")
     rec = json.loads(out)
     d = await drafted(body.ws if body else None, rec)
-    args = ["share", str(fid), "--json", *([] if isinstance(d, str) else ["--draft", "-"])]
-    ok, out, err = await asyncio.to_thread(kernel, args, stdin=None if isinstance(d, str) else json.dumps(d), timeout=180)
+    args = ["issue", str(fid), "--json", *([] if isinstance(d, str) else ["--draft", "-"])]
+    ok, out, err = await asyncio.to_thread(kernel, args, stdin=None if isinstance(d, str) else json.dumps(d), timeout=180,
+                                           cmd="file")
     if not ok:
-        raise HTTPException(409, err or "thimble fix share gave nothing")
+        raise HTTPException(409, err or "thimble file issue gave nothing")
     r = json.loads(out)
     return {**{k: r.get(k) for k in ("id", "title", "took", "url", "shortened", "text")},
             "note": d if isinstance(d, str) else ""}
