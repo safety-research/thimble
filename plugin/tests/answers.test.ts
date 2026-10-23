@@ -3,7 +3,7 @@
 // and a resumed session's turns read back. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { actingRow, answerRows, answerStepKey, labelsOf, partOf, pickedRow, questionOf, registerAnswers, resetAnswers, restoreAnswers, setPart, sinceLast, textRows, turnOf, turnOfRow, turnsNow } from '../core/answers'
+import { actingRow, answerRows, answerStepKey, labelsOf, partOf, pickedBar, pickedRow, questionOf, registerAnswers, resetAnswers, restoreAnswers, setPart, sinceLast, textRows, turnOf, turnOfRow, turnsNow } from '../core/answers'
 import { registerTurn } from '../core/turn'
 import { tempRun } from './stubs'
 
@@ -111,12 +111,19 @@ test('a turn that ended in an error answered nothing; the keys act on the newest
   await back!.now!()
   expect(await actingRow(s.$)).toBe('t1-row-0')
   expect(await pickedRow(s.$)).toBe('t1-row-0')
-  expect(s.scrolled.at(-1)).toMatchObject({ to: { key: 'ans-t1-row-0' } })
+  // the bar names the picked answer (Claude Code moves the chat for a press, not for a key); a press on it brings the
+  // answer's own row into view, which every answer has, whether thimble draws it or not
+  const named = await pickedBar(s.$, false)
+  expect(named.map(x => `${x.glyph} ${x.words}`)).toEqual(['▸ answer 1 of 2 “Why was pr/118 reverted?”'])
+  await named[0]!.press!()
+  expect(s.scrolled.at(-1)).toMatchObject({ to: { requestId: 't1-row-0' } })
+  expect(await pickedBar(s.$, true)).toEqual([])
   // past the oldest answer nothing moves; } back to the newest gives the keys back to the latest turn
   await (await answerStepKey(s.$, '{'))!.now!()
   expect(await actingRow(s.$)).toBe('t1-row-0')
   await (await answerStepKey(s.$, '}'))!.now!()
   expect(await pickedRow(s.$)).toBe(null)
+  expect(await pickedBar(s.$, false)).toEqual([])
   // a letter typed at once after { undoes it (hooks/keys.ts); a new turn of main's gives the keys back
   const k = await answerStepKey(s.$, '{')
   await k!.now!()

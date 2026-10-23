@@ -296,18 +296,30 @@ export async function turnAnswers($: Engine): Promise<void> {
 // ------------------------------------------------------------------------------------------------ the keys { }
 
 /** { and } at an empty prompt, while there are two answers or more: the keys act on the answer before or after the one
- *  they act on now (the newest gives them back to the latest turn). (hooks/keys.ts asks.) */
+ *  they act on now (the newest gives them back to the latest turn); ▸ stands in place of its ● (core/answerview.ts
+ *  textView). Claude Code moves the chat for a press, not for a key, so an answer picked above the screen is named on
+ *  the bar (pickedBar), and a press there brings it into view. (hooks/keys.ts asks.) */
 export async function answerStepKey($: Engine, key: string): Promise<{ now: () => Promise<unknown>; undo: () => Promise<unknown> } | null> {
   if (key !== '{' && key !== '}') return null
   if ((await answerRows($)).length < 2) return null
   const was = (await $.state.get(SEL)).value as string | null | undefined
   return {
-    now: async () => {
-      const row = await stepAnswer($, key === '{' ? -1 : 1)
-      if (row) await $.ui.scroll({ to: { key: `ans-${row}` }, block: 'nearest' }).catch(() => undefined)
-    },
+    now: () => stepAnswer($, key === '{' ? -1 : 1),
     undo: () => $.state.set(SEL, was ?? null),
   }
+}
+
+/** The bar's item while the keys act on an earlier answer than the newest: `▸ answer 2 of 4 “its question”`, and a
+ *  press on it brings that answer into view (by its own row, which every answer has, whether thimble draws it or not;
+ *  Claude Code moves the chat for a press). None while they act on the newest. */
+export async function pickedBar($: Engine, preview: boolean): Promise<{ id: string; glyph: string; words: string; key: string; press?: () => unknown }[]> {
+  if (preview) return []
+  const row = await pickedRow($)
+  if (!row) return []
+  const all = await answerRows($)
+  const q = (await questionOf($, row)).replace(/\s+/g, ' ').trim()
+  const words = `answer ${all.indexOf(row) + 1} of ${all.length}${q ? ` “${q.length > 40 ? `${q.slice(0, 39)}…` : q}”` : ''}`
+  return [{ id: 'picked', glyph: '▸', key: '}', words, press: () => $.ui.scroll({ to: { requestId: row }, block: 'start' }).catch(() => undefined) }]
 }
 
 // ------------------------------------------------------------------------------------------------ hooks

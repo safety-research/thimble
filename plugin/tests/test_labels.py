@@ -169,6 +169,32 @@ def test_a_none_from_code_leaves_the_record_outside_the_label(root: Path):
     assert again.returncode == 0 and LB.status(LB.load(st, "wren-sorry"))["records"] == 2
 
 
+def test_a_label_reads_the_records_nested_in_a_json_document_at_a_pointer_and_keeps_their_places(root: Path):
+    # two made-up chat logs, each a list of conversations whose messages are nested one level down
+    for name, users in (("a", ("wren", "moss")), ("b", ("fern",))):
+        doc = [{"user": u, "messages": [{"role": "user", "text": f"{u} asks"}, {"role": "assistant", "text": f"stop {u}'s job"}]}
+               for u in users]
+        (root / "chat" / f"{name}.json").write_text(json.dumps(doc))
+    r = run(root, "label", "stops", "--in", "chat/*.json#/*/messages", "--regex", "stop")
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "  stops: yes 3 · no 3 of 6 records" in r.stdout
+    st = Store(root)
+    # each record is a message, by its own place in its file
+    yes = LB.page(st, "stops", "yes")
+    assert [x["ref"] for x in yes["records"]] == ["chat/a.json#/0/messages/1", "chat/a.json#/1/messages/1", "chat/b.json#/0/messages/1"]
+    assert yes["records"][0]["words"].endswith("stop wren's job")
+    # the model reads the messages themselves, by those refs
+    run(root, "label", "asks", "--in", "chat/a.json#/*/messages", "--prompt", "The message asks for something.")
+    w = json.loads(run(root, "label", "asks", "--waiting").stdout)
+    assert [u["ref"] for u in w["units"]] == [f"chat/a.json#/{i}/messages/{j}" for i in (0, 1) for j in (0, 1)]
+    assert "wren asks" in w["units"][0]["text"]
+    # a pointer that names nothing says what the document holds; one on a file that is not JSON says why
+    r = run(root, "label", "none", "--in", "chat/a.json#/turns", "--regex", "x")
+    assert r.returncode != 0 and "names no records" in r.stdout + r.stderr and "#/*/messages" in r.stdout + r.stderr
+    r = run(root, "label", "none", "--in", "chat/room.jsonl#/x", "--regex", "x")
+    assert r.returncode != 0 and "no JSON document" in r.stdout + r.stderr
+
+
 def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     r = run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.", "--reason")
     assert r.returncode == 0, r.stdout + r.stderr

@@ -33,6 +33,8 @@ const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'],
 
 /** What a key on the line does, once the word window closed (it cannot be undone). */
 export async function fixKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
+  // a key no line takes reads nothing: a key's hook has a few milliseconds of its own time
+  if (!Object.values(KEYS).some(ks => ks.includes(k))) return null
   const l = await fixLineNow($)
   if (!l || !(KEYS[l.kind] ?? []).includes(k)) return null
   return { later: () => pressLine($, l.id, l.kind, k) }

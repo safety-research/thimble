@@ -51,7 +51,7 @@ import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { squeezeBar, squeezeHidesCard, squeezeView } from '../squeeze/seam'
+import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
@@ -93,17 +93,39 @@ async function standNow($: Engine): Promise<Stand> {
   return ((await $.state.get(STAND)).value ?? null) as Stand
 }
 
+// The tray and the card ] reached, as this module last wrote or read them: it alone writes them, so the copy is the
+// state's. A key at an empty prompt reads the copy (trayHolds, trayKey), since Claude Code gives a key's hook a few
+// milliseconds of its own time and each read of the state costs some of it under load. A drawing reads the state
+// itself, so a change draws again.
+let kept: { tray: Tray; stand: Stand } | null = null
+
+async function keptNow($: Engine): Promise<{ tray: Tray; stand: Stand }> {
+  return kept ?? (kept = { tray: await trayNow($), stand: await standNow($) })
+}
+
+async function writeTray($: Engine, tray: Tray): Promise<void> {
+  const next = tray && Array.isArray(tray.stack) && tray.stack.length ? tray : null
+  await $.state.set(TRAY, next as never)
+  kept = { ...(await keptNow($)), tray: next }
+}
+
+async function writeStand($: Engine, stand: Stand): Promise<void> {
+  await $.state.set(STAND, stand as never)
+  kept = { ...(await keptNow($)), stand }
+}
+
 /** Whether the tray holds the keys: it is open, or a card ] reached stands. */
 export async function trayHolds($: Engine): Promise<boolean> {
-  return !!(await trayNow($)) || !!(await standNow($))
+  const k = await keptNow($)
+  return !!k.tray || !!k.stand
 }
 
 /** The tray as it stands now: what a question asked with it open carries for Claude follows its top (core/tell.ts),
  *  and nothing once it closed. */
 async function setTray($: Engine, tray: Tray): Promise<void> {
   const next = tray && tray.stack.length ? tray : null
-  await $.state.set(TRAY, next as never)
-  if (next) await $.state.set(STAND, null as never)
+  await writeTray($, next)
+  if (next) await writeStand($, null)
   const f = top(next) as Frame | null
   await tellAtNextPrompt($, 'tray', f ? scopeText(f, await infoOf($, f)) : '')
 }
@@ -300,7 +322,7 @@ async function toggleCode($: Engine): Promise<void> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) return
-  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, open: f.open === 'code' ? null : 'code', page: 0, skip: 0 }] } as never)
+  await writeTray($, { stack: [...tray.stack.slice(0, -1), { ...f, open: f.open === 'code' ? null : 'code', page: 0, skip: 0 }] })
 }
 
 /** m on a tray taller than the room above the bar: its next rows, and from the top again after the last. `skip`: the
@@ -309,14 +331,14 @@ async function setPage($: Engine, page: number, skip = 0): Promise<void> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) return
-  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, page, skip }] } as never)
+  await writeTray($, { stack: [...tray.stack.slice(0, -1), { ...f, page, skip }] })
 }
 
 /** A card ] reached takes the keys, its own first, and shows framed in focus. */
 async function standOn($: Engine, row: string, card: string): Promise<void> {
   await setTray($, null)
   await setFocus($, card)
-  await $.state.set(STAND, { row, card } as never)
+  await writeStand($, { row, card })
   const t = await turnOfRow($, row)
   if (t?.answer) await pickAnswer($, t.answer)
   await reveal($, { row, card })
@@ -381,21 +403,22 @@ async function expand($: Engine, f: Frame): Promise<void> {
 
 /** Whether the squeeze chips hold the keys now (their items show as the bar's focus): [ and ] are theirs then. */
 async function chipsOpen($: Engine): Promise<boolean> {
-  try { return ((await squeezeBar($, featureOn, false)) ?? []).some(x => x?.focus) } catch { return false }
+  try { return await squeezeHolds($) } catch { return false }
 }
 
 /** The tray's keys at an empty prompt (hooks/keys.ts takes them as a Take): ] and [ always (but while the squeeze chips
  *  are open at rest), its own while it is open, a's and 0 on a card ] reached. */
 export async function trayKey($: Engine, key: string, until = 0): Promise<Any | null> {
-  const tray = await trayNow($)
-  const stand = tray ? null : await standNow($)
+  const k = await keptNow($)
+  const tray = k.tray
+  const stand = tray ? null : k.stand
   if (key === ']' || key === '[') {
     if (!tray && !stand && (await chipsOpen($))) return null
     return { now: () => stepMark($, key === ']' ? 1 : -1) }
   }
   if (stand) {
     if (key === 'a') return { later: () => askCard($, stand, true) }
-    if (key === '0') return { now: () => $.state.set(STAND, null as never) }
+    if (key === '0') return { now: () => writeStand($, null) }
     return null
   }
   const f = top(tray) as Frame | null
@@ -456,7 +479,7 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
     return [
       { id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askCard($, stand) },
       ...(await steps()),
-      { id: 'tray-0', key: '0', words: 'back', focus: true, press: () => $.state.set(STAND, null as never) },
+      { id: 'tray-0', key: '0', words: 'back', focus: true, press: () => writeStand($, null) },
     ]
   }
   const f = top(tray) as Frame | null
@@ -767,8 +790,8 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
 
 /** A /clear or a /resume (hooks/turnover.ts): the tray on the earlier conversation's citations closes. */
 export async function turnTray($: Engine): Promise<void> {
-  await $.state.set(TRAY, null as never)
-  await $.state.set(STAND, null as never)
+  await writeTray($, null)
+  await writeStand($, null)
 }
 
 export const registerTray: Register = on => {
@@ -780,7 +803,7 @@ export const registerTray: Register = on => {
         const f = top(await trayNow($)) as Frame | null
         if (f) {
           pendingAbout = aboutOf(f, await infoOf($, f))
-          await $.state.set(TRAY, null as never)
+          await writeTray($, null)
         } else pendingAbout = null
       }
     } catch {

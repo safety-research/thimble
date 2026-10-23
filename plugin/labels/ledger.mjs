@@ -20,6 +20,7 @@
 // vP value, rP record, cP check, pg-up, pg-down; P a JSON list); `hotkey` the key that presses it, which Claude Code
 // draws before it (`1: yes`), so a run with one takes width(hotkey) + 2 more cells.
 import { cut, cutWords, textWidth } from '../core/text.js'
+import { howMade } from './use.mjs'
 
 export const NONE = '-'
 const width = textWidth
@@ -124,8 +125,6 @@ export function scopeWords(l, show = p => p) {
   if (l.checked) parts.push(`you checked ${num(l.checked)}: ${num(l.agree)} agree, ${num(l.disagree)} changed`)
   return parts.join(' · ')
 }
-
-const KIND = { code: 'code', regex: 'regex', prompt: 'prompt', set: 'values Claude gave' }
 
 // ------------------------------------------------------------------------------------------------ rows
 
@@ -451,7 +450,7 @@ export function examples(l, value, page, o) {
 
 /** The definition in place of the examples: its kind, the rule whole (a code label's as code), what it went over. */
 export function definition(l, w, show = p => p) {
-  const rows = [[{ s: 'definition', bold: true }, { s: ` · ${KIND[l.kind] ?? String(l.kind || '')}`, tone: 'dim' }]]
+  const rows = [[{ s: 'definition', bold: true }, { s: ` · ${howMade(l.kind) || String(l.kind || '')}`, tone: 'dim' }]]
   const rule = String(l.rule || '').replace(/\s+$/, '')
   if (!rule) rows.push([{ s: '  no rule: Claude gave each record its value', tone: 'dim' }])
   else if (l.kind === 'code') rows.push({ code: rule })
