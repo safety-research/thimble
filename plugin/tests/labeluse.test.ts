@@ -4,10 +4,10 @@
 // colors; a large label run's ask waits above the bar and in the bar, its key acts once the word window closed, the
 // choice runs as the person and Claude hears it with the next prompt; a feed line read again never brings an answered
 // ask back. All data is made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 import { colorOf } from '../labels/pane'
-import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelRowEl, labelsUnderAnswer, labelsUnderCard, resetLabelUse } from '../labels/use'
+import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelRowEl, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -110,8 +110,11 @@ test('a card shows the labels its turn ran before it; the answer only those no c
   await w.set('card', { id: card, version: 1, title: 'Spam by agent', calls: {} }, card)
   // the card names `yes` in a color of its own in its legend, and `no` in none
   await w.set('cardTree', { gen: 1, width: 60, seq: 1, tree: { t: 'Box', c: [{ t: 'Text', p: { color: '#b2c24f' }, c: ['■'] }, { t: 'Text', c: [' yes  no'] }] } }, card)
-  // the labels are read after the drawing that asked, which draws again
+  // a drawing reads nothing: the labels are read from a hook (the session's start, a turn's end, a label command)
   expect(await labelsUnderCard(w.$, ELS, card, 80)).toEqual([])
+  await w.flush()
+  expect(w.ran).toEqual([])
+  needLabelList(w.$)
   await w.flush()
   const under = await labelsUnderCard(w.$, ELS, card, 80)
   expect(textOf(under)).toBe('label spam · read by Claude · 420 records  ● yes  ● no')
@@ -122,6 +125,64 @@ test('a card shows the labels its turn ran before it; the answer only those no c
   expect(await labelsUnderAnswer(w.$, ELS, 'r1', 80)).toEqual([])
   // the read ran once, as the person's (`thimble label --json`)
   expect(w.ran.filter(a => a.join(' ') === 'label --json').length).toBe(1)
+})
+
+test('a read that fails keeps the rows as last read; a read asked while one runs reads once more after it', async () => {
+  const LIST = [{ name: 'spam', kind: 'regex', values: ['yes', 'no'], records: 12 }]
+  let fail = false
+  const w = engine(args => (args[0] === 'label' && args[1] === '--json' ? (fail ? { code: 1, out: 'thimble label: a made-up failure' } : { out: LIST }) : { out: {} }))
+  const card = 'c00000000000b2'
+  await w.set('answerTurns', ['t1'])
+  await w.set('answerTurn', { turnId: 't1', n: 1, rows: ['r1'], answer: 'r1', reason: 'answer', startedAt: 1, endedAt: 2, seq: 2, labels: [{ name: 'spam', args: [], toolUseId: 'b1', seq: 1, ok: true }], cards: [{ id: card, toolUseId: 'k1', seq: 2 }] }, 't1')
+  await w.set('card', { id: card, version: 1, title: 'Spam', calls: {} }, card)
+  needLabelList(w.$)
+  await w.flush()
+  expect(textOf(await labelsUnderCard(w.$, ELS, card, 80))).toBe('label spam · regex · 12 records  ● yes  ● no')
+  fail = true
+  needLabelList(w.$)
+  await w.flush()
+  expect(textOf(await labelsUnderCard(w.$, ELS, card, 80))).toBe('label spam · regex · 12 records  ● yes  ● no')
+  // two hooks ask while a read runs: one more read after it, not two
+  fail = false
+  const before = w.ran.length
+  needLabelList(w.$)
+  needLabelList(w.$)
+  needLabelList(w.$)
+  await w.flush()
+  expect(w.ran.length - before).toBe(2)
+})
+
+test("a `thimble label` command of Claude's reads the labels again from its hook; any other command does not", async ($, on) => {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' })
+  const clock = mock.clock(on, { now: 0 })
+  const reads: string[][] = []
+  on('session.id', () => ({ value: 's-labeluse' }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('fs.read', () => ({ value: '' }))
+  on('fs.exists', () => ({ value: false }))
+  on('fs.write', () => ({ value: undefined }))
+  on('fs.stat', () => ({ value: { kind: 'other', size: 0, mtimeMs: 0, isLink: false } }))
+  on('env.set', () => ({ value: {} }))
+  on('command.register', () => ({ value: { command: 'thimble-settings' } }))
+  on('process.run', (_$: unknown, e: { argv: string[] }) => {
+    if (e.argv.slice(1).join(' ') === 'label --json') reads.push(e.argv)
+    const out = e.argv.slice(1).join(' ') === 'label --json' ? '[{"name": "spam", "values": ["yes", "no"]}]' : '{}'
+    return { value: { exitCode: 0, stdout: out, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
+  on('tool.call', () => ({ result: '' }) as never)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await clock.advance(100)
+  const n = reads.length
+  expect(n).toBeGreaterThan(0)
+  await $.tool.call({ tool: 'Bash', command: 'ls runs' } as never)
+  await clock.advance(100)
+  expect(reads.length).toBe(n)
+  await $.tool.call({ tool: 'Bash', command: 'thimble label spam --in chat.jsonl --regex "(?i)buy now"' } as never)
+  await clock.advance(100)
+  expect(reads.length).toBe(n + 1)
 })
 
 test('a large label run asks above the bar and in the bar; its key acts after the word window and runs as the person; Claude hears the choice', async () => {

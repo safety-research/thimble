@@ -9,6 +9,8 @@
 //   sentenceOf(text, mark)     -> the sentence that holds a mark, on one line, each mark as `[words]`
 //   sentenceSpan(text, mark)   -> where that sentence stands in the text, [start, end)
 //   withRewrites(text, items)  -> the text with the sentences its marks' checks rewrote in place of its own
+//   rewritesIn(text, items)    -> that text, and the marks whose rewrite stands in it
+//   withCorrections(text, items) -> the text with each corrected mark's words in place of its own
 //   plainSentence(sentence)    -> that sentence as a person reads it: no markdown, a table row's cells joined by ` · `
 //   withoutMarks(text)         -> the text with each mark as its words alone (marks switched off)
 //   blocks(text)               -> the markdown's blocks with their offsets
@@ -114,41 +116,104 @@ export function sentenceSpan(text, mark) {
  * The text with the sentences its checks rewrote: `items` are the text's marks' checks by their place (marks/store.ts
  * MarkItem), and a corrected one's `rewrite` is the sentence that stands in place of its own, written as sentenceOf
  * writes one (each citation `[words]`, engine/kernel/evidence.py sentence_rewrite). The white space around the sentence
- * stays; a second rewrite of one sentence is left out. The text as it was when the rewritten one would not hold the
- * same number of marks, so each mark keeps its place among them.
+ * stays; a second rewrite of one sentence is left out. Each rewrite stands or not on its own: one that would not hold
+ * the marks of the sentence it replaces leaves that sentence as it was. `placed`: the marks whose rewrite stands.
  */
-export function withRewrites(text, items) {
+export function rewritesIn(text, items) {
   const s = String(text || '')
-  const spans = marksIn(s).flatMap((m, k) => (items[k]?.status === 'corrected' && String(items[k]?.rewrite || '').trim() ? [{ span: sentenceSpan(s, m), sentence: String(items[k].rewrite) }] : []))
+  const spans = marksIn(s).flatMap((m, k) => (items[k]?.status === 'corrected' && String(items[k]?.rewrite || '').trim() ? [{ k, span: sentenceSpan(s, m), sentence: String(items[k].rewrite) }] : []))
     .sort((x, y) => y.span[0] - x.span[0])
   let out = s
   let floor = Infinity
-  for (const { span: [a, b], sentence } of spans) {
+  const placed = new Set()
+  for (const { k, span: [a, b], sentence } of spans) {
     if (b > floor) continue
     const raw = s.slice(a, b)
     const lead = raw.match(/^\s*/)[0]
     const trail = raw.slice(lead.length).match(/\s*$/)[0]
-    out = out.slice(0, a) + lead + asMarks(sentence) + trail + out.slice(b)
+    const body = asMarks(sentence, raw)
+    if (body == null) continue
+    out = out.slice(0, a) + lead + body + trail + out.slice(b)
     floor = a
+    placed.add(k)
   }
-  return marksIn(out).length === marksIn(s).length ? out : s
+  return { text: out, placed }
 }
 
-/** A sentence written as sentenceOf writes one, each citation `[words]` a mark again (`[words](#)`). */
-function asMarks(sentence) {
-  let out = ''
+/** The text with the sentences its checks rewrote (rewritesIn). */
+export function withRewrites(text, items) {
+  return rewritesIn(text, items).text
+}
+
+/** Each `[` and the `]` that balances it, as engine/kernel/evidence.py citations_of reads a sentence: brackets inside
+ *  the words stay the words', a `\` escapes the character after it, and code is read as words are. [start, end). */
+function bracketGroups(s) {
+  const out = []
   let i = 0
-  while (i < sentence.length) {
-    if (sentence[i] !== '[') { out += sentence[i++]; continue }
+  while (i < s.length) {
+    if (s[i] !== '[') { i += s[i] === '\\' ? 2 : 1; continue }
     let depth = 0
-    let close = -1
-    for (let j = i; j < sentence.length; j++) {
-      if (sentence[j] === '[') depth++
-      else if (sentence[j] === ']' && --depth === 0) { close = j; break }
+    let j = i
+    for (; j < s.length; j++) {
+      if (s[j] === '\\') { j++; continue }
+      if (s[j] === '[') depth++
+      else if (s[j] === ']' && --depth === 0) break
     }
-    if (close < 0) { out += sentence.slice(i); break }
-    out += `${sentence.slice(i, close + 1)}(#)`
-    i = close + 1
+    if (j >= s.length) break
+    out.push([i, j + 1])
+    i = j + 1
+  }
+  return out
+}
+
+/**
+ * A rewrite, written as sentenceOf writes one, as the sentence `raw` it replaces is written: the bracket groups of
+ * both stand in the same order (the validator keeps every other citation of the sentence), and each group takes the
+ * role its place had in `raw`: a mark's group becomes a mark again (`[words](#)`), a link's keeps its target
+ * (`[the log](a.log)`, its target put back when the rewrite wrote the words alone), and brackets that were neither
+ * (`[x]` in code, or as written) stay as written. Null when it cannot hold the marks of `raw`: another number of
+ * groups, or marks lost.
+ */
+function asMarks(sentence, raw) {
+  const was = bracketGroups(raw).map(([a, b]) => {
+    if (raw.startsWith('(#)', b)) return { kind: 'mark' }
+    const link = /^\(([^)\n]*)\)/.exec(raw.slice(b))
+    return link ? { kind: 'link', target: link[1] } : { kind: 'words' }
+  })
+  const groups = bracketGroups(sentence)
+  if (groups.length !== was.length) return null
+  let out = ''
+  let at = 0
+  groups.forEach(([a, b], i) => {
+    out += sentence.slice(at, b)
+    const role = was[i]
+    if (role.kind === 'mark' && !sentence.startsWith('(#)', b)) out += '(#)'
+    if (role.kind === 'link' && sentence[b] !== '(') out += `(${role.target})`
+    at = b
+  })
+  out += sentence.slice(at)
+  return marksIn(out).length === marksIn(raw).length ? out : null
+}
+
+/**
+ * The text with each correction's words in place of its mark's words (`[shown](#)` for `[words](#)`), so what the
+ * person reads is the text the features place their words on (an explainer's, a heads-up's). A mark's correction
+ * stands when its check corrected it with other words and neither narrowed it (its words stay, only a part is cited)
+ * nor rewrote its sentence (rewritesIn), and when the words hold as a mark's (the text keeps its marks).
+ */
+export function withCorrections(text, items) {
+  const s = String(text || '')
+  const ms = marksIn(s)
+  let out = s
+  for (let k = ms.length - 1; k >= 0; k--) {
+    const it = items[k]
+    const m = ms[k]
+    const shown = String(it?.shown ?? '')
+    if (it?.status !== 'corrected' || it.narrowed || it.rewrite || !shown.trim() || shown === m.words) continue
+    const next = out.slice(0, m.start + 1) + shown + out.slice(m.start + 1 + m.words.length)
+    const now = marksIn(next)
+    if (now.length !== ms.length || now[k].words !== shown) continue
+    out = next
   }
   return out
 }

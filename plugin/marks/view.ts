@@ -175,9 +175,13 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     let e = k
     while (e + 1 < runs.length && runs[e + 1]!.mark === r.mark) e++
     const look = o.looks[r.mark]
-    // a correction may hold markdown (a file's line as written): it draws as the reply's own words would
+    // a correction may hold markdown (a file's line as written): it draws as the reply's own words would. The text
+    // usually holds the corrected words already (message.js withCorrections, rewritesIn), so its own runs, with the
+    // spans on them, stand
     const own = runs.slice(k, e + 1)
-    if (look?.status === 'corrected' && look.shown) out.push(...(look.narrowed ? narrowRuns(own, look.shown) : inline(look.shown, 0, look.shown.length).map((x: Run) => ({ ...x, mark: r.mark }))))
+    const fixed = look?.status === 'corrected' && look.shown && !look.narrowed ? inline(look.shown, 0, look.shown.length).map((x: Run) => ({ ...x, mark: r.mark })) : null
+    if (look?.status === 'corrected' && look.shown && look.narrowed) out.push(...narrowRuns(own, look.shown))
+    else if (fixed && runsText(fixed) !== runsText(own)) out.push(...fixed)
     else out.push(...own)
     if (look?.status === 'checking') out.push({ s: ` ${o.spin}`, mark: r.mark, tag: 'spin' })
     if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
@@ -376,6 +380,24 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     i = j + 1
   }
   return Box({ flexDirection: 'column', marginTop: 1, children: rows })
+}
+
+/** A span the features placed on the words Claude wrote that the check of the citations changed, so it stands on no
+ *  words of the reply now: its words as they were, in its look, and what it is. */
+export type LostSpan = { words: string; kind: string; look: SpanLook; label: string; onPress?: () => unknown }
+
+/** One line under the reply for each span whose words the check changed: the words in the span's fill, then what it is
+ *  and why it is not on the reply's words, a press that opens it as the span would. Nothing when none is lost. */
+export function lostSpansEl(els: Any, lost: LostSpan[], key: string): Any | null {
+  if (!lost.length) return null
+  const { Box, Button, Text } = els
+  return Box({ key, marginLeft: 2, flexDirection: 'column', children: lost.map((l, i) => {
+    const { tint: _tint, ...look } = l.look
+    const words = [Text({ key: 'w', ...look, children: l.words }), Text({ key: 'd', dimColor: true, children: ` ${l.kind} · the check of the citations changed these words` })]
+    return l.onPress
+      ? Button({ key: `${key}-${i}`, plain: true, label: `${l.label} (the check changed its words)`.slice(0, 120), hover: { bold: true }, onPress: () => l.onPress!(), children: [Text({ key: 't', children: words })] })
+      : Text({ key: `${key}-${i}`, children: words })
+  }) })
 }
 
 export type FooterOpts = { key: string; checking: number; spin: string }

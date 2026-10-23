@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { blocks, inline, marksIn, plainSentence, runsText, sentenceOf, tableOf, withoutMarks, withRewrites, wrapRuns } from '../message.js'
+import { blocks, inline, marksIn, plainSentence, rewritesIn, runsText, sentenceOf, tableOf, withCorrections, withoutMarks, withRewrites, wrapRuns } from '../message.js'
 
 const words = text => marksIn(text).map(m => m.words)
 
@@ -49,6 +49,39 @@ test("a sentence a check rewrote stands in place of the reply's, its citations m
   assert.equal(marksIn(out).length, 2)
   // a sentence that would not hold the same marks leaves the text as it was
   assert.equal(withRewrites(text, [{ status: 'corrected', rewrite: '- agent-07 wrote [“yes, that was me”].' }]), text)
+})
+
+test("a rewrite in a sentence with a link stands whole: the link keeps its target, and the cited words are never glued into the old sentence", () => {
+  const text = 'Nightly runs.\nThe nightly run nightly-007 passed [with 0 errors](#) (see [the log](runs/n7.log)). Then [3](#) more ran.'
+  const ms = marksIn(text)
+  assert.equal(sentenceOf(text, ms[0]), 'The nightly run nightly-007 passed [with 0 errors] (see [the log](runs/n7.log)).')
+  const fixed = { status: 'corrected', shown: 'failed with 2 errors', rewrite: 'The nightly run nightly-007 [failed with 2 errors] (see [the log]).' }
+  const got = rewritesIn(text, [fixed, { status: 'verified', shown: '3' }])
+  assert.equal(got.text, 'Nightly runs.\nThe nightly run nightly-007 [failed with 2 errors](#) (see [the log](runs/n7.log)). Then [3](#) more ran.')
+  assert.deepEqual([...got.placed], [0])
+  // the link written whole stays as written
+  assert.equal(withRewrites(text, [{ ...fixed, rewrite: 'The nightly run nightly-007 [failed with 2 errors] (see [the log](runs/n7.log)).' }]), got.text)
+  // brackets that are neither a mark nor a link (in code) stay as written, and the sentence still stands
+  const code = 'Run `x[0]` passed [with 0 errors](#).'
+  assert.equal(withRewrites(code, [{ status: 'corrected', rewrite: 'Run `x[0]` [failed with 2 errors].' }]), 'Run `x[0]` [failed with 2 errors](#).')
+  // a rewrite that cannot hold the sentence's marks leaves that sentence, and only that one, as it was
+  const two = 'A [1](#) here. B [2](#) there.'
+  const one = rewritesIn(two, [{ status: 'corrected', rewrite: 'A [1] [x] here.' }, { status: 'corrected', rewrite: 'B [two] there.' }])
+  assert.equal(one.text, 'A [1](#) here. B [two](#) there.')
+  assert.deepEqual([...one.placed], [1])
+})
+
+test('a correction\'s words stand in place of its mark\'s words, so features place their words on what is shown; a narrowing or a rewrite does not', () => {
+  const text = 'Of the runs, [12 of 40](#) failed, [all](#) on [Tuesday at noon](#).'
+  const items = [
+    { status: 'corrected', shown: '11 of 40' },
+    { status: 'verified', shown: 'all' },
+    { status: 'corrected', shown: 'noon', narrowed: true },
+  ]
+  assert.equal(withCorrections(text, items), 'Of the runs, [11 of 40](#) failed, [all](#) on [Tuesday at noon](#).')
+  assert.equal(withCorrections(text, [{ status: 'corrected', shown: '11 of 40', rewrite: 'Of the runs, [11 of 40] failed.' }]), text)
+  // words that would not hold as a mark's (an unbalanced bracket) leave the mark's words
+  assert.equal(withCorrections(text, [{ status: 'corrected', shown: '11 of [40' }]), text)
 })
 
 test('a block with marks lays out as runs, each mark one group of runs with its own bold and code', () => {

@@ -31,9 +31,9 @@ const answer = (requestId: string, text: string) => ({ plugin: 'thimble', compon
 const above = (maxRows = 20) => ({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 100, scroll: { offset: 0, bodyRows: maxRows - 1 }, view: {} }, viewport: view }) as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
 
-/** A resumed session with one answer, TEXT, whose citation the check left as `item`; `more`: the turn's cards, the
- *  message's parts and kept files to add (a card's meta.json under cards/<id>/). */
-async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string> } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
+/** A resumed session with one answer, TEXT (or `more.text`), whose citation the check left as `item`; `more`: the
+ *  turn's cards, the message's parts and kept files to add (a card's meta.json under cards/<id>/). */
+async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
@@ -44,7 +44,7 @@ async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { c
   on('session.messages', () => ({ value: [] }))
   const kept: Record<string, string> = {
     'marks/row-t1.json': JSON.stringify({ key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [item] }),
-    'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'how many failed?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: more.cards ?? [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: TEXT, at: 1, ...(more.parts ? { parts: more.parts } : {}) }] }),
+    'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'how many failed?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: more.cards ?? [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: more.text ?? TEXT, at: 1, ...(more.parts ? { parts: more.parts } : {}) }] }),
     ...(more.kept ?? {}),
   }
   const keptOf = (path: string) => Object.keys(kept).find(k => path.endsWith(`/${k}`))
@@ -380,4 +380,58 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   await clock.advance(2000)
   await $.prompt.edit(key(']'))
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
+})
+
+// a heads-up on the words of a citation the check corrected: it stays on the new words while they hold its term, and
+// when they do not, a line under the reply names it and opens it
+const CORRECTED = { n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11.' }
+const headsOn = (term: string) => ({ explain: { order: ['h1'], items: { h1: { id: 'h1', kind: 'heads', term, title: 'Retried runs count twice', bullets: ['Four runs were retried and count twice.'] } } } })
+const fills = (n: Any) => all(n).filter(x => x.type === 'Text' && x.props?.backgroundColor && !x.props?.bold)
+
+test('a heads-up inside a corrected citation stays on its words while the new words hold them', async ($, on) => {
+  await resumed($, on, CORRECTED, 's-tray-5', { parts: headsOn('of 40') })
+  const drawn = await $.ui.render(answer('row-t1', TEXT))
+  expect(textOf(drawn)).toContain('Of the runs, 11 of 40 failed on the p95 check.')
+  // the corrected words carry the heads-up's fill on the words it stands on, inside the citation
+  const cite = all(drawn).filter(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
+  expect(cite.map(textOf).join('')).toBe('11 of 40')
+  expect(fills(cite).map(textOf)).toEqual(['of 40'])
+  expect(textOf(drawn)).not.toContain('the check of the citations changed these words')
+})
+
+test('a heads-up whose words the check changed is not dropped silently: a line under the reply names it and opens it', async ($, on) => {
+  await resumed($, on, CORRECTED, 's-tray-6', { parts: headsOn('12 of 40') })
+  const drawn = await $.ui.render(answer('row-t1', TEXT))
+  expect(textOf(drawn)).toContain('Of the runs, 11 of 40 failed on the p95 check.')
+  const line = all(drawn).find(n => n.type === 'Button' && /the check changed its words/.test(String(n.props?.label)))
+  expect(textOf(line)).toBe('12 of 40 heads-up · the check of the citations changed these words')
+  expect(fills(line).map(textOf)).toEqual(['12 of 40'])
+  // a press opens the heads-up in the tray, as a press on its words would
+  const ui = await $.ui.mount(answer('row-t1', TEXT))
+  await ui.press({ key: line.props.key })
+  await ui.unmount()
+  expect(textOf(await $.ui.render(above(40)))).toContain('Retried runs count twice')
+})
+
+// a repair that rewrote the sentence of a citation, in a sentence that also holds a link: the new sentence stands in
+// place of the old one whole, never its cited words alone inside the old one (`passed failed with`)
+const NIGHTLY = 'The nightly run nightly-007 passed [with 0 errors](#) (see [the log](runs/n7.log)).'
+const REWROTE = {
+  n: 1, row: 'row-t1', words: 'with 0 errors', start: 35, end: 53, sentence: 'The nightly run nightly-007 passed [with 0 errors] (see [the log](runs/n7.log)).', status: 'corrected', repair: true,
+  shown: 'failed with 2 errors', was: 'with 0 errors', rewrite: 'The nightly run nightly-007 [failed with 2 errors] (see [the log]).', reason: 'The log ends with 2 errors.',
+}
+
+test("a repair's rewritten sentence stands whole in the reply, a link in it kept; one that cannot stand leaves Claude's words, failed", async ($, on) => {
+  await resumed($, on, REWROTE, 's-tray-7', { text: NIGHTLY })
+  const words = textOf(await $.ui.render(answer('row-t1', NIGHTLY)))
+  expect(words).toContain('The nightly run nightly-007 failed with 2 errors (see the log')
+  expect(words).toContain('runs/n7.log')
+  expect(words).not.toContain('passed')
+})
+
+test("a rewrite that cannot stand in the reply leaves Claude's sentence as written and its citation failed, never glued", async ($, on) => {
+  await resumed($, on, { ...REWROTE, rewrite: 'The nightly run [nightly-007] [failed with 2 errors] (see [the log]).' }, 's-tray-8', { text: NIGHTLY })
+  const words = textOf(await $.ui.render(answer('row-t1', NIGHTLY)))
+  expect(words).toContain('The nightly run nightly-007 passed with 0 errors × (see the log')
+  expect(words).not.toContain('failed with 2 errors')
 })

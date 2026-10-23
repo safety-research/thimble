@@ -21,7 +21,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
-import { markFocus, markPressed, passagesFor, rowDrawing, spansFor, textView, underText } from '../core/answerview'
+import { markFocus, markPressed, passagesFor, rowDrawing, spansFor, textView, underText, type Span } from '../core/answerview'
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
@@ -29,9 +29,9 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
-import { marksIn, withoutMarks, withRewrites } from './message.js'
+import { marksIn, rewritesIn, withCorrections, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
-import { footerEl, messageEl, type MarkLook } from './view'
+import { footerEl, lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,8 +49,21 @@ export function looksByWords(marks: { words: string }[], items: MarkItem[], runs
     const k = free.findIndex(it => norm(it.words) === norm(m.words))
     if (k < 0) return { n: 0, status: runs ? 'pending' : 'unchecked' }
     const it = free.splice(k, 1)[0]!
+    // a rewrite's cited words belong to its own sentence, not to the one this text says them in
+    if (it.status === 'corrected' && it.rewrite) return { n: it.n, status: 'failed' }
     return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
   })
+}
+
+/** The spans placed on the words Claude wrote (`was`, on `words`) that stand nowhere on the words shown (`now`): each
+ *  with its words as they were. An explainer's or a heads-up's span names what it is. */
+export function lostSpans(words: string, was: Span[], now: Span[]): LostSpan[] {
+  const kept = new Set(now.map(x => x.id))
+  return was.filter(x => !kept.has(x.id)).map(x => ({
+    words: words.slice(x.start, x.end).replace(/`/g, ''),
+    kind: /^heads up\b/.test(x.label) ? 'heads-up' : /^explain\b/.test(x.label) ? 'explainer' : 'mark',
+    look: x.look, label: x.label, ...(x.onPress ? { onPress: x.onPress } : {}),
+  }))
 }
 
 /** Why the checker may not make this call, or null (main's calls and other agents' are not this module's). */
@@ -146,10 +159,15 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const words = marksOn ? view.text : withoutMarks(view.text)
   const reply = marksOn ? await rowMarks($, row) : null
   const own = words === raw
-  // Claude's own words, with each sentence a check rewrote in place of the one Claude wrote
-  const text = own ? withRewrites(words, reply?.items ?? []) : words
+  // Claude's own words as the person reads them: each sentence a check rewrote in place of the one Claude wrote, and
+  // each corrected citation's words in place of its own, so the explainers and heads-ups stand on the words shown
+  const rewrote = own ? rewritesIn(words, reply?.items ?? []) : { text: words, placed: new Set<number>() }
+  const text = own ? withCorrections(rewrote.text, reply?.items ?? []) : words
   const marks = marksOn ? marksIn(text) : []
   const spans = await spansFor($, row, text, marks)
+  // a span that stood on words Claude wrote and stands nowhere now, since the check changed those words: a line under
+  // the reply says so and opens it
+  const lost = text !== words ? lostSpans(words, await spansFor($, row, words, marksIn(words)), spans) : []
   const under = await underText($, els, row, cols)
   if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length) {
     return own ? below() : below({ ...e, props: { ...e.props, text } })
@@ -165,7 +183,11 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const looks: MarkLook[] = own
     ? marks.map((_m: Any, k: number) => {
       const it = reply?.items[k]
-      return it ? { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) } : { n: k + 1, status: waits ? 'pending' : 'failed' }
+      if (!it) return { n: k + 1, status: waits ? 'pending' : 'failed' }
+      // a rewrite that cannot stand in the text leaves Claude's sentence, whose words the check did not confirm: its
+      // cited words alone in that sentence would read wrong
+      if (it.status === 'corrected' && it.rewrite && !rewrote.placed.has(k)) return { n: it.n, status: 'failed' }
+      return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
     })
     : looksByWords(marks, reply?.items ?? [], runs)
   const focusN = await markFocus($, row)
@@ -186,6 +208,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     })
     : await (own ? below() : below({ ...e, props: { ...e.props, text } }))
   const foot = reply?.last ? footerEl(els, { key: `mf-${row}`, spin, checking: reply.checking }) : null
-  const parts = [body, ...(foot ? [foot] : []), ...under]
+  const gone = lostSpansEl(els, lost, `ml-${row}`)
+  const parts = [body, ...(gone ? [gone] : []), ...(foot ? [foot] : []), ...under]
   return parts.length === 1 ? body : els.Box({ key: `ans-${row}`, flexDirection: 'column', children: parts })
 }

@@ -8,8 +8,11 @@
 // values: under a card in the colors the card gives them (a plain dim dot where it gives none, so the row never shows
 // a color the card does not use), under an answer in the label's own colors (the labels pane's). An answer gets a row
 // only for the labels its turn used that none of its cards shows. A press on the name opens the label in the labels
-// pane; a press on a value opens it on that value's records. The labels are read once per change of the labels
-// (labels.ts labelsData, `thimble label --json`, the person's read), after the drawing that asked, which draws again.
+// pane; a press on a value opens it on that value's records. The labels are read from hooks, never from a drawing
+// (`thimble label --json`, the person's read): at each load of the plugin, after each of main's turns, after a
+// `thimble label` command and after the person's answer to an ask; the rows draw what was last read. Claude Code stops
+// every call a drawing made that still runs when a newer drawing replaces it, so a read started there could end
+// `aborted` and leave the rows empty.
 //
 // The ask. A --prompt label over more than a sample of records (engine/kernel/estimate.py) does not start: the kernel
 // writes a `label_ask` line in the change feed (core/feed.ts hands it to labelAskFromFeed), and the ask waits above
@@ -26,7 +29,8 @@
 //   labelAskBar($, on, preview)            its keys at the bar's left while it waits
 //   labelAskFromFeed($, ev)                a `label_ask` line of the kernel's change feed
 //   answerAsk($, choice, ask?)             the person's choice, as a press or a key gives it
-//   registerLabelUse                       nothing of its own: the feed, the keys and the drawings call in
+//   registerLabelUse                       the reads of the labels (session.start, turn.complete, a `thimble label`
+//                                          command); the feed, the keys and the drawings call in
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
@@ -36,7 +40,7 @@ import { labelsOf, turnOfRow, turnsNow } from '../core/answers'
 import { rootHere, runThimble } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
 import type { Take } from '../hooks/keys'
-import { labelFromFeed, labelGen, labelsChanged, labelsData } from './labels'
+import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
 import { ASK_KEYS, answerNote, askChoices, askOf, howMade, sampleOffered, tonesInTree, usedNames } from './use.mjs'
 
@@ -59,27 +63,51 @@ const VALUES_SHOWN = 8
 
 // ------------------------------------------------------------------------------------------------ the labels, read
 
-/** The folder's labels as last read, by folder; and the reads that run, by folder and labelGen. */
-const lists = new Map<string, { gen: number; list: Any[] }>()
-const reading = new Set<string>()
+/** The folder's labels as last read, by folder; the read that runs, by folder, and whether another is asked after it
+ *  (the labels changed while it ran). */
+const lists = new Map<string, Any[]>()
+const reading = new Map<string, Promise<void>>()
+const again = new Set<string>()
 
-/** The folder's labels (`thimble label --json`): read once per change of the labels, after the drawing that asked,
- *  which draws again; until then the list as it last stood, or null before the first read. */
-async function labelList($: Engine, root: string): Promise<Any[] | null> {
-  const gen = await labelGen($)
-  const kept = lists.get(root)
-  if (kept && kept.gen === gen) return kept.list
-  const key = `${root}|${gen}`
-  if (!reading.has(key)) {
-    reading.add(key)
-    $.clock.after(0, () => {
-      void labelsData($, { root })
-        .then(v => { lists.set(root, { gen, list: Array.isArray(v) ? v : [] }) })
-        .catch(() => { lists.set(root, { gen, list: [] }) })
-        .finally(() => { reading.delete(key); $.ui.invalidate('ui.render') })
-    })
+/** Read the folder's labels (`thimble label --json`) beside the session, and draw again once read. Asked from hooks
+ *  only (needLabelList: registerLabelUse, answerAsk, turnLabelUse). One read runs at a time per folder; one asked
+ *  while it runs reads once more after it, so the last read is after the newest change. A read that fails keeps the
+ *  list as it stood. */
+export async function readLabelList($: Engine): Promise<void> {
+  const root = await rootHere($)
+  if (!root) return
+  if (reading.has(root)) {
+    again.add(root)
+    return
   }
-  return kept?.list ?? null
+  const run = (async () => {
+    do {
+      again.delete(root)
+      try {
+        // read here, not through the pane's labelsData: its answers are kept per labelGen, which a hook beside this one
+        // may not have moved on yet when this reads
+        const r = await runThimble($, root, ['label', '--json'], { timeoutMs: 60000 })
+        const v = JSON.parse(r.stdout)
+        if (r.code === 0 && Array.isArray(v)) lists.set(root, v)
+      } catch {
+        // the rows keep the list as it stood; the next hook reads again
+      }
+      $.ui.invalidate('ui.render')
+    } while (again.has(root))
+  })().finally(() => { reading.delete(root) })
+  reading.set(root, run)
+  await run
+}
+
+/** Read the folder's labels a moment after the hook that asks (as bar/counts.ts needCounts counts), beside the
+ *  session. */
+export function needLabelList($: Engine): void {
+  $.clock.after(0, () => { void readLabelList($).catch(() => undefined) })
+}
+
+/** The folder's labels as last read, or null before the first read. A drawing reads nothing itself. */
+function labelList(root: string): Any[] | null {
+  return lists.get(root) ?? null
 }
 
 /** The labels named, as the folder holds them now (a name no label has any more is left out); null while read. */
@@ -87,7 +115,7 @@ async function usedOf($: Engine, names: string[]): Promise<UsedLabel[] | null> {
   if (!names.length) return []
   const root = await rootHere($)
   if (!root) return []
-  const list = await labelList($, root)
+  const list = labelList(root)
   if (!list) return null
   const out: UsedLabel[] = []
   for (const name of names) {
@@ -172,8 +200,8 @@ const asksSeen = new Set<string>()
  *  again). */
 export async function turnLabelUse($: Engine): Promise<void> {
   lists.clear()
-  reading.clear()
   await setLabelAsk($, null)
+  needLabelList($)
 }
 
 export async function labelAskNow($: Engine): Promise<LabelAsk | null> {
@@ -217,6 +245,7 @@ export async function answerAsk($: Engine, choice: Choice, given?: LabelAsk): Pr
   }
   await tellAtNextPrompt($, about, answerNote(a, choice, got))
   await labelsChanged($)
+  needLabelList($)
   if (choice !== 'cancel') labelFromFeed($, { name: a.name, root: a.root, t: `${a.ask}-${choice}` })
 }
 
@@ -257,11 +286,34 @@ export async function labelAskBar($: Engine, _on: (key: string) => boolean, _pre
   }))
 }
 
-export const registerLabelUse: Register = () => undefined
+/** A Bash command of Claude's that runs `thimble label` (labels/register.ts reads it alike). */
+const LABEL_COMMAND = /\bthimble\b[^\n|;&]*\blabel\b/
+
+export const registerLabelUse: Register = on => {
+  // the labels at each load of the plugin (a new or resumed session, a reload, a switch turned on)
+  on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
+    const r = await next(e)
+    needLabelList($)
+    return r
+  }).catch(($, e, next) => next(e))
+  // after each of main's turns, which may have run a label
+  on('turn.complete', { reason: /^(answer|aborted|refusal|error)$/ }, async ($, e, next) => {
+    const r = await next(e)
+    if (e.agentId === undefined) needLabelList($)
+    return r
+  }).catch(($, e, next) => next(e))
+  // a `thimble label` command of Claude's (main's or a fork's) may change a label
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const r = await next(e)
+    if (LABEL_COMMAND.test(String((e as { command?: unknown }).command || ''))) needLabelList($)
+    return r
+  }).catch(($, e, next) => next(e))
+}
 
 /** For tests: nothing read, no ask seen. */
 export function resetLabelUse(): void {
   lists.clear()
   reading.clear()
+  again.clear()
   asksSeen.clear()
 }
