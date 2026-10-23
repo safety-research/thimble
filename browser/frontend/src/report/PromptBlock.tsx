@@ -9,7 +9,6 @@ import { TextArea } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { bus } from '../lib/bus'
-import { demoStop } from '../lib/demo'
 import { useReportCtx } from './context'
 
 export interface PromptBlockProps {
@@ -39,7 +38,7 @@ export function PromptBlock({ block, editor }: PromptBlockProps) {
 
   const submit = async () => {
     const request = text.trim()
-    if (!request || busy || demoStop()) return
+    if (!request || busy) return
     setBusy(true)
     try {
       await (card ? submitCard : submitPrompt)(block.id, request)

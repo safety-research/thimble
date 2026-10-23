@@ -818,12 +818,6 @@ a.card:hover {
   color: var(--text-tertiary);
   font-size: var(--text-ui-sm);
 }
-/* a disabled composer with a tip (a demo page's): the hover reaches the composer, which shows the tip, through the
-   disabled field and send square, which take no pointer events of their own */
-.composer-disabled[data-tipped] .composer-text:disabled,
-.composer-disabled[data-tipped] .composer-send:disabled {
-  pointer-events: none;
-}
 .composer .field-mono {
   font: var(--type-mono);
 }

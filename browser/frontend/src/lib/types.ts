@@ -490,9 +490,6 @@ export interface Proposal {
   proposed_by: string
   /** the analyst asked for it (backend views.propose): it opens by itself once built (files/viewReady.ts) */
   asked?: boolean
-  /** the proposal of an orientation from before 0.8.0 whose view has not passed its checks yet: its card shows the
-   * build, the views bar not */
-  held?: boolean
   /** its view is switched off in Settings (backend views.views_off): the views bar leaves it out */
   off?: boolean
   status: ProposalStatus
@@ -1328,7 +1325,7 @@ export interface ExtensionViewRow {
 
 /** One extension added to thimble, as this workspace finds it (backend extensions.public): whether it runs here and
  * why not, this workspace's switch, whether it cannot run here whatever that switch says (`locked`), what it gives,
- * the settings it runs under, its orientation instructions and the offer to run them, and its views. */
+ * the settings it runs under, and its views. */
 export interface ExtensionRow {
   name: string
   version: string
@@ -1349,10 +1346,6 @@ export interface ExtensionRow {
   consent?: string
   /** whether its code runs in a sandbox; null for one with no code */
   sandboxed?: boolean | null
-  /** whether Run now can run its orientation here once it is on: its instructions, or its own orientation program */
-  orients?: boolean
-  /** whether Settings offers to run its orientation now: it came on after an orientation ran here */
-  offer?: boolean
   /** an extension thimble ships that is not added: turning its switch on adds it */
   addable?: boolean
   /** for one not added: the extensions thimble ships that adding it adds with it */
@@ -1377,12 +1370,11 @@ export interface LocalExtension {
   views: LocalViewRow[]
 }
 
-/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, whether an
- * orientation ran here, and the workspace's local extension. */
+/** `GET /ws/{c}/extensions`: the extensions added, the conflicts among those that run here, in words, and the
+ * workspace's local extension. */
 export interface Extensions {
   extensions: ExtensionRow[]
   conflicts: string[]
-  orientation_ran?: boolean
   local?: LocalExtension | null
 }
 
