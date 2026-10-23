@@ -54,6 +54,15 @@ command. The 0.10 browser workbench has a launcher of another name, `thimble-bro
 
 ## Install
 
+The simplest way is to ask Claude Code:
+
+```
+claude "install thimble from https://github.com/safety-research/thimble"
+```
+
+Claude asks whether you want the browser workbench too, runs the script below, helps you fix what is missing, and
+says how to use what it installed. To do it yourself:
+
 ```
 git clone https://github.com/safety-research/thimble
 cd thimble
@@ -117,6 +126,9 @@ The terminal plugin:
 2. Ask: "How many rows does this file have per value of its first column? Show it as a card."
 3. Claude answers with a card, and the numbers in its answer are underlined in purple, each with a spinner until the
    checker is done. The line above the prompt starts with `thimble` and says how much of the folder Claude has read.
+
+`examples/sample/runs.csv` in the checkout holds 40 made-up nightly test runs to try it on. Run `claude` in
+`examples/sample`, and ask: "Did the failures start after the config change? Show it as a card."
 
 The browser workbench:
 

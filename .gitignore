@@ -7,6 +7,7 @@ node_modules/
 plugin/.claude-plugin/types/
 # what thimble writes when a session runs in a folder of this checkout
 /thimble/
+/examples/sample/thimble/
 .claude/settings.local.json
 .claude/worktrees/
 .DS_Store
