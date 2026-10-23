@@ -25,7 +25,7 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-272 routes, 158 of them writes: 35 token, 1 code, 1 agent token, 127 cookie, 105 cookie or token, 1 media key, 2 none.
+278 routes, 163 of them writes: 35 token, 1 code, 1 agent token, 132 cookie, 106 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -83,8 +83,12 @@ knows the key.
 | POST | `/api/extensions/refresh` | extensions | token |
 | GET | `/api/feedback/download` | feedback_routes | cookie or token |
 | POST | `/api/feedback/reveal` | feedback_routes | cookie |
+| GET | `/api/fixes` | fixes | cookie or token |
+| POST | `/api/fixes/{fid}/apply` | fixes | cookie |
+| POST | `/api/fixes/{fid}/dismiss` | fixes | cookie |
 | POST | `/api/fixes/{fid}/share` | fix_share | cookie |
 | GET | `/api/fixes/{fid}/share/page` | fix_share | cookie or token |
+| POST | `/api/fixes/{fid}/undo` | fixes | cookie |
 | GET | `/api/health` | main | none |
 | GET | `/api/jobs` | jobs | cookie or token |
 | POST | `/api/module/ended` | module_bridge | token |
@@ -192,6 +196,8 @@ knows the key.
 | PUT | `/api/ws/{c}/filters` | concepts | cookie |
 | PUT | `/api/ws/{c}/filters/canvas/cards` | concepts | cookie |
 | DELETE | `/api/ws/{c}/filters/{scope}` | concepts | cookie |
+| POST | `/api/ws/{c}/fixes` | fixes | cookie |
+| POST | `/api/ws/{c}/fixes/{fid}/redo` | fixes | cookie |
 | GET | `/api/ws/{c}/instance` | agents | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types` | report_types | cookie or token |
 | GET | `/api/ws/{c}/investigations/{inv_id}/types/{slug}` | report_types | cookie or token |

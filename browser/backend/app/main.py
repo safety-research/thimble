@@ -142,7 +142,7 @@ ROUTER_MODULES = [
     "corpus", "transcripts", "source_keys", "source_events", "pdfs", "ledger", "investigation", "notebook", "concepts", "views", "cardtypes",
     "card_libs", "extensions",
     # the agent engine (main, threads, background agents) and the tools they call
-    "agents", "tools", "plans", "jobs", "verify",
+    "agents", "tools", "plans", "jobs", "verify", "fixes",
     # documents, and the report checks that comment on them (their runs shut down with the server); the citation
     # checks' Repair
     "report_types", "exports", "checks", "canvas_comments", "marks",

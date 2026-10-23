@@ -869,6 +869,14 @@ Filed {label}. {running} runs now, and code tickets run one at a time, so this o
 
 Filed {label}: {title}. {start}
 
+## file_dev_ticket-fix
+
+thimble's fixer works on this change as fix {id}, "{title}", in a copy of thimble, with this conversation as its context. The row above the composer shows how it goes. When the change passes thimble's checks, a notice at the top of the chat asks the analyst to use it, and thimble starts again with it after their click. Tell the analyst in one line.
+
+## file_dev_ticket-fix-failed
+
+The fixer did not start on this change: {why} Tell the analyst in one line.
+
 ## ticket-terminal
 
 This call filed nothing: code tickets run only in browser mode for now, since the analyst allows each one on its card there. Tell the analyst so in one line: to file it, they quit, run `thimble mode browser`, start `thimble` again and ask again.

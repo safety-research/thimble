@@ -29,6 +29,9 @@ os.environ.setdefault("THIMBLE_PROPOSE_VIEWS", "off")
 # 0.8's tests drive main as an interactive Claude Code session through the plugin's hooks and module: the server's own
 # runtime (app/runtime.py) is off, and the tests of the runtime turn it on.
 os.environ.setdefault("THIMBLE_RUNTIME", "off")
+# No fix of the person's thimble (app/fixes.py): file_dev_ticket and File a code ticket file code tickets then, and the
+# tests of the fixes turn them on.
+os.environ.setdefault("THIMBLE_FIXES", "off")
 # The suite's corpora are the synthetic ones, always: an inherited THIMBLE_DATA_DIR would point config.DATA_DIR at
 # real corpora. conftest is imported before any app module, so config reads this value.
 DATA = Path(tempfile.mkdtemp(prefix="thimble-tests-data-")).resolve()
@@ -44,6 +47,7 @@ REAL_HOMES = tuple(dict.fromkeys(os.path.abspath(os.path.expanduser(h)) for h in
 SUITE_HOME = Path(tempfile.mkdtemp(prefix="thimble-tests-home-")).resolve()
 atexit.register(shutil.rmtree, SUITE_HOME, True)
 os.environ["THIMBLE_HOME"] = str(SUITE_HOME)
+os.environ["THIMBLE_PLUGIN_HOME"] = str(SUITE_HOME / "plugin-home")
 
 
 class RealHomeWrite(PermissionError):
@@ -200,6 +204,8 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
     """Every test's thimble home is its own tmp dir, so what the server records there never reaches the user's. A test's
     own THIMBLE_HOME still wins."""
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thimble-home"))
+    # the terminal plugin's home, where the person's fixes are kept (app/fixes.py)
+    monkeypatch.setenv("THIMBLE_PLUGIN_HOME", str(tmp_path / "plugin-home"))
 
 
 PLUGIN_TOKEN = "t0ken-of-the-test-server"
