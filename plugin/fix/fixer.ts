@@ -17,10 +17,11 @@ import type { EngineInterface } from 'claude-code'
 import { busyWhile } from '../bar/busy'
 import { failNotice } from '../bar/notice'
 import { spawnFork } from '../core/forks'
+import { thimbleHome } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
-import { type Fix, fixOf, jsonOf, kernelFix, refreshFixes, setFixLine } from './fixes'
+import { type Fix, fixesDir, fixOf, jsonOf, kernelFix, refreshFixes, setFixLine } from './fixes'
 import { screenCopy } from './screen'
 
 type Engine = EngineInterface
@@ -57,7 +58,7 @@ export async function fixOfAgent($: Engine, agentId: string | undefined): Promis
 
 /** The fixer's first message: the task (prompts/fixer.md), the words of each round, where it works, and a text copy
  *  of what thimble shows now. */
-function firstMessage(fix: Fix, earlier: boolean, task: string, by: Asker, screen: string): string {
+function firstMessage(fix: Fix, earlier: string | null, task: string, by: Asker, screen: string): string {
   const words = fix.words || []
   const asked = words.length > 1
     ? words.map((w, i) => `Round ${i + 1}: ${w}`).join('\n')
@@ -72,7 +73,7 @@ function firstMessage(fix: Fix, earlier: boolean, task: string, by: Asker, scree
     asked,
     '',
     `Your working folder is the copy: ${fix.work}.`,
-    ...(earlier ? [`An earlier change for this request, which did not fit or failed its tests, is in $HOME/earlier.patch; start from it when it helps.`] : []),
+    ...(earlier ? [`An earlier change for this request, which did not fit or failed its tests, is in ${earlier}; start from it when it helps.`] : []),
     '',
     'What thimble shows on the person\'s screen now, as text (the conversation above does not hold it):',
     '',
@@ -108,7 +109,7 @@ async function start($: Engine, fix: Fix, earlier: boolean, screen: string): Pro
     return `The fixer did not start (${cut(String((err as Error)?.message || err), 200)}).`
   }
   // no type: a fork of the session, which sees the conversation
-  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier, task, await askerOf($, fix.id), screen), description: `fix ${fix.id}: ${cut(fix.title, 40)}`, cwd: fix.work || undefined })
+  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier ? `${fixesDir(await thimbleHome($))}/tmp/${fix.id}/earlier.patch` : null, task, await askerOf($, fix.id), screen), description: `fix ${fix.id}: ${cut(fix.title, 40)}`, cwd: fix.work || undefined })
   if (r.deny !== undefined || !r.agentId) return `The fixer did not start (${cut(String(r.deny || 'no agent started'), 200)}).`
   await $.state.set(FIXERS, { ...(await fixers($)), [r.agentId]: fix.id } as never)
   const word = `fixing: ${cut(fix.title, 36)} · in a copy`

@@ -90,6 +90,7 @@ function setup() {
       Object.assign(fix, { state: 'on', work: null })
       return ok({ id: 1, reload: true, version: '0.10.2+fix.c0ffee1' })
     }
+    if (verb === 'redo') { Object.assign(fix, { state: 'working', refused: null }); return ok(fix) }
     if (verb === 'undo') { fix.state = 'off'; return ok({ id: 1, reload: true }) }
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
     if (verb === 'diff') return ok('diff --git a/plugin/bar/bar.tsx b/plugin/bar/bar.tsx\n-  coverage\n+  read\n')
@@ -313,6 +314,10 @@ test('a refused fix shows its whole reason: a long one on a row of its own, a sh
   rows = await fixLineRows(s.$, ELS, 110)
   expect(textOf(rows.at(-2))).toBe(`    Changed     1 file · ${s.fix.refused}`)
   expect(textOf(rows.at(-1))).toBe('    r redo · n later')
+  // r: a new fixer, told where the earlier change is
+  await (await fixKey(s.$, 'r'))!.later()
+  expect(s.spawns.length).toBe(2)
+  expect(String(s.spawns[1].prompt)).toContain(`is in ${HOME}/fixes/tmp/1/earlier.patch;`)
   const t = setup()
   t.fix.refused = 'its tests failed'
   await requested(t, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
