@@ -296,7 +296,10 @@ export async function turnAnswers($: Engine): Promise<void> {
 // ------------------------------------------------------------------------------------------------ the keys { }
 
 /** { and } at an empty prompt, while there are two answers or more: the keys act on the answer before or after the one
- *  they act on now (the newest gives them back to the latest turn). (hooks/keys.ts asks.) */
+ *  they act on now (the newest gives them back to the latest turn), and the chat moves to show it, with ▸ in place of
+ *  its ● (core/answerview.ts textView). The chat moves to the answer's own row, by its id: thimble draws a row in an
+ *  element of its own only when it changes the row, so a key of thimble's would name nothing on an answer drawn as
+ *  Claude Code draws it. (hooks/keys.ts asks, in the person's key press, where Claude Code moves the chat.) */
 export async function answerStepKey($: Engine, key: string): Promise<{ now: () => Promise<unknown>; undo: () => Promise<unknown> } | null> {
   if (key !== '{' && key !== '}') return null
   if ((await answerRows($)).length < 2) return null
@@ -304,7 +307,7 @@ export async function answerStepKey($: Engine, key: string): Promise<{ now: () =
   return {
     now: async () => {
       const row = await stepAnswer($, key === '{' ? -1 : 1)
-      if (row) await $.ui.scroll({ to: { key: `ans-${row}` }, block: 'nearest' }).catch(() => undefined)
+      if (row) await $.ui.scroll({ to: { requestId: row }, block: 'nearest' }).catch(() => undefined)
     },
     undo: () => $.state.set(SEL, was ?? null),
   }

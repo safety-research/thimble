@@ -111,7 +111,8 @@ test('a turn that ended in an error answered nothing; the keys act on the newest
   await back!.now!()
   expect(await actingRow(s.$)).toBe('t1-row-0')
   expect(await pickedRow(s.$)).toBe('t1-row-0')
-  expect(s.scrolled.at(-1)).toMatchObject({ to: { key: 'ans-t1-row-0' } })
+  // the chat moves to the picked answer's own row, which every answer has, whether thimble draws it or not
+  expect(s.scrolled.at(-1)).toMatchObject({ to: { requestId: 't1-row-0' } })
   // past the oldest answer nothing moves; } back to the newest gives the keys back to the latest turn
   await (await answerStepKey(s.$, '{'))!.now!()
   expect(await actingRow(s.$)).toBe('t1-row-0')
