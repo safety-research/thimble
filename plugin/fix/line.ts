@@ -5,6 +5,7 @@
 //   applied   ✓ <title> is on · thimble reloaded · u undo               If thimble stops loading: sh …/off.sh
 //   off       ○ <title> is off · thimble reloaded                        (until the next prompt)
 //   failed    × Fix 7 did not pass: <title> · <why>                     d diff · r redo · n not now
+//             (a <why> too long for the row, such as a refusal that names files, gets a row of its own)
 //   request   ◇ Saved as a request with no code: <title>                n ok · /thimble-fix lists it
 //   update    ↑ thimble 0.10.3 · 3 fixes carried · 1 needs redo         (a new release at session start; until the next
 //                                                                        prompt)
@@ -77,6 +78,7 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   const dim = (key: string, children: string) => Text({ key, dimColor: true, children })
   let first: Any[] = []
   let second: Any[] = []
+  let why: Any[] = []
   if (l.kind === 'ready' && f) {
     first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: 'Fix ready: ' }), Text({ key: 't', children: title }),
       dim('m', ` · ${sizeOf(f)} · tests ${f.tests === 'passed' ? 'passed in the sandbox' : f.tests || 'not run'}`)]
@@ -89,8 +91,12 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   } else if (l.kind === 'off') {
     first = [Text({ key: 'g', dimColor: true, children: '○ ' }), Text({ key: 't', children: `${title} is off` }), dim('m', ' · thimble reloaded · /thimble-fix turns it on again')]
   } else if (l.kind === 'failed') {
+    // the reason whole: after the title when it fits there, else on a row of its own
+    const reason = f?.error || 'its tests failed'
+    const fits = textWidth(`× Fix ${l.id} did not pass: ${title} · ${reason}`) <= width
     first = [Text({ key: 'g', color: 'error', children: '× ' }), Text({ key: 'h', children: `Fix ${l.id} did not pass: ` }), Text({ key: 't', children: title }),
-      dim('m', ` · ${cut(f?.error || 'its tests failed', Math.max(20, width - textWidth(title) - 30))}`)]
+      ...(fits ? [dim('m', ` · ${reason}`)] : [])]
+    if (!fits) why = [Text({ key: 'w', dimColor: true, wrap: 'wrap', children: `  ${reason}` })]
     second = [Text({ key: 'i', children: '  ' }), ...keyText(els, 'd', 'diff', 0), ...keyText(els, 'r', 'redo', 1), ...keyText(els, 'n', 'not now', 2)]
   } else if (l.kind === 'request') {
     first = [Text({ key: 'g', color: KEY_COLOR, children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
@@ -100,5 +106,6 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   } else if (l.kind === 'problem') {
     first = [Text({ key: 't', color: 'error', wrap: 'wrap', children: `× ${l.said || `fix ${l.id} did not go through`}` })]
   } else return []
-  return [rule('fix-rule-a'), row('fix-line-1', first), ...(second.length ? [row('fix-line-2', second)] : []), rule('fix-rule-b')]
+  return [rule('fix-rule-a'), row('fix-line-1', first), ...(why.length ? [row('fix-line-why', why)] : []),
+    ...(second.length ? [row('fix-line-2', second)] : []), rule('fix-rule-b')]
 }

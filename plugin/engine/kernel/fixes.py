@@ -28,7 +28,8 @@ is never edited here. Because Claude Code names a copy by the plugin's version, 
 release's version with the commit of mine after it (0.10.2+fix.4e1a9c2), written in live's working tree only.
 
 A fix may not change the files that keep the person safe (PROTECTED): the fix flow, the privacy scan, the sandbox and
-its settings, the install and update scripts, and lockfiles. Binary files are refused too.
+its settings, the hooks file and its command hooks, the launcher, thimble's scripts, and lock files. Binary files are
+refused too. thimble checks this when the fixer ends (done); the fixer's prompt does not list these files.
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -61,16 +62,20 @@ PLUGIN = Path(__file__).resolve().parents[2]
 STATES = ("working", "ready", "failed", "on", "off", "redo", "request", "sent", "saved", "released", "removed")
 PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 
-# the files a fix may not change: what keeps undo, off, the sandbox and the scan working (fnmatch patterns over the
-# repository's paths)
-PROTECTED = (
-    "plugin/engine/kernel/fixes.py", "plugin/engine/kernel/privacy.py", "plugin/fix/*", "plugin/prompts/fixer.md",
-    "plugin/prompts/fix-draft.md", "plugin/sandbox/*", "plugin/cards/argv.mjs", "plugin/hooks/hooks.json",
-    "plugin/hooks/temp-allow.sh", "plugin/hooks/temp_allow.py", "plugin/bin/*", "scripts/*",
-    "*package-lock.json", "*yarn.lock", "*pnpm-lock.yaml", "*uv.lock", "*poetry.lock", "*Cargo.lock",
-    "browser/scripts/*", "browser/backend/app/dev.py", "browser/backend/app/kernel_wrap.py",
-)
-PROTECTED_WHY = "it keeps you safe (the fix flow, the privacy scan, the sandbox, the install and update scripts, lockfiles)"
+# the files a fix may not change, by what each one is: what keeps undo, off, the sandbox and the scan working (fnmatch
+# patterns over the repository's paths). The refusal names each file with what it is.
+PROTECTED_KINDS = {
+    "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/fix/*", "plugin/prompts/fixer.md",
+                     "plugin/prompts/fix-draft.md", "browser/backend/app/dev.py"),
+    "the privacy scan": ("plugin/engine/kernel/privacy.py",),
+    "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "browser/backend/app/kernel_wrap.py"),
+    "the hooks file": ("plugin/hooks/hooks.json",),
+    "a command hook": ("plugin/hooks/temp-allow.sh", "plugin/hooks/temp_allow.py"),
+    "the launcher": ("plugin/bin/*",),
+    "thimble's scripts": ("scripts/*", "browser/scripts/*"),
+    "a lock file": ("*package-lock.json", "*yarn.lock", "*pnpm-lock.yaml", "*uv.lock", "*poetry.lock", "*Cargo.lock"),
+}
+PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
 
 
 class FixError(Exception):
@@ -539,6 +544,20 @@ def protected_of(paths: list[str]) -> list[str]:
     return [p for p in paths if any(fnmatch.fnmatch(p, pat) for pat in PROTECTED)]
 
 
+def _and(words: list[str]) -> str:
+    return " and ".join(words) if len(words) < 3 else ", ".join(words[:-1]) + ", and " + words[-1]
+
+
+def protected_why(paths: list[str]) -> str:
+    """The refusal for a fix that changes protected files: each file, with what it is, and why thimble refuses."""
+    kinds: dict[str, list[str]] = {}
+    for p in paths:
+        kind = next(k for k, pats in PROTECTED_KINDS.items() if any(fnmatch.fnmatch(p, pat) for pat in pats))
+        kinds.setdefault(kind, []).append(p)
+    named = [f"{_and(ps)} ({kind})" for kind, ps in kinds.items()]
+    return f"it changes {_and(named)}; thimble does not apply changes to its safety files"
+
+
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
          tests: bool = True) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the quick tests in
@@ -568,7 +587,7 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     bad = protected_of([f["path"] for f in files])
     binary = [f["path"] for f in files if f["add"] is None]
     if bad:
-        rec.update(state="failed", tests=None, error=f"it changes {bad[0]}, and a fix may not change that file: {PROTECTED_WHY}")
+        rec.update(state="failed", tests=None, error=protected_why(bad))
         return put(rec)
     if binary:
         rec.update(state="failed", tests=None, error=f"it adds or changes a binary file ({binary[0]}); a fix changes text only")
