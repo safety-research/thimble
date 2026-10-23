@@ -7,11 +7,13 @@
 // evidence pane. Tab and Enter reach the same Buttons.
 //
 //   keys while the pane holds the keyboard, each once: p n the previous or next cluster · k j the previous or next
-//   claim (a claim picked, the list in a window) · e the claim's evidence, open or closed · with it open: c the code
-//   and output whole · h the whole history · k j the previous or next citation · x repair the citation shown (a failed
-//   one: a check of it again in the background, marks/checker.ts launchRepair, started in this feature's ui.press hook,
-//   seam.ts) · b back (where it was said). A focused pane hands a plugin only its Buttons' hotkeys, one letter or digit
-//   each, so the citations step on k j, not [ ]. The input under the pane asks about what is chosen (threads/pane.tsx).
+//   claim of the cluster shown (none picked yet: the last or the first) · e the claim's evidence, open or closed · with
+//   it open: c the code and output whole · h the whole history · k j the previous or next citation (the claim's, when
+//   it has one citation) · x repair the citation shown (a failed one: a check of it again in the background,
+//   marks/checker.ts launchRepair, started in this feature's ui.press hook, seam.ts) · b back (where it was said). A
+//   focused pane hands a plugin only its Buttons' hotkeys, one letter or digit each, so the citations step on k j, not
+//   [ ]; and Claude Code types any other letter into the prompt, the keyboard going with it. So once a cluster is
+//   chosen, k j p n are keys in every state. The input under the pane asks about what is chosen (threads/pane.tsx).
 //
 // A claim's citations are the reply's marks near its words (store.js sources): their check and evidence come from
 // marks/store.ts as they stand now, so a check that ends after the look shows in the detail.
@@ -219,6 +221,20 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (ev && claim) return openEvidence(cites[Number(ev[1]) - 1])
     if (part.startsWith('was-')) return pick(part.slice(4))
   }
+  // k j: the claims of the cluster shown, once one is chosen (none picked yet: k the last, j the first)
+  const cs = view.chosen && group != null ? (groupOf(data, group).cs as Any[]) : []
+  const i = claim ? cs.findIndex(c => c.id === claim.id) : -1
+  const claimKeys = () => {
+    if (!cs.length) return
+    key('k', 'previous claim', () => pick(cs[i < 0 ? cs.length - 1 : (i - 1 + cs.length) % cs.length]?.id ?? null))
+    key('j', 'next claim', () => pick(cs[(i + 1) % cs.length]?.id ?? null))
+  }
+  // p n: at rest nothing is chosen, so n chooses the cluster of what is newest, p the one before it
+  const clusterKeys = () => {
+    if (data.groups.length < 2 || group == null) return
+    key('p', 'previous', () => pickGroup(hopCluster(data, group, -1)))
+    key('n', 'next', () => pickGroup(view.chosen ? hopCluster(data, group, 1) : group))
+  }
   if (claim && a.open && at) {
     // the evidence open: its own keys, as the citation's card in the reply has them
     const now = { ...at, open: true, cite, ...(a.all ? { all: true } : {}), ...(a.whole ? { whole: true } : {}) }
@@ -227,23 +243,14 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (view.cites > 1) {
       key('k', 'previous citation', stepCite(-1))
       key('j', 'next citation', stepCite(1))
-    }
+    } else claimKeys()
     // the press is the ui.press hook's (seam.ts), which starts the repair inside a hook
     if (repairable(view.shown)) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
+    clusterKeys()
     key('e', 'close', () => showClaims($, at))
   } else {
-    if (claim && view.windowed) {
-      // the list in a window: k j walk its claims
-      const cs = groupOf(data, group).cs as Any[]
-      const i = cs.findIndex(c => c.id === claim.id)
-      key('k', 'previous claim', () => pick(cs[(i - 1 + cs.length) % cs.length]?.id ?? null))
-      key('j', 'next claim', () => pick(cs[(i + 1) % cs.length]?.id ?? null))
-    }
-    if (data.groups.length > 1 && group != null) {
-      // at rest nothing is chosen: n chooses the cluster of what is newest, p the one before it
-      key('p', 'previous', () => pickGroup(hopCluster(data, group, -1)))
-      key('n', 'next', () => pickGroup(view.chosen ? hopCluster(data, group, 1) : group))
-    }
+    claimKeys()
+    clusterKeys()
     if (claim && at && (view.cites || view.fixes)) key('e', 'evidence', () => showClaims($, { ...at, open: true, cite: 0 }))
   }
   const row = (r: Run[], k: string) => rowEl(els, r, k, press)

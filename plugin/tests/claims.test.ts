@@ -178,6 +178,14 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a p
   expect(textOf(cluster)).toContain('● failures · 2 claims')
   expect(textOf(cluster)).toContain('  – Run 4 failed on the p95 check.')
   expect(textOf(cluster)).toContain('  – Run 9 failed on a timeout.')
+  // a cluster chosen: k j pick its claims (none picked yet: j the first, k the last), so every key of the pane stays
+  // in it; each move keeps the keyboard in the pane, a click's too
+  expect(keysOf(cluster)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['p', 'previous'], ['n', 'next']])
+  await buttons(cluster).find(b => b.hotkey === 'j').onPress()
+  expect(paneNow(s).args).toMatchObject({ claim: 'c1' })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', focus: true })
+  await buttons(cluster).find(b => b.hotkey === 'k').onPress()
+  expect(paneNow(s).args).toMatchObject({ claim: 'c2' })
   // a press on a dot picks its claim, of any cluster: the cluster's list stays, the claim ▸ with its chips under it,
   // and e opens its evidence
   const dots = buttons(pane).filter(b => /^g\d+:d:/.test(b.key))
@@ -189,7 +197,9 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a p
   const pt = textOf(picked)
   expect(pt).toContain('● failures · 2 claims')
   expect(pt).toContain('  ▸ Run 4 failed on the p95 check.    · 1 citation not checked  turn 1  – Run 9 failed on a timeout.')
-  expect(keysOf(picked)).toEqual([['p', 'previous'], ['n', 'next'], ['e', 'evidence']])
+  expect(keysOf(picked)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['p', 'previous'], ['n', 'next'], ['e', 'evidence']])
+  await buttons(picked).find(b => b.hotkey === 'j').onPress()
+  expect(paneNow(s).args).toMatchObject({ claim: 'c2' })
   // the claim is bold in its cluster's color; its dot again chooses its cluster
   expect(JSON.stringify(picked)).toMatch(/"color":"#[0-9a-f]{6}","bold":true,"children":"Run 4 failed on the p95 check\."/)
   await buttons(picked).find(b => /^g\d+:d:c1$/.test(b.key)).onPress()
@@ -197,6 +207,7 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a p
   // a claim in the list of a cluster picks it
   await buttons(cluster).find(b => /^p\d+:n:c2$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c2' })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', focus: true })
   // the cluster's name above the claim chooses the cluster again; n the next cluster, the whole of it
   await buttons(picked).find(b => /^p\d+:g:k1$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ group: 'k1' })
@@ -214,7 +225,8 @@ test('a look that fails leaves a gap the pane names; c opens the pane, where a p
   expect(textOf(open)).toContain('‹ 1 of 1 ›')
   expect(textOf(open)).not.toContain('Run 9 failed')
   expect(textOf(open)).not.toContain('said in')
-  expect(keysOf(open)).toEqual([['e', 'close']])
+  // one citation: k j walk the cluster's claims, and p n its clusters, as with the evidence closed
+  expect(keysOf(open)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['p', 'previous'], ['n', 'next'], ['e', 'close']])
   await buttons(open).find(b => b.hotkey === 'e').onPress()
   expect(paneNow(s).args.open).toBeUndefined()
   // where a claim was said: the message with the claim's words, and b back
@@ -239,7 +251,7 @@ test('a corrected claim says corrected under it; e opens its history: what it sa
   const shut = await draw({ claim: 'c2' })
   expect(textOf(shut)).toContain('    no citations  corrected  turn 2')
   expect(textOf(shut)).not.toContain('History')
-  expect(buttons(shut).filter(b => b.hotkey).map(b => b.hotkey)).toEqual(['e'])
+  expect(buttons(shut).filter(b => b.hotkey).map(b => b.hotkey)).toEqual(['k', 'j', 'e'])
   await buttons(shut).find(b => b.hotkey === 'e').onPress()
   const pane = await draw(paneNow(s).args)
   const t = textOf(pane)
