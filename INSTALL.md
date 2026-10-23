@@ -90,7 +90,9 @@ Options:
 - `--no-browser`: the terminal plugin only.
 - `--no-plugin`: the browser workbench only.
 - `--no-setup`: do not ask how the browser workbench reaches Claude; the page asks at its first start, and
-  `thimble-browser --setup` asks again.
+  `thimble-browser --setup` asks again. `thimble-browser --setup --key-file FILE` takes an API key from a file you
+  wrote (so that Claude, when it installs thimble for you, never sees the key), and `--setup --find-wif` lists the
+  Workload Identity Federation config files in `~/.anthropic`, `~/.config/anthropic` and `~/.thimble-browser`.
 - `--local`: the plugin from this checkout in place of GitHub, to try a branch. Claude Code then loads the plugin from
   the checkout's `plugin/` folder.
 
