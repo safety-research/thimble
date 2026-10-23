@@ -40,7 +40,7 @@ import { mainTurn } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
 import { layoutLines } from './layout.js'
-import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, markSeen, metaOf, readState, saveMeta, saveState, seenNow, setFocus, setTree, treeOf, versionDir } from './store'
+import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, keptFocus, keptMeta, keptSeen, markSeen, metaOf, readState, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -176,13 +176,14 @@ export function noteShown($: Engine, ids: string[], onScreen: { first: number; l
  *  drawn since the plugin loaded and the screen shows it now (noteShown), so a card scrolled out of view, and one a
  *  resumed session no longer shows, takes no keys. */
 export async function keyOwner($: Engine, key: string): Promise<CardMeta | null> {
+  // a key press reads what cards/store.ts keeps of the cards, no state
   const metas: CardMeta[] = []
-  for (const id of await seenNow($)) {
+  for (const id of await keptSeen($)) {
     if (shown.get(id) === false) continue
-    const m = await metaOf($, id)
+    const m = await keptMeta($, id)
     if (m && m.version > 0 && m.keys.includes(key)) metas.push(m)
   }
-  const focus = await focusNow($)
+  const focus = await keptFocus($)
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
 }
 

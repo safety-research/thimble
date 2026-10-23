@@ -125,7 +125,9 @@ export async function recount($: Engine): Promise<void> {
   if (session !== (await sessionKey($))) return
   if (got) last = got
   if (error) failNotice($, error, 'coverage')
-  await $.state.set(COUNTS, { coverage, labels, gen: (was?.gen ?? 0) + 1, error })
+  const counts = { coverage, labels, gen: (was?.gen ?? 0) + 1, error }
+  await $.state.set(COUNTS, counts)
+  kept = { counts }
   if (!error) await failCleared($, 'coverage')
 }
 
@@ -135,6 +137,7 @@ export async function turnCounts($: Engine): Promise<void> {
   last = null
   asked = false
   await $.state.set(COUNTS, null)
+  kept = { counts: null }
   needCounts($)
 }
 
@@ -152,4 +155,13 @@ export function needCounts($: Engine): void {
 /** The bar's counts as last counted, or null. */
 export async function countsNow($: Engine): Promise<Counts | null> {
   return ((await $.state.get(COUNTS)).value ?? null) as Counts | null
+}
+
+// The counts as this module last wrote or read them: it alone writes them, so the copy is the state's. r and l at an
+// empty prompt read the copy (bar.tsx barKeys), since a key's hook has a few milliseconds of its own time. A drawing
+// reads the state itself (countsNow), so a change draws again.
+let kept: { counts: Counts | null } | null = null
+
+export async function keptCounts($: Engine): Promise<Counts | null> {
+  return (kept ?? (kept = { counts: await countsNow($) })).counts
 }

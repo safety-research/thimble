@@ -57,16 +57,34 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.string
 /** A /clear or a /resume (seam.ts turnSqueeze): the chips close, and the chips the person typed in the earlier
  *  conversation are not offered. */
 export async function turnChips($: Engine): Promise<void> {
-  await $.state.set(OPEN, null)
+  await writeOpen($, null)
   await $.state.set(OWN, [])
 }
 
 export async function openNow($: Engine): Promise<Open | null> {
   return ((await $.state.get(OPEN)).value ?? null) as Open | null
 }
+
+// The open chips, as this module last wrote or read them: it alone writes them, so the copy is the state's. A key at an
+// empty prompt reads the copy (chipsHold, squeezeKeyTake), since Claude Code gives a key's hook a few milliseconds of
+// its own time and each read of the state costs some of it under load. A drawing reads the state itself (openNow), so
+// a change draws again.
+let openKept: { open: Open | null } | null = null
+
+async function keptOpen($: Engine): Promise<Open | null> {
+  return (openKept ?? (openKept = { open: await openNow($) })).open
+}
+
+async function writeOpen($: Engine, open: Open | null): Promise<void> {
+  await $.state.set(OPEN, open)
+  openKept = { open }
+}
+
 async function setOpen($: Engine, change: Partial<Open> | null): Promise<void> {
-  if (change === null) { await $.state.set(OPEN, null); return }
-  await update($, OPEN, cur => (cur ? { ...cur, ...change } : null))
+  if (change === null) { await writeOpen($, null); return }
+  let now: Open | null = null
+  await update($, OPEN, cur => (now = cur ? { ...cur, ...change } : null))
+  openKept = { open: now }
 }
 
 /** The record the keys act on: the catch-up standing on the answer the keys act on, else that answer. */
@@ -78,7 +96,7 @@ export async function targetNow($: Engine): Promise<string | null> {
 
 /** The chips open on a record, its first chip picked; scrolled into view. */
 export async function openChips($: Engine, id: string, focus = 'length'): Promise<void> {
-  await $.state.set(OPEN, { id, focus, edge: null, typing: null, held: false, hint: false })
+  await writeOpen($, { id, focus, edge: null, typing: null, held: false, hint: false })
   await $.ui.scroll({ to: { key: `sq-${id}` }, block: 'nearest' }).catch(() => undefined)
 }
 
@@ -211,7 +229,7 @@ function catchUpTake($: Engine, open: Open): Take {
   let made: string | null = null
   return {
     now: async () => { made = await catchUpNow($) },
-    undo: async () => { if (made) await dismissNow($, made, true); await $.state.set(OPEN, open) },
+    undo: async () => { if (made) await dismissNow($, made, true); await writeOpen($, open) },
   }
 }
 
@@ -225,13 +243,13 @@ export async function dismissNow($: Engine, id: string, undo = false): Promise<v
 
 /** Whether the chips are open: their keys come before the tray's and the label ask's, as in 0.10. */
 export async function chipsHold($: Engine): Promise<boolean> {
-  return featureOn('squeeze') && !!(await openNow($))
+  return featureOn('squeeze') && !!(await keptOpen($))
 }
 
 /** A key at an empty prompt: the chips' keys while they are open; s at rest opens them. */
 export async function squeezeKeyTake($: Engine, key: string): Promise<Take | null> {
   if (!featureOn('squeeze')) return null
-  const open = await openNow($)
+  const open = await keptOpen($)
   if (open) {
     if (open.held || open.hint) await setOpen($, { held: false, hint: false })
     const rec = await recOf($, open.id)
@@ -246,7 +264,7 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
     }
     if (key === '0') return { now: () => revert($, open) }
     if (key === '+') return { now: () => askOwn($) }
-    if (key === 's') return { now: () => setOpen($, null), undo: () => $.state.set(OPEN, open) }
+    if (key === 's') return { now: () => setOpen($, null), undo: () => writeOpen($, open) }
     return null
   }
   if (key !== 's') return null

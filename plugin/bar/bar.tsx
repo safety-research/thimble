@@ -21,7 +21,7 @@ import { vReady } from '../designer/v'
 import { fixLineRows } from '../fix/line'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
-import { countsNow } from './counts'
+import { countsNow, keptCounts } from './counts'
 import { failLineNow } from './notice'
 
 type Engine = EngineInterface
@@ -71,9 +71,12 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
   return out
 }
 
-/** The keys the bar names now (r and l act only while they show). */
+/** The keys the bar names now (r and l act only while they show), from the counts as last kept (counts.ts keptCounts):
+ *  a key press reads no state. */
 export async function barKeys($: Engine): Promise<Set<string>> {
-  return new Set((await countItems($, featureOn, null)).map(x => x.key!).filter(Boolean))
+  if (!featureOn('counts')) return new Set()
+  const c = await keptCounts($)
+  return new Set([...(c?.coverage ? ['r'] : []), ...(c?.labels ? ['l'] : [])])
 }
 
 /** The bar's rows: the failure line (when there is one) and the bar, `width` cells wide. */
