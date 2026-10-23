@@ -2,8 +2,8 @@
 // and comments on its passages (backend answer_comments.py, routes GET /ws/{c}/answer-comments and POST
 // …/{id}/dismiss, the stream's `answer-comments` record). Each open comment tints its passage in main's chat in its
 // check's color, as the report tints a commented passage; the first piece of the passage carries the anchor
-// `answer:<turn>#s<n>` (Go to it in the Comments sidebar scrolls to it), and a click opens the comment under the answer
-// as the comment card the canvas and the report's margin draw.
+// `answer:<turn>#s<n>` (Go to it in the Comments sidebar scrolls to it), and a click opens the comment beside the passage
+// as the comment card the canvas and the report's margin draw (AnswerComment.tsx AnswerCommentPop).
 //
 // A comment names the turn it is on (`turn`, the id the turn's `done` record names, chat/model.ts TextRow.turn) and
 // quotes its passage raw, as Claude wrote it. The chat draws the answer as markdown, so the passage is found in the drawn
@@ -45,7 +45,7 @@ export interface AnswerMark {
   colour: string
   /** the passage's ref, the first piece's anchor */
   ref: string
-  /** its comment is open under the answer */
+  /** its comment is open beside it */
   active: boolean
 }
 

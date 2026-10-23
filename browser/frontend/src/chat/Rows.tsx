@@ -6,7 +6,7 @@
 // chips of what it points at. Label runs in a row are one Label card, a step per label. A notice (a failure with its
 // fix, which the strip above the composer offers) is one warning line, quiet once it is closed (Notice.tsx). In main's
 // chat a check's comments on an answer tint their passages; a click on one, or Go to it on `answer:<turn>#s<n>`, opens
-// the comment under the answer as the canvas's comment card (chat/answerComments.ts, AnswerComment.tsx).
+// the comment as the canvas's comment card in a popover beside the passage (chat/answerComments.ts, AnswerComment.tsx).
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Button } from '../components/Button'
 import { Chip } from '../components/Chip'
@@ -27,7 +27,7 @@ import { revealAnchor, teleport } from '../lib/teleport'
 import { track } from '../lib/telemetry'
 import { chipIcon, chipPending, docSave, sameDocRun, settleChip, settledWord, type Settled } from './chips'
 import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdown'
-import { AnswerCommentCard } from './AnswerComment'
+import { AnswerCommentPop } from './AnswerComment'
 import { answeredAsk, askedAnswer, commentsOfRow, marksOf, useAnswerComments, type AnswerComment, type AnswerMark } from './answerComments'
 import { MarksFooter } from '../marks/MarksFooter'
 import { API_ERROR_KIND, callLineText, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
@@ -207,7 +207,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
                 <div className="chat-text" data-anchor={anchorOf(r.index)} data-anchor-text={chat ? r.text : undefined}>
                   <ChatMarkdown text={r.text} streaming={r === lastText} checks={r.checks} marks={own?.marks} />
                 </div>
-                {open && <AnswerCommentCard key={open.id} comment={open} ws={ws} anchor={anchorOf(r.index) ?? open.ref} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
+                {open && <AnswerCommentPop key={open.id} comment={open} ws={ws} anchor={anchorOf(r.index) ?? open.ref} onDone={answers.dismiss} onClose={() => setOpened(null)} />}
                 {r.turnMarks && <MarksFooter items={r.turnMarks} />}
               </div>
             )
