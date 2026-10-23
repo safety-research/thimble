@@ -378,6 +378,11 @@ test('a citation lights on hover as one, on every line it wraps to: one hover gr
   expect(cited.props.backgroundColor).toBeUndefined()
   expect(line.props.hover).toEqual({ scope: cited.props.hover.scope })
   expect(highlighted(ELS, 'runs: 40', [], 'o0').props.hover).toBeUndefined()
+  // marks no check is for (n 0: new words in a squeezed version) light one at a time too
+  const fresh = all(messageEl(ELS, { text, marks, looks: marks.map(() => ({ n: 0, status: 'unchecked' })) as Any, key: 'mk-row-9', cols: 40, first: true, spin: '', onMark: () => undefined }))
+  const groups = marks.map(m => new Set(fresh.filter(b => b.type === 'Button' && String(b.props.label) === `citation 0: ${m.words}`).map(b => b.props.hover.scope)))
+  expect(groups.map(g => g.size)).toEqual([1, 1, 1])
+  expect(new Set(groups.flatMap(g => [...g])).size).toBe(3)
 })
 
 test("a narrowed citation: only the part the check cited is the mark; Claude's own words around it stay, as plain words", () => {
