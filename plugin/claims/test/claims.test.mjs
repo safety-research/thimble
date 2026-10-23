@@ -185,6 +185,25 @@ test('a cluster chosen: its name and its claims under the map, each a press on t
   assert.deepEqual(new Set(bold.map(x => x.part.slice(2))), new Set([...mine].filter(id => c.graph.some(r => r.some(x => x.part === `d:${id}` && /[●◉○]/.test(x.s))))))
 })
 
+test("the map's open cluster shows each claim whole when its claims fit the pane, two lines and … only when they do not", () => {
+  const st = emptyStore('s')
+  const long = [1, 2, 3].map(n => `Run ${n} of the sample sweep ended with 17 of its 1,617 checks failing, all of them in the parser step that reads the nightly logs before the summary`)
+  const short = Array.from({ length: 9 }, (_, i) => `Item ${i + 1} is a short note`)
+  const claims = [...long.map(q => ({ quote: q, cluster: 'sweep' })), ...short.map(q => ({ quote: q, cluster: 'notes' }))]
+  applyTurn(st, { places: [{ row: 'r1', by: 'claude', turn: 1, text: [...long, ...short].map(q => q + '.').join(' ') }], turn: 1, out: { claims } })
+  const data = paneData(st)
+  const key = String(data.groups.find(g => g.name === 'sweep').id)
+  // room below: every claim whole, none cut in its words
+  const roomy = graphView(data, { group: key }, { w: 70, h: 60 })
+  assert.ok(roomy.graph.length, 'the map shows')
+  assert.equal((panel(roomy).match(/logs before the summary\./g) || []).length, 3)
+  assert.doesNotMatch(panel(roomy), / …/)
+  // too short for them whole: two lines each, then …
+  const tight = panel(graphView(data, { group: key }, { w: 70, h: 18 }))
+  assert.ok((tight.match(/ …$/gm) || []).length >= 1, tight)
+  assert.doesNotMatch(tight, /before the summary/)
+})
+
 function linkedClaims() {
   const st = emptyStore('s')
   const quotes = ['The keys (v, s, ], 1, { }) need a reply to act on, and the bar finder returns null when there is no reply yet',
@@ -258,6 +277,19 @@ test("a claim picked: its whole sentence wrapped under its first word, its chips
   assert.equal(rowText(card.rows.at(-1)), '│ + 41 more lines')
   const whole = cardOf({ label: '6,543', status: 'verified', evidence: huge }, 56, { whole: true })
   assert.ok(whole.rows.length > 40 && whole.rows.every(r => rowText(r).length <= 56))
+  // a card's value: the card's title, then the header over the cited row, the cited cell tinted; never a file's place
+  const table = { corner: 'run', cols: ['model', 'merged', 'backlog'], rows: [{ label: 'r1', values: ['opus', '143', '176'] }], at: { r: 0, c: 1 } }
+  const ofCard = { kind: 'card', card: 'c1', title: 'Merges by run', ref: 'card:c1#merged/r1', value: '143', table }
+  for (const whole of [false, true]) {
+    const rows = cardOf({ label: '143', status: 'verified', evidence: ofCard }, 56, { whole }).rows
+    assert.deepEqual(rows.map(rowText), ['143   ✓ verified · cite', 'card Merges by run', '│ run  model  merged  backlog', '│ r1    opus     143      176'])
+    assert.ok(rows[1][0].tone === 'dim' && rows[1][1].bold)
+    assert.ok(rows[3].some(x => x.tint && x.s === '143'))
+  }
+  // without a table: the card's value, or the line its code printed
+  assert.deepEqual(citationRows({ label: '9', status: 'verified', evidence: { kind: 'card', card: 'c2', title: 'Counts', value: '9 runs' } }, 40).map(rowText), ['9   ✓ verified · cite', 'card Counts', '│ 9 runs'])
+  assert.deepEqual(citationRows({ label: '9', status: 'verified', evidence: { kind: 'card', card: 'c2', title: 'Counts', value: '9', output: 'runs\n9 runs\n', highlight: [[5, 6]] } }, 40).map(rowText), ['9   ✓ verified · cite', 'card Counts', '│ 9 runs'])
+  assert.doesNotMatch(JSON.stringify(cardOf({ label: '9', status: 'verified', evidence: ofCard }, 40, { whole: true }).rows), /undefined/)
 })
 
 /** A claim corrected n times, each in its own turn, with a reason each time. */
@@ -316,7 +348,8 @@ test('fourteen clusters: near clusters join, named for both; past what the map h
   // sixth, which says so; every claim is drawn, and the map and the detail fit the pane, whatever is chosen
   const apart = paneData(build(false))
   const v = graphView(apart, {}, { w: 62, h: 30 })
-  assert.match(rowText(v.head[0]), /^Claims · 60 claims · 6 clusters$/)
+  // the head counts the store's 14 clusters, not the 6 cells the map drew them in
+  assert.match(rowText(v.head[0]), /^Claims · 60 claims · 14 clusters$/)
   assert.deepEqual(v.data.groups.map(g => g.name), ['topic 0', 'topic 1', 'topic 2', 'topic 3', 'topic 4', 'topic 5 + 8 other clusters'])
   const onMap = new Set(v.graph.flatMap(r => r.filter(x => /^g:/.test(x.part || '') && x.s.trim()).map(x => x.part)))
   assert.equal(onMap.size, 6)

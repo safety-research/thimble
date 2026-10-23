@@ -2465,7 +2465,7 @@ async def _apply_prompt(c: str, concept: dict, units: Iterator[Unit], out: Path,
         cause = None
         if len(live) < len(batch):
             blank = next(it.unit.ref for it in batch if not (it.text or "").strip())
-            cause = f"{len(batch) - len(live)} unit(s) have no readable text (e.g. {blank}), so they were not labeled"
+            cause = blank_text_cause(len(batch) - len(live), unit, blank)
             if not live:
                 return answers, cause
         items = [(batch[n].unit.ref, batch[n].text) for n in live]
@@ -3868,6 +3868,14 @@ def note_change(concept: dict, what: str, text: str = "") -> dict:
 
 def redefined_text(before: list[str], values: list[str]) -> str:
     return f"redefined, its values now {', '.join(values)}" if list(before) != list(values) else "redefined"
+
+
+def blank_text_cause(n: int, unit: str, example: str) -> str:
+    """Why `n` units of kind `unit` were not labeled when they hold no text, in the count's own form ("1 record has",
+    "3 records have")."""
+    one, many = UNIT_NAMES.get(unit, ("unit", "units"))
+    were = f"{one} has" if n == 1 else f"{many} have"
+    return f"{n:,} {were} no readable text (e.g. {example}), so {'it was' if n == 1 else 'they were'} not labeled"
 
 
 def ran_text(unit: str, total: Any) -> str:

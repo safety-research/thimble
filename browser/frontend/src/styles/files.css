@@ -2304,6 +2304,23 @@
   padding: 10px 20px 10px 12px;
   border-bottom: 1px solid rgba(var(--ink-rgb), 0.07);
 }
+/* the record a followed ref names keeps a quiet mark after the wash fades, as a line and a table row keep theirs: an
+   edge in the highlight's ink at its left, after its Color by bands when it has them, and its number in the ink */
+.reader-record.reader-target {
+  box-shadow: inset 2px 0 0 var(--hl-edge);
+}
+.reader-record.reader-target > .reader-lineno {
+  color: var(--text-primary);
+}
+.reader-record.has-cb.reader-target {
+  box-shadow: none;
+}
+.reader-record.reader-target > .reader-bands::after {
+  content: '';
+  flex: none;
+  width: 2px;
+  background: var(--hl-edge);
+}
 /* records out of sight are neither laid out nor painted, so a resize or scroll reflows only those near the view; the
    records within a body's height and a half of the view are drawn ahead of it (anchor.ts data-near), so their real
    heights replace the estimates out of sight, where the reader's scroll anchor makes up for them */
@@ -2684,8 +2701,8 @@
   flex: 1;
   border-top: 1px solid var(--border-hairline);
 }
-/* the record a followed ref points at: the evidence highlight, fading out by 1.5 s (views/common.tsx HIT_MS), leaving
-   no edge */
+/* the record a followed ref points at: the evidence highlight, fading out by 1.5 s (views/common.tsx HIT_MS); the
+   record's quiet mark stays (.reader-record.reader-target) */
 .reader-card.reader-hit::after,
 .reader-block.reader-hit::after {
   content: '';

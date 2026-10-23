@@ -13,7 +13,7 @@
 // It registers no model tool and starts no `claude`.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { noticeLine } from '../bar/notice'
+import { failCleared, noticeLine } from '../bar/notice'
 import { actingRow, messageOf, partOf, setPart, turnOf, turnsNow } from '../core/answers'
 import { isPersonPrompt } from '../core/answers.mjs'
 import { readKept, writeKept } from '../core/env'
@@ -177,11 +177,17 @@ export async function claimsLit($: Engine): Promise<boolean> {
   return !!lit?.note
 }
 
-/** c, or /claims: the Claims pane, holding the keyboard. */
-export async function openClaims($: Engine, args: ClaimsArgs = {}): Promise<void> {
+/** c, /claims or a press on the bar's count: the Claims pane, holding the keyboard. `byKey`: c at the prompt opened it,
+ *  which Claude Code places only in a wide terminal (a press or a command at any width, core/pane.ts), so the notice
+ *  names the bar's count, a click on which opens it. */
+export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false): Promise<void> {
   await reloadClaims($)
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims', { focus: true, rows: 36 })
-  if (!placed) noticeLine($, 'Claude Code did not open the Claims pane here: the terminal is too narrow. Type /claims to open it.')
+  if (placed) { await failCleared($, 'pane:claims'); return }
+  const n = byKey ? await claimCount($) : 0
+  noticeLine($, n
+    ? `Claude Code opens the side pane from a key only in a wider terminal. Click “c ${await claimsBarWords($)}” in the bar below, or type /claims, to open it here.`
+    : 'Claude Code did not open the Claims pane here. Type /claims to open it.', 'pane:claims')
 }
 
 /** The pane shows other arguments (the person moved in it, by a key or a click), and holds the keyboard: Claude Code

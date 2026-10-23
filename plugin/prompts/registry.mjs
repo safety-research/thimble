@@ -72,6 +72,21 @@ export const TEXTS = {
     reader: 'threads/thread.ts',
     use: "the prompt of the fork that answers a side thread's question",
   },
+  fixer: {
+    about: 'make the change the person asked for to their thimble, in a scratch copy, test it, and say what it does',
+    reader: 'fix/fixer.ts',
+    use: 'the system prompt of the thimble:fixer subagent that /thimble-fix starts',
+  },
+  'fix-draft': {
+    about: "a public GitHub issue's title, what was wrong and how it was fixed, for one of the person's fixes, before the privacy scan",
+    reader: 'browser/backend/app/fix_share.py',
+    use: 'one model call per fix the person shares from the browser',
+  },
+  reapply: {
+    about: 'bring back the fixes thimble update set aside, each one the new release still needs, once',
+    reader: 'engine/kernel/fixes.py',
+    use: 'the first message of the Claude Code session that thimble reapply opens in live',
+  },
 }
 
 /** A text's file, as a path from the plugin's root. */

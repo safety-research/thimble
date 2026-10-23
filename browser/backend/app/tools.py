@@ -1921,7 +1921,8 @@ def _attach_takeaway(c: str, cid: str, raw: Any, cell: dict | None, *, author: s
     a
     runnable card cite.resolve). Returns (attached, the line the model reads), naming the values that linked and,
     through
-    `## not-found-in-outputs`, those the outputs do not show."""
+    `## not-found-in-outputs`, those the outputs do not show, and through `## shown-not-linked`, those they show in
+    several places or as a number too small to link alone."""
     from . import cite, notebook
 
     text = re.sub(_SELF_REF_RE.format(cid=re.escape(cid)), "", str(raw or ""))
@@ -1935,6 +1936,8 @@ def _attach_takeaway(c: str, cid: str, raw: Any, cell: dict | None, *, author: s
             parts.append("linked " + ", ".join(f"{l.token}→{l.ref.split(cid, 1)[-1] or l.ref}" for l in resolved.links[:8]))
         if resolved.unresolved:
             parts.append(hint("not-found-in-outputs", values=", ".join(resolved.unresolved[:10])))
+        if resolved.shown:
+            parts.append(hint("shown-not-linked", values=", ".join(dict.fromkeys(resolved.shown[:10])), cid=cid))
         for l in resolved.misplaced[:5]:  # a value cited at the row the takeaway names, which shows another (cite.off_named_row)
             td = cite._ANY_TD.match(l.ref)
             at = cite.find_td(cell.get("outputs"), td[2], td[3]) if td else None
@@ -2970,6 +2973,15 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         if typed:
             return await _typed_build(ctx, slug)
         return ok(hint("view-changing", view=prop.get("name"), slug=slug))
+    from . import fixes  # noqa: PLC0415
+
+    if not fixes.problem():
+        # a change to thimble's code is a fix of the person's thimble (fixes.py), as /thimble-fix makes one
+        try:
+            got = await fixes.request(ctx.c, f"{title}\n\n{body}", title=title)
+        except HTTPException as e:
+            return ok(hint("file_dev_ticket-fix-failed", why=_detail_text(e.detail)))
+        return ok(hint("file_dev_ticket-fix", id=str(got["fix"]["id"]), title=str(got["fix"].get("title") or title)))
     fn = _optional("dev", "file_ticket")
     if fn is None:
         return _not_available("file_dev_ticket", "dev", "file_ticket")

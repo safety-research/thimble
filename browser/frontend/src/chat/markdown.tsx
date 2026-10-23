@@ -239,6 +239,8 @@ function MdMark(props: JSX.IntrinsicElements['mark'] & ExtraProps) {
       role="button"
       tabIndex={0}
       onClick={(e) => {
+        // a citation's words in the passage open the citation (marks/Mark), so the two popovers never open at once
+        if ((e.target as HTMLElement).closest?.('.mark-words')) return
         e.stopPropagation()
         ctx.open(id)
       }}

@@ -163,21 +163,47 @@ export async function setTree($: Engine, id: string, t: CardDrawing, changed = t
   await update($, { ...TREE, id }, cur => withDrawing(cur as CardTree | undefined, t, changed))
 }
 
+// What a card key at an empty prompt reads (cards/draw.ts keyOwner): the cards seen, each card's meta and the focused
+// card, as this module last wrote or read them. This module alone writes them, so the copy is the state's. Claude Code
+// gives a key's hook a few milliseconds of its own time, and each read of the state costs some of it under load, so a
+// key reads the copy (keptSeen, keptMeta, keptFocus) and no state. A drawing reads the state itself (seenNow, metaOf,
+// focusNow), so a change draws again.
+let seenKept: string[] | null = null
+let focusKept: { id: string | null } | null = null
+const metasKept = new Map<string, CardMeta | null>()
+
 /** The cards drawn on screen since the plugin loaded: only they take keys. */
 export async function seenNow($: Engine): Promise<string[]> {
   return ((await $.state.get(SEEN)).value ?? []) as string[]
 }
 
+export async function keptSeen($: Engine): Promise<string[]> {
+  return seenKept ?? (seenKept = await seenNow($))
+}
+
 export async function markSeen($: Engine, id: string): Promise<void> {
-  await update($, SEEN, cur => ((cur ?? []).includes(id) ? cur ?? [] : [...(cur ?? []), id]))
+  if (seenKept?.includes(id)) return
+  let now: string[] = []
+  await update($, SEEN, cur => (now = (cur ?? []).includes(id) ? cur ?? [] : [...(cur ?? []), id]))
+  seenKept = now
 }
 
 export async function focusNow($: Engine): Promise<string | null> {
   return (await $.state.get(FOCUS)).value ?? null
 }
 
+export async function keptFocus($: Engine): Promise<string | null> {
+  return (focusKept ?? (focusKept = { id: await focusNow($) })).id
+}
+
+async function writeFocus($: Engine, id: string | null): Promise<void> {
+  await $.state.set(FOCUS, id)
+  focusKept = { id }
+}
+
 export async function setFocus($: Engine, id: string): Promise<void> {
-  if ((await $.state.get(FOCUS)).value !== id) await $.state.set(FOCUS, id)
+  if ((await $.state.get(FOCUS)).value !== id) await writeFocus($, id)
+  else focusKept = { id }
 }
 
 /** The card a call of the card tool drew or changed. */
@@ -195,10 +221,16 @@ export async function metaOf($: Engine, id: string): Promise<CardMeta | null> {
   return ((await $.state.get({ ...CARD, id })).value ?? null) as CardMeta | null
 }
 
+export async function keptMeta($: Engine, id: string): Promise<CardMeta | null> {
+  if (!metasKept.has(id)) metasKept.set(id, await metaOf($, id))
+  return metasKept.get(id) ?? null
+}
+
 /** A card's meta, kept in $.state and on disk; each of its calls knows the card, and a card with an anchor joins the
  *  cards under that answer. */
 export async function saveMeta($: Engine, meta: CardMeta): Promise<void> {
   await $.state.set({ ...CARD, id: meta.id }, meta)
+  metasKept.set(meta.id, meta)
   for (const call of Object.keys(meta.calls)) {
     if (((await $.state.get({ ...CALL, id: call })).value as { id?: string } | undefined)?.id !== meta.id) await $.state.set({ ...CALL, id: call }, { id: meta.id })
   }
@@ -227,8 +259,9 @@ export async function readState($: Engine, id: string, version: number): Promise
 /** A /clear or a /resume (hooks/turnover.ts): no card of the earlier conversation takes keys or is drawn under an
  *  answer; the new conversation's cards are back (restoreCards). */
 export async function turnCards($: Engine): Promise<void> {
-  await $.state.set(FOCUS, null)
+  await writeFocus($, null)
   await $.state.set(SEEN, [])
+  seenKept = []
   await $.state.set(AT, {})
   await restoreCards($)
 }
@@ -247,10 +280,11 @@ export async function restoreCards($: Engine): Promise<void> {
   const at: Record<string, string[]> = {}
   for (const m of metas.sort((a, b) => a.at - b.at)) {
     await $.state.set({ ...CARD, id: m.id }, m)
+    metasKept.set(m.id, m)
     for (const call of Object.keys(m.calls ?? {})) await $.state.set({ ...CALL, id: call }, { id: m.id })
     if (m.anchorRow && m.version > 0) (at[m.anchorRow] ??= []).push(m.id)
   }
   await $.state.set(AT, at)
   const newest = metas.filter(m => m.version > 0).pop()
-  if (newest && !(await $.state.get(FOCUS)).value) await $.state.set(FOCUS, newest.id)
+  if (newest && !(await $.state.get(FOCUS)).value) await writeFocus($, newest.id)
 }

@@ -1,4 +1,5 @@
 // The typed client for every route of the backend's API.
+import type { FixStatus } from '../chat/fix'
 import type {
   CanvasResponse,
   Extensions,
@@ -658,6 +659,18 @@ export const api = {
       body: JSON.stringify({ kind: 'card', payload: { text: body.text, group: `request:${body.request}`, ...(body.doc ? { doc: body.doc } : {}), ...(body.after ? { after: body.after } : {}), ...(body.card ? { card: body.card } : {}) } }),
     }),
 
+  // ---- thimble fix: the person's changes to their own thimble (backend fixes.py) ----
+  /** `every`: every fix, for Your fixes; else the ones the page shows now */
+  fixes: (every = false) => j<FixStatus>(`${apiBase()}/fixes${every ? '?every=true' : ''}`),
+  /** Use it now, or Use it in Your fixes: the person's click puts the fix on, and the server starts again with it */
+  applyFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/apply`, { method: 'POST' }),
+  /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows; `fix`: words typed in that fix's own
+   * thread, a round of it */
+  requestFix: (ws: string, words: string, page: string, fix?: number) =>
+    j<{ fix: { id: number; title: string; state: string } }>(`${apiBase()}/ws/${enc(ws)}/fixes`, { method: 'POST', body: JSON.stringify({ words, page, ...(fix !== undefined ? { fix } : {}) }) }),
+  undoFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/undo`, { method: 'POST' }),
+  redoFix: (ws: string, id: number) => j<{ fix: { id: number } }>(`${apiBase()}/ws/${enc(ws)}/fixes/${enc(String(id))}/redo`, { method: 'POST' }),
+  dismissFix: (id: number) => j<{ ok: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/dismiss`, { method: 'POST' }),
   // ---- tickets ----
   tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),
   ticket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}`),
@@ -854,6 +867,14 @@ export const scaleApi = {
     for (const query of stampQueries(paths))
       Object.assign(stamps, (await j<{ stamps: Record<string, string | null> }>(`${apiBase()}/corpora/${enc(c)}/sources/stamps?${query}`)).stamps)
     return { stamps }
+  },
+  /** `GET /corpora/{c}/sources/kinds?path=…`: whether each path names a folder or a file (null for neither), by a stat
+   * alone (lib/pathKinds); as many requests as stampQueries makes. */
+  pathKinds: async (c: string, paths: readonly string[]) => {
+    const kinds: Record<string, 'folder' | 'file' | null> = {}
+    for (const query of stampQueries(paths))
+      Object.assign(kinds, (await j<{ kinds: Record<string, 'folder' | 'file' | null> }>(`${apiBase()}/corpora/${enc(c)}/sources/kinds?${query}`)).kinds)
+    return { kinds }
   },
   /** `GET /ws/{c}/labels?path=&lines=a-b`: every concept's rows on lines a..b of one file, plus its whole-file rows. */
   labelsForLines: (c: string, path: string, a: number, b: number) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines: `${a}-${b}` })}`),

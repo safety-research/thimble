@@ -1288,7 +1288,8 @@ def chart(kind, data, *, show=True, **options):
     sort      a list of the categories (bar), rows (dots), groups (box, density, violin) or items (range) in order, or
               None for the frame's order; by default the largest first (bar), the earliest first (dots), the largest
               median first (box, density, violin), the largest after first, or with times the earliest before (range),
-              a label's values in the label's order (bar, dots, range)
+              a label's values in the label's order (bar, dots, range), and text that names times, such as "hour 01",
+              "2026-06-18" or "Mon", in time order
     stack     with a group or series: True stacks them (the default), False sets bars side by side and overlaps areas
               lightly, "share" stacks each category or x to 100%
     label     a label's name: the group or series column, else the category, row or item column, holds its values,
@@ -1544,9 +1545,59 @@ def _distinct(values) -> list:
     return out
 
 
+# text that names a time, for _time_order: a time unit and its number ("hour 01", "day 3", "Q2"), a date or a month
+# written out ("2026-06-18", "2026-06"), a clock time ("07:30"), or a month's or a weekday's name ("Jun", "Monday")
+_TIME_UNITS = {"sec": "second", "second": "second", "min": "minute", "minute": "minute", "hr": "hour", "hour": "hour",
+               "day": "day", "wk": "week", "week": "week", "month": "month", "q": "quarter", "quarter": "quarter",
+               "yr": "year", "year": "year", "turn": "turn", "step": "step", "round": "round", "epoch": "epoch",
+               "phase": "phase", "stage": "stage", "iter": "iteration", "iteration": "iteration"}
+_UNIT_NUMBER = re.compile(r"([A-Za-z]+)[ _-]?(\d+)")
+_ISO_DATE = re.compile(r"\d{4}-\d{2}(-\d{2}([ T]\d{2}:\d{2}(:\d{2})?)?)?")
+_CLOCK = re.compile(r"(\d{1,2}):(\d{2})(?::(\d{2}))?")
+_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+           "november", "december"]
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+
+
+def _named(word: str, names: list) -> int | None:
+    """The place in `names` of the name `word` spells, whole or by its first three letters or more, else None."""
+    w = word.strip().lower().rstrip(".")
+    return next((i for i, n in enumerate(names) if len(w) >= 3 and n.startswith(w)), None)
+
+
+def _time_order(vals: list) -> list | None:
+    """`vals` in time order when each is text that names a time in the same way (the note above _TIME_UNITS), else
+    None. Such categories are ordered by what they say, so a chart keeps that order rather than ranking them."""
+    texts = [v.strip() for v in vals if isinstance(v, str)]
+    if len(vals) < 2 or len(texts) != len(vals):
+        return None
+
+    def by(keys: list) -> list:
+        return [v for _k, v in sorted(zip(keys, vals), key=lambda p: p[0])]
+
+    units = [_UNIT_NUMBER.fullmatch(t) for t in texts]
+    if all(units) and len({_TIME_UNITS.get(m[1].lower()) for m in units} - {None}) == 1 and \
+            all(m[1].lower() in _TIME_UNITS for m in units):
+        return by([int(m[2]) for m in units])
+    if all(_ISO_DATE.fullmatch(t) for t in texts):
+        return by(texts)
+    clocks = [_CLOCK.fullmatch(t) for t in texts]
+    if all(clocks):
+        return by([(int(m[1]), int(m[2]), int(m[3] or 0)) for m in clocks])
+    for names in (_MONTHS, _WEEKDAYS):
+        at = [_named(t, names) for t in texts]
+        if all(a is not None for a in at):
+            return by(at)
+    return None
+
+
 def _ranked(s, by, earliest=False) -> list:
     """The values of `s` by the rows' `by`: the largest absolute sum first, or with `earliest` the least first; ties,
-    and values with no `by`, in the frame's order."""
+    and values with no `by`, in the frame's order. Values that name times ("hour 01", "2026-06-18", "Mon") keep their
+    time order instead (_time_order)."""
+    timed = _time_order(_distinct(s.tolist()))
+    if timed is not None:
+        return timed
     key: dict = {}
     for v, w in zip(s.tolist(), by.tolist()):
         j, w = _json_value(v), None if _missing(w) else w

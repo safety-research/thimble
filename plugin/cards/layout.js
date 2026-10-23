@@ -425,10 +425,15 @@ function grid(width) {
   }
 }
 
+/** A text padded into columns (`ada         3 of 9`): two spaces or more between its words. */
+const COLUMNS = /\S {2,}\S/
+
 // Places and sizes are kept in fractions of a cell until here, and rounded to whole cells as Claude Code rounds them: a
 // box's place in its parent and its size to the nearest cell, a text's place down to the cell it falls in, and its
-// width down to the whole cells it was measured with.
-function paint(node, g, x0, y0, clip) {
+// width down to the whole cells it was measured with. `row`: the node stands in a row of parts side by side (a box
+// above it lays two or more children across), so a text of it that wraps breaks that row; a text padded into columns
+// is such a row by itself. A wrapped text says so (`row: true`); a sentence that wraps on its own line does not.
+function paint(node, g, x0, y0, clip, row = false) {
   const text = node.kind === 'text'
   const cell = text ? v => Math.floor(v + 1e-6) : Math.round
   const x = x0 + cell(node.lay.x || 0)
@@ -438,7 +443,7 @@ function paint(node, g, x0, y0, clip) {
   if (node.kind === 'text') {
     const rows = wrapText(node.text, Math.max(0, w), node.wrap)
     rows.forEach((r, i) => g.put(x, y + i, r, clip))
-    if (rows.length > node.text.split('\n').length) g.wrapped.push({ line: y + 1, text: node.text })
+    if (rows.length > node.text.split('\n').length) g.wrapped.push({ line: y + 1, text: node.text, ...(row || COLUMNS.test(node.text) ? { row: true } : {}) })
     return
   }
   if (h > 0) g.height(y + h)
@@ -457,7 +462,8 @@ function paint(node, g, x0, y0, clip) {
     const c = { x0: x + node.bw.l, x1: x + w - node.bw.r, y0: y + node.bw.t, y1: y + h - node.bw.b }
     inner = clip ? { x0: Math.max(c.x0, clip.x0), x1: Math.min(c.x1, clip.x1), y0: Math.max(c.y0, clip.y0), y1: Math.min(c.y1, clip.y1) } : c
   }
-  for (const k of node.kids) if (k.lay) paint(k, g, x, y, inner)
+  const across = row || (node.row && node.kids.filter(k => k.lay && Math.round(k.lay.w) > 0).length > 1)
+  for (const k of node.kids) if (k.lay) paint(k, g, x, y, inner, across)
 }
 
 /** The tree as the card's region holds it: a column Box `width` cells wide. What is wider is cut at the grid's edge,

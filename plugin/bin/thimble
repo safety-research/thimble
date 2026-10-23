@@ -2,7 +2,13 @@
 # thimble's kernel as one command. Claude Code puts a plugin's bin/ folder on the Bash tool's PATH, so `thimble` runs
 # as a bare command, through the session's permission mode like any other. The Python it runs: THIMBLE_PYTHON, else the
 # plugin's own .venv, else python3. The kernel needs Python 3.10 or later and nothing else.
-here=$(cd "$(dirname "$0")/.." && pwd)
+# a shell's thimble is a link to this file (scripts/install.sh): the plugin folder is the link's target's
+self=$0
+while [ -L "$self" ]; do
+  to=$(readlink "$self")
+  case $to in /*) self=$to ;; *) self=$(dirname "$self")/$to ;; esac
+done
+here=$(cd "$(dirname "$self")/.." && pwd)
 py=${THIMBLE_PYTHON:-}
 if [ -z "$py" ] && [ -x "$here/.venv/bin/python" ]; then py="$here/.venv/bin/python"; fi
 # for whoever works on thimble (not in its help): `thimble dev prompts`, the prompt registry (prompts/node.mjs);

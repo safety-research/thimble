@@ -28,7 +28,36 @@ def _load(path: Any) -> list[dict[str, Any]]:
         got = json.loads(path.read_text("utf-8"))
     except (OSError, ValueError):
         return []
-    return got if isinstance(got, list) else []
+    if not isinstance(got, list):
+        return []
+    # a conversation saved before replies kept the API's field names holds a fallback block's `from` as `from_`,
+    # which the API refuses when the conversation is sent again
+    for m in got:
+        for b in (m.get("content") if isinstance(m, dict) and isinstance(m.get("content"), list) else []):
+            if isinstance(b, dict) and b.get("type") == "fallback" and "from_" in b and "from" not in b:
+                b["from"] = b.pop("from_")
+    return got
+
+
+def fallback_records(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The reply's model switches as the transcript tells them, as Claude Code writes them: for each `fallback` block
+    (Claude's safeguards answered with another model), a `model_refusal_fallback` record with the model asked for and
+    the one that answered, which the chat's mirror makes a notice of (session._switched)."""
+    from . import session  # noqa: PLC0415
+
+    out = []
+    for b in content:
+        if isinstance(b, dict) and b.get("type") == "fallback":
+            was, now = (b.get("from") or {}).get("model"), (b.get("to") or {}).get("model")
+            out.append({"type": "system", "subtype": session.FALLBACK_SUBTYPE, "direction": "retry",
+                        "originalModel": was or "", "fallbackModel": now or ""})
+    return out
+
+
+def reply_blocks(final: Any) -> list[dict[str, Any]]:
+    """A reply's blocks as the conversation keeps them and sends them again: in the API's own field names (a fallback
+    block's `from`, which the SDK names `from_`)."""
+    return [b.model_dump(mode="json", exclude_none=True, by_alias=True) for b in final.content]
 
 
 def _save(path: Any, messages: list[dict[str, Any]]) -> None:
@@ -172,7 +201,7 @@ async def fork_stream(c: str, prompt: str, *, model: str, effort: str | None, al
     texts: list[str] = []
     while True:
         final = await _stream(client, request(spec, messages))
-        content = [b.model_dump(mode="json", exclude_none=True) for b in final.content]
+        content = reply_blocks(final)
         messages.append({"role": "assistant", "content": content})
         out.append(_line({"type": "assistant", "message": {"model": str(getattr(final, "model", "") or model),
                                                             "content": content, "stop_reason": final.stop_reason}}))
@@ -251,11 +280,13 @@ async def turn(conv: Any, text: str) -> Any:
                 await asyncio.sleep(2 ** retries)
                 continue
             retries = 0
-            content = [b.model_dump(mode="json", exclude_none=True) for b in final.content]
+            content = reply_blocks(final)
             messages.append({"role": "assistant", "content": content})
             _save(path, messages)
             blocks, server_results = runtime_tools.server_blocks_to_records(content)
             usage = final.usage.model_dump(mode="json", exclude_none=True) if getattr(final, "usage", None) else {}
+            for switch in fallback_records(content):
+                conv.emit(switch)
             conv.emit_assistant(blocks, str(getattr(final, "model", "") or spec.model), usage)
             conv.live_text(key, None)
             conv.emit_results(server_results)

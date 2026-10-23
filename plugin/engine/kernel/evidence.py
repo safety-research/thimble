@@ -261,7 +261,8 @@ def unshown(words: str, text: str, approx: bool = False) -> str:
         day = next((m.group(0) for p in DATE_PARTS for m in [p.search(w)] if m), "")
         return f"the day {day}" if day else "the day the words name"
     said = wordnums(text, counts=True)
-    nums = [v for v, d in marked_numbers(wordnums(w, counts=True)) if not has_number(v, said, dates=d, approx=approx)]
+    ww = wordnums(w, counts=True)
+    nums = [number_named(ww, v, d) for v, d in marked_numbers(ww) if not has_number(v, said, dates=d, approx=approx)]
     if nums:
         return " or ".join(dict.fromkeys(nums))
     names = [x for x in NAME.findall(w) if not has_name(x, text)]
@@ -386,6 +387,16 @@ def wordnums(s: str, counts: bool = False) -> str:
     after "these" or "those" points back to things already named ("these two removed …"): it counts nothing."""
     words = [w for w in WORDNUM if not (counts and w == "one")]
     return re.sub(r"(?<!these )(?<!those )\b(" + "|".join(words) + r"|half)\b", lambda m: WORDNUM.get(m.group(1).lower(), "50"), s, flags=re.I)
+
+
+def number_named(words: str, v: str, in_date: bool) -> str:
+    """A number of the words as a reason names it: one that stands in a time or a date by the whole time or date
+    ("14:08", never its "8"), any other by its value."""
+    if in_date:
+        for a, b in date_spans(words):
+            if any(number_at(m) == v for m in NUM.finditer(words[a:b])):
+                return words[a:b]
+    return v
 
 
 def date_spans(text: str) -> list[tuple[int, int]]:
@@ -1122,34 +1133,68 @@ def read_lines(path: str, a: int, b: int, partial: bool = False) -> tuple[int, l
 
 def quote_fragments(words: str) -> list[str]:
     """The quoted words of a direct quote, split at an ellipsis: `"Confirmed sequence: GA -> ... G5"` gives
-    ["Confirmed sequence: GA ->", "G5"]; [] for words that are no direct quote."""
+    ["Confirmed sequence: GA ->", "G5"]; [] for words that are no direct quote. Square brackets hold the quoter's own
+    words: inside a word they complete or change it (`environ[ment]`, `[T]he`) and are read as part of it; standing
+    alone they replace words of the record (`[the agents] could not`), and the quote is split there, as at an
+    ellipsis."""
     w = unmark(words)
     spans = re.findall(r"[\"“]([^\"“”]+)[\"”]", w)
     if not spans and w[:1] in QUOTE_CHARS and w[-1:] in QUOTE_CHARS:
         spans = [w[1:-1]]
     frags = []
     for s in spans:
-        frags += [f.strip(" .,;:" + QUOTE_CHARS) for f in re.split(r"…|\.\.\.", s)]
+        s = re.sub(r"(?<=\w)\[([^\[\]]*)\]|\[([^\[\]]*)\](?=\w)", lambda m: m.group(1) or m.group(2) or "", s)
+        frags += [f.strip(" .,;:" + QUOTE_CHARS) for f in re.split(r"…|\.\.\.|\[[^\[\]]*\]", s)]
     return [f for f in frags if len(f) >= 3]
 
 
+def quoted_around(sentence: str, words: str) -> bool:
+    """Whether the sentence quotes the cited words with its quote marks around the citation's brackets, a stop or a
+    comma inside them: `u2 wrote "[I've been locked out]."`. Words that hold their own quote marks are left alone."""
+    w = norm_ws(words)
+    if not w or w[:1] in QUOTE_CHARS or w[-1:] in QUOTE_CHARS:
+        return False
+    return bool(re.search(r'"\[' + re.escape(one_quote(w)) + r'\][.,;:!?]?"', one_quote(norm_ws(sentence))))
+
+
+JSON_ESCAPE = re.compile(r'\\u([dD][89abAB][0-9a-fA-F]{2})\\u([dD][c-fC-F][0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})|\\(["\\/bfnrt])')
+JSON_SIMPLE = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+
+
+def json_unescaped(raw: str) -> str:
+    """A line's JSON string escapes read as the characters they stand for (`\\u2014` is —, `\\"` is "), for a JSON
+    line that does not parse whole: one longer than LINE_BYTES, cut there. "" when it holds no escape."""
+    def one(m: re.Match) -> str:
+        if m.group(1):
+            return chr(0x10000 + ((int(m.group(1), 16) - 0xD800) << 10) + (int(m.group(2), 16) - 0xDC00))
+        if m.group(3):
+            return chr(int(m.group(3), 16))
+        return JSON_SIMPLE.get(m.group(4), m.group(4))
+    text = JSON_ESCAPE.sub(one, raw)
+    return text if text != raw else ""
+
+
 def forms(raw: str) -> list[tuple[str, bool]]:
-    """The texts a line can hold words in: the line as written, and its JSON strings decoded (`decoded` True)."""
+    """The texts a line can hold words in: the line as written, and its JSON strings decoded (`decoded` True); a JSON
+    line cut at LINE_BYTES, with its escapes read."""
     out = [(raw, False)]
     try:
         out.append(("\n".join(json_strings(json.loads(raw))), True))
     except ValueError:
-        pass
+        if raw.lstrip()[:1] in "{[" and json_unescaped(raw):
+            out.append((json_unescaped(raw), True))
     return out
 
 
 def shown_forms(raw: str) -> list[tuple[str, bool]]:
     """The texts a cited line is shown in, best first: each string value of its JSON alone, decoded (a record's message
-    reads as written, its line breaks real), then the line as written."""
+    reads as written, its line breaks real), then the line as written. A JSON line cut at LINE_BYTES shows with its
+    escapes read."""
     try:
         v = json.loads(raw)
     except ValueError:
-        return [(raw, False)]
+        cut = json_unescaped(raw) if raw.lstrip()[:1] in "{[" else ""
+        return [(cut, True), (raw, False)] if cut else [(raw, False)]
     vals: list[str] = []
 
     def walk(x: Any) -> None:
@@ -1315,7 +1360,7 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     pct = percents(target)
     for v, in_date in (marked_numbers(unmark(target)) if kind != "code" else []):
         if not any(has_number(v, h, dates=in_date) or (v in pct and has_number(fraction(v), h)) for h in hay):
-            problems.append(f"{where} reads “{nearest(target, hay)}”, not {v}")
+            problems.append(f"{where} reads “{nearest(target, hay)}”, not {number_named(unmark(target), v, in_date)}")
     if was and kind != "code" and not problems:
         missing = unshown_change(was, target, "\n".join(hay))
         if missing:
@@ -1629,6 +1674,21 @@ def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     return shown
 
 
+def framed(target: str, places: list[dict[str, Any]], approx: bool = False) -> bool:
+    """Cells show words that also name a number their column's name gives: "139 of the 176 PRs" cites the cell 139 of
+    the column `of_176_still_open`. A cell's value must show a number of the words itself; its row's and its column's
+    names, read as words, may show the rest, as a total or a unit."""
+    cells = [p for p in places if p["out"][0] == "cells"]
+    if not cells or len(cells) != len(places):
+        return False
+    values = wordnums("\n".join(p["value"] for p in cells), counts=True)
+    nums = marked_numbers(wordnums(target, counts=True))
+    if not any(has_number(v, values, dates=d, approx=approx) for v, d in nums):
+        return False
+    names = "\n".join(f"{p['text']} {re.sub(r'[_.]+', ' ', str(p['col']))}" for p in cells)
+    return shows(target, names, approx)
+
+
 def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
     """The problems of card evidence, and the evidence to show: each cited place must be one of the session's cards,
     and together they show the words (a cell's value, with its row's name; a line of printed output). Words that hold
@@ -1649,7 +1709,8 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
     shown = {**shown_all[0], **({"more": shown_all[1:]} if len(shown_all) > 1 else {})}
     values, texts = [p["value"] for p in places], [p["text"] for p in places]
     one = places[0]
-    if not (shows(target, "\n".join(values), approx) or shows(target, "\n".join(texts), approx)):
+    if not (shows(target, "\n".join(values), approx) or shows(target, "\n".join(texts), approx)
+            or framed(target, places, approx)):
         if len(places) > 1:
             return [instead(" and ".join(p["where"] for p in places), target, texts, approx)], shown
         if one["out"][0] == "cells":
@@ -1973,7 +2034,10 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if given.strip() and status in ("verified", "corrected", "narrowed", "wrong"):
         got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words)
         if isinstance(got, str):
-            return judged("evidence", f"The check reworded the sentence, but {got}.")
+            # a rewording that cannot stand still leaves what the check found wrong, which the person reads in its
+            # own reason (the records show it false); with no such reason, why the rewording could not stand
+            found = reason if status in ("corrected", "wrong") else ""
+            return judged("evidence", found or f"The check reworded the sentence, but {got}.")
         corr = {**corr, "words": got["cited"]}
         if loose(got["rest"]) == loose(got["was_rest"]):
             # only the cited words change: a correction of them, or no change
@@ -2021,7 +2085,11 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         return {**out, "reason": f"{NOT_RUN} It gave the status {status!r}."}
     # a narrowing puts no words in: the evidence shows the part it keeps
     changed = bool(new) and not narrow and loose(new) != loose(words)
-    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards)
+    target = unmark(new or words)
+    if not new and quoted_around(str(mark.get("sentence") or ""), words):
+        # a quote whose marks stand around the citation (`"[I've been locked out]."`) is a direct quote too
+        target = f'"{target}"'
+    problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or written, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
@@ -2086,15 +2154,23 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
                             "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})."})
-    # a sentence is rewritten once: the rewrite of a second citation of it would undo the first one's
-    rewritten: set[str] = set()
+    # a sentence is rewritten once: the rewrite of a second citation of it would undo the first one's. The same new
+    # sentence for a second citation undoes nothing: a rewrite keeps the other citations' words, so the second
+    # citation's words stand in it as written, and the first rewrite places them
+    rewritten: dict[str, str] = {}
     for m, r in zip(marks, results):
         if not r.get("rewrite"):
             continue
         key = norm_ws(m.get("sentence") or "")
         if key in rewritten:
-            r.update(status="failed", failedBy="evidence", shown=str(m.get("words", "")), reason="The check reworded this sentence for another of its citations too, so this change was left out.")
+            words = str(m.get("words", ""))
+            same = norm_ws(str(r["rewrite"])) == rewritten[key]
+            if same:
+                r.update(status="verified", shown=words)
+            else:
+                r.update(status="failed", failedBy="evidence", shown=words, reason="The check reworded this sentence for another of its citations too, so this change was left out.")
             for k in ("rewrite", "was", "narrowed"):
                 r.pop(k, None)
-        rewritten.add(key)
+            continue
+        rewritten[key] = norm_ws(str(r["rewrite"]))
     return {"parsed": items is not None, "results": results}

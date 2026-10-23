@@ -1491,6 +1491,33 @@ button.model-line-part[aria-expanded='true'] {
   flex-direction: column;
   max-height: 100%;
 }
+/* the holds, the permission card, the view proposal, the label asks and the notices: at most 40% of the window's
+   height together, so the transcript keeps its room above them; more scrolls here */
+.chat-foot-stack {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  border-radius: var(--radius-card);
+}
+/* more below what shows: the stack's foot fades into the composer */
+.chat-foot-stack[data-more] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+}
+.chat-foot-stack:empty {
+  display: none;
+}
+.chat-foot-stack > * {
+  flex: none;
+}
+.chat-foot-stack .chat-notices {
+  max-height: none;
+  overflow: visible;
+}
 .chat-foot .chat-composer {
   position: relative;
   z-index: 1;
@@ -1802,6 +1829,156 @@ button.model-line-part[aria-expanded='true'] {
 }
 .chat-notice-row[data-closed] .chat-notice-ico {
   color: var(--text-tertiary);
+}
+/* thimble fix (chat/FixStrip.tsx): one row above the composer while Claude works on the person's fix, a spinner and
+   its step on the card's surface; once it ended, one notice at the top of the chat on the result's wash (ready and on:
+   positive, did not pass: warning). A ready fix's notice has its buttons on a row of their own under the words */
+.chat-fix {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0 0 8px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-fix[data-kind='fixed'] {
+  border-color: var(--status-positive);
+  background: color-mix(in oklab, var(--status-positive) 10%, var(--surface-card));
+}
+.chat-fix[data-kind='failed'],
+.chat-fix[data-kind='problem'] {
+  border-color: var(--status-warning);
+  background: color-mix(in oklab, var(--status-warning) 12%, var(--surface-card));
+}
+.chat-fix-ico {
+  flex: none;
+  color: var(--text-secondary);
+}
+.chat-fix[data-kind='fixed'] .chat-fix-ico {
+  color: var(--status-positive);
+}
+.chat-fix[data-kind='failed'] .chat-fix-ico,
+.chat-fix[data-kind='problem'] .chat-fix-ico {
+  color: var(--status-warning);
+}
+.chat-fix-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 0;
+  overflow-wrap: anywhere;
+}
+.chat-fix-act.btn,
+.chat-fix-x.btn {
+  flex: none;
+}
+.chat-fix-top {
+  flex: none;
+  padding: 8px 12px 0;
+}
+.chat-fix-top .chat-fix {
+  margin: 0;
+}
+.chat-fix-note {
+  flex-wrap: wrap;
+}
+.chat-fix-line {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.chat-fix[data-kind='ready'] {
+  border-color: var(--status-positive);
+  background: color-mix(in oklab, var(--status-positive) 10%, var(--surface-card));
+}
+.chat-fix[data-kind='ready'] .chat-fix-ico,
+.chat-fix-lead {
+  color: var(--status-positive);
+}
+.chat-fix-lead {
+  font-weight: 600;
+}
+.chat-fix-ask {
+  padding: 8px 10px;
+}
+.chat-fix-ask .chat-fix-line {
+  align-items: flex-start;
+}
+.chat-fix-ask .chat-fix-ico {
+  margin-top: 3px;
+}
+.chat-fix-acts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 0 21px;
+}
+.chat-fix-what {
+  flex: 1 1 100%;
+  margin: 6px 0 0 21px;
+  color: var(--text-secondary);
+}
+.chat-fix-what div {
+  display: flex;
+  gap: 6px;
+  padding: 1px 0;
+}
+.chat-fix-what dt {
+  flex: none;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.chat-fix-what dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chat-fixes {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  font: var(--type-body-sm);
+}
+.chat-fixes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 4px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.chat-fixes-empty {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--text-secondary);
+}
+.chat-fixes-list {
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+}
+.chat-fixes-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 2px 6px 2px 10px;
+}
+.chat-fixes-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chat-fixes-state {
+  flex: none;
+  color: var(--text-secondary);
 }
 /* a start that did not happen (chat/Refused): one card on the warning's soft wash, the agent named, why on one line,
    the request in full behind a disclosure, and the kind's buttons */

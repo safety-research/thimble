@@ -4,6 +4,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
+import { busyWhile } from '../bar/busy'
 import { failNotice, noticeLine, promptTyped } from '../bar/notice'
 import { promptStub } from './stubs'
 
@@ -43,6 +44,7 @@ function world(on: Any, coverage: { ok: boolean; out: string }) {
   const clock = mock.clock(on, { now: 0 })
   const submitted: string[] = []
   const opened: string[] = []
+  const opens: Any[] = []
   const ran: string[][] = []
   on('session.id', () => ({ value: 's-bar' }))
   on('session.cwd', () => ({ value: '/made-up/data' }))
@@ -56,7 +58,7 @@ function world(on: Any, coverage: { ok: boolean; out: string }) {
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   on('env.set', () => ({ value: {} }))
   on('ui.toast', () => ({ value: undefined }))
-  on('ui.open', (_$: unknown, e: { id: string }) => { opened.push(e.id); return { value: { isPlaced: true } } })
+  on('ui.open', (_$: unknown, e: { id: string }) => { opened.push(e.id); opens.push(e); return { value: { isPlaced: true } } })
   on('ui.panes', () => ({ value: opened.map(id => ({ id, title: id })) }))
   on('command.register', () => ({ value: { command: 'thimble-settings' } }))
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
@@ -70,7 +72,7 @@ function world(on: Any, coverage: { ok: boolean; out: string }) {
   on('prompt.submit', (_$: unknown, e: { text: string }) => { submitted.push(e.text); return { text: e.text } })
   on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
-  return { clock, submitted, opened, ran }
+  return { clock, submitted, opened, opens, ran }
 }
 
 test('after an answer the bar names v, coverage and the labels; r opens the coverage pane, whose folders open', async ($, on) => {
@@ -90,6 +92,8 @@ test('after an answer the bar names v, coverage and the labels; r opens the cove
   expect(r.text).toBe('')
   await w.clock.advance(400)
   expect(w.opened).toContain('thimble')
+  // it takes the keys, so j k ↵ of its key row act in it and do not type into the prompt; esc closes it
+  expect(w.opens.at(-1)).toMatchObject({ id: 'thimble', focus: true, closeOnEscape: true })
   const pane = await $.ui.mount(PANE)
   // one bar for the folder and its key: 1 file read into Claude's context, 2 more computed over or searched
   expect((await pane.find({ type: 'Text', text: /files touched/ }))?.text).toMatch(/3\/7 files touched · 43%/)
@@ -179,3 +183,23 @@ test('a failure is a line above the bar in red, a notice one not in red; the nex
   expect((await barRows($, ELS, 100, { on: () => true })).length).toBe(1)
 })
 
+
+test('a long busy step keeps the bar to one row: its other steps go, then its words are cut', async () => {
+  let now = 0
+  const state: Record<string, unknown> = {}
+  const $ = { ...stateOnly(state), clock: { now: async () => now, after: () => ({ cancel() {} }) } } as Any
+  let alive = true
+  await busyWhile($, 'checking 3 citations', async () => alive)
+  await busyWhile($, 'fixing fix 6 with a made-up long step name', async () => alive)
+  now = 5000
+  const wide = textOf(await barRows($, ELS, 160, { on: () => false }))
+  expect(wide).toContain('checking 3 citations')
+  expect(wide).toContain('fixing fix 6 with a made-up long step name')
+  const narrow = textOf(await barRows($, ELS, 50, { on: () => false }))
+  expect(narrow).not.toContain(' · ')
+  expect(narrow.length).toBeLessThanOrEqual(50)
+  const narrower = textOf(await barRows($, ELS, 26, { on: () => false }))
+  expect(narrower).toContain('…')
+  expect(narrower.length).toBeLessThanOrEqual(26)
+  alive = false
+})

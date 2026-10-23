@@ -5,6 +5,8 @@
     transcript  a jsonl of chat records               one line (one message or event)   <path>#L<n>
     csv         .csv .tsv                             one row after the header          <path>#row=<n>
     json        .json                                 one item of its largest list      <path>#/<key>/<i>
+                                                      (or of the list at a JSON pointer:
+                                                      iter_rows' `at`, `*` every item)
     sqlite      .db .sqlite .sqlite3                  one row of a table                <path>#<table>/<rowid>
     markdown    .md .markdown .rst                    one section (a heading and text)  <path>#L<a>-<b>
     diff        .diff .patch                          one hunk                          <path>#L<a>-<b>
@@ -207,6 +209,45 @@ def _pointer_get(v: Any, pointer: str) -> Any:
     return v
 
 
+def _esc(key: Any) -> str:
+    return str(key).replace("~", "~0").replace("/", "~1")
+
+
+def pointer_values(v: Any, at: str) -> Iterator[tuple[str, Any]]:
+    """(pointer, value) of each value a JSON pointer names in a document: `at` is a JSON pointer (RFC 6901) whose `*`
+    parts stand for every item of a list or every key of an object at that level, so `/*/messages` names the
+    `messages` of each top item. A part that names nothing in a value skips that value."""
+    # `#/` is the whole document, as iter_rows names one read as one value
+    parts = [p.replace("~1", "/").replace("~0", "~") for p in at.split("/")[1:]] if at.startswith("/") and at != "/" else []
+
+    def walk(x: Any, i: int, here: str) -> Iterator[tuple[str, Any]]:
+        if i == len(parts):
+            yield here, x
+            return
+        part = parts[i]
+        if part == "*":
+            kids = enumerate(x) if isinstance(x, list) else x.items() if isinstance(x, dict) else ()
+            for k, y in kids:
+                yield from walk(y, i + 1, f"{here}/{_esc(k)}")
+        elif isinstance(x, list) and part.isdigit() and int(part) < len(x):
+            yield from walk(x[int(part)], i + 1, f"{here}/{part}")
+        elif isinstance(x, dict) and part in x:
+            yield from walk(x[part], i + 1, f"{here}/{_esc(part)}")
+
+    yield from walk(v, 0, "")
+
+
+def json_records_at(rel: str, v: Any, at: str) -> Iterator[Row]:
+    """The records of a JSON document at a pointer (pointer_values): each item of each list it names, else the value it
+    names, each with its own pointer as its ref (`run.json#/0/messages/3`), so a record keeps its place in the file."""
+    for here, x in pointer_values(v, at):
+        if isinstance(x, list):
+            for i, y in enumerate(x):
+                yield Row(f"{rel}#{here}/{i}", json.dumps(y, ensure_ascii=False), y)
+        else:
+            yield Row(f"{rel}#{here or '/'}", json.dumps(x, ensure_ascii=False), x)
+
+
 @contextmanager
 def open_db(p: Path) -> Iterator[sqlite3.Connection]:
     """A database opened to read only, so that nothing beside it is made or changed. SQLite reads a database in WAL mode
@@ -256,10 +297,15 @@ def json_lines(root: Path, rel: str, nums: set[int]) -> Iterator[Row]:
                 yield _record(rel, i, line)
 
 
-def iter_rows(root: Path, rel: str, table: str | None = None) -> Iterator[Row]:
-    """Every row of one source file, in file order."""
+def iter_rows(root: Path, rel: str, table: str | None = None, at: str | None = None) -> Iterator[Row]:
+    """Every row of one source file, in file order. `at`, a JSON pointer (pointer_values): the records of a JSON
+    document there in place of its largest list, so the messages nested in each conversation of a transcript file are
+    records of their own."""
     p = root / rel
     kind = kind_of_file(root, rel)
+    if at and kind == "json":
+        yield from json_records_at(rel, json.loads(p.read_text(errors="replace")), at)
+        return
     if kind in ("jsonl", "transcript"):
         with open(p, "r", errors="replace") as f:
             for i, line in enumerate(f, 1):

@@ -38,11 +38,11 @@
 // and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
 //
 // Where side threads can be asked about its passages (`passages`), each row of blocks is a passage (a heading's, its
-// whole section), and its margin cell asks about it (core/askcell.js): a blue ? while the pointer is over the row, a
-// blue ↳ once a thread was asked about it.
+// whole section), and its margin cell asks about it (core/askcell.js): a purple ? while the pointer is over the row, a
+// purple ↳ once a thread was asked about it.
 import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
-import { themeLast, type Theme } from '../core/theme'
+import { accent, themeLast, type Theme } from '../core/theme'
 import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -87,8 +87,6 @@ export type MessageOpts = {
 /** A passage of a reply: its words, and a few of them that name it. */
 export type Passage = { text: string; label: string }
 
-/** A purple that follows the person's theme (Claude Code's color for a merged pull request): the turning glyph. */
-const PURPLE = 'merged'
 /** The turning glyph's cell when no frame is given: one cell, as every frame is. */
 const SPIN_CELL = '⠋'
 
@@ -246,7 +244,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   // group of its own by its place, so the pointer over it lights it alone
   const id = look.n > 0 ? `${o.key}:${look.n}` : `${o.key}:at${r.mark as number}`
   const tint = citeHover(id, look.status)
-  if (r.tag === 'spin') p.color = PURPLE
+  if (r.tag === 'spin') p.color = accent()
   else if (r.tag) p.color = 'error'
   else Object.assign(p, wordsLook(look.status, id))
   // a span inside the mark's words (a heads-up, an explainer): its fill at rest and no underline, as a span never has
@@ -366,9 +364,9 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     const lead = dot && o.lead
     const glyph = dot ? '●' : ' '
     const cell = lead
-      ? Box({ width: 2, flexShrink: 0, children: [Text({ color: 'suggestion', bold: true, children: o.lead })] })
+      ? Box({ width: 2, flexShrink: 0, children: [Text({ color: accent(), bold: true, children: o.lead })] })
       : o.passages
-        ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph })
+        ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph, color: accent() })
         : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
     rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [...(o.gutter === false ? [] : [cell]), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     dot = false

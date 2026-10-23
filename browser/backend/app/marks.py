@@ -17,7 +17,9 @@
 4. When the reply's last mark settles, main reads what the check changed with its next event (a quiet `citations`
    event, events.QUIET_KINDS), in the terminal's words (tell_text).
 5. Repair in a failed mark's label (repair, the terminal's x) checks that one mark again: a fork of main reads the
-   checker's text with the terminal's repair request, the validator decides, and main hears how it ended.
+   checker's text with the terminal's repair request, the validator decides, and main hears how it ended. A check that
+   finds a mark wrong or cannot confirm it starts that repair itself, as soon as it ends (_check_share, the terminal's
+   autoRepair); a repair's own end starts none, so a mark that fails again waits for Repair.
 
 The cards are evidence too: before the forks start, every place of the workspace's cards and its value (a table's cell,
 a chart's data row, a line of printed output) is written to a file the checker greps first (session_cards, the
@@ -130,11 +132,22 @@ def session_cards(c: str) -> list[dict[str, Any]]:
 
 
 def cards_index(c: str, cards: list[dict[str, Any]]) -> str:
-    """The file the checker greps for a value a card shows (the validator's card_index), in the workspace's temp
-    folder; its path."""
-    p = _temp_dir(c) / "cards-index.tsv"
+    """The file the checker greps for a value a card shows (the validator's card_index), in a folder of its own in the
+    workspace's temp folder; its path. Each check has its own: a card rewritten while a check runs starts another
+    check, whose index must not take the place of the one this check's validator reads `cards` as."""
+    folder = _temp_dir(c) / f"check-{secrets.token_hex(4)}"
+    folder.mkdir()
+    p = folder / "cards-index.tsv"
     p.write_text(evidence().card_index(cards), encoding="utf-8")
     return str(p)
+
+
+def _drop_index(index: str) -> None:
+    """A check's index, gone with its folder once the check ended."""
+    if index:
+        with contextlib.suppress(OSError):
+            Path(index).unlink()
+            Path(index).parent.rmdir()
 
 
 def evidence() -> ModuleType:
@@ -257,20 +270,26 @@ def _tell(c: str, text: str) -> None:
         log.info("%s: main was not told what the citation check changed", c)
 
 
+def _checked(m: dict[str, Any]) -> bool:
+    """Whether the reply's own check still checks this mark: a mark a repair checks again is the repair's to tell of."""
+    return m["status"] == "checking" and not m.get("repair")
+
+
 async def _edit(c: str, turn: str, change: Callable[[dict[str, Any]], dict[str, Any]], tell: bool = True) -> dict[str, Any] | None:
-    """A change of a reply's marks, one at a time; when it settles the reply's last mark, main is told what the check
-    changed (`tell`; a repair tells main of its own mark, repair_tell_text)."""
+    """A change of a reply's marks, one at a time; when it settles the last mark the reply's check judges, main is told
+    what the check changed (`tell`; a repair tells main of its own mark, repair_tell_text)."""
     async with _locks.setdefault((c, turn), asyncio.Lock()):
         reply = stored(c, turn)
         if reply is None:
             return None
         was_open = any(m["status"] == "checking" for m in reply["items"])
+        was_checked = any(_checked(m) for m in reply["items"])
         reply = change(reply)
         settled = was_open and not any(m["status"] == "checking" for m in reply["items"])
         if settled:
             reply.setdefault("times", {})["settled"] = time.time()
         _save(c, reply)
-    if tell and settled and (text := tell_text(reply["items"])):
+    if tell and was_checked and not any(_checked(m) for m in reply["items"]) and (text := tell_text(reply["items"])):
         _tell(c, text)
     return reply
 
@@ -407,8 +426,11 @@ async def _start_check(c: str, main: dict[str, Any], turn: str, texts: list[str]
         return
     folder = str(main.get("cwd") or config.corpus_dir(c))
     cards, index = await _cards_and_index(c)
-    await asyncio.gather(*(_check_share(c, main, turn, cut, share, folder, fork or run_fork, cards, index)
-                           for share in split_marks(chat + takes)))
+    try:
+        await asyncio.gather(*(_check_share(c, main, turn, cut, share, folder, fork or run_fork, cards, index)
+                               for share in split_marks(chat + takes)))
+    finally:
+        _drop_index(index)
 
 
 async def _cards_and_index(c: str) -> tuple[list[dict[str, Any]], str]:
@@ -458,12 +480,14 @@ async def _takeaways_change(c: str, takes: list[dict[str, Any]], judged: Callabl
 
 async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share: list[dict[str, Any]], folder: str,
                        fork: Callable[..., Awaitable[dict[str, Any]]], cards: list[dict[str, Any]] | None = None,
-                       index: str = "", request: str = "") -> None:
+                       index: str = "", request: str = "", auto: bool = False) -> None:
     """One fork's check of a share of the marks. `request`: what follows the checker's text for a repair (Repair in a
-    mark's label, the terminal's x), whose end tells main how its one mark ended."""
+    mark's label, the terminal's x, or one this check's end started, `auto`), whose end tells main how its one mark
+    ended. A check that is no repair repairs each mark it found wrong or could not confirm, as soon as it ends."""
     takes = [m for m in share if m.get("card")]
     mine = {m["n"] for m in share if not m.get("card")}
     lines = "\n".join(_line(m) for m in share)
+    found: list[dict[str, Any]] = []  # the marks this check failed, which it repairs at its end
 
     async def give_up(why: str) -> None:
         await _give_up(c, turn, mine, why)
@@ -504,7 +528,7 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
             return r
 
         reply = await _edit(c, turn, change, tell=not request)
-        if request and reply and (text := repair_tell_text([m for m in reply["items"] if m["n"] in mine])):
+        if request and reply and (text := repair_tell_text([m for m in reply["items"] if m["n"] in mine], auto)):
             _tell(c, text)
 
         def judged_takeaway(m: dict[str, Any]) -> dict[str, Any]:
@@ -514,12 +538,39 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
             return {**m, **{k: v for k, v in res.items() if k != "n"}, "shown": str(res.get("shown") or m["words"])}
 
         await _takeaways_change(c, takes, judged_takeaway)
+        if not request:
+            found = [m for m in share if _found_failed(by_n.get(m["n"]))]
     except Exception as e:  # noqa: BLE001 — a check that cannot be validated leaves its marks unchecked, and says so
         log.exception("%s: the check of the marks failed", c)
         _notice(c, f"thimble could not check the citations ({type(e).__name__}: {str(e)[:80]}), so some are not "
                    "checked.")
     finally:
         await give_up("the check ended before it judged this citation")
+    # after give_up, which would leave unchecked a mark whose repair already runs
+    for m in found:
+        if m.get("card") and not _takeaway_now(c, m):
+            continue  # the card's takeaway was written again meanwhile: its own check judges the new words
+        why = await repair(c, turn=None if m.get("card") else turn, n=None if m.get("card") else m["n"],
+                           card=m.get("card"), k=m.get("k"), fork=fork, auto=True)
+        # a mark that is not failed now has nothing to repair: a takeaway written again meanwhile is under its own check
+        if why and why != NOT_FAILED:
+            _notice(c, f"The repair of a failed citation did not start ({why[:100]}). Press Repair on it to try again.")
+
+
+def _takeaway_now(c: str, m: dict[str, Any]) -> bool:
+    """Whether the card of takeaway mark `m` still has the takeaway this check read."""
+    from . import notebook  # noqa: PLC0415
+
+    try:
+        return str((notebook.get_cell(c, m["card"]) or {}).get("takeaway") or "") == m["takeaway"]
+    except Exception:  # noqa: BLE001 — a card that cannot be read has no takeaway to repair
+        return False
+
+
+def _found_failed(res: dict[str, Any] | None) -> bool:
+    """Whether a check's result failed its mark by a finding: wrong, or not confirmed. A mark it gave no answer for is
+    unchecked, and Repair checks it: what stopped this check would stop another."""
+    return bool(res) and res.get("status") == "failed" and res.get("failedBy") in ("check", "evidence")
 
 
 def _temp_dir(c: str) -> Path:
@@ -592,7 +643,7 @@ def _q(w: str) -> str:
 REPAIR_NOT_RUN = "The analyst pressed x to check citation {n}, whose first check did not run. It may stand in an earlier reply than your last."
 REPAIR_FIRST = "The analyst pressed x to repair citation {n}. It may stand in an earlier reply than your last. The first check {found}"
 REPAIR_TASK = (
-    "Check it again from the start, and make the citation correct: change the cited words, the sentence or the evidence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.",
+    "Check it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.",
     "When the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.",
 )
 
@@ -608,9 +659,9 @@ def repair_request(m: dict[str, Any], n: int) -> str:
     return "\n".join((first, *REPAIR_TASK))
 
 
-def repair_tell_text(items: list[dict[str, Any]]) -> str:
-    """What main reads when a repair ended: how its mark ended, as the analyst reads it (the terminal's
-    repairTellText)."""
+def repair_tell_text(items: list[dict[str, Any]], auto: bool = False) -> str:
+    """What main reads when a repair ended: how its mark ended, as the analyst reads it, and who started it: the analyst
+    with Repair, or thimble (`auto`, as the check failed it) (the terminal's repairTellText)."""
     def why(m: dict[str, Any]) -> str:
         return f" (the check: {_q(m['reason'])})" if m.get("reason") else ""
 
@@ -627,12 +678,15 @@ def repair_tell_text(items: list[dict[str, Any]]) -> str:
     if not lines:
         return ""
     fence = "```"
-    return ("The analyst pressed Repair on a citation of yours, and thimble checked it against the data. Its words in "
-            f"the block below may quote the records.\n{fence}text\n" + "\n".join(lines) + f"\n{fence}\n"
-            "The analyst sees the result in the reply. Use it from now on.")
+    head = ("A citation of yours failed its check, so thimble checked it again against the data." if auto else
+            "The analyst pressed Repair on a citation of yours, and thimble checked it against the data.")
+    return (f"{head} Its words in the block below may quote the records.\n{fence}text\n" + "\n".join(lines)
+            + f"\n{fence}\nThe analyst sees the result in the reply. Use it from now on.")
 
 
 REPAIRABLE = ("failed", "unchecked")
+# repair's answer for a mark that is not failed now: checked as it stands, or under a check again
+NOT_FAILED = "this citation is not one that failed"
 # what a repair clears of a mark: its earlier result goes, its place and words stay
 CLEARED = ("status", "was", "reason", "failedBy", "evidence", "note", "narrowed", "rewrite", "shown")
 
@@ -651,10 +705,11 @@ def _main_now(c: str) -> tuple[dict[str, Any], str] | str:
 
 
 async def repair(c: str, turn: str | None = None, n: int | None = None, card: str | None = None, k: int | None = None,
-                 fork: Callable[..., Awaitable[dict[str, Any]]] | None = None) -> str:
+                 fork: Callable[..., Awaitable[dict[str, Any]]] | None = None, auto: bool = False) -> str:
     """Repair a failed mark: a reply's (`turn`, `n`) or a card's takeaway's (`card`, its order `k`). It is `checking`
     again while a fork of main checks it with the terminal's repair request, and the validator decides its end as for
-    any check. '' when it started, else why not. The check runs in the background."""
+    any check. '' when it started, else why not. The check runs in the background. `auto`: the check that failed it
+    started it, not the analyst (main hears so)."""
     from . import notebook  # noqa: PLC0415
 
     got = _main_now(c)
@@ -668,7 +723,7 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         text = str((cell or {}).get("takeaway") or "")
         m = next((x for x in kept.get("items") or [] if x.get("k") == k), None) if kept.get("text") == text else None
         if not m or m.get("status") not in REPAIRABLE:
-            return "this citation is not one that failed"
+            return NOT_FAILED
         request = repair_request(m, 1)
         base = {key: v for key, v in m.items() if key not in CLEARED}
         share = {**base, "n": 1, "status": "checking", "shown": m["words"], "card": card,
@@ -684,7 +739,7 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         reply = stored(c, turn or "")
         m = next((x for x in (reply or {}).get("items") or [] if x.get("n") == n), None)
         if not m or m.get("status") not in REPAIRABLE:
-            return "this citation is not one that failed"
+            return NOT_FAILED
         request = repair_request(m, int(m["n"]))
         base = {key: v for key, v in m.items() if key not in CLEARED}
         share = {**base, "status": "checking", "shown": m["words"]}
@@ -699,7 +754,10 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
     async def run() -> None:
         cards, index = await _cards_and_index(c)
         folder = str(main.get("cwd") or config.corpus_dir(c))
-        await _check_share(c, main, str(turn), cut, [share], folder, fork or run_fork, cards, index, request)
+        try:
+            await _check_share(c, main, str(turn), cut, [share], folder, fork or run_fork, cards, index, request, auto)
+        finally:
+            _drop_index(index)
 
     _spawn(run())
     return ""

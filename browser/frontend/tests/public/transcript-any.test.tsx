@@ -576,6 +576,24 @@ describe('Color by and Filter by over a whole-file JSON transcript', () => {
     expect([5, 9, 15, 21].map((l) => band(el, l))).toEqual([null, keyColor(0), keyColor(1), null])
   })
 
+  test("the turns are first drawn with their colors: none is drawn plain while Color by's keys are on their way", async () => {
+    vi.stubGlobal('fetch', async () => new Response('{"detail":"not found"}', { status: 404, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    const page: SourcePage = { path: P, kind: 'text', total_lines: 30, start: 1, records: [line(1, '{'), line(2, '  "schema_version": "ATIF-v1.7",')], transcript: { format: 'json', score: 0.5 } }
+    vi.spyOn(api, 'source').mockResolvedValue(page)
+    vi.spyOn(api, 'sourceTurns').mockResolvedValue({ path: P, total: 4, start: 0, n_groups: 1, groups: { '0': { title: 'toy-agent', first: 0 } }, turns: TURNS })
+    let give: (k: SourceKeys) => void = () => {}
+    vi.spyOn(api, 'sourceKeys').mockReturnValue(new Promise<SourceKeys>((r) => (give = r)))
+    localStorage.setItem(pickKey('w', P), JSON.stringify('transcript'))
+    const el = await mount(<Reader workspace="w" path={P} kind="text" labels={NO_LABELS} lead={<span />} />)
+    await settle()
+    await settle()
+    expect(el.querySelectorAll('.reader-card').length).toBe(0)
+    await act(async () => give(KEYS))
+    await settle()
+    expect([5, 9, 15, 21].map((l) => band(el, l))).toEqual([keyColor(0), keyColor(1), keyColor(1), keyColor(0)])
+  })
+
   test('Filter by hides the turns whose value of a field is off', async () => {
     const el = await open({ 'thimble:w:filterBy:run/trajectory.json': { by: 'k:tool', off: { 'k:tool': ['bash'] } } })
     expect([...el.querySelectorAll('.reader-turns .reader-card')].map((c) => c.getAttribute('data-line'))).toEqual(['5', '9', '21'])
@@ -652,5 +670,27 @@ describe('a PDF ref', () => {
     await act(async () => pdf.click())
     expect(other.querySelector('iframe.reader-pdf-frame')).not.toBeNull()
     expect(localStorage.getItem(Object.keys(localStorage).find((k) => k.includes('viewOf:docs/a.pdf')) ?? '')).toContain('pdf')
+  })
+})
+
+describe("the loupe's line of a Claude Code stream record", () => {
+  const json = (n: number, obj: object) => line(n, JSON.stringify(obj))
+  const stream: TranscriptHint = { format: 'stream', score: 1 }
+  test('reads as the Transcript view shows it: a system record as its summary, a message as its words and tool calls, never its JSON', () => {
+    const sys = previewOf(json(3, { type: 'system', subtype: 'thinking_tokens', estimated_tokens: 3900, session_id: 's-1' }), stream, null)
+    expect(sys).toMatchObject({ who: 'system', text: 'thinking_tokens' })
+    const progress = previewOf(json(4, { type: 'tool_progress', tool_name: 'Bash', elapsed_time_seconds: 12, session_id: 's-1' }), stream, null)
+    expect(progress.text).toBe('Bash · 12s')
+    const call = { type: 'assistant', timestamp: '2026-05-02T10:04:00Z', message: { content: [{ type: 'text', text: 'Running the tests now.' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'pytest -q tests/' } }] } }
+    expect(previewOf(json(5, call), stream, null)).toMatchObject({ who: 'assistant', when: '10:04:00', text: 'Running the tests now. · Bash pytest -q tests/' })
+    const result = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: '12 passed in 0.4s' }] } }
+    expect(previewOf(json(6, result), stream, null).text).toBe('12 passed in 0.4s')
+    // a turn that holds only redacted thinking, which the view gives no row, names what it holds
+    expect(previewOf(json(7, { type: 'assistant', message: { content: [{ type: 'thinking', thinking: '', signature: 'x' }] } }), stream, null).text).toBe('thinking')
+    for (const p of [sys, progress]) expect(p.text).not.toMatch(/[{"]/)
+  })
+  test('a record with no words of any kind reads as its fields, not as JSON', () => {
+    const p = previewOf(json(8, { id: 8, ok: true, params: { pr: 66191 }, tags: [] }), null, null)
+    expect(p.text).toBe('id: 8 · ok: true · params: {…} · tags: []')
   })
 })

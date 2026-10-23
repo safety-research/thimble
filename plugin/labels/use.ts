@@ -4,8 +4,9 @@
 //
 // The label rows. Which labels a turn used are the `thimble label` commands its Bash calls ran (core/answers.ts
 // labelsOf); a card's are those its turn ran before the card's call (CardUse.seq). A card gets one row under it: each
-// label's name, how it was made in plain words (regex, code, or read by Claude) and over how many records, and its
-// values: under a card in the colors the card gives them (a plain dim dot where it gives none, so the row never shows
+// label's name, how it was made in plain words (regex, code, read by Claude, or values Claude gave: the labels pane's
+// words) and over how many records, and the values its records have, then the records with no value (in the pane's
+// gray): under a card in the colors the card gives them (a plain dim dot where it gives none, so the row never shows
 // a color the card does not use), under an answer in the label's own colors (the labels pane's). An answer gets a row
 // only for the labels its turn used that none of its cards shows. A press on the name opens the label in the labels
 // pane; a press on a value opens it on that value's records. The labels are read from hooks, never from a drawing
@@ -39,25 +40,25 @@ import { metaOf, treeOf } from '../cards/store'
 import { labelsOf, turnOfRow, turnsNow } from '../core/answers'
 import { rootHere, runThimble } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
+import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
-import { ASK_KEYS, answerNote, askChoices, askOf, howMade, sampleOffered, tonesInTree, usedNames } from './use.mjs'
+import { ASK_KEYS, answerNote, askChoices, askOf, howMade, NO_VALUE, rowValues, sampleOffered, tonesInTree, usedNames } from './use.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** A label a row names: its values, how it was made, over how many records. `tones`, set only under a card: the colors
- *  the card gives its values. */
-export type UsedLabel = { name: string; values: string[]; kind?: string; records?: number; tones?: Record<string, string> }
+/** A label a row names: its values (all of them, which fix each value's color), how it was made, over how many records.
+ *  `shown`: the values the row names (use.mjs rowValues: those some record has, then the records with no value); all
+ *  of `values` when not given. `tones`, set only under a card: the colors the card gives its values. */
+export type UsedLabel = { name: string; values: string[]; shown?: { v: string; name: string }[]; kind?: string; records?: number; tones?: Record<string, string> }
 /** The ask that waits for the person's choice. */
 export type LabelAsk = { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean }
 type Choice = 'all' | 'sample' | 'cancel'
 
 const LABELASK = { plugin: 'thimble', key: 'labelAsk' } as const
-/** The color of a key the person can press, as the bar draws one. */
-const KEY_COLOR = 'suggestion'
 /** The values a row names at most. */
 const VALUES_SHOWN = 8
 
@@ -121,7 +122,7 @@ async function usedOf($: Engine, names: string[]): Promise<UsedLabel[] | null> {
   for (const name of names) {
     const l = list.find(x => x && x.name === name)
     if (!l || !Array.isArray(l.values)) continue
-    out.push({ name, values: l.values.map(String), ...(typeof l.kind === 'string' ? { kind: l.kind } : {}), ...(typeof l.records === 'number' ? { records: l.records } : {}) })
+    out.push({ name, values: l.values.map(String), shown: rowValues(l), ...(typeof l.kind === 'string' ? { kind: l.kind } : {}), ...(typeof l.records === 'number' ? { records: l.records } : {}) })
   }
   return out
 }
@@ -129,32 +130,36 @@ async function usedOf($: Engine, names: string[]): Promise<UsedLabel[] | null> {
 // ------------------------------------------------------------------------------------------------ the rows
 
 /** The row under a card or an answer: `label has-link · regex · 412 records  ● yes  ● no`, each name and value a
- *  press. */
+ *  press. Each label is one group, so a row too long for the width wraps between labels, never inside one. */
 export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen: (name: string, value: string | null) => unknown }): Any | null {
   if (!used.length) return null
   const { Box, Button, Text } = els
-  const kids: Any[] = [Text({ key: `${o.key}-w`, dimColor: true, children: used.length === 1 ? 'label ' : 'labels ' })]
+  const row: Any[] = [Text({ key: `${o.key}-w`, dimColor: true, children: used.length === 1 ? 'label ' : 'labels ' })]
   used.forEach((l, i) => {
-    if (i) kids.push(Text({ key: `${o.key}-s${i}`, dimColor: true, children: '   ' }))
+    if (i) row.push(Text({ key: `${o.key}-s${i}`, dimColor: true, children: '   ' }))
+    const kids: Any[] = []
     kids.push(Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ key: 'n', bold: true, children: l.name })] }))
     const how = howMade(l.kind)
     if (how) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${how}` }))
     if (typeof l.records === 'number') kids.push(Text({ key: `${o.key}-d${i}`, dimColor: true, children: ` · ${l.records.toLocaleString('en-US')} ${l.records === 1 ? 'record' : 'records'}` }))
-    l.values.slice(0, VALUES_SHOWN).forEach((v, j) => {
+    ;(l.shown ?? l.values.map(v => ({ v, name: v }))).slice(0, VALUES_SHOWN).forEach(({ v, name }, j) => {
       // under a card (`tones`): the color the card gives the value, or a plain dim dot where it gives none; under an
-      // answer: the label's own colors
-      const color = l.tones ? l.tones[v] : colorOf(l.values, v)
-      const words = color ? [Text({ key: 'v', color, children: `● ${v}` })] : [Text({ key: 'd', dimColor: true, children: '●' }), Text({ key: 'v', children: ` ${v}` })]
+      // answer: the label's own colors. The records with no value: the pane's gray, under a card too
+      const none = v === NO_VALUE
+      const color = none ? colorOf(l.values, v) : l.tones ? l.tones[v] : colorOf(l.values, v)
+      const words = color ? [Text({ key: 'v', color, children: `● ${name}` })] : [Text({ key: 'd', dimColor: true, children: '●' }), Text({ key: 'v', children: ` ${name}` })]
       kids.push(Text({ key: `${o.key}-g${i}-${j}`, children: '  ' }))
-      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: words }))
+      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: none ? `the records of ${l.name} with ${name === 'no value' ? 'no value' : 'no value yet'}` : `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: words }))
     })
+    row.push(Box({ key: `${o.key}-l${i}`, flexDirection: 'row', flexWrap: 'wrap', children: kids }))
   })
-  return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: kids })
+  return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: row })
 }
 
-/** What a press on a row's label name (value null) or value does: open the labels pane on it. */
-function opener($: Engine): (name: string, value: string | null) => void {
-  return (name, value) => { void openLabels($, value == null ? { label: name } : { label: name, value }) }
+/** What a press on a row's label name (value null) or value does: open the labels pane on it. The open is returned, so
+ *  it is made while the press runs: Claude Code places the pane at any width only for such an open. */
+function opener($: Engine): (name: string, value: string | null) => Promise<unknown> {
+  return (name, value) => openLabels($, value == null ? { label: name } : { label: name, value })
 }
 
 /** The labels a card's newest call used: those its turn ran before the call. */
@@ -269,7 +274,7 @@ export async function labelAskBand($: Engine, els: Any, _width: number): Promise
   if (!a) return []
   const { Box, Text, Button } = els
   const choice = (c: { key: string; words: string; choice: Choice }) =>
-    Box({ key: `ask-${c.choice}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: c.words, onPress: () => { void answerAsk($, c.choice, a) }, children: [Text({ key: 'k', color: KEY_COLOR, bold: true, children: c.key }), Text({ key: 'w', children: ` ${c.words}` })] })] })
+    Box({ key: `ask-${c.choice}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: c.words, onPress: () => { void answerAsk($, c.choice, a) }, children: [Text({ key: 'k', color: accent(), bold: true, children: c.key }), Text({ key: 'w', children: ` ${c.words}` })] })] })
   return [Box({ key: 'label-ask', flexDirection: 'column', children: [
     Text({ key: 'ask-text', wrap: 'wrap', children: [Text({ key: 'n', dimColor: true, children: `label ${a.name}  ` }), `${a.text}?`] }),
     Box({ key: 'ask-keys', flexDirection: 'row', flexWrap: 'wrap', children: askChoices(a).map(choice) }),

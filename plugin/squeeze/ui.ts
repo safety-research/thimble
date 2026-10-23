@@ -7,7 +7,7 @@
 // one more, `Catch up on N replies` (its digit after the chips'): it writes one catch-up of them, drawn under the newest
 // of them while they draw no text (term.ts catchUp), with the chips open on it. A letter right after s, or after the
 // catch-up's digit, undoes it (hooks/keys.ts word window).
-// While the chips are open their keys come first (core/answerview.ts restoredKey):
+// While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey):
 //   [ ] shorter / longer on the picked chip (Length: short · as written · longer · much longer); < > , . the same, unnamed
 //   1–N pick a chip (N+1: the catch-up, when the row offers it) · 0 the original (on a catch-up: the replies again)
 //   · s close · + a chip in the person's own words (typed as `/squeeze <words>`, with the earlier ones offered as it is typed)
@@ -23,6 +23,7 @@ import type { BarItem } from '../bar/bar'
 import { markPressed } from '../core/answerview'
 import { actingRow, pickAnswer, pickedRow } from '../core/answers'
 import { openPane } from '../core/pane'
+import { accent } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import type { Take } from '../hooks/keys'
 import { marksIn } from '../marks/message.js'
@@ -44,10 +45,6 @@ const OPEN = { plugin: 'thimble', key: 'squeezeOpen' } as const
 const OWN = { plugin: 'thimble', key: 'squeezeOwn' } as const
 /** What [ and ] do to each chip, in its words: the way down, then the way up. */
 const WAYS: Record<string, string> = { length: 'shorter / longer', interpret: 'facts / interpretation', familiarity: 'newer / more expert' }
-/** thimble's color, as the rule down a catch-up's side and its name in its head line. */
-const RULE = 'permission'
-/** The color of a key the bar names, lit (as bar.tsx's keys). */
-const LIT = 'suggestion'
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 
@@ -56,16 +53,34 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.string
 /** A /clear or a /resume (seam.ts turnSqueeze): the chips close, and the chips the person typed in the earlier
  *  conversation are not offered. */
 export async function turnChips($: Engine): Promise<void> {
-  await $.state.set(OPEN, null)
+  await writeOpen($, null)
   await $.state.set(OWN, [])
 }
 
 export async function openNow($: Engine): Promise<Open | null> {
   return ((await $.state.get(OPEN)).value ?? null) as Open | null
 }
+
+// The open chips, as this module last wrote or read them: it alone writes them, so the copy is the state's. A key at an
+// empty prompt reads the copy (chipsHold, squeezeKeyTake), since Claude Code gives a key's hook a few milliseconds of
+// its own time and each read of the state costs some of it under load. A drawing reads the state itself (openNow), so
+// a change draws again.
+let openKept: { open: Open | null } | null = null
+
+async function keptOpen($: Engine): Promise<Open | null> {
+  return (openKept ?? (openKept = { open: await openNow($) })).open
+}
+
+async function writeOpen($: Engine, open: Open | null): Promise<void> {
+  await $.state.set(OPEN, open)
+  openKept = { open }
+}
+
 async function setOpen($: Engine, change: Partial<Open> | null): Promise<void> {
-  if (change === null) { await $.state.set(OPEN, null); return }
-  await update($, OPEN, cur => (cur ? { ...cur, ...change } : null))
+  if (change === null) { await writeOpen($, null); return }
+  let now: Open | null = null
+  await update($, OPEN, cur => (now = cur ? { ...cur, ...change } : null))
+  openKept = { open: now }
 }
 
 /** The record the keys act on: the catch-up standing on the answer the keys act on, else that answer. */
@@ -77,7 +92,7 @@ export async function targetNow($: Engine): Promise<string | null> {
 
 /** The chips open on a record, its first chip picked; scrolled into view. */
 export async function openChips($: Engine, id: string, focus = 'length'): Promise<void> {
-  await $.state.set(OPEN, { id, focus, edge: null, typing: null, held: false, hint: false })
+  await writeOpen($, { id, focus, edge: null, typing: null, held: false, hint: false })
   await $.ui.scroll({ to: { key: `sq-${id}` }, block: 'nearest' }).catch(() => undefined)
 }
 
@@ -210,7 +225,7 @@ function catchUpTake($: Engine, open: Open): Take {
   let made: string | null = null
   return {
     now: async () => { made = await catchUpNow($) },
-    undo: async () => { if (made) await dismissNow($, made, true); await $.state.set(OPEN, open) },
+    undo: async () => { if (made) await dismissNow($, made, true); await writeOpen($, open) },
   }
 }
 
@@ -224,13 +239,13 @@ export async function dismissNow($: Engine, id: string, undo = false): Promise<v
 
 /** Whether the chips are open: their keys come before the tray's and the label ask's, as in 0.10. */
 export async function chipsHold($: Engine): Promise<boolean> {
-  return featureOn('squeeze') && !!(await openNow($))
+  return featureOn('squeeze') && !!(await keptOpen($))
 }
 
 /** A key at an empty prompt: the chips' keys while they are open; s at rest opens them. */
 export async function squeezeKeyTake($: Engine, key: string): Promise<Take | null> {
   if (!featureOn('squeeze')) return null
-  const open = await openNow($)
+  const open = await keptOpen($)
   if (open) {
     if (open.held || open.hint) await setOpen($, { held: false, hint: false })
     const rec = await recOf($, open.id)
@@ -245,7 +260,7 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
     }
     if (key === '0') return { now: () => revert($, open) }
     if (key === '+') return { now: () => askOwn($) }
-    if (key === 's') return { now: () => setOpen($, null), undo: () => $.state.set(OPEN, open) }
+    if (key === 's') return { now: () => setOpen($, null), undo: () => writeOpen($, open) }
     return null
   }
   if (key !== 's') return null
@@ -325,7 +340,7 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const now = await recOf($, id)
   const lit = now && !now.catchup && typeof now.shown === 'string'
   const words = lit ? `● ${setWords(now) || 'squeezed'}` : pile ? 'squeeze or catch up' : 'squeeze'
-  return [{ id: 'squeeze', key: 's', words, ...(lit ? { color: LIT } : {}), press: () => openChips($, id) }]
+  return [{ id: 'squeeze', key: 's', words, ...(lit ? { color: accent() } : {}), press: () => openChips($, id) }]
 }
 
 async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
@@ -373,12 +388,12 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
 async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   const open = await openNow($)
   const rec = await recOf($, id)
-  if (!open || !rec) return { items: [], plus: null, catchup: null, width }
+  if (!open || !rec) return { items: [], plus: null, catchup: null, width, color: accent() }
   const row = rowOf(rec, (await levelsNow($, rec)).at)
   const focus = row.some((c: Any) => c.id === open.focus) ? open.focus : row[0].id
   return {
     items: row.map((c: Any, i: number) => ({ id: c.id, n: i + 1, name: c.name, levels: c.levels, level: c.level, word: levelWords(c), picked: c.id === focus && open.typing == null })),
-    plus: open.typing, catchup: open.id === id ? await catchUpChip($, open, rec, row.length) : null, width,
+    plus: open.typing, catchup: open.id === id ? await catchUpChip($, open, rec, row.length) : null, width, color: accent(),
   }
 }
 
@@ -419,7 +434,10 @@ export async function viewOf($: Engine, row: string): Promise<{ text?: string | 
 /** The catch-up drawn at the newest message it covers (term.ts drawnAt), in place of that message's words, once a
  *  version of it is written, and as it stands at every level of its chips: a rule down its left side beside its
  *  head line and its text (its first characters while a version writes itself in, dim while one is written). Its
- *  citations look as the checked citations of the replies with the same words, and open their evidence. */
+ *  citations look as the checked citations of the replies they stand for (marks/register.ts looksByWords: the same
+ *  words, else the same claim in new words), and a press on one acts as a press on that citation in its reply. The
+ *  replies' citations are numbered across the catch-up, since each reply numbers its own from 1: so citations of two
+ *  replies never share a hover group, and a press finds the reply's citation it stands for. */
 export async function catchUpEl($: Engine, els: Any, row: string, cols: number): Promise<Any | null> {
   if (!featureOn('squeeze')) return null
   const cu = await catchUpAt($, row)
@@ -428,7 +446,13 @@ export async function catchUpEl($: Engine, els: Any, row: string, cols: number):
   const ui = await uiOf($, cu.id)
   const text = ui.reveal ? revealCut(cu.shown, ui.reveal.n) : cu.shown
   const items: MarkItem[] = []
-  for (const r of cu.catchup?.rows ?? []) items.push(...((await rowMarks($, r))?.items ?? []))
+  const from: { row: string; n: number }[] = []
+  for (const r of cu.catchup?.rows ?? []) {
+    for (const it of (await rowMarks($, r))?.items ?? []) {
+      from.push({ row: it.row, n: it.n })
+      items.push({ ...it, n: from.length })
+    }
+  }
   const marks = marksIn(text)
   const looks = looksByWords(marks, items, await mainRuns($))
   const replies = Number(cu.catchup?.replies) || 0
@@ -436,16 +460,16 @@ export async function catchUpEl($: Engine, els: Any, row: string, cols: number):
   const body = messageEl(els, {
     text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: !!ui.running,
     onMark: async (k: number) => {
-      const it = items.find(x => x.n === looks[k]?.n && x.words.replace(/\s+/g, ' ').trim().toLowerCase() === marks[k]!.words.replace(/\s+/g, ' ').trim().toLowerCase())
+      const it = from[(looks[k]?.n ?? 0) - 1]
       if (!it) return
       if (await markPressed($, it.row, it.n)) return
       await openPane($, 'evidence', { row: it.row, n: it.n }, `citation ${it.n}`)
     },
   })
-  const head = els.Text({ key: 'cu-head', children: [els.Text({ color: RULE, bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} since your last message` })] })
+  const head = els.Text({ key: 'cu-head', children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} since your last message` })] })
   // the rule: as tall as the text is likely to be, cut at the catch-up's own height
   const tall = rowsOf(text, w) + 4
-  const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, overflow: 'hidden', flexDirection: 'column', children: [els.Text({ color: RULE, children: Array.from({ length: tall }, () => '▎').join('\n') })] })
+  const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, overflow: 'hidden', flexDirection: 'column', children: [els.Text({ color: accent(), children: Array.from({ length: tall }, () => '▎').join('\n') })] })
   return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [
     els.Box({ key: 'cu-ruled', flexDirection: 'column', paddingLeft: 2, children: [rule, head, body] }),
   ] })

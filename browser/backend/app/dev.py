@@ -515,8 +515,9 @@ def file_ticket(workspace: str | None, title: str, body: str, source: str = "ana
 
 def ticket_problem() -> str:
     """Why this server runs no code ticket, '' when it does: the live tree is not a git checkout (RELEASE_LINE), or
-    the server is itself a validation stack (NO_RUNNER_LINE)."""
-    if not (REPO / ".git").exists():
+    the server is itself a validation stack (NO_RUNNER_LINE). The checkout's git folder may be the browser folder's own or
+    the repository's that holds it (config.git_dir)."""
+    if config.git_dir(REPO) is None:
         return RELEASE_LINE
     if not STACK_ENABLED:
         return NO_RUNNER_LINE
@@ -532,7 +533,7 @@ def tickets_run_here(c: str | None = None) -> bool:
 def runner_problem(*, fixing: bool = False) -> str:
     """Why `thimble fix` cannot run here, '' when it can: the live tree is not a git checkout, the server is itself a
     validation stack (unless `fixing`), or the claude CLI is missing."""
-    if not (REPO / ".git").exists():
+    if config.git_dir(REPO) is None:
         return RELEASE_LINE
     if not fixing and not STACK_ENABLED:
         return NO_RUNNER_LINE
@@ -4122,9 +4123,10 @@ async def _shutdown_others() -> None:
             log.exception("shutdown of %s before restart failed", name)
 
 
-async def _do_restart(title: str, *, ticket_id: str | None = None) -> None:
+async def _do_restart(title: str, *, ticket_id: str | None = None, cwd: Path | None = None) -> None:
     """Restart this server in place (execv). After a ticket's apply, the restart watch goes first, so a change that
-    keeps the server from coming back is rolled back and the previous code started again."""
+    keeps the server from coming back is rolled back and the previous code started again. `cwd` is the backend folder
+    of the tree to start from (thimble fix: fixes.restart starts the server from the checkout of the person's fixes)."""
     global _closing
     _emit_all({"type": "server", "status": "restarting", "title": title})
     try:
@@ -4140,8 +4142,10 @@ async def _do_restart(title: str, *, ticket_id: str | None = None) -> None:
     await shutdown()
     await _shutdown_others()
     await asyncio.sleep(0.2)
-    log.info("restarting for %r", title)
+    log.info("restarting for %r%s", title, f" from {cwd}" if cwd else "")
     try:
+        if cwd is not None:
+            os.chdir(cwd)
         EXECV(_restart_argv())
     except OSError:
         log.exception("the restart's execv failed; this server goes on")
@@ -4223,6 +4227,15 @@ async def post_ticket(body: NewTicket, request: Request) -> dict[str, Any]:
     agent through main's module once nothing else runs."""
     await _on_first_request()
     _clicked(request)
+    from . import fixes  # noqa: PLC0415
+
+    if body.workspace and not fixes.problem():
+        # a change to thimble's code is a fix of the person's thimble (fixes.py), as /thimble-fix makes one
+        title, text = body.title.strip(), body.body.strip()
+        words = text if title and text.startswith(title.rstrip("…")) else "\n\n".join(x for x in (title, text) if x)
+        got = await fixes.request(body.workspace, words, title=body.title.strip() or None)
+        return {"id": f"fix-{got['fix']['id']}", "title": got["fix"].get("title"), "status": "running", "chat": None,
+                "fix": got["fix"]}
     try:
         return file_ticket(body.workspace, body.title, body.body, body.source, urgent=body.urgent, target=body.target)
     except ValueError as e:

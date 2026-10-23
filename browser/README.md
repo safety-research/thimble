@@ -29,14 +29,17 @@ Claude Code sign-in. The installer asks how to reach Claude (`--no-setup` skips 
 cd path/to/folder
 thimble-browser
 thimble-browser path/to/folder --port 8400
-thimble-browser --continue    # or -r / --resume to pick an earlier chat
+thimble-browser --continue    # or -r / --resume to pick an earlier session
 ```
 
 `thimble-browser` opens the folder you are in, or the folder you name. It starts the server on 127.0.0.1, port 8300 or
 the next free one (`--port N` takes N alone), and prints the page's sign-in link and how it reaches Claude. Ctrl-C
-stops the server. Each start opens a new chat, as `claude` does; the workspace's cards, canvas, reports and labels
-stay. From another machine, reach the page through an SSH tunnel
-(`ssh -L 8300:127.0.0.1:8300 <host>`). The workspaces (chats, cards, labels, report) are kept in `~/.thimble-browser`,
+stops the server. Each start is a new session, as with `claude`: an empty chat, canvas, report and labels, as at the
+folder's first start. `--continue` (`-c`) brings back the latest session with its chat, canvas, report and labels;
+`--resume` (`-r`) lists the earlier sessions (when, the first message, turns and cards) and brings back the one you
+pick. From another machine, reach the page through an SSH tunnel
+(`ssh -L 8300:127.0.0.1:8300 <host>`). The workspaces (chats, cards, labels, report; the earlier sessions in
+`workspaces/.archive`) are kept in `~/.thimble-browser`,
 or in `THIMBLE_BROWSER_HOME`, apart from the terminal plugin's `~/.thimble`.
 
 ## Layout

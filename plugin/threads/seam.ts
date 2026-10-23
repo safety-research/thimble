@@ -9,9 +9,10 @@
 //   threadsBar($, on, preview)         its items at the bar's right (`t 2 threads`)
 //   drawThreadsPane($, e, kind, args, els)   the side pane of kind `threads` (the list) or `thread` (one thread: what
 //                                      it is about, its turns, its input)
-//   openThread($, scope)               the side pane on the thread about `scope` (a new one, or the one already about
+//   openThread($, scope, {key})        the side pane on the thread about `scope` (a new one, or the one already about
 //                                      it), its input taking the keys: the tray's `a` on a mark, a claim's question in
-//                                      the claims pane; true when it opened
+//                                      the claims pane; true when it opened. `key`: the bar's words that open it where
+//                                      the key at the prompt cannot (a narrow terminal)
 //   threadAsked($, scope)              the first question of the thread about `scope`, or null when none was asked:
 //                                      the tray's `↳ thread: … · a opens it` line
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
@@ -90,8 +91,8 @@ export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown):
   return roomUnder($, e, kind, args)
 }
 
-export async function openThread($: Engine, scope: ThreadScope): Promise<boolean> {
-  return openThreadOn($, scope)
+export async function openThread($: Engine, scope: ThreadScope, o: { key?: string } = {}): Promise<boolean> {
+  return openThreadOn($, scope, o)
 }
 
 /** A reply's passages as the margin asks about them; read again when a thread changes. */
@@ -101,7 +102,8 @@ export async function threadPassages($: Engine, row: string): Promise<{ has: (p:
   const scope = (p: Passage): ThreadScope => ({ about: p.label, passage: { row, text: p.text.slice(0, 4000) } })
   return {
     has: p => asked(scope(p)),
-    ask: p => { void openThreadOn($, scope(p)).catch(() => undefined) },
+    // the open, returned: Claude Code places the pane at any width only for an open made while the press runs
+    ask: p => openThreadOn($, scope(p)).catch(() => false),
   }
 }
 
@@ -112,7 +114,7 @@ export async function threadOnCard($: Engine, id: string, title: string, line = 
   const about = `the card "${title || id}"`
   const part = cardPart(line)
   const scope: ThreadScope = part ? { about: partAbout(about, part), card: id, part } : { about, card: id }
-  return { label: scope.about, has: asked(scope), press: () => { void openThreadOn($, scope).catch(() => undefined) } }
+  return { label: scope.about, has: asked(scope), press: () => openThreadOn($, scope).catch(() => false) }
 }
 
 export async function threadCardAnchor($: Engine, agentId: string | undefined, cardId: string): Promise<string | null> {

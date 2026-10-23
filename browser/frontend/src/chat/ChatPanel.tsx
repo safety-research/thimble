@@ -58,6 +58,8 @@ import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
 import { LabelAsks } from './LabelAsk'
 import { NoticeStrip } from './Notice'
+import { fixWords, pageText } from './fix'
+import { FixNotice, FixWorking } from './FixStrip'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -307,6 +309,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const flowRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLElement>(null)
   const footRef = useRef<HTMLDivElement>(null)
+  const stack = useMoreBelow()
   // the tree: collapsed to one row by default
   const treeKey = storageKey(ws, 'threads-collapsed')
   const [treeCollapsed, setTreeCollapsed] = useState(() => readStorage<boolean>(treeKey, true))
@@ -698,6 +701,28 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
+    // `/thimble-fix <words>`: a change to the person's own thimble, made by a fork of main with what the page shows now
+    const fixing = fixWords(text)
+    if (fixing === '') {
+      // `/thimble-fix` alone: Your fixes, as in the terminal
+      bus.emit('fixList', { open: true })
+      return Promise.resolve(true)
+    }
+    if (fixing !== null || target.to === 'fix') {
+      // the fix runs in the background in a thread of its own (backend fixes.fixer_chat); main's chat shows the message
+      // and one line that it started there. Typed in a fix's thread, the words are a round of that fix
+      track('ui-click', { target: target.to === 'fix' && fixing === null ? `fix:${target.fix}` : 'fix:new' })
+      return api
+        .requestFix(ws, fixing ?? text, pageText(), fixing === null && target.to === 'fix' ? target.fix : undefined)
+        .then(() => true)
+        .catch((e: Error) => {
+          bus.emit('toast', { text: `thimble fix did not start: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' })
+          return false
+        })
+    }
+    // what the analyst sends shows at the list's end, also when they had scrolled up to read: the list follows it
+    nearEnd.current = true
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
     if (target.to === 'orient') {
       // the latest orientation takes the analyst's message itself: it resumes the finished session, or waits for the run
       // going on to end; from one of its steps, its thread opens, where the message and the reply show
@@ -796,6 +821,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             aside={onCollapse && <Button variant="icon" size="sm" icon="panel-left" title="Collapse the chat" className="chat-head-collapse" onClick={onCollapse} />}
           />
         </header>
+        <FixNotice ws={ws} />
         <div
           className="chat-list"
           ref={listRef}
@@ -823,16 +849,22 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
             {!chat.loading && !chat.error && kind === 'check' && <SessionView ws={ws} id={current} chat={chat} role="check" title={curMeta?.title || 'Check'} running={running} fromMain={false} />}
             {!chat.loading && !chat.error && kind === 'dev' && <DevView ws={ws} id={current} chat={chat} mainRecords={main.records} ticket={ticket} onTicket={setTicket} />}
             {!chat.loading && !chat.error && kind === 'step' && curMeta && <StepView ws={ws} meta={curMeta} chat={chat} running={running} />}
+            {!chat.loading && !chat.error && kind === 'fix' && <Rows rows={chat.rows} ws={ws} chat={current} streaming={chat.streaming} />}
           </div>
           </CallFocusContext.Provider>
         </div>
         <div ref={footRef} className="chat-foot">
-          <Holds className="chat-main-holds" alert={main.meta?.alert} />
-          {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
-          {!touring && <ProposalCard ws={ws} />}
-          <LabelAsks ws={ws} />
-          <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
+          {/* what waits for the analyst above the composer, together at most a part of the column's height, so the
+              transcript keeps its room; more of it scrolls */}
+          <div className="chat-foot-stack" ref={stack.ref} onScroll={stack.check} data-more={stack.more || undefined}>
+            <Holds className="chat-main-holds" alert={main.meta?.alert} />
+            {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
+            {!touring && <ProposalCard ws={ws} />}
+            <LabelAsks ws={ws} />
+            <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
+          </div>
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
+          <FixWorking />
           {orientClosedText ? (
             <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
               <Icon name="terminal" size={13} className="chat-continue-ico" />
@@ -860,6 +892,38 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       </section>
     </ThreadsContext.Provider>
   )
+}
+
+/** Whether a box that scrolls holds more below what it shows: `ref` goes on the box and `check` on its scroll; its
+ * size and its children's are watched. */
+export function useMoreBelow() {
+  const [more, setMore] = useState(false)
+  const box = useRef<HTMLDivElement | null>(null)
+  const check = useCallback(() => {
+    const el = box.current
+    setMore(!!el && el.scrollHeight - el.scrollTop - el.clientHeight > 2)
+  }, [])
+  const ro = useRef<ResizeObserver | null>(null)
+  const mo = useRef<MutationObserver | null>(null)
+  const ref = useCallback(
+    (el: HTMLDivElement | null) => {
+      ro.current?.disconnect()
+      mo.current?.disconnect()
+      box.current = el
+      if (!el) return
+      if (typeof ResizeObserver !== 'undefined') {
+        ro.current = new ResizeObserver(check)
+        ro.current.observe(el)
+      }
+      if (typeof MutationObserver !== 'undefined') {
+        mo.current = new MutationObserver(check)
+        mo.current.observe(el, { childList: true, subtree: true })
+      }
+      check()
+    },
+    [check],
+  )
+  return { ref, check, more }
 }
 
 /** The kinds of a thread's `error` record that end a run without a reply the analyst can read (backend

@@ -35,12 +35,12 @@ import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, underCard } from '../core/answerview'
 import { askCell } from '../core/askcell.js'
 import { cut } from '../core/text.js'
-import { themeNow, type Theme } from '../core/theme'
+import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
 import { layoutLines } from './layout.js'
-import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, markSeen, metaOf, readState, saveMeta, saveState, seenNow, setFocus, setTree, treeOf, versionDir } from './store'
+import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, keptFocus, keptMeta, keptSeen, markSeen, metaOf, readState, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -85,9 +85,49 @@ export async function canRedraw($: Engine, turn: string | undefined): Promise<bo
   return fullscreen === true || (!!turn && turn === (await mainTurn($)))
 }
 
+// Claude Code keeps the newest run of reads and commands live (ToolGroup isActive: its line and the rows of its last
+// call) until its next request after the card's call, and only then folds it into one line. A card drawn under its call
+// at once stood that many rows lower and jumped up a moment later, so the first drawing of a card of the turn that runs
+// waits while a run is live (firstWaits); it draws when the run folds, the next step starts or the turn ends (runFolded).
+// The runs live now, by row; the cards that wait; the cards drawn since the plugin loaded.
+const liveRuns = new Set<string>()
+const waiting = new Set<string>()
+const drawnOnce = new Set<string>()
+
+/** A run of calls drawn now (`row`, its requestId): live or folded. */
+export function noteRun($: Engine, row: string, live: boolean): void {
+  if (live) liveRuns.add(row)
+  else if (liveRuns.delete(row)) runFolded($)
+}
+
+/** No run is live any more (`all`: a step of main's started, or its turn ended), or one folded: the cards that waited
+ *  draw. */
+export function runFolded($: Engine, all = false): void {
+  if (all) liveRuns.clear()
+  if (!waiting.size || liveRuns.size) return
+  waiting.clear()
+  $.clock.after(0, () => $.ui.invalidate('ui.render'))
+}
+
+/** Whether the card's frame waits: its first drawing, of a card main's running turn drew, while a run is live. */
+export async function firstWaits($: Engine, meta: CardMeta): Promise<boolean> {
+  if (drawnOnce.has(meta.id)) return false
+  if (liveRuns.size && !!meta.turn && meta.turn === (await mainTurn($))) {
+    waiting.add(meta.id)
+    return true
+  }
+  drawnOnce.add(meta.id)
+  return false
+}
+
 /** The screen's rows, or 0 while no drawing said. */
 export function screenRows(): number {
   return rowsSeen
+}
+
+/** The screen's columns, or 0 while no drawing said. */
+export function screenColumns(): number {
+  return columnsSeen
 }
 
 export function cardWidth(columns?: number): number {
@@ -176,13 +216,14 @@ export function noteShown($: Engine, ids: string[], onScreen: { first: number; l
  *  drawn since the plugin loaded and the screen shows it now (noteShown), so a card scrolled out of view, and one a
  *  resumed session no longer shows, takes no keys. */
 export async function keyOwner($: Engine, key: string): Promise<CardMeta | null> {
+  // a key press reads what cards/store.ts keeps of the cards, no state
   const metas: CardMeta[] = []
-  for (const id of await seenNow($)) {
+  for (const id of await keptSeen($)) {
     if (shown.get(id) === false) continue
-    const m = await metaOf($, id)
+    const m = await keptMeta($, id)
     if (m && m.version > 0 && m.keys.includes(key)) metas.push(m)
   }
-  const focus = await focusNow($)
+  const focus = await keptFocus($)
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
 }
 
@@ -224,7 +265,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // the margin left of the frame, in the 2 columns of its indent, beside its title: asks a side thread about the card
   // (its title and what it shows); the row's keyed Box scopes the ?'s hover, so it shows while the pointer is on the card
   const framed = ask
-    ? E.Box({ key: `ask-row-${meta.id}`, flexDirection: 'row', children: [E.Box({ width: 2, flexShrink: 0, paddingTop: 1 + (sel ? titleRows + sel.row : 0), children: [askCell(E, { key: `card-ask-${meta.id}`, ...ask })] }), box] })
+    ? E.Box({ key: `ask-row-${meta.id}`, flexDirection: 'row', children: [E.Box({ width: 2, flexShrink: 0, paddingTop: 1 + (sel ? titleRows + sel.row : 0), children: [askCell(E, { key: `card-ask-${meta.id}`, ...ask, color: accent() })] }), box] })
     : box
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
   const under = await underCard($, E, meta.id, inside)

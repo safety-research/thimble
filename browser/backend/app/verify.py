@@ -124,10 +124,11 @@ def _link_now(c: str, cell: dict, v: dict, *, rerun: bool = False) -> None:
                 for l in res.links]
     resolved, typed_links = _apply_typed(typed, resolved)
     unresolved = list(dict.fromkeys(res.unresolved))
+    shown = list(dict.fromkeys(res.shown))  # found in the outputs, left plain: never unresolved
     quiet = [{"value": l.token, "ref": l.ref, "why": heal.WHY_GONE.format(value=l.token) if rerun else heal.WHY_MOVED, "gone": rerun}
              for l in res.stale]
     links = {"status": "pending", "resolved": resolved, "unresolved": unresolved, "broken": [], "quiet": quiet,
-             "typed": typed_links, "checked": False}
+             "typed": typed_links, "checked": False, "shown": shown}
     if not CHECK_JOBS:  # the deterministic verdict stands as the record; nothing is checked by execution
         links["status"] = _links_status(resolved, unresolved, [], _numbers(typed.text) or resolved or quiet or typed_links,
                                         quiet=quiet, typed=typed_links)
@@ -411,15 +412,17 @@ async def _links_job(c: str, cid: str, version: str) -> None:
     typed = _typed(cid, text, load)
     text = typed.text
     resolved, typed_links = _apply_typed(typed, resolved)
-    unresolved = [t for t in (stored.get("unresolved") or []) if isinstance(t, str)] or _unlinked(text)
+    # a number the outputs show but resolve left plain (several places, or too small to link alone) is no unresolved one
+    shown = {t for t in (stored.get("shown") or []) if isinstance(t, str)}
+    unresolved = [t for t in (stored.get("unresolved") or []) if isinstance(t, str)] or [t for t in _unlinked(text) if t not in shown]
     if text != raw:  # tokens were put right or unwrapped: what is unlinked is read off the text as it stands
-        unresolved = _unlinked(text)
+        unresolved = [t for t in _unlinked(text) if t not in shown]
     still = unresolved  # a number no output shows stays unlinked, for the agent that wrote the takeaway to cite
     # a re-run's orphan that found no home keeps its cause on the grey mark ("was 44 in an earlier run")
     changes = [ch.record() for ch in healed.changes if ch.how != heal.KEPT]
     links = {"status": _links_status(resolved, still, broken, _numbers(text) or resolved or typed_links, quiet=quiet,
                                      typed=typed_links), "resolved": resolved,
-             "unresolved": still, "broken": broken, "quiet": quiet, "typed": typed_links, "checked": True,
+             "unresolved": still, "broken": broken, "quiet": quiet, "typed": typed_links, "checked": True, "shown": sorted(shown),
              "healed": {"version": heal.version(text, [x for x in (load(i) for i in heal.cited_cell_ids(text)) if x]),
                         "relinks": relinks, "changes": changes, "ms": int((time.monotonic() - t0) * 1000)}}
 

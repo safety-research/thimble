@@ -1188,6 +1188,17 @@ def get_stamps(c: str, path: list[str] = Query(default=[]), include_hidden: int 
     return {"stamps": out}
 
 
+@router.get("/corpora/{c}/sources/kinds")
+def get_kinds(c: str, path: list[str] = Query(default=[])) -> dict[str, Any]:
+    """`?path=<path>&path=...`: whether each path names a folder or a file, by a stat alone (refs.path_kinds), so a
+    chip that names a folder with no slash after it shows the folder's glyph as soon as the chat draws it; null for a
+    path that names neither. 400 past STAMPS_MAX paths."""
+    corpus = _corpus(c)
+    if len(path) > STAMPS_MAX:
+        raise HTTPException(400, f"at most {STAMPS_MAX} paths at a time")
+    return {"kinds": refs.path_kinds(corpus, path)}
+
+
 @router.get("/corpora/{c}/source")
 def get_source(c: str, path: str, request: Request, start: int = 1, count: int = PAGE_DEFAULT, clip: int = 0) -> dict[str, Any]:
     """A page of a file's records; `clip` > 0 cuts every string longer than that many characters (clip_records)."""

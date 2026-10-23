@@ -60,6 +60,6 @@ test("a fork's transcript is the thread's turns: the question after its directiv
     ['person', 'why so many?', 'Runs', null], ['claude', '41 of the 44 runs failed (runs.jsonl).', null, ['c9']],
     ['person', 'and the 3?', 'Runs', null], ['claude', 'They used the old config.', null, null],
   ])
-  assert.match(sentNote({ subject: 'Runs', turns: shown }), /^The analyst sent you the answer of a side thread about Runs\. They asked there: "and the 3\?"\nThe side agent answered:\nThey used the old config\.$/)
+  assert.match(sentNote({ subject: 'Runs', turns: shown }), /^The analyst sent you the answer of a side thread about Runs\. They asked there: "and the 3\?"\nThe side agent answered:\nThey used the old config\.\n\nReply to the analyst: say what this answer changes in what you told them, if anything\.$/)
 })
 

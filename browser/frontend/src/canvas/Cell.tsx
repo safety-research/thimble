@@ -14,6 +14,7 @@ import { pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import type { Cell } from '../lib/types'
 import { CardFace, type CardField } from './CardFace'
+import { CITATION } from '../marks/marks'
 import { checkAgain } from './checkActions'
 import { useConceptDetail } from './concepts'
 import { CanvasContext } from './context'
@@ -91,7 +92,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   const armed = useRef<CardField | null>(null)
   const textDown = (field: CardField) => (e: MouseEvent<HTMLElement>) => {
     armed.current = null
-    if (!p.alone || e.button !== 0 || pointKeyHeld(e) || (e.target as HTMLElement).closest('a, button, .chip, .refchip')) return
+    if (!p.alone || e.button !== 0 || pointKeyHeld(e) || (e.target as HTMLElement).closest(`a, button, .chip, ${CITATION}`)) return
     armed.current = field
     e.stopPropagation()
   }
@@ -105,7 +106,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   const textClick = (field: CardField) => (e: MouseEvent<HTMLElement>) => {
     const was = armed.current
     armed.current = null
-    if (was !== field || !p.alone || pointKeyHeld(e) || (e.target as HTMLElement).closest('a, button, .chip, .refchip')) return
+    if (was !== field || !p.alone || pointKeyHeld(e) || (e.target as HTMLElement).closest(`a, button, .chip, ${CITATION}`)) return
     if (e.detail > 1) return cancelEdit()
     const at = { x: e.clientX, y: e.clientY }
     cancelEdit()
@@ -157,7 +158,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
       onMouseDown={(e) => p.onPress(e, cell.id)}
       onDoubleClick={(e) => {
         cancelEdit()
-        if ((e.target as HTMLElement).closest('button, textarea, input, [contenteditable="true"], .chip, .refchip')) return
+        if ((e.target as HTMLElement).closest(`button, textarea, input, [contenteditable="true"], .chip, ${CITATION}`)) return
         e.stopPropagation()
         p.onFocusMode(cell.id)
       }}

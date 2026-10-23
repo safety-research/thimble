@@ -40,7 +40,7 @@ import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { revealCard } from '../cards/draw'
-import { themeNow } from '../core/theme'
+import { accent, themeNow } from '../core/theme'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
 import { launchRepair, repairOf } from '../marks/checker'
@@ -51,7 +51,7 @@ import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { squeezeBar, squeezeHidesCard, squeezeView } from '../squeeze/seam'
+import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
@@ -62,7 +62,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Frame = MarkRef & { open?: 'code' | null; page?: number }
+export type Frame = MarkRef & { open?: 'code' | null; page?: number; skip?: number }
 export type Tray = { stack: Frame[] } | null
 type Stop = { row: string; kind?: 'citation' | 'explain' | 'heads'; n?: number; id?: string; at?: number; card?: string }
 type Stand = { row: string; card: string } | null
@@ -78,7 +78,7 @@ const TONES = { citation: 'merged', explain: 'planMode', heads: 'claude' } as co
 // the question the person typed with the tray open, until main's turn for it starts (then kept by its turn)
 let pendingAbout: string | null = null
 // the tray as last drawn, when its body was taller than the room above the bar: the frame and where m goes next
-let paged: { f: Frame; next: number | null } | null = null
+let paged: { f: Frame; next: number | null; skip: number } | null = null
 
 const quietly = (p: Promise<unknown> | unknown) => Promise.resolve(p).catch(() => undefined)
 
@@ -93,12 +93,39 @@ async function standNow($: Engine): Promise<Stand> {
   return ((await $.state.get(STAND)).value ?? null) as Stand
 }
 
+// The tray and the card ] reached, as this module last wrote or read them: it alone writes them, so the copy is the
+// state's. A key at an empty prompt reads the copy (trayHolds, trayKey), since Claude Code gives a key's hook a few
+// milliseconds of its own time and each read of the state costs some of it under load. A drawing reads the state
+// itself, so a change draws again.
+let kept: { tray: Tray; stand: Stand } | null = null
+
+async function keptNow($: Engine): Promise<{ tray: Tray; stand: Stand }> {
+  return kept ?? (kept = { tray: await trayNow($), stand: await standNow($) })
+}
+
+async function writeTray($: Engine, tray: Tray): Promise<void> {
+  const next = tray && Array.isArray(tray.stack) && tray.stack.length ? tray : null
+  await $.state.set(TRAY, next as never)
+  kept = { ...(await keptNow($)), tray: next }
+}
+
+async function writeStand($: Engine, stand: Stand): Promise<void> {
+  await $.state.set(STAND, stand as never)
+  kept = { ...(await keptNow($)), stand }
+}
+
+/** Whether the tray holds the keys: it is open, or a card ] reached stands. */
+export async function trayHolds($: Engine): Promise<boolean> {
+  const k = await keptNow($)
+  return !!k.tray || !!k.stand
+}
+
 /** The tray as it stands now: what a question asked with it open carries for Claude follows its top (core/tell.ts),
  *  and nothing once it closed. */
 async function setTray($: Engine, tray: Tray): Promise<void> {
   const next = tray && tray.stack.length ? tray : null
-  await $.state.set(TRAY, next as never)
-  if (next) await $.state.set(STAND, null as never)
+  await writeTray($, next)
+  if (next) await writeStand($, null)
   const f = top(next) as Frame | null
   await tellAtNextPrompt($, 'tray', f ? scopeText(f, await infoOf($, f)) : '')
 }
@@ -295,22 +322,23 @@ async function toggleCode($: Engine): Promise<void> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) return
-  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, open: f.open === 'code' ? null : 'code', page: 0 }] } as never)
+  await writeTray($, { stack: [...tray.stack.slice(0, -1), { ...f, open: f.open === 'code' ? null : 'code', page: 0, skip: 0 }] })
 }
 
-/** m on a tray taller than the room above the bar: its next rows, and from the top again after the last. */
-async function setPage($: Engine, page: number): Promise<void> {
+/** m on a tray taller than the room above the bar: its next rows, and from the top again after the last. `skip`: the
+ *  rows of unit `page` already shown, when it is taller than the room (tray.mjs pageOf). */
+async function setPage($: Engine, page: number, skip = 0): Promise<void> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) return
-  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, page }] } as never)
+  await writeTray($, { stack: [...tray.stack.slice(0, -1), { ...f, page, skip }] })
 }
 
 /** A card ] reached takes the keys, its own first, and shows framed in focus. */
 async function standOn($: Engine, row: string, card: string): Promise<void> {
   await setTray($, null)
   await setFocus($, card)
-  await $.state.set(STAND, { row, card } as never)
+  await writeStand($, { row, card })
   const t = await turnOfRow($, row)
   if (t?.answer) await pickAnswer($, t.answer)
   await reveal($, { row, card })
@@ -334,17 +362,21 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
   else await openMark($, refOf(next) as Frame, { reveal: true })
 }
 
-/** a: a side thread about the mark the tray shows; the tray gives way to it when it opened. */
-async function askAbout($: Engine, f: Frame): Promise<void> {
+/** The bar's words that open a side thread where the a key cannot: Claude Code places the pane at any width only for a
+ *  press (`a ask` in the bar), never for a key at the prompt. */
+const ASK_WORDS = 'a ask'
+
+/** a, or a press on `a ask`: a side thread about the mark the tray shows; the tray gives way to it when it opened. */
+async function askAbout($: Engine, f: Frame, byKey = false): Promise<void> {
   const info = await infoOf($, f)
-  const placed = await openThread($, { about: aboutOf(f, info), mark: refOf(f) as MarkRef })
+  const placed = await openThread($, { about: aboutOf(f, info), mark: refOf(f) as MarkRef }, byKey ? { key: ASK_WORDS } : {})
   if (placed) await setTray($, null)
 }
 
-/** a on the card ] reached: a side thread about it. */
-async function askCard($: Engine, stand: NonNullable<Stand>): Promise<void> {
+/** a, or a press on `a ask`, on the card ] reached: a side thread about it. */
+async function askCard($: Engine, stand: NonNullable<Stand>, byKey = false): Promise<void> {
   const meta = await metaOf($, stand.card)
-  await openThread($, { about: `the card "${meta?.title ?? stand.card}"`, card: stand.card })
+  await openThread($, { about: `the card "${meta?.title ?? stand.card}"`, card: stand.card }, byKey ? { key: ASK_WORDS } : {})
 }
 
 /** The Button keys of `x repair`: in the citation's card, and in the bar (bar.tsx draws an item as `bar-<id>`). */
@@ -371,21 +403,22 @@ async function expand($: Engine, f: Frame): Promise<void> {
 
 /** Whether the squeeze chips hold the keys now (their items show as the bar's focus): [ and ] are theirs then. */
 async function chipsOpen($: Engine): Promise<boolean> {
-  try { return ((await squeezeBar($, featureOn, false)) ?? []).some(x => x?.focus) } catch { return false }
+  try { return await squeezeHolds($) } catch { return false }
 }
 
 /** The tray's keys at an empty prompt (hooks/keys.ts takes them as a Take): ] and [ always (but while the squeeze chips
  *  are open at rest), its own while it is open, a's and 0 on a card ] reached. */
 export async function trayKey($: Engine, key: string, until = 0): Promise<Any | null> {
-  const tray = await trayNow($)
-  const stand = tray ? null : await standNow($)
+  const k = await keptNow($)
+  const tray = k.tray
+  const stand = tray ? null : k.stand
   if (key === ']' || key === '[') {
     if (!tray && !stand && (await chipsOpen($))) return null
     return { now: () => stepMark($, key === ']' ? 1 : -1) }
   }
   if (stand) {
-    if (key === 'a') return { later: () => askCard($, stand) }
-    if (key === '0') return { now: () => $.state.set(STAND, null as never) }
+    if (key === 'a') return { later: () => askCard($, stand, true) }
+    if (key === '0') return { now: () => writeStand($, null) }
     return null
   }
   const f = top(tray) as Frame | null
@@ -393,11 +426,13 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   if (key === '0') return { now: () => goBack($) }
   if (key === 'm' && paged && sameRef(paged.f, f) && (paged.f.open ?? null) === (f.open ?? null) && paged.next !== null) {
     const was = f.page ?? 0
+    const wasSkip = f.skip ?? 0
     const to = paged.next
-    return { now: () => setPage($, to), undo: () => setPage($, was) }
+    const skip = paged.skip
+    return { now: () => setPage($, to, skip), undo: () => setPage($, was, wasSkip) }
   }
-  if (key === 'a') return { later: () => askAbout($, f) }
-  if (key === '1') return { now: () => askAbout($, f) }
+  if (key === 'a') return { later: () => askAbout($, f, true) }
+  if (key === '1') return { now: () => askAbout($, f, true) }
   if (f.kind === 'citation') {
     const ev = (await itemOf($, f.row, f.n))?.evidence
     if (key === 'c' && ev?.kind === 'computed') return { now: () => toggleCode($), undo: () => toggleCode($) }
@@ -444,7 +479,7 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
     return [
       { id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askCard($, stand) },
       ...(await steps()),
-      { id: 'tray-0', key: '0', words: 'back', focus: true, press: () => $.state.set(STAND, null as never) },
+      { id: 'tray-0', key: '0', words: 'back', focus: true, press: () => writeStand($, null) },
     ]
   }
   const f = top(tray) as Frame | null
@@ -563,7 +598,7 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   // a check that did not run: x starts it
   const unrun = m.status === 'failed' && m.failedBy === 'none'
   if (canRepair(m)) rows.push({ h: 1, el: els.Button({ key: 'repair', plain: true, label: unrun ? 'check this citation' : 'repair this citation', hover: { bold: true }, onPress: () => undefined, children: [
-    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: 'suggestion', children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: unrun ? ': start its check' : ': check it again and correct the cited words' })] }),
+    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: accent(), children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: unrun ? ': start its check' : ': check it again and correct the cited words' })] }),
   ] }) })
   if (!ev) {
     if (m.status !== 'checking' && !unrun) dim('none', 'The check gave no evidence for it.')
@@ -634,11 +669,12 @@ function drawUnits(els: Any, units: Unit[]): Any[] {
 /** The press on a citation's file place: the citation's evidence in the side pane. The open is awaited inside the
  *  handler, so it is made while the person's press runs: Claude Code places a pane at any width only for such an open,
  *  and one left to run after the handler returned (`void openPane(...)`) is unasked and waits undrawn below 144
- *  columns (110 for a pane the person opened before), which the notice then reports. */
+ *  columns (110 for a pane the person opened before). When Claude Code still places none (no surface here draws
+ *  panes), the notice says so; the tray keeps showing the cited line. */
 export function evidenceOpener($: Engine, f: { row: string; n: number }): () => Promise<void> {
   return async () => {
     const placed = await openPane($, 'evidence', { row: f.row, n: f.n }, `citation ${f.n}`).catch(() => true)
-    if (!placed) noticeLine($, 'Claude Code did not open the side pane here. Click the citation in the reply to see its evidence.', 'tray')
+    if (!placed) noticeLine($, 'Claude Code did not open the side pane here. The tray above still shows the cited line.', 'tray')
   }
 }
 
@@ -705,8 +741,8 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   // one more, the blank row messageEl draws above them (marks/view.ts)
   const gap = words && words.text.trim() ? 1 : 0
   const fit = room > 0 ? Math.max(3, room - 3 - gap) : 0
-  const page = pageOf(units.map(u => u.h), fit, f.page ?? 0)
-  paged = page.next === null ? null : { f, next: page.next }
+  const page = pageOf(units.map(u => u.h), fit, f.page ?? 0, f.skip ?? 0)
+  paged = page.next === null ? null : { f, next: page.next, skip: page.nextSkip ?? 0 }
   const shown = units.slice(page.start, page.end)
   let body: Any[]
   if (words) {
@@ -726,8 +762,9 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     const n = units.length
     body = [
       // the body keeps its own height inside the page (no shrinking), so the page cuts a unit it shows only the top of
-      Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1) + gap, overflow: 'hidden', children: [Box({ key: 'tray-page-body', flexDirection: 'column', flexShrink: 0, children: body })] }),
-      Text({ key: 'tray-more', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 ? 'm from the top' : 'm more'} · lines ${page.start + 1}–${page.end} of ${n}` }),
+      // (a unit taller than the page shows from the rows it already showed: the body moves up by them)
+      Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1) + gap, overflow: 'hidden', children: [Box({ key: 'tray-page-body', flexDirection: 'column', flexShrink: 0, ...(page.skip ? { marginTop: -page.skip } : {}), children: body })] }),
+      Text({ key: 'tray-more', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 && !page.nextSkip ? 'm from the top' : 'm more'} · lines ${page.start + 1}–${page.end} of ${n}` }),
     ]
   }
   // the right of the title says what kind of mark it is, and a citation's status before it
@@ -753,8 +790,8 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
 
 /** A /clear or a /resume (hooks/turnover.ts): the tray on the earlier conversation's citations closes. */
 export async function turnTray($: Engine): Promise<void> {
-  await $.state.set(TRAY, null as never)
-  await $.state.set(STAND, null as never)
+  await writeTray($, null)
+  await writeStand($, null)
 }
 
 export const registerTray: Register = on => {
@@ -766,7 +803,7 @@ export const registerTray: Register = on => {
         const f = top(await trayNow($)) as Frame | null
         if (f) {
           pendingAbout = aboutOf(f, await infoOf($, f))
-          await $.state.set(TRAY, null as never)
+          await writeTray($, null)
         } else pendingAbout = null
       }
     } catch {

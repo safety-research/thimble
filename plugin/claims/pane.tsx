@@ -26,10 +26,11 @@
 import type { EngineInterface } from 'claude-code'
 
 import { messageOf } from '../core/answers'
+import { quiet } from '../core/askcell.js'
 import { tellOpened } from '../core/engaged'
 import { failNotice } from '../bar/notice'
 import { openPane, paneNow } from '../core/pane'
-import { themeLast, themeNow } from '../core/theme'
+import { accent, themeLast, themeNow } from '../core/theme'
 import { launchRepair, repairOf } from '../marks/checker'
 import { citeWords } from '../marks/evidence'
 import { citeHeat } from '../marks/view'
@@ -52,7 +53,7 @@ const CLUSTER = ['#3cc2b9', '#a98be0', '#cfae7e', '#8fa1bd', '#e384b2', '#b2c24f
 const CLUSTER_LIGHT = ['#0f7f78', '#7650c4', '#87662a', '#4f6386', '#b03a74', '#677510']
 /** A line of code's color: the theme key thimble draws inline code in (tray/tray.ts), shaded by Claude Code. */
 const CODE_INK = 'permission'
-const THEME: Record<string, string> = { plain: 'text', accent: 'suggestion', good: 'success', bad: 'error', warn: 'warning', cite: 'merged' }
+const THEME: Record<string, string> = { plain: 'text', good: 'success', bad: 'error', warn: 'warning', cite: 'merged' }
 
 function look(tone: string | null | undefined): Record<string, unknown> {
   if (!tone) return {}
@@ -61,7 +62,7 @@ function look(tone: string | null | undefined): Record<string, unknown> {
   if (t === 'del') return { color: THEME.bad, strikethrough: true }
   if (t === 'ins') return { color: THEME.good }
   const c = /^c(\d)$/.exec(t)
-  const color = c ? (themeLast() === 'light' ? CLUSTER_LIGHT : CLUSTER)[(Number(c[1]) - 1) % 6] : t === 'code' ? CODE_INK : THEME[t]
+  const color = c ? (themeLast() === 'light' ? CLUSTER_LIGHT : CLUSTER)[(Number(c[1]) - 1) % 6] : t === 'code' ? CODE_INK : t === 'accent' ? accent() : THEME[t]
   return { ...(color ? { color } : {}), ...(faint || t === 'dim' ? { dimColor: true } : {}) }
 }
 
@@ -184,7 +185,7 @@ function keysRow(els: Any, keys: Key[]): unknown {
   const { Box, Button, Text } = els
   return Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
     ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
-    Button({ key: x.id ?? `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: x.label })] }),
+    Button({ key: x.id ?? `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, hover: quiet(`claims-${x.id ?? `key-${x.k}`}`), onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: x.label })] }),
   ]) })
 }
 

@@ -777,6 +777,10 @@ card:{cid}, your last card, still has no takeaway. Write it with `edit_card` and
 
 NOT found in this card's outputs, {values}. Cite each where the output shows it, or drop it.
 
+## shown-not-linked
+
+Found in this card's outputs but not linked, {values}: more than one place shows each, or it is a small number that could stand for several places. Link each to the place your words mean, as `[[value|card:{cid}#<column>/<row>]]`.
+
 ## add_card-more
 
 … {more}. `read_ref` on {ref} shows all of it.
@@ -868,6 +872,14 @@ Filed {label}. {running} runs now, and code tickets run one at a time, so this o
 ## file_dev_ticket-start
 
 Filed {label}: {title}. {start}
+
+## file_dev_ticket-fix
+
+thimble's fixer works on this change as fix {id}, "{title}", in a copy of thimble, with this conversation as its context. The row above the composer shows how it goes. When the change passes thimble's checks, a notice at the top of the chat asks the analyst to use it, and thimble starts again with it after their click. Tell the analyst in one line.
+
+## file_dev_ticket-fix-failed
+
+The fixer did not start on this change: {why} Tell the analyst in one line.
 
 ## ticket-terminal
 

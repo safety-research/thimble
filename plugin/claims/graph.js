@@ -5,8 +5,8 @@
 //   the head        Claims, how many and in how many clusters (`no claims yet` before the first); `+N new` bold for a
 //                   moment after claims came in
 //   the map         every cluster, each a loose group of dots in its own color in a cell of the map, its name under
-//                   them (three lines at most, then …); a hollow dot is a claim a later one corrected, a heavier one a
-//                   claim said twice or more, a ◆ a claim that came in while the person browsed (until the next look).
+//                   them (three lines at most, then …); a heavier dot is a claim said twice or more,
+//                   a ◆ a claim that came in while the person browsed (until the next look).
 //                   No lines join the dots, which keep their places while the person walks them. The map has two
 //                   columns of cells (three in a wide pane) and as many rows of cells as fit over the room the detail
 //                   keeps (cells of 4 rows); clusters beyond that, smallest first, join a near cluster (linked or
@@ -36,6 +36,7 @@
 // A canvas (canvas()) is a grid of cells: text and dots that are parts (a press on the part; the blank cells beside a
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, part}.
 import { blocks } from '../marks/message.js'
+import { tableLines } from '../marks/table.mjs'
 import { evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printLine } from '../tray/tray.mjs'
 import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
 
@@ -71,8 +72,8 @@ export const wrapName = (name, n) => wrap(one(name).replace(/ …$/, '\u2060…'
 
 /** A cluster's color: the six categorical tones in turn. */
 export const toneOf = i => `c${(Math.max(0, i) % 6) + 1}`
-/** A claim's dot: hollow once corrected, heavier when said twice or more. */
-export const dotOf = c => (c.revised_by ? '○' : (c.n || 1) >= 2 ? '◉' : '●')
+/** A claim's dot: filled, heavier when said twice or more (a claim a later one corrected stays filled). */
+export const dotOf = c => ((c.n || 1) >= 2 ? '◉' : '●')
 
 /** Who said a claim and when, in a few words, for a side thread: `turn 2`, `turn 2 · you`. */
 export function whenOf(c) {
@@ -533,9 +534,10 @@ function pieces(text, spans, n) {
 /**
  * A citation's evidence as its card in the reply draws it (tray/tray.ts citationBody), in `room` characters: for a
  * value code computed, the one line of the code that printed it, cut in the middle, and the output line that holds it,
- * cut around the cited words, with how many output lines it leaves out; for a file, its place and the cited line. The
- * cited words' spans in the line. Null without evidence. {code?, place?, text, spans, more, cut}: cut when the code or
- * the line was cut.
+ * cut around the cited words, with how many output lines it leaves out; for a card's value, the card's title and the
+ * header over the cited row when the value is a table's cell (`table`: the header and the row, tableLines), else the
+ * line that holds it; for a file, its place and the cited line. The cited words' spans in the line. Null without
+ * evidence. {code?, card?, table?, place?, text, spans, more, cut}: cut when the code or the line was cut.
  */
 export function snippetOf(ev, room) {
   const line = evidenceLine(ev)
@@ -546,6 +548,10 @@ export function snippetOf(ev, room) {
     const code = printLine(ev.code, line.text)
     const shown = midCut(code, room)
     return { code: shown, text: fit.text, spans: fit.spans, more: hiddenOutput(ev), cut: cutLine || shown !== code }
+  }
+  if (ev.kind === 'card') {
+    const table = ev.table ? tableLines(ev.table, Math.max(9, room)) : null
+    return { card: one(ev.title || ev.card), ...(table ? { table } : {}), text: fit.text, spans: fit.spans, more: 0, cut: cutLine }
   }
   return { place: `${ev.file}:${line.n ?? ev.line}`, text: fit.text, spans: fit.spans, more: 0, cut: cutLine }
 }
@@ -566,10 +572,31 @@ function wholeRows(ev, W) {
     }
     return rows
   }
+  if (ev.kind === 'card') {
+    // a card's value: the card, then the cited cell's header and row (the columns round it that fit, as the reply's
+    // card shows them: a table wrapped reads worse), else what its code printed, else the value
+    rows.push(cardLine(ev, W))
+    const table = ev.table ? tableLines(ev.table, W - 2) : null
+    const lines = table || (ev.output != null ? [] : [evidenceLine(ev)].filter(Boolean))
+    for (const l of lines) for (const p of pieces(l.text, l.spans, W - 2)) rows.push(bar(p))
+    if (!table && ev.output != null) {
+      const hit = evidenceLine(ev)
+      let found = false
+      for (const l of String(ev.output).replace(/\n+$/, '').split('\n')) {
+        const mine = !found && hit && l === hit.text
+        if (mine) found = true
+        for (const p of pieces(l, mine ? hit.spans : [], W - 2)) rows.push(bar(p))
+      }
+    }
+    return rows
+  }
   rows.push([{ s: cut(`${ev.file}:${ev.line}`, W), tone: 'dim' }])
   for (const l of Array.isArray(ev.lines) ? ev.lines : []) for (const p of pieces(String(l.text ?? ''), l.highlight ? [l.highlight] : [], W - 2)) rows.push(bar(p))
   return rows
 }
+
+/** A card's value's first row, as the citation's card in the reply has it: `card` dim, then the card's title bold. */
+const cardLine = (ev, W) => fit([{ s: 'card ', tone: 'dim' }, { s: one(ev.title || ev.card), bold: true }], W)
 
 /**
  * A citation as its card in the reply draws it, as rows of runs W wide: the cited words bold in the citations' look
@@ -595,6 +622,12 @@ export function cardOf(s, W, { whole = false } = {}) {
   if (!sn) return { rows, cut: false }
   if (sn.code) rows.push([{ s: sn.code, tone: 'code' }])
   if (sn.place) rows.push([{ s: cut(sn.place, W), tone: 'dim' }])
+  if (sn.card != null) rows.push(cardLine(s.evidence, W))
+  if (sn.table) {
+    // a table's cell: the header over the cited row (and any other cited row), the cited cells tinted
+    for (const l of sn.table) rows.push([{ s: '│', tone: 'dim-faint' }, { s: ' ' }, ...tinted(l.text || ' ', l.spans)])
+    return { rows, cut: sn.cut }
+  }
   const clipped = /^…|…$/.test(sn.text)
   rows.push([{ s: '│', tone: 'dim-faint' }, { s: ' ' }, ...tinted(sn.text, sn.spans, clipped ? { tone: 'dim' } : {})])
   if (sn.more) rows.push([{ s: '│', tone: 'dim-faint' }, { s: ' ' }, { s: moreLines(sn.more), tone: 'dim' }])
@@ -841,12 +874,12 @@ function nameRows(name, tone, W, { after = '', part = null, lit = false, dim = f
 }
 
 /** A claim in the cluster's list, as rows W wide, each a press on `part`: `–` and its sentence, wrapped under its first
- *  word, two lines at most (then …). The claim picked: `▸` and the whole sentence bold in the cluster's color; with a
- *  claim picked, every other one dim; a new claim (`fresh`) bold. */
-function itemRows(c, W, { tone, picked = false, dim = false, fresh = false, part = null }) {
+ *  word, whole when `whole`, else two lines at most (then …). The claim picked: `▸` and the whole sentence bold in the
+ *  cluster's color; with a claim picked, every other one dim; a new claim (`fresh`) bold. */
+function itemRows(c, W, { tone, picked = false, dim = false, fresh = false, part = null, whole = false }) {
   const look = picked ? { tone, bold: true } : fresh ? { bold: true } : dim ? { tone: 'dim' } : {}
   let lines = wrap(sentenceOf(c.text), W - 4)
-  if (!picked && lines.length > 2) {
+  if (!picked && !whole && lines.length > 2) {
     const words = lines[1].split(' ')
     while (words.length > 1 && len(words.join(' ')) + 2 > W - 4) words.pop()
     lines = [lines[0], `${words.join(' ')} …`]
@@ -889,11 +922,15 @@ export function panelOf({ data, claim, group, tone, W, byId = new Map((data.clai
     rows.push(...pickedRows(claim), ...indent(ev.rows, 4))
     return { rows, cites: ev.cites, shown: ev.shown, cut: ev.cut, fixes, windowed: false }
   }
-  const items = cs.map(c => (claim?.id === c.id ? pickedRows(c) : itemRows(c, W, { tone: gtone, dim: !!claim, fresh: fresh.has(c.id), part: `n:${c.id}` })))
+  const itemsOf = whole => cs.map(c => (claim?.id === c.id ? pickedRows(c) : itemRows(c, W, { tone: gtone, dim: !!claim, fresh: fresh.has(c.id), part: `n:${c.id}`, whole })))
+  const budget = Math.max(3, room - rows.length)
+  const height = its => its.reduce((a, r) => a + r.length, 0)
+  // each claim whole when they all fit the room, else two lines at most, so a claim is cut only when the room is short
+  const full = itemsOf(true)
+  const items = height(full) <= budget ? full : itemsOf(false)
   // the window of claims the list shows: all when they fit, else round the claim picked (or from the first), or from
   // the claim the person paged to
-  const all = items.reduce((a, r) => a + r.length, 0)
-  const budget = Math.max(3, room - rows.length)
+  const all = height(items)
   const fitIn = budget - 2
   // the claims a screen shows from claim `a` down
   const downFrom = a => { let b = a, used = 0; while (b < items.length && (b === a || used + items[b].length <= fitIn)) { used += items[b].length; b++ } return b }
@@ -1013,8 +1050,9 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false } = {})
   const tone = c => toneOf(gi.get(String(c.cluster)) ?? 0)
   const { claim, group, chosen } = selectedOf(data, st)
   const fresh = freshOf(data, st)
-  // `+N new` for a moment: the claims that came in while browsing, else the last look's
-  const head = [headRuns(data, { narrow, fresh: bright ? fresh.size || claims.filter(c => c.turn != null && c.turn === data.last).length : 0 })]
+  // `+N new` for a moment: the claims that came in while browsing, else the last look's. The head counts the store's
+  // clusters, not the cells the map joined them into
+  const head = [headRuns(raw, { narrow, fresh: bright ? fresh.size || claims.filter(c => c.turn != null && c.turn === data.last).length : 0 })]
   for (const g of data.gaps || []) head.push([{ s: `Turn ${g.turn} was not read: `, tone: 'bad' }, { s: cut(g.why || 'the look at the answer failed', W - 24), tone: 'dim' }])
   const none = { claim: null, group: null, chosen: false, cites: 0, shown: null, cut: false, fixes: 0, windowed: false, narrow, cellRows: 0, data, order: [] }
   if (!claims.length) return { head, graph: [], panel: [], ...none }
@@ -1065,10 +1103,10 @@ const result = panel => ({
 })
 
 /** The head: Claims, how many and in how many clusters (`no claims yet` before the first), and `+N new` for a moment
- *  after claims came in. */
+ *  after claims came in. The clusters are the lens's that hold claims (the claims between clusters are none). */
 function headRuns(data, { narrow = false, fresh = 0 } = {}) {
   const n = data.total || 0
-  const groups = (data.groups || []).length
+  const groups = (data.groups || []).filter(g => g.id != null).length
   const out = [{ s: 'Claims', bold: true }]
   if (!n) out.push({ s: ' · no claims yet', tone: 'dim' })
   else out.push({ s: ` · ${n.toLocaleString('en-US')}${narrow ? '' : ` claim${n === 1 ? '' : 's'}`}${groups > 1 ? ` · ${groups} clusters` : ''}`, tone: 'dim' })

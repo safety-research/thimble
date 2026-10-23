@@ -185,6 +185,35 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(String(r5.result)).toContain('`title` is empty')
 })
 
+test('a new card waits while the run of calls above it is live and draws once it folds; a card drawn before stays when a later run is live', async ($, on) => {
+  world(on)
+  on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ text: 'how many runs failed?', turnId: 't-runs' } as never)
+  // Claude Code's run of commands above the card's call: live until its next request, then folded into one line
+  const run = (row: string, isActive: boolean) => ({
+    component: 'ToolGroup', surface: 'terminal', requestId: row, viewport: { columns: 100, rows: 40, isFullscreen: true },
+    props: { calls: [{ tool_use_id: `${row}-ls`, tool: 'Bash', input: { command: 'ls runs' }, isRunning: false, isErrored: false, isInterrupted: false }], isActive, isExpanded: false },
+  }) as never
+  const drawn = async (toolUseId: string, input: Record<string, unknown>) => elements(await $.ui.render(callRow(toolUseId, input))).some(n => n.type === 'Client')
+  await $.ui.render(run('run-1', true))
+  const input = { title: 'Runs', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_w1', ...input } as never)
+  expect(await drawn('toolu_made_up_w1', input)).toBe(false)
+  await $.ui.render(run('run-1', false))
+  expect(await drawn('toolu_made_up_w1', input)).toBe(true)
+  // a later run that goes live leaves the card on screen
+  await $.ui.render(run('run-2', true))
+  expect(await drawn('toolu_made_up_w1', input)).toBe(true)
+  // a run that never says it folded: the end of the turn draws the card
+  const second = { title: 'Failures', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_w2', ...second } as never)
+  expect(await drawn('toolu_made_up_w2', second)).toBe(false)
+  await $.turn.complete({ turnId: 't-runs', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  expect(await drawn('toolu_made_up_w2', second)).toBe(true)
+})
+
 test('a view that did not parse is fixed with edits, its rows kept; the card on screen stays meanwhile', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
@@ -299,7 +328,7 @@ test('a card at each width: in a side pane the card and its copy each draw at th
     const plain = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
     expect(String(plain.result)).not.toContain('side pane')
     const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_18', title: 'Scores', data: 'runs.json', view: `${VIEW}\n// WIDE_ROW` } as never)) as Any
-    expect(String(r.result)).toMatch(/When a side pane opens beside the conversation, the card is \d+ columns wide, and texts that fit on their rows at \d+ columns wrap onto more rows there \(line 1\):\nada 3 of 9\nmerged\nbram 5/)
+    expect(String(r.result)).toMatch(/When a side pane opens beside the conversation, the card is \d+ columns wide, and rows that fit at \d+ columns wrap there, out of their columns \(line 1\):\nada 3 of 9\nmerged\nbram 5/)
   }
 })
 

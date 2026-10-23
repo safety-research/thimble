@@ -39,7 +39,8 @@ export type Evidence =
  *  thimble, when the checker's evidence did not hold (`evidence`: the claim is not confirmed), or no check
  *  (`none`: the check did not run or gave no answer, notRun; x starts it). `note` is what the check found wrong in the
  *  sentence outside the mark.
- *  `repair`: the person pressed x on it, and this check is the one x started (checker.ts startRepair).
+ *  `repair`: this check is a repair of it: one x started, or one thimble started when the reply's check failed it
+ *  (checker.ts launchRepair, autoRepair).
  *  `narrowed`: a `corrected` mark whose check cites only a part of its words (`shown`): the rest is Claude's own wording,
  *  such as a translation, which the reply shows as plain words.
  *  `rewrite`: a `corrected` mark whose check rewrote its whole sentence (written as `sentence`, each citation

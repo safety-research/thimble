@@ -2,8 +2,9 @@
 // drawn as the Files views bar draws its views (Segmented), + New
 // (DocMenus.tsx), Export (ExportMenu.tsx), the story's Read, the lock note (LockNote.tsx), History (History.tsx) and the primary action,
 // Write or Revise (WriteAction.tsx, where Revise asks first), which asks the analyst's session for the document (a
-// `write` browser event; `report` stream events follow it). While a writer of the document runs, Stop stands beside
-// Writing (WriteAction.tsx StopWriter), and while Claude Code asks that writer in the terminal the bar says so. A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
+// `write` browser event; `report` stream events follow it). While a writer of the document runs, the action says what
+// it does, Writing until the text is saved and then Checking citations (WriteAction.tsx writePhase), with Stop beside
+// it (StopWriter), and while Claude Code asks that writer in the terminal the bar says so. A failed write stays on its document (writeFailures.ts) with Retry until dismissed or written. A document
 // not written yet is its frame (GET …/frame). The views' module (Documents.tsx) is imported once in an effect rather than
 // with React.lazy, whose Suspense retry can stall; documents are kept by slug so a switch never shows an empty body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -30,7 +31,7 @@ import type { HistoryRow, HistoryView } from './historyModel'
 import { LockNote } from './LockNote'
 import { ExportMenu } from './ExportMenu'
 import { docKey, docLabel, labelReadDocument, ownType, rendererOf, reportFilterSets, SLUG, switcherItems } from './model'
-import { StopWriter, WriteAction } from './WriteAction'
+import { PHASE_LABEL, StopWriter, WriteAction, writePhase } from './WriteAction'
 import { failedDetail, failedReport, failedText, noteRefusal, useWriteFailures, useWriteRefusals, WRITE_RETRY_NOTE, writingAfter } from './writeFailures'
 import { RefusedCard } from '../chat/Refused'
 import { ApiErrorCard } from '../chat/ApiError'
@@ -290,11 +291,16 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
   const bodyDoc = held ? held.doc : doc
   const bodyRenderer = held ? rendererOf(types, held.slug, held.doc) : renderer
   // a writer's session of this document that runs: the write goes on after its first save (the stream says
-  // `generated` then), so the primary action stays Writing, never Revise, until the session ends
+  // `generated` then), while the writer re-cites what the save's citation check tagged, so the primary action stays
+  // busy, never Revise, until the session ends
   const writer = chats.find((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === slug) ?? null
-  // a document is being written while its write is pending or a writer of it runs (which goes on after its first save)
-  const writingOf = (s: string) => !!generating[s] || types?.[s]?.status === 'generating' || chats.some((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === s)
-  const busy = writingSlug === slug || !!generating[slug] || types?.[slug]?.status === 'generating' || !!writer
+  // what a document's writer does (writePhase): writing while its write is pending, then checking citations while a
+  // writer of it still runs after its save; null when none works on it
+  const phaseOf = (s: string) =>
+    writePhase(writingSlug === s || !!generating[s] || types?.[s]?.status === 'generating', chats.some((m) => m.role === 'writer' && m.status === 'running' && writerDoc(m) === s))
+  const writingOf = (s: string) => phaseOf(s) != null
+  const phase = phaseOf(slug)
+  const busy = phase != null
   // Write is a click: the writer starts through thimble's plugin, and the answer says whether it did; the stream's
   // `report` events (generating, then generated or failed) carry the write from there, so the button stays busy while
   // the writer works. A start that did not happen shows its card under the bar
@@ -380,7 +386,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
               <span className="wu-type" data-doc-chip={it.slug}>
                 {!(it.generating || writingOf(it.slug)) && failures[it.slug] && <Mark kind="failed" label="Not written" className="wu-type-failed" />}
                 {it.label}
-                {(it.generating || writingOf(it.slug)) && <Spinner size={10} label="Writing" className="tab-dot tab-spinner" />}
+                {(it.generating || writingOf(it.slug)) && <Spinner size={10} label={PHASE_LABEL[phaseOf(it.slug) ?? 'writing']} className="tab-dot tab-spinner" />}
               </span>
             ),
           }))}
@@ -398,6 +404,7 @@ export function ReportTab({ ws, active }: { ws: string; active: boolean }) {
           name={ownType(slug) ? docLabel(slug, types) : docLabel(slug, types).toLowerCase()}
           written={written}
           busy={busy}
+          phase={phase ?? 'writing'}
           disabled={(load.state === 'loading' && !held) || load.state === 'error'}
           history={!isPage && !isVideo}
           onWrite={() => void write()}

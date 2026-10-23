@@ -8,7 +8,7 @@
 
 For feedback, bug reports, or anything else, please reach out to [@mjoerke](https://github.com/mjoerke). I would love to hear from you!
 
-https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
+https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 
 ## Features
 
@@ -45,6 +45,8 @@ scripts/install.sh
 ### Terminal plugin
 
 Run `claude` in a folder with files you'd like to analyze. thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off; `/plugin` turns thimble off.
+
+When thimble does something wrong, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble. In a shell, `thimble file issue N` posts fix N as a GitHub issue and `thimble file pr N` opens a pull request with its code; each shows you the text first.
 
 ![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
 

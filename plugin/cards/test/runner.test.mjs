@@ -71,6 +71,24 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
 })
 
+// A sentence that fits the card and wraps on its own line where a side pane narrows the card reads the same there: the
+// call brings no narrower copy back for it, so the answer gives no reason for a new version. Parts side by side that
+// wrap do (a row of Texts in a Box laid across).
+test('a sentence that wraps at the narrower width alone brings no copy back; parts side by side that wrap there do', async () => {
+  const sentence = `function view(p, s) { const { Box, Text } = s.elements
+  return Box({ flexDirection: 'column', children: [
+    Text({ children: 'Failures jump after the change on the 21st, from five of twenty to all of them.' }),
+    Text({ children: 'ada 3' }),
+  ] }) }`
+  const one = await load(sentence, { width: 90, beside: 40 })
+  assert.equal(one.r.ok, true)
+  assert.equal(one.r.beside, undefined)
+  const parts = sentence.replace("Text({ children: 'ada 3' }),", "Box({ children: [Text({ children: 'ada' }), Text({ children: ' 3 of 9 merged, the longest run of the afternoon by far' })] }),")
+  const two = await load(parts, { width: 90, beside: 40 })
+  assert.equal(two.r.beside.wrapped.length, 1)
+  assert.match(two.r.beside.lines[two.r.beside.wrapped[0] - 1], /3 of 9 merged/)
+})
+
 test('the tree holds only what Claude Code draws: a Button of words, and strings with no control character', async () => {
   const boxed = 'function view(p, s) { const { Box, Text, Button } = s.elements; return Text({ children: Box({ children: Text({ children: "x" }) }) }) }'
   const r1 = (await load(boxed)).r

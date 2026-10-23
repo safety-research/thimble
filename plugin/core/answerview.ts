@@ -29,7 +29,7 @@ import type { Take } from '../hooks/keys'
 import { labelAskBand, labelAskBar, labelAskKey, labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayKey } from '../tray/seam'
+import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { askOnce } from './rowhook'
 
@@ -172,10 +172,12 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
 /** The features' items at the bar's left, after v: the ask's choices, the tray's steps, s, then c. While an item of
  *  what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  const tray = items(await safe(trayBar($, on, preview), []), preview)
   return [
     ...items(await safe(labelAskBar($, on, preview), []), preview),
-    ...items(await safe(trayBar($, on, preview), []), preview),
-    ...items(await safe(squeezeBar($, on, preview), []), preview),
+    ...tray,
+    // while the tray holds the keys, the chips' keys (0 [ ]) wait: the bar names each key once
+    ...(tray.length ? [] : items(await safe(squeezeBar($, on, preview), []), preview)),
     ...items(await safe(claimsBar($, on, preview), []), preview),
   ]
 }
@@ -185,13 +187,16 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
   return items(await safe(threadsBar($, on, preview), []), preview)
 }
 
-/** A key at an empty prompt, to the first feature that takes it now: the squeeze chips while open (their keys came
- *  first in 0.10 too), the tray while open (and ] [ at rest), a large label run's ask while it waits, s, { } over the
- *  answers, the explainers' keys, c, then t. */
+/** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
+ *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
+ *  tray's ] [ at rest, a large label run's ask while it waits, s, { } over the answers, the explainers' keys, c, then
+ *  t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
+  const tray = await safe(trayHolds($), false)
   const chips = await safe(squeezeHolds($), false)
-  return (chips ? await safe(squeezeKey($, key, until), null) : null)
-    ?? (await safe(trayKey($, key, until), null))
+  return (tray ? await safe(trayKey($, key, until), null) : null)
+    ?? (chips ? await safe(squeezeKey($, key, until), null) : null)
+    ?? (tray ? null : await safe(trayKey($, key, until), null))
     ?? (await safe(labelAskKey($, key, until), null))
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))

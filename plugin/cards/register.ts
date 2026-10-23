@@ -21,7 +21,7 @@ import { askOnce } from '../core/rowhook'
 import { cut } from '../core/text.js'
 import { featureOn } from '../settings/features.mjs'
 import { sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
-import { cardOfKey, cardPost, clientFault, frame, framesUnder, noteShown, noteViewport } from './draw'
+import { cardOfKey, cardPost, clientFault, firstWaits, frame, framesUnder, noteRun, noteShown, noteViewport, runFolded } from './draw'
 import { callOf, cardIdOf, metaOf, restoreCards } from './store'
 import { cardCall, registerCardTool } from './tool'
 
@@ -70,9 +70,29 @@ export const registerCards: Register = on => {
     const own = e.props.isExpanded ? await next(e) : await next({ ...e, props: { ...e.props, input: { title: String(input.title || meta?.title || ''), ...(input.data ? { data: String(input.data) } : {}) } } })
     if (!meta || meta.version < 1) return own
     if (meta.anchorRow || meta.toolUseId !== e.props.tool_use_id) return own
+    // drawn once the run of calls above has folded (draw.ts firstWaits), so the card does not jump up
+    if (await firstWaits($, meta)) return own
     const E = $.ui.resolve(e) as Any
     noteShown($, [meta.id], e.props.onScreen)
     return E.Box({ flexDirection: 'column', children: [own, await frame($, e, meta)] })
+  }).catch(($, e, next) => next(e))
+
+  // the runs of calls Claude Code draws live, until they fold (draw.ts firstWaits); a step or the end of main's turn
+  // folds them all
+  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
+    noteRun($, String(e.requestId ?? ''), !!e.props.isActive)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+  on('turn.step', { turnId: /\S/ }, async function* ($, e, next) {
+    if (e.agentId === undefined) {
+      try { runFolded($, true) } catch { /* the step goes on */ }
+    }
+    return yield* next(e)
+  })
+  on('turn.complete', { turnId: /\S/ }, async ($, e, next) => {
+    const r = await next(e)
+    if (e.agentId === undefined) runFolded($, true)
+    return r
   }).catch(($, e, next) => next(e))
 
   // the call's result: the person reads the card, not the text copy Claude got; one line in its place: what the card

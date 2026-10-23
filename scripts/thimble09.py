@@ -6,7 +6,7 @@ marketplace, named thimble like 0.10's, makes `claude plugin marketplace add` fa
   thimble09.py commands     the removal commands, one per line: as shown, a tab, then as run
   thimble09.py workspaces   the 0.9 release install's workspaces folder, when it has one
 
-What 0.9 left: ~/.local/bin/thimble, a link to <tree>/plugin/bin/thimble (0.10 writes no such command); a release
+What 0.9 left: ~/.local/bin/thimble, a link to 0.9's <tree>/plugin/bin/thimble (0.10's link runs engine/thimble.py); a release
 install, the plugin thimble@thimble-local from the marketplace thimble-local, which is ~/.thimble/app, with its
 workspaces in ~/.thimble/app/workspaces; a clone install, the plugin thimble@thimble from the marketplace thimble, which
 is the clone (0.9's tree: backend/ beside plugin/, or plugin.json's version 0.9), with its workspaces in the clone; and,
@@ -86,7 +86,11 @@ def find():
         target = os.readlink(LAUNCHER) if os.path.islink(LAUNCHER) else ""
         target = os.path.normpath(os.path.join(os.path.dirname(LAUNCHER), target)) if target else ""
         text = read(target or LAUNCHER)
-        if target.endswith("/plugin/bin/thimble") or "thimble uninstall" in text:
+        # 0.10's link runs its kernel (engine/thimble.py), or points into Claude Code's plugins or thimble's live copy
+        # (gone after a move), and is no 0.9 left behind
+        ours = ("engine/thimble.py" in text and "thimble uninstall" not in text) or (
+            not text and ("/plugins/marketplaces/" in target or "/fixes/live/" in target))
+        if not ours and (target.endswith("/plugin/bin/thimble") or "thimble uninstall" in text):
             f["launcher"] = target or LAUNCHER
             # 0.9's own command; a 0.9 clone pulled to 0.10 leaves the link on 0.10's plugin/bin/thimble, which fails
             f["runs"] = bool(text) and "engine/thimble.py" not in text

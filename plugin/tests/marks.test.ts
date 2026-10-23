@@ -7,7 +7,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
-import { awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
+import { autoRepair, awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { marksIn, withRewrites } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
@@ -310,7 +310,7 @@ test('x on a wrong citation checks it again in a fork of its own; its answer cor
   expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
   expect(seen.spawned.length).toBe(2)
   expect(seen.spawned[1].description).toBe('checking a citation again (x)')
-  expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start, and make the citation correct: change the cited words, the sentence or the evidence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.')
+  expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.')
   // while it runs the citation spins; the other marks keep their results; no second repair of it starts
   expect(await drawn($)).toContain('"ship it" ⠋')
   expect(await drawn($)).toContain('merged 12 of 40.')
@@ -358,4 +358,92 @@ test('a repair whose fork does not start leaves the citation as it was and says 
   const why = await launchRepair($, (await repairOf($, 'row-1', 3)) as Any, { until: 0, cancelled: false })
   expect(why).toContain('The repair did not start (made-up: no agents now)')
   expect((await rowMarks($, 'row-1'))!.items[2]!.status).toBe('failed')
+})
+
+/** x's request for citation 3 of REPLY, which the check found wrong: what a repair's fork reads under the checker's text. */
+const REPAIR_3 = 'CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.'
+
+test("a check that fails a citation repairs it at once, with x's request: it spins as for x, and the repair's answer replaces it", async () => {
+  let runs = 0
+  const repaired = { parsed: true, results: [{ n: 3, status: 'corrected', shown: '"ship it now"', was: '"ship it"', reason: 'line 9 holds these words' }] }
+  const { $, seen } = engine(() => ({ exitCode: 0, stdout: JSON.stringify(runs++ ? repaired : VALIDATED), stderr: '' }))
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect((await rowMarks($, 'row-1'))!.items[2]!.status).toBe('failed')
+  // the hook around endCheck's: the failed citation's repair starts, one fork, x's request word for word
+  await autoRepair($, FORK)
+  expect(seen.spawned.length).toBe(2)
+  expect(seen.spawned[1].description).toBe('checking a citation again (x)')
+  expect(seen.spawned[1].prompt).toBe(REPAIR_3)
+  expect((await rowMarks($, 'row-1'))!.items[2]).toMatchObject({ status: 'checking', repair: true })
+  expect(await drawn($)).toContain('"ship it" ⠋')
+  expect(await drawn($)).toContain('merged 12 of 40.')
+  // started once: the same check's end again, or x while it runs, starts no other
+  await autoRepair($, FORK)
+  expect(await repairOf($, 'row-1', 3)).toBe(null)
+  expect(seen.spawned.length).toBe(2)
+  await endCheck($, { agentId: `${FORK}1`, reason: 'answer', answer: '```json\n[]\n```' })
+  expect((await rowMarks($, 'row-1'))!.items[2]).toMatchObject({ status: 'corrected', shown: '"ship it now"', was: '"ship it"', repair: true })
+  expect(await drawn($)).toContain('"ship it now"')
+  // main reads that thimble checked it again, not that the analyst pressed x
+  const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['marks:row-1:repair:3']).toContain('A citation of yours failed its check, so thimble checked it again against the data.')
+  expect(told['marks:row-1:repair:3']).not.toContain('pressed x')
+  expect(told['marks:row-1:repair:3']).toContain('- "ship it" is corrected to "ship it now" (the check: "line 9 holds these words")')
+  expect(told['marks:row-1']).toContain('"ship it" is flagged as wrong')
+})
+
+test('a repair that fails the citation again starts no other: it stays failed, and x asks again as before', async () => {
+  const again = { parsed: true, results: [{ n: 3, status: 'failed', failedBy: 'evidence', shown: '"ship it"', reason: 'no file holds these words' }] }
+  let runs = 0
+  const { $, seen } = engine(() => ({ exitCode: 0, stdout: JSON.stringify(runs++ ? again : VALIDATED), stderr: '' }))
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  await autoRepair($, FORK)
+  await endCheck($, { agentId: `${FORK}1`, reason: 'answer', answer: '```json\n[]\n```' })
+  await autoRepair($, `${FORK}1`)
+  expect(seen.spawned.length).toBe(2)
+  expect((await rowMarks($, 'row-1'))!.items[2]).toMatchObject({ status: 'failed', failedBy: 'evidence', repair: true })
+  expect(await drawn($)).toContain('"ship it" ×')
+  const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['marks:row-1:repair:3']).toContain('- "ship it" is still flagged as not confirmed')
+  // x: a repair of it again, by the person, which main hears as theirs
+  const r = await repairOf($, 'row-1', 3)
+  expect(typeof r).toBe('object')
+  expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
+  expect(seen.spawned.length).toBe(3)
+  expect(seen.spawned[2].prompt).toContain('The analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check could not confirm it: "no file holds these words"')
+  await endCheck($, { agentId: `${FORK}2`, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(((await $.state.get({ plugin: 'thimble', key: 'tell' })).value as Record<string, string>)['marks:row-1:repair:3']).toContain('The analyst pressed x (repair) on a citation of yours')
+})
+
+test("a check that did not run, or ran and failed no citation, repairs none: x checks those as before", async () => {
+  const { $, seen } = engine(VALIDATED)
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'refusal', answer: '' })
+  await autoRepair($, FORK)
+  expect(seen.spawned.length).toBe(1)
+  expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['failed', 'failed', 'failed'])
+  // an answer that left a citation out: that citation's check did not run, so x starts it
+  const { $: two, seen: seen2 } = engine({ parsed: true, results: [{ n: 1, status: 'verified', shown: '40', reason: 'counted' }, { n: 2, status: 'corrected', shown: '12 of 40', was: '15 of 40', reason: 'agent-07 merged 12' }] })
+  await noteRow(two, 'row-1', REPLY)
+  await startCheck(two, { turnId: 't-1', reason: 'answer' })
+  await endCheck(two, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  await autoRepair(two, FORK)
+  expect(seen2.spawned.length).toBe(1)
+  expect((await rowMarks(two, 'row-1'))!.items[2]).toMatchObject({ status: 'failed', failedBy: 'none' })
+})
+
+test("a repair that cannot start leaves the citation failed and says why, with x as the fix", async () => {
+  const { $ } = engine(VALIDATED)
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  $.agent.spawn = async () => ({ deny: 'made-up: no agents now' })
+  await autoRepair($, FORK)
+  expect((await rowMarks($, 'row-1'))!.items[2]!.status).toBe('failed')
+  expect(String((await failLineNow($))?.text)).toContain('The repair did not start (made-up: no agents now). Press x on the citation to try again.')
 })

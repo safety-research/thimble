@@ -12,7 +12,9 @@
 //      the designer fork called; a new version draws in the card's place
 //   4. tries the call's actions, keys and clicks in order, then puts the card back as it was
 //   5. answers what the card read (rows, columns, the first row), the text copy at the card's width, the copy at the
-//      width a side pane leaves it when texts wrap there that fit at the card's width, and the copy after each action
+//      width a side pane leaves it when a row that fits at the card's width wraps there, and the copy after each
+//      action. Nothing in it asks for a new version: notes come only for what is wrong (a key the card cannot get, a
+//      row a side pane breaks, a card taller than the screen)
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
 // card in the card's place, under the call that first drew it or under the answer v was pressed on (its view whole, or
@@ -161,13 +163,13 @@ function copyText(lines: string[], cut: number[], width: number): string[] {
   return out
 }
 
-/** The card as a side pane draws it, when texts that fit on their rows at the card's width wrap there (the runner's
- *  load says: runner.mjs besideOf). */
+/** The card as a side pane draws it, when a row that fits at the card's width wraps there (the runner's load says:
+ *  runner.mjs besideOf). */
 function besidePane(beside: Any, width: number): string[] {
   if (!beside?.wrapped?.length) return []
   const lines = beside.wrapped as number[]
   const which = `line${lines.length > 1 ? 's' : ''} ${lines.slice(0, 8).join(', ')}`
-  return ['', `When a side pane opens beside the conversation, the card is ${beside.width} columns wide, and texts that fit on their rows at ${width} columns wrap onto more rows there (${which}):`, ...copyText(beside.lines, beside.cut, beside.width)]
+  return ['', `When a side pane opens beside the conversation, the card is ${beside.width} columns wide, and rows that fit at ${width} columns wrap there, out of their columns (${which}):`, ...copyText(beside.lines, beside.cut, beside.width)]
 }
 
 /** What a call answers when the version did not draw: what to fix, or, when the runner cannot start, that the card is
@@ -280,7 +282,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
       ? `Version ${version} of “${title}” is drawn in place of version ${meta.version}, ${next.anchorRow ? placeWords(next.anchorRow) : 'under the call that first drew the card'}.`
       : meta.version > 0
         ? `Version ${version} of “${title}” is drawn where this call stands, since the terminal cannot draw the earlier place again; the earlier call shows one line that points here.`
-        : `“${title}” is drawn ${next.anchorRow ? placeWords(next.anchorRow) : 'where this call stands, above the words you write after it'}. Its id is "${id}": to change it, call card again with this id.`,
+        : `“${title}” is drawn ${next.anchorRow ? placeWords(next.anchorRow) : 'where this call stands, above the words you write after it'}. Its id is "${id}".`,
     `It read ${r.summary.read} from ${baseName(file)}${r.summary.columns.length ? `, with the columns ${r.summary.columns.join(', ')}` : ''}.`,
   ]
   if (r.summary.other) out.push(`The file is an object: props.data is the whole object, with ${(r.summary.other as string[]).join(', ')}, and props.rows its "rows" list${r.summary.hasRows ? '' : ' (it has none, so props.rows is empty)'}.`)

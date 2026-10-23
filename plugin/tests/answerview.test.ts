@@ -71,6 +71,29 @@ test('each passage of a reply drawn here has a margin that asks a side thread ab
   expect(all(plain).some(n => n.type === 'Button' && /ask about/.test(n.props.label))).toBe(false)
 })
 
+test('a key at an empty prompt reads no state once the plugin has read it: its hook has a few milliseconds of its own time', async ($, on) => {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
+  mock.clock(on, { now: 0 })
+  on('session.id', () => ({ value: 's-keys' }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: promptStub(e.path) ?? '' }))
+  on('fs.write', () => ({ value: undefined }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', () => ({ value: false }))
+  // what Claude Code's box does with a key thimble does not take: types it
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text}${e.inputText}`, cursor: e.text.length + e.inputText.length }))
+  let gets = 0
+  on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
+  const press = (key: string) => $.prompt.edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never)
+  // the first key reads what the keys need; a letter no one takes then reads nothing, nor does c (its pane opens later)
+  expect(await press('h')).toEqual({ text: 'h', cursor: 1 })
+  expect(gets).toBeGreaterThan(0)
+  gets = 0
+  expect(await press('q')).toEqual({ text: 'q', cursor: 1 })
+  expect(gets).toBe(0)
+})
+
 test("the features' letters are thimble's own, so no card takes them", () => {
   expect(restoredKeys()).toEqual(['s', 'c', 't'])
   for (const k of restoredKeys()) expect(ownKeys()).toContain(k)
@@ -122,6 +145,7 @@ test('{ at an empty prompt picks the answer before for the keys, drawn with ▸;
   const band = textOf(await $.ui.render({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never))
   expect(band).toContain('thimble')
   expect(band).toContain('s squeeze')
+  expect(band).not.toContain('answer 1 of 2')
   await turn('t3', 'You are welcome.')
   expect(textOf(await $.ui.render(answer('row-t1', 'The revert undid a change.')))).toBe('the engine')
 })

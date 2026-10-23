@@ -416,7 +416,10 @@ class Link:
 class Resolved:
     annotated: str  # the answer with resolved numbers rewritten as [[token|ref]]
     links: list[Link] = field(default_factory=list)
-    unresolved: list[str] = field(default_factory=list)  # number tokens we could not source
+    unresolved: list[str] = field(default_factory=list)  # number tokens no output shows
+    # numbers an output shows that resolve does not link alone: several places show the value, or it is a small number
+    # that could stand for any of them (_specific). Left plain, never in `unresolved`, since the output does show them
+    shown: list[str] = field(default_factory=list)
     # value-refs into this cell whose target is gone and whose value has no other unique home, kept as written when
     # resolve() ran with keep_stale: tier 0
     stale: list[Link] = field(default_factory=list)
@@ -1234,6 +1237,12 @@ class _Sources:
             return False
         return any(shown_matches(tok, t) for t in self.totals)
 
+    def shows(self, tok: str) -> bool:
+        """Whether an output shows the number somewhere, in one place or in several: a table's value, a chart's row, a
+        line of text, or a table value it rounds."""
+        key = _norm(tok)
+        return key in self.table or key in self.text or any(shown_matches(tok, v) for v, _ in self.shown)
+
     def supports(self, display: str) -> bool:
         """Whether the card shows each number of a display somewhere, or its data holds it as a total or count: what a number
         cited to the whole card needs."""
@@ -1241,9 +1250,7 @@ class _Sources:
         if not nums:
             return False
         for tok in nums:
-            key = _norm(tok)
-            shown = key in self.table or key in self.text or any(shown_matches(tok, v) for v, _ in self.shown)
-            if not shown and not any(shown_matches(tok, t) for t in self.totals):
+            if not self.shows(tok) and not any(shown_matches(tok, t) for t in self.totals):
                 return False
         return True
 
@@ -1418,6 +1425,8 @@ def _annotate_plain(seg: str, src: _Sources, res: Resolved, seen: set[str]) -> s
             seen.add(tok)
             if src.is_total(tok):
                 res.totals.append(tok)
+            elif src.shows(tok):  # shown, but in several places or too small to link alone: found, and left plain
+                res.shown.append(tok)
             elif not src.word_places(tok):  # one an output writes in words ("Twelve pages") is found, and left plain
                 res.unresolved.append(tok)
     parts.append(seg[pos:])

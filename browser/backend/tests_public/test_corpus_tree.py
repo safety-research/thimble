@@ -171,6 +171,20 @@ def test_the_tree_asks_which_folders_changed_by_their_stamps_and_lists_only_thos
     assert client.get(f"/api/corpora/{NAME}/sources/stamps", params={"path": ["x"] * 201}).status_code == 400
 
 
+def test_a_chip_s_path_is_known_for_a_folder_or_a_file_by_a_stat_alone(tree_corpus, monkeypatch):
+    """GET /sources/kinds: whether each path a chip names is a folder or a file, so a folder named with no slash after
+    it shows the folder glyph as the chat draws it (lib/pathKinds); none for a path that is not there, leads outside
+    the corpus, or that the Files listing leaves out (a dot name, a symlinked folder). It reads no folder's entries."""
+    os.symlink(tree_corpus / "runs", tree_corpus / "linked")
+    monkeypatch.setattr(corpus, "folder_listing", lambda *a, **k: pytest.fail("a stat alone"))
+    paths = ["runs", "runs/r1", "README.md", "empty", "nope", ".git", "linked", "../outside"]
+    r = client.get(f"/api/corpora/{NAME}/sources/kinds", params={"path": paths})
+    assert r.status_code == 200, r.text
+    assert r.json()["kinds"] == {"runs": "folder", "runs/r1": "folder", "README.md": "file", "empty": "folder",
+                                 "nope": None, ".git": None, "linked": None, "../outside": None}
+    assert client.get(f"/api/corpora/{NAME}/sources/kinds", params={"path": ["x"] * 201}).status_code == 400
+
+
 def test_the_source_list_is_stamped_when_its_walk_ends(tree_corpus, monkeypatch):
     clock = [1000.0]
     walks = []

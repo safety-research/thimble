@@ -6,7 +6,7 @@
 // ask back. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
+import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelRowEl, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -76,6 +76,14 @@ function engine(kernel: (args: string[]) => { code?: number; out: unknown } = ()
   return { $, ran, flush, set, state }
 }
 
+test('a row of several labels wraps between labels: each label, with its values, is one group', () => {
+  const used = ['sabotage_candidate', 'sabotage', 'sabotage2'].map(name => ({ name, kind: 'regex', values: ['yes', 'no'], records: 20764 }))
+  const row = labelRowEl(ELS, used, { key: 'k', onOpen: () => undefined })
+  const groups = (row.props.children as Any[]).filter(n => n.type === 'Box')
+  expect(groups.map(textOf)).toEqual(used.map(l => `${l.name} · regex · 20,764 records  ● yes  ● no`))
+  expect(textOf(row)).toBe(`labels ${groups.map(textOf).join('   ')}`)
+})
+
 test('a card shows the labels its turn ran before it; the answer only those no card of it shows; a press opens the label', async () => {
   const LIST = [
     { name: 'spam', kind: 'prompt', values: ['yes', 'no'], records: 420 },
@@ -110,6 +118,16 @@ test('a card shows the labels its turn ran before it; the answer only those no c
   expect(await labelsUnderAnswer(w.$, ELS, 'r1', 80)).toEqual([])
   // the read ran once, as the person's (`thimble label --json`)
   expect(w.ran.filter(a => a.join(' ') === 'label --json').length).toBe(1)
+  // a press on the label's name opens the labels pane on it, the open made inside the press (what the press returns
+  // settles after it): Claude Code places the pane at any width only for such an open
+  const opens: Any[] = []
+  w.$.ui.open = (a: Any) => new Promise(r => setTimeout(() => r((opens.push(a.id), { isPlaced: true })), 1))
+  w.$.ui.panes = async () => []
+  const name = all(answer).find(k => k.type === 'Button' && k.props.label === 'open the label tone')
+  const pressed = name.props.onPress()
+  expect(pressed).toBeInstanceOf(Promise)
+  await pressed
+  expect(opens).toEqual(['thimble'])
 })
 
 test('a read that fails keeps the rows as last read; a read asked while one runs reads once more after it', async () => {

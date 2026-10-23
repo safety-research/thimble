@@ -2,7 +2,7 @@
 // label, coverage, the claims (core/pane.ts draws the thread under those panes), and a card or an explainer the tray's
 // `a` asks about (the pane `thread`). The person asks it in the pane's input bar; it answers about that thing, with
 // turns of its own, and can read and compute over the data. Main reads each question in one line (core/engaged.ts),
-// and no answer unless the person sends it there (m in the pane).
+// and no answer unless the person sends it there (m in the pane), which starts a turn of main's on it.
 //
 // The mechanism: one fork of main per thread (core/forks.ts spawnFork, kind `thread`), started inside the hook of the
 // person's ↵, no turn of main.
@@ -22,13 +22,14 @@
 //     the pane (threadCardAnchor: cards/tool.ts anchors them at `thread:<key>`).
 //   - Its answers cite as main's replies do, and are checked as they are (marks/checker.ts checkAnswer, at the fork's
 //     turn end): each answer is a reply of its own in the marks' store (threads.mjs answerRow), which the pane draws.
+//   - m sends the last answer to main as a prompt of its own (sendToMain): main answers it in the conversation.
 //   - The bar counts the session's threads (`t 2 threads`); t or a click on the count lists them (pane `threads`), and
 //     opening one shows it again with its conversation.
 // Nothing here runs unless the person asked a question.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { failNotice, noticeLine } from '../bar/notice'
+import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { cardText, revealCard } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { partOf } from '../core/answers'
@@ -319,7 +320,11 @@ async function refresh($: Engine, agentId: string, status: Thread['status']): Pr
   } catch {
     // the turns stay as they were; the status still moves
   }
-  await keep($, { ...t, turns, status })
+  // the thread as it stands after the read: a poll's read that the fork's end overtook (status done) leaves it done, so
+  // the pane does not show the thread answering for ever, without m
+  const now = threads.get(key!)
+  if (!now || (status === 'running' && now.status !== 'running')) return
+  await keep($, { ...now, turns, status })
 }
 
 /** Read the running threads' turns again every few seconds until none runs: only after a question the person asked. */
@@ -355,13 +360,23 @@ export async function cardsOfTurn($: Engine, ids: string[] | undefined): Promise
   return out
 }
 
-/** m in a thread's pane: its last answer goes to main with the person's next prompt. False when it has none. */
+/** m in a thread's pane: its last answer goes to main as a prompt of its own, a turn of main's once main is idle, so
+ *  Claude reads it and answers in the conversation at once, as `send this answer to Claude` says. A prompt that does
+ *  not enter waits for the person's next prompt, with a line that says so. False when it has none. */
 export async function sendToMain($: Engine, key: string): Promise<boolean> {
   const t = threads.get(key)
   const note = t ? sentNote(t) : ''
   if (!t || !note) return false
-  await tellAtNextPrompt($, `thread:${t.id}`, note)
   await keep($, { ...t, sent: t.turns.length })
+  const waits = async (why: string) => {
+    await tellAtNextPrompt($, `thread:${t.id}`, note)
+    noticeLine($, `The answer did not reach Claude now (${why.slice(0, 120)}). Claude reads it with your next prompt.`, 'thread')
+  }
+  // not awaited: the prompt enters once main is idle, which may be after main's turn that runs now
+  void Promise.resolve($.prompt.submit({ text: note } as Any)).then(
+    (r: Any) => (r?.drop !== undefined ? waits(String(r.drop || 'a hook refused it')) : undefined),
+    (err: unknown) => waits(String((err as Error)?.message || err)),
+  ).catch(() => undefined)
   return true
 }
 
@@ -400,8 +415,10 @@ export function takeAskNext(key: string): boolean {
 }
 
 /** The thread about `scope`: an existing one, or a new one with no turns yet, opened in the side pane, its input bar
- *  taking the keys. */
-export async function openThreadOn($: Engine, scope: ThreadScope): Promise<boolean> {
+ *  taking the keys. `key`: a key at the prompt opened it, and these are the bar's words a click on which opens it
+ *  where the key cannot: Claude Code places a pane at any width only for the person's press or command, never for a
+ *  key at the prompt (core/pane.ts). */
+export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string } = {}): Promise<boolean> {
   await restoreThreads($)
   // a card: the line it selects now, which the pane shows in place of the whole card
   if (scope.card && !scope.part) {
@@ -421,9 +438,13 @@ export async function openThreadOn($: Engine, scope: ThreadScope): Promise<boole
   // for the a key
   if (scope.card) await revealCard($, scope.card, 'start')
   const placed = await showThread($, key, { ask: true })
+  // open: a notice that a key could not open it goes
+  if (placed) await failCleared($, 'pane:threads')
   if (!placed) {
     pendingKey = key
-    noticeLine($, 'Claude Code opens the side pane from a key only in a wider terminal. Type /threads to open it here.', 'pane:threads')
+    noticeLine($, o.key
+      ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${o.key}” in the bar below, or type /threads, to open it here.`
+      : 'Claude Code did not open the side pane here. Type /threads to open it.', 'pane:threads')
   }
   return placed
 }
@@ -432,6 +453,7 @@ export async function openThreadOn($: Engine, scope: ThreadScope): Promise<boole
 export async function listThreads($: Engine, o: { fromKey?: boolean } = {}): Promise<boolean> {
   await restoreThreads($)
   const placed = await openPane($, 'threads', {}, 'Threads', { focus: true })
+  if (placed) await failCleared($, 'pane:threads')
   if (!placed && o.fromKey) {
     pendingKey = ''
     noticeLine($, `Claude Code opens the side pane from a key only in a wider terminal. Click “${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” in the bar below, or type /threads, to open it here.`, 'pane:threads')

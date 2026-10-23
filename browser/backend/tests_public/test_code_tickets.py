@@ -452,6 +452,33 @@ async def test_a_release_install_registers_no_ticket_agent_and_main_hears_why(ti
     assert "cannot run here" in res.text and dev.RELEASE_LINE in res.text
 
 
+def test_a_checkout_whose_git_folder_is_the_repository_s_one_level_up_runs_code_tickets(tmp_path, monkeypatch):
+    """thimble's repository holds the browser as `browser/` beside `plugin/`, its `.git` one level up (a folder, or a
+    worktree's file): code tickets run there. An installed copy has none, and the git folder of some other repository
+    that only holds the copy never counts."""
+    monkeypatch.setattr(dev, "STACK_ENABLED", True)
+    repo = tmp_path / "thimble"
+    (repo / "plugin").mkdir(parents=True)
+    (repo / "browser").mkdir()
+    (repo / ".git").mkdir()
+    monkeypatch.setattr(dev, "REPO", repo / "browser")
+    assert config.git_dir(repo / "browser") == repo / ".git" and dev.ticket_problem() == ""
+    assert dev.runner_problem(fixing=True) != dev.RELEASE_LINE
+    (repo / ".git").rmdir()
+    (repo / ".git").write_text("gitdir: /home/t/thimble/.git/worktrees/fix\n")  # a worktree of the repository
+    assert config.git_dir(repo / "browser") == repo / ".git" and dev.ticket_problem() == ""
+    own = tmp_path / "own"  # the browser folder as its own checkout
+    (own / ".git").mkdir(parents=True)
+    assert config.git_dir(own) == own / ".git"
+    outer = tmp_path / "project"  # a copy inside a repository of the analyst's that is not thimble's
+    (outer / ".git").mkdir(parents=True)
+    (outer / "vendor" / "thimble" / "browser").mkdir(parents=True)
+    (outer / "browser").mkdir()
+    for copy in (outer / "vendor" / "thimble" / "browser", outer / "browser"):
+        monkeypatch.setattr(dev, "REPO", copy)
+        assert config.git_dir(copy) is None and dev.ticket_problem() == dev.RELEASE_LINE
+
+
 async def test_a_ticket_the_box_cannot_run_asks_before_it_starts_and_again_before_its_change_is_applied(ticketing,
                                                                                                       monkeypatch):
     """Where the box can't run, the ticket's code runs outside the sandbox during its checks, so the analyst is asked

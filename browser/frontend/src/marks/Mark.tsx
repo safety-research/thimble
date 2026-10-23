@@ -9,8 +9,9 @@
 //   code       highlighted
 //   card       a value a card shows: the card's chip (a click opens it) over the table around the cited cell, the cell
 //              marked, as a card's citation shows it (components/RefChip); a line of its printed output shows as the
-//              computed output does. An evidence that names only the place (an old `[[value|card:…]]` citation) reads
-//              the place when the label opens.
+//              computed output does. The card is read when the label opens: when it changed after the check (the card
+//              check rewrote it, say), the label shows it as it is now, or says the place is gone and shows what the
+//              check read.
 //
 // Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked.
 //
@@ -26,6 +27,7 @@ import { citedTable, placePop, printedTable, TablePreview, useRefLabel } from '.
 import { Spinner } from '../components/Spinner'
 import { api, marksApi } from '../lib/api'
 import { glyphOf } from '../lib/fileGlyph'
+import { wordsSpanRef } from '../lib/quoteFind'
 import { parseRef } from '../lib/refs'
 import { CITED, citedLines, type At, type Grid } from '../lib/tableCell'
 import { teleport } from '../lib/teleport'
@@ -227,6 +229,17 @@ function RepairButton({ item }: { item: MarkItem }) {
   )
 }
 
+/** Where a quote's place opens: the span of the words the check found inside the record it cites (wordsSpanRef), so
+ * the File browser highlights them; the record itself when it holds no such words or cannot be read. */
+async function quotedPlace(at: string, words: string): Promise<string> {
+  if (!words.trim()) return at
+  try {
+    return wordsSpanRef(await api.resolveRef(workspaceFromUrl() ?? '', at), words) ?? at
+  } catch {
+    return at
+  }
+}
+
 function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
   const open = useContext(OpenPlace)
   if (ev.kind === 'card') return <CardEvidence ev={ev} value={value} />
@@ -262,10 +275,13 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
     <>
       {places.map((p, i) => {
         const at = `${p.file}#L${String(p.line).split('-')[0]}`
+        // the words the check found on the cited line, which the record opens with highlighted
+        const cited = p.lines?.find((l) => String(l.n) === String(p.line).split('-')[0] && l.highlight)
+        const words = cited?.highlight ? cited.text.slice(cited.highlight[0], cited.highlight[1]) : ''
         return (
           <div key={i} className="mark-ev">
             <div className="refchip-pop-head">
-              <Chip kind="ref" tone="evidence" icon={glyphOf(String(p.file ?? ''))} className="refchip-pop-chip" onClick={() => open(at)}>
+              <Chip kind="ref" tone="evidence" icon={glyphOf(String(p.file ?? ''))} className="refchip-pop-chip" onClick={() => void quotedPlace(at, words).then(open)}>
                 {`${p.file}:${p.line}`}
               </Chip>
               {i === 0 && <span className="refchip-pop-value">{value}</span>}
@@ -293,17 +309,41 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
   )
 }
 
-type Resolved = { state: 'loading' } | { state: 'gone' } | { state: 'table'; grid: Grid; at: At } | { state: 'lines'; lines: string[]; from: number; to: number }
+type Resolved = { state: 'loading' } | { state: 'failed' } | { state: 'gone' } | { state: 'table'; grid: Grid; at: At } | { state: 'lines'; lines: string[]; from: number; to: number }
 
-/** A value a card shows: the card's chip over the table around the cited cell, or the printed lines around the cited
- * one. Evidence that names only the place is read when the label opens (api.resolveRef), as RefChip reads it. */
+/** Whether the card still shows what the check read: the same cell in the same table, or the same cited lines. A
+ * check's own copy of the card (`table`, `output`) that the card still shows is kept, with its other cited cells and
+ * its highlights; else the card's output now is shown, or, when the place is gone, the copy with a note. Pure. */
+export function sameAsChecked(snap: { grid: Grid; at: At } | null, output: string | undefined, highlight: [number, number][] | undefined, live: Resolved): boolean {
+  if (live.state === 'table' && snap) {
+    const cell = (g: Grid, at: At) => g.rows[at.r]?.values[at.c]
+    return snap.grid.cols[snap.at.c] === live.grid.cols[live.at.c] && snap.grid.rows[snap.at.r]?.label === live.grid.rows[live.at.r]?.label && cell(snap.grid, snap.at) === cell(live.grid, live.at)
+  }
+  if (live.state === 'lines' && output != null) {
+    const first = highlight?.length ? highlight[0][0] : -1
+    const line = first < 0 ? null : output.slice(output.lastIndexOf('\n', first - 1) + 1).split('\n')[0]
+    return line != null && live.lines.slice(live.from, live.to + 1).some((l) => l === line)
+  }
+  return false
+}
+
+/** what a card's evidence says when the card changed after its check: the cell it cites shows another value now, or
+ * the place (a line of its output, a cell of a column renamed) no longer holds what the check read */
+export const CHANGED_NOW = 'The card changed after the check. It shows this now:'
+export const CHANGED_READ = 'The card changed after the check. The check read this:'
+
+/** A value a card shows: the card's chip, by the card's title now, over the table around the cited cell, or the
+ * printed lines around the cited one, as the card shows them now (api.resolveRef, as RefChip reads them). The check's
+ * own copy shows while the card is read and stays when the card still shows the same (sameAsChecked). When the card
+ * changed, a note says so over the cell as it is now, or over the copy when the place no longer holds what the check
+ * read. */
 function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
   const open = useContext(OpenPlace)
   const own = printedTable(ev.table, value)
   const [got, setGot] = useState<Resolved>({ state: 'loading' })
+  const [now, setNow] = useState('')
   const ref = ev.ref ?? `card:${ev.card}`
   useEffect(() => {
-    if (own || ev.output != null) return
     const p = parseRef(ref)
     const ws = workspaceFromUrl() ?? ''
     let live = true
@@ -311,6 +351,7 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
       .resolveRef(ws, ref)
       .then((r) => {
         if (!live) return
+        if (typeof r.meta?.title === 'string') setNow(r.meta.title)
         if (p?.kind === 'cell' && p.col != null && p.row != null) {
           const t = citedTable(r, p.col, p.row)
           return setGot(t ? { state: 'table', ...t } : { state: 'gone' })
@@ -321,15 +362,22 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
         const lines = typeof span?.text === 'string' && p?.kind === 'cell' && p.line != null ? citedLines(r.excerpt ?? '', span.text, p.line) : null
         setGot(lines ? { state: 'lines', ...lines } : { state: 'gone' })
       })
-      .catch(() => live && setGot({ state: 'gone' }))
+      .catch(() => live && setGot({ state: 'failed' }))
     return () => {
       live = false
     }
   }, [ref])
   const card = ev.card ?? (parseRef(ref) as { cellId?: string } | null)?.cellId ?? ''
   const name = useRefLabel(`card:${card}`)
-  const title = ev.title || name || 'card'
-  const table = own ?? (got.state === 'table' ? got : null)
+  const copy = !!own || ev.output != null
+  // the check's copy while the card is read, and after when the card still shows the same; else the card now
+  // (a card that could not be read leaves the copy as it is, with no note)
+  const checked = copy && (got.state === 'loading' || got.state === 'failed' || got.state === 'gone' || sameAsChecked(own, ev.output, ev.highlight, got))
+  // a line of the output that reads otherwise now is no longer the place the check read: its copy shows
+  const reread = copy && !checked && got.state === 'lines'
+  const changed = reread || (copy && got.state === 'gone') ? CHANGED_READ : copy && !checked ? CHANGED_NOW : ''
+  const title = now || ev.title || name || 'card'
+  const table = checked || reread ? own : got.state === 'table' ? got : null
   return (
     <div className="mark-ev">
       <div className="refchip-pop-head">
@@ -338,9 +386,10 @@ function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
         </Chip>
         {!table ? <span className="refchip-pop-value">{value}</span> : null}
       </div>
+      {changed && <div className="mark-pop-state mark-ev-changed">{changed}</div>}
       {table ? (
         <TablePreview grid={table.grid} at={table.at} also={'also' in table ? table.also : undefined} />
-      ) : ev.output != null ? (
+      ) : (checked || reread) && ev.output != null ? (
         <div className="refchip-lines mono">{outputLines(ev.output, ev.highlight ?? [])}</div>
       ) : got.state === 'lines' ? (
         <div className="refchip-lines mono">

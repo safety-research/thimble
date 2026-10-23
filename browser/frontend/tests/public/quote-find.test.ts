@@ -3,7 +3,7 @@
 // them (src/files/views/table.tsx citedCell).
 import { describe, expect, test } from 'vitest'
 import { citedCell } from '../../src/files/views/table.tsx'
-import { findQuote, quotedWords, quoteSpanRef } from '../../src/lib/quoteFind.ts'
+import { findQuote, quotedWords, quoteSpanRef, wordsSpanRef } from '../../src/lib/quoteFind.ts'
 import type { ResolvedRef, SourceRecord } from '../../src/lib/types.ts'
 
 describe('quoted words', () => {
@@ -27,6 +27,15 @@ describe('quoted words', () => {
     expect(quoteSpanRef(r, 'reported its searches "completed successfully"')).toBe('events.jsonl#L7.b0:c28-50')
     expect(quoteSpanRef(r, 'a claim in other words')).toBeNull()
     expect(quoteSpanRef({ ...r, kind: 'span' }, '"completed successfully"')).toBeNull()
+  })
+
+  test("a place the check cited opens at the very words it found there, which need no quotation marks", () => {
+    const r = { ref: 'run/transcript.jsonl#L12', kind: 'record', path: 'run/transcript.jsonl', line: 12, excerpt: '', blocks: [{ kind: 'raw', text: '{"type":"assistant","message":{"content":[{"type":"text","text":"Tests pass.\\nShipping the fix now."}]}}' }] } as unknown as ResolvedRef
+    // the words as the check shows them, with the line break the record's JSON writes as \n
+    expect(wordsSpanRef(r, 'Shipping the fix')).toBe('run/transcript.jsonl#L12.b0:c78-94')
+    expect(wordsSpanRef(r, 'Tests pass.\nShipping')).toBe('run/transcript.jsonl#L12.b0:c65-86')
+    expect(wordsSpanRef(r, 'words it does not hold')).toBeNull()
+    expect(wordsSpanRef(r, '  ')).toBeNull()
   })
 
   test('the cell of a table row that holds the quoted words is found, and where they sit in its text', () => {

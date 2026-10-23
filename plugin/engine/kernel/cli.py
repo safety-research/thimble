@@ -1,5 +1,26 @@
-"""thimble: thimble's kernel as one command, which Claude runs with the Bash tool, so every call goes through the
-session's permission mode and sandbox like any other command.
+"""thimble: the thimble command. In a shell, it updates thimble and keeps your fixes (your own changes to thimble). In
+a Claude Code session, Claude runs it to label records and to see what it read.
+
+In a shell:
+
+    thimble update                 the newest thimble, for the terminal plugin and the browser workbench. Your fixes
+                                   are set aside, so that nothing is fixed twice; thimble reapply brings them back
+    thimble reapply                Claude Code opens in your copy of thimble and brings back each fix that the new
+                                   release still needs, once
+    thimble fixes                  your fixes that are not in the release: on, off or ready (also: thimble fix list)
+    thimble fix show N             what fix N does, in a few lines
+    thimble fix diff N             fix N's change to thimble's code
+    thimble fix apply N            use a ready fix now (it asks y/N first)
+    thimble file issue N [--open]  a link that posts fix N as a GitHub issue; you check it on GitHub first
+    thimble file pr N              open a pull request with fix N's code on the public repo (asks first)
+    thimble fix off [N]            one fix off, or all of them (the plain release)
+    thimble fix on [N]             one fix on, or all of them again (asks y/N first)
+    thimble fix remove N           fix N leaves your list (off first, when it is on)
+    thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
+
+In Claude Code, /thimble-fix <what should work differently> asks Claude for a new fix.
+
+Claude runs these in a session:
 
     thimble label [NAME]                       the labels, or one label's counts per value
     thimble label NAME --csv                   each record's ref, value, confidence, by and checked, for your code
@@ -10,6 +31,8 @@ session's permission mode and sandbox like any other command.
                                                (--wait waits for it; thimble label --help says more)
     thimble coverage [--all]                   what entered Claude's context, what was only computed over, and what
                                                was never touched (of this session, or of every session)
+    thimble update --continue                  in the session thimble reapply opens: records the fixes Claude brought
+                                               back, turns them on, and leaves out the rest
 
 Add --json to label or coverage for the whole record.
 """
@@ -119,6 +142,13 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
     --within L=V        only records the label L gave the value V
     --limit N           a trial: N records at random; the same label without --limit then labels the rest
     --reason            the model also gives a one-line reason per record
+
+A record is one line of a JSONL or text file, one row of a CSV file or of a database table (`--in 'x.db#table'`), or
+one item of the largest list in a JSON document. For records deeper in a JSON document, put a JSON pointer after # in
+the glob: `--in 'runs/*.json#/result/findings'` labels each item of that list, and a `*` in the pointer stands for
+every item or key at its level, as in `--in 'chats.json#/*/messages'`. A label over the files themselves keeps each
+record's place in its file as its ref (`chats.json#/3/messages/12`), so the analyst can open the record, and a quote
+from it is checked against the file. A copy of the records in another file loses that place.
 
 A --prompt label over more than 300 records does not start at once: the analyst is asked first, in the terminal, to
 run all, run on a random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks. The
@@ -421,9 +451,105 @@ def _label(st: Store, a: argparse.Namespace) -> int:
     return 0
 
 
+FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engine/kernel/fixes.py says how).
+
+    thimble fixes                    your fixes that are not in the release, one row each: number, state (on, off,
+                                     ready), title, date and the start of your words (also: thimble fix list)
+    thimble fix show N               what fix N does, in a few lines
+    thimble fix diff N               fix N's change to thimble's code
+    thimble fix apply N              use a ready fix now (it asks y/N first)
+    thimble file issue N [--open]    a link that posts fix N as a GitHub issue; you check it on GitHub first
+    thimble file pr N [--yes]        open a pull request with fix N's code on the public repo (asks first;
+                                     needs gh, GitHub's command line tool; --yes skips the question)
+    thimble fix off N | on N         turn fix N off, or on (on asks for your key in the terminal)
+    thimble fix off | on             all your fixes off (the plain release), or on again
+    thimble fix merge A B C          fixes B and C become part of fix A: one change, one title (asks y/N first)
+    thimble fix remove N             fix N leaves your list (off first, when it is on)
+    thimble fix export N [--to DIR]  save fix N as files: its patch (git am applies it) and its record
+
+Fixes act across your sessions, so they are listed and managed here, in a shell. Ask for a fix in Claude Code or the
+browser: /thimble-fix <what should work differently>. A fix goes on only by your key: y on the fix's line in thimble,
+or thimble fix apply N in your own terminal."""
+
+
+FILE_HELP = """Send one of your fixes to thimble's public repository on GitHub, so that thimble's authors can see it.
+
+    thimble file issue N [--open]    a link that posts fix N as a GitHub issue; you read the text on GitHub and press
+                                     Submit there (--open opens the link in your browser)
+    thimble file pr N [--yes]        a pull request with fix N's code, from your GitHub account. It shows the title,
+                                     the text, the files and the privacy check, and asks y/N first (--yes skips the
+                                     question). It needs gh, GitHub's command line tool, signed in (gh auth login)
+
+Both take your names, paths and the names of your data out of the text first. Run them in your own terminal."""
+
+
+UPDATE_HELP = """thimble update: the newest thimble release (its newest vX.Y.Z tag on GitHub), for the terminal plugin and the
+browser workbench in one go. Run it in a shell, not inside Claude Code.
+
+When you have fixes, it does not put them on the release by itself: the release may already fix some of the same
+things. It sets them aside, so thimble is the plain release, and keeps each fix's old change. Then:
+
+    thimble reapply                  Claude Code opens in ~/.thimble/fixes/live. Claude checks each fix against the
+                                     release, brings back what is still needed (one commit per fix), and runs:
+    thimble update --continue        records those commits as the fixes' new versions and turns them on; a set-aside
+                                     fix with no commit is left out, because the release does it or it cannot work there
+    thimble update --check           only says whether a newer release is out
+
+Afterwards: /reload-plugins in Claude Code, and restart thimble-browser.
+
+A dev install (scripts/install.sh --local) follows your own checkout instead of the releases: after `git pull`, thimble
+update moves thimble and your fixes onto the commit you checked out. It fetches nothing and leaves out changes you have
+not committed. Each fix that still applies cleanly is replayed onto that commit; one that does not is set aside for
+thimble reapply, as above."""
+
+
+def cmd_update(a: argparse.Namespace) -> int:
+    from . import fixes as FX  # noqa: PLC0415
+
+    return FX.cmd_update(a)
+
+
+def cmd_fix(a: argparse.Namespace) -> int:
+    from . import fixes as FX  # noqa: PLC0415
+
+    return FX.cmd(a)
+
+
+def cmd_file(a: argparse.Namespace) -> int:
+    """thimble file issue N | thimble file pr N: a fix sent to thimble's public repository (kernel/share.py)."""
+    from . import share as SH  # noqa: PLC0415
+
+    return SH.cmd(a) if a.verb == "issue" else SH.pr_cmd(a)
+
+
+def cmd_reapply(a: argparse.Namespace) -> int:
+    from . import fixes as FX  # noqa: PLC0415
+
+    return FX.cmd_reapply(a)
+
+
+def _shares(line: str) -> bool:
+    """A help line of share.py's commands (thimble file issue, thimble file pr), or the line that goes on from one."""
+    return "thimble file " in line or "needs gh, GitHub's" in line
+
+
+def _no_share(text: str) -> str:
+    from . import fixes as FX  # noqa: PLC0415
+
+    return text if FX.can_share() else "\n".join(x for x in text.splitlines() if not _shares(x))
+
+
+def _help() -> str:
+    """thimble --help: this file's text, without the file lines while this thimble has no thimble file."""
+    from . import fixes as FX  # noqa: PLC0415
+
+    lines = __doc__.strip().splitlines()
+    return "\n".join(x for x in lines if FX.can_share() or not _shares(x))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{label,coverage}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{update,reapply,fixes,fix,file,browser,demo,doctor,label,coverage}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
@@ -459,16 +585,65 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_coverage)
+    p = sub.add_parser("fix", help="your changes to thimble", description=_no_share(FIX_HELP),
+                       formatter_class=argparse.RawDescriptionHelpFormatter)
+    # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
+    p.add_argument("verb", nargs="?", default="list",
+                   choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "again", "done", "apply", "merge", "notnow",
+                            "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
+    p.add_argument("id", nargs="?")
+    p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
+    p.add_argument("more", nargs="*", help=argparse.SUPPRESS)  # merge: the third fix and on
+    p.add_argument("--json", action="store_true")
+    p.add_argument("--to", metavar="DIR")
+    p.add_argument("--words", help=argparse.SUPPRESS)
+    p.add_argument("--title", help=argparse.SUPPRESS)
+    p.add_argument("--summary", help=argparse.SUPPRESS)
+    p.add_argument("--made-in", dest="made_in", default="terminal", help=argparse.SUPPRESS)
+    p.add_argument("--request", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--no-tests", dest="no_tests", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--cannot", help=argparse.SUPPRESS)  # done: the fixer's end said why it cannot be done (-: stdin)
+    p.add_argument("--session", help=argparse.SUPPRESS)  # new, round, again, redo, done: the Claude Code session of the fixer
+    p.add_argument("--answer", choices=("pr", "file"), default="file", help=argparse.SUPPRESS)
+    p.add_argument("--ask", help=argparse.SUPPRESS)
+    p.add_argument("--check", action="store_true", help=argparse.SUPPRESS)  # update: the session's check (plugin/fix)
+    p.add_argument("--once", action="store_true", help=argparse.SUPPRESS)  # update --check: a dev install's commit, once
+    p.set_defaults(fn=cmd_fix)
+    p = sub.add_parser("file", help="send a fix to thimble's public repository: an issue, or a pull request",
+                       description=FILE_HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("verb", choices=("issue", "pr"), metavar="issue|pr")
+    p.add_argument("id", nargs="?")
+    p.add_argument("--json", action="store_true", help="issue: the whole record, as JSON")
+    p.add_argument("--open", dest="open", action="store_true", help="issue: open the GitHub link in your browser too")
+    p.add_argument("--draft", help=argparse.SUPPRESS)  # issue: Claude's draft as JSON on stdin (-)
+    p.add_argument("--yes", action="store_true", help="pr: open the pull request without asking (for scripts)")
+    p.set_defaults(fn=cmd_file)
+    p = sub.add_parser("update", help="the newest thimble release, for both modes", description=UPDATE_HELP,
+                       formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--continue", dest="cont", action="store_true",
+                   help="record the commits Claude made for the pending fixes, and turn them on")
+    p.add_argument("--check", action="store_true", help="only say whether a newer release is out")
+    p.add_argument("--once", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_update)
+    p = sub.add_parser("reapply", help="Claude brings back the fixes thimble update set aside",
+                       description="thimble reapply: Claude Code opens in your copy of thimble (~/.thimble/fixes/live) "
+                       "with the fixes thimble update set aside. Claude checks each one against the new release, brings "
+                       "back what is still needed, and runs thimble update --continue. Run it in a shell.")
+    p.add_argument("--print", action="store_true", help="print Claude's first message, and open nothing")
+    p.set_defaults(fn=cmd_reapply)
     args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "fixes":
+        args = ["fix", "list", *args[1:]]
     if not args or args[0] in ("-h", "--help", "help"):
         # the commands in one screen: argparse's usage lines would only repeat them
-        print(__doc__.strip())
+        print(_help())
         return 0
     if not args[0].startswith("-") and args[0] not in sub.choices:
-        ap.error(f"no command {args[0]!r}: the commands are label and coverage")
+        ap.error(f"no command {args[0]!r}: thimble --help lists the commands")
     a = ap.parse_args(args)
     if not getattr(a, "fn", None):
-        print(__doc__.strip())
+        print(_help())
         return 0
     try:
         return a.fn(a)

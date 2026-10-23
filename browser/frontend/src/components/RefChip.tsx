@@ -24,6 +24,7 @@ import { teleport } from '../lib/teleport'
 import type { Cell, ResolvedRef } from '../lib/types'
 import { workspaceFromUrl } from '../lib/workspace'
 import { glyphOf } from '../lib/fileGlyph'
+import { ensurePathKind, onPathKinds, pathKind } from '../lib/pathKinds'
 import { Chip, type ChipTone } from './Chip'
 import type { IconName } from './Icon'
 import { chartLabels, Output, isNumericCell, primaryArtifact } from './Outputs'
@@ -302,9 +303,16 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const unresolved = !parsed && !broken
   const wholeCell = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null ? parsed.cellId : null
   const asText = value != null
-  // a ref that names a folder with no slash after it shows the folder glyph once its label finds it a folder
+  // a chip of a path with no slash after it and no file type in its name may name a folder: it shows the folder glyph
+  // as soon as the server says it is one (a stat, lib/pathKinds), or once its label finds it a folder
   const [folder, setFolder] = useState(false)
-  const icon = folder ? 'folder' : refIcon(ref)
+  const bare = !asText && parsed?.kind === 'path' && !parsed.locator && glyphOf(parsed.path) === 'page' ? parsed.path : null
+  useEffect(() => {
+    if (bare) ensurePathKind(ws, bare)
+  }, [ws, bare])
+  const statKind = () => (bare ? pathKind(ws, bare) : undefined)
+  const named = useSyncExternalStore(onPathKinds, statKind, statKind)
+  const icon = folder || named === 'folder' ? 'folder' : refIcon(ref)
   // a standalone citation of a part of a card (a table's cell, an output's lines), or inside a chat reply, a card or
   // report text (GlyphCites), is its glyph alone with its name in the hover; a citation of a whole card is the card's
   // chip with its name, as the chips that list what a step made are

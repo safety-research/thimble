@@ -21,10 +21,14 @@
 //                             its mark is `checking` while it runs, and its end is endCheck's as any check's. Call it
 //                             inside a hook (the spawn is its first call); a key's spawn waits out the word window
 //                             (`hold`, marks/register.ts holds it) and is refused when the person typed a word
+//   autoRepair($, agentId)    after a reply's check ended (endCheck): each citation it found wrong or could not confirm
+//                             is repaired at once, as x repairs it; a repair's own failure starts none. Call it in a
+//                             hook around endCheck's (marks/register.ts): the repair's fork skips the hook that spawned
+//                             it, so its end still reaches endCheck
 //
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
 // mark of its share `checking`: a mark it gave no answer for is failed, as the person sees it (store.ts notRun). When a reply's last mark settles, main is told what changed (tellText), once; when a
-// repair ends, main is told how that one mark ended (repairTellText).
+// repair ends, main is told how that one mark ended (repairTellText): who started it, the person (x) or thimble (auto).
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent);
 // the marks themselves are in store.ts
@@ -52,7 +56,7 @@ type Any = any
 /** One fork's check: the reply, and the numbers of the marks this fork checks. `cwd` is the shell's folder, where the
  *  fork's code runs; `root` the folder the session started in, which the pane's paths start from. A relative path of
  *  the evidence is read from either. */
-type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; thread?: string }
+type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string }
 
 const RUNNING = { plugin: 'thimble', key: 'marksRunning' } as const
 const ROWS = { plugin: 'thimble', key: 'marksRows' } as const
@@ -183,8 +187,9 @@ export function tellText(items: MarkItem[]): string {
   return parts.join('\n')
 }
 
-/** What main reads with the person's next prompt when a repair (x) ended: how its mark ended, as the person reads it. */
-export function repairTellText(items: MarkItem[]): string {
+/** What main reads with the person's next prompt when a repair ended: how its mark ended, as the person reads it, and
+ *  who started it: the person with x, or thimble (`auto`, right after the check failed it). */
+export function repairTellText(items: MarkItem[], auto = false): string {
   const lines = items.map(m => {
     if (m.status === 'corrected') return fixedLine(m)
     if (m.status === 'verified') return `- ${q(m.words)} is verified as written${why(m)}`
@@ -194,7 +199,8 @@ export function repairTellText(items: MarkItem[]): string {
   })
   const notes = notesOf(items).map(n => `- ${q(n)}`)
   if (!lines.length) return ''
-  const parts = [`The analyst pressed x (repair) on a citation of yours, and thimble checked it against the data. Its words in the block below may quote the records.\n${fenced(lines.join('\n'))}`]
+  const head = auto ? 'A citation of yours failed its check, so thimble checked it again against the data.' : 'The analyst pressed x (repair) on a citation of yours, and thimble checked it against the data.'
+  const parts = [`${head} Its words in the block below may quote the records.\n${fenced(lines.join('\n'))}`]
   if (notes.length) parts.push(`The check also found these uncited statements false. The analyst does not see these:\n${fenced(notes.join('\n'))}`)
   parts.push('The analyst sees the result in the reply. Use it from now on.')
   return parts.join('\n')
@@ -213,7 +219,7 @@ async function edit($: Engine, c: Check, change: (r: Reply) => Reply): Promise<R
   })
   // a side thread's answer: main never read it, so it hears nothing of its check
   if (reply && open && !c.thread && !reply.items.some(counted)) {
-    const text = c.repair ? repairTellText(reply.items.filter(m => mine.has(m.n))) : tellText(reply.items)
+    const text = c.repair ? repairTellText(reply.items.filter(m => mine.has(m.n)), !!c.auto) : tellText(reply.items)
     if (text) await tellAtNextPrompt($, c.repair ? `marks:${c.key}:repair:${c.marks.join(',')}` : `marks:${c.key}`, text)
   }
   return reply
@@ -345,7 +351,7 @@ export const REPAIR_DESCRIPTION = 'checking a citation again (x)'
 /** A repair's spawn held for a key's word window: it waits until `until`, and is refused once `cancelled`. */
 export type RepairHold = { until: number; cancelled: boolean }
 /** What a check of one mark again needs: its reply, its mark, and the checker's text with the request. */
-export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string }
+export type Repair = { key: string; turnId: string; n: number; prompt: string; cwd: string; root: string; thread?: string; auto?: boolean }
 
 let held: RepairHold | null = null
 const starting = new Set<string>()
@@ -362,7 +368,7 @@ export function repairRequest(m: MarkItem): string {
   const found = m.failedBy === 'evidence' ? 'could not confirm it' : 'found it wrong'
   return [
     `The analyst pressed x to repair citation ${m.n}. It may stand in an earlier reply than your last. The first check ${found}${m.reason ? `: ${q(m.reason)}` : '.'}`,
-    'Check it again from the start, and make the citation correct: change the cited words, the sentence or the evidence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.',
+    'Check it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.',
     'When the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.',
   ].join('\n')
 }
@@ -410,13 +416,37 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
         return { ...base, shown: m.words, status: 'checking' as MarkStatus, repair: true as const }
       }),
     }))
-    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.thread ? { thread: r.thread } : {}) }
+    const c: Check = { agentId, key: r.key, turnId: r.turnId, marks: [r.n], cwd: r.cwd, root: r.root, replyEnd: now, spawnedAt: now, repair: true, ...(r.auto ? { auto: true } : {}), ...(r.thread ? { thread: r.thread } : {}) }
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: c }))
     await showRunning($, r.key, 1, [agentId])
     return ''
   } finally {
     if (held === hold) held = null
     starting.delete(id)
+  }
+}
+
+/** The citations each ended check found wrong or could not confirm, by the check's fork, until autoRepair starts their
+ *  repairs. endCheck notes them; the hook around it (marks/register.ts) reads them as the same event ends. */
+const toRepair = new Map<string, { key: string; marks: number[] }>()
+
+/** After the check of fork `agentId` ended: a repair of each citation it found wrong or could not confirm, at once,
+ *  with x's request, each in a fork of its own; the citation spins as for x, and its end replaces it as x's does. A
+ *  repair's own end starts none (endCheck notes only a reply's check), so a citation that fails again stays failed and
+ *  waits for x. A citation whose check did not run is left to x too: what stopped its check would stop this one. Call
+ *  it inside a hook, as launchRepair. */
+export async function autoRepair($: Engine, agentId: string): Promise<void> {
+  const due = toRepair.get(agentId)
+  toRepair.delete(agentId)
+  if (!due) return
+  const items = (await replyOf($, due.key))?.items ?? []
+  for (const n of due.marks) {
+    const m = items.find(x => x.n === n)
+    if (!m) continue
+    const r = await repairOf($, m.row, n)
+    if (r === null) continue
+    const why = typeof r === 'string' ? r : await launchRepair($, { ...r, auto: true }, { until: 0, cancelled: false })
+    if (why) failNotice($, why, 'marks:repair')
   }
 }
 
@@ -461,6 +491,7 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
 
 /** At the end of the checker's turn: its answer validated, each mark's status written, and the timings recorded. */
 export async function endCheck($: Engine, e: { agentId: string; reason: string; answer: string; usage?: unknown }): Promise<void> {
+  toRepair.delete(e.agentId)
   const c = (await running($))[e.agentId]
   if (!c) return
   const forkEnd = Number(await $.clock.now())
@@ -495,6 +526,9 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
       return { ...m, ...rest, shown: String(res.shown ?? m.words) }
     })))
     if (!reply) return
+    // a reply's check: the citations it found wrong or could not confirm are repaired as soon as it ends (autoRepair)
+    const found = c.repair ? [] : reply.items.filter(m => mine.has(m.n) && m.status === 'failed' && m.failedBy !== 'none').map(m => m.n)
+    if (found.length) toRepair.set(e.agentId, { key: c.key, marks: found })
     const count = (s: string, by?: string) => reply.items.filter(m => mine.has(m.n) && m.status === s && (!by || m.failedBy === by)).length
     await record($, {
       kind: 'marks', feature: 'checker', marks: c.marks.length, reply_marks: reply.items.length, verified: count('verified'), corrected: count('corrected'),

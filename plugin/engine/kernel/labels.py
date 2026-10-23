@@ -316,8 +316,11 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
             limit: int | None = None, seed: int = 0) -> tuple[list[S.Row], int, list[str]]:
     """(the records, how many matched, the files) of a glob, narrowed by --where and --within; with a limit, that many
     of them at random (a trial)."""
-    # `x.db#prs` names one table of a database, as load() reads it
-    pattern, _, table = glob.partition("#")
+    # `x.db#prs` names one table of a database, as load() reads it; `x.json#/runs/*/steps` the records of a JSON
+    # document at a pointer (S.pointer_values)
+    pattern, _, place = glob.partition("#")
+    at = place if place.startswith("/") else None
+    table = None if at else place
     files = S.expand_glob(st.root, pattern)
     outside = [f for f in files if f == ".." or f.startswith("../")]
     if outside:
@@ -326,6 +329,11 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
                          f"table is `file.db#table`)")
     if not files:
         raise LabelError(f"no source file matches {pattern!r} under {st.root}")
+    if at:
+        other = [rel for rel in files if S.kind_of_file(st.root, rel) != "json"]
+        if other:
+            raise LabelError(f"{other[0]} is no JSON document: a place after # that starts with / is a JSON pointer, "
+                             f"which only a .json file has (a database's table is `file.db#table`)")
     if table:
         for rel in files:
             tables = S.table_names(st.root, rel)
@@ -342,7 +350,7 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
     kept: list[S.Row] = []
     matched = 0
     for rel in files:
-        for row in S.iter_rows(st.root, rel, table=table or None):
+        for row in S.iter_rows(st.root, rel, table=table or None, at=at):
             if inside is not None and row.ref not in inside:
                 continue
             if cond is not None:
@@ -361,6 +369,11 @@ def records(st: Store, glob: str, where: str | None = None, within: tuple[str, s
                 j = rng.randrange(matched)
                 if j < limit:
                     kept[j] = row
+    if at and not matched and cond is None and inside is None:
+        doc = json.loads((st.root / files[0]).read_text(errors="replace"))
+        top = list(doc)[:12] if isinstance(doc, dict) else f"a list of {len(doc)} items" if isinstance(doc, list) else "one value"
+        raise LabelError(f"the pointer {at} names no records in {files[0]}: its top level holds {top}. A `*` in the "
+                         f"pointer stands for every item or key at its level, as in `#/*/messages`")
     return kept, matched, files
 
 
@@ -395,8 +408,14 @@ def rows_of(st: Store, refs: list[str]) -> dict[str, S.Row]:
     for rel, want in by_file.items():
         nums = {int(m[1]) for r in want if (m := re.fullmatch(r".*#L(\d+)", r))}
         try:
-            if len(nums) == len(want) and S.kind_of_file(st.root, rel) in ("jsonl", "transcript"):
+            kind = S.kind_of_file(st.root, rel)
+            if len(nums) == len(want) and kind in ("jsonl", "transcript"):
                 rows = S.json_lines(st.root, rel, nums)
+            elif kind == "json":
+                # each record by its own pointer, wherever in the document it is (a label's place, or its largest list)
+                doc = json.loads((st.root / rel).read_text(errors="replace"))
+                rows = (S.Row(r, json.dumps(x, ensure_ascii=False), x) for r in want for _, x in
+                        S.pointer_values(doc, r.partition("#")[2] or "/") if r.partition("#")[2].startswith("/"))
             else:
                 rows = S.iter_rows(st.root, rel)
             for row in rows:

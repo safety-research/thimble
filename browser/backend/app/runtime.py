@@ -31,11 +31,12 @@ security plugin skips person-installed plugins' prompt.context and session.appen
 When Claude cannot be reached the way chosen (no choice, no key, a WIF file that cannot be used), a turn writes one
 card into the chat (ACCESS_KIND) that says what is missing and opens the setup step; never a raw error.
 
-Main's chats. Each start of thimble-browser opens a new chat of main, as each `claude` starts a new session: the
-workspace's cards, canvas, reports and labels stay, and main's log in the page keeps the earlier chats above a `New
-chat` line. `--continue` and `--resume` bring an earlier chat back (Space.switch, from the register route's `chat`):
-main's conversation (convs/main-<sid>.<engine>.json) and its transcript are that chat's again. runtime/main.json names
-the chat that is main now; main_chats lists them for the launcher's picker.
+Main's chats. Each start of thimble-browser is a new session of the folder, a workspace as empty as at its first start
+(folder_sessions.py); `--continue` and `--resume` bring an earlier session back whole, with its chat of main. A session
+can hold several chats of main (a workspace from before sessions, or the register route's `chat` "new"): Space.switch
+makes one main, and main's conversation (convs/main-<sid>.<engine>.json) and its transcript are that chat's again.
+runtime/main.json names the chat that is main now; chats_in lists them. When the workspace's folder goes (moved aside
+or deleted, ledger), forget drops its runtime, so the next ensure reads the folder in its place.
 
 THIMBLE_RUNTIME=off turns this off (0.8's own tests); it is on otherwise.
 """
@@ -63,6 +64,7 @@ ENV = "THIMBLE_RUNTIME"
 DIR = "runtime"
 MAIN = "main"
 FORK_TYPE = "fork"
+FIXER = "fixer"  # the role of thimble fix's fork (fixes.py), whose folder is its copy of thimble
 MAIN_BUILTINS = ("Read", "Grep", "Glob", "Bash", "WebFetch", "WebSearch")
 AGENT_BUILTINS = ("Read", "Grep", "Glob", "Bash", "Edit", "Write", "WebFetch", "WebSearch")
 WEB = ("WebFetch", "WebSearch")
@@ -422,11 +424,25 @@ class Space:
             with contextlib.suppress(Exception):
                 for d in writes:
                     d.mkdir(parents=True, exist_ok=True)
+        cwd = self.corpus
+        if conv.kind == "fork" and conv.role == FIXER:
+            # thimble fix's fixer (fixes.py): main's conversation and tools, and Edit and Write, in the fix's copy of
+            # thimble, which it alone writes, with its temp folder. Claude Code resumes main's session only from
+            # main's folder, so there the copy is an added folder
+            from . import fixes  # noqa: PLC0415
+
+            work, more, writes = fixes.fixer_roots(int(conv.values.get("fix") or 0))
+            writes = [*writes, tmp]
+            reads = [*reads, *more]
+            builtins = [*builtins, *(b for b in ("Edit", "Write") if b not in builtins)]
+            edits = None
+            if engine() == "api":
+                cwd = work
         with contextlib.suppress(Exception):
             if (userconf.load_or_defaults(self.c)[0].get("agents") or {}).get("main", {}).get("web") == "off":
                 builtins = [b for b in builtins if b not in WEB]
         return Spec(system=system, builtins=runtime_tools.available(builtins) if engine() == "api" else builtins,
-                    thimble=names, model=model, effort=effort, cwd=self.corpus, workspace=self.ws,
+                    thimble=names, model=model, effort=effort, cwd=cwd, workspace=self.ws,
                     read_roots=reads, write_roots=writes, private=self.private(), home=tmp, fast=fast,
                     corpus_edits=edits, no_write=protected(self.ws))
 
@@ -465,13 +481,13 @@ def _last_uuid(path: Path) -> str | None:
 
 
 def _chat_of(path: Path) -> dict[str, Any]:
-    """{turns, first}: how many turns a main transcript holds (the user records that open one) and the first message
-    the analyst typed in it, as one line."""
-    turns, first, other = 0, "", ""
+    """{turns, first, start}: how many turns a main transcript holds (the user records that open one), the first message
+    the analyst typed in it, as one line, and when its first turn began (the record's timestamp, '' when none)."""
+    turns, first, other, start = 0, "", "", ""
     try:
         f = path.open(encoding="utf-8")
     except OSError:
-        return {"turns": 0, "first": ""}
+        return {"turns": 0, "first": "", "start": ""}
     with f:
         for ln in f:
             try:
@@ -482,6 +498,7 @@ def _chat_of(path: Path) -> dict[str, Any]:
             if rec.get("type") != "user" or not isinstance(content, str):
                 continue
             turns += 1
+            start = start or str(rec.get("timestamp") or "")
             if first:
                 continue
             m = EVENT_BODY_RE.match(content)
@@ -490,15 +507,20 @@ def _chat_of(path: Path) -> dict[str, Any]:
                 first = body
             elif not other:
                 other = body
-    return {"turns": turns, "first": first or other}
+    return {"turns": turns, "first": first or other, "start": start}
 
 
 def main_chats(c: str) -> list[dict[str, Any]]:
-    """The workspace's chats of main that hold a turn, the latest first: {id, at (the last write, epoch seconds),
-    turns, first (the first message), current (main's now)}. For the launcher's --continue and --resume."""
+    """The workspace's chats of main that hold a turn, the latest first (chats_in)."""
     from . import config  # noqa: PLC0415
 
-    d = config.workspace_dir(c) / DIR
+    return chats_in(config.workspace_dir(c) / DIR)
+
+
+def chats_in(d: Path) -> list[dict[str, Any]]:
+    """The chats of main that hold a turn in a workspace's runtime folder `d`, the latest first: {id, at (the last
+    write, epoch seconds), turns, first (the first message), start (when its first turn began), current (main's now)}.
+    Reads only, so it lists a session moved aside as well (folder_sessions)."""
     now = str(_read_json(d / "main.json").get("session") or "")
     out = []
     for p in d.glob("*.jsonl") if d.is_dir() else ():
@@ -557,6 +579,19 @@ def ensure(c: str) -> Space:
         sp = _spaces[c] = Space(c)
     sp.attach()
     return sp
+
+
+async def forget(c: str) -> None:
+    """The workspace's folder goes (ledger: moved aside for a new session, or deleted): its conversations' running turns
+    stop, awaited, so none writes into the folder that takes its place, and its runtime is dropped, so the next ensure
+    reads that folder (a new session's empty one, or a session brought back)."""
+    sp = _spaces.pop(c, None)
+    if sp is None:
+        return
+    for conv in [sp.main, *sp.convs.values()]:
+        if conv.running:
+            conv.queue.clear()
+            await _cancel(conv.task)
 
 
 def ensure_soon(c: str) -> None:
@@ -891,17 +926,42 @@ async def _lifespan(app: Any):
                 ensure(p.parent.parent.name)
         _loop.run_in_executor(None, llm.warm)  # so the first message does not wait for the SDK's import
     yield
-    for sp in list(_spaces.values()):
-        for conv in [sp.main, *sp.convs.values()]:
-            if conv.running:
-                conv.task.cancel()  # type: ignore[union-attr]
+    # this router is included last, so its lifespan ends first, while the mirror and the modules still run
+    await stop_all()
 
 
 router = APIRouter(lifespan=_lifespan)
 
+STOP_WAIT_S = 5.0  # how long the server's stop waits for its agents to end (stop_all)
 
-async def shutdown() -> None:
+
+async def stop_all(wait_s: float = STOP_WAIT_S) -> list[str]:
+    """The server stops (Ctrl-C in thimble-browser, a restart): every agent it runs stops, main's turn, the threads'
+    forks and thimble's agents, as a Stop click stops one (_cancel): each ends `stopped` in its chat and in the registry
+    (_agent_loop, _ended). It waits up to `wait_s` for them, then the mirror keeps where each stands
+    (session.keep_places), so the next server neither shows them running nor takes them up again. The ids stopped."""
+    from . import session  # noqa: PLC0415
+
+    stopping: list[tuple[str, Any]] = []
+    mains = [sp.c for sp in _spaces.values() if sp.main.running]
     for sp in list(_spaces.values()):
         for conv in [sp.main, *sp.convs.values()]:
             if conv.running:
+                conv.queue.clear()
                 conv.task.cancel()  # type: ignore[union-attr]
+                stopping.append((f"{sp.c}/{conv.id}", conv.task))
+    if stopping:
+        waits = [t if isinstance(t, asyncio.Future) else asyncio.wrap_future(t) for _, t in stopping]
+        _, late = await asyncio.wait(waits, timeout=wait_s)
+        if late:
+            log.warning("%d agent(s) did not stop within %g s", len(late), wait_s)
+        log.info("the server stops: stopped %s", ", ".join(i for i, _ in stopping))
+    for c in mains:  # main's turn ends with a note, as the Stop button ends it (agents.interrupt_route)
+        with contextlib.suppress(Exception):
+            session.turn_stopped(c, stopped=True, text=session.QUIT_TEXT)
+    session.keep_places()
+    return [i for i, _ in stopping]
+
+
+async def shutdown() -> None:
+    await stop_all()

@@ -243,6 +243,24 @@ function errorBlockIndexes(rec: any): Set<number> {
   return out
 }
 
+/** A Claude Code stream record on one line, as the Transcript view shows it folded, for a place that names records
+ * one line each (the loupe beside the strip, a record's tooltip): a record that is no message, such as a system
+ * record or a tool's progress, as its summary (`system · thinking_tokens`, shown behind the system toggle); a message
+ * as its words, each tool call as its name and what it acts on, each result from its start (foldParts); a message
+ * with no words to show, which the view gives no row, as the kinds of its content (`thinking`). `wrap`: the key a
+ * record nests its stream record under. Null for a record that is no stream record. Pure. */
+export function streamLine(obj: unknown, wrap?: string | null): string | null {
+  const o = obj as any
+  const r = wrap && o?.[wrap] && typeof o[wrap] === 'object' && !Array.isArray(o[wrap]) ? o[wrap] : o
+  if (!isStreamRec(r)) return null
+  if (!CONVERSATIONAL.has(r.type)) return sysSummary(r)
+  const parts = foldParts(streamBlocks(r).filter((b) => b.kind !== 'raw'))
+  if (parts.length) return parts.map((p) => (p.kind === 'tool' ? `${p.tool} ${p.text}`.trim() : p.text)).join(' · ')
+  const content = r.message?.content
+  const kinds = Array.isArray(content) ? [...new Set(content.map((c: any) => c?.type).filter((t: unknown): t is string => typeof t === 'string'))] : []
+  return kinds.join(', ') || r.type
+}
+
 /** Whether a record's blocks hold any words to show. Pure. */
 export function hasWords(blocks: readonly Block[]): boolean {
   return blocks.some((b) => b.text.trim() !== '')

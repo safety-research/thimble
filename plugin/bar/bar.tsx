@@ -2,6 +2,8 @@
 //
 //   the failure line  only while there is one (bar/notice.ts failLineNow): a failure in red, or a notice. It wraps, so
 //                  the whole failure shows
+//   the fix line   only while there is one (fix/line.ts): a fix that is ready (y use it now · d what changed · n
+//                  later), on (u undo), off, failed, or a request with no code
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), `v card` while
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
@@ -13,20 +15,19 @@
 import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
-import { textWidth } from '../core/text.js'
+import { cut, textWidth } from '../core/text.js'
+import { accent } from '../core/theme'
 import { vReady } from '../designer/v'
+import { fixLineRows } from '../fix/line'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
-import { countsNow } from './counts'
+import { countsNow, keptCounts } from './counts'
 import { failLineNow } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** The colors of the bar: thimble's name, and a key the person can press. Theme keys, so light and dark both read. */
-const NAME_COLOR = 'permission'
-const KEY_COLOR = 'suggestion'
 
 
 /** What a press on a part of the bar does; register.ts gives them, so this module draws and decides nothing else. */
@@ -67,9 +68,12 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
   return out
 }
 
-/** The keys the bar names now (r and l act only while they show). */
+/** The keys the bar names now (r and l act only while they show), from the counts as last kept (counts.ts keptCounts):
+ *  a key press reads no state. */
 export async function barKeys($: Engine): Promise<Set<string>> {
-  return new Set((await countItems($, featureOn, null)).map(x => x.key!).filter(Boolean))
+  if (!featureOn('counts')) return new Set()
+  const c = await keptCounts($)
+  return new Set([...(c?.coverage ? ['r'] : []), ...(c?.labels ? ['l'] : [])])
 }
 
 /** The bar's rows: the failure line (when there is one) and the bar, `width` cells wide. */
@@ -86,23 +90,29 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   if (!preview && room() < 0) right = right.filter(x => x.id !== 'labels')
   if (!preview && room() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
   if (!preview && room() < 0) right = []
+  // then the busy item's other steps go, and its words are cut, so the bar keeps to one row
+  const b = left.findIndex(x => x.id === 'busy')
+  if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: left[b]!.words.split(' · ')[0]! }
+  if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: cut(left[b]!.words, Math.max(8, len(left[b]!.words) + room())) }
 
   const words = (x: Item, i: number): Any[] => [
-    ...(x.glyph ? [Text({ key: `g${i}`, color: NAME_COLOR, children: `${x.glyph} ` })] : []),
-    ...(x.key ? [Text({ key: `k${i}`, color: KEY_COLOR, bold: true, children: x.key }), Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
+    ...(x.glyph ? [Text({ key: `g${i}`, color: accent(), children: `${x.glyph} ` })] : []),
+    ...(x.key ? [Text({ key: `k${i}`, color: accent(), bold: true, children: x.key }), Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
   ]
   const drawn = (x: Item, i: number): Any => (x.press
     ? Button({ key: `bar-${x.id}`, plain: true, label: `${x.key ? `${x.key} ` : ''}${x.words}`, onPress: x.press, children: words(x, i) })
     : Text({ key: `bar-${x.id}`, children: words(x, i) }))
   const joined = (xs: Item[], at: number): Any[] => xs.flatMap((x, i) => [...(i ? [Text({ key: `s${at + i}`, dimColor: true, children: ' · ' })] : []), drawn(x, at + i)])
 
-  const name = Text({ key: 'name', color: NAME_COLOR, bold: true, children: 'thimble' })
+  const name = Text({ key: 'name', color: accent(), bold: true, children: 'thimble' })
   const label = presses ? Button({ key: 'bar-thimble', plain: true, label: 'thimble settings', onPress: presses.settings, children: [name] }) : name
   const bar = Box({ key: 'bar', flexDirection: 'row', justifyContent: 'space-between', width, ...(preview ? { flexWrap: 'wrap' } : {}), children: [
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
     ...(right.length ? [Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: joined(right, left.length) })] : []),
   ] })
-  return [...(preview ? [] : await lineRows($, els, width)), bar]
+  // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's
+  const fixRows = preview ? [] : await fixLineRows($, els, width).catch(() => [])
+  return [...(preview ? [] : await lineRows($, els, width)), ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), bar]
 }
 
 /** The failure line: what failed, whole, in red, or a notice. */

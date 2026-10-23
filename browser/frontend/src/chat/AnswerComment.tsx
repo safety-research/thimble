@@ -109,8 +109,9 @@ export function AnswerCommentPop(props: CardProps) {
     const onDown = (e: MouseEvent) => {
       const t = e.target as Element | null
       if (popEl.current?.contains(t)) return
-      // a press on a tinted passage: its click opens that comment, or closes this one when it is its own
-      if (t?.closest?.('mark.answer-tint[data-answer-comment]')) return
+      // a press on a tinted passage: its click opens that comment, or closes this one when it is its own; a press on a
+      // citation's words in it opens the citation, which this comment makes way for
+      if (t?.closest?.('mark.answer-tint[data-answer-comment]') && !t.closest('.mark-words')) return
       close.current()
     }
     document.addEventListener('keydown', onKey)

@@ -22,6 +22,15 @@ import type { EngineInterface } from 'claude-code'
 type Engine = EngineInterface
 export type Theme = 'dark' | 'light'
 
+/** thimble's color: its name on the bar, the keys it names, the citations' turning glyph. Claude Code's color for a
+ *  merged pull request, a purple in every theme: #8700ff on the light ones (contrast 6.0 on white), #af87ff on the
+ *  dark ones (6.1 on #1e1e1e), magenta on the ANSI ones. Every drawing asks for it as it draws, never keeps it in a
+ *  constant, so a change here reaches all of thimble. The pure modules get it from the module that draws them
+ *  (core/askcell.js as `color`, the Client squeeze/chips.tsx in its props). */
+export function accent(): string {
+  return 'merged'
+}
+
 const FRESH_MS = 1000
 
 let current: Theme = 'dark'

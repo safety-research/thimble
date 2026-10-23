@@ -10,6 +10,7 @@ import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
 import { claimsStore } from '../claims/term'
+import { failLineNow } from '../bar/notice'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -132,7 +133,7 @@ test("an answer's claims come in with the citations near their words; c counts t
   // the next look reads every claim so far
   await answered(s, { id: 't2', prompt: 'Are you sure?', rows: ['The edits were not biased: one editor tilted them.'] })
   expect(s.forks[1]).toContain('PROMPT lens-claims')
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.words, x.color])).toEqual([['3 claims', 'suggestion']])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.words, x.color])).toEqual([['3 claims', 'merged']])
   // switched off, c is not on the bar and the key is typed
   expect(await claimsBar(s.$, k => k !== 'claims', false)).toEqual([])
 })
@@ -151,6 +152,15 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   await answered(s, { id: 't2', prompt: 'Why?', rows: ['Because of the cache.'] })
   const take = await claimsKey(s.$, 'c', 0)
   expect(take?.later).toBeDefined()
+  // a narrow terminal: Claude Code places no pane for a key at the prompt there, so the notice names the bar's count,
+  // a click on which opens it
+  const placing = s.$.ui.open
+  s.$.ui.open = async () => ({ isPlaced: false, reason: 'unasked below 144 columns (118 now)' })
+  s.$.ui.panes = async () => []
+  await take!.later!()
+  await new Promise(r => setTimeout(r, 1))
+  expect(String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text)).toContain('“c 3 claims”')
+  s.$.ui.open = placing
   await take!.later!()
   expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims', focus: true })
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, args, els)
@@ -166,6 +176,8 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   // never hold the key, which drew it twice. At rest too every key of the pane is held, so none is typed into the prompt
   expect(keysOf(pane)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['p', 'previous'], ['n', 'next']])
   expect(buttons(pane).filter(b => b.hotkey).map(b => textOf(b.children))).toEqual(['previous claim', 'next claim', 'previous', 'next'])
+  // under the pointer a key's words brighten, never Claude Code's inverse of a plain Button
+  expect(buttons(pane).filter(b => b.hotkey).map(b => b.hover?.inverse)).toEqual([false, false, false, false])
   expect(t).toContain('previous · next')
   // at rest n chooses the first cluster in reading order (the list's top), p the last; j the first claim, k the last
   await buttons(pane).find(b => b.hotkey === 'n').onPress()
@@ -269,6 +281,24 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   expect(paneNow(s).args).toMatchObject({ group: 'k1' })
   await buttons(onMap).find(b => /^g\d+:d:c3$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c3' })
+})
+
+test('c in a terminal too narrow for the pane says to type /claims; once /claims opens the pane, that line goes', async () => {
+  setOptions({})
+  const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['[Run 4 failed](#).'] })
+  const line = async () => ((await failLineNow(s.$)) as Any)?.text ?? ''
+  s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
+  await (await claimsKey(s.$, 'c', 0))!.later!()
+  await settle()
+  expect(await line()).toContain('type /claims')
+  // a command's pane is placed at any width
+  s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
+  await s.call('command.run', { command: 'claims' }, async () => ({}))
+  await settle()
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims' })
+  expect(await line()).toBe('')
 })
 
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {

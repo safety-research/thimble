@@ -4,7 +4,7 @@
 //
 //   the head     `Coverage` and, at the right, how many of the folder's files Claude touched. One bar for the whole
 //                folder in three shades: files read into Claude's context (█), files only computed over or searched
-//                (▓), files untouched (░); its key under it, then a dim `touched` over the count column
+//                (█ in gray), files untouched (░); its key under it, then a dim `touched` over the count column
 //   the tree     one line per row: a folder or a file, its name cut with … to fit, a 12-cell bar of the same three
 //                shades, and the files touched (`16/904`). ↵ opens a folder one level (its own files and folders) and
 //                closes it again; j k move. A tree taller than the room scrolls with the selection, and a dim line
@@ -41,14 +41,14 @@ export function pct(part, all) {
   return `${Math.min(99, Math.round(x))}%`
 }
 
-/** A bar of `w` cells: `read` of `all` in █, `comp` in ▓, the rest ░; a part above none takes one cell at least. */
+/** A bar of `w` cells: `read` of `all` in █, `comp` in █ (gray), the rest ░; a part above none takes one cell at least. */
 export function bar(read, comp, all, w) {
   const cells = x => (x <= 0 || !(all > 0) ? 0 : Math.max(1, Math.round((x / all) * w)))
   const r = Math.min(w, cells(read))
   const c = Math.min(w - r, cells(comp))
   return [
     ...(r ? [{ s: '█'.repeat(r), tone: 'read' }] : []),
-    ...(c ? [{ s: '▓'.repeat(c), tone: 'comp' }] : []),
+    ...(c ? [{ s: '█'.repeat(c), tone: 'comp' }] : []),
     ...(w - r - c ? [{ s: '░'.repeat(w - r - c), tone: 'track' }] : []),
   ]
 }
@@ -177,7 +177,7 @@ function detailLines(f, W) {
     else if (f.seen) lines.push([{ s: '█ ', tone: 'read' }, { s: "in Claude's context", tone: null }])
     else {
       const how = n0(f.model) ? ["read by a label's model", tools(f.model_labels)] : f.searched ? ['searched', tools(f.searched_by)] : ['computed over', computedBy]
-      lines.push([{ s: '▓ ', tone: 'comp' }, { s: `${how[0]}, not in Claude's context`, tone: null }, ...(how[1] ? [{ s: `  ${how[1]}`, tone: 'dim' }] : [])])
+      lines.push([{ s: '█ ', tone: 'comp' }, { s: `${how[0]}, not in Claude's context`, tone: null }, ...(how[1] ? [{ s: `  ${how[1]}`, tone: 'dim' }] : [])])
     }
     return lines
   }
@@ -189,9 +189,9 @@ function detailLines(f, W) {
   if (f.touched) {
     const computed = n0(f.computed_over_units ?? f.computed_units)
     const model = n0(f.model_read_units ?? f.model_units)
-    if (computed) rows.push(['▓', 'comp', 'computed over', computed, computedBy])
-    if (f.searched) rows.push(['▓', 'comp', 'searched', all, tools(f.searched_by)])
-    if (model) rows.push(['▓', 'comp', "read by a label's model", model, tools(f.model_labels)])
+    if (computed) rows.push(['█', 'comp', 'computed over', computed, computedBy])
+    if (f.searched) rows.push(['█', 'comp', 'searched', all, tools(f.searched_by)])
+    if (model) rows.push(['█', 'comp', "read by a label's model", model, tools(f.model_labels)])
   }
   const amounts = rows.map(([, , , part], i) => `${num(part)}/${num(all)}${i ? '' : ` ${unitWord(f.unit, all)}`}`)
   const amountW = Math.max(...amounts.map(width))
@@ -229,11 +229,11 @@ export function coverageView(cov, view, { W, H, under = 0 }) {
   head.push(bar(seen, touched - seen, files, W))
   if (none) head.push([])
   else if (narrow) {
-    head.push([{ s: '█', tone: 'read' }, { s: ` in context ${num(seen)}  `, tone: 'dim' }, { s: '▓', tone: 'comp' }, { s: ` computed ${num(touched - seen)}  `, tone: 'dim' }, { s: '░', tone: 'track' }, { s: ' untouched', tone: 'dim' }])
+    head.push([{ s: '█', tone: 'read' }, { s: ` in context ${num(seen)}  `, tone: 'dim' }, { s: '█', tone: 'comp' }, { s: ` computed ${num(touched - seen)}  `, tone: 'dim' }, { s: '░', tone: 'track' }, { s: ' untouched', tone: 'dim' }])
     head.push([])
   } else {
     head.push([{ s: '█', tone: 'read' }, { s: ` read into Claude's context ${num(seen)}`, tone: 'dim' }])
-    head.push([{ s: '▓', tone: 'comp' }, { s: ` computed over or searched, not in its context ${num(touched - seen)}   `, tone: 'dim' }, { s: '░', tone: 'track' }, { s: ' untouched', tone: 'dim' }])
+    head.push([{ s: '█', tone: 'comp' }, { s: ` computed over or searched, not in its context ${num(touched - seen)}   `, tone: 'dim' }, { s: '░', tone: 'track' }, { s: ' untouched', tone: 'dim' }])
     head.push([])
   }
 

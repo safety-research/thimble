@@ -14,8 +14,8 @@ declare module 'claude-code' {
       /** main's text rows of the turn that runs, until its reply's marks are in the store: [{ row, text, at }] */
       marksRows: { row: string; text: string; at: number }[]
       /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
-       *  check of one mark again, which x in the tray started */
-      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean }>
+       *  check of one mark again, which x in the tray started, or thimble when the check failed it (`auto`) */
+      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string }>
 
       // ---- cards (cards/)
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,
@@ -65,7 +65,7 @@ declare module 'claude-code' {
       /** the id of main's turn that runs, null when none runs (core/turn.ts) */
       mainTurn: string | null
       /** which agents are thimble's forks, and their kind (core/forks.ts) */
-      forks: Record<string, 'checker' | 'designer' | 'thread'>
+      forks: Record<string, 'checker' | 'designer' | 'thread' | 'fixer'>
       /** what Claude reads with the person's next prompt, by key (core/tell.ts) */
       tell: Record<string, string>
       /** the session's temp folder, as a real path (core/home.ts tempDir) */
@@ -100,6 +100,25 @@ declare module 'claude-code' {
       thread: StateFamily<unknown>
       /** goes up when a thread changes: the bar's count and the thread list draw again */
       threadsGen: number
+
+      // ---- fixes (fix/): the person's changes to their own thimble; the kernel keeps the records (fixes.jsonl)
+      /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read (fixes.ts) */
+      fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number } | null
+      /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem; whether d opened what
+       *  changed; a reload that waits for Claude's turn or a restart (fixes.ts FixLine) */
+      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart' } | null
+      /** whether this session looked for a newer release already (register.ts) */
+      fixUpdated: boolean
+      /** after the person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is their request (fix/register.ts) */
+      fixAsked: number
+      /** the strays from before rounds changed a fix in place that the fix's line told of already (fix/register.ts) */
+      fixStrays: string[]
+      /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
+      fixers: Record<string, number>
+      /** the start of the command each fix's fixer runs a shell command with, in the sandbox, by the fix's id (fixer.ts) */
+      fixerBox: Record<string, string[]>
+      /** the fixes Claude started with the fix-thimble skill, by the fix's id (fixer.ts) */
+      fixBy: Record<string, 'claude'>
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
       /** a record's state beside its text, by its id (a row, or `<host row>#cu` for a catch-up): { running, want,

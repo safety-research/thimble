@@ -187,3 +187,58 @@ async function chipsDrawn($: Any, row: string, text: string, override: Any = {})
   return { client, tree: Chips({ ...client?.props.props, ...override } as never, surface as never), posts }
 }
 
+test('a citation opened over the open chips takes the keys: the bar names 0 once, 0 closes the tray and keeps the version, then the chips take 0 again', async ($, on) => {
+  const text = 'Of the [12 runs](#), [3 failed](#) on the [slow mirror](#).'
+  const t = await setup($, on, ['Of all [12 nightly runs](#), exactly [3 of them failed](#), each on the [slow package mirror](#).'])
+  await t.turn('t1', text)
+  await t.press('s')
+  await t.press(']')
+  await t.clock.advance(5000)
+  const all = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : [n, ...[n.props?.children, n.children].flat(Infinity).flatMap(all)])
+  const cite = all(await $.ui.render(answer('row-t1', text))).find(n => n.type === 'Button' && /^citation 2/.test(String(n.props.label)))
+  const ui = await $.ui.mount(answer('row-t1', text))
+  await ui.press({ key: cite.props.key })
+  await ui.unmount()
+  // the tray is open over the chips: the bar names its keys alone, each key once
+  const open = await t.bar()
+  expect(open).toContain('3 failed')
+  expect(open.match(/0 (close|back|revert)/g)).toEqual(['0 close'])
+  expect(open).not.toContain('shorter / longer')
+  // 0 closes the tray; the longer version stays, and the chips hold the keys again
+  await t.press('0')
+  expect(await t.bar()).not.toContain('0 close')
+  expect(textOf(await $.ui.render(answer('row-t1', text)))).toContain('slow package mirror')
+  expect(await t.bar()).toContain('0 revert')
+  await t.press('0')
+  expect(textOf(await $.ui.render(answer('row-t1', text)))).not.toContain('slow package mirror')
+})
+
+// A catch-up words the replies' citations anew, and each reply numbers its citations from 1. Each citation of the
+// catch-up stands for the reply's citation that states the same claim: a press on a reworded one acts on that citation
+// (the tray stands on it), and citations of two replies light apart, each in its own hover group
+test("a catch-up's reworded citations: a press acts on the reply's citation with the same claim, and two replies' citations light apart", async ($, on) => {
+  const t = await setup($, on, ['Of all [12 nightly runs](#), [3 of them failed](#); the retry then passed on [the slow package mirror](#).'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'Of the [12 runs](#), [3 failed](#).', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed on the [slow mirror](#).', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.press('s')
+  await t.press('4')
+  await t.clock.advance(5000)
+  const host = answer('row-t3', 'The retry passed on the [slow mirror](#).')
+  const all = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : [n, ...[n.props?.children, n.children].flat(Infinity).flatMap(all)])
+  const cites = all(await $.ui.render(host)).filter(n => n.type === 'Button' && /^citation /.test(String(n.props.label)))
+  const labels = [...new Set(cites.map(b => String(b.props.label)))]
+  expect(labels.length).toBe(3)
+  // three hover groups: the mirror (the second reply's citation 1) does not light with the 12 runs (the first's 1)
+  const scopes = labels.map(l => [...new Set(cites.filter(b => b.props.label === l).map(b => b.hover.scope))])
+  expect(scopes.every(s => s.length === 1)).toBe(true)
+  expect(new Set(scopes.flat()).size).toBe(3)
+  // a press on the reworded mirror: the tray stands on the second reply's citation
+  await t.press('s')
+  const ui = await $.ui.mount(host)
+  await ui.press({ key: cites.find(b => /package mirror/.test(b.props.label))!.props.key })
+  await ui.unmount()
+  const band = await t.bar()
+  expect(band).toContain('slow mirror')
+  expect(band).not.toContain('12 runs')
+})

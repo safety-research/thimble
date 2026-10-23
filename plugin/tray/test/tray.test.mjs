@@ -3,7 +3,7 @@
 //   node --test plugin/tray/test/tray.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
+import { back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, pageOf, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -29,6 +29,13 @@ test('a row\'s stops: its citations and explainers by where they stand, then its
   assert.equal(stepFrom(stops, 4, 1), null)
   assert.equal(stepFrom(stops, 0, -1), null)
   assert.deepEqual(stops.map(stopWhat), ['citation', 'heads up', 'explainer', 'citation', 'card'])
+})
+
+test('a unit taller than the room shows a room of its rows at a time: m goes on in it, then to the next unit', () => {
+  assert.equal(pageOf([9, 1], 4).end, 1)
+  assert.deepEqual(pageOf([9, 1], 4), { start: 0, end: 1, more: 1, next: 0, nextSkip: 3 })
+  assert.deepEqual(pageOf([9, 1], 4, 0, 3), { start: 0, end: 1, more: 1, next: 0, skip: 3, nextSkip: 6 })
+  assert.deepEqual(pageOf([9, 1], 4, 0, 6), { start: 0, end: 1, more: 1, next: 1, skip: 6 })
 })
 
 test('a citation\'s card: why in one sentence, and the one line of evidence that holds the value, cut around it', () => {

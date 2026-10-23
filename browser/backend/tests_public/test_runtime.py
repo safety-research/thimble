@@ -4,13 +4,14 @@ the Agent SDK (runtime_cc.py). Both write the same records into the chats, throu
 Messages API is a fake client and the Agent SDK a fake ClaudeSDKClient: no model is called and no `claude` starts."""
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from app import agents, claude_access, config, events, llm, runtime, runtime_cc, subagents, write_session
+from app import agents, claude_access, config, events, llm, runtime, runtime_cc, session, subagents, write_session
 
 CORPUS = "mini"
 
@@ -424,6 +425,46 @@ async def test_typed_start_tools_start_at_once(on, monkeypatch):
             await c.task
 
 
+class Hang(FakeStream):
+    """A reply that never comes, as a long turn's: the turn waits on it until it is stopped."""
+
+    async def __anext__(self) -> Any:
+        await asyncio.Event().wait()
+        raise StopAsyncIteration
+
+
+async def test_the_server_s_stop_ends_its_agents_stopped_and_the_next_start_runs_none(on, monkeypatch):
+    """Ctrl-C in thimble-browser stops the server, which stops every agent it runs first (runtime.stop_all): a writer's
+    run ends `stopped`, a thread's fork ends, main's turn ends with a line that says why, and the mirror keeps them
+    ended, so the next start under the same chat (thimble-browser --continue) shows nothing running."""
+    client = api_key(monkeypatch, [])
+    client.stream = lambda **body: Hang(Final([], "end_turn"))
+    runtime.ensure(CORPUS)
+    ans = await write_session.start(CORPUS, "report", "Write it up.")
+    tid = str(agents.new_thread(CORPUS, None, None, "why")["id"])
+    events.post(CORPUS, "thread", {"thread": tid, "text": "Why did it fail?"})
+    events.post(CORPUS, "main", {"text": "What happened?"})
+    await asyncio.sleep(0.3)
+    sp = runtime._spaces[CORPUS]
+    writer = sp.convs[str(ans.agent_id)]
+    assert sp.main.running and writer.running and agents.running(CORPUS, tid)
+    assert len(await runtime.stop_all(wait_s=5)) == 3
+    assert not any(c.running for c in [sp.main, *sp.convs.values()])
+    assert (subagents.agent(CORPUS, str(ans.agent_id)) or {}).get("status") == "stopped"
+    assert not agents.running(CORPUS, tid)
+    assert ("chip", session.QUIT_TEXT) in shape(main_records())
+    # the next start: a new server attaches main's same chat, with none of this one's state in memory
+    runtime._spaces.clear()
+    session._live.pop(CORPUS, None)
+    agents._busy.clear()
+    runtime.ensure(CORPUS)
+    try:
+        assert not agents.running(CORPUS, tid), "the thread's fork is not taken up again"
+        assert not agents.running(CORPUS, agents.MAIN_ID) and not session._live[CORPUS].turn_open
+    finally:
+        await session.shutdown()
+
+
 # --------------------------------------------------------------------------- one-shot calls
 
 
@@ -614,27 +655,104 @@ def test_main_s_state_from_before_chats_were_kept_apart_is_its_chat_s(on):
     assert sp.main.state_path("api") == d / "convs" / "main-s1.api.json" and sp.main.state_path("api").is_file()
 
 
-def test_the_launcher_picks_the_latest_chat_an_id_or_one_by_number(on, monkeypatch, capsys):
-    from app import cli
+def test_the_launcher_picks_the_latest_session_one_by_chat_id_or_one_by_number(on, monkeypatch, capsys):
+    from app import cli, folder_sessions
 
-    rows = [{"id": "bbb222", "at": 200.0, "turns": 3, "first": "Second question", "current": True},
-            {"id": "aaa111", "at": 100.0, "turns": 1, "first": "First question", "current": False}]
-    monkeypatch.setattr(runtime, "main_chats", lambda c: rows)
+    rows = [{"archive": None, "at": 200.0, "turns": 3, "cards": 2, "first": "Second question", "chat": "bbb222",
+             "chats": ["bbb222"]},
+            {"archive": "mini-2026-10-23-090000", "at": 100.0, "turns": 1, "cards": 1, "first": "First question",
+             "chat": "aaa111", "chats": ["aaa111", "aab000"]}]
+    monkeypatch.setattr(folder_sessions, "listing", lambda c: rows)
     folder = config.corpus_dir(CORPUS)
     monkeypatch.setattr(cli, "known_corpus", lambda cwd, data: (CORPUS, folder))
     data = folder.parent
-    assert cli.pick_chat(folder, data, "new") == "new"
-    assert cli.pick_chat(folder, data, "continue") == "bbb222"
-    assert cli.pick_chat(folder, data, "aaa") == "aaa111"
-    assert cli.pick_chat(folder, data, "zzz") is None
+    assert cli.pick_session(folder, data, "new") == {"archive": None, "chat": "new"}
+    assert cli.pick_session(folder, data, "continue") == {"archive": None, "chat": "bbb222"}
+    assert cli.pick_session(folder, data, "aab") == {"archive": "mini-2026-10-23-090000", "chat": "aab000"}
+    assert cli.pick_session(folder, data, "aa") is None and cli.pick_session(folder, data, "zzz") is None
     answers = iter(["9", "2"])
     monkeypatch.setattr("builtins.input", lambda _: next(answers))
-    assert cli.pick_chat(folder, data, "pick") == "aaa111"
+    assert cli.pick_session(folder, data, "pick") == {"archive": "mini-2026-10-23-090000", "chat": "aaa111"}
     out = capsys.readouterr().out
-    assert "1. " in out and "3 turns  Second question" in out and "1 turn  First question" in out
-    monkeypatch.setattr(runtime, "main_chats", lambda c: [])
-    assert cli.pick_chat(folder, data, "continue") is None
-    assert "no earlier chat" in capsys.readouterr().out
+    assert "1. " in out and "3 turns    2 cards  Second question" in out and "1 turn     1 card  First question" in out
+    monkeypatch.setattr(folder_sessions, "listing", lambda c: [])
+    assert cli.pick_session(folder, data, "continue") is None
+    assert "no earlier session" in capsys.readouterr().out
+
+
+async def test_a_new_session_is_empty_and_the_last_comes_back_whole(on, monkeypatch):
+    """thimble-browser's new session (folder_sessions.py): the open workspace moves aside whole (ledger.archive_workspace),
+    main's runtime goes with it (runtime.forget), and the next start of main is a chat of its own in an empty workspace;
+    bringing the session back (ledger.restore_workspace) brings its chat, its conversation and its card."""
+    from app import folder_sessions, ledger, notebook
+
+    client = api_key(monkeypatch, [text("Two incidents happened."), text("Hello."), text("Still two.")])
+    await main_turn("What happened?")
+    ws = config.workspace_dir(CORPUS)
+    nb = notebook.create_notebook(ws, "G")
+    notebook.insert_cell(CORPUS, nb["id"], notebook.new_cell("note", "test", "Two incidents", nb["id"],
+                                                             payload={"text": "two"}))
+    first = runtime._spaces[CORPUS].sid
+    [row] = folder_sessions.listing(CORPUS)
+    assert (row["archive"], row["first"], row["turns"], row["cards"], row["chat"]) == (None, "What happened?", 1, 1, first)
+    moved = (await ledger.archive_workspace(CORPUS))["archived"]
+    assert CORPUS not in runtime._spaces, "the runtime of the folder that went is dropped"
+    await main_turn("Hi")
+    assert runtime._spaces[CORPUS].sid != first and "What happened?" not in asked(client, 1)
+    assert ("user", "What happened?") not in shape(main_records()), "the new session's chat holds none of the last one's"
+    assert not notebook.list_notebooks(config.workspace_dir(CORPUS), figures=False)
+    rows = folder_sessions.listing(CORPUS)
+    assert [(r["archive"], r["first"]) for r in rows] == [(None, "Hi"), (Path(moved).name, "What happened?")]
+    await ledger.restore_workspace(CORPUS, {"archive": Path(moved).name})
+    assert CORPUS not in runtime._spaces
+    await main_turn("And now?")
+    assert runtime._spaces[CORPUS].sid == first
+    assert "What happened?" in asked(client, 2) and "Hi" not in asked(client, 2)
+    got = shape(main_records())
+    assert ("user", "What happened?") in got and ("user", "And now?") in got and ("user", "Hi") not in got
+    assert sum(r["n_cells"] for r in notebook.list_notebooks(config.workspace_dir(CORPUS), figures=False)) == 1
+    assert [r["first"] for r in folder_sessions.listing(CORPUS)] == ["What happened?", "Hi"]
+
+
+def test_a_workspace_that_holds_nothing_is_no_session_to_list(on):
+    from app import folder_sessions
+
+    runtime.ensure(CORPUS)
+    assert folder_sessions.listing(CORPUS) == []
+    assert not folder_sessions.holds(folder_sessions.summary(config.workspace_dir(CORPUS)))
+
+
+def test_the_launcher_moves_a_session_that_holds_anything_aside_and_brings_one_back(on, monkeypatch, capsys):
+    """open_session: a new session archives the open one only when it holds anything; an earlier one is restored; each
+    then opens its chat of main through the register route; a failure says so in one line."""
+    from app import cli, folder_sessions
+
+    calls: list[tuple] = []
+    monkeypatch.setattr(cli, "resolve_env", lambda: {"workspaces_dir": str(config.WORKSPACES_DIR)})
+    monkeypatch.setattr(cli, "archive_workspace", lambda url, name: calls.append(("archive", name)) or (True, "/x"))
+    monkeypatch.setattr(cli, "restore_workspace", lambda url, name, a: calls.append(("restore", a)) or (200, {}))
+    monkeypatch.setattr(cli, "_request", lambda m, url, body=None, **k: calls.append(("register", body["chat"])) or (201, {}))
+    folder = config.corpus_dir(CORPUS)
+    held = {"turns": 0, "cards": 0, "labels": 0, "documents": [], "threads": 0}
+    monkeypatch.setattr(folder_sessions, "summary", lambda ws: held)
+    assert cli.open_session("u", CORPUS, folder, {"archive": None, "chat": "new"})
+    assert calls == [("register", "new")], "a workspace that holds nothing is the new session"
+    calls.clear()
+    held["cards"] = 1
+    assert cli.open_session("u", CORPUS, folder, {"archive": None, "chat": "new"})
+    assert calls == [("archive", CORPUS), ("register", "new")]
+    calls.clear()
+    assert cli.open_session("u", CORPUS, folder, {"archive": None, "chat": "bbb"})
+    assert calls == [("register", "bbb")], "the session open now is continued as it is"
+    calls.clear()
+    assert cli.open_session("u", CORPUS, folder, {"archive": "mini-1", "chat": "aaa"})
+    assert calls == [("restore", "mini-1"), ("register", "aaa")]
+    monkeypatch.setattr(cli, "restore_workspace", lambda url, name, a: (404, {"detail": "no archive"}))
+    assert not cli.open_session("u", CORPUS, folder, {"archive": "mini-1", "chat": "aaa"})
+    assert "the session was not brought back (no archive)" in capsys.readouterr().out
+    monkeypatch.setattr(cli, "archive_workspace", lambda url, name: (False, None))
+    assert cli.open_session("u", CORPUS, folder, {"archive": None, "chat": "new"})
+    assert "the last session was not moved aside" in capsys.readouterr().out
 
 
 async def test_on_claude_code_sign_in_a_new_chat_is_a_new_session_and_resume_resumes_its_own(on, monkeypatch):
@@ -659,3 +777,31 @@ async def test_on_claude_code_sign_in_a_new_chat_is_a_new_session_and_resume_res
     await sp.switch(first)
     await main_turn("And now?")
     assert seen["options"].resume == "sess-1"
+
+
+def test_an_api_error_reads_as_the_api_s_message_in_a_sentence_not_its_raw_answer():
+    import anthropic
+    import httpx
+
+    body = {"type": "error", "request_id": "req_made_up",
+            "error": {"type": "invalid_request_error", "message": "messages.3.content.1.fallback.from: Field required"}}
+    e = anthropic.BadRequestError(f"Error code: 400 - {body}", body=body,
+                                  response=httpx.Response(400, request=httpx.Request("POST", "https://api.example.test")))
+    assert llm.failure(e) == "Claude's API answered 400 (invalid request): messages.3.content.1.fallback.from: Field required."
+    assert "{" not in llm.failure(e)
+    # an answer whose body holds no message keeps its own text
+    bare = anthropic.InternalServerError("Error code: 500 - upstream reset", body=None,
+                                         response=httpx.Response(500, request=httpx.Request("POST", "https://api.example.test")))
+    assert llm.failure(bare) == "Claude's API answered 500: Error code: 500 - upstream reset"
+
+
+async def test_a_reply_claude_s_safeguards_moved_to_another_model_is_told_in_a_notice(on, monkeypatch):
+    from app import notices
+
+    switched = [Block(type="text", text="Here is the overview."),
+                Block(**{"type": "fallback", "from": {"model": "claude-opus-5-5"}, "to": {"model": "claude-opus-4-8"},
+                         "trigger": {"category": "cyber", "type": "refusal"}})]
+    api_key(monkeypatch, [switched])
+    await main_turn("What are these episodes?")
+    said = [n["text"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
+    assert said == ["Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."]

@@ -12,6 +12,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { countsNow, lastCoverage } from '../bar/counts'
+import { quiet } from '../core/askcell.js'
 import { closePane, PANE_ID } from '../core/pane'
 import { featureOn } from '../settings/features.mjs'
 import { rowsUnder } from '../threads/seam'
@@ -60,7 +61,8 @@ export async function drawCoverage($: EngineInterface, e: Any, args: unknown, el
     ? Button({ key: l.press, plain: true, label: l.press.replace(/^(dir|file):/, ''), onPress: press(l.press), ...(l.sel ? { autoFocus: true } : {}), children: runs(l.runs, l.sel) })
     : Text({ key: l.key, wrap: 'truncate-end', children: runs(l.runs) })))
 
-  // the keys, under a rule: each a plain Button its key presses (Claude Code draws the key, lit, then a colon)
+  // the keys, under a rule: each a plain Button its key presses (Claude Code draws the key, lit, then a colon). ↵ has no
+  // hotkey, so the pane draws it, lit as Claude Code lights the keys beside it (a plugin cannot set that color)
   const keys: [string | null, string, () => unknown][] = [
     ['k', 'up', step(-1)],
     ['j', 'down', step(1)],
@@ -70,8 +72,8 @@ export async function drawCoverage($: EngineInterface, e: Any, args: unknown, el
   const keyRow = Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap(([k, label, onPress], i) => [
     ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
     k
-      ? Button({ key: `key-${k}`, plain: true, hotkey: k, label, onPress, children: [Text({ key: 'w', dimColor: true, children: label })] })
-      : Button({ key: 'key-enter', plain: true, label, onPress, children: [Text({ key: 'k', color: 'suggestion', bold: true, children: '↵' }), Text({ key: 'w', dimColor: true, children: ` ${label}` })] }),
+      ? Button({ key: `key-${k}`, plain: true, hotkey: k, label, hover: quiet(`coverage-key-${k}`), onPress, children: [Text({ key: 'w', dimColor: true, children: label })] })
+      : Button({ key: 'key-enter', plain: true, label, hover: quiet('coverage-key-enter'), onPress, children: [Text({ key: 'k', color: 'suggestion', bold: true, children: '↵' }), Text({ key: 'w', dimColor: true, children: ` ${label}` })] }),
   ]) })
 
   return Box({ flexDirection: 'column', width: W, children: [
