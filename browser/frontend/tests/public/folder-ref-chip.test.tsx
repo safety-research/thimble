@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 // A ref to a folder (`[[harness/]]`) is the folder's chip, and its hover lists the folder's entries, never an error
-// (components/RefChip; the ref route resolves a folder to "Folder · N items" over its entries).
+// (components/RefChip; the ref route resolves a folder to "Folder · N items" over its entries). A folder named with no
+// slash after it has the folder glyph as soon as the chat draws it: the chips that draw together ask the server what
+// their paths name in one request (lib/pathKinds).
 import { act } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
+import { ChatMarkdown, ChipContext } from '../../src/chat/markdown.tsx'
 import { RefChip } from '../../src/components/RefChip.tsx'
-import { api } from '../../src/lib/api.ts'
+import { api, scaleApi } from '../../src/lib/api.ts'
 import type { ResolvedRef } from '../../src/lib/types.ts'
 import { mount, unmountAll } from './mount.tsx'
 
@@ -46,4 +49,23 @@ test('a folder named with no slash takes the folder glyph once its hover finds i
   await hover(c)
   expect(c.querySelector('svg.chip-ico')?.classList.contains('icon-folder')).toBe(true)
   expect(document.body.querySelector('.refchip-pop-error')).toBeNull()
+})
+
+test('a folder named with no slash has the folder glyph as the chat draws it, before any hover', async () => {
+  const resolve = vi.spyOn(api, 'resolveRef')
+  const kinds = vi.spyOn(scaleApi, 'pathKinds').mockResolvedValue({ kinds: { harness: 'folder', NOTES: 'file' } })
+  const el = await mount(
+    <ChipContext.Provider value={{ workspace: 'ws-chat', broken: new Set() }}>
+      <ChatMarkdown text="The agent's code is in [[harness]], its notes in [[NOTES]] and its runs in [[runs.csv]]." />
+    </ChipContext.Provider>,
+  )
+  await act(async () => new Promise((r) => setTimeout(r, 0)))
+  const glyph = (ref: string) => [...(el.querySelector(`[data-ref="${ref}"] svg`)?.classList ?? [])].find((c) => c.startsWith('icon-') && c !== 'icon')
+  expect(glyph('harness')).toBe('icon-folder')
+  expect(glyph('NOTES')).toBe('icon-page')
+  expect(glyph('runs.csv')).not.toBe('icon-folder')
+  // one request for the chips drawn together, and none for a name whose type its extension says
+  expect(kinds).toHaveBeenCalledTimes(1)
+  expect(kinds.mock.calls[0]).toEqual(['ws-chat', ['harness', 'NOTES']])
+  expect(resolve).not.toHaveBeenCalled()
 })

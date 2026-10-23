@@ -25,7 +25,7 @@ for `/api/ws/...`), the server takes the prefix off, and the cookie counts only 
 never sends the cookie to another server on 127.0.0.1 or localhost, whatever its port, since no other page
 knows the key.
 
-270 routes, 158 of them writes: 36 token, 1 code, 1 agent token, 126 cookie, 103 cookie or token, 1 media key, 2 none.
+271 routes, 158 of them writes: 36 token, 1 code, 1 agent token, 126 cookie, 104 cookie or token, 1 media key, 2 none.
 
 | Method | Path | Module | Credential |
 |---|---|---|---|
@@ -58,6 +58,7 @@ knows the key.
 | GET | `/api/corpora/{c}/sources/find` | corpus | cookie or token |
 | GET | `/api/corpora/{c}/sources/grep` | corpus | cookie or token |
 | POST | `/api/corpora/{c}/sources/grep/stop` | corpus | cookie |
+| GET | `/api/corpora/{c}/sources/kinds` | corpus | cookie or token |
 | GET | `/api/corpora/{c}/sources/stamps` | corpus | cookie or token |
 | POST | `/api/dev/announce` | dev | token |
 | POST | `/api/dev/restart` | dev | cookie |
