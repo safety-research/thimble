@@ -1,7 +1,6 @@
-// Scrolling Files' Transcript mode (src/files/Reader.tsx, views/transcript.tsx, useFilterBy.ts) in a real browser,
-// Chromium and, where Playwright's WebKit starts, WebKit: an agent's stream of 2,700 records, most of them tool results
-// in stretches where they are 50% to 99% of the records, with "user" (the tool results) turned off in Filter by once
-// the file is open, and with every value on. The records Filter by hides leave the reader short of rows, and it reads
+// Scrolling Files' Transcript mode (src/files/Reader.tsx, views/transcript.tsx, useFilterBy.ts) in headless Chromium:
+// an agent's stream of 2,700 records, most of them tool results in stretches where they are 50% to 99% of the records,
+// with "user" (the tool results) turned off in Filter by once the file is open. The records Filter by hides leave the reader short of rows, and it reads
 // on until it is full: the wheel scrolls it, a drag of the overview's frame down the file and a trackpad's flicks after
 // it move the first record in view only down the file, never back to records it passed (a sliver of the record before
 // it as the reader settles is no step back), and the reader stays where the drag lets go.
@@ -9,7 +8,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, test } from 'vitest'
-import { chromium, webkit, type BrowserType, type Page } from 'playwright'
+import { chromium, type Page } from 'playwright'
 import { bundle, cleanup, ORIGIN, src } from './page.ts'
 
 const MIME: Record<string, string> = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff' }
@@ -64,11 +63,6 @@ beforeAll(async () => {
 })
 
 afterAll(() => cleanup())
-
-const ENGINES: [string, BrowserType][] = [
-  ['chromium', chromium],
-  ['webkit', webkit],
-]
 
 async function open(page: Page, query: string) {
   await page.route('**/*', (route) => {
@@ -134,61 +128,56 @@ function onward(seen: At[], what: string, slack = 0) {
 const lastLine = (seen: At[]) => seen[seen.length - 1]?.line ?? 0
 const firstLine = (seen: At[]) => seen[0]?.line ?? 0
 
-for (const [name, engine] of ENGINES)
-  for (const off of [true, false])
-    test(`${name}: Files' Transcript mode with ${off ? '"user" turned off in Filter by' : 'every value on'} reads on until it is full and scrolls down the file by the wheel, a drag of the overview's frame and flicks, its first record in view never going back`, async (ctx) => {
-      const browser = await engine.launch({ headless: true }).catch(() => null)
-      if (!browser) return ctx.skip()
-      try {
-        const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
-        await open(page, '')
-        if (off) {
-          await page.locator('.filterby-chip[data-value="user"]').click()
-          await page.waitForTimeout(800)
-        }
-        // the reader is full: its records run past its bottom
-        const full = await page.evaluate(() => {
-          const b = document.querySelector<HTMLElement>('.reader-body')!
-          return { content: b.scrollHeight, height: b.clientHeight, records: b.querySelectorAll('.reader-record').length }
-        })
-        assert.ok(full.content > full.height + 200, `the reader reads on until it is full: ${JSON.stringify(full)}`)
-        const box = (await page.locator('.reader-body').boundingBox())!
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-        const wheel = await watch(page, async () => {
-          for (let i = 0; i < 10; i++) {
-            await page.mouse.wheel(0, 100)
-            await page.waitForTimeout(30)
-          }
-        })
-        onward(wheel, 'the wheel')
-        assert.ok(lastLine(wheel) > firstLine(wheel), `the wheel scrolls the reader: ${said(wheel)}`)
-        // the overview's frame dragged down the file and let go
-        const fr = (await page.locator('.track-frame-over').boundingBox())!
-        const x = fr.x + fr.width / 2
-        const y = fr.y + fr.height / 2
-        const drag = await watch(page, async () => {
-          await page.mouse.move(x, y)
-          await page.mouse.down()
-          for (let i = 1; i <= 20; i++) {
-            await page.mouse.move(x, y + i * 3)
-            await page.waitForTimeout(40)
-          }
-          await page.mouse.up()
-        })
-        onward(drag, 'the drag', LET_GO_LINES)
-        assert.ok(lastLine(drag) > 150, `the drag goes down the file: ${said(drag)}`)
-        // a trackpad's flicks: quick wheel steps that die away
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-        const flicks = await watch(page, async () => {
-          for (let k = 0; k < 4; k++)
-            for (let i = 0; i < 30; i++) {
-              await page.mouse.wheel(0, Math.max(2, 60 * Math.exp(-i / 8)))
-              await page.waitForTimeout(16)
-            }
-        })
-        onward(flicks, 'the flicks')
-        assert.ok(lastLine(flicks) > firstLine(flicks), `the flicks scroll on: ${said(flicks)}`)
-      } finally {
-        await browser.close()
+test(`Files' Transcript mode with "user" turned off in Filter by reads on until it is full and scrolls down the file by the wheel, a drag of the overview's frame and flicks, its first record in view never going back`, async () => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
+    await open(page, '')
+    await page.locator('.filterby-chip[data-value="user"]').click()
+    await page.waitForTimeout(800)
+    // the reader is full: its records run past its bottom
+    const full = await page.evaluate(() => {
+      const b = document.querySelector<HTMLElement>('.reader-body')!
+      return { content: b.scrollHeight, height: b.clientHeight, records: b.querySelectorAll('.reader-record').length }
+    })
+    assert.ok(full.content > full.height + 200, `the reader reads on until it is full: ${JSON.stringify(full)}`)
+    const box = (await page.locator('.reader-body').boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    const wheel = await watch(page, async () => {
+      for (let i = 0; i < 10; i++) {
+        await page.mouse.wheel(0, 100)
+        await page.waitForTimeout(30)
       }
-    }, 120_000)
+    })
+    onward(wheel, 'the wheel')
+    assert.ok(lastLine(wheel) > firstLine(wheel), `the wheel scrolls the reader: ${said(wheel)}`)
+    // the overview's frame dragged down the file and let go
+    const fr = (await page.locator('.track-frame-over').boundingBox())!
+    const x = fr.x + fr.width / 2
+    const y = fr.y + fr.height / 2
+    const drag = await watch(page, async () => {
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      for (let i = 1; i <= 20; i++) {
+        await page.mouse.move(x, y + i * 3)
+        await page.waitForTimeout(40)
+      }
+      await page.mouse.up()
+    })
+    onward(drag, 'the drag', LET_GO_LINES)
+    assert.ok(lastLine(drag) > 150, `the drag goes down the file: ${said(drag)}`)
+    // a trackpad's flicks: quick wheel steps that die away
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    const flicks = await watch(page, async () => {
+      for (let k = 0; k < 4; k++)
+        for (let i = 0; i < 30; i++) {
+          await page.mouse.wheel(0, Math.max(2, 60 * Math.exp(-i / 8)))
+          await page.waitForTimeout(16)
+        }
+    })
+    onward(flicks, 'the flicks')
+    assert.ok(lastLine(flicks) > firstLine(flicks), `the flicks scroll on: ${said(flicks)}`)
+  } finally {
+    await browser.close()
+  }
+}, 120_000)

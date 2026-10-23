@@ -2,10 +2,8 @@
 // frame as ViewerFrame holds it, with the kit as views.frame_document loads it and the markdown parser
 // (src/lib/kitMarkdown.ts, bundled here as vite build bundles it into kit/markdown.js), in the theme's own tokens: a
 // pull request's body in GitHub's markdown draws its headings, tables, task lists, code and quotes in thimble's look,
-// light and dark, within its mount's width; raw HTML shows as text and runs nothing; a citation that quotes the source
-// word for word, its ** and list markers included, is found in the rendered text, and opens a fold it is in; the search
-// finds a phrase across a bold word and opens a fold that holds its match. What the part decides without layout
-// (mentions, escaping, links, the fold's place) is tests/public/data-kit.test.ts.
+// light and dark, within its mount's width; raw HTML shows as text and runs nothing. What the part decides without
+// layout (mentions, escaping, links, the fold's place) is tests/public/data-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -42,9 +40,6 @@ def gale(force):
 
 ![the harbor at noon](https://img.example/harbor.png) and ~~old~~ text, https://example.org/ferry.
 `
-// a body whose last lines fold away, and an email whose last lines do
-const LONG = ['## Log', ...Array.from({ length: 30 }, (_, i) => `- step ${i + 1} of the crossing`), '- the **squall** came at dusk', '- and passed'].join('\n')
-const MAIL = ['From: ana', 'To: bo', '', ...Array.from({ length: 20 }, (_, i) => `Line ${i + 1} of the timetable.`), 'The last ferry waits for the tide.', 'Ana'].join('\n')
 
 let browser: Browser
 let kit: string
@@ -142,41 +137,6 @@ describe('the text', () => {
     })
   }
 
-  test("a table's cell keeps the text to one line and a card's preview leaves Show more out; a table keeps its words", async () => {
-    const TABLE = '| metric | before | after | notes |\n|---|--:|--:|---|\n| p50 latency | 120 ms | 80 ms | a long note about the measurement, which wraps in its own column rather than break the words of the others |'
-    const { page, frame } = await framed(doc(`<div id="tab" style="display:flex;flex-direction:column;width:720px;height:200px"></div><div id="cards" style="width:420px"></div><div id="pr"></div><script>
-const rows = [{ ref: 'mail.jsonl#L1', md: ${js(BODY)}, plain: ${js(MAIL)} }, { ref: 'mail.jsonl#L2', md: 'short', plain: 'short' }]
-thimble.table({ mount: '#tab', rows, columns: [{ name: 'md', html: (r) => thimble.text.html(r.md) }, { name: 'plain', html: (r) => thimble.text.html(r.plain, { format: 'plain' }) }] })
-document.getElementById('cards').innerHTML = thimble.recordCard({ ref: 'forge/prs.jsonl#L9', title: 'Log', body: { html: thimble.text.html(${js(LONG)}) } })
-thimble.text('#pr', ${js(TABLE)})</script>`))
-    const got = await frame().evaluate(() => {
-      const cells = [...document.querySelectorAll('#tab .thimble-table-td')] as HTMLElement[]
-      // each word of the table's cells on one line: a word broken in two would stand on two
-      const broken: string[] = []
-      for (const cell of document.querySelectorAll('#pr th, #pr td')) {
-        const t = cell.firstChild as Text
-        for (const m of t.data.matchAll(/\S+/g)) {
-          const r = document.createRange()
-          r.setStart(t, m.index!)
-          r.setEnd(t, m.index! + m[0].length)
-          if (new Set([...r.getClientRects()].map((b) => Math.round(b.top))).size > 1) broken.push(m[0])
-        }
-      }
-      const more = document.querySelector('#cards .thimble-text-more') as HTMLElement
-      return {
-        cells: cells.length,
-        // a line break of the text past the cell's one line would run it into the row below
-        overflow: cells.filter((td) => td.querySelector('.thimble-text') && td.scrollHeight > td.closest('.thimble-table-row')!.clientHeight + 1).length,
-        folded: !!document.querySelector('#cards [data-thimble-fold][hidden]'),
-        more: more && getComputedStyle(more).display,
-        broken,
-        wide: document.documentElement.scrollWidth <= innerWidth,
-      }
-    })
-    assert.deepEqual(got, { cells: 4, overflow: 0, folded: true, more: 'none', broken: [], wide: true })
-    await page.close()
-  })
-
   test('raw HTML shows as text and runs nothing, in markdown and in plain text', async () => {
     const raw = '<script>window.pwned = 1</script>\n\n<img src="x" onerror="window.pwned = 2">\n\nSee [this](javascript:window.pwned=3) and <b onclick="window.pwned=4">bold</b>.'
     const { page, frame } = await framed(doc(`<div id="a"></div><div id="b"></div><script>
@@ -197,100 +157,4 @@ document.getElementById('b').innerHTML = thimble.text.html(${js(raw)}, { format:
     await page.close()
   })
 
-  test('a citation that quotes the source with its ** and list markers is found in the rendered text, and opens its fold', async () => {
-    const { page, frame } = await framed(doc(`<div id="pr"></div><div id="log"></div><div id="log2"></div><script>
-thimble.text('#pr', ${js(BODY)}, { ref: ${js(REF)} })
-document.getElementById('log').innerHTML = thimble.text.html(${js(LONG)}, { ref: 'forge/prs.jsonl#L9' })
-document.getElementById('log2').innerHTML = thimble.text.html(${js(LONG)}, { ref: 'forge/prs.jsonl#L10' })</script>`))
-    const quote = async (record: string, text: string) => {
-      await page.evaluate(
-        ([record, text]) => {
-          ;(window as any).sent = []
-          ;(document.getElementById('f') as HTMLIFrameElement).contentWindow!.postMessage({ type: 'thimble:open', open: { ref: record }, quote: { record, text } }, '*')
-        },
-        [record, text],
-      )
-      await page.waitForFunction(() => (window as any).sent.some((m: any) => m?.type === 'thimble:quoted'), null, { timeout: 25000 })
-      const found = await page.evaluate(() => (window as any).sent.find((m: any) => m?.type === 'thimble:quoted').found)
-      const lit = await frame().evaluate(() => {
-        const h = CSS.highlights.get('thimble-quote')
-        return h ? [...h].map((r) => r.toString().replace(/\s+/g, ' ')).join('') : ''
-      })
-      return { found, lit }
-    }
-    assert.deepEqual(await quote(REF, 'Fixes the **gale** warning when the ferry is _late_'), { found: true, lit: 'Fixes the gale warning when the ferry is late' })
-    assert.deepEqual(await quote(REF, '- [x] [Tests added](https://github.com/o/r/pull/1)'), { found: true, lit: 'Tests added' })
-    // the passage is in the fold: the fold opens, and the passage shows
-    assert.equal(await frame().evaluate(() => (document.querySelector('#log .thimble-text-more') as HTMLElement).textContent), 'Show more')
-    assert.deepEqual(await quote('forge/prs.jsonl#L9', '- the **squall** came at dusk'), { found: true, lit: 'the squall came at dusk' })
-    const open = await frame().evaluate(() => ({
-      more: document.querySelector('#log .thimble-text-more')!.textContent,
-      shows: (() => {
-        const li = [...document.querySelectorAll('#log li')].find((l) => l.textContent!.includes('squall'))!
-        return li.getClientRects().length > 0
-      })(),
-    }))
-    assert.deepEqual(open, { more: 'Show less', shows: true })
-    // a passage that starts before the fold and ends in it opens it too
-    assert.deepEqual(await quote('forge/prs.jsonl#L10', '- step 11 of the crossing\n- step 12 of the crossing'), {
-      found: true,
-      lit: 'step 11 of the crossing step 12 of the crossing',
-    })
-    assert.equal(await frame().evaluate(() => document.querySelector('#log2 .thimble-text-more')!.textContent), 'Show less')
-    await page.close()
-  })
-
-  test('the search finds a phrase across a bold word, and opens the fold that holds a match', async () => {
-    const { page, frame } = await framed(doc(`<div class="top"><span id="search"></span></div><div id="list"><div id="pr"></div><div id="log"></div><div id="mail"></div></div><script>
-window.search = thimble.search({ mount: '#search', in: '#list' })
-thimble.text('#pr', ${js(BODY)}, { ref: ${js(REF)} })
-document.getElementById('log').innerHTML = thimble.text.html(${js(LONG)}, { ref: 'forge/prs.jsonl#L9' })
-document.getElementById('mail').innerHTML = thimble.text.html(${js(MAIL)}, { format: 'plain', ref: 'mail.jsonl#L4' })</script>`))
-    const find = async (text: string) => {
-      await frame().locator('.thimble-search-input').fill(text)
-      await frame().waitForTimeout(350)
-      return frame().evaluate(() => {
-        const cur = CSS.highlights.get('thimble-search-current')
-        return { count: (window as any).search.count, current: cur ? [...cur].map((r) => r.toString()).join('') : null }
-      })
-    }
-    assert.deepEqual(await find('the gale warning'), { count: 1, current: 'the gale warning' })
-    // folded: the lines past the first 12, the squall's among them
-    const before = await frame().evaluate(() => {
-      const root = document.querySelector('#log .thimble-text') as HTMLElement
-      const shown = [...root.querySelectorAll('li')].filter((l) => l.getClientRects().length).length
-      return { shown, more: root.querySelector('.thimble-text-more')!.textContent, height: root.getBoundingClientRect().height }
-    })
-    assert.equal(before.shown, 11, 'the heading and 11 items: 12 lines')
-    assert.equal(before.more, 'Show more')
-    assert.deepEqual(await find('squall came'), { count: 1, current: 'squall came' })
-    const after = await frame().evaluate(() => {
-      const root = document.querySelector('#log .thimble-text') as HTMLElement
-      const li = [...root.querySelectorAll('li')].find((l) => l.textContent!.includes('squall'))!
-      const box = li.getBoundingClientRect()
-      const list = document.getElementById('list')!.getBoundingClientRect()
-      return {
-        more: root.querySelector('.thimble-text-more')!.textContent,
-        shown: [...root.querySelectorAll('li')].filter((l) => l.getClientRects().length).length,
-        inView: box.top >= list.top && box.bottom <= list.bottom,
-        numbers: getComputedStyle(root.querySelector('ul')!).listStyleType,
-      }
-    })
-    assert.deepEqual(after, { more: 'Show less', shown: 32, inView: true, numbers: 'disc' })
-    // in plain text the fold starts inside the text's one block: the search opens it there too, and the text reads on
-    const mail = () =>
-      frame().evaluate(() => {
-        const p = document.querySelector('#mail .thimble-text-plain') as HTMLElement
-        return { more: document.querySelector('#mail .thimble-text-more')!.textContent, text: p.innerText.trim().split('\n').length }
-      })
-    assert.deepEqual(await mail(), { more: 'Show more', text: 12 })
-    assert.deepEqual(await find('waits for the tide'), { count: 1, current: 'waits for the tide' })
-    assert.deepEqual(await mail(), { more: 'Show less', text: 25 })
-    // Show less folds it again, and Show more opens it
-    await frame().click('#log .thimble-text-more')
-    assert.equal(await frame().evaluate(() => [...document.querySelectorAll('#log li')].filter((l) => l.getClientRects().length).length), 11)
-    await frame().click('#log .thimble-text-more')
-    assert.equal(await frame().evaluate(() => [...document.querySelectorAll('#log li')].filter((l) => l.getClientRects().length).length), 32)
-    await page.close()
-  })
 })

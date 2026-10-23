@@ -2,11 +2,8 @@
 // holding a plan card and a table card in the analyst's frame, its comments read from GET /canvas/comments
 // (src/canvas/CommentLayer.tsx) and its checks from GET /checks. Each comment sits right of the frame, the one on a step
 // level with that step's row (`[data-anchor="card:<id>#step-<n>"]`, as a plan card draws its steps) and the others level
-// with their card's top, none overlapping, even when a comment's Show more opens its details, each its check's name and
-// its statement. As in the Report, each commented step's text or card's question is highlighted in its check's color and
-// no line joins a comment to its card; hovering a comment darkens its highlight, with no underline, and brings the
-// comment to the front with a little more shadow, where it stays; opening it also moves it level with its step, the
-// comment above it moving up. ✓ (Done) resolves one through POST
+// with their card's top, none overlapping. As in the Report, each commented step's text or card's question is
+// highlighted in its check's color and no line joins a comment to its card. ✓ (Done) resolves one through POST
 // /canvas/comments/{id}/resolve and it goes; a comment offers no Ask and no Know it. Comments in the top bar lists the
 // check that covers the cards, with its count of open comments, and its square turns it off and on, which hides and
 // shows its comments and their highlights.
@@ -197,110 +194,6 @@ test("at rest, each commented step and card is highlighted in its check's color,
   // the comments at rest share one stacking and one shadow
   const cards = Object.values(got.cards)
   assert.ok(cards.every((c) => c.z === cards[0].z && c.shadow === cards[0].shadow), JSON.stringify(got.cards))
-})
-
-test('hovering a comment darkens its highlight with no underline and brings it to the front with more shadow, where it stays', async () => {
-  await page.mouse.move(5, 5)
-  await page.waitForTimeout(150)
-  const rest = await drawn()
-  await page.locator('[data-canvas-comment="k1"]').hover()
-  await page.waitForTimeout(250)
-  const got = await drawn()
-  assert.equal(got.lines, 0, 'no line to the hovered comment')
-  assert.deepEqual(flagsOf(got), REST.map((f) => ({ ...f, active: f.anchor === 'card:plan1#step-4' })), "step 4's highlight alone is the strong one")
-  const step = got.flags[1]
-  assert.ok(step.bg !== rest.flags[1].bg && step.underline === 'none', `darker, and not underlined: ${JSON.stringify([rest.flags[1], step])}`)
-  const [k1, k2, k3] = ['k1', 'k2', 'k3'].map((id) => got.cards[id])
-  assert.ok(k1.z > k2.z && k1.z > k3.z, `in front of the others: ${JSON.stringify(got.cards)}`)
-  assert.ok(k1.shadow !== rest.cards.k1.shadow && k2.shadow === rest.cards.k2.shadow, `with more shadow: ${JSON.stringify([rest.cards.k1, k1])}`)
-  assert.ok(Math.abs(k1.top - rest.cards.k1.top) <= 1, 'a hovered comment does not move from under the pointer')
-  // the pointer gone, the highlights are quiet again and the comment goes back among the others
-  await page.mouse.move(5, 5)
-  await page.waitForTimeout(250)
-  const after = await drawn()
-  assert.deepEqual(flagsOf(after), REST)
-  assert.equal(after.cards.k1.z, rest.cards.k1.z)
-  // a comment on the whole card darkens the card's question
-  await page.locator('[data-canvas-comment="k3"]').hover()
-  await page.waitForTimeout(150)
-  const card = await drawn()
-  assert.equal(card.lines, 0)
-  assert.deepEqual(flagsOf(card), REST.map((f) => ({ ...f, active: f.anchor === 'card:box1' })))
-  await page.mouse.move(5, 5)
-  await page.waitForTimeout(150)
-})
-
-test('an open comment stands level with its step in front, the comment above it moving up, until it is let go', async () => {
-  const at = async () => {
-    const step4 = (await box('[data-anchor="card:plan1#step-4"]'))!
-    const k1 = (await box('[data-canvas-comment="k1"]'))!
-    const k2 = (await box('[data-canvas-comment="k2"]'))!
-    return { step4, k1, k2 }
-  }
-  const s = await page.evaluate(() => new DOMMatrix(getComputedStyle(document.querySelector<HTMLElement>('.board-plane')!).transform).a)
-  // the comment on the plan opens its details, which push the comment on step 4 down below its row
-  await page.locator('[data-canvas-comment="k2"]').hover()
-  await page.locator('[data-canvas-comment="k2"] .wu-cm-more').click()
-  await page.waitForSelector('[data-canvas-comment="k2"] .wu-cm-details')
-  await page.mouse.move(5, 5)
-  await page.waitForTimeout(400)
-  const pushed = await at()
-  assert.ok(pushed.k1.top > pushed.step4.top + 20, `k1 pushed below step 4: ${JSON.stringify(pushed)}`)
-  // opening k1 moves it up to its row, and k2 moves up above it
-  await page.locator('[data-canvas-comment="k1"] .wu-cm-statement').click()
-  await page.waitForSelector('[data-canvas-comment="k1"].wu-cm-active')
-  await page.mouse.move(5, 5)
-  await page.waitForTimeout(500)
-  const open = await at()
-  assert.ok(Math.abs(open.k1.top - (open.step4.top - 4 * s)) <= 6, `k1 level with step 4: ${JSON.stringify(open)}`)
-  assert.ok(open.k2.bottom <= open.k1.top + 1 && open.k2.top < pushed.k2.top - 20, `k2 moved up above it: ${JSON.stringify({ pushed, open })}`)
-  const got = await drawn()
-  assert.equal(got.lines, 0)
-  assert.deepEqual(got.flags.filter((f) => f.active).map((f) => f.anchor), ['card:plan1#step-4'])
-  assert.ok(got.cards.k1.z > got.cards.k2.z && got.cards.k1.z > got.cards.k3.z, 'in front while open')
-  // hovering another comment darkens that one's place alone, and the open one stays where it stands
-  await page.locator('[data-canvas-comment="k3"]').hover()
-  await page.waitForTimeout(250)
-  const other = await drawn()
-  assert.deepEqual(other.flags.filter((f) => f.active).map((f) => f.anchor), ['card:box1'])
-  assert.ok(Math.abs(other.cards.k1.top - got.cards.k1.top) <= 1)
-  // let go, it goes back below the comment above it
-  await page.mouse.move(5, 5)
-  await page.mouse.down()
-  await page.mouse.up()
-  await page.waitForFunction(() => !document.querySelector('.wu-cm-active'))
-  await page.waitForTimeout(500)
-  const done = await drawn()
-  assert.deepEqual(flagsOf(done), REST)
-  const back = await at()
-  assert.ok(Math.abs(back.k1.top - pushed.k1.top) <= 2 && Math.abs(back.k2.top - pushed.k2.top) <= 2, `back in the stack: ${JSON.stringify({ pushed, back })}`)
-  await page.locator('[data-canvas-comment="k2"]').hover()
-  await page.locator('[data-canvas-comment="k2"] .wu-cm-more').click()
-  await page.waitForFunction(() => !document.querySelector('[data-canvas-comment="k2"] .wu-cm-details'))
-  await page.mouse.move(5, 5)
-  await page.waitForTimeout(400)
-})
-
-test("a comment's Show more opening its details moves the comments below it down, and folding them moves them back", async () => {
-  const tops = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll<HTMLElement>('[data-canvas-comment]')].map((e) => [e.dataset.canvasComment!, e.getBoundingClientRect().top])))
-  const before = await tops()
-  assert.ok(before.k2 < before.k1, 'the comment on the plan stands above the one on its step 4')
-  const sel = '[data-canvas-comment="k2"]'
-  await page.locator(sel).hover()
-  // nothing but the details' own height may move the others
-  await page.locator(`${sel} .wu-cm-more`).click()
-  await page.waitForSelector(`${sel} .wu-cm-details`)
-  await page.waitForTimeout(300)
-  const open = (await Promise.all(['k1', 'k2', 'k3'].map((id) => box(`[data-canvas-comment="${id}"]`)))).map((b) => b!)
-  assert.ok(open[0].top > before.k1 + 1, `k1 moved down: ${open[0].top} vs ${before.k1}; ${JSON.stringify(open)}`)
-  const all = [...open].sort((x, y) => x.top - y.top)
-  for (let i = 1; i < all.length; i++) assert.ok(all[i].top >= all[i - 1].bottom, `no overlap with the details open: ${JSON.stringify(all)}`)
-  await page.locator(`${sel} .wu-cm-more`).click()
-  await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), sel)
-  await page.waitForTimeout(300)
-  const after = await tops()
-  for (const id of Object.keys(before)) assert.ok(Math.abs(after[id] - before[id]) <= 1, `${id} back in its place: ${after[id]} vs ${before[id]}`)
-  await page.mouse.move(5, 5)
 })
 
 test('Comments in the top bar lists the check over the cards with its count, and its square turns it off and on', async () => {

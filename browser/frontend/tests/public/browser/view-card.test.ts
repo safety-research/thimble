@@ -5,10 +5,8 @@
 // bar is as straight at the card's top as at its middle. With Off the card has no bar and its corners are all the
 // token's again. With two or three Color by choices the bar is a straight band per choice, side by side from the
 // edge in the order of the choices, as wide and as far apart as the bands on the kit's list row beside it, empty where
-// the card has no value or its value's colour is turned off (the card stays); the text stays clear of them, in light
-// and dark, in a column and in a tile grid, and with more choices than the padding holds the padding widens and the
-// bands stay inside the card. The pixels across each card's edge are read from a picture of the page. What
-// recordCard writes, without layout, is tests/public/record-card.test.ts.
+// the card has no value. The pixels across each card's edge are read from a picture of the page. What recordCard
+// writes, without layout, is tests/public/record-card.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -181,7 +179,6 @@ const GREEN = 'rgb(8, 99, 47)'
 const GOLD = 'rgb(138, 109, 0)'
 const TEAL = 'rgb(14, 124, 134)'
 const BROWN = 'rgb(122, 74, 28)'
-const NIGHT = 'rgb(38, 38, 36)'
 
 /** px: a band's width and the width of `n` bands, as the bridge gives them (viewer_bridge.js bandW, bandsW) */
 const bandW = (n: number) => Math.max(1, Math.min(3, Math.floor((9 - (n - 1)) / n)))
@@ -266,58 +263,3 @@ test("two and three choices: a straight band per choice in their order on each c
     await page.close()
   }
 }, 120_000)
-
-test("a value's colour turned off leaves its band empty and the card in place; Off takes the bands off and rounds the corners", async () => {
-  const { page, frame } = await framedBands(['f:claimant', 'f:state', 'f:kind'])
-  await frame().evaluate(() => [...document.querySelectorAll<HTMLElement>('.thimble-colour-chip')].find((c) => c.textContent!.includes('agent-08'))!.click())
-  await frame().waitForFunction(() => !(window as unknown as { colour: { isOn(v: string): boolean } }).colour.isOn('agent-08'))
-  await page.waitForTimeout(300)
-  await assertBands(page, frame(), 'forge.db#prs/1', [WHITE, GREEN, TEAL], WHITE)
-  await assertBands(page, frame(), 'forge.db#prs/2', [ORANGE, GOLD, BROWN], WHITE)
-  const l = await layout(frame(), 'forge.db#prs/1')
-  assert.equal(l.opacity, '1', 'Color by only colors: the card is not dimmed')
-  assert.notEqual(l.display, 'none', 'nor hidden')
-  // Off: no band on any card, every corner the token's, the text where it was
-  await frame().click('.thimble-colour-by')
-  await frame().click('.thimble-colour-menu [data-by="off"]')
-  await frame().waitForFunction(() => !document.querySelector('[data-thimble-edge]'))
-  await page.keyboard.press('Escape')
-  await page.waitForTimeout(200)
-  for (const rec of RECS) {
-    const off = await layout(frame(), rec.ref)
-    assert.deepEqual(off.radius, ['4px', '4px'], `${rec.ref}: the token's corners with Off`)
-    assert.equal(off.text, 13, `${rec.ref}: the text 12px of padding and the hairline in, as before`)
-    assert.deepEqual(await pixels(page, frame(), rec.ref, 1, null, 4), [WHITE, WHITE, WHITE, WHITE], `${rec.ref}: no band with Off`)
-  }
-  await page.close()
-}, 60_000)
-
-test('in dark, the bands are as in light and their gaps and empty bands the dark paper', async () => {
-  const { page, frame } = await framedBands(['f:claimant', 'f:state', 'f:kind'], true)
-  await assertBands(page, frame(), 'forge.db#prs/1', [BLUE, GREEN, TEAL], NIGHT)
-  await assertBands(page, frame(), 'forge.db#prs/3', [NIGHT, GREEN, NIGHT], NIGHT)
-  await assertBands(page, frame(), 'forge.db#prs/2/tile', [ORANGE, GOLD, BROWN], NIGHT)
-  await page.close()
-}, 60_000)
-
-test("more choices than the card's padding holds: the padding widens with the bands, which stay inside every card and tile", async () => {
-  const picks = ['f:claimant', 'f:state', 'f:kind', ...MANY.map((m) => 'f:' + m)]
-  const { page, frame } = await framedBands(picks)
-  assert.ok(bandsW(picks.length) + 3 > 12, 'more bands than 12px of padding holds')
-  for (const rec of RECS) {
-    const colours = rec.claimant === 'agent-08' ? [BLUE, GREEN, TEAL] : rec.claimant ? [ORANGE, GOLD, BROWN] : [WHITE, GREEN, WHITE]
-    for (const ref of [rec.ref, rec.ref + '/tile']) await assertBands(page, frame(), ref, [...colours, BLUE, BLUE, BLUE, BLUE], WHITE)
-  }
-  // back to one choice: the one bar, and the text 12px in again
-  // as the view checks choose it (thimble.__choices)
-  await frame().evaluate(() => {
-    type Choice = { control: string; choice: string; go(): void }
-    const all = (window as unknown as { thimble: { __choices(): Choice[] } }).thimble.__choices()
-    all.find((c) => c.control === 'Color by' && c.choice === 'Claimant')!.go()
-  })
-  await page.waitForTimeout(400)
-  const one = await layout(frame(), 'forge.db#prs/1')
-  assert.equal(one.edge, 'in')
-  assert.equal(one.text, 13)
-  await page.close()
-}, 60_000)

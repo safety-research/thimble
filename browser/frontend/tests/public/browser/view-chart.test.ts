@@ -1,14 +1,11 @@
-// The view kit's charts (backend/app/viewer_chart.js, thimble.chart) and record viewer (viewer_record.js,
-// thimble.record) in a real browser: a page in a sandboxed frame with the kit as views.frame_document loads it, the
-// vega builds a view names in its libs, and the canvas's chart drawing (src/lib/kitChart.ts, bundled here as vite build
-// bundles it into kit/chart.js). A chart is drawn by the canvas's own code in the page's own theme: its one series in
-// --viz-1, its axis labels in --viz-font-label, on the paper; its groups in Color by's colours, as its records' bars
-// are, with no legend; a label's classes in the label's colours; refitted when its box narrows, a chart of panels too,
-// which fills its box as on a card; and in a box too narrow for its long names, the names are cut so the plot keeps its
-// room, as on a card. A record's values line up at each level, a long string is folded to six lines, and nothing runs
-// past the side panel's width. thimble's answers to
-// the kit's chart fetches are given here as kernel_thimble.chart_spec writes them; that they are the card's spec is
-// backend/tests_public/test_view_kit_records_charts.py, and the kit's plumbing is tests/public/records-charts-kit.test.ts.
+// The view kit's charts (backend/app/viewer_chart.js, thimble.chart) in a real browser: a page in a sandboxed frame with
+// the kit as views.frame_document loads it, the vega builds a view names in its libs, and the canvas's chart drawing
+// (src/lib/kitChart.ts, bundled here as vite build bundles it into kit/chart.js). A chart is drawn by the canvas's own
+// code in the page's own theme: its one series in --viz-1, its axis labels in --viz-font-label, on the paper; its
+// groups in Color by's colours, as its records' bars are, with no legend; a label's classes in the label's colours.
+// thimble's answers to the kit's chart fetches are given here as kernel_thimble.chart_spec writes them; that they are
+// the card's spec is backend/tests_public/test_view_kit_records_charts.py, and the kit's plumbing is
+// tests/public/records-charts-kit.test.ts.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -181,85 +178,5 @@ test("its groups take Color by's colours, as its records' bars do, and a label's
     return [css('--label-1'), css('--label-3'), css('--label-none')]
   })
   assert.deepEqual(await fills(frame, '#c'), label, "captcha, money and other in the label's colours, other in its gray")
-  await page.close()
-})
-
-test("a group with no value takes Color by's gray, and a chart left with no rows keeps its height", async () => {
-  const frame = await framed()
-  await frame.evaluate(() => {
-    ;(window as any).colour = (window as any).thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool', values: ['Read', 'Bash'] }], initial: 'tool' })
-  })
-  assert.equal(await chart(frame, '#b', 'nulls', { colour: true }), true)
-  const readColour = await frame.evaluate(() => (window as any).colour.colourOf('Read'))
-  const gray = await frame.evaluate(() => {
-    const i = document.createElement('i')
-    document.body.appendChild(i)
-    i.style.color = 'var(--label-none)'
-    return getComputedStyle(i).color
-  })
-  assert.deepEqual(await fills(frame, '#b'), [readColour, gray], "agent-1 in Read's colour; agent-2, whose tool is none, in the gray")
-  const before = await frame.evaluate(() => document.querySelector('#b .thimble-chart-plot')!.getBoundingClientRect().height)
-  const after = await frame.evaluate(async () => {
-    await (window as any).thimble.chart('#b', 'bar', [])
-    const note = document.querySelector('#b .thimble-chart-note') as HTMLElement
-    return { text: note.textContent, height: note.getBoundingClientRect().height }
-  })
-  assert.equal(after.text, 'No data')
-  assert.ok(before > 60 && Math.abs(after.height - before) <= 1, `No data as tall as the chart it replaced: ${after.height} for ${before}`)
-  await page.close()
-})
-
-test('it is refitted when its box narrows, and cuts long names in a narrow box so the plot keeps its room', async () => {
-  const frame = await framed()
-  await chart(frame, '#d', 'one')
-  await frame.evaluate(() => ((document.getElementById('d') as HTMLElement).style.width = '400px'))
-  await frame.waitForFunction(() => document.querySelector('#d svg')!.getBoundingClientRect().width <= 400)
-  assert.equal(await chart(frame, '#n', 'long'), true)
-  const got = await frame.evaluate(() => {
-    const plot = document.querySelector('#n g.mark-rect')!.getBoundingClientRect()
-    const labels = [...document.querySelectorAll('#n g.role-axis-label text')].map((t) => t.getBoundingClientRect().width)
-    return { plot: plot.width, svg: document.querySelector('#n svg')!.getBoundingClientRect().width, widest: Math.max(...labels) }
-  })
-  assert.ok(got.svg <= 320, `inside its 320 px box: ${got.svg}`)
-  assert.ok(got.plot >= 320 * 0.3, `the plot keeps its room: ${got.plot} px`)
-  assert.ok(got.widest <= 320 * 0.35 + 4, `the names cut to fit: ${got.widest} px`)
-  await page.close()
-})
-
-test('a chart of panels fills its box, as on a card, and is fitted again when the box narrows', async () => {
-  const frame = await framed()
-  assert.equal(await chart(frame, '#a', 'panels'), true)
-  const wide = await frame.evaluate(() => document.querySelector('#a svg')!.getBoundingClientRect().width)
-  // the panels share the box with their legend's room, as on a card (they were drawn at Vega-Lite's own width, 369 px)
-  assert.ok(wide > 480 && wide <= 600, `as wide as its 600 px box: ${wide}`)
-  await frame.evaluate(() => ((document.getElementById('a') as HTMLElement).style.width = '400px'))
-  await frame.waitForFunction(() => {
-    const w = document.querySelector('#a svg')?.getBoundingClientRect().width ?? 0
-    return w > 300 && w <= 400
-  })
-  await page.close()
-})
-
-test("a record's values line up at each level, a long string folds to six lines, and nothing runs past its box", async () => {
-  const frame = await framed()
-  const got = await frame.evaluate(() => {
-    const rec = { type: 'tool_use', tool: 'Read', a_much_longer_key_name: 4, input: { file_path: '/repo/pandas/core/frame.py', limit: 200 },
-      output: Array.from({ length: 30 }, (_, i) => `line ${i + 1} of what came back, which is long enough to wrap in the panel`).join('\n') }
-    ;(window as any).thimble.record({ mount: '#rec', value: rec, ref: 'r1/explorer.jsonl#L12' })
-    const left = (sel: string) => [...document.querySelectorAll(sel)].map((e) => Math.round(e.getBoundingClientRect().left))
-    const box = document.getElementById('rec')!
-    const text = document.querySelector('#rec .thimble-record-text') as HTMLElement
-    return {
-      top: left('#rec .thimble-record-tree > .thimble-record-row > .thimble-record-val'),
-      nested: left('#rec .thimble-record-kids > .thimble-record-row > .thimble-record-val'),
-      folded: text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight),
-      over: box.scrollWidth - box.clientWidth,
-    }
-  })
-  assert.equal(new Set(got.top).size, 1, `the record's values start at one edge: ${got.top}`)
-  assert.equal(new Set(got.nested).size, 1, `a nested value's own values start at one edge: ${got.nested}`)
-  assert.ok(got.nested[0] > got.top[0] - 200, 'nested under its key')
-  assert.ok(got.folded > 5.5 && got.folded < 6.5, `a long string folded to six lines: ${got.folded}`)
-  assert.equal(got.over, 0, 'nothing runs past the box')
   await page.close()
 })

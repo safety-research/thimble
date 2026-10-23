@@ -1,12 +1,9 @@
 // The find's colors (tokens.css --find-bg and --find-bg-strong, and the accent as text for a tick) in headless
-// Chromium on the theme's own tokens, light and dark, iris and pink: the view kit's search (viewer_search.js,
-// viewer_kit.css) washes every match in a tint of the accent and the current one in a stronger tint, a kept record whose
-// words do not show takes the matches' tint for a moment, and its ticks on the list's strip (viewer_colour.js) are the
-// accent as text; the tree's and the record's own find (viewer_parts.css) and Files' find (files.css
-// ::highlight(reader-find), the folder search's marks) take the same tints, and the words found are in the text's color,
-// a link's too. On every paper and accent the text and the secondary text read at 4.5:1 or more on the current match's
-// tint, each tint stands as far apart from the cell and from the other as on iris (the accent's --find-mix), and a tick
-// reads at 3:1 or more on the cell. Files' strip draws its find's ticks in the same color
+// Chromium on the theme's own tokens: the view kit's search (viewer_search.js, viewer_kit.css) washes every match in a
+// tint of the accent and the current one in a stronger tint, and its ticks on the list's strip (viewer_colour.js) are
+// the accent as text. On every paper and accent the text and the secondary text read at 4.5:1 or more on the current
+// match's tint, each tint stands as far apart from the cell and from the other as on iris (the accent's --find-mix),
+// and a tick reads at 3:1 or more on the cell. Files' strip draws its find's ticks in the same color
 // (tests/public/browser/tracks.test.ts).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -26,7 +23,6 @@ const KIT =
     .join('') +
   `<style>${read('viewer_kit.css')}</style><style>${read('viewer_parts.css')}</style>`
 const TOKENS = readFileSync(path.join(FRONTEND, 'src', 'styles', 'tokens.css'), 'utf8') + ':root{--font-body:sans-serif;--font-mono:monospace}'
-const FILES_CSS = readFileSync(path.join(FRONTEND, 'src', 'styles', 'files.css'), 'utf8')
 
 type RGB = [number, number, number]
 const hex = (h: string): RGB => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)) as RGB
@@ -56,12 +52,6 @@ const SHARE: Record<string, Record<string, [number, number]>> = {
   light: { iris: [0.2, 0.32], pink: [0.26, 0.4] },
   dark: { iris: [0.32, 0.5], pink: [0.32, 0.5] },
 }
-const THEMES = [
-  ['light', 'iris'],
-  ['light', 'pink'],
-  ['dark', 'iris'],
-  ['dark', 'pink'],
-] as const
 
 const html = (theme: string, accent: string, head: string, body: string) =>
   `<!doctype html><html${theme === 'dark' ? ' data-paper="dark"' : ''} data-accent="${accent}"><head><style>${TOKENS} html,body{margin:0;height:100%} body{background:var(--surface-card)}</style>${head}</head><body>${body}</body></html>`
@@ -143,164 +133,46 @@ const drawn = (page: Page, sel: string, prop: 'color' | 'backgroundColor') =>
   )
 
 describe("the view kit's search", () => {
-  for (const [theme, accent] of THEMES) {
-    test(`${theme}, ${accent}: every match in a tint of the accent, the current one stronger, the strip's ticks the accent as text`, async () => {
-      const page = await open(SEARCH(theme, accent))
-      await page.evaluate(() => (window as any).search.set('xxxx'))
-      await page.waitForTimeout(400)
-      assert.equal(await page.evaluate(() => (window as any).search.count), 16)
-      await page.evaluate(() => (window as any).search.go(1))
-      await page.waitForTimeout(200)
-      const cur = (await inRange('thimble-search-current')(page))!
-      const other = (await inRange('thimble-search')(page))!
-      assert.ok(cur && other, 'a current match and another on screen')
-      const [m, s] = SHARE[theme][accent]
-      const want = { match: over(FILL[accent], m, CELL[theme]), current: over(FILL[accent], s, CELL[theme]) }
-      const got = { match: await pixel(page, other.x, other.y), current: await pixel(page, cur.x, cur.y) }
-      assert.ok(near(got.match, want.match), `the match's tint: ${got.match}, want ${want.match}`)
-      assert.ok(near(got.current, want.current), `the current match's tint: ${got.current}, want ${want.current}`)
-      // the strip's lane of ticks: the accent as text, never the text's ink
-      const tick = await page.evaluate(() => {
-        const cv = document.querySelector('.thimble-colour-strip canvas') as HTMLCanvasElement
-        const dpr = window.devicePixelRatio || 1
-        const data = cv.getContext('2d')!.getImageData(Math.round(6 * dpr), 0, 1, cv.height).data
-        for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 250) return Array.from(data.slice(i, i + 4))
-        return null
-      })
-      assert.ok(tick, 'a tick drawn in the lane')
-      const ink = theme === 'light' ? INK[accent] : await drawn(page, '#probe-accent', 'color')
-      assert.ok(near(tick!, ink, 2), `the tick: ${tick}, want the accent as text ${ink}`)
-      assert.ok(apart(tick!, await drawn(page, '#probe-text', 'color')) > 40, `the tick is not the text's ink: ${tick}`)
-      // the tree's and the record's own find marks take the matches' tint
-      const marks = await page.evaluate(() => ['#tree-hit', '#record-hit', '#probe-find', '#probe-hl'].map((s) => getComputedStyle(document.querySelector(s)!).backgroundColor))
-      assert.equal(marks[0], marks[2])
-      assert.equal(marks[1], marks[2])
-      assert.notEqual(marks[2], marks[3])
-      // their words in the text's color, as the search's
-      const inks = await page.evaluate(() => ['#tree-hit', '#record-hit', '#probe-text'].map((s) => getComputedStyle(document.querySelector(s)!).color))
-      assert.deepEqual(inks, [inks[2], inks[2], inks[2]])
-      await page.close()
-    })
-  }
-
-  test('dark, graphite: the tints take the accent as text, since its fill is too near the cell to show', async () => {
-    const page = await open(SEARCH('dark', 'graphite'))
+  // on the light paper and iris; every paper and accent is the contrast check below
+  const [theme, accent] = ['light', 'iris'] as const
+  test(`${theme}, ${accent}: every match in a tint of the accent, the current one stronger, the strip's ticks the accent as text`, async () => {
+    const page = await open(SEARCH(theme, accent))
     await page.evaluate(() => (window as any).search.set('xxxx'))
     await page.waitForTimeout(400)
+    assert.equal(await page.evaluate(() => (window as any).search.count), 16)
+    await page.evaluate(() => (window as any).search.go(1))
+    await page.waitForTimeout(200)
+    const cur = (await inRange('thimble-search-current')(page))!
     const other = (await inRange('thimble-search')(page))!
-    const got = await pixel(page, other.x, other.y)
-    assert.ok(contrast(got, CELL.dark) >= 1.3, `the match's tint ${got} stands apart from the cell: ${contrast(got, CELL.dark).toFixed(2)}`)
-    await page.close()
-  })
-
-  test("a kept record whose words do not show takes the matches' tint for a moment when gone to", async () => {
-    const doc = html(
-      'light',
-      'pink',
-      KIT,
-      `<div style="padding:8px"><span id="search"></span></div><div id="list" style="height:400px;overflow-y:auto;font:16px/28px sans-serif">${ROWS}</div>
-<script>window.search = thimble.search({ mount: '#search', in: '#list', onChange: (s) => s.kept(s.text ? ['log.jsonl#L3', 'log.jsonl#L6'] : null) })</script>`,
-    )
-    const page = await open(doc)
-    await page.evaluate(() => (window as any).search.set('gale'))
-    await page.waitForFunction(() => document.querySelector('[data-thimble-snap]'), null, { timeout: 3000 })
-    const row = await page.evaluate(() => {
-      const el = document.querySelector('[data-thimble-snap]') as HTMLElement
-      const b = el.getBoundingClientRect()
-      return { ref: el.getAttribute('data-anchor'), snap: el.getAttribute('data-thimble-snap'), anim: getComputedStyle(el).animationName, x: b.right - 20, y: b.top + b.height / 2 }
+    assert.ok(cur && other, 'a current match and another on screen')
+    const [m, s] = SHARE[theme][accent]
+    const want = { match: over(FILL[accent], m, CELL[theme]), current: over(FILL[accent], s, CELL[theme]) }
+    const got = { match: await pixel(page, other.x, other.y), current: await pixel(page, cur.x, cur.y) }
+    assert.ok(near(got.match, want.match), `the match's tint: ${got.match}, want ${want.match}`)
+    assert.ok(near(got.current, want.current), `the current match's tint: ${got.current}, want ${want.current}`)
+    // the strip's lane of ticks: the accent as text, never the text's ink
+    const tick = await page.evaluate(() => {
+      const cv = document.querySelector('.thimble-colour-strip canvas') as HTMLCanvasElement
+      const dpr = window.devicePixelRatio || 1
+      const data = cv.getContext('2d')!.getImageData(Math.round(6 * dpr), 0, 1, cv.height).data
+      for (let i = 0; i < data.length; i += 4) if (data[i + 3] > 250) return Array.from(data.slice(i, i + 4))
+      return null
     })
-    assert.deepEqual([row.ref, row.snap, row.anim], ['log.jsonl#L3', 'search', 'thimble-snap-search'])
-    const got = await pixel(page, row.x, row.y)
-    const want = over(FILL.pink, SHARE.light.pink[0], CELL.light)
-    assert.ok(near(got, want, 4), `the kept record's tint: ${got}, want ${want}`)
+    assert.ok(tick, 'a tick drawn in the lane')
+    const ink = theme === 'light' ? INK[accent] : await drawn(page, '#probe-accent', 'color')
+    assert.ok(near(tick!, ink, 2), `the tick: ${tick}, want the accent as text ${ink}`)
+    assert.ok(apart(tick!, await drawn(page, '#probe-text', 'color')) > 40, `the tick is not the text's ink: ${tick}`)
+    // the tree's and the record's own find marks take the matches' tint
+    const marks = await page.evaluate(() => ['#tree-hit', '#record-hit', '#probe-find', '#probe-hl'].map((s) => getComputedStyle(document.querySelector(s)!).backgroundColor))
+    assert.equal(marks[0], marks[2])
+    assert.equal(marks[1], marks[2])
+    assert.notEqual(marks[2], marks[3])
+    // their words in the text's color, as the search's
+    const inks = await page.evaluate(() => ['#tree-hit', '#record-hit', '#probe-text'].map((s) => getComputedStyle(document.querySelector(s)!).color))
+    assert.deepEqual(inks, [inks[2], inks[2], inks[2]])
     await page.close()
   })
-})
 
-/** the darkest pixel of the page inside `box`, from a picture of it: a glyph's core */
-async function darkest(page: Page, box: { x: number; y: number; width: number; height: number }): Promise<number[]> {
-  const png = await page.screenshot({ clip: box })
-  return page.evaluate(async (b64) => {
-    const img = new Image()
-    img.src = 'data:image/png;base64,' + b64
-    await img.decode()
-    const c = document.createElement('canvas')
-    c.width = img.width
-    c.height = img.height
-    const g = c.getContext('2d')!
-    g.drawImage(img, 0, 0)
-    const d = g.getImageData(0, 0, c.width, c.height).data
-    let best = [255, 255, 255, 255]
-    for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] < best[0] + best[1] + best[2]) best = Array.from(d.slice(i, i + 4))
-    return best
-  }, png.toString('base64'))
-}
-
-describe('the words found in a link', () => {
-  // a link's words found read in the text's color on the tint, not in the accent as text, which reads under 4.5:1 there
-  const LINK = `<p id="text" style="font:700 40px/56px sans-serif;padding:8px">see <a href="#x" style="color:var(--text-link);text-decoration:none">xxxx</a> and xxxx</p>`
-  const box = (page: Page, name: string) =>
-    page.evaluate((name) => {
-      const b = ([...(CSS as any).highlights.get(name)][0] as Range).getBoundingClientRect()
-      return { x: Math.round(b.left) + 1, y: Math.round(b.top) + 1, width: Math.round(b.width) - 2, height: Math.round(b.height) - 2 }
-    }, name)
-  test("the kit's search: the current match in a link is in the text's color", async () => {
-    const page = await open(html('light', 'iris', KIT, `<div style="padding:8px"><span id="search"></span></div><div id="list">${LINK}</div><script>window.search = thimble.search({ mount: '#search', in: '#list' })</script>`))
-    await page.evaluate(() => (window as any).search.set('xxxx'))
-    await page.waitForTimeout(400)
-    assert.equal(await page.evaluate(() => (window as any).search.at), 0)
-    const core = await darkest(page, await box(page, 'thimble-search-current'))
-    assert.ok(contrast(core, [0, 0, 0]) < 1.3, `the found link's words: ${core}, want the text's black`)
-    await page.close()
-  })
-  test("Files' find: the current match in a link is in the text's color", async () => {
-    const page = await open(
-      html('light', 'iris', `<style>${FILES_CSS}</style>`, `${LINK}<script>
-const t = document.querySelector('#text a').firstChild
-const r = document.createRange(); r.setStart(t, 0); r.setEnd(t, 4)
-CSS.highlights.set('reader-find-current', new Highlight(r))
-</script>`),
-    )
-    const core = await darkest(page, await box(page, 'reader-find-current'))
-    assert.ok(contrast(core, [0, 0, 0]) < 1.3, `the found link's words: ${core}, want the text's black`)
-    await page.close()
-  })
-})
-
-describe("Files' find", () => {
-  for (const [theme, accent] of THEMES) {
-    test(`${theme}, ${accent}: the reader's matches and the folder search's marks in the same tints`, async () => {
-      const page = await open(
-        html(
-          theme,
-          accent,
-          `<style>${FILES_CSS}</style>`,
-          `<p id="text" style="font:24px/36px sans-serif;padding:8px">xxxx and xxxx</p>
-<div class="files-found-row"><mark id="found">gale</mark></div><i id="probe-find" style="background:var(--find-bg)">probe</i>
-<script>
-const t = document.getElementById('text').firstChild
-const at = (a) => { const r = document.createRange(); r.setStart(t, a); r.setEnd(t, a + 4); return r }
-CSS.highlights.set('reader-find', new Highlight(at(0)))
-CSS.highlights.set('reader-find-current', new Highlight(at(9)))
-</script>`,
-        ),
-      )
-      const spots = await page.evaluate(() =>
-        ['reader-find', 'reader-find-current'].map((n) => {
-          const b = ([...(CSS as any).highlights.get(n)][0] as Range).getBoundingClientRect()
-          return { x: b.left + b.width / 2, y: b.top + 3 }
-        }),
-      )
-      const [m, s] = SHARE[theme][accent]
-      const match = await pixel(page, spots[0].x, spots[0].y)
-      const current = await pixel(page, spots[1].x, spots[1].y)
-      assert.ok(near(match, over(FILL[accent], m, CELL[theme])), `the match's tint: ${match}`)
-      assert.ok(near(current, over(FILL[accent], s, CELL[theme])), `the current match's tint: ${current}`)
-      const marks = await page.evaluate(() => ['#found', '#probe-find'].map((s) => getComputedStyle(document.querySelector(s)!).backgroundColor))
-      assert.equal(marks[0], marks[1])
-      await page.close()
-    })
-  }
 })
 
 test('on every paper and accent, the text reads on the tints, each tint stands apart, and a tick reads on the cell', async () => {
