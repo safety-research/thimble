@@ -125,6 +125,16 @@ test('a card shows the labels its turn ran before it; the answer only those no c
   expect(await labelsUnderAnswer(w.$, ELS, 'r1', 80)).toEqual([])
   // the read ran once, as the person's (`thimble label --json`)
   expect(w.ran.filter(a => a.join(' ') === 'label --json').length).toBe(1)
+  // a press on the label's name opens the labels pane on it, the open made inside the press (what the press returns
+  // settles after it): Claude Code places the pane at any width only for such an open
+  const opens: Any[] = []
+  w.$.ui.open = (a: Any) => new Promise(r => setTimeout(() => r((opens.push(a.id), { isPlaced: true })), 1))
+  w.$.ui.panes = async () => []
+  const name = all(answer).find(k => k.type === 'Button' && k.props.label === 'open the label tone')
+  const pressed = name.props.onPress()
+  expect(pressed).toBeInstanceOf(Promise)
+  await pressed
+  expect(opens).toEqual(['thimble'])
 })
 
 test('a read that fails keeps the rows as last read; a read asked while one runs reads once more after it', async () => {

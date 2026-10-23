@@ -151,6 +151,15 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   await answered(s, { id: 't2', prompt: 'Why?', rows: ['Because of the cache.'] })
   const take = await claimsKey(s.$, 'c', 0)
   expect(take?.later).toBeDefined()
+  // a narrow terminal: Claude Code places no pane for a key at the prompt there, so the notice names the bar's count,
+  // a click on which opens it
+  const placing = s.$.ui.open
+  s.$.ui.open = async () => ({ isPlaced: false, reason: 'unasked below 144 columns (118 now)' })
+  s.$.ui.panes = async () => []
+  await take!.later!()
+  await new Promise(r => setTimeout(r, 1))
+  expect(String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text)).toContain('“c 3 claims”')
+  s.$.ui.open = placing
   await take!.later!()
   expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims', focus: true })
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, args, els)

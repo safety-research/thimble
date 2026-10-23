@@ -35,7 +35,7 @@ export const CLAIMS_KEYS = ['c']
 export async function claimsKey($: Engine, key: string, _until: number): Promise<Take | null> {
   if (key !== 'c' || !featureOn('claims')) return null
   // after the word window, as 0.10 did: `c` that starts a word is typed
-  return { later: () => openClaims($) }
+  return { later: () => openClaims($, {}, true) }
 }
 
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {

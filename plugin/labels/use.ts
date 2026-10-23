@@ -152,9 +152,10 @@ export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen
   return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: kids })
 }
 
-/** What a press on a row's label name (value null) or value does: open the labels pane on it. */
-function opener($: Engine): (name: string, value: string | null) => void {
-  return (name, value) => { void openLabels($, value == null ? { label: name } : { label: name, value }) }
+/** What a press on a row's label name (value null) or value does: open the labels pane on it. The open is returned, so
+ *  it is made while the press runs: Claude Code places the pane at any width only for such an open. */
+function opener($: Engine): (name: string, value: string | null) => Promise<unknown> {
+  return (name, value) => openLabels($, value == null ? { label: name } : { label: name, value })
 }
 
 /** The labels a card's newest call used: those its turn ran before the call. */

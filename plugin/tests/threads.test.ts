@@ -214,6 +214,38 @@ test('the margin of a passage or a card opens its thread; it says asked (↳) on
   expect(threadOf(key)!.scope).toEqual({ about: '"Tuesday 41" in the card "Runs per day"', card: 'c00000000000b1', part: '▸ Tuesday  ██████ 41' })
 })
 
+// Claude Code places a pane at any width only for an open made while the person's press runs: one the press leaves to
+// run after it returned is unasked and waits undrawn below 144 columns. So each press that opens the side pane (the
+// margin of a passage or a card, a row of the thread list, the way back to it) returns the open, and the open is made
+// by the time what it returns settles, as Claude Code calls a press
+test('each press that opens the side pane makes the open inside the press', async () => {
+  const s = setup()
+  const opens: string[] = []
+  const later = <T>(v: T) => new Promise<T>(r => setTimeout(() => r(v), 1))
+  s.$.ui.open = (a: Any) => later((opens.push(a.id), { isPlaced: true }))
+  const pressed = async (press: () => unknown) => {
+    const before = opens.length
+    const r = press()
+    expect(r).toBeInstanceOf(Promise)
+    await r
+    return opens.length - before
+  }
+  const p = { text: 'Two runs failed.', label: '"Two runs failed."' }
+  const margin = await threadPassages(s.$, 'row-made-up-5')
+  expect(await pressed(() => margin.ask(p))).toBe(1)
+  const card = await threadOnCard(s.$, 'c00000000000b2', 'Runs per day')
+  expect(await pressed(card.press)).toBe(1)
+  // a thread the list shows, and the way back from it
+  const asked = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await asked
+  const list = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'threads', {}, els))
+  expect(await pressed(list.find(n => n.type === 'Button' && n.props?.key === 'thread-0').props.onPress)).toBe(1)
+  const one = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY, from: 'threads' }, els))
+  expect(await pressed(one.find(n => n.type === 'Button' && n.props?.key === 'back').props.onPress)).toBe(1)
+})
+
 test('the thread pane: its steps without the folders they ran in, and m drawn once as Claude Code draws a key', async () => {
   const s = setup()
   const asked = askHere(s.$, SCOPE, 'why so many?')

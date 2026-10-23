@@ -292,7 +292,7 @@ async function drawList($: Engine, e: Any, els: Any): Promise<Any> {
     const lastRow = i === rows.length - 1
     const state = r.status === 'running' ? Text({ color: 'warning', children: 'answering…' }) : r.status === 'failed' ? Text({ color: 'error', children: 'stopped' }) : Text({ dimColor: true, children: `${r.asks} question${r.asks === 1 ? '' : 's'}${r.ago ? ` · ${r.ago}` : ''}` })
     const name = cut(r.name, Math.max(12, W - 26))
-    out.push(Button({ key: `thread-${i}`, plain: true, label: r.name, onPress: () => { void showThread($, r.key, { from: 'threads' }) }, children: [Box({ flexDirection: 'column', children: [
+    out.push(Button({ key: `thread-${i}`, plain: true, label: r.name, onPress: () => showThread($, r.key, { from: 'threads' }), children: [Box({ flexDirection: 'column', children: [
       Text({ key: 'n', wrap: 'truncate-end', children: [Text({ dimColor: true, children: lastRow ? '└─ ' : '├─ ' }), Text({ children: name }), Text({ children: '  ' }), state] }),
       ...(r.last ? [Text({ key: 'q', dimColor: true, wrap: 'truncate-end', children: `${lastRow ? ' ' : '│'}    ${cut(r.last, Math.max(10, W - 6))}` })] : []),
     ] })] }))
@@ -391,7 +391,7 @@ async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> 
   const { W, H } = sizeOf(e)
   const top: Any[] = []
   // the way back to the list, when the list opened it (esc closes the pane)
-  if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', onPress: () => { void listThreads($) }, children: [Text({ color: 'suggestion', children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
+  if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', onPress: () => listThreads($), children: [Text({ color: 'suggestion', children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
   const subject = await subjectOfPane($, e, els, t, W)
   const keys = keysRow($, els, t, subject.keys)
   const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - top.length - keys.length))
