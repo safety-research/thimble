@@ -110,7 +110,11 @@ function watch($: Engine, id: number): void {
     if (f?.state !== 'working') { t?.cancel?.(); return }
     await recoverFixers($, [f])
   }
-  try { t = $.clock.every(5000, () => { void look().catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { t = null }
+  try {
+    t = $.clock.every(5000, () => { void look().catch(err => failNotice($, `thimble could not look at fix ${id}: ${cut(String((err as Error)?.message || err), 200)}`)) }) as unknown as { cancel?: () => void }
+  } catch {
+    t = null
+  }
 }
 
 const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`
@@ -167,7 +171,13 @@ const ending = new Set<number>()
 export async function fixerEnded($: Engine, e: Any, id: number): Promise<void> {
   if (ending.has(id)) return
   ending.add(id)
-  try { await ended($, e, id) } finally { ending.delete(id) }
+  try {
+    await ended($, e, id)
+  } catch (err) {
+    await setFixLine($, { id, kind: 'problem', said: `Fix ${id} could not be checked: ${cut(String((err as Error)?.message || err), 200)}. /thimble-fix lists it.` }).catch(() => undefined)
+  } finally {
+    ending.delete(id)
+  }
 }
 
 async function ended($: Engine, e: Any, id: number): Promise<void> {
@@ -197,7 +207,8 @@ export async function recoverFixers($: Engine, working: Fix[]): Promise<void> {
   const map = await fixers($)
   let alive: Set<string>
   try {
-    alive = new Set((await $.agent.list()).filter(a => !['completed', 'failed', 'killed', 'ended', 'stopped'].includes(String(a.status))).map(a => a.id))
+    // a background agent that handed back its report waits idle: for a fixer, that is its end
+    alive = new Set((await $.agent.list()).filter(a => ['pending', 'running', 'waiting'].includes(String(a.status))).map(a => a.id))
   } catch {
     return
   }

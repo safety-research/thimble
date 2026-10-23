@@ -109,7 +109,8 @@ export const registerFix: Register = on => {
   on('turn.complete', { agentId: /^[\s\S]+$/ }, async ($, e, next) => {
     const r = await next(e)
     const id = await fixOfAgent($, e.agentId)
-    if (id != null) $.clock.after(0, () => { void fixerEnded($, e, id).catch(() => undefined) })
+    // not awaited: the commit and the tests take a while, and the turn's end should not wait on them
+    if (id != null) void fixerEnded($, e, id)
     return r
   }).catch(($, e, next) => next(e))
 
