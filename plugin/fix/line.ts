@@ -91,7 +91,8 @@ function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
   const { Box, Text } = els
   const room = Math.max(20, width - 16)
   const row = (key: string, label: string, text: string) => Box({ key, flexDirection: 'row', width, children: [
-    Text({ key: 'l', dimColor: true, children: `    ${label.padEnd(12)}` }),
+    // the label keeps its width: a value that wraps beside it would take its trailing spaces
+    Box({ key: 'l', width: 16, flexShrink: 0, children: [Text({ key: 't', dimColor: true, children: `    ${label}`.padEnd(16) })] }),
     Box({ key: 'v', flexShrink: 1, children: [Text({ key: 't', wrap: 'wrap', children: text })] }),
   ] })
   const words = f.words || []

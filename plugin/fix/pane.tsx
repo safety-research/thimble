@@ -128,7 +128,7 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
   const detail: Any[] = [Text({ key: 'rule', dimColor: true, children: '─'.repeat(Math.min(W, 60)) })]
   detail.push(Text({ key: 'st', children: [Text({ key: 'a', bold: true, children: sel.title }), Text({ key: 'b', dimColor: true, children: `  fix ${sel.id}${sel.commit ? ` · commit ${sel.commit.slice(0, 7)}` : ''} · made in ${sel.made_in || 'terminal'}` })] }))
   const labeled = (key: string, label: string, text: string, tone: Any = {}) => Box({ key, flexDirection: 'row', width: W, children: [
-    Text({ key: 'l', dimColor: true, children: label.padEnd(12) }), Box({ key: 'v', flexShrink: 1, children: [Text({ key: 't', wrap: 'wrap', ...tone, children: text })] }),
+    Box({ key: 'l', width: 12, flexShrink: 0, children: [Text({ key: 't', dimColor: true, children: label.padEnd(12) })] }), Box({ key: 'v', flexShrink: 1, children: [Text({ key: 't', wrap: 'wrap', ...tone, children: text })] }),
   ] })
   for (const [i, w] of (sel.words || []).entries()) detail.push(labeled(`w${i}`, i ? 'then' : 'You asked', cut(w, 400)))
   if (sel.summary) detail.push(labeled('sum', 'Claude did', sel.summary))
