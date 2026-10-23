@@ -29,7 +29,7 @@ import { messageOf } from '../core/answers'
 import { tellOpened } from '../core/engaged'
 import { failNotice } from '../bar/notice'
 import { openPane, paneNow } from '../core/pane'
-import { themeLast, themeNow } from '../core/theme'
+import { ACCENT, themeLast, themeNow } from '../core/theme'
 import { launchRepair, repairOf } from '../marks/checker'
 import { citeWords } from '../marks/evidence'
 import { citeHeat } from '../marks/view'
@@ -52,7 +52,7 @@ const CLUSTER = ['#3cc2b9', '#a98be0', '#cfae7e', '#8fa1bd', '#e384b2', '#b2c24f
 const CLUSTER_LIGHT = ['#0f7f78', '#7650c4', '#87662a', '#4f6386', '#b03a74', '#677510']
 /** A line of code's color: the theme key thimble draws inline code in (tray/tray.ts), shaded by Claude Code. */
 const CODE_INK = 'permission'
-const THEME: Record<string, string> = { plain: 'text', accent: 'suggestion', good: 'success', bad: 'error', warn: 'warning', cite: 'merged' }
+const THEME: Record<string, string> = { plain: 'text', accent: ACCENT, good: 'success', bad: 'error', warn: 'warning', cite: 'merged' }
 
 function look(tone: string | null | undefined): Record<string, unknown> {
   if (!tone) return {}

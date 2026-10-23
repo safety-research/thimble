@@ -39,7 +39,7 @@ import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
 import { cut, textWidth } from '../core/text.js'
-import { themeNow } from '../core/theme'
+import { ACCENT, themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeHeat, citeLook, messageEl, type MarkLook } from '../marks/view'
@@ -391,7 +391,7 @@ async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> 
   const { W, H } = sizeOf(e)
   const top: Any[] = []
   // the way back to the list, when the list opened it (esc closes the pane)
-  if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', onPress: () => { void listThreads($) }, children: [Text({ color: 'suggestion', children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
+  if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', onPress: () => { void listThreads($) }, children: [Text({ color: ACCENT, children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
   const subject = await subjectOfPane($, e, els, t, W)
   const keys = keysRow($, els, t, subject.keys)
   const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - top.length - keys.length))

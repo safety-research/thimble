@@ -40,7 +40,7 @@ import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { revealCard } from '../cards/draw'
-import { themeNow } from '../core/theme'
+import { ACCENT, themeNow } from '../core/theme'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
 import { launchRepair, repairOf } from '../marks/checker'
@@ -563,7 +563,7 @@ function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: 
   // a check that did not run: x starts it
   const unrun = m.status === 'failed' && m.failedBy === 'none'
   if (canRepair(m)) rows.push({ h: 1, el: els.Button({ key: 'repair', plain: true, label: unrun ? 'check this citation' : 'repair this citation', hover: { bold: true }, onPress: () => undefined, children: [
-    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: 'suggestion', children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: unrun ? ': start its check' : ': check it again and correct the cited words' })] }),
+    Text({ key: 'k', wrap: 'truncate-end', children: [Text({ key: 'x', bold: true, color: ACCENT, children: 'x' }), Text({ key: 'w', children: ' repair' }), Text({ key: 'd', dimColor: true, children: unrun ? ': start its check' : ': check it again and correct the cited words' })] }),
   ] }) })
   if (!ev) {
     if (m.status !== 'checking' && !unrun) dim('none', 'The check gave no evidence for it.')

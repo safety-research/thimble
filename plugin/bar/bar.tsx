@@ -14,6 +14,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
 import { textWidth } from '../core/text.js'
+import { ACCENT } from '../core/theme'
 import { vReady } from '../designer/v'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
@@ -24,9 +25,9 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** The colors of the bar: thimble's name, and a key the person can press. Theme keys, so light and dark both read. */
-const NAME_COLOR = 'permission'
-const KEY_COLOR = 'suggestion'
+/** The colors of the bar: thimble's name, and a key the person can press, both thimble's purple. */
+const NAME_COLOR = ACCENT
+const KEY_COLOR = ACCENT
 
 
 /** What a press on a part of the bar does; register.ts gives them, so this module draws and decides nothing else. */
