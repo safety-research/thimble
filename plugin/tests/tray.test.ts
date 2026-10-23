@@ -435,7 +435,7 @@ const HEADS = {
         'Four of the runs were retried after a timeout, and the summary file counts each try as its own run, so the share of failures reads higher than the share of distinct runs.',
         'The check read the summary file only, so it cannot say which of the tries failed or whether a retry passed later on in the same sweep of runs.',
         'The runs that were not retried all finished inside their budget, so the timeout explains the retries but not the failures among the other runs.',
-      ], todo: 'Count distinct run ids before you quote the share.' },
+      ], offer: 'Count the distinct run ids' },
       g1: { id: 'g1', term: 'p95', body: 'The time that 95 of 100 checks stay under.' },
     },
   },
@@ -456,7 +456,7 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   const barRows = all(drawn).filter(n => n.props?.key === 'bar').length
   expect(page.props.height + 3 + 1 + 2 + barRows).toBeLessThanOrEqual(12)
   expect(band).toContain('m more · lines 1–')
-  expect(band).not.toContain('Count distinct run ids')
+  expect(band).not.toContain('Count the distinct run ids')
   // the fewest rows that show it whole hold all of it and the bar: its 10 lines at this width, the blank row over
   // them, the frame's three rows and the two blank rows
   let whole = 12
@@ -476,7 +476,7 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   expect(Number(/lines (\d+)–/.exec(textOf(await $.ui.render(above(12))))?.[1])).toBeGreaterThan(Number(was))
   // a tall screen shows it whole
   band = textOf(await $.ui.render(above(40)))
-  expect(band).toContain('Count distinct run ids')
+  expect(band).toContain('Count the distinct run ids')
   expect(band).not.toContain('m more')
   // ] goes on to the citation, then the explainer after it
   await clock.advance(2000)
@@ -485,6 +485,36 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   await clock.advance(2000)
   await $.prompt.edit(key(']'))
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
+})
+
+test("a heads-up informs and, where it offers a check, o has Claude make it in a side thread about the heads-up", async ($, on) => {
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.id); return { value: { isPlaced: true } } as never })
+  on('ui.close', () => ({ value: undefined }))
+  const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-offer', { parts: HEADS })
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  const band = textOf(await $.ui.render(above(40)))
+  expect(band).toContain('Claude can do this for you (o): Count the distinct run ids.')
+  expect(band).toContain('o ask Claude to do it')
+  // o, once its word window closed: the offer is the side thread's question, about the heads-up
+  await clock.advance(2000)
+  expect(await $.prompt.edit(key('o'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  await new Promise(r => setTimeout(r, 50))
+  const thread = spawns.find(x => String(x.prompt).includes('PROMPT thread'))
+  expect(thread?.prompt).toContain('Count the distinct run ids')
+  expect(thread?.prompt).toContain('Retried runs count twice')
+  expect(opens).toEqual(['thimble'])
+})
+
+test('a heads-up without an offer has no o', async ($, on) => {
+  const plain = { explain: { order: ['h1'], items: { h1: { ...HEADS.explain.items.h1, offer: undefined } } } }
+  await resumed($, on, QUOTED, 's-tray-no-offer', { parts: plain })
+  await $.prompt.edit(key(']'))
+  const band = textOf(await $.ui.render(above(40)))
+  expect(band).toContain('Retried runs count twice')
+  expect(band).not.toContain('Claude can do this for you')
+  expect(band).not.toContain('ask Claude to do it')
 })
 
 test('an explainer paragraph taller than the room shows a room of its rows at a time: m goes on inside it, then from the top', async ($, on) => {

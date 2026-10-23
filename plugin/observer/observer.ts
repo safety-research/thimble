@@ -6,7 +6,9 @@
 //   - an answer: the last text row of a turn of main's that answered (the person's question, a key's ask, a background
 //     task's report, which starts a turn of its own);
 //   - a reply in a long turn: words Claude wrote before it went on working (LONG_REPLY characters or more), queued
-//     when its turn takes its next step.
+//     when its turn takes its next step;
+//   - the words of an answer with cards: the rows above and between the turn's cards, queued with its answer, since
+//     a reply that explains, shows a card and explains again is one answer.
 // One worker takes the queue in order. When several messages wait (they came while a look ran), it takes them all in
 // one look whose prompt names each of them. Two looks never run at once, and a look never delays a turn. It looks only
 // where a person is (S.person): never in a `-p` run, and in a session Claude Code's background service runs only once
@@ -333,6 +335,14 @@ export const registerObserver: Register = on => {
     try {
       if (e.reason !== 'answer' || !observerOn() || S.person !== 'now') return r
       const t = await turnOf($, e.turnId)
+      // a reply with cards is one answer: the words above and between its cards are looked at with its last row
+      const first = Math.min(...(t?.cards ?? []).map(c => (typeof c.after === 'number' ? c.after : Infinity)))
+      if (t && Number.isFinite(first)) {
+        for (const row of t.rows.slice(Math.max(0, first - 1), -1)) {
+          const w = S.queued.has(row) ? null : await msgOf($, t, row, 'reply')
+          if (w) await enqueue($, w)
+        }
+      }
       const m = t?.answer ? await msgOf($, t, t.answer, 'answer') : null
       if (m) await enqueue($, m)
     } catch {

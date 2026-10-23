@@ -123,6 +123,32 @@ test('with every feature it serves off, no look runs; one lens off has no sectio
   setOptions({})
 })
 
+test('a reply with a card is one answer: the words above and after the card are read in one look, a progress note before them is not', async () => {
+  setOptions({})
+  const s = setup([READ])
+  // the card the turn draws: its call, and the card it drew (cards/store.ts)
+  await s.$.state.set({ plugin: 'thimble', key: 'cardCall', id: 'tu-card-1' }, { id: 'c0a1b2c3d4' })
+  await s.$.state.set({ plugin: 'thimble', key: 'card', id: 'c0a1b2c3d4' }, { id: 'c0a1b2c3d4', version: 1, title: 'Builds by day', toolUseId: 'tu-card-1', turn: 't1', agentId: null, anchorRow: null, keys: [], read: '9 rows', columns: [], file: 'days.json', gen: 1, error: null, calls: { 'tu-card-1': { version: 1 } }, at: 1 })
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await s.call('prompt.submit', { text: 'What happened in these logs?', origin: { kind: 'composer' } })
+  await s.call('turn.start', { text: 'What happened in these logs?', turnId: 't1' })
+  const rows = ['Reading the logs now.', 'These are the logs of a build farm: most nightly builds failed after one config change.', 'The card shows the failures start on the day of the change.']
+  for (const [k, text] of rows.entries()) {
+    if (k) await s.step('t1', k)
+    if (k === 2) await s.call('tool.call', { tool: 'mcp__thimble__card', tool_use_id: 'tu-card-1' }, async () => ({ result: 'drawn' }))
+    await s.call('session.append', { door: 'response', message: { type: 'assistant', content: [{ type: 'text', text }] } }, async () => ({ uuid: `t1-row-${k}` }))
+  }
+  await s.call('turn.complete', { turnId: 't1', reason: 'answer', answer: rows[2] }, async () => ({ text: '' }))
+  await settle()
+  await drainNow(s.$)
+  await settle()
+  for (let i = 0; i < 100 && !s.forks.length; i++) await settle()
+  expect(s.forks.length).toBe(1)
+  expect(s.forks[0]).toContain('These are the logs of a build farm')
+  expect(s.forks[0]).toContain('The card shows the failures start')
+  expect(s.forks[0]).not.toContain('Reading the logs now.')
+})
+
 test("a reply that cannot be read is tried once more, then the failure line says what is missing and why", async () => {
   setOptions({})
   const s = setup([{ isAnswered: true, text: 'no json here' }, { isAnswered: true, text: 'still none' }])

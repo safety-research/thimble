@@ -280,13 +280,15 @@ export function glossesOf(list, text, skip = [], from = 0) {
 }
 
 /** The look's heads-up as a part keeps it, placed on its term like an explainer (one the text does not hold is dropped,
- *  so it never points at nothing); null when there is none. */
+ *  so it never points at nothing), with the check Claude offers to make (`offer`), when it gives one; null when there is
+ *  none. */
 export function headsOf(item, text, id = 'h1') {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null
   const term = str(termOf(item.term))
   const bullets = (Array.isArray(item.bullets) ? item.bullets : []).map(b => str(b)).filter(Boolean)
   if (!term || !bullets.length || !holds(text, term)) return null
-  return { id, kind: 'heads', term, title: str(item.title) || term, bullets, todo: str(item.todo) }
+  const offer = str(item.offer)
+  return { id, kind: 'heads', term, title: str(item.title) || term, bullets, ...(offer ? { offer } : {}) }
 }
 
 /**

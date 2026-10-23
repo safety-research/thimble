@@ -12,6 +12,7 @@
 //   c           a citation computed by code: all its code and output in place of the one line, and back
 //   h explain   the explainer (or heads-up) on the citation's words, over it
 //   e expand    an explainer written again at more length, in its place (explain/seam.ts expandExplainer)
+//   o           on a heads-up that offers a check: Claude makes it, in a side thread about the heads-up
 //   2–9         a citation inside an explainer's words, over it (a click on it too), unnamed
 //   x repair    on a failed citation: a check of that one claim again in the background, which looks in
 //               the records for the right value and corrects the cited words (marks/checker.ts launchRepair), or
@@ -58,7 +59,7 @@ import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
-import { openThread, threadAsked } from '../threads/seam'
+import { askInThread, openThread, threadAsked } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
   moreLines, open, pageOf, printLine, push, refOf, restStop, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
@@ -397,6 +398,20 @@ async function askAbout($: Engine, f: Frame, byKey = false): Promise<void> {
   if (placed) await setTray($, null)
 }
 
+/** The bar's words for o on a heads-up that offers a check. */
+const OFFER_WORDS = 'o ask Claude to do it'
+
+/** o, or a press on its words: the heads-up's offer, asked at once in a side thread about the heads-up. */
+async function takeOffer($: Engine, f: Frame, byKey = false): Promise<void> {
+  const g = await glossOf($, f.row, f.id)
+  if (!g?.offer) return
+  const scope = { about: aboutOf(f, await infoOf($, f)), mark: refOf(f) as MarkRef }
+  // the question is asked whether or not the pane could open here: the thread list (t) shows it
+  const placed = await openThread($, scope, byKey ? { key: OFFER_WORDS } : {}).catch(() => false)
+  await askInThread($, scope, g.offer)
+  if (placed) await setTray($, null)
+}
+
 /** a, or a press on `a ask`, on the card ] reached: a side thread about it. */
 async function askCard($: Engine, stand: NonNullable<Stand>, byKey = false): Promise<void> {
   const meta = await metaOf($, stand.card)
@@ -481,6 +496,7 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   }
   const g = await glossOf($, f.row, f.id)
   if (key === 'e' && f.kind === 'explain' && g && !g.expanded) return { later: () => expand($, f) }
+  if (key === 'o' && f.kind === 'heads' && g?.offer) return { later: () => takeOffer($, f, true) }
   if (/^[2-9]$/.test(key) && g) {
     const { looks } = await linksOf($, f, explainerText(g))
     const links = looks.filter((l: Any) => l.n > 0).slice(0, 8)
@@ -527,6 +543,7 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
   }
   const g = await glossOf($, f.row, f.id)
   if (f.kind === 'explain' && g && !g.expanded) out.push({ id: 'tray-e', key: 'e', words: 'expand', focus: true, press: () => expand($, f) })
+  if (f.kind === 'heads' && g?.offer) out.push({ id: 'tray-o', key: 'o', words: OFFER_WORDS.slice(2), focus: true, press: () => takeOffer($, f) })
   out.push({ id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askAbout($, f) }, zero, ...(await steps()))
   return out
 }

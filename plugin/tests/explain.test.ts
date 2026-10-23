@@ -91,7 +91,7 @@ const reply = (d: Any) => ({ isAnswered: true, text: JSON.stringify(d), usage: {
 const ANSWER = 'Uploads fail after the retry budget runs out: [41 of the 44](#) failures came 30 seconds after a drop.'
 const LOOK = reply({
   glosses: [{ term: 'retry budget', body: 'How many times the client tries again.', here: '[upload.py allows five tries](client/upload.py#L3-4).' }, { term: 'not in the answer', body: 'x' }],
-  heads: { term: '30 seconds after a drop', title: 'Only one network', bullets: ['[The log covers one office](logs/upload.log).'], todo: 'Check the other office.' },
+  heads: { term: '30 seconds after a drop', title: 'Only one network', bullets: ['[The log covers one office](logs/upload.log).'], offer: 'Count the failures at the other office' },
 })
 
 test("after a look, the answer's explainer and heads-up stand on their words in the theme's teal and orange, and the digest knows them", async () => {
@@ -101,7 +101,7 @@ test("after a look, the answer's explainer and heads-up stand on their words in 
   const part = await partOf<ExplainPart>(s.$, 't1-row', 'explain')
   expect(part!.order).toEqual(['h1', 'g1'])
   expect(part!.items.g1).toMatchObject({ term: 'retry budget', body: 'How many times the client tries again.' })
-  expect(part!.items.h1).toMatchObject({ kind: 'heads', title: 'Only one network', todo: 'Check the other office.' })
+  expect(part!.items.h1).toMatchObject({ kind: 'heads', title: 'Only one network', offer: 'Count the failures at the other office' })
   const spans = await spansFor(s.$, 't1-row', ANSWER, [{ start: 57, end: 75, words: '41 of the 44' }])
   expect(spans.map(x => ANSWER.slice(x.start, x.end))).toEqual(['retry budget', '30 seconds after a drop'])
   // a highlight: a fill behind the words, teal for an explainer, orange for a heads-up, the words in the theme's text color

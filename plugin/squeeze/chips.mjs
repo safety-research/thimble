@@ -259,7 +259,7 @@ export const MEANS = Object.freeze({
   interpret: Object.freeze([
     () => 'State what was found: counts, values, what happened, and sentences that sum them up or rank them. Leave out why it happened, what follows from it and what to do.',
     () => '',
-    () => "Lead with Claude's reading of the facts, as an expert in the field reads them: the likely cause, what is usual and what is not, what follows, and what to do. Say where the reading starts, as in \"My read:\", so the analyst can tell it from what was found.",
+    () => "Lead with Claude's reading of the facts, as an expert in the field reads them: the likely cause, what is usual and what is not, what follows, and what to do, with the clues in the facts connected to what an expert knows. Say where the reading starts, as in \"My read:\", and mark what comes from that background knowledge, so the analyst can tell it from what was found.",
   ]),
   // (working, where the original stands, asks nothing)
   familiarity: Object.freeze([

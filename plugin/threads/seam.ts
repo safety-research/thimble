@@ -32,7 +32,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { drawThreads, rowsUnder as roomUnder, threadUnder as under } from './pane'
+import { askHere, drawThreads, rowsUnder as roomUnder, threadUnder as under } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadsBright } from './thread'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
@@ -94,6 +94,11 @@ export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown):
 
 export async function openThread($: Engine, scope: ThreadScope, o: { key?: string } = {}): Promise<boolean> {
   return openThreadOn($, scope, o)
+}
+
+/** A question asked at once in the thread on `scope`, as its input bar asks it (a heads-up's offer, from the tray). */
+export async function askInThread($: Engine, scope: ThreadScope, text: string): Promise<void> {
+  return askHere($, scope, text)
 }
 
 /** A reply's passages as the margin asks about them; read again when a thread changes. */

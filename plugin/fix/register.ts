@@ -11,8 +11,9 @@
 //                          or in place: the version the person has stays until y), new <words> a new fix; words with
 //                          neither go to the fixer that works, else the fix the line shows, else a new fix
 //                          (request.ts). The person asked for it after their
-//                          /thimble-fix <words>; else Claude did, when it saw thimble misbehave (skills/fix-thimble/
-//                          SKILL.md). Claude reads what came of it in the skill's place, and is told when the fix ends
+//                          /thimble-fix <words>; else Claude did, on the person's yes to the fix it offered when it
+//                          saw thimble misbehave (skills/fix-thimble/SKILL.md, guidance.md). Claude reads what came
+//                          of it in the skill's place, and is told when the fix ends
 //   /thimble-fix           how to ask for a fix, and that fixes are listed and managed in a shell (thimble fix), at
 //                          once, without a turn of Claude's
 //   the fixer's calls      its shell runs in the sandbox runtime (no network, reads only the system, its tools and

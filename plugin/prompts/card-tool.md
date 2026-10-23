@@ -1,4 +1,4 @@
-Draw an interactive card, or a new version of one in its place. The card appears in the conversation at this call, before the words you write after it; refer to it by its title, not as "below".
+Draw an interactive card, or a new version of one in its place. The card appears in the conversation at this call: what you wrote before the call stands above it, and what you write after it stands below it. Refer to it by its title, not as "above" or "below".
 
 Data: a JSON file of rows that your code wrote from the records: a list, JSON Lines, or one object. The call says what the card read.
 
@@ -6,8 +6,8 @@ View: plain JavaScript (no JSX) that defines `function view(props, surface)`, wi
 
 State: `surface.state` (undefined at first) and `surface.setState(next)` hold plain JSON, kept across resumes. Keep a selection by the record's key, not its place.
 
-Input: `const keys = "jk"` names the letters the card takes at an empty prompt, and `function onKey(key, surface, props)` gets each. Only letters reach a card (a digit types into the prompt), and {{KEPT}} are thimble's own; j and k suit next and previous. `surface.onPointer(fn)`, in view, gets clicks as {type: "down"|"up", x, y} in cells.
+Input: `const keys = "jk"` names the letters the card takes at an empty prompt, and `function onKey(key, surface, props)` gets each. Only letters reach a card (a digit types into the prompt), and {{KEPT}} are thimble's own. Keys read best where their place on the keyboard matches the way they move: j down and k up a list, and j back and k forward through steps that go left to right. `surface.onPointer(fn)`, in view, gets clicks as {type: "down"|"up", x, y} in cells.
 
-The call returns a text copy of the card or the view's error. Try each key and Button with `actions`, and read each copy as the analyst will. Before you reply, fix in one new version what they would misread, a plot that came out mangled, and any change that makes the card easier to read or use. For a change, also one the analyst asks for, call card with the `id` and `edits`, since a whole view takes half a minute to write. The new version still answers the card's first question, with the change beside it. A new question gets a new card.
+The call returns a text copy of the card or the view's error. Try each key and Button with `actions`, and read each copy as the analyst will. Before you go on, fix in one new version what they would misread, a plot that came out mangled, and any change that makes the card easier to read or use. For a change, also one the analyst asks for, call card with the `id` and `edits`, since a whole view takes half a minute to write. The new version still answers the card's first question, with the change beside it. A new question gets a new card.
 
 The guidance's Cards section says what makes a good card.

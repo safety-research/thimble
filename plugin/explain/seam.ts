@@ -41,11 +41,11 @@ import { markColors, mergeLook, placeGlosses } from './place.mjs'
 type Engine = EngineInterface
 
 /** An explainer, or (kind `heads`) an important detail, as 0.10's Gloss: the words it stands on as the person reads
- *  them (`term`), what it is (`body`), where it mattered here (`here`), a heads-up's `title`, `bullets` and `todo`,
- *  and, once written at more length (`expanded`), the short one kept in `short`. Its words may link to the lines of a
- *  file that show a point, as `[words](path#L12-20)`. */
+ *  them (`term`), what it is (`body`), where it mattered here (`here`), a heads-up's `title`, `bullets` and `offer` (a
+ *  check Claude can make), and, once written at more length (`expanded`), the short one kept in `short`. Its words may
+ *  link to the lines of a file that show a point, as `[words](path#L12-20)`. */
 export type Gloss = {
-  id: string; term: string; kind?: 'heads'; title?: string; body?: string; here?: string; bullets?: string[]; todo?: string
+  id: string; term: string; kind?: 'heads'; title?: string; body?: string; here?: string; bullets?: string[]; offer?: string
   expanded?: boolean; short?: { body: string; here: string }
 }
 /** A row's part `explain`: its explainers and heads-ups by id, in the order they were given. */

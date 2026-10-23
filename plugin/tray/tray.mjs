@@ -214,7 +214,7 @@ export function scopeText(f, info = {}) {
   }
   const g = info.gloss || {}
   if (f.kind === 'heads') {
-    return `The analyst asked this with an important detail of your reply open in the tray: "${plain(g.title || g.term)}", on the words "${plain(g.term)}"${where}. It said: ${(g.bullets || []).map(plain).join(' ')}${g.todo ? ` What to do: ${plain(g.todo)}` : ''} "This" or "it" may mean that detail.`
+    return `The analyst asked this with an important detail of your reply open in the tray: "${plain(g.title || g.term)}", on the words "${plain(g.term)}"${where}. It said: ${(g.bullets || []).map(plain).join(' ')}${g.offer ? ` It offered that Claude can do this: ${plain(g.offer)}.` : ''} "This" or "it" may mean that detail.`
   }
   return `The analyst asked this with an explainer of your reply open in the tray: the term "${plain(g.term)}"${where}. The explainer said: ${plain(g.body || g.title)}${g.here ? ` ${plain(g.here)}` : ''} "This" or "it" may mean that term.`
 }
@@ -223,12 +223,12 @@ export function scopeText(f, info = {}) {
 export const canRepair = m => !!m && m.status === 'failed'
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where
- *  it mattered here. A heads-up: its title in bold, two to four bullets, and one line on what to do. */
+ *  it mattered here. A heads-up: its title in bold, two to four bullets, and the check Claude offers to make (o). */
 export function explainerText(g) {
   if (!g) return ''
   if (g.kind === 'heads') {
     const bullets = (Array.isArray(g.bullets) ? g.bullets : []).filter(x => typeof x === 'string' && x.trim()).slice(0, 4)
-    return [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', bullets.map(x => `- ${x}`).join('\n'), g.todo ? `→ ${g.todo}` : ''].filter(Boolean).join('\n\n')
+    return [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', bullets.map(x => `- ${x}`).join('\n'), g.offer ? `Claude can do this for you (o): ${String(g.offer).replace(/[.\s]+$/, '')}.` : ''].filter(Boolean).join('\n\n')
   }
   return [g.body || g.title || '', g.here || ''].filter(Boolean).join('\n\n')
 }
