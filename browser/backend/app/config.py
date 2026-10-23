@@ -20,6 +20,22 @@ from typing import Any, Mapping
 log = logging.getLogger("thimble.config")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def git_dir(root: Path | None = None) -> Path | None:
+    """The `.git` (a folder, or a worktree's file) of the git checkout thimble's browser folder `root` (REPO_ROOT) is
+    part of: its own, or that of the repository that holds it as `browser/` beside the terminal plugin's `plugin/`, as
+    thimble's repository does. None in a copy that is no checkout, such as an installed release; never the git folder
+    of some repository further up that only happens to hold the copy."""
+    root = REPO_ROOT if root is None else root
+    if (root / ".git").exists():
+        return root / ".git"
+    top = root.parent
+    if root.name == "browser" and (top / "plugin").is_dir() and (top / ".git").exists():
+        return top / ".git"
+    return None
+
+
 # new for every start of the server's code, an execv restart and a reload among them: /api/health carries it, so the
 # watch over a restart (restart_watch.py) tells the restarted server from the one before it
 BOOT_ID = os.urandom(4).hex()

@@ -2658,7 +2658,7 @@ def status_line(name: str | None) -> str:
 
 
 def is_git_checkout() -> bool:
-    return (config.REPO_ROOT / ".git").exists()
+    return config.git_dir() is not None
 
 
 def git_branch() -> str:

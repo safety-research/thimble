@@ -410,6 +410,15 @@ def _git(*args: str) -> str:
         return ""
 
 
+def _checkout() -> bool:
+    """Whether REPO_ROOT is part of a git checkout (config.git_dir); its own `.git` when config.py cannot be imported."""
+    try:
+        from . import config  # noqa: PLC0415
+    except Exception:  # noqa: BLE001 — the report is built with the server's code broken too
+        return (REPO_ROOT / ".git").exists()
+    return config.git_dir(REPO_ROOT) is not None
+
+
 def install_kind() -> tuple[str, str]:
     """(`release`, `checkout` or `unknown`, the line versions.txt shows) from RELEASE.json or the git checkout's state.
     """
@@ -417,7 +426,7 @@ def install_kind() -> tuple[str, str]:
     if isinstance(rel, dict):
         return "release", (f"release {rel.get('version', '?')} @ {rel.get('commit', '?')}, {rel.get('date', '?')}, "
                            f"at {REPO_ROOT}")
-    if (REPO_ROOT / ".git").exists():
+    if _checkout():
         dirty = _git("status", "--porcelain")
         return "checkout", (f"git {_git('rev-parse', '--abbrev-ref', 'HEAD') or '?'} @ "
                             f"{_git('rev-parse', '--short', 'HEAD') or '?'} ({len(dirty.splitlines())} uncommitted "

@@ -515,8 +515,9 @@ def file_ticket(workspace: str | None, title: str, body: str, source: str = "ana
 
 def ticket_problem() -> str:
     """Why this server runs no code ticket, '' when it does: the live tree is not a git checkout (RELEASE_LINE), or
-    the server is itself a validation stack (NO_RUNNER_LINE)."""
-    if not (REPO / ".git").exists():
+    the server is itself a validation stack (NO_RUNNER_LINE). The checkout's git folder may be the browser folder's own or
+    the repository's that holds it (config.git_dir)."""
+    if config.git_dir(REPO) is None:
         return RELEASE_LINE
     if not STACK_ENABLED:
         return NO_RUNNER_LINE
@@ -532,7 +533,7 @@ def tickets_run_here(c: str | None = None) -> bool:
 def runner_problem(*, fixing: bool = False) -> str:
     """Why `thimble fix` cannot run here, '' when it can: the live tree is not a git checkout, the server is itself a
     validation stack (unless `fixing`), or the claude CLI is missing."""
-    if not (REPO / ".git").exists():
+    if config.git_dir(REPO) is None:
         return RELEASE_LINE
     if not fixing and not STACK_ENABLED:
         return NO_RUNNER_LINE

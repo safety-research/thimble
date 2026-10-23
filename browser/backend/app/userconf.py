@@ -1020,7 +1020,7 @@ TICKET_FILES = ("tickets.jsonl", "applies.jsonl")  # in a development install's 
 def dev_files() -> list[Path]:
     """The code tickets' records main may not edit in a development install (dev.DEV_DIR's rule, which this module does
     not import), which hold the change their checks passed; none in an installed copy."""
-    if not (config.REPO_ROOT / ".git").exists():
+    if config.git_dir() is None:
         return []
     folder = Path(os.environ.get("THIMBLE_DEV_DIR") or config.REPO_ROOT / "dev")
     return [folder / name for name in TICKET_FILES]
@@ -1030,8 +1030,8 @@ def checkout_git() -> list[Path]:
     """The live checkout's git folder in a development install, which main and its subagents may not edit: only
     thimble's server commits to a code ticket's branch and moves the live branch (dev.commit_worktree); none in an
     installed copy."""
-    git = config.REPO_ROOT / ".git"
-    return [git] if git.exists() else []
+    git = config.git_dir()
+    return [git] if git is not None else []
 
 
 def _spellings(*paths: Path | str) -> list[str]:
