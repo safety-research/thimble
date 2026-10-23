@@ -261,7 +261,8 @@ def unshown(words: str, text: str, approx: bool = False) -> str:
         day = next((m.group(0) for p in DATE_PARTS for m in [p.search(w)] if m), "")
         return f"the day {day}" if day else "the day the words name"
     said = wordnums(text, counts=True)
-    nums = [v for v, d in marked_numbers(wordnums(w, counts=True)) if not has_number(v, said, dates=d, approx=approx)]
+    ww = wordnums(w, counts=True)
+    nums = [number_named(ww, v, d) for v, d in marked_numbers(ww) if not has_number(v, said, dates=d, approx=approx)]
     if nums:
         return " or ".join(dict.fromkeys(nums))
     names = [x for x in NAME.findall(w) if not has_name(x, text)]
@@ -386,6 +387,16 @@ def wordnums(s: str, counts: bool = False) -> str:
     after "these" or "those" points back to things already named ("these two removed …"): it counts nothing."""
     words = [w for w in WORDNUM if not (counts and w == "one")]
     return re.sub(r"(?<!these )(?<!those )\b(" + "|".join(words) + r"|half)\b", lambda m: WORDNUM.get(m.group(1).lower(), "50"), s, flags=re.I)
+
+
+def number_named(words: str, v: str, in_date: bool) -> str:
+    """A number of the words as a reason names it: one that stands in a time or a date by the whole time or date
+    ("14:08", never its "8"), any other by its value."""
+    if in_date:
+        for a, b in date_spans(words):
+            if any(number_at(m) == v for m in NUM.finditer(words[a:b])):
+                return words[a:b]
+    return v
 
 
 def date_spans(text: str) -> list[tuple[int, int]]:
@@ -1328,7 +1339,7 @@ def check_quote(target: str, kind: str, evs: list[dict[str, Any]], cwd: str, roo
     pct = percents(target)
     for v, in_date in (marked_numbers(unmark(target)) if kind != "code" else []):
         if not any(has_number(v, h, dates=in_date) or (v in pct and has_number(fraction(v), h)) for h in hay):
-            problems.append(f"{where} reads “{nearest(target, hay)}”, not {v}")
+            problems.append(f"{where} reads “{nearest(target, hay)}”, not {number_named(unmark(target), v, in_date)}")
     if was and kind != "code" and not problems:
         missing = unshown_change(was, target, "\n".join(hay))
         if missing:

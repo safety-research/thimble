@@ -932,6 +932,11 @@ def test_a_failed_citation_says_why_in_one_plain_sentence(tmp_path):
         (check_mark(mark("13 merged"), card("card:k3f9a1@out1#L3"), [], "/data", cards=CARDS), "Line 3 of the card's output reads “agent-07 12 40”, not 13."),
         (check_mark(mark("15 of 40"), computed("12 of 40", status="corrected", correction={"words": "13 of 40"}), [call(CODE, "12 of 40")], "/data"),
          "The check offered other words, but the result reads “12 of 40”, not 13."),
+        # a time is named whole, never by one of its numbers
+        (check_mark(mark("merged by about 14:08"), computed("merged at 14:07"), [call('import json\nr = json.loads(open("pr.json").read())\nprint("merged at", r["at"])', "merged at 14:07\n")], "/data"),
+         "The result reads “merged at 14:07”, not 14:08."),
+        (check_mark(mark("merged at 14:08"), quote("standup.jsonl", 2, "Merged"), [], str(tmp_path)),
+         "Line 2 of standup.jsonl reads “Merged 4 PRs on 2026-06-12.”, not 14:08."),
         # what is missing
         (check_mark(mark("15 of 40"), computed("15 of 40"), [call(wrong_typed, "15 of 40")], "/data"),
          "The code typed 15 and 40 in by hand instead of computing them from the records."),
