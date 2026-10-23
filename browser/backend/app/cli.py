@@ -86,7 +86,7 @@ import uuid
 from contextlib import contextmanager, redirect_stdout, suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Mapping, NamedTuple
+from typing import Any, Callable, Iterator, Mapping, NamedTuple
 
 from . import cc_plugin, config, headless, launch_mode, procs
 
@@ -100,6 +100,9 @@ PLUGIN_DIR = config.REPO_ROOT / "plugin"
 WAIT_S = 20.0
 LOCK_WAIT_S = 30.0
 STOP_WAIT_S = 6.0
+# how long the server has, after its SIGTERM, to stop its agents and end (runtime.stop_all) before what is left of its
+# session is signalled (_kill): uvicorn's graceful wait (3 s), the agents' (runtime.STOP_WAIT_S) and the modules' own
+SERVER_STOP_S = 15.0
 HEALTH_TIMEOUT_S = 1.0
 LOG_TAIL = 15
 FIX_INSTRUCTION = "File a `file_dev_ticket` titled 'fix: …' describing what broke; the dev agent runs it as a ticket."
@@ -872,9 +875,11 @@ def _signal_all(pids: list[int], sig: int, group: int | None = None) -> None:
             pass
 
 
-def _kill(pid: int | None, check, label: str) -> str:
+def _kill(pid: int | None, check, label: str, settle_s: float = 0.0) -> str:
     """SIGTERM then SIGKILL the session `pid` leads, only while `check(pid)` finds it is still the process server.json
-    meant. Never a name pattern, never a port."""
+    meant. Never a name pattern, never a port. With `settle_s` (the server), `pid` alone has its SIGTERM first and up to
+    that long to end what it runs itself, as the server stops its agents (runtime.stop_all) so each ends `stopped`; the
+    rest of its session (what it could not stop) is signalled after."""
     if not pid or not pid_alive(pid):
         return f"{label}: not running"
     reason = check(pid)
@@ -886,6 +891,14 @@ def _kill(pid: int | None, check, label: str) -> str:
         return f"{label}: not running"
     victims = (session_pids(pid) or [pid]) if leader else [pid]
     group = pid if leader and not procs.HAVE_PROC else None
+    if settle_s > 0:
+        _signal_all([pid], signal.SIGTERM)
+        deadline = time.monotonic() + settle_s
+        while pid_alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if not any(pid_alive(q) for q in victims):
+            more = f" ({len(victims)} processes)" if len(victims) > 1 else ""
+            return f"{label}: pid {pid} stopped{more}"
     _signal_all(victims, signal.SIGTERM, group)
     deadline = time.monotonic() + STOP_WAIT_S
     while any(pid_alive(q) for q in victims) and time.monotonic() < deadline:
@@ -1045,11 +1058,11 @@ def stop(*, vite: bool = True, kernels: bool = True) -> list[str]:
     recorded = is_server(st.get("pid"), p, st.get("repo"))
     if not kernels and st.get("pid") and pid_alive(st.get("pid")):
         hand_over_kernels(int(st["pid"]))
-    lines.append(_kill(st.get("pid"), server_check(p, st.get("repo")), "server"))
+    lines.append(_kill(st.get("pid"), server_check(p, st.get("repo")), "server", SERVER_STOP_S))
     if not recorded:  # a stale record (module note): the server answering on the port, when it is this checkout's
         leader = health_leader(api_url(p))
         if leader and leader != st.get("pid") and is_server(leader, p, st.get("repo")):
-            lines.append(_kill(leader, server_check(p, st.get("repo")), "server"))
+            lines.append(_kill(leader, server_check(p, st.get("repo")), "server", SERVER_STOP_S))
     if vite and st.get("vite_pid"):  # a release install, and a checkout that serves the build, run no Vite
         lines.append(_kill(st.get("vite_pid"), argv_check("vite"), "vite"))
     if kernels:
@@ -2645,7 +2658,7 @@ def status_line(name: str | None) -> str:
 
 
 def is_git_checkout() -> bool:
-    return (config.REPO_ROOT / ".git").exists()
+    return config.git_dir() is not None
 
 
 def git_branch() -> str:
@@ -4665,14 +4678,40 @@ def cmd_browser(args: argparse.Namespace) -> int:
     if getattr(args, "detach", False):
         return 0
     print(BROWSER_LINE.format(what="the server runs until you press Ctrl-C here."), flush=True)
+    hold_until_quit()
+    return 0
+
+
+class Quit(Exception):
+    """The terminal that holds thimble-browser closed (SIGHUP), or the launcher was told to end (SIGTERM)."""
+
+
+def _quit(signum: int, _frame: Any) -> None:
+    raise Quit(signum)
+
+
+def hold_until_quit(sleep: Callable[[float], None] = time.sleep) -> None:
+    """Hold the terminal until Ctrl-C, or until the terminal closes or the launcher is told to end, then stop the
+    server (stop), which stops every agent it runs first (runtime.stop_all). A second signal does not cut that stop
+    short, and lines a closed terminal can no longer take are dropped. `sleep` is a seam for tests."""
+    sigs = (signal.SIGINT, signal.SIGHUP, signal.SIGTERM)
+    before = {sig: signal.getsignal(sig) for sig in sigs}
+    for sig in (signal.SIGHUP, signal.SIGTERM):
+        signal.signal(sig, _quit)
     try:
         while True:
-            time.sleep(3600)
-    except KeyboardInterrupt:
-        print("")
-        for ln in stop():
-            print(ln)
-    return 0
+            sleep(3600)
+    except (KeyboardInterrupt, Quit):
+        for sig in sigs:
+            signal.signal(sig, signal.SIG_IGN)
+        for ln in ["", *stop()]:
+            try:
+                print(ln, flush=True)
+            except OSError:  # the terminal is gone
+                pass
+    finally:
+        for sig, handler in before.items():
+            signal.signal(sig, handler)
 
 
 def cmd_server_status(args: argparse.Namespace) -> int:

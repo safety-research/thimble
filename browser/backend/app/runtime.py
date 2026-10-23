@@ -911,17 +911,42 @@ async def _lifespan(app: Any):
                 ensure(p.parent.parent.name)
         _loop.run_in_executor(None, llm.warm)  # so the first message does not wait for the SDK's import
     yield
-    for sp in list(_spaces.values()):
-        for conv in [sp.main, *sp.convs.values()]:
-            if conv.running:
-                conv.task.cancel()  # type: ignore[union-attr]
+    # this router is included last, so its lifespan ends first, while the mirror and the modules still run
+    await stop_all()
 
 
 router = APIRouter(lifespan=_lifespan)
 
+STOP_WAIT_S = 5.0  # how long the server's stop waits for its agents to end (stop_all)
 
-async def shutdown() -> None:
+
+async def stop_all(wait_s: float = STOP_WAIT_S) -> list[str]:
+    """The server stops (Ctrl-C in thimble-browser, a restart): every agent it runs stops, main's turn, the threads'
+    forks and thimble's agents, as a Stop click stops one (_cancel): each ends `stopped` in its chat and in the registry
+    (_agent_loop, _ended). It waits up to `wait_s` for them, then the mirror keeps where each stands
+    (session.keep_places), so the next server neither shows them running nor takes them up again. The ids stopped."""
+    from . import session  # noqa: PLC0415
+
+    stopping: list[tuple[str, Any]] = []
+    mains = [sp.c for sp in _spaces.values() if sp.main.running]
     for sp in list(_spaces.values()):
         for conv in [sp.main, *sp.convs.values()]:
             if conv.running:
+                conv.queue.clear()
                 conv.task.cancel()  # type: ignore[union-attr]
+                stopping.append((f"{sp.c}/{conv.id}", conv.task))
+    if stopping:
+        waits = [t if isinstance(t, asyncio.Future) else asyncio.wrap_future(t) for _, t in stopping]
+        _, late = await asyncio.wait(waits, timeout=wait_s)
+        if late:
+            log.warning("%d agent(s) did not stop within %g s", len(late), wait_s)
+        log.info("the server stops: stopped %s", ", ".join(i for i, _ in stopping))
+    for c in mains:  # main's turn ends with a note, as the Stop button ends it (agents.interrupt_route)
+        with contextlib.suppress(Exception):
+            session.turn_stopped(c, stopped=True, text=session.QUIT_TEXT)
+    session.keep_places()
+    return [i for i, _ in stopping]
+
+
+async def shutdown() -> None:
+    await stop_all()

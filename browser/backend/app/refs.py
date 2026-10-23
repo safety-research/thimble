@@ -719,6 +719,27 @@ def _resolve_folder(corpus_dir: Path, rel: str, ref: str) -> dict[str, Any]:
     return {"ref": ref, "kind": "path", "path": rel + "/", "record": None, "excerpt": excerpt[:EXCERPT_MAX], "meta": meta}
 
 
+def path_kinds(corpus_dir: Path, paths: list[str]) -> dict[str, str | None]:
+    """Whether each corpus path names a folder (one a folder ref resolves, _resolve_folder) or a file, by a stat alone,
+    for a chip's glyph before its hover resolves it: {path: "folder" | "file" | None}, None for a path that names
+    neither, that the Files listing leaves out, or that leads outside the corpus."""
+    from . import corpus  # lazy (import cycle)
+
+    out: dict[str, str | None] = {}
+    for p in paths:
+        rel, kind = p.strip(), None
+        try:
+            path, _ = _locate(corpus_dir, rel)
+            if path.is_dir():
+                kind = "folder" if corpus._listed_folder(corpus_dir, rel.strip("/"), False) is not None else None
+            elif path.is_file():
+                kind = "file"
+        except (RefError, OSError):
+            pass
+        out[p] = kind
+    return out
+
+
 _MOMENT = re.compile(r"^t=([0-9:.]+)(?:,([0-9:.]+))?$")  # a video's or a recording's moment, the media fragment's form
 
 

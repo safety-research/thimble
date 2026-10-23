@@ -167,6 +167,7 @@ SAFETY_TEXT = "Claude's safety check stopped a response, and the session is tryi
 SAFETY_STOP_TEXT = "The session stopped: Claude's safety check ended this turn"
 INTERRUPTED_TEXT = "The turn was interrupted in the terminal"
 STOPPED_TEXT = "The turn was stopped in the browser"
+QUIT_TEXT = "The turn stopped when thimble-browser quit"  # the server stopped under it (runtime.stop_all)
 WAITING_TEXT = "The session is waiting for you in the terminal"
 WAITING_FOR = {"permission prompt": "a permission prompt", "dialog open": "a dialog is open",
                "input needed": "a request for input", "sandbox request": "a sandboxed command asks for network access"}
@@ -421,6 +422,17 @@ def _save_cursor(lv: Live) -> None:
     if main_moved:
         lv.saved = at
     lv.subs_saved = offsets
+
+
+def keep_places() -> None:
+    """Keep where each followed transcript stands now, in every workspace (_save_cursor): the server stops
+    (runtime.stop_all) once its agents ended, so a fork that ended is not taken up again at the next start
+    (_restore_subs)."""
+    for lv in list(_live.values()):
+        try:
+            _save_cursor(lv)
+        except Exception:  # noqa: BLE001 — one workspace's record that cannot be written leaves the others
+            log.warning("%s: the mirror's places were not kept", lv.c, exc_info=True)
 
 
 def _sub_places(lv: Live) -> dict[str, dict]:
@@ -1412,14 +1424,14 @@ def _interrupted(lv: Live) -> None:
         _stopped(lv, SAFETY_STOP_TEXT if lv.held_by_check or (lv.flagged and not lv.answered) else INTERRUPTED_TEXT)
 
 
-def turn_stopped(c: str, *, stopped: bool = True) -> None:
+def turn_stopped(c: str, *, stopped: bool = True, text: str = STOPPED_TEXT) -> None:
     """The analyst's Stop ended main's turn (subagents.stop_main: `$.turn.abort`, which writes neither an interrupt's
     line nor a turn_duration record into the transcript): what the transcript holds of the turn is read first, then the
     turn ends with its note, as an interrupt in the terminal ends it (a start it missed is not asked for again), and the
     cursor keeps it ended. A prompt the read finds after the stopped turn (one that waited, which Claude Code takes up
     at once) opened the next turn, which goes on. With `stopped` false, Claude Code ran no turn of main's when the Stop
     came: only a turn an interrupt or a safety stop ended (its note is in) and that the mirror still holds open ends,
-    with no note of its own; any other is one whose end the mirror has yet to read."""
+    with no note of its own; any other is one whose end the mirror has yet to read. `text` is the note."""
     lv = _live.get(c)
     if lv is None:
         return
@@ -1430,7 +1442,7 @@ def turn_stopped(c: str, *, stopped: bool = True) -> None:
     if not stopped and not lv.stop_noted:
         return
     if stopped:
-        _stopped(lv, STOPPED_TEXT)
+        _stopped(lv, text)
     _end_turn(lv)
     lv.saved = -1  # _save_cursor writes the ended turn even when the transcript did not grow
     _save_cursor(lv)

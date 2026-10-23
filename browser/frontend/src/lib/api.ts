@@ -855,6 +855,14 @@ export const scaleApi = {
       Object.assign(stamps, (await j<{ stamps: Record<string, string | null> }>(`${apiBase()}/corpora/${enc(c)}/sources/stamps?${query}`)).stamps)
     return { stamps }
   },
+  /** `GET /corpora/{c}/sources/kinds?path=…`: whether each path names a folder or a file (null for neither), by a stat
+   * alone (lib/pathKinds); as many requests as stampQueries makes. */
+  pathKinds: async (c: string, paths: readonly string[]) => {
+    const kinds: Record<string, 'folder' | 'file' | null> = {}
+    for (const query of stampQueries(paths))
+      Object.assign(kinds, (await j<{ kinds: Record<string, 'folder' | 'file' | null> }>(`${apiBase()}/corpora/${enc(c)}/sources/kinds?${query}`)).kinds)
+    return { kinds }
+  },
   /** `GET /ws/{c}/labels?path=&lines=a-b`: every concept's rows on lines a..b of one file, plus its whole-file rows. */
   labelsForLines: (c: string, path: string, a: number, b: number) => j<LabelsForPath[]>(`${ws(c)}/labels${q({ path, lines: `${a}-${b}` })}`),
   /** `GET /ws/{c}/labels?path=&lines=a-b,c-d,...`: every concept's rows on each of these ranges of one file's lines, plus
