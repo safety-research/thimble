@@ -520,7 +520,7 @@ const CODE_INK = 'permission'
 type Unit = { h: number; el?: Any; code?: string }
 
 /** A line of evidence in the ruled block under the code or the file's place: a dim rule on the left, so code and
- *  output read apart, and the line, the cited words in the soft tint. */
+ *  output read apart, and the line, the cited words bold in the citation purple (CITE_LOOK). */
 function ruled(els: Any, text: string, spans: [number, number][], w: number, key: string): Unit {
   const { Box, Text } = els
   const h = rowsOf(text, w - 2)
@@ -537,7 +537,7 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
  *  block, ended by a dim count of the output lines it leaves out; with c, all the code (as code), then all the output
  *  in the ruled block. For a file: its place (`place`, a click opens the side pane), then the cited line in the ruled
  *  block. For a card's value: the card's title, then the header over the cited row in the ruled block; printed output
- *  that is a table shows so too. The cited words in the soft tint. */
+ *  that is a table shows so too. The cited words bold in the citation purple. */
 function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: Any | null): Unit[] {
   const { Text } = els
   if (!m) return [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }]
@@ -680,8 +680,10 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     Text({ key: 'q', children: asked.length > 60 ? asked.slice(0, 59) + '…' : asked }),
     Text({ key: 'b', dimColor: true, children: ' · a opens it' }),
   ] }) })
-  // what fits above the bar: the frame's two borders and title take three rows
-  const fit = room > 0 ? Math.max(3, room - 3) : 0
+  // what fits above the bar: the frame's two borders and title take three rows, and an explainer's or heads-up's words
+  // one more, the blank row messageEl draws above them (marks/view.ts)
+  const gap = words && words.text.trim() ? 1 : 0
+  const fit = room > 0 ? Math.max(3, room - 3 - gap) : 0
   const page = pageOf(units.map(u => u.h), fit, f.page ?? 0)
   paged = page.next === null ? null : { f, next: page.next }
   const shown = units.slice(page.start, page.end)
@@ -702,7 +704,7 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   if (page.next !== null) {
     const n = units.length
     body = [
-      Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1), overflow: 'hidden', children: body }),
+      Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1) + gap, overflow: 'hidden', children: body }),
       Text({ key: 'tray-more', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 ? 'm from the top' : 'm more'} · lines ${page.start + 1}–${page.end} of ${n}` }),
     ]
   }

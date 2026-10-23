@@ -33,7 +33,7 @@ const TONE: Record<string, Record<string, unknown>> = {
   rule: { dimColor: true },
   bold: { bold: true },
 }
-/** The selected row's name, tinted as a cited value is (marks/evidence.tsx CITE_TINT). */
+/** The selected row's name, tinted: the soft band Claude Code draws behind the person's own messages. */
 const SEL_TINT = 'userMessageBackground'
 
 export async function drawCoverage($: EngineInterface, e: Any, args: unknown, els: Any): Promise<unknown> {

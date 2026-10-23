@@ -313,19 +313,33 @@ export function hiddenOutput(ev, shown = 1) {
 /** What a citation's one-line card says of the output lines it leaves out: `+ 3 more lines`, `+ 1 more line`. */
 export const moreLines = n => `+ ${n} more line${n === 1 ? '' : 's'}`
 
-/** A line cut to `room` characters, around its first span when it is longer, with … where it was cut; its spans moved
- *  with it. */
+/** A line cut to `room` characters around its first span when it is longer: the span with as much of the line on each
+ *  side as fits, cut between words (inside a word only when no space is left between the cut and the span), with `… ` or ` …` only
+ *  where text was cut; its spans moved with it. A span wider than the room shows from its start. */
 export function lineWindow(line, room) {
   if (!line) return line
   const { text, spans } = line
   if (!(room > 8) || text.length <= room) return line
   const [a, b] = spans[0] || [0, 0]
-  let from = Math.max(0, Math.min(a - Math.floor((room - (b - a)) / 2), text.length - room + 1))
-  if (from > 0) from = Math.min(from + 1, a)
-  const head = from > 0 ? '…' : ''
-  const left = room - head.length
-  const to = from + left < text.length ? from + left - 1 : text.length
-  const tail = to < text.length ? '…' : ''
+  // the window: the span in its middle, room less 2 cells for each `… ` a cut side needs
+  let from = Math.max(0, Math.min(a - Math.floor((room - 4 - (b - a)) / 2), text.length - (room - 2), a))
+  const open = room - (from > 0 ? 2 : 0)
+  let to = from + open >= text.length ? text.length : from + open - 2
+  // whole words: a cut inside a word moves to the word's edge, never into the span
+  const inWord = i => i > 0 && i < text.length && /\S/.test(text[i - 1]) && /\S/.test(text[i])
+  if (inWord(from)) {
+    const m = /\s+/.exec(text.slice(from, a))
+    if (m) from += m.index + m[0].length
+  }
+  if (inWord(to)) {
+    const lo = b < to ? Math.max(b, from + 1) : from + 1
+    const j = text.slice(lo, to).search(/\s\S*$/)
+    if (j >= 0) to = lo + j
+  }
+  while (from < to && /\s/.test(text[from])) from++
+  while (to > from && /\s/.test(text[to - 1])) to--
+  const head = from > 0 ? '… ' : ''
+  const tail = to < text.length ? ' …' : ''
   const moved = spans.map(([x, y]) => [Math.max(x, from) - from + head.length, Math.min(y, to) - from + head.length]).filter(([x, y]) => y > x)
   return { ...line, text: head + text.slice(from, to) + tail, spans: moved }
 }
