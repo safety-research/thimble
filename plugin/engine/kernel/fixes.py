@@ -1846,7 +1846,9 @@ def cmd_update(a) -> int:
     if a.json:
         out_json(r)
         return 0
-    print("\n".join(lines))
     if r.get("reload"):
-        print("In Claude Code, type /reload-plugins to load it.")
+        # the hint goes before the pending fixes' command, so that the command is the last line
+        at = lines.index("") if "" in lines else len(lines)
+        lines = [*lines[:at], "In Claude Code, type /reload-plugins to load it.", *lines[at:]]
+    print("\n".join(lines))
     return 0
