@@ -6,20 +6,34 @@ This repository holds two products: the terminal plugin for Claude Code (`plugin
 ## Installing thimble for a user
 
 When the user asks you to install thimble (for example "install thimble from
-https://github.com/safety-research/thimble"), follow [INSTALL.md](INSTALL.md):
+https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) has the details and the fixes.
 
-1. Ask whether they want the browser workbench too. It takes about 1 GB of disk and needs credentials for the Claude
-   API; the terminal plugin alone needs neither.
+1. Ask first, with your question tool (AskUserQuestion) when you have it, which they want:
+   - **The terminal plugin alone**: in their Claude Code sessions, Claude cites its claims, a second Claude checks
+     them, and Claude draws cards of the data. It needs Node.js and Python, and no other access.
+   - **The browser workbench too**: the same work in a web page on this machine. It takes about 1 GB of disk and needs
+     access to the Claude API: an API key, Workload Identity Federation, or their Claude Code sign-in.
 2. If `~/.local/bin/thimble` exists, it is thimble 0.9's launcher. Tell the user, and offer `thimble uninstall` (or
    removing that file) before you go on.
-3. Run `scripts/install.sh` in a clone, with `--no-browser` for the plugin alone. It checks what is needed first and
-   says what is missing, one line each. Tell the user what is missing, with the command that fixes it, and run that
-   command only when the user agrees. Then run the script again.
-4. End with a short reply: the plugin works in a new `claude` session in a folder of data files that they trust; Claude
-   adds a citation to each claim it makes and a second Claude checks them; the line above the prompt lists the keys that work, such
-   as `v` for a card of the last answer; a click on `thimble` in that line (or `/thimble-settings`) turns each feature
-   on or off, and `/plugin` turns thimble off. The browser workbench starts
-   with `thimble-browser` in a folder of files (or `thimble-browser FOLDER`), and asks for credentials in its Settings.
+3. Clone the repository (or use the local folder the user names) and run `scripts/install.sh` in it, with
+   `--no-browser` for the plugin alone. Add `--local` when the source is a local folder, so the plugin comes from it.
+   The script checks what is missing first, one line each, and installs nothing until all of it is there. Tell the
+   user what is missing and the command that fixes it, run that command only when the user agrees, then run the
+   script again.
+4. End with a short reply on how to use what was installed:
+   - The plugin: open `claude` in a folder of data files. Claude cites each claim, and a second Claude checks it
+     against the files; a click on the underlined words opens the evidence. The line above the prompt shows the keys:
+     `v` card, `s` squeeze, `c` claims, `r` coverage. A click on `thimble` in that line, or `/thimble-settings`, opens
+     the settings; `/plugin` turns thimble off.
+   - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints. The page asks at
+     its first start how it reaches Claude (an API key, Workload Identity Federation, or the Claude Code sign-in);
+     `thimble-browser --setup` asks again.
+5. When the plugin was installed, offer to show it in this session. `examples/sample/runs.csv` holds 40 made-up
+   nightly test runs. The user types `/reload-plugins` (you cannot type it for them), which loads thimble here, then
+   sends: "Did the failures in examples/sample/runs.csv start after the config change? Show it as a card." Give the
+   file's full path in that line. Answer it as thimble's guidance says: one card, and checked citations. If the line
+   above the prompt does not show `thimble` after the reload, give the two commands that start it fresh instead:
+   `cd <clone>/examples/sample` and `claude`, with the same question.
 
 ## Working on thimble
 
