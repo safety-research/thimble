@@ -550,7 +550,8 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
     for m in found:
         why = await repair(c, turn=None if m.get("card") else turn, n=None if m.get("card") else m["n"],
                            card=m.get("card"), k=m.get("k"), fork=fork, auto=True)
-        if why:
+        # a mark that is not failed now has nothing to repair: a takeaway written again meanwhile is under its own check
+        if why and why != NOT_FAILED:
             _notice(c, f"The repair of a failed citation did not start ({why[:100]}). Press Repair on it to try again.")
 
 
@@ -672,6 +673,8 @@ def repair_tell_text(items: list[dict[str, Any]], auto: bool = False) -> str:
 
 
 REPAIRABLE = ("failed", "unchecked")
+# repair's answer for a mark that is not failed now: checked as it stands, or under a check again
+NOT_FAILED = "this citation is not one that failed"
 # what a repair clears of a mark: its earlier result goes, its place and words stay
 CLEARED = ("status", "was", "reason", "failedBy", "evidence", "note", "narrowed", "rewrite", "shown")
 
@@ -708,7 +711,7 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         text = str((cell or {}).get("takeaway") or "")
         m = next((x for x in kept.get("items") or [] if x.get("k") == k), None) if kept.get("text") == text else None
         if not m or m.get("status") not in REPAIRABLE:
-            return "this citation is not one that failed"
+            return NOT_FAILED
         request = repair_request(m, 1)
         base = {key: v for key, v in m.items() if key not in CLEARED}
         share = {**base, "n": 1, "status": "checking", "shown": m["words"], "card": card,
@@ -724,7 +727,7 @@ async def repair(c: str, turn: str | None = None, n: int | None = None, card: st
         reply = stored(c, turn or "")
         m = next((x for x in (reply or {}).get("items") or [] if x.get("n") == n), None)
         if not m or m.get("status") not in REPAIRABLE:
-            return "this citation is not one that failed"
+            return NOT_FAILED
         request = repair_request(m, int(m["n"]))
         base = {key: v for key, v in m.items() if key not in CLEARED}
         share = {**base, "status": "checking", "shown": m["words"]}

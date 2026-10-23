@@ -419,7 +419,7 @@ def test_repair_checks_a_failed_mark_again_and_main_hears_how_it_ended(_fresh, m
     async def go():
         assert await marks.repair(CORPUS, turn=turn, n=1, fork=fork) == ""
         await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
-        assert await marks.repair(CORPUS, turn=turn, n=1, fork=fork) == "this citation is not one that failed"
+        assert await marks.repair(CORPUS, turn=turn, n=1, fork=fork) == marks.NOT_FAILED
 
     asyncio.run(go())
     assert "The analyst pressed x to repair citation 1." in seen[0] and "found it wrong: \"The card shows 104" in seen[0]
@@ -632,3 +632,29 @@ def test_main_hears_a_reply_s_check_while_a_repair_of_one_of_its_marks_runs(_fre
     assert '"243 against 99" is corrected to "243 against 104"' in said()[0] and "243 against 105" not in said()[0]
     assert '"243 against 105" is corrected to "243 against 104"' in said()[1]
     assert [m["status"] for m in marks.stored(CORPUS, turn)["items"]] == ["corrected"] * 2 + ["verified"] * 3
+
+
+def test_a_repair_that_cannot_start_says_why_and_a_mark_no_longer_failed_is_left_alone(_fresh, monkeypatch):
+    """The check's end repairs its failed marks. A repair that cannot start says why, with Repair as the fix. A mark
+    that is not failed when its repair would start (a takeaway written again, now under a check of its own) has
+    nothing to repair, so no notice is shown for it."""
+    place = _runs_card()
+    answers: list[str] = []
+
+    async def fork(c, main, cut, prompt):
+        out = [{"mark": 1, "kind": "card", "evidence": place, "status": "wrong", "correction": None,
+                "reason": "The card shows 104, not 105."}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    async def gone(c, **kw):
+        return answers.pop(0)
+
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+    monkeypatch.setattr(marks, "repair", gone)
+    for why in ("main has no finished turn to check from yet", marks.NOT_FAILED):
+        answers.append(why)
+        asyncio.run(marks.start_check(CORPUS, main, marks.new_turn(), ["Opus closed [243 against 105](#) issues."], "cut-1",
+                                      fork=fork))
+    notices = [t for _, t in _fresh if t.startswith("notice")]
+    assert notices == ["notice: The repair of a failed citation did not start (main has no finished turn to check from "
+                       "yet). Press Repair on it to try again."], notices
