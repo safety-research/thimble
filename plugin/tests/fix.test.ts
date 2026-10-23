@@ -1,13 +1,16 @@
 // thimble fix in the hooks module (fix/), on a plain engine whose kernel is faked (the kernel's own tests are
-// test_fixes.py): /thimble-fix starts the fixer in its copy; the fixer's shell runs in the sandbox and it writes only its
-// copy; Claude can neither apply nor send a fix; the fixer's end puts the fix's line above the bar; y applies it with a
-// secret only that press holds and reloads the plugins; u undoes it; n leaves it off; /thimble-fix alone lists the
-// fixes, and d shows a fix's diff. All data is made up. `claude plugin test plugin`.
+// test_fixes.py): /thimble-fix, or Claude's fix-thimble skill, starts the fixer as a fork of the session in its copy,
+// with a text copy of what thimble shows; more words while it works go to the same fixer; Claude can neither apply nor
+// send a fix, the fixer included; the fixer's end puts the fix's line above the bar and sends a notification; d shows
+// what changed; y applies it with a secret only that press holds and reloads the plugins (at the turn's end when Claude
+// is mid-reply; a --plugin-dir session is told to restart); u undoes it; n leaves it ready in the list; /thimble-fix
+// alone lists the fixes. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { fixKey, fixLineRows } from '../fix/line'
 import { drawFixes } from '../fix/pane'
-import { registerFix } from '../fix/register'
+import { registerFix, wordsOfSkill } from '../fix/register'
+import { textOf as screenText, TEXT_ELS } from '../fix/screen'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -15,8 +18,6 @@ type Any = any
 
 const HOME = '/made-up/.thimble'
 const WORK = `${HOME}/fixes/work/1`
-const BOX = ['/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', '/made-up/node', '/made-up/plugin/sandbox/run.mjs', '--srt', `${HOME}/srt/0.0.79`,
-  JSON.stringify({ filesystem: { allowWrite: [{ path: WORK, literal: true }, { path: `${HOME}/fixes/tmp/1`, literal: true }] } }), '--', '/bin/bash', '-c']
 const ELS = { Box: (p: Any) => ({ type: 'Box', props: p }), Text: (p: Any) => ({ type: 'Text', props: p }), Button: (p: Any) => ({ type: 'Button', props: p }) }
 
 function textOf(n: Any): string {
@@ -60,14 +61,20 @@ function setup() {
   const commands: string[] = []
   const opened: string[] = []
   const toasts: string[] = []
+  const notes: { text: string; title?: string }[] = []
+  const sent: { to: Any; text: string }[] = []
+  const agents: { id: string; status: string }[] = []
+  const config: { key: string; value: unknown }[] = []
   const fix: Any = { id: 1, title: 'make the bar say read', words: ["make the bar's coverage item say read"], rounds: 1, made_in: 'terminal', created: 1761200000, state: 'working', work: WORK, commit: null, files: [], tests: null, summary: '', error: null }
-  const list = () => ({ fixes: [fix], on: true, live: `${HOME}/fixes/live`, version: '0.10.2', count_on: fix.state === 'on' ? 1 : 0, pointed: true })
+  // the kernel's records: none until the first request
+  let made = false
+  const list = () => ({ fixes: made ? [fix] : [], on: true, live: `${HOME}/fixes/live`, version: '0.10.2', count_on: fix.state === 'on' ? 1 : 0, pointed: true })
   const kernel = (argv: string[], stdin?: string) => {
     const ok = (out: unknown) => ({ exitCode: 0, stdout: typeof out === 'string' ? out : JSON.stringify(out), stderr: '' })
     const verb = argv[argv.indexOf('fix') + 1]
     if (verb === 'list') return ok(list())
-    if (verb === 'new') return ok(fix)
-    if (verb === 'sandbox') return ok(BOX)
+    if (verb === 'new') { made = true; return ok(fix) }
+    if (verb === 'round') { Object.assign(fix, { words: [...fix.words, stdin], rounds: fix.rounds + 1, state: 'working' }); return ok(fix) }
     if (verb === 'done') {
       const t = argv.indexOf('--title')
       Object.assign(fix, { state: argv.includes('--request') ? 'request' : 'ready', title: t > 0 ? argv[t + 1] : fix.title, summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }] })
@@ -101,11 +108,15 @@ function setup() {
       set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true } },
     },
     clock: { now: async () => (now += 1000), sleep: async () => undefined, after: (_ms: number, fn: () => unknown) => { timers.push(fn); return { cancel() {} } }, every: () => ({ cancel() {} }) },
-    agent: { register: async () => ({ agent: 'thimble:fixer' }), spawn: async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-fixer-${spawns.length}` } } },
-    session: { id: async () => 's-fix', cwd: async () => '/made-up/data', root: async () => '/made-up/data' },
+    agent: {
+      spawn: async (a: Any) => { spawns.push(a); const agentId = `agent-fixer-${spawns.length}`; agents.push({ id: agentId, status: 'running' }); return { model: 'claude-made-up', agentId } },
+      list: async () => agents,
+    },
+    session: { id: async () => 's-fix', cwd: async () => '/made-up/data', root: async () => '/made-up/data', send: async (a: Any) => { sent.push(a); return { isDelivered: true } } },
+    config: { list: async () => config },
     process: { run: async (argv: string[], o: Any = {}) => { ran.push({ argv, ...(o.stdin != null ? { stdin: o.stdin } : {}) }); return argv.includes('fix') ? kernel(argv, o.stdin) : { exitCode: 0, stdout: '', stderr: '' } } },
     command: { run: async (c: Any) => { commands.push(c.command); return {} }, register: async () => ({ command: 'thimble-fix' }) },
-    ui: { toast: (t: string) => { toasts.push(t) }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: () => undefined },
+    ui: { toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: () => undefined },
   }
   /** An event through the module's hooks that admit it, in order, then `base`. */
   const call = (event: string, e: Any, base: (e: Any) => Any = async x => x) => {
@@ -119,61 +130,95 @@ function setup() {
     await new Promise(r => setTimeout(r, 5))
   }
   const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).join(' ')).filter(Boolean)
-  return { $, call, tick, ran, spawns, commands, files, fix, opened, toasts, verbs }
+  /** The fixer's end: its agent idles, and its turn's end reaches the hooks. */
+  const end = async (answer: string, agentId = 'agent-fixer-1') => {
+    for (const a of agents) if (a.id === agentId) a.status = 'idle'
+    await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
+    await tick()
+  }
+  return { $, call, tick, end, made: () => { made = true }, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs }
 }
 
 /** A request, and the fixer's end with what it says. */
 async function requested(s: ReturnType<typeof setup>, answer = 'Done.\n\nTitle: Bar says read for coverage\nWhat it does: The bar says r read 14%.') {
   await s.call('session.start', { cwd: '/made-up/data' })
   const r = await s.call('command.run', { command: 'thimble-fix', args: "make the bar's coverage item say read" })
-  await s.call('turn.complete', { turnId: 't-f', agentId: 'agent-fixer-1', reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
-  await s.tick()
+  await s.end(answer)
   return r
 }
 
-test('a request starts the fixer in its copy; its shell runs in the sandbox, and Claude can neither apply nor write the fixes', async () => {
+const ran = async (e: Any) => ({ result: { ran: e.command ?? e.file_path ?? '' } })
+
+test("a request forks the session into its copy with a text copy of the screen; no call, the fixer's included, applies or writes the fixes", async () => {
   const s = setup()
   await s.call('session.start', { cwd: '/made-up/data' })
+  // what the screen shows: a failure line above the bar, and Your fixes open in the side pane
+  await s.$.state.set({ plugin: 'thimble', key: 'failLine' }, { kind: 'failed', text: 'The card “Runs by day” could not be drawn' })
+  await s.call('command.run', { command: 'thimble-fix', args: '' })
   const r = await s.call('command.run', { command: 'thimble-fix', args: "make the bar's coverage item say read" })
-  expect(String(r.text)).toContain('works on fix 1')
+  expect(String(r.text)).toBe('A fork of this session is fixing it in the background (fix 1). Keep going.')
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("make the bar's coverage item say read")
-  expect(s.spawns[0]).toMatchObject({ subagentType: 'thimble:fixer', cwd: WORK })
-  expect(s.spawns[0].prompt).toContain("make the bar's coverage item say read")
-  const ran = async (e: Any) => ({ result: { ran: e.command ?? e.file_path ?? '' } })
-  // the fixer's Bash: the same command, in the sandbox
-  const bash = await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-1', agentId: 'agent-fixer-1', command: 'claude plugin test plugin' }, ran)
-  expect(String(bash.result.ran).startsWith("'/usr/bin/env' '-i'")).toBe(true)
-  expect(String(bash.result.ran)).toContain("'/bin/bash' '-c' 'claude plugin test plugin'")
-  // its writes: only in its copy; no other tools
+  // a fork (no agent type of its own), in the copy, whose first message opens with the fixer's task
+  expect(s.spawns[0]).toMatchObject({ subagentType: 'fork', cwd: WORK })
+  const first = String(s.spawns[0].prompt)
+  expect(first.startsWith('PROMPT fixer')).toBe(true)
+  expect(first).toContain("The person asked for this change to their thimble (fix 1):\n\nmake the bar's coverage item say read")
+  expect(first).toContain("What thimble shows on the person's screen now, as text")
+  expect(first).toContain('× The card “Runs by day” could not be drawn')
+  expect(first).toContain('The side pane, open on fixes:')
+  expect(first).toContain('Your fixes · thimble 0.10.2')
+  expect(first).toContain('No card is drawn.')
+  // the fixer's calls go to Claude Code's own permission handling: thimble neither rewrites nor answers them
+  expect((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-1', agentId: 'agent-fixer-1', command: 'claude plugin test plugin' }, ran)).result.ran).toBe('claude plugin test plugin')
   expect((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-2', agentId: 'agent-fixer-1', file_path: `${WORK}/plugin/bar/bar.tsx` }, ran)).result.ran).toBe(`${WORK}/plugin/bar/bar.tsx`)
-  expect(String((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-3', agentId: 'agent-fixer-1', file_path: '/made-up/data/notes.md' }, ran)).deny)).toContain('only its copy')
-  expect(String((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-3b', agentId: 'agent-fixer-1', file_path: `${WORK}/../../live/plugin/x.ts` }, ran)).deny)).toContain('only its copy')
-  expect(String((await s.call('tool.call', { tool: 'WebFetch', tool_use_id: 'tu-4', agentId: 'agent-fixer-1', url: 'https://example.com' }, ran)).deny)).toContain('works offline')
-  // its hand-back, which ends its run, goes through
-  expect((await s.call('tool.call', { tool: 'SubagentHandback', tool_use_id: 'tu-4b', agentId: 'agent-fixer-1', message: 'Title: x' }, async () => ({ result: { ran: 'handed back' } }))).result.ran).toBe('handed back')
-  // main: thimble's own verbs and folder are refused; the person's shell verbs are not
-  expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5', command: 'thimble fix apply 1 --ask -' }, ran)).deny)).toContain('Only thimble and the person')
-  expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5b', command: 'cd x && thimble  fix send 1 --answer pr' }, ran)).deny)).toContain('Only thimble and the person')
-  expect(String((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-6', file_path: `${HOME}/fixes/asks/1.json` }, ran)).deny)).toContain('thimble alone')
+  expect((await s.call('tool.check', { tool: 'Bash', agentId: 'agent-fixer-1', input: { command: 'rm -rf ~' } }, async () => ({ decision: 'ask' }))).decision).toBe('ask')
+  // the verbs and the folder only thimble and the person's keys use: refused to main and to the fixer alike
+  for (const agentId of [undefined, 'agent-fixer-1']) {
+    expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5', agentId, command: 'thimble fix apply 1 --ask -' }, ran)).deny)).toContain('Only thimble and the person')
+    expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5b', agentId, command: 'cd x && thimble  fix send 1 --answer pr' }, ran)).deny)).toContain('Only thimble and the person')
+    expect(String((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-6', agentId, file_path: `${HOME}/fixes/asks/1.json` }, ran)).deny)).toContain('thimble alone')
+  }
   expect((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-7', command: 'thimble fix list' }, ran)).result.ran).toBe('thimble fix list')
-  // the fixer's calls thimble put in the sandbox or its copy need no dialog; main's and other places still ask
-  const ask = async () => ({ decision: 'ask' })
-  expect((await s.call('tool.check', { tool: 'Bash', tool_use_id: 'tu-1', agentId: 'agent-fixer-1', input: { command: bash.result.ran } }, ask)).decision).toBe('allow')
-  expect((await s.call('tool.check', { tool: 'Bash', tool_use_id: 'tu-9', agentId: 'agent-fixer-1', input: { command: 'rm -rf ~' } }, ask)).decision).toBe('ask')
-  expect((await s.call('tool.check', { tool: 'Write', agentId: 'agent-fixer-1', input: { file_path: `${WORK}/a.ts` } }, ask)).decision).toBe('allow')
-  expect((await s.call('tool.check', { tool: 'Write', agentId: 'agent-fixer-1', input: { file_path: '/made-up/data/a.ts' } }, ask)).decision).toBe('ask')
-  expect((await s.call('tool.check', { tool: 'Write', input: { file_path: `${WORK}/a.ts` } }, ask)).decision).toBe('ask')
 })
 
-test("the fixer's end puts the fix's line above the bar; y applies it with the press's secret and reloads; u undoes it", async () => {
+test('more words while the fixer works go to the same fixer, as a round of its fix', async () => {
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.call('command.run', { command: 'thimble-fix', args: "make the bar's coverage item say read" })
+  const r = await s.call('command.run', { command: 'thimble-fix', args: 'and keep the percent' })
+  expect(String(r.text)).toBe('The fork fixing fix 1 has these words too. Keep going.')
+  expect(s.spawns.length).toBe(1)
+  expect(s.ran.find(x => x.argv.includes('round'))?.stdin).toBe('and keep the percent')
+  expect(s.sent).toEqual([{ to: { agentId: 'agent-fixer-1' }, text: 'The person adds to fix 1 (round 2): and keep the percent' }])
+  // once the fixer ended, new words are a new request
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  await (await fixKey(s.$, 'n'))!.later()
+  s.fix.state = 'ready'
+  await s.call('command.run', { command: 'thimble-fix', args: 'the pane title too' })
+  expect(s.sent.length).toBe(1)
+  expect(s.spawns.length).toBe(2)
+})
+
+test("the fixer's end: the line and a notification say it is fixed; d shows what changed; y applies it with the press's secret and reloads; u undoes it", async () => {
   const s = setup()
   await requested(s)
   expect(s.verbs()).toContain('done 1 --summary - --title Bar says read for coverage')
   expect(s.ran.find(x => x.argv.includes('done'))?.stdin).toBe('The bar says r read 14%.')
-  let line = textOf(await fixLineRows(s.$, ELS, 110))
-  expect(line).toContain('Fix ready: Bar says read for coverage')
-  expect(line).toContain('1 file +1 −1 · tests passed in the sandbox')
-  expect(line).toContain('y apply · d diff · n not now')
+  let rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows[0])).toBe('  ✓ thimble fixed: Bar says read for coverage · tests pass')
+  expect(textOf(rows[1])).toBe('    y use it now · d what changed · n later')
+  expect(s.notes).toEqual([{ text: 'thimble fixed: Bar says read for coverage · tests pass', title: 'thimble' }])
+  // d: a few lines in the line's place, not a diff
+  await (await fixKey(s.$, 'd'))!.later()
+  rows = await fixLineRows(s.$, ELS, 110)
+  expect(rows.map(textOf)).toEqual([
+    '  Bar says read for coverage · fix 1',
+    "    You asked   make the bar's coverage item say read",
+    '    Claude did  The bar says r read 14%.',
+    '    Changed     1 file · tests pass',
+    '    y use it now · n later',
+  ])
+  expect(s.verbs().some(v => v.startsWith('diff'))).toBe(false)
   // y: a secret on stdin, its sha256 in asks/1.json (never the secret), then the plugins load again
   const y = await fixKey(s.$, 'y')
   expect(y).not.toBe(null)
@@ -185,9 +230,9 @@ test("the fixer's end puts the fix's line above the bar; y applies it with the p
   expect(asked).toMatch(/"key":"[0-9a-f]{64}"/)
   expect(asked).not.toContain(String(apply?.stdin))
   expect(s.commands).toEqual(['reload-plugins'])
-  line = textOf(await fixLineRows(s.$, ELS, 110))
-  expect(line).toContain('Bar says read for coverage is on · thimble reloaded · u undo')
-  expect(line).toContain(`If thimble stops loading: sh ${HOME}/fixes/off.sh`)
+  rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows[0])).toBe('  ✓ Bar says read for coverage is on · thimble reloaded · u undo')
+  expect(textOf(rows[1])).toBe(`    If thimble stops loading: sh ${HOME}/fixes/off.sh`)
   // only u acts now
   expect(await fixKey(s.$, 'y')).toBe(null)
   await (await fixKey(s.$, 'u'))!.later()
@@ -199,37 +244,76 @@ test("the fixer's end puts the fix's line above the bar; y applies it with the p
   expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
 })
 
-test('n leaves the fix off in the list; a fixer that changed nothing leaves a request', async () => {
+test("y while Claude is mid-reply: the reload waits for the turn's end, and the line says so; a --plugin-dir session is told to restart", async () => {
+  const s = setup()
+  await requested(s)
+  await s.$.state.set({ plugin: 'thimble', key: 'mainTurn' }, 't-main')
+  await (await fixKey(s.$, 'y'))!.later()
+  expect(s.commands).toEqual([])
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ Bar says read for coverage is on · reloads when Claude finishes · u undo')
+  // the person's prompt keeps the line while the reload waits
+  await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
+  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('reloads when Claude finishes')
+  await s.$.state.set({ plugin: 'thimble', key: 'mainTurn' }, null)
+  await s.call('turn.complete', { turnId: 't-main', reason: 'answer', answer: 'Runs 3 and 9.', durationMs: 9, isAborted: false }, async () => ({}))
+  await s.tick()
+  expect(s.commands).toEqual(['reload-plugins'])
+  // the new load of the plugin: the line says it reloaded
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ Bar says read for coverage is on · thimble reloaded · u undo')
+
+  const t = setup()
+  t.config.push({ key: 'thimble@inline.cards', value: true })
+  await requested(t)
+  await (await fixKey(t.$, 'y'))!.later()
+  expect(t.verbs()).toContain('apply 1 --ask -')
+  expect(t.commands).toEqual([])
+  expect(textOf((await fixLineRows(t.$, ELS, 160))[0])).toBe(`  ✓ Bar says read for coverage is on · restart Claude Code with --plugin-dir ${HOME}/fixes/live/plugin to load it · u undo`)
+})
+
+test('n leaves the fix ready in the list, where y turns it on; a fixer that changed nothing leaves a request', async () => {
   const s = setup()
   await requested(s)
   await (await fixKey(s.$, 'n'))!.later()
-  expect(s.verbs()).toContain('notnow 1')
+  expect(s.verbs().some(v => v.startsWith('notnow'))).toBe(false)
+  expect(s.fix.state).toBe('ready')
   expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
-  expect(s.toasts.join('\n')).toContain('waits in Your fixes, off')
+  expect(s.toasts.join('\n')).toContain('waits in Your fixes, ready')
+  await s.call('command.run', { command: 'thimble-fix', args: '' })
+  const drawn = await drawFixes(s.$, { props: { bodyColumns: 90 } }, {}, ELS)
+  expect(textOf(drawn)).toMatch(/◆ ready +Bar says read for coverage/)
+  await buttons(drawn)['key-y']!.onPress()
+  expect(s.verbs()).toContain('apply 1 --ask -')
   const t = setup()
   await requested(t, 'Title: Explain terms of my field\nRequest: It needs words only the person knows.')
   expect(t.verbs()).toContain('done 1 --summary - --title Explain terms of my field --request')
   expect(textOf(await fixLineRows(t.$, ELS, 110))).toContain('Saved as a request with no code: Explain terms of my field')
 })
 
-test('a refused fix shows its whole reason: a long one on a row of its own, a short one after the title', async () => {
+test('a refused fix shows its whole reason: a long one on a row of its own, a short one after the title; d shows what changed', async () => {
   const s = setup()
   s.fix.refused = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files'
   await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
   let rows = await fixLineRows(s.$, ELS, 110)
   expect(textOf(rows)).toContain('× Fix 1 did not pass: Skip the scan for my notes')
-  expect(rows.map((r: Any) => r.props.key)).toEqual(['fix-rule-a', 'fix-line-1', 'fix-line-why', 'fix-line-2', 'fix-rule-b'])
-  expect(textOf(rows[2])).toBe(`  ${s.fix.refused}`)
-  expect(textOf(rows[3])).toContain('d diff · r redo · n not now')
+  expect(rows.map((r: Any) => r.props.key)).toEqual(['fix-line-1', 'fix-line-why', 'fix-line-2'])
+  expect(textOf(rows[1])).toBe(`    ${s.fix.refused}`)
+  expect(textOf(rows[2])).toBe('    d what changed · r redo · n later')
+  expect(s.notes).toEqual([])
+  await (await fixKey(s.$, 'd'))!.later()
+  rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows.at(-2))).toBe(`    Changed     1 file · ${s.fix.refused}`)
+  expect(textOf(rows.at(-1))).toBe('    r redo · n later')
   const t = setup()
-  t.fix.refused = 'its tests failed in the sandbox'
+  t.fix.refused = 'its tests failed'
   await requested(t, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
   rows = await fixLineRows(t.$, ELS, 110)
-  expect(textOf(rows[1])).toBe('× Fix 1 did not pass: Skip the scan for my notes · its tests failed in the sandbox')
+  expect(textOf(rows[0])).toBe('  × Fix 1 did not pass: Skip the scan for my notes · its tests failed')
   expect(rows.map((r: Any) => r.props.key)).not.toContain('fix-line-why')
 })
 
-test("/thimble-fix alone lists the fixes; d shows the selected fix's diff; u on a ready fix applies it", async () => {
+test('/thimble-fix alone lists the fixes but those in the release; the selected fix shows what changed, and no diff key', async () => {
   const s = setup()
   await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
   await s.call('command.run', { command: 'thimble-fix', args: '' })
@@ -238,26 +322,57 @@ test("/thimble-fix alone lists the fixes; d shows the selected fix's diff; u on 
   let drawn = await drawFixes(s.$, e, {}, ELS)
   expect(textOf(drawn)).toContain('Your fixes · thimble 0.10.2 + 0 on')
   expect(textOf(drawn)).toMatch(/◆ ready +Bar says read/)
-  expect(textOf(drawn)).toContain("You asked “make the bar's coverage item say read”")
-  await buttons(drawn)['key-d']!.onPress()
-  drawn = await drawFixes(s.$, e, {}, ELS)
-  expect(textOf(drawn)).toContain('+  read')
-  await buttons(drawn)['key-u']!.onPress()
+  expect(textOf(drawn)).toContain("You asked   make the bar's coverage item say read")
+  expect(textOf(drawn)).toContain('Claude did  The bar says read.')
+  expect(Object.keys(buttons(drawn))).not.toContain('key-d')
+  await buttons(drawn)['key-y']!.onPress()
   expect(s.verbs()).toContain('apply 1 --ask -')
+  drawn = await drawFixes(s.$, e, {}, ELS)
+  expect(Object.keys(buttons(drawn))).toContain('key-u')
+  s.fix.state = 'released'
+  await s.call('command.run', { command: 'thimble-fix', args: '' })
+  drawn = await drawFixes(s.$, e, {}, ELS)
+  expect(textOf(drawn)).toContain('Ask for a change at the prompt')
+  expect(textOf(drawn)).not.toContain('Bar says read')
 })
 
-test('at session start a newer release replays the fixes that are on, once a session, and one line says what came of it', async () => {
+test("Claude starts a fix with the fix-thimble skill: the same fork starts, Claude reads what came of it, and is told when it ends", async () => {
+  expect(wordsOfSkill("What thimble does wrong, and what it should do: the explainer's links show as raw text\n\nthimble starts its fix…")).toBe("the explainer's links show as raw text")
+  expect(wordsOfSkill('What thimble does wrong, and what it should do: \n\nthimble starts its fix…')).toBe('')
+  expect(wordsOfSkill('What thimble does wrong, and what it should do: $ARGUMENTS\n\nthimble starts…\n\nARGUMENTS: the bar is cut')).toBe('the bar is cut')
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  const skill = { skill: 'thimble:fix-thimble', text: "What thimble does wrong, and what it should do: the card's legend hides its last row\n\nthimble starts its fix…", frontmatter: {}, source: 'plugin' }
+  const r = await s.call('skill.prompt', skill, async (e: Any) => ({ text: e.text }))
+  expect(String(r.text)).toContain('thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix 1')
+  expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("the card's legend hides its last row")
+  expect(String(s.spawns[0].prompt)).toContain("Claude, in the conversation above, saw thimble misbehave and asked for this change to the person's thimble (fix 1):")
+  // no words: nothing starts, and Claude reads why
+  const none = await s.call('skill.prompt', { ...skill, text: 'What thimble does wrong, and what it should do: \n\nthimble starts…' }, async (e: Any) => ({ text: e.text }))
+  expect(String(none.text)).toContain('thimble started no fix')
+  expect(s.spawns.length).toBe(1)
+  // its end: the line and the notification, and Claude is told, so that it can tell the person
+  await s.end('Title: Legend shows every row\nWhat it does: The legend wraps.')
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Legend shows every row · tests pass')
+  const told = ((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['fix-1']).toBe('The thimble fix you started, fix 1 ("Legend shows every row"), is ready and tests pass; the person turns it on with y. Tell the person in one short line.')
+})
+
+test('a newer release comes with thimble update in a shell: the session start replays nothing, and /thimble-fix update says where', async () => {
   const s = setup()
   s.fix.state = 'on'
+  s.made()
   await s.call('session.start', { cwd: '/made-up/data' })
   await s.tick()
-  expect(s.verbs()).toContain('update --json')
-  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 · 1 fix carried · thimble reloaded')
-  expect(s.commands).toEqual(['reload-plugins'])
-  // the reload starts the module again: no second update in this session
-  await s.call('session.start', { cwd: '/made-up/data' })
-  await s.tick()
-  expect(s.verbs().filter(v => v === 'update --json').length).toBe(1)
-  await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
-  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.verbs()).not.toContain('update --json')
+  expect(String((await s.call('command.run', { command: 'thimble-fix', args: 'update' })).text)).toContain('`thimble update` in a shell')
+})
+
+test('the text copy of a drawing: a row side by side, a column one under another, a button by its words', () => {
+  const { Box, Text, Button, Markdown } = TEXT_ELS as Any
+  const drawn = Box({ flexDirection: 'column', children: [
+    Box({ children: [Text({ children: 'thimble' }), Text({ children: '  ' }), Button({ label: 'r coverage 43%', children: [Text({ children: 'r' }), Text({ children: ' coverage 43%' })] })] }),
+    Markdown({ text: 'a **link**' }),
+  ] })
+  expect(screenText(drawn)).toBe('thimble  r coverage 43%\na **link**')
 })

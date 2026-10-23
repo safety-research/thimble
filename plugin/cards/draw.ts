@@ -125,6 +125,11 @@ export function screenRows(): number {
   return rowsSeen
 }
 
+/** The screen's columns, or 0 while no drawing said. */
+export function screenColumns(): number {
+  return columnsSeen
+}
+
 export function cardWidth(columns?: number): number {
   return Math.max(MIN_WIDTH, (columns || columnsSeen || 100) - FRAME)
 }

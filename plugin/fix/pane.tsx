@@ -1,11 +1,12 @@
 // pane.tsx: Your fixes (core/pane.ts kind `fixes`), which /thimble-fix alone opens, and the submit preview (kind
 // `fixsubmit`). Both take the keys while open; esc closes them.
 //
-//   Your fixes   every request, newest first: its state (on, off, ready, failed, redo, request, sent, saved), its
-//                title, its date and a note; under the list the selected fix: the person's words, what it does, its
-//                files and tests, or with d its whole diff. j k move, ↵ selects, m marks, d diff, u turns a fix on or
-//                off (on needs this press: the fix's code then runs outside the sandbox), r redo, s submits the marked
-//                fixes (or the selected one), x removes, a turns every fix off or on.
+//   Your fixes   every request, newest first, but those the release now holds: its state (on, off, ready, failed,
+//                redo, request, sent, saved), its title, its date and a note; under the list what the selected fix
+//                changed: the person's words, what Claude did, its files and tests. j k move, ↵ selects, m marks, y
+//                turns a ready or off fix on (only this press does: the fix's code then runs as thimble), u turns an
+//                on fix off, r redo, s submits the marked fixes (or the selected one), x removes, a turns every fix
+//                off or on.
 //   Submit       for the fix the walk is on: where it goes and as whom, each detail the scan removed with its
 //                placeholder and why, and the exact text that leaves. y sends (a pull request), w saves the same text
 //                as files, k keeps the first detail that can be kept, esc cancels. Only these presses send.
@@ -17,7 +18,8 @@ import { quiet } from '../core/askcell.js'
 import { openPane } from '../core/pane'
 import { cut, textWidth } from '../core/text.js'
 import { ACCENT } from '../core/theme'
-import { allOffOn, applyFix, diffText, type Fix, fixesNow, refreshFixes, removeFix, shownPath, sizeOf, undoFix } from './fixes'
+import { testsWord } from './fixer'
+import { allOffOn, applyFix, type Fix, fixesNow, refreshFixes, removeFix, shownPath, sizeOf, undoFix } from './fixes'
 import { redoFix } from './request'
 import { type Draft, draftNow, type Hit, submitAction, submitFixes, submitNow, submitSkip } from './submit'
 
@@ -47,7 +49,7 @@ async function setView($: Engine, v: Partial<View>): Promise<void> {
   await $.state.set(VIEW, { ...(await viewNow($)), ...v } as never)
 }
 
-/** /thimble-fix alone, or d on the line: Your fixes, with `sel` selected. */
+/** /thimble-fix alone: Your fixes, with `sel` selected. */
 export async function openFixes($: Engine, o: { sel?: number; diff?: boolean } = {}): Promise<boolean> {
   const list = await refreshFixes($)
   const v = await viewNow($)
@@ -95,7 +97,8 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
   const { Box, Button, Text } = els
   const W = Math.max(40, Number(e.props?.bodyColumns) || 80)
   const list = await fixesNow($)
-  const fixes = list?.fixes ?? []
+  // a fix the release now holds is no longer the person's to keep
+  const fixes = (list?.fixes ?? []).filter(f => f.state !== 'released')
   const v = await viewNow($)
   const say = (said: string | null | void) => { if (said) $.ui.toast(said) }
   const head = Box({ key: 'head', flexDirection: 'column', children: [
@@ -121,22 +124,19 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
       Text({ key: 'n', ...(f.state === 'redo' || f.state === 'failed' ? { color: 'warning' } : { dimColor: true }), children: cut(noteOf(f), Math.max(8, W - tw - 30)) }),
     ] })
   })
-  // the selected fix, or its whole diff
+  // what the selected fix changed, in a few lines, as d on the line shows it
   const detail: Any[] = [Text({ key: 'rule', dimColor: true, children: '─'.repeat(Math.min(W, 60)) })]
   detail.push(Text({ key: 'st', children: [Text({ key: 'a', bold: true, children: sel.title }), Text({ key: 'b', dimColor: true, children: `  fix ${sel.id}${sel.commit ? ` · commit ${sel.commit.slice(0, 7)}` : ''} · made in ${sel.made_in || 'terminal'}` })] }))
-  if (v.diff && sel.commit) {
-    detail.push(...diffRows(els, await diffText($, sel.id), W))
-  } else {
-    for (const [i, w] of (sel.words || []).entries()) detail.push(Text({ key: `w${i}`, dimColor: true, wrap: 'wrap', children: `You asked${(sel.words || []).length > 1 ? ` (round ${i + 1})` : ''} “${cut(w, 400)}”` }))
-    if (sel.summary) detail.push(Text({ key: 'sum', wrap: 'wrap', children: sel.summary }))
-    if (sel.files?.length) detail.push(Text({ key: 'files', children: `${sizeOf(sel)} · tests ${sel.tests || 'not run'} · ${sel.rounds || 1} round${(sel.rounds || 1) === 1 ? '' : 's'}` }))
-    if ((sel.state === 'failed' || sel.state === 'redo') && sel.error) detail.push(Text({ key: 'why', color: 'warning', wrap: 'wrap', children: `${sel.state === 'redo' ? 'It does not fit your thimble now' : 'It did not pass'}: ${sel.error}. r asks Claude to redo it; your words and the old change are kept.` }))
-  }
-  const toggle = async () => {
-    if (sel.state === 'on') say(await undoFix($, sel.id))
-    else if ((sel.state === 'off' || sel.state === 'ready') && sel.commit) say(await applyFix($, sel.id))
-    else say(`Fix ${sel.id} is ${sel.state}: there is nothing to turn on.`)
-  }
+  const labeled = (key: string, label: string, text: string, tone: Any = {}) => Box({ key, flexDirection: 'row', width: W, children: [
+    Box({ key: 'l', width: 12, flexShrink: 0, children: [Text({ key: 't', dimColor: true, children: label.padEnd(12) })] }), Box({ key: 'v', flexShrink: 1, children: [Text({ key: 't', wrap: 'wrap', ...tone, children: text })] }),
+  ] })
+  for (const [i, w] of (sel.words || []).entries()) detail.push(labeled(`w${i}`, i ? 'then' : 'You asked', cut(w, 400)))
+  if (sel.summary) detail.push(labeled('sum', 'Claude did', sel.summary))
+  if (sel.files?.length) detail.push(labeled('files', 'Changed', `${sizeOf(sel)} · ${testsWord(sel)} · ${sel.rounds || 1} round${(sel.rounds || 1) === 1 ? '' : 's'}`))
+  if ((sel.state === 'failed' || sel.state === 'redo') && sel.error) detail.push(labeled('why', 'Why', `${sel.state === 'redo' ? 'It does not fit your thimble now' : 'It did not pass'}: ${sel.error}. r asks Claude to redo it; your words and the old change are kept.`, { color: 'warning' }))
+  const canUse = (sel.state === 'off' || sel.state === 'ready') && !!sel.commit
+  const use = async () => say(canUse ? await applyFix($, sel.id) : `Fix ${sel.id} is ${sel.state}: there is nothing to turn on.`)
+  const undo = async () => say(sel.state === 'on' ? await undoFix($, sel.id) : `Fix ${sel.id} is ${sel.state}, not on.`)
   const move = (d: number) => async () => {
     const i = Math.max(0, Math.min(fixes.length - 1, fixes.findIndex(f => f.id === sel.id) + d))
     await setView($, { sel: fixes[i]!.id, diff: false })
@@ -153,8 +153,9 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
     await submitFixes($, ids)
   }
   const key = keys(els, [
-    ['j', 'down', move(1)], ['k', 'up', move(-1)], ['m', 'mark', mark], ['d', v.diff ? 'details' : 'diff', () => setView($, { diff: !v.diff })],
-    ['u', sel.state === 'on' ? 'off' : 'on', toggle], ['r', 'redo', async () => say(await redoFix($, sel.id))],
+    ['j', 'down', move(1)], ['k', 'up', move(-1)], ['m', 'mark', mark],
+    ...(sel.state === 'on' ? [['u', 'undo', undo] as [string, string, () => unknown]] : [['y', 'use it now', use] as [string, string, () => unknown]]),
+    ['r', 'redo', async () => say(await redoFix($, sel.id))],
     ['s', v.marked.length > 1 ? `submit ${v.marked.length}` : 'submit', submit], ['x', 'remove', async () => say(await removeFix($, sel.id))],
     ['a', list?.on === false ? 'all on' : 'all off', async () => say(await allOffOn($, list?.on === false))],
   ])

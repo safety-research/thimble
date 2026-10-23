@@ -104,15 +104,14 @@ declare module 'claude-code' {
       // ---- fixes (fix/): the person's changes to their own thimble; the kernel keeps the records (fixes.jsonl)
       /** the fixes as `thimble fix list --json` last gave them, and a number that changes with each read (fixes.ts) */
       fixes: { fixes: unknown[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number } | null
-      /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem (fixes.ts FixLine) */
-      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string } | null
-      /** whether this session looked for a newer release already (register.ts) */
-      fixUpdated: boolean
+      /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem; whether d opened what
+       *  changed; a reload that waits for Claude's turn or a restart (fixes.ts FixLine) */
+      fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart' } | null
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
       fixers: Record<string, number>
-      /** the start of the command each fix's fixer runs a shell command with, in the sandbox, by the fix's id */
-      fixerBox: Record<string, string[]>
-      /** what Your fixes shows (pane.tsx): the selected fix, the marked ones, whether the diff shows */
+      /** the fixes Claude started with the fix-thimble skill, by the fix's id (fixer.ts) */
+      fixBy: Record<string, 'claude'>
+      /** what Your fixes shows (pane.tsx): the selected fix, the marked ones, whether the submit preview shows the diff */
       fixView: { sel: number | null; marked: number[]; diff: boolean } | null
       /** the submit preview: the fixes it walks, the one it shows, and why a draft could not be made */
       fixSubmit: { ids: number[]; at: number; problem?: string } | null

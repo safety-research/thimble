@@ -1,16 +1,17 @@
 // fixer.ts: thimble's fixer, the subagent that makes a change the person asked for, in the background, in a scratch
-// copy of thimble (~/.thimble/fixes/work/<id>). Its type is thimble:fixer (prompts/fixer.md is its system prompt).
+// copy of thimble (~/.thimble/fixes/work/<id>). It is a fork of the person's session, so it sees the conversation
+// ("this" means something in it); prompts/fixer.md opens its first message. Its calls go through Claude Code's own
+// permission handling in the person's mode, as any subagent's do.
 //
-//   startFixer($, fix, words)   spawns it in the copy, with the person's words; the bar shows `fixing: <title>`
-//   fixerCall($, e)             each of its tool calls: Bash runs in the sandbox runtime (the kernel's `fix sandbox`
-//                               gives the command's start: no network, writes only the copy and its temp folder);
-//                               Write and Edit only in the copy; nothing else
-//   fixerCheck($, e)            those calls need no dialog: the person asked for the fix, and they cannot reach
-//                               anything else
-//   fixerEnded($, e)            its end: thimble commits the change in the copy and runs the tests in the sandbox
-//                               (`thimble fix done`), then the line above the bar says the fix is ready
+//   startFixer($, fix, words)   forks the session into the copy, with the words and a text copy of what thimble shows
+//                               now (screen.ts); the bar shows `fixing: <title>` with its time
+//   liveFixer($)                the fix whose fixer still works, and its agent: more words for it go to that fixer
+//   fixerEnded($, e)            its end: thimble commits the change in the copy and runs the tests (`thimble fix done`),
+//                               then the line above the bar asks whether to use it (y; the person's key applies it), and
+//                               Claude Code sends a notification. When Claude started the fix, Claude is told, so that it
+//                               can tell the person.
 //
-//   state: fixers (agentId → the fix's id), fixerBox (the sandbox command's start, by the fix's id)
+//   state: fixers (agentId → the fix's id), fixBy (the fixes Claude started, by their id)
 import type { EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
@@ -20,40 +21,27 @@ import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { type Fix, fixOf, jsonOf, kernelFix, refreshFixes, setFixLine } from './fixes'
+import { screenCopy } from './screen'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export const FIXER = 'thimble:fixer'
 const FIXERS = { plugin: 'thimble', key: 'fixers' } as const
-const BOX = { plugin: 'thimble', key: 'fixerBox' } as const
+const BY = { plugin: 'thimble', key: 'fixBy' } as const
 
-let registered = false
+/** Who asked for a fix: the person (/thimble-fix), or Claude (the fix-thimble skill). */
+export type Asker = 'person' | 'claude'
 
-/** The fixer's type, registered once per load of the plugin. Null when it is ready, else why not. */
-async function ensureType($: Engine): Promise<string | null> {
-  if (registered) return null
-  try {
-    const prompt = await promptText($, 'fixer')
-    await $.agent.register({
-      name: 'fixer',
-      description: "Changes thimble's own code for the person, in a scratch copy, when they ask with /thimble-fix. Only the plugin starts it.",
-      prompt,
-      tools: ['Bash', 'Read', 'Write', 'Edit', 'Grep', 'Glob'],
-      background: true,
-      omitClaudeMd: true,
-    } as Any)
-    registered = true
-    return null
-  } catch (err) {
-    return String((err as Error)?.message || err).slice(0, 240)
-  }
+export async function askerOf($: Engine, id: number): Promise<Asker> {
+  return (((await $.state.get(BY)).value ?? {}) as Record<string, string>)[String(id)] === 'claude' ? 'claude' : 'person'
 }
 
-/** The model never starts the fixer itself: only /thimble-fix does. */
-export async function fixerOffered(): Promise<{ isOffered: boolean }> {
-  return { isOffered: false }
+export async function setAsker($: Engine, id: number, by: Asker): Promise<void> {
+  const all = { ...(((await $.state.get(BY)).value ?? {}) as Record<string, 'claude'>) }
+  if (by === 'claude') all[String(id)] = 'claude'
+  else delete all[String(id)]
+  await $.state.set(BY, all as never)
 }
 
 async function fixers($: Engine): Promise<Record<string, number>> {
@@ -67,32 +55,60 @@ export async function fixOfAgent($: Engine, agentId: string | undefined): Promis
   return typeof id === 'number' ? id : null
 }
 
-/** The fixer's first message: the person's words, each round, and where it works. */
-function firstMessage(fix: Fix, earlier: boolean): string {
+/** The fixer's first message: the task (prompts/fixer.md), the words of each round, where it works, and a text copy
+ *  of what thimble shows now. */
+function firstMessage(fix: Fix, earlier: boolean, task: string, by: Asker, screen: string): string {
   const words = fix.words || []
   const asked = words.length > 1
     ? words.map((w, i) => `Round ${i + 1}: ${w}`).join('\n')
     : words[0] || fix.title
   return [
-    `The person asked for this change to their thimble (fix ${fix.id}):`,
+    task.trim(),
+    '',
+    by === 'claude'
+      ? `Claude, in the conversation above, saw thimble misbehave and asked for this change to the person's thimble (fix ${fix.id}):`
+      : `The person asked for this change to their thimble (fix ${fix.id}):`,
     '',
     asked,
     '',
     `Your working folder is the copy: ${fix.work}.`,
     ...(earlier ? [`An earlier change for this request, which did not fit or failed its tests, is in $HOME/earlier.patch; start from it when it helps.`] : []),
+    '',
+    'What thimble shows on the person\'s screen now, as text (the conversation above does not hold it):',
+    '',
+    screen,
   ].join('\n')
 }
 
-/** Start the fixer on a fix whose copy the kernel just made (a request, a round, a redo). */
-export async function startFixer($: Engine, fix: Fix, earlier = false): Promise<string | null> {
-  const bad = await ensureType($)
-  if (bad) return `The fixer did not start (${bad}).`
-  // the command's start for its shell, kept for each of its Bash calls
-  const box = await kernelFix($, ['sandbox', String(fix.id)], { timeoutMs: 30000 })
-  const argv = box.ok ? jsonOf<string[]>(box.out) : null
-  if (!argv) return `The fixer did not start: ${cut(box.err || 'the sandbox could not be set up', 220)}`
-  await $.state.set(BOX, { ...(((await $.state.get(BOX)).value ?? {}) as Record<string, string[]>), [String(fix.id)]: argv } as never)
-  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier), description: `fix ${fix.id}: ${cut(fix.title, 40)}`, type: FIXER, cwd: fix.work || undefined })
+/** The text copy of the screen for a fixer about to start, made before its copy of thimble (so it shows the screen as
+ *  the person saw it when they asked). */
+export async function screenNow($: Engine): Promise<string> {
+  return screenCopy($).catch(err => `(thimble could not copy the screen: ${cut(String((err as Error)?.message || err), 160)})`)
+}
+
+/** The fixes whose fixer is starting: a look for fixers that ended (recoverFixers) leaves them be. */
+const starting = new Set<number>()
+
+/** Start the fixer on a fix whose copy the kernel just made (a request, a round, a redo). `screen`: the text copy of
+ *  the screen, when the caller made it before the copy. */
+export async function startFixer($: Engine, fix: Fix, earlier = false, screen?: string): Promise<string | null> {
+  starting.add(fix.id)
+  try {
+    return await start($, fix, earlier, screen ?? (await screenNow($)))
+  } finally {
+    starting.delete(fix.id)
+  }
+}
+
+async function start($: Engine, fix: Fix, earlier: boolean, screen: string): Promise<string | null> {
+  let task: string
+  try {
+    task = await promptText($, 'fixer')
+  } catch (err) {
+    return `The fixer did not start (${cut(String((err as Error)?.message || err), 200)}).`
+  }
+  // no type: a fork of the session, which sees the conversation
+  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier, task, await askerOf($, fix.id), screen), description: `fix ${fix.id}: ${cut(fix.title, 40)}`, cwd: fix.work || undefined })
   if (r.deny !== undefined || !r.agentId) return `The fixer did not start (${cut(String(r.deny || 'no agent started'), 200)}).`
   await $.state.set(FIXERS, { ...(await fixers($)), [r.agentId]: fix.id } as never)
   const word = `fixing: ${cut(fix.title, 36)} · in a copy`
@@ -117,43 +133,24 @@ function watch($: Engine, id: number): void {
   }
 }
 
-const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`
-
-/** The places the fixer may write: its copy and its temp folder. */
-function writable(argv: string[]): string[] {
-  const rules = jsonOf<Any>(argv[argv.indexOf('--srt') + 2] ?? '')
-  return ((rules?.filesystem?.allowWrite ?? []) as { path: string }[]).map(x => String(x.path).replace(/\/+$/, ''))
-}
-
-/** The Bash commands thimble wrapped, by tool_use_id, so their check needs no dialog. */
-const wrapped = new Map<string, string>()
-
-/** One tool call of a fixer: rewritten into the sandbox, let through, or refused. */
-export async function fixerCall($: Engine, e: Any, id: number): Promise<{ command?: string; deny?: string } | null> {
-  const argv = (((await $.state.get(BOX)).value ?? {}) as Record<string, string[]>)[String(id)]
-  if (!argv) return { deny: 'thimble lost the sandbox of this fix; end now.' }
-  if (e.tool === 'Bash') {
-    const command = [...argv, String(e.command ?? '')].map(quote).join(' ')
-    if (e.tool_use_id) wrapped.set(String(e.tool_use_id), command)
-    return { command }
+/** The newest fix whose fixer still works, and its agent, or null: more words for that fix go to it. A fixer that
+ *  ended (its change is being tested) takes no more words. */
+export async function liveFixer($: Engine): Promise<{ fix: Fix; agentId: string } | null> {
+  const list = await refreshFixes($)
+  const working = (list?.fixes ?? []).filter(f => f.state === 'working' && !ending.has(f.id))
+  if (!working.length) return null
+  let alive: Set<string>
+  try {
+    alive = new Set((await $.agent.list()).filter(a => ['pending', 'running', 'waiting'].includes(String(a.status))).map(a => a.id))
+  } catch {
+    return null
   }
-  if (e.tool === 'Write' || e.tool === 'Edit' || e.tool === 'MultiEdit' || e.tool === 'NotebookEdit') {
-    const p = String(e.file_path ?? e.notebook_path ?? '')
-    const ok = p.startsWith('/') && !p.split('/').includes('..') && writable(argv).some(w => p === w || p.startsWith(`${w}/`))
-    return ok ? null : { deny: `The fixer changes only its copy of thimble (${writable(argv)[0] ?? 'the copy'}); ${p || 'that file'} is outside it.` }
+  const map = await fixers($)
+  for (const f of working) {
+    const agentId = Object.entries(map).find(([a, id]) => id === f.id && alive.has(a))?.[0]
+    if (agentId) return { fix: f, agentId }
   }
-  // what reaches past the copy and the sandbox: the network, other agents, other servers
-  if (/^(?:WebFetch|WebSearch|Agent|Task|SendMessage)$|^mcp__/.test(String(e.tool))) return { deny: `The fixer works offline, in its copy of thimble: ${e.tool} is not for it.` }
   return null
-}
-
-/** A fixer's call needs no dialog when thimble wrapped it in the sandbox, or it writes in its copy. */
-export async function fixerCheck($: Engine, e: Any, id: number): Promise<boolean> {
-  if (e.tool === 'Bash') return !!e.tool_use_id && wrapped.get(String(e.tool_use_id)) === String((e.input as Any)?.command ?? '')
-  if (['Read', 'Grep', 'Glob'].includes(e.tool)) return true
-  const argv = (((await $.state.get(BOX)).value ?? {}) as Record<string, string[]>)[String(id)]
-  const p = String((e.input as Any)?.file_path ?? '')
-  return !!argv && p.startsWith('/') && !p.split('/').includes('..') && writable(argv).some(w => p.startsWith(`${w}/`))
 }
 
 /** What the fixer's last message says: its title, what it does, or that it is a request with no code. */
@@ -197,7 +194,25 @@ async function ended($: Engine, e: Any, id: number): Promise<void> {
   const done = jsonOf<Fix>(r.out)
   const kind = done?.state === 'ready' ? 'ready' : done?.state === 'request' ? 'request' : 'failed'
   await setFixLine($, { id, kind })
-  if (kind === 'ready') await tellAtNextPrompt($, `fix-${id}`, `thimble's fixer finished fix ${id} ("${done?.title}"); it waits for the person's y. Nothing for you to do.`)
+  const title = done?.title || fix?.title || `fix ${id}`
+  if (kind === 'ready') {
+    // the person may be in another window: Claude Code's own notification, with the line's words
+    try { await $.ui.notify(`thimble fixed: ${title} · ${testsWord(done)}`, { title: 'thimble' }) } catch { /* the line says it */ }
+  }
+  if ((await askerOf($, id)) === 'claude') {
+    const said = kind === 'ready'
+      ? `is ready and ${testsWord(done)}; the person turns it on with y`
+      : kind === 'request' ? 'changed no code; it is kept as a request in the person\'s list of fixes' : `did not pass its checks (${cut(done?.error || 'its tests failed', 200)})`
+    await tellAtNextPrompt($, `fix-${id}`, `The thimble fix you started, fix ${id} ("${title}"), ${said}. Tell the person in one short line.`)
+  } else if (kind === 'ready') {
+    await tellAtNextPrompt($, `fix-${id}`, `thimble's fixer finished fix ${id} ("${title}"); it waits for the person's y. Nothing for you to do.`)
+  }
+}
+
+/** What came of a fix's tests, in the line's words: `tests pass`. */
+export function testsWord(f: Pick<Fix, 'tests'> | null | undefined): string {
+  const t = f?.tests
+  return t === 'passed' ? 'tests pass' : t === 'skipped' ? 'tests not run' : t ? `tests ${t}` : 'tests not run'
 }
 
 /** A fix that still says `working` whose fixer no longer runs (its end came while the plugin reloaded, or never
@@ -213,6 +228,7 @@ export async function recoverFixers($: Engine, working: Fix[]): Promise<void> {
     return
   }
   for (const f of working) {
+    if (starting.has(f.id)) continue
     const ids = Object.entries(map).filter(([, id]) => id === f.id).map(([a]) => a)
     if (ids.some(a => alive.has(a))) continue
     await fixerEnded($, { agentId: ids[0] ?? '', answer: '' }, f.id)

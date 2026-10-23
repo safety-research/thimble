@@ -2,8 +2,8 @@
 //
 //   the failure line  only while there is one (bar/notice.ts failLineNow): a failure in red, or a notice. It wraps, so
 //                  the whole failure shows
-//   the fix line   only while there is one (fix/line.ts): a fix that is ready (y apply · d diff · n not now), on (u
-//                  undo), off, failed, or a request with no code
+//   the fix line   only while there is one (fix/line.ts): a fix that is ready (y use it now · d what changed · n
+//                  later), on (u undo), off, failed, or a request with no code
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), `v card` while
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its

@@ -1,7 +1,7 @@
 // keys.ts: thimble's keys at an empty prompt, in one hook. A key goes to the first of these that takes it now:
 //
-//   y d n u r  fix/line.ts fixKey    the line of a fix above the bar, while it shows: y apply, d diff, n not now,
-//                                    u undo, r redo
+//   y d n u r  fix/line.ts fixKey    the line of a fix above the bar, while it shows: y use it now, d what
+//                                    changed, n later, u undo, r redo
 //   v        designer/v.ts vKey      a card of the last answer
 //   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
 //                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers', c, t

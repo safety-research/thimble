@@ -4,8 +4,10 @@
 //
 //   refreshFixes($)          the kernel's list, into $.state fixes
 //   fixLineNow($), setFixLine  the one line above the bar for one fix (line.ts draws it)
-//   applyFix($, id)          y, or u on an off fix in the list: a secret made at this press, its sha256 in
-//                            asks/<id>.json, the secret to `thimble fix apply` on stdin; then /reload-plugins
+//   applyFix($, id)          y, on the line or in the list: a secret made at this press, its sha256 in
+//                            asks/<id>.json, the secret to `thimble fix apply` on stdin; then /reload-plugins, at
+//                            once, or at the end of Claude's turn when it is mid-reply; in a session that loads
+//                            thimble with --plugin-dir, the line names the restart instead
 //   undoFix, notNow, removeFix, allOff, allOn   the other keys
 //   reloadPlugins($)         /reload-plugins, once the session is idle, so the person never types it
 //
@@ -18,6 +20,7 @@ import { rootHere, runThimble, startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
+import { mainRuns } from '../core/turn'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -33,10 +36,11 @@ export type Fix = {
   note?: string; pr?: string; saved?: string; tests_tail?: string
 }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number }
-/** The line above the bar for one fix: ready (y apply · d diff · n not now), applied (u undo), off (after u),
- *  failed (d diff · r redo · n not now), request (no code), a new release with the fixes replayed on it (update), or a
- *  problem with what to do. */
-export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string }
+/** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
+ *  u), failed (d what changed · r redo · n later), request (no code), a new release with the fixes replayed on it
+ *  (update), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
+ *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
+export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart' }
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
 
@@ -103,9 +107,25 @@ export async function reloadPlugins($: Engine): Promise<boolean> {
   }
 }
 
-/** A reload that was due runs now (the end of a turn). */
+/** A reload that was due runs now (the end of a turn). One that fails says so, with the command that loads it. */
 export async function reloadIfDue($: Engine): Promise<void> {
-  if (reloadDue) await reloadPlugins($)
+  if (reloadDue && !(await reloadPlugins($))) failNotice($, 'thimble changed, and Claude Code did not load it again by itself. Type /reload-plugins.')
+}
+
+/** The reload a line waited for came (this module is a new load of the plugin): the line says thimble reloaded. */
+export async function reloaded($: Engine): Promise<void> {
+  const l = await fixLineNow($)
+  if (l?.kind === 'applied' && l.reload === 'pending') await setFixLine($, { id: l.id, kind: 'applied' })
+}
+
+/** Whether this session loads thimble with --plugin-dir: then Claude Code's copy of the fixes is not what it loads, and
+ *  a restart with the fixes' folder loads them. Claude Code names such a plugin's settings `<name>@inline.<field>`. */
+export async function pluginDirSession($: Engine): Promise<boolean> {
+  try {
+    return (await $.config.list()).some(r => String(r.key).startsWith(`${$.plugin.name}@inline.`))
+  } catch {
+    return false
+  }
 }
 
 /** The person's key press: a new secret held only here, its sha256 in asks/<id>.json for the kernel to check. The
@@ -141,10 +161,20 @@ export async function applyFix($: Engine, id: number): Promise<string | null> {
   const d = jsonOf<Any>(r.out) ?? {}
   await refreshFixes($)
   const f = await fixOf($, id)
-  await setFixLine($, { id, kind: 'applied' })
-  if (d.reload) $.ui.log(`thimble reloaded its plugins: fix ${id}${f ? `, “${f.title}”,` : ''} is on.`)
+  // a --plugin-dir session loads its own folder: the line names the restart. Mid-reply, the reload waits for the turn's
+  // end (turn.complete runs reloadIfDue), and the line says so until the new load (reloaded)
+  const reload = (await pluginDirSession($)) ? 'restart' : d.reload && (await mainRuns($)) ? 'pending' : undefined
+  await setFixLine($, { id, kind: 'applied', ...(reload ? { reload } : {}) })
+  if (d.reload && !reload) $.ui.log(`thimble reloaded its plugins: fix ${id}${f ? `, “${f.title}”,` : ''} is on.`)
   await tellAtNextPrompt($, `fix-${id}`, `The person applied thimble fix ${id}${f ? ` ("${f.title}")` : ''}: it is now part of their thimble${d?.version ? ` (${d.version})` : ''}.`)
-  await load($, d)
+  if (reload === 'pending') {
+    reloadDue = true
+    // the turn ended while the fix went on: its end found nothing due, so the reload runs now
+    if (!(await mainRuns($))) {
+      await setFixLine($, { id, kind: 'applied' })
+      await load($, d)
+    }
+  } else if (!reload) await load($, d)
   return null
 }
 
