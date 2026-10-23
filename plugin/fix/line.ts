@@ -3,10 +3,10 @@
 //
 //   ready     ✓ thimble fixed: <title> · tests pass
 //               y use it now · d what changed · n later
-//             (a round that changed fix 3, which the person had: ✓ thimble changed fix 3: <title> · tests pass, and d
-//             shows each round's words; one whose change did not fit fix 3: … · a new fix: it did not fit fix 3)
+//             (a round of a fix the person has: ✓ thimble changed: <title> · tests pass; the version they have stays
+//             until y, and d shows each round's words)
 //             d shows what changed in its place, in a few lines, not a diff:
-//             <title> · fix 3
+//             <title>
 //               You asked   <the words>
 //               Claude did  <what it does>
 //               Changed     2 files · tests pass
@@ -14,14 +14,15 @@
 //   applied   ✓ <title> is on · thimble reloaded · u undo (or: reloads when Claude finishes; or, in a session that
 //               If thimble stops loading: sh …/off.sh       loads thimble with --plugin-dir, the restart that loads it)
 //   off       ○ <title> is off · thimble reloaded           (until the next prompt)
-//   failed    × Fix 7 did not pass: <title> · <why>         d what changed · r redo · n later
-//             (a <why> too long for the row, such as a refusal that names files, gets a row of its own)
+//             ↺ <title> is back to its version before · thimble reloaded   (u after y on a changed fix)
+//   failed    × <title> did not pass · <why>                d what changed · r redo · n later
+//             (× The change to <title> did not pass, for a round of a fix the person has: n leaves the fix as it was;
+//             a <why> too long for the row, such as a refusal that names files, gets a row of its own)
 //   request   ◇ Saved as a request with no code: <title>    n ok · thimble fix list, in a shell, lists it
+//             ◇ Claude changed no code: <title> stays as it was   (a round of a fix the person has)
 //   update    ↑ thimble 0.10.3 · 3 fixes carried · 1 needs redo   (until the next prompt)
 //   release   ↑ thimble 0.10.3 is out (you have 0.10.2) · thimble update in a shell   (at session start)
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
-//   ask       ? <the fixer's question: which fix the words are for>
-//               1 <title> · 3 <title> · 0 a new fix · n never mind   (a number makes the words a change to that fix)
 //
 // y applies: from then on the fix's code runs as thimble, so only the person's key does it (fixes.ts). n leaves a ready
 // fix ready in the person's list (thimble fix list, in a shell), where thimble fix apply N turns it on later.
@@ -31,15 +32,15 @@ import { thimbleHome } from '../core/home'
 import { cut, textWidth } from '../core/text.js'
 import { accent } from '../core/theme'
 import { testsWord } from './fixer'
-import { applyFix, type Fix, fixesDir, fixesNow, type FixLine, fixLineNow, fixOf, notNow, setFixLine, shownPath, undoFix } from './fixes'
-import { redoFix, request } from './request'
+import { applyFix, type Fix, fixesDir, fixesNow, fixLineNow, fixName, fixOf, notNow, setFixLine, shownPath, undoFix } from './fixes'
+import { redoFix } from './request'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
 /** The keys the line takes now, by its kind. */
-const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['d', 'r', 'n'], request: ['n'], ask: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'n'] }
+const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['d', 'r', 'n'], request: ['n'] }
 
 /** What a key on the line does, once the word window closed (it cannot be undone). */
 export async function fixKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
@@ -47,7 +48,6 @@ export async function fixKey($: Engine, k: string): Promise<{ later: () => Promi
   if (!Object.values(KEYS).some(ks => ks.includes(k))) return null
   const l = await fixLineNow($)
   if (!l || !(KEYS[l.kind] ?? []).includes(k)) return null
-  if (l.kind === 'ask') return /^\d$/.test(k) && k !== '0' && !(l.choices ?? []).includes(Number(k)) ? null : { later: () => pressAsk($, l, k) }
   return { later: () => pressLine($, l.id, l.kind, k) }
 }
 
@@ -65,18 +65,11 @@ async function pressLine($: Engine, id: number, kind: string, k: string): Promis
     // one stays failed there
     await setFixLine($, null)
     if (kind === 'failed') said = await notNow($, id)
-    if (!said && kind === 'ready') $.ui.toast(`Fix ${id} waits, ready: in a shell, thimble fix apply ${id} turns it on, and thimble fix list lists your fixes.`)
+    const f = !said && kind === 'ready' ? await fixOf($, id) : null
+    if (f?.prev) $.ui.toast(`The new version of “${fixName(f)}” waits; the one you have stays. In a shell, thimble fix apply ${id} puts the new one on.`)
+    else if (!said && kind === 'ready') $.ui.toast(`“${f ? fixName(f) : `Fix ${id}`}” waits, ready: in a shell, thimble fix apply ${id} turns it on, and thimble fix list lists your fixes.`)
   }
   if (said) await setFixLine($, { id, kind: 'problem', said })
-}
-
-/** A key on the line that asks which fix the words are for: a fix's number, 0 a new fix, n never mind. */
-async function pressAsk($: Engine, l: FixLine, k: string): Promise<void> {
-  await setFixLine($, null)
-  if (k === 'n' || !l.words) return
-  const r = await request($, k === '0' ? `new ${l.words}` : `${k} ${l.words}`, l.by === 'claude' ? 'claude' : 'person')
-  if (r.failed) await setFixLine($, { id: r.fix?.id ?? l.id, kind: 'problem', said: r.text.replace(/^×\s*/, '') })
-  else $.ui.toast(r.text)
 }
 
 /** The person's next prompt: a line that only told something goes. A fix that waits for y stays. */
@@ -110,7 +103,7 @@ function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
   ] })
   const words = f.words || []
   return [
-    Box({ key: 'fix-what-head', flexDirection: 'row', width, children: [Text({ key: 'i', children: '  ' }), Text({ key: 't', bold: true, children: cut(f.title, Math.max(12, width - 14)) }), Text({ key: 'n', dimColor: true, children: ` · fix ${f.id}` })] }),
+    Box({ key: 'fix-what-head', flexDirection: 'row', width, children: [Text({ key: 'i', children: '  ' }), Text({ key: 't', bold: true, children: cut(f.title, Math.max(12, width - 4)) })] }),
     ...words.map((w, i) => row(`fix-what-asked-${i}`, i ? 'then' : 'You asked', cut(w, room * 2))),
     ...(f.summary ? [row('fix-what-did', 'Claude did', cut(f.summary, room * 3))] : []),
     row('fix-what-changed', 'Changed', changed),
@@ -136,9 +129,8 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   let second: Any[] = []
   let why: Any[] = []
   if (l.kind === 'ready' && f) {
-    // a round that changed a fix the person had names that fix; one that did not fit it says it is a new fix
-    first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: l.changed ? `thimble changed fix ${f.id}: ` : 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${testsWord(f)}`),
-      ...(l.notFolded != null ? [dim('f', ` · a new fix: it did not fit fix ${l.notFolded}`)] : [])]
+    // a round of a fix the person has: its new version, which y puts in place of the one they have
+    first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: f.prev ? 'thimble changed: ' : 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${testsWord(f)}`)]
     second = keysRow(els, [['y', 'use it now'], ['d', 'what changed'], ['n', 'later']])
   } else if (l.kind === 'applied') {
     const off = await shownPath($, `${fixesDir(await thimbleHome($))}/off.sh`)
@@ -149,28 +141,29 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 't', children: `${title} is on` }), dim('m', how), ...keyText(els, 'u', 'undo', 0)]
     second = [dim('o', `    If thimble stops loading: sh ${off}`)]
   } else if (l.kind === 'off') {
-    first = [Text({ key: 'g', dimColor: true, children: '○ ' }), Text({ key: 't', children: `${title} is off` }), dim('m', ' · thimble reloaded · /thimble-fix turns it on again')]
+    first = l.back
+      ? [Text({ key: 'g', dimColor: true, children: '↺ ' }), Text({ key: 't', children: `${title} is back to its version before` }), dim('m', ' · thimble reloaded')]
+      : [Text({ key: 'g', dimColor: true, children: '○ ' }), Text({ key: 't', children: `${title} is off` }), dim('m', ' · thimble reloaded · thimble fix on, in a shell, turns it on again')]
   } else if (l.kind === 'failed') {
     // the reason whole: after the title when it fits there, else on a row of its own
     const reason = f?.error || 'its tests failed'
-    const fits = textWidth(`  × Fix ${l.id} did not pass: ${title} · ${reason}`) <= width
-    first = [Text({ key: 'g', color: 'error', children: '× ' }), Text({ key: 'h', children: `Fix ${l.id} did not pass: ` }), Text({ key: 't', children: title }),
+    const lead = f?.prev ? 'The change to ' : ''
+    const fits = textWidth(`  × ${lead}${title} did not pass · ${reason}`) <= width
+    first = [Text({ key: 'g', color: 'error', children: '× ' }), Text({ key: 'h', children: lead }), Text({ key: 't', children: title }), Text({ key: 'p', children: ' did not pass' }),
       ...(fits ? [dim('m', ` · ${reason}`)] : [])]
     if (!fits) why = [Text({ key: 'w', dimColor: true, wrap: 'wrap', children: `  ${reason}` })]
     second = keysRow(els, [['d', 'what changed'], ['r', 'redo'], ['n', 'later']])
   } else if (l.kind === 'request') {
-    first = [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
-    second = [...keysRow(els, [['n', 'ok']]), dim('m', ' · thimble fix list, in a shell, lists it')]
+    first = l.kept
+      ? [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Claude changed no code: ' }), Text({ key: 't', children: title }), Text({ key: 'm', children: ' stays as it was' })]
+      : [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
+    second = l.kept ? keysRow(els, [['n', 'ok']]) : [...keysRow(els, [['n', 'ok']]), dim('m', ' · thimble fix list, in a shell, lists it')]
   } else if (l.kind === 'update') {
     first = [Text({ key: 'g', color: accent(), children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · thimble fix list, in a shell, lists your fixes')]
   } else if (l.kind === 'release') {
     first = [Text({ key: 'g', color: accent(), children: '↑ ' }), Text({ key: 't', children: l.said || 'a new thimble release is out' })]
-  } else if (l.kind === 'ask') {
-    first = [Text({ key: 'g', color: accent(), children: '? ' }), Text({ key: 't', wrap: 'wrap', children: l.said || 'Which fix are these words for?' })]
-    const fixes = (await fixesNow($))?.fixes ?? []
-    second = keysRow(els, [...(l.choices ?? []).map(id => [String(id), cut(fixes.find(f => f.id === id)?.title || `fix ${id}`, 28)] as [string, string]), ['0', 'a new fix'], ['n', 'never mind']])
   } else if (l.kind === 'problem') {
-    first = [Text({ key: 't', color: 'error', wrap: 'wrap', children: `× ${l.said || `fix ${l.id} did not go through`}` })]
+    first = [Text({ key: 't', color: 'error', wrap: 'wrap', children: `× ${l.said || `${f ? `“${fixName(f)}”` : `fix ${l.id}`} did not go through`}` })]
   } else return []
   return [row('fix-line-1', first), ...(why.length ? [row('fix-line-why', why)] : []),
     ...(second.length ? [Box({ key: 'fix-line-2', flexDirection: 'row', flexWrap: 'wrap', width, children: second })] : [])]

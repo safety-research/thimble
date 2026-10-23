@@ -15,7 +15,6 @@ In a shell:
     thimble file pr N              open a pull request with fix N's code on the public repo (asks first)
     thimble fix off [N]            one fix off, or all of them (the plain release)
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
-    thimble fix merge A B C        fixes B and C become part of fix A: one change, one title (asks y/N first)
     thimble fix remove N           fix N leaves your list (off first, when it is on)
     thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
 
@@ -598,9 +597,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--made-in", dest="made_in", default="terminal", help=argparse.SUPPRESS)
     p.add_argument("--request", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--no-tests", dest="no_tests", action="store_true", help=argparse.SUPPRESS)
-    p.add_argument("--refines", help=argparse.SUPPRESS)  # new: a fix these words may change
-    p.add_argument("--always", action="store_true", help=argparse.SUPPRESS)  # new: they change it, whatever the end says
-    p.add_argument("--changes", help=argparse.SUPPRESS)  # done: the fixer's end said its change refines this fix
     p.add_argument("--cannot", help=argparse.SUPPRESS)  # done: the fixer's end said why it cannot be done (-: stdin)
     p.add_argument("--session", help=argparse.SUPPRESS)  # new, round, again, redo, done: the Claude Code session of the fixer
     p.add_argument("--answer", choices=("pr", "file"), default="file", help=argparse.SUPPRESS)

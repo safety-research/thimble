@@ -22,6 +22,13 @@ Under $THIMBLE_HOME/fixes:
 
 refs/thimble/fixes/<id> in live's repository keeps each fix's commit, on or off, so an undone fix can come back.
 
+More words for a fix are a round of that fix, never a new fix (round_). A fix that is on, off or ready with no copy is
+changed in place: a copy holds its change, the fixer adds to it, and the new version (refs/thimble/next/<id>) waits for
+the person's y while the version they have (prev) stays as it was; y swaps it in, and u brings back the one before
+(refs/thimble/prev/<id>). Follow-ups made as fixes of their own before this (records with `refines`) fold into their
+fix by themselves when the list is read (fold_strays), with git's three-way picks; thimble fix merge is the manual
+fallback.
+
 thimble's code, not Claude, commits, moves mine and points Claude Code's marketplace at live. Claude Code copies the
 plugin from live into its own cache (`claude plugin update`), and the session loads it with /reload-plugins; its cache
 is never edited here. Because Claude Code names a copy by the plugin's version, live's plugin.json carries the
@@ -521,23 +528,15 @@ def run_tests(fid: int | str) -> tuple[bool, str]:
 REFINABLE = ("on", "off", "ready")
 
 
-def new(words: str, made_in: str = "terminal", title: str | None = None, refines: int | str | None = None,
-        always: bool = False, session: str | None = None) -> dict[str, Any]:
-    """A request: a copy cut from mine. `refines`: a fix that is on, off or ready, which these words may change (the
-    fixer's end says so, and done folds the change into it; `always`: they change it whatever the end says). Its
-    change is in the copy: mine holds it when it is on, else thimble puts it on the copy first. `session`: the Claude
-    Code session whose fixer works on it; only that session checks it at the fixer's end."""
+def new(words: str, made_in: str = "terminal", title: str | None = None, session: str | None = None) -> dict[str, Any]:
+    """A request: a copy cut from mine. `session`: the Claude Code session whose fixer works on it; only that session
+    checks it at the fixer's end."""
     words = (words or "").strip()
     if not words:
         raise FixError("say what should work differently: /thimble-fix make the bar say how many citations failed")
     with Lock():
         ensure_live()
         recs = records()
-        tgt = None
-        if refines is not None:
-            tgt = get(refines)
-            if tgt.get("state") not in REFINABLE or not tgt.get("commit"):
-                raise FixError(f"fix {tgt['id']} is {state_word(tgt)}; only a fix that is on, off or ready can change")
         fid = max(recs, default=0) + 1
         wt = work_dir(fid)
         if wt.exists():
@@ -546,21 +545,11 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, refines
         wt.parent.mkdir(parents=True, exist_ok=True)
         git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
         _give_types(wt)
-        if tgt and tgt.get("state") != "on":
-            p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{tgt['id']}"],
-                    cwd=wt, check=False, env=as_thimble())
-            if p.returncode != 0:
-                run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
-                _drop_work({"work": str(wt)})
-                raise FixError(f"fix {tgt['id']} does not fit your thimble as it is now; /thimble-fix new <words> makes "
-                               "a new fix")
-            base = git("rev-parse", "HEAD", cwd=wt)
         tmp_dir(fid).mkdir(parents=True, exist_ok=True)
         rec = {"id": fid, "title": (title or short(words)).strip(), "words": [words], "rounds": 1, "made_in": made_in,
                "created": time.time(), "state": "working", "work": str(wt), "base": base, "commit": None, "files": [],
                "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
-               "session": session or None,
-               **({"refines": tgt["id"], "refines_always": bool(always)} if tgt else {})}
+               "session": session or None}
         return put(rec)
 
 
@@ -590,16 +579,92 @@ def again(fid: int | str, session: str | None = None) -> dict[str, Any]:
     return put(rec)
 
 
-def round_(fid: int | str, words: str, session: str | None = None, always: bool = False) -> dict[str, Any]:
-    """More words for a fix whose copy is still there: a new round of the same fix, whose fixer works in `session`.
-    `always`: the words name the fix it refines, so its change goes into that fix whatever the end says."""
+def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, Any]:
+    """More words for a fix, whose fixer works in `session`: a new round of the same fix, never a new fix. A fix whose
+    copy is still there (working, ready, or refused) gets the round in that copy. A fix that is on, off or ready with
+    no copy is changed in place: a new copy holds its change, and its version as it is now (prev) stays on, or off,
+    until the person's y puts the new version on (apply), and u goes back to it (undo). A fix that failed, or no longer
+    fits, starts again in a new copy (redo)."""
     rec = get(fid)
-    if not _is_checkout(rec.get("work")):
-        raise FixError(f"fix {rec['id']} has no copy any more; ask for a new fix")
-    rec.update(words=[*rec.get("words", []), words.strip()], rounds=int(rec.get("rounds") or 1) + 1, state="working",
-               error=None, **({"session": session} if session else {}),
-               **({"refines_always": True} if always and rec.get("refines") is not None else {}))
-    return put(rec)
+    words = (words or "").strip()
+    if _is_checkout(rec.get("work")):
+        rec.update(words=[*rec.get("words", []), words], rounds=int(rec.get("rounds") or 1) + 1, state="working",
+                   error=None, **({"session": session} if session else {}))
+        return put(_named_patches(rec, words))
+    if rec.get("state") in ("failed", "redo"):
+        return redo(rec["id"], words, session)
+    if rec.get("state") not in REFINABLE or not rec.get("commit"):
+        raise FixError(f"fix {rec['id']} is {state_word(rec)}; only a fix that is on, off or ready can change")
+    if not words:
+        raise FixError("say what should work differently in this fix")
+    with Lock():
+        ensure_live()
+        rec = get(rec["id"])
+        wt, base = _copy_of(rec)
+        prev = {k: rec.get(k) for k in ("state", "commit", "files", "summary", "title", "tests", "tests_tail", "on_at",
+                                         "base", "note")}
+        rec.pop("refused", None)
+        rec.update(state="working", work=str(wt), base=base, prev=prev, error=None, tests=None, note=None,
+                   words=[*rec.get("words", []), words], rounds=int(rec.get("rounds") or 1) + 1,
+                   session=session or rec.get("session"))
+        return put(_named_patches(rec, words))
+
+
+def _named_patches(rec: dict[str, Any], words: str) -> dict[str, Any]:
+    """The other fixes the words name ("fold in fix 4"): each one's own change as a patch in the fixer's temp folder
+    (tmp/<id>/fix-<n>.patch), which the fixer reads (patches: id, title, path)."""
+    out = list(rec.get("patches") or [])
+    for m in dict.fromkeys(int(x) for x in re.findall(r"\bfix\s+#?(\d+)\b", words, re.I)):
+        if m == rec["id"] or any(x.get("id") == m for x in out):
+            continue
+        try:
+            other = get(m)
+        except FixError:
+            continue
+        ref = f"refs/thimble/fixes/{m}"
+        if not git("rev-parse", "-q", "--verify", ref, cwd=live_dir(), check=False):
+            continue
+        patch = run(["git", "-c", "core.quotePath=false", "show", "--format=", "--no-color", "--no-ext-diff", ref],
+                    cwd=live_dir(), check=False).stdout
+        if not patch.strip():
+            continue
+        tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
+        path = tmp_dir(rec["id"]) / f"fix-{m}.patch"
+        path.write_text(patch)
+        out.append({"id": m, "title": other.get("title") or "", "path": str(path)})
+    return {**rec, "patches": out} if out else rec
+
+
+def _copy_of(rec: dict[str, Any]) -> tuple[Path, str]:
+    """A copy cut from mine that holds the fix's change as it is now (its ref): mine holds it when it is on, else thimble
+    puts it on the copy. The copy and the commit it starts from."""
+    fid = rec["id"]
+    wt = work_dir(fid)
+    _drop_work(rec)
+    if wt.exists():
+        shutil.rmtree(wt)
+    base = head()
+    wt.parent.mkdir(parents=True, exist_ok=True)
+    git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+    _give_types(wt)
+    if rec.get("state") != "on" or not _has_ref(fid):
+        p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", _fix_ref(rec)], cwd=wt, check=False,
+                env=as_thimble())
+        if p.returncode != 0:
+            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+            _drop_work({"work": str(wt)})
+            raise FixError(f"fix {fid} does not fit your thimble as it is now; /thimble-fix new <words> makes a new fix")
+        base = git("rev-parse", "HEAD", cwd=wt)
+    tmp_dir(fid).mkdir(parents=True, exist_ok=True)
+    return wt, base
+
+
+def _has_ref(fid: int) -> bool:
+    return bool(git("rev-parse", "-q", "--verify", f"refs/thimble/fixes/{fid}", cwd=live_dir(), check=False))
+
+
+def _fix_ref(rec: dict[str, Any]) -> str:
+    return f"refs/thimble/fixes/{rec['id']}" if _has_ref(rec["id"]) else str(rec["commit"])
 
 
 def _numstat(repo: Path, a: str, b: str) -> list[dict[str, Any]]:
@@ -638,11 +703,11 @@ def _is_checkout(work: str | None) -> bool:
 
 
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
-         tests: bool = True, changes: int | str | None = None, session: str | None = None,
-         cannot: str | None = None) -> dict[str, Any]:
+         tests: bool = True, session: str | None = None, cannot: str | None = None) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the quick tests in
-    the sandbox. ready, failed (with the reason), or a request with no code. `changes`: the fixer's end said its
-    change refines that fix (or the person asked to change it, refines_always): a ready change goes into it (fold).
+    the sandbox. ready, failed (with the reason), or a request with no code. A round of a fix changed in place (prev):
+    a ready change becomes the fix's new version, the fix's change and the round's in one commit (settle), which waits
+    for the person's y while the version before stays as it was; a round that changed nothing leaves the fix as it was.
     `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
     `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r."""
     rec = get(fid)
@@ -655,57 +720,49 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
         rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300))
         return put(rec)
     rec = _done(fid, title, summary, request, tests)
-    target = changes if changes not in (None, "") else rec.get("refines") if rec.get("refines_always") else None
-    if target is not None and rec.get("state") == "ready":
-        return fold(rec, target)
+    if rec.get("prev") and rec.get("state") == "request":
+        return {**_restore(rec), "unchanged": True}
+    if rec.get("prev") and rec.get("state") == "ready":
+        return settle(rec)
     return rec
 
 
-def fold(rec: dict[str, Any], target: int | str) -> dict[str, Any]:
-    """A round's ready change goes into fix `target`: its new commit is the target's change plus this change, both on
-    the commit the target's change sits on; its record gains the round's words and summary and is ready again (only
-    the person's key puts it on). A target that is on comes out of mine until then. When the change does not apply
-    to the target, the round stays a fix of its own, with fold_failed naming the target."""
-    try:
-        tgt = get(target)
-    except FixError:
-        return put({**rec, "fold_failed": str(target)})
+def settle(rec: dict[str, Any]) -> dict[str, Any]:
+    """A ready round of a fix changed in place: its new version is the fix's change as it is now (its ref) plus the
+    round's change, as one commit on the commit the fix's change sits on, kept under refs/thimble/next/<id> until the
+    person's y. A round's change that does not apply to the fix fails, for r."""
     wt = Path(rec["work"])
-    if tgt["id"] == rec["id"] or tgt.get("state") not in REFINABLE or not tgt.get("commit"):
-        return put({**rec, "fold_failed": tgt["id"]})
     with Lock():
-        # the target as it is now: another round may have folded into it while this one waited for the lock
-        tgt = get(tgt["id"])
-        if tgt.get("state") not in REFINABLE or not tgt.get("commit"):
-            return put({**rec, "fold_failed": tgt["id"]})
-        old = git("rev-parse", f"refs/thimble/fixes/{tgt['id']}", cwd=wt)
+        old = git("rev-parse", _fix_ref(rec), cwd=wt)
         parent = git("rev-parse", f"{old}^", cwd=wt)
+        mine = rec["commit"]
         git("checkout", "-q", "--detach", old, cwd=wt)
-        p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", rec["commit"]], cwd=wt, check=False, env=as_thimble())
+        p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", mine], cwd=wt, check=False, env=as_thimble())
         if p.returncode != 0:
             run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
             run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
-            git("checkout", "-q", "--detach", rec["commit"], cwd=wt)
-            return put({**rec, "fold_failed": tgt["id"]})
+            git("checkout", "-q", "--detach", mine, cwd=wt)
+            why = f"its change does not fit fix {rec['id']} as it is now"
+            return put({**rec, "state": "failed", "error": why})
         tree = git("write-tree", cwd=wt)
-        summary = rec.get("summary") or tgt.get("summary") or ""
+        run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
+        git("checkout", "-q", "--detach", mine, cwd=wt)
         commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", parent, "-m",
-                     f"{tgt['title']}\n\n{summary}\n\nthimble fix {tgt['id']}".strip(), cwd=wt, env=as_thimble())
-        git("update-ref", f"refs/thimble/fixes/{tgt['id']}", commit, cwd=wt)
-        git("update-ref", "-d", f"refs/thimble/fixes/{rec['id']}", cwd=wt)
-        files = _numstat(wt, parent, commit)
-        was_on = tgt.get("state") == "on"
-        _drop_work(rec)
-        put({**rec, "state": "removed", "folded_into": tgt["id"]})
-        words = [*(tgt.get("words") or []), *(rec.get("words") or [])]
-        tgt.update(commit=commit, base=parent, files=files, words=words, summary=summary, state="ready", error=None,
-                   note=None, tests=rec.get("tests"), tests_tail=rec.get("tests_tail"), work=None,
-                   rounds=int(tgt.get("rounds") or 1) + int(rec.get("rounds") or 1))
-        put(tgt)
-    if was_on:
-        # mine without the old commit until the person's y puts the new one on
-        _move(lambda: _take_out(tgt["id"], f"it did not fit once fix {tgt['id']} changed"))
-    return {**get(tgt["id"]), "folded": rec["id"]}
+                     f"{rec['title']}\n\n{rec.get('summary') or ''}\n\nthimble fix {rec['id']}".strip(), cwd=wt,
+                     env=as_thimble())
+        git("update-ref", f"refs/thimble/next/{rec['id']}", commit, cwd=wt)
+        return put({**rec, "commit": commit, "round_commit": mine, "files": _numstat(wt, parent, commit)})
+
+
+def _restore(rec: dict[str, Any]) -> dict[str, Any]:
+    """A fix changed in place goes back to its version before the round (prev); the person's words stay with it."""
+    p = rec.get("prev") or {}
+    _drop_work(rec)
+    run(["git", "update-ref", "-d", f"refs/thimble/next/{rec['id']}"], cwd=live_dir(), check=False)
+    for k in ("refused", "prev", "round_commit"):
+        rec.pop(k, None)
+    rec.update({k: v for k, v in p.items() if k != "note"}, note=p.get("note"), error=None)
+    return put(rec)
 
 
 def _take_out(fid: int, why: str) -> dict[str, Any]:
@@ -734,7 +791,8 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
         return put(rec)
     wt = Path(rec["work"])
     rec.pop("refused", None)
-    if title and title.strip():
+    # a fix changed in place keeps its name
+    if title and title.strip() and not rec.get("prev"):
         rec["title"] = short(title, 60)
     rec["summary"] = (summary or "").strip()[:2000]
     git("add", "-A", cwd=wt)
@@ -749,7 +807,8 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", rec["base"], "-m",
                  f"{rec['title']}\n\n{rec['summary']}\n\nthimble fix {rec['id']}".strip(), cwd=wt, env=as_thimble())
     git("reset", "-q", "--hard", commit, cwd=wt)
-    git("update-ref", f"refs/thimble/fixes/{rec['id']}", commit, cwd=wt)
+    # a round of a fix changed in place: its ref keeps the version the person has until their y
+    git("update-ref", f"refs/thimble/{'next' if rec.get('prev') else 'fixes'}/{rec['id']}", commit, cwd=wt)
     files = _numstat(wt, rec["base"], commit)
     rec.update(commit=commit, files=files)
     bad = protected_of([f["path"] for f in files])
@@ -824,8 +883,13 @@ def apply_typed(fid: int | str, answer=input) -> dict[str, Any] | None:
 # ------------------------------------------------------------------ on, off, undo
 
 
+def _is_on(r: dict[str, Any]) -> bool:
+    """A fix whose change is in mine: on, or on under a round that changes it in place."""
+    return r.get("state") == "on" or (r.get("prev") or {}).get("state") == "on"
+
+
 def _on_ids(recs: dict[int, dict[str, Any]]) -> list[int]:
-    return [r["id"] for r in sorted((r for r in recs.values() if r.get("state") == "on"), key=lambda r: r.get("on_at") or 0)]
+    return [r["id"] for r in sorted((r for r in recs.values() if _is_on(r)), key=lambda r: r.get("on_at") or 0)]
 
 
 def _rebuild(order: list[int]) -> list[int]:
@@ -867,6 +931,9 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
         raise FixError(f"thimble update set fix {rec['id']} aside at {release_name()}, so that nothing is fixed twice: "
                        "thimble reapply in a shell has Claude check it against the release and bring it back")
 
+    if rec.get("prev"):
+        return _move(lambda: _swap(rec["id"]))
+
     def change():
         live = live_dir()
         _unstamp()
@@ -893,15 +960,129 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     return _move(change)
 
 
-def merge(ids: list[int | str], secret: str | None, title: str | None = None, summary: str | None = None) -> dict[str, Any]:
-    """The person's key (thimble fix merge A B C in a shell): the fixes become one, under the
-    first one's id: one commit, on the commit the first fix with code sits on, with each fix's change in the order
-    given; one title and summary (the first fix's, when none is given); every fix's words. A request with no code
-    gives its words only. The others' records say merged; their refs stay, and each merged commit is kept under
-    refs/thimble/merged/<id>/, for an undo by hand. A merged fix that was on is on in its place in mine."""
+def _swap(fid: int) -> dict[str, Any]:
+    """y on a fix changed in place: its new version takes the place of the one before, which stays under
+    refs/thimble/prev/<id> for u. A fix that was on is rebuilt in its place in mine; one that was off goes on last."""
+    live = live_dir()
+    rec = get(fid)
+    p = rec.get("prev") or {}
+    old = git("rev-parse", "-q", "--verify", f"refs/thimble/fixes/{fid}", cwd=live, check=False) or str(p.get("commit") or "")
+    _unstamp()
+    git("checkout", "-q", "mine", cwd=live)
+    write_json(home() / "state.json", {"on": True})
+    git("update-ref", f"refs/thimble/fixes/{fid}", rec["commit"], cwd=live)
+    order = _on_ids(records())
+    if fid not in order:
+        order.append(fid)
+    failed = _rebuild(order)
+    if fid in failed and order[-1] != fid:
+        # a new version that needs fixes after it in mine underneath it (a stray folded in): last
+        order = [*[i for i in order if i != fid], fid]
+        failed = _rebuild(order)
+    if fid in failed:
+        git("update-ref", f"refs/thimble/fixes/{fid}", old, cwd=live)
+        _rebuild([i for i in order if p.get("state") == "on" or i != fid])
+        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; r asks Claude to redo it")
+    for i in failed:
+        x = get(i)
+        x.update(state="redo", error=f"it did not fit once fix {fid} changed")
+        put(x)
+    if old:
+        git("update-ref", f"refs/thimble/prev/{fid}", old, cwd=live)
+    git("update-ref", "-d", f"refs/thimble/next/{fid}", cwd=live)
+    _repoint()
+    r = get(fid)
+    new_commit = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
+    r.pop("round_commit", None)
+    r.update(state="on", on_at=p.get("on_at") if p.get("state") == "on" else time.time(), commit=new_commit, error=None,
+             note=None, prev={**p, "commit": old})
+    _drop_work(r)
+    put(r)
+    return {"id": fid, "title": r["title"], "commit": new_commit, "changed": True, "redo": failed}
+
+
+def merge(ids: list[int | str], secret: str | None) -> dict[str, Any]:
+    """The person's key (thimble fix merge A B C in a shell): a manual fallback, since follow-ups are rounds of their
+    fix and strays from before fold in by themselves (fold_strays). The fixes become one, under the first one's id, by
+    git alone (_merge). Whatever stops it changes nothing, and the error names the /thimble-fix that has Claude do it."""
     recs = [get(i) for i in ids]
+    check_ask(recs[0]["id"], secret)
+    try:
+        return _merge(recs)
+    except FixError as e:
+        others = [r["id"] for r in recs[1:]]
+        ask = f"/thimble-fix {recs[0]['id']} fold in {_and([f'fix {i}' for i in others])}" if others else "/thimble-fix"
+        raise FixError(f"{str(e).rstrip('.')}; nothing was merged. In Claude Code, {ask} asks Claude to do it") from e
+
+
+class Conflict(FixError):
+    """Two fixes change the same lines in different ways: only Claude can join them (/thimble-fix N fold in fix M)."""
+
+    def __init__(self, into: int, other: int):
+        self.into, self.other = into, other
+        super().__init__(f"fix {other} and fix {into} change the same lines in different ways, so git cannot join them")
+
+
+def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -> dict[str, Any]:
+    """One tree with each fix's own change, in the order they sit in mine (git's three-way pick, from each fix's own
+    parent, so that what a fix was built on and the merge leaves out stays out), placed after the fixes of mine that
+    are not merged: the fewest first (the place of the first merged fix that is on), later only when a merged fix needs
+    one of them underneath it. Fixes on in none of them sit on the commit the first was made on, else on mine.
+    {place, parent, tree, rest, code}, or Conflict."""
+    live = live_dir()
+    refs = {r["id"]: git("rev-parse", f"refs/thimble/fixes/{r['id']}", cwd=live) for r in code}
+    mine_order = _replay_order(records())
+    at = {fid: i for i, fid in enumerate(mine_order)}
+    given = [x["id"] for x in code]
+    code = sorted(code, key=lambda r: (at.get(r["id"], len(at)), given.index(r["id"])))
+    rest = [i for i in mine_order if i not in merged_ids]
+    on_named = [i for i in mine_order if i in merged_ids]
+    wt = tmp_dir(first) / "merge"
+    run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
+    shutil.rmtree(wt, ignore_errors=True)
+    git("worktree", "add", "-q", "--detach", str(wt), release()["base"], cwd=live)
+    try:
+        prefix = [release()["base"]]
+        for i in rest:
+            p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{i}"],
+                    cwd=wt, check=False, env=as_thimble())
+            if p.returncode != 0:
+                run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+                break
+            prefix.append(git("rev-parse", "HEAD", cwd=wt))
+        if on_named:
+            start = len([i for i in mine_order[:mine_order.index(on_named[0])] if i not in merged_ids])
+            tries = [(k, prefix[k]) for k in range(start, len(prefix))]
+        else:
+            tries = [(len(rest), git("rev-parse", f"{refs[code[0]['id']]}^", cwd=live)), (len(rest), prefix[-1])]
+        stuck = code[-1]["id"]
+        for place, base in tries:
+            git("checkout", "-q", "--detach", base, cwd=wt)
+            for r in code:
+                p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", "--allow-empty", refs[r["id"]]], cwd=wt,
+                        check=False, env=as_thimble())
+                if p.returncode != 0:
+                    stuck = r["id"]
+                    run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+                    run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
+                    break
+            else:
+                tree = git("write-tree", cwd=wt)
+                run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
+                return {"place": place, "parent": base, "tree": tree, "rest": rest, "code": code, "refs": refs}
+        other = first if stuck != first else next(r["id"] for r in code if r["id"] != stuck)
+        raise Conflict(first, stuck if stuck != first else other)
+    finally:
+        run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
+        run(["git", "worktree", "prune"], cwd=live, check=False)
+
+
+def _merge(recs: list[dict[str, Any]]) -> dict[str, Any]:
+    """The fixes become one, under the first one's id: one commit (_merged_tree); the first fix's title, every fix's
+    summary and words. A request with no code gives its words only. The others' records
+    say merged; their refs stay, and each merged commit is kept under refs/thimble/merged/<id>/, for an undo by hand.
+    A merged fix that was on is on in mine, after the fixes it needs underneath it."""
     first = recs[0]
-    check_ask(first["id"], secret)
     if len({r["id"] for r in recs}) != len(recs) or len(recs) < 2:
         raise FixError("name two fixes or more, each once: thimble fix merge 1 3 4")
     for r in recs:
@@ -910,37 +1091,21 @@ def merge(ids: list[int | str], secret: str | None, title: str | None = None, su
     code = [r for r in recs if r.get("state") != "request" and r.get("commit")]
     if not code:
         raise FixError("none of these fixes changes code; a request merges into a fix that does")
+    merged_ids = {r["id"] for r in recs}
 
     def change():
         live = live_dir()
-        refs = {r["id"]: git("rev-parse", f"refs/thimble/fixes/{r['id']}", cwd=live) for r in code}
-        parent = git("rev-parse", f"{refs[code[0]['id']]}^", cwd=live)
-        wt = tmp_dir(first["id"]) / "merge"
-        run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
-        shutil.rmtree(wt, ignore_errors=True)
-        git("worktree", "add", "-q", "--detach", str(wt), parent, cwd=live)
-        try:
-            for r in code:
-                p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", "--allow-empty", refs[r["id"]]], cwd=wt,
-                        check=False, env=as_thimble())
-                if p.returncode != 0:
-                    run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
-                    raise FixError(f"fix {r['id']} does not fit the fixes before it in the list; nothing was merged")
-            tree = git("write-tree", cwd=wt)
-        finally:
-            run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
-            run(["git", "worktree", "prune"], cwd=live, check=False)
-        name = short(title or first["title"], 60)
-        text = (summary if summary is not None else " ".join(str(r.get("summary") or "").strip() for r in recs)).strip()
+        m = _merged_tree(code, merged_ids, first["id"])
+        place, parent, tree, rest = m["place"], m["parent"], m["tree"], m["rest"]
+        name = first["title"]
+        text = " ".join(str(r.get("summary") or "").strip() for r in recs).strip()
         commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", parent, "-m",
                      f"{name}\n\n{text}\n\nthimble fix {first['id']}".strip(), cwd=live, env=as_thimble())
-        for i, old in refs.items():
+        for i, old in m["refs"].items():
             git("update-ref", f"refs/thimble/merged/{first['id']}/{i}", old, cwd=live)
         git("update-ref", f"refs/thimble/fixes/{first['id']}", commit, cwd=live)
         all_recs = records()
-        on_order = _on_ids(all_recs)
-        merged_ids = {r["id"] for r in recs}
-        was_on = [i for i in on_order if i in merged_ids]
+        was_on = [i for i in _on_ids(all_recs) if i in merged_ids]
         for r in recs[1:]:
             x = get(r["id"])
             _drop_work(x)
@@ -958,10 +1123,8 @@ def merge(ids: list[int | str], secret: str | None, title: str | None = None, su
         put(f)
         failed: list[int] = []
         if was_on:
-            # mine again: the merged fix in the place of the first of them that was on, the others gone
-            order = [i for i in on_order if i not in merged_ids or i == was_on[0]]
-            order = [first["id"] if i == was_on[0] else i for i in order]
-            failed = _rebuild(order)
+            # mine again: the merged fix after the fixes it needs underneath it, the others gone
+            failed = _rebuild([*rest[:place], first["id"], *rest[place:]])
             for i in failed:
                 x = get(i)
                 x.update(state="redo", error=f"it did not fit once fixes {_and([str(r['id']) for r in recs])} merged")
@@ -975,7 +1138,64 @@ def merge(ids: list[int | str], secret: str | None, title: str | None = None, su
     return _move(change)
 
 
-def merge_typed(ids: list[int | str], title: str | None = None, summary: str | None = None) -> dict[str, Any]:
+def fold_strays() -> list[dict[str, Any]]:
+    """Follow-ups made as fixes of their own before rounds changed a fix in place (records with `refines`, on, off or
+    ready) fold into the fix they refine, by themselves, with git's three-way picks (_merged_tree). A stray that is on
+    with its fix on merges as it stands (mine keeps the same change). Any other stray becomes a new version of its fix
+    that waits for the person's y, the version they have staying until then (prev), as after a round. One whose lines
+    conflict with the fix stays, marked (fold_conflict), for /thimble-fix N fold in fix M. What happened, one entry a
+    stray."""
+    out: list[dict[str, Any]] = []
+    for stray in sorted(records().values(), key=lambda r: r["id"]):
+        if stray.get("refines") is None or stray.get("fold_conflict") or stray.get("state") not in REFINABLE \
+                or not stray.get("commit"):
+            continue
+        try:
+            tgt = get(stray["refines"])
+        except FixError:
+            continue
+        if tgt["id"] == stray["id"] or tgt.get("state") not in REFINABLE or not tgt.get("commit") or tgt.get("prev"):
+            continue
+        both_on = tgt.get("state") == "on" and stray.get("state") == "on"
+        if stray.get("state") == "on" and not both_on:
+            continue  # its fix is off: folding would turn the fix on without the person's key
+        try:
+            if both_on or tgt.get("state") != "on":
+                _merge([tgt, stray])
+                out.append({"id": stray["id"], "into": tgt["id"], "folded": True})
+            else:
+                with Lock():
+                    _pending_fold(tgt, stray)
+                out.append({"id": stray["id"], "into": tgt["id"], "folded": True, "waits": True})
+        except Conflict:
+            put({**get(stray["id"]), "fold_conflict": tgt["id"]})
+            out.append({"id": stray["id"], "into": tgt["id"], "conflict": True})
+    return out
+
+
+def _pending_fold(tgt: dict[str, Any], stray: dict[str, Any]) -> None:
+    """A stray that is not on joins a fix that is on as the fix's new version, for the person's y (apply swaps it in)."""
+    live = live_dir()
+    m = _merged_tree([tgt, stray], {tgt["id"], stray["id"]}, tgt["id"])
+    summary = " ".join(x for x in (str(tgt.get("summary") or "").strip(), str(stray.get("summary") or "").strip()) if x)
+    commit = git(*THIMBLE_ID, "commit-tree", m["tree"], "-p", m["parent"], "-m",
+                 f"{tgt['title']}\n\n{summary}\n\nthimble fix {tgt['id']}".strip(), cwd=live, env=as_thimble())
+    git("update-ref", f"refs/thimble/next/{tgt['id']}", commit, cwd=live)
+    git("update-ref", f"refs/thimble/merged/{tgt['id']}/{stray['id']}", m["refs"][stray["id"]], cwd=live)
+    x = get(stray["id"])
+    _drop_work(x)
+    x.update(state="merged", merged_into=tgt["id"])
+    put(x)
+    t = get(tgt["id"])
+    prev = {k: t.get(k) for k in ("state", "commit", "files", "summary", "title", "tests", "tests_tail", "on_at", "base",
+                                   "note")}
+    t.update(prev=prev, state="ready", commit=commit, files=_numstat(live, m["parent"], commit), summary=summary,
+             words=[*(t.get("words") or []), *(stray.get("words") or [])], tests=stray.get("tests"),
+             rounds=int(t.get("rounds") or 1) + int(stray.get("rounds") or 1), merged=[stray["id"]], error=None)
+    put(t)
+
+
+def merge_typed(ids: list[int | str]) -> dict[str, Any]:
     """thimble fix merge A B C in a shell: after the person's y in their terminal."""
     recs = [get(i) for i in ids]
     names = ", ".join(f'{r["id"]} "{r["title"]}"' for r in recs)
@@ -985,7 +1205,7 @@ def merge_typed(ids: list[int | str], title: str | None = None, summary: str | N
     if not secret:
         return {"said": "Nothing merged.", "reload": False}
     write_json(home() / "asks" / f"{recs[0]['id']}.json", {"key": key_hash(secret)})
-    out = merge(ids, secret, title, summary)
+    out = merge(ids, secret)
     return {**out, "said": f"Fixes {_and([str(r['id']) for r in recs])} are now fix {recs[0]['id']}: {out['title']}."}
 
 
@@ -995,6 +1215,12 @@ def not_now(fid: int | str) -> dict[str, Any]:
     rec = get(fid)
     if rec.get("state") not in ("ready", "failed"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}")
+    if rec.get("prev"):
+        # a fix changed in place: a ready new version waits for thimble fix apply; a failed round leaves it as it was
+        if rec["state"] == "failed":
+            return _restore(rec)
+        _drop_work(rec)
+        return put(rec)
     if rec["state"] == "ready":
         rec.update(state="off", note="not now")
     _drop_work(rec)
@@ -1009,14 +1235,21 @@ def redo(fid: int | str, words: str = "", session: str | None = None) -> dict[st
         raise FixError(f"fix {rec['id']} is {rec.get('state')}")
     with Lock():
         ensure_live()
-        earlier = diff_of(rec) if rec.get("commit") else ""
-        _drop_work(rec)
-        wt = work_dir(rec["id"])
-        if wt.exists():
-            shutil.rmtree(wt)
-        base = head()
-        git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
-        _give_types(wt)
+        if rec.get("prev"):
+            # a round of a fix changed in place: the copy holds the fix as the person has it, the round's change apart
+            c = rec.get("round_commit") or rec.get("commit")
+            earlier = run(["git", "-c", "core.quotePath=false", "show", "--format=", "--no-color", "--no-ext-diff", c],
+                          cwd=live_dir(), check=False).stdout if c else ""
+            wt, base = _copy_of({**rec, **{k: v for k, v in rec["prev"].items() if k in ("state", "commit")}})
+        else:
+            earlier = diff_of(rec) if rec.get("commit") else ""
+            _drop_work(rec)
+            wt = work_dir(rec["id"])
+            if wt.exists():
+                shutil.rmtree(wt)
+            base = head()
+            git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+            _give_types(wt)
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         if earlier.strip():
             (tmp_dir(rec["id"]) / "earlier.patch").write_text(earlier)
@@ -1031,6 +1264,8 @@ def undo(fid: int | str) -> dict[str, Any]:
     rec = get(fid)
     if rec.get("state") != "on":
         raise FixError(f"fix {rec['id']} is not on")
+    if rec.get("prev"):
+        return _move(lambda: _back(rec["id"]))
 
     def change():
         r = get(rec["id"])
@@ -1040,6 +1275,34 @@ def undo(fid: int | str) -> dict[str, Any]:
         return {"id": rec["id"], "title": rec["title"], **out}
 
     return _move(change)
+
+
+def _back(fid: int) -> dict[str, Any]:
+    """u after y on a fix changed in place: the version before comes back, on or off as it was."""
+    live = live_dir()
+    r = get(fid)
+    p = r.pop("prev") or {}
+    old = git("rev-parse", "-q", "--verify", f"refs/thimble/prev/{fid}", cwd=live, check=False) or str(p.get("commit") or "")
+    git("update-ref", f"refs/thimble/fixes/{fid}", old, cwd=live)
+    r.update({k: v for k, v in p.items() if k in ("files", "summary", "title", "tests", "tests_tail", "base")},
+             state=p.get("state") or "off", note="back to the version before", error=None)
+    if r["state"] == "on":
+        r["on_at"] = p.get("on_at") or r.get("on_at")
+    put(r)
+    run(["git", "update-ref", "-d", f"refs/thimble/prev/{fid}"], cwd=live, check=False)
+    failed = _rebuild(_on_ids(records()))
+    for i in failed:
+        x = get(i)
+        x.update(state="redo", error=f"it did not fit once fix {fid} went back")
+        put(x)
+    if is_on():
+        git("checkout", "-q", "mine", cwd=live)
+    else:
+        git("checkout", "-q", "--detach", release()["base"], cwd=live)
+    r = get(fid)
+    r["commit"] = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
+    put(r)
+    return {"id": fid, "title": r["title"], "back": True, "state": r["state"], "redo": failed}
 
 
 def remove(fid: int | str) -> dict[str, Any]:
@@ -1580,10 +1843,24 @@ def state_word(r: dict[str, Any]) -> str:
     brings it back), and one the release took is "in 0.10.3"."""
     if r.get("state") == "released" and (r.get("released_in") or str(r.get("note") or "").startswith("in ")):
         return f"in {r.get('released_in') or str(r['note'])[3:]}"
-    return WORD.get(str(r.get("state")), str(r.get("state")))
+    word = WORD.get(str(r.get("state")), str(r.get("state")))
+    # a fix changed in place while its version before stays on: "on · changing", "on · change ready"
+    if (r.get("prev") or {}).get("state") == "on" and r.get("state") in CHANGING:
+        return f"on · {CHANGING[r['state']]}"
+    return word
+
+
+CHANGING = {"working": "changing", "ready": "change ready", "failed": "change failed"}
 
 
 def listing() -> dict[str, Any]:
+    folded: list[dict[str, Any]] = []
+    if any(r.get("refines") is not None and not r.get("fold_conflict") and r.get("state") in REFINABLE
+           for r in records().values()):
+        try:
+            folded = fold_strays()
+        except (FixError, OSError, subprocess.SubprocessError):
+            folded = []
     recs = [r for r in records().values() if r.get("state") not in ("removed", "released", "merged")]
     recs.sort(key=lambda r: (ORDER.get(str(r.get("state")), 6), r["id"]))
     rel = release()
@@ -1591,7 +1868,7 @@ def listing() -> dict[str, Any]:
     return {"fixes": recs, "on": on, "live": str(live_dir()), "version": release_name(rel),
             "base": rel.get("base") or "", "kind": rel.get("kind") or "", "pointed": bool(rel.get("pointed")),
             "count_on": sum(r.get("state") == "on" for r in recs),
-            "aside": [r["id"] for r in recs if r.get("state") == "pending"]}
+            "aside": [r["id"] for r in recs if r.get("state") == "pending"], "folded": folded}
 
 
 def can_share() -> bool:
@@ -1617,7 +1894,7 @@ class Paint:
 
 def _state_paint(c: Paint, r: dict[str, Any], on: bool, width: int = 0) -> str:
     w = state_word(r) if on or r.get("state") != "on" else "off"
-    kind = "green" if w == "on" else "dim" if w == "off" else "bold"
+    kind = "green" if w.startswith("on") else "dim" if w == "off" else "bold"
     return c(kind, f"{w:<{width}}") if width else c(kind, w)
 
 
@@ -1632,11 +1909,10 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     if not fixes:
         return [f"{c('title', 'Your thimble fixes')} · thimble {d['version']} with no fixes of yours", "", f"  {new_fix}"]
     words = {r["id"]: (state_word(r) if d["on"] or r.get("state") != "on" else "off") for r in fixes}
-    # a fixer at work on a change to another fix: its row says which (it becomes part of that fix at its end)
-    titles = {r["id"]: (f"→ fix {r['refines']}{'' if r.get('refines_always') else '?'}: {r['title']}"
-                        if r.get("state") == "working" and r.get("refines") is not None else r["title"]) for r in fixes}
+    titles = {r["id"]: r["title"] for r in fixes}
     counts: dict[str, int] = {}
     for w in words.values():
+        w = w.split(" · ")[0]
         counts[w] = counts.get(w, 0) + 1
     parts = [c("green", f"{counts.pop('on')} on")] if "on" in counts else []
     parts += [f"{n} {w}" for w, n in counts.items()]
@@ -2216,9 +2492,9 @@ def cmd(a) -> int:
             if r.get("reload"):
                 print(RELOAD)
         elif verb == "new":
-            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.refines, a.always, a.session))
+            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.session))
         elif verb == "round":
-            out_json(round_(a.id, stdin_text() or a.words or "", a.session, a.always))
+            out_json(round_(a.id, stdin_text() or a.words or "", a.session))
         elif verb == "again":
             out_json(again(a.id, a.session))
         elif verb == "done":
@@ -2226,7 +2502,7 @@ def cmd(a) -> int:
                 out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done"))
             else:
                 summary = stdin_text() if a.summary == "-" else (a.summary or "")
-                out_json(done(a.id, a.title, summary, a.request, not a.no_tests, a.changes, a.session))
+                out_json(done(a.id, a.title, summary, a.request, not a.no_tests, session=a.session))
         elif verb == "apply":
             if a.ask == "-":
                 out_json(apply(a.id, stdin_text()))
@@ -2236,11 +2512,10 @@ def cmd(a) -> int:
                       else "Not applied; thimble fix apply asks again whenever you want.")
         elif verb == "merge":
             ids = [x for x in (a.id, a.hit, *(a.more or [])) if x]
-            summary = None if a.summary is None else a.summary
             if a.ask == "-":
-                out_json(merge(ids, stdin_text(), a.title, summary))
+                out_json(merge(ids, stdin_text()))
             else:
-                r = merge_typed(ids, a.title, summary)
+                r = merge_typed(ids)
                 print(r.get("said", ""))
                 if r.get("reload"):
                     print(RELOAD)

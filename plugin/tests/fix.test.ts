@@ -9,9 +9,10 @@
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
-import { fixingWord } from '../fix/fixes'
+import { fixSlug, fixingWord } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { notStarted, registerFix, wordsOfSkill } from '../fix/register'
+import { fixesContext } from '../fix/request'
 import { textOf as screenText, TEXT_ELS } from '../fix/screen'
 import { promptStub } from './stubs'
 
@@ -68,9 +69,8 @@ function setup() {
   const fix: Any = { id: 1, title: 'make the bar say read', words: ["make the bar's coverage item say read"], rounds: 1, made_in: 'terminal', created: 1761200000, state: 'working', work: WORK, commit: null, files: [], tests: null, summary: '', error: null }
   // the kernel's records: none until the first request
   let made = false
-  // other fixes a test gives the kernel (a fix that is on, to change); fold.fails: a change does not fit its fix
+  // other fixes a test gives the kernel
   const others: Any[] = []
-  const fold = { fails: false }
   const all = () => [...(made ? [fix] : []), ...others].filter(f => f.state !== 'removed')
   const list = () => ({ fixes: all(), on: true, live: `${HOME}/fixes/live`, version: '0.10.2', count_on: all().filter(f => f.state === 'on').length, pointed: true })
   const kernel = (argv: string[], stdin?: string) => {
@@ -84,39 +84,37 @@ function setup() {
     if (verb === 'new') {
       made = true
       if (stdin) fix.words = [stdin]
-      const r = argv.indexOf('--refines')
-      if (r > 0) Object.assign(fix, { refines: Number(argv[r + 1]), refines_always: argv.includes('--always') })
       return ok(fix)
     }
     // the check refused the change: another round in the same copy; the test's refusal was for the first round only
     if (verb === 'again') { Object.assign(fix, { state: 'working', rounds: fix.rounds + 1, refuse: null }); return ok(fix) }
-    // --always: the words name the fix this one refines, so its change goes into that fix whatever the end says
-    if (verb === 'round') { Object.assign(fix, { words: [...fix.words, stdin], rounds: fix.rounds + 1, state: 'working' }, argv.includes('--always') && fix.refines != null ? { refines_always: true } : {}); return ok(fix) }
+    // a round of the fix: in its copy while it has one, else in place (a new copy; the version the person has, prev,
+    // stays until y)
+    if (verb === 'round') {
+      if (!fix.work) Object.assign(fix, { prev: { state: fix.state, commit: fix.commit, title: fix.title, summary: fix.summary }, work: WORK })
+      Object.assign(fix, { words: [...fix.words, stdin], rounds: fix.rounds + 1, state: 'working' })
+      return ok(fix)
+    }
     if (verb === 'done') {
       const t = argv.indexOf('--title')
-      Object.assign(fix, { state: argv.includes('--request') ? 'request' : 'ready', title: t > 0 ? argv[t + 1] : fix.title, summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }] })
+      // a round of a fix changed in place keeps its name; one that changed no code leaves the fix as it was
+      if (fix.prev && argv.includes('--request')) { Object.assign(fix, { ...fix.prev, work: null, prev: null }); return ok({ ...fix, unchanged: true }) }
+      Object.assign(fix, { state: argv.includes('--request') ? 'request' : 'ready', title: t > 0 && !fix.prev ? argv[t + 1] : fix.title, summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }] })
       // the kernel's check after the fixer's end refused it (fix.refuse is the reason a test gives); a refusal for
       // safety files is kept on the record (refused) until the next check
       if (argv.includes('--cannot')) { Object.assign(fix, { state: 'failed', tests: null, error: stdin, refused: null }); return ok(fix) }
       if (fix.refuse) Object.assign(fix, { state: 'failed', tests: null, error: fix.refuse, refused: /safety files/.test(fix.refuse) ? { why: fix.refuse, files: ['plugin/engine/kernel/privacy.py'] } : { why: fix.refuse, files: [], tests: 'FAIL made-up test' } })
       else fix.refused = null
-      // the end said `Changes fix N` (or the person named it): the change goes into fix N, unless it does not fit
-      const c = argv.indexOf('--changes')
-      const into = others.find(f => f.id === (c > 0 ? Number(argv[c + 1]) : fix.refines_always ? fix.refines : -1))
-      if (into && fix.state === 'ready') {
-        if (fold.fails) return ok({ ...fix, fold_failed: into.id })
-        Object.assign(into, { state: 'ready', words: [...into.words, ...fix.words], rounds: into.rounds + 1, summary: stdin, tests: 'passed', commit: 'f01d3d1' })
-        fix.state = 'removed'
-        return ok({ ...into, folded: fix.id })
-      }
       return ok(fix)
     }
     if (verb === 'apply') {
       // the kernel checks the press's secret against the sha256 the plugin wrote
       const id = Number(argv[argv.indexOf('apply') + 1])
       if (!JSON.parse(files.get(`${HOME}/fixes/asks/${id}.json`) ?? '{}').key || !stdin) return { exitCode: 1, stdout: '', stderr: "thimble fix apply: only the person's key press in thimble does that" }
-      Object.assign(id === 1 ? fix : others.find(f => f.id === id), { state: 'on', work: null })
-      return ok({ id, reload: true, version: '0.10.2+fix.c0ffee1' })
+      const f = id === 1 ? fix : others.find(x => x.id === id)
+      const changed = !!f.prev
+      Object.assign(f, { state: 'on', work: null })
+      return ok({ id, reload: true, version: '0.10.2+fix.c0ffee1', ...(changed ? { changed: true } : {}) })
     }
     if (verb === 'remove') { if (argv.includes('1')) fix.state = 'removed'; return ok({ id: 1, reload: false }) }
     if (verb === 'merge') {
@@ -126,7 +124,12 @@ function setup() {
       return ok({ id: ids[0], title: t > 0 ? argv[t + 1] : 'first', merged: ids.slice(1), redo: [], reload: true })
     }
     if (verb === 'redo') { Object.assign(fix, { state: 'working', refuse: null }); return ok(fix) }
-    if (verb === 'undo') { fix.state = 'off'; return ok({ id: 1, reload: true }) }
+    // u after y on a fix changed in place: its version before comes back
+    if (verb === 'undo') {
+      if (fix.prev) { Object.assign(fix, { ...fix.prev, prev: null }); return ok({ id: 1, reload: true, back: true }) }
+      fix.state = 'off'
+      return ok({ id: 1, reload: true })
+    }
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
     if (verb === 'diff') return ok('diff --git a/plugin/bar/bar.tsx b/plugin/bar/bar.tsx\n-  coverage\n+  read\n')
     if (verb === 'update' && argv.includes('--check')) return ok({ from: '0.10.2', to: '0.10.3', newer: fix.state === 'on' })
@@ -183,7 +186,7 @@ function setup() {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, made: () => { made = true }, others, fold, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where }
+  return { $, call, tick, end, made: () => { made = true }, others, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where }
 }
 
 /** The person's /thimble-fix <words>: the command runs the plugin's prompt command with the words a moment later, and
@@ -220,13 +223,13 @@ test("a request forks the session into its copy with a text copy of the screen; 
   // what the screen shows: a failure line above the bar
   await s.$.state.set({ plugin: 'thimble', key: 'failLine' }, { kind: 'failed', text: 'The card “Runs by day” could not be drawn' })
   const r = await ask(s, "make the bar's coverage item say read")
-  expect(String(r.text)).toContain('in a copy (fix 1, "make the bar say read")')
+  expect(String(r.text)).toContain('in a copy ("make the bar say read")')
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("make the bar's coverage item say read")
-  // a fork (no agent type of its own), in the copy, whose first message opens with the fixer's task
-  expect(s.spawns[0]).toMatchObject({ subagentType: 'fork', cwd: WORK, name: 'fix-1' })
+  // a fork (no agent type of its own), in the copy, named after the fix, whose first message opens with the task
+  expect(s.spawns[0]).toMatchObject({ subagentType: 'fork', cwd: WORK, name: 'fix-bar-say-read' })
   const first = String(s.spawns[0].prompt)
   expect(first.startsWith('PROMPT fixer')).toBe(true)
-  expect(first).toContain("The person asked for this change to their thimble (fix 1):\n\nmake the bar's coverage item say read")
+  expect(first).toContain("The person asked for this change to their thimble:\n\nmake the bar's coverage item say read")
   expect(first).toContain("What thimble shows on the person's screen now, as text")
   expect(first).toContain('× The card “Runs by day” could not be drawn')
   expect(first).toContain('No side pane is open.')
@@ -286,7 +289,7 @@ test("two sessions share the fixes' folder: a fix another session's fixer works 
   expect(s.verbs().filter(v => /^done (7|8)\b/.test(v))).toEqual([])
   // words go to a new fix of this session's, which the kernel records with this session
   const r = await ask(s, "make the bar's coverage item say read")
-  expect(String(r.text)).toContain('(fix 1, ')
+  expect(String(r.text)).toContain('("make the bar say read")')
   expect(s.sent).toEqual([])
   expect(s.ran.find(x => x.argv.includes('new'))?.argv.slice(-2)).toEqual(['--session', 's-fix'])
   await s.end('Title: Bar says read\nWhat it does: The bar says read.')
@@ -300,10 +303,10 @@ test('more words while the fixer works go to the same fixer, as a round of its f
   await s.call('session.start', { cwd: '/made-up/data' })
   await ask(s, "make the bar's coverage item say read")
   const r = await ask(s, 'and keep the percent')
-  expect(String(r.text)).toContain('thimble gave these words to the fork that already fixes fix 1')
+  expect(String(r.text)).toBe('thimble gave these words to the fork that is already fixing "make the bar say read". Tell the person in one short line, then go on with their request.')
   expect(s.spawns.length).toBe(1)
   expect(s.ran.find(x => x.argv.includes('round'))?.stdin).toBe('and keep the percent')
-  expect(s.sent).toEqual([{ to: { agentId: 'agent-fixer-1' }, text: 'The person adds to fix 1 (round 2): and keep the percent' }])
+  expect(s.sent).toEqual([{ to: { agentId: 'agent-fixer-1' }, text: 'The person adds to this fix (round 2): and keep the percent' }])
   // once the fixer ended, new words are a new request
   await s.end('Title: Bar says read\nWhat it does: The bar says read.')
   await (await fixKey(s.$, 'n'))!.later()
@@ -326,7 +329,7 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   await (await fixKey(s.$, 'd'))!.later()
   rows = await fixLineRows(s.$, ELS, 110)
   expect(rows.map(textOf)).toEqual([
-    '  Bar says read for coverage · fix 1',
+    '  Bar says read for coverage',
     "    You asked   make the bar's coverage item say read",
     '    Claude did  The bar says r read 14%.',
     '    Changed     1 file · tests pass',
@@ -393,7 +396,7 @@ test('n leaves the fix ready in the list, where thimble fix apply in a shell tur
   expect(s.verbs().some(v => v.startsWith('notnow'))).toBe(false)
   expect(s.fix.state).toBe('ready')
   expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
-  expect(s.toasts.join('\n')).toContain('Fix 1 waits, ready: in a shell, thimble fix apply 1 turns it on, and thimble fix list lists your fixes.')
+  expect(s.toasts.join('\n')).toContain('“Bar says read for coverage” waits, ready: in a shell, thimble fix apply 1 turns it on, and thimble fix list lists your fixes.')
   const t = setup()
   await requested(t, 'Title: Explain terms of my field\nRequest: It needs words only the person knows.')
   expect(t.verbs()).toContain('done 1 --summary - --title Explain terms of my field --request')
@@ -431,7 +434,7 @@ test('a fixer that finds the request cannot be met ends with Cannot: the line sh
   await s.end(`I could not do this.\n\nCannot: ${why}`, 'agent-fixer-2')
   expect(s.ran.find(x => x.argv.includes('--cannot'))?.stdin).toBe(why)
   let rows = await fixLineRows(s.$, ELS, 110)
-  expect(textOf(rows)).toContain('× Fix 1 did not pass: Skip the scan for my notes')
+  expect(textOf(rows)).toContain('× Skip the scan for my notes did not pass')
   expect(rows.map((r: Any) => r.props.key)).toEqual(['fix-line-1', 'fix-line-why', 'fix-line-2'])
   expect(textOf(rows[1])).toBe(`    ${why}`)
   expect(textOf(rows[2])).toBe('    d what changed · r redo · n later')
@@ -449,7 +452,7 @@ test('a fixer that finds the request cannot be met ends with Cannot: the line sh
   await requested(t, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
   await t.end('Cannot: it needs the scan off', 'agent-fixer-2')
   rows = await fixLineRows(t.$, ELS, 110)
-  expect(textOf(rows[0])).toBe('  × Fix 1 did not pass: Skip the scan for my notes · it needs the scan off')
+  expect(textOf(rows[0])).toBe('  × Skip the scan for my notes did not pass · it needs the scan off')
   expect(rows.map((r: Any) => r.props.key)).not.toContain('fix-line-why')
 })
 
@@ -470,9 +473,9 @@ test("Claude starts a fix with the fix-thimble skill: the same fork starts, Clau
   await s.call('session.start', { cwd: '/made-up/data' })
   const r = skillText(await skillCall(s, "the card's legend hides its last row", 'fix-thimble'))
   expect(r.result).toEqual({ success: true, commandName: 'fix-thimble' })
-  expect(String(r.text)).toContain('thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix 1')
+  expect(String(r.text)).toBe('thimble started a fork of this conversation that fixes thimble in the background, in a copy ("make the bar say read"). The person sees "fixing make the bar say read" on the bar while it works, and decides with a key whether to use the fix. Tell the person in one short line, then go on with their request. thimble tells you when the fix ends.')
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("the card's legend hides its last row")
-  expect(String(s.spawns[0].prompt)).toContain("Claude, in the conversation above, saw thimble misbehave and asked for this change to the person's thimble (fix 1):")
+  expect(String(s.spawns[0].prompt)).toContain("Claude, in the conversation above, saw thimble misbehave and asked for this change to the person's thimble:")
   // no words: nothing starts, and Claude reads why
   const none = skillText(await skillCall(s, ' '))
   expect(String(none.text)).toContain('thimble started no fix')
@@ -481,7 +484,7 @@ test("Claude starts a fix with the fix-thimble skill: the same fork starts, Clau
   await s.end('Title: Legend shows every row\nWhat it does: The legend wraps.')
   expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Legend shows every row · tests pass')
   const told = ((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
-  expect(told['fix-1']).toBe('The thimble fix you started, fix 1 ("Legend shows every row"), is ready and tests pass; the person turns it on with y. Tell the person in one short line.')
+  expect(told['fix-1']).toBe('The thimble fix you started, "Legend shows every row", is ready and tests pass; the person turns it on with y. Tell the person in one short line.')
 })
 
 test("where skill.prompt passes over thimble (an organization's security plugin), the Skill call still starts the fix, once; skill.prompt alone starts it too", async () => {
@@ -538,7 +541,7 @@ test('/thimble-fix alone and /thimble-fix update answer at once, with no turn of
   expect((await s.call('command.describe', { command: 'thimble:thimble-fix', description: 'd', isHidden: false, immediate: false }, async (e: Any) => ({ description: e.description, isHidden: e.isHidden }))).isHidden).toBe(true)
   // Claude's skill after it: the fixer reads the words as the person's, and Claude is not told of it again
   await skillCall(s, "2 make the bar's coverage item bold")
-  expect(String(s.spawns[0].prompt)).toContain('The person asked for this change to their thimble (fix 1)')
+  expect(String(s.spawns[0].prompt)).toContain('The person asked for this change to their thimble:')
   expect(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).toEqual({})
   // after two of main's turns (Claude's question, and its answer), a skill call is Claude's own again
   await s.call('command.run', { command: 'thimble-fix', args: 'the bar' })
@@ -603,135 +606,67 @@ test('the text copy of a drawing: a row side by side, a column one under another
   expect(screenText(drawn)).toBe('thimble  r coverage 43%\na **link**')
 })
 
-/** A fix the person applied earlier, on: fix 5. */
-const onFix = () => ({ id: 5, title: 'Bar says read', words: ['say read, not coverage'], rounds: 1, made_in: 'terminal', created: 1761100000, state: 'on', on_at: 1761100100, work: null, commit: 'be11ead', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }], tests: 'passed', summary: 'The bar says read.', error: null })
-
-test('words while the fix applied last is on: the fixer hears of it, and its end Changes fix 5 makes that fix ready again with both rounds', async () => {
+test('the live sequence: apply a fix, follow up on it, and the follow-up is a round of that fix in place; y puts the new version on, u brings back the one before', async () => {
   const s = setup()
-  s.others.push(onFix())
-  await s.call('session.start', { cwd: '/made-up/data' })
-  const r = await ask(s, 'not quite: keep the percent')
-  expect(String(r.text)).toContain('in a copy (fix 1, "make the bar say read")')
-  expect(s.verbs()).toContain('new --made-in terminal --refines 5')
-  const first = String(s.spawns[0].prompt)
-  expect(first).toContain('The person applied fix 5 ("Bar says read": The bar says read.; asked in the words "say read, not coverage") last')
-  expect(first).toContain('end with the line `Changes fix N` (its number) in place of the Title line')
-  // a repair of what that fix added is a change to it; only a change clearly about something else is a fix of its own
-  expect(first).toContain('When your change is about the same feature or part of thimble as one of these fixes (a repair of something it added included)')
-  expect(first).toContain('only a change clearly about something else ends with a title of its own')
-  await s.end('Done.\n\nChanges fix 5\nWhat it does: The bar says read and keeps the percent.')
-  expect(s.verbs()).toContain('done 1 --summary - --changes 5')
-  let rows = await fixLineRows(s.$, ELS, 110)
-  expect(textOf(rows[0])).toBe('  ✓ thimble changed fix 5: Bar says read · tests pass')
-  expect(textOf(rows[1])).toBe('    y use it now · d what changed · n later')
-  expect(s.notes).toEqual([{ text: 'thimble changed fix 5: Bar says read · tests pass', title: 'thimble' }])
-  await (await fixKey(s.$, 'd'))!.later()
-  rows = await fixLineRows(s.$, ELS, 110)
-  expect(rows.map(textOf).slice(0, 4)).toEqual([
-    '  Bar says read · fix 5',
-    '    You asked   say read, not coverage',
-    '    then        not quite: keep the percent',
-    '    Claude did  The bar says read and keeps the percent.',
-  ])
-  // y turns the changed fix on with the person's key, and reloads
+  await requested(s)
   await (await fixKey(s.$, 'y'))!.later()
-  expect(s.verbs()).toContain('apply 5 --ask -')
-  expect(s.commands).toEqual(['reload-plugins'])
+  expect(s.verbs()).toContain('apply 1 --ask -')
+  // /thimble-fix: Claude reads the person's fixes beside the command, by name and state, the number as the handle
+  const ran = await s.call('command.run', { command: 'thimble:thimble-fix', args: 'it breaks when I click' }, async () => ({}))
+  expect(ran.context).toEqual(["The person's thimble fixes (start the fix-thimble skill with `N <words>` to change fix N, `new <words>` for a new fix):\n1  \"Bar says read for coverage\" (on): The bar says r read 14%."])
+  // Claude gives `1 <words>`: a round of fix 1 itself, never a new fix
+  const r = await ask(s, '1 it breaks when I click')
+  expect(s.verbs().filter(v => v.startsWith('new'))).toEqual(['new --made-in terminal'])
+  expect(s.verbs()).toContain('round 1')
+  expect(s.ran.find(x => x.argv.includes('round'))?.stdin).toBe('it breaks when I click')
+  expect(String(r.text)).toBe('thimble started a fork of this conversation that changes the person\'s fix "Bar says read for coverage" in the background, in a copy; the version they have stays until they press y. The person sees "changing Bar says read for coverage" on the bar while it works, and decides with a key whether to use the changed fix. Tell the person in one short line, then go on with their request. thimble tells you when it ends.')
+  expect(busySteps()).toContain('changing Bar says read for coverage')
+  expect(s.spawns[1]).toMatchObject({ name: 'fix-bar-says-read-coverage', cwd: WORK })
+  const first = String(s.spawns[1].prompt)
+  expect(first).toContain("Round 1: make the bar's coverage item say read\nRound 2: it breaks when I click")
+  expect(first).toContain('These words change the fix the person already has on, "Bar says read for coverage" (The bar says r read 14%.); its change is in your copy, and your change becomes part of it.')
+  // its end: the fix's own line, its name kept, the version on stays until y
+  await s.end('Title: Clicking read works\nWhat it does: The read item works when clicked.', 'agent-fixer-2')
+  let rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows[0])).toBe('  ✓ thimble changed: Bar says read for coverage · tests pass')
+  expect(textOf(rows[1])).toBe('    y use it now · d what changed · n later')
+  expect(s.notes.at(-1)).toEqual({ text: 'thimble changed: Bar says read for coverage · tests pass', title: 'thimble' })
+  await (await fixKey(s.$, 'y'))!.later()
+  expect(s.verbs().filter(v => v.startsWith('apply'))).toEqual(['apply 1 --ask -', 'apply 1 --ask -'])
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ Bar says read for coverage is on · thimble reloaded · u undo')
+  // u: the version before comes back
+  await (await fixKey(s.$, 'u'))!.later()
+  expect(s.verbs()).toContain('undo 1')
+  rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows[0])).toBe('  ↺ Bar says read for coverage is back to its version before · thimble reloaded')
+  expect(s.fix.state).toBe('on')
 })
 
-test('/thimble-fix 5 <words> always changes fix 5; /thimble-fix new <words> is a new fix; a change that does not fit fix 5 is a new fix and the line says so', async () => {
+test('words about something else are a new fix; a follow-up round that changes no code leaves the fix as it was', async () => {
   const s = setup()
-  s.others.push({ ...onFix(), state: 'off' })
-  await s.call('session.start', { cwd: '/made-up/data' })
-  const r = await ask(s, '5 keep the percent')
-  // a change to fix 5, never a fix of its own number: Claude and the bar speak of fix 5
-  expect(String(r.text)).toBe('thimble started a fork of this conversation that changes fix 5 in the background, in a copy. The person sees "changing fix 5" on the bar while it works, and decides with a key whether to use the changed fix. Tell the person in one short line, then go on with their request. thimble tells you when it ends.')
-  expect(busySteps()).toContain('changing fix 5')
-  expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe('keep the percent')
-  expect(s.verbs()).toContain('new --made-in terminal --refines 5 --always')
-  expect(String(s.spawns[0].prompt)).toContain('The person asked to change their fix 5')
-  // the end gives a title, and still the change goes into fix 5
-  await s.end('Title: Bar keeps percent\nWhat it does: The bar keeps the percent.')
-  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble changed fix 5: Bar says read · tests pass')
+  await requested(s)
+  await (await fixKey(s.$, 'y'))!.later()
+  await ask(s, 'new a pane for labels')
+  expect(s.verbs().filter(v => v.startsWith('new'))).toEqual(['new --made-in terminal', 'new --made-in terminal'])
+  expect(s.ran.filter(x => x.argv.includes('new')).at(-1)?.stdin).toBe('a pane for labels')
+  expect(s.verbs().some(v => v.startsWith('round'))).toBe(false)
 
   const t = setup()
-  t.others.push(onFix())
-  await t.call('session.start', { cwd: '/made-up/data' })
-  await ask(t, 'new a pane for labels')
-  expect(t.ran.find(x => x.argv.includes('new'))?.stdin).toBe('a pane for labels')
-  expect(t.verbs()).toContain('new --made-in terminal')
-  expect(String(t.spawns[0].prompt)).not.toContain('fix 5')
-
-  const u = setup()
-  u.others.push(onFix())
-  u.fold.fails = true
-  await u.call('session.start', { cwd: '/made-up/data' })
-  await ask(u, 'keep the percent')
-  await u.end('Changes fix 5\nWhat it does: The bar keeps the percent.')
-  expect(textOf((await fixLineRows(u.$, ELS, 160))[0])).toBe("  ✓ thimble fixed: make the bar say read · tests pass · a new fix: it did not fit fix 5")
-  expect(u.others[0].state).toBe('on')
+  await requested(t)
+  await (await fixKey(t.$, 'y'))!.later()
+  await ask(t, '1 what does the item say?')
+  await t.end('Title: Bar says read\nRequest: It already says read.', 'agent-fixer-2')
+  expect(textOf(await fixLineRows(t.$, ELS, 110))).toContain('◇ Claude changed no code: Bar says read for coverage stays as it was')
+  expect(t.fix.state).toBe('on')
 })
 
-test('when the fixer cannot tell which fix the words are for, the line asks; a number makes them a change to that fix', async () => {
-  const s = setup()
-  s.others.push(onFix(), { ...onFix(), id: 3, title: 'Labels pane', words: ['a pane for labels'], on_at: 1761100200, summary: 'A labels pane.' })
-  await s.call('session.start', { cwd: '/made-up/data' })
-  await ask(s, 'make it bigger')
-  const first = String(s.spawns[0].prompt)
-  expect(s.verbs()).toContain('new --made-in terminal --refines 3')
-  expect(first).toContain('Their other fixes that are on, also in your copy: fix 5 ("Bar says read"')
-  expect(first).toContain('end with one line `Which fix: <one short question>`')
-  await s.end('Which fix: The bar item, or the labels pane?')
-  expect(s.verbs()).toContain('remove 1')
-  let rows = await fixLineRows(s.$, ELS, 110)
-  expect(textOf(rows[0])).toBe('  ? The bar item, or the labels pane?')
-  expect(textOf(rows[1])).toBe('    3 Labels pane · 5 Bar says read · 0 a new fix · n never mind')
-  expect(await fixKey(s.$, '7')).toBe(null)
-  await (await fixKey(s.$, '5'))!.later()
-  expect(s.verbs()).toContain('new --made-in terminal --refines 5 --always')
-  expect(s.ran.filter(x => x.argv.includes('new')).at(-1)?.stdin).toBe('make it bigger')
-  expect(String(s.spawns[1].prompt)).toContain('The person asked to change their fix 5')
-  rows = await fixLineRows(s.$, ELS, 110)
-  expect(rows).toEqual([])
-})
-
-
-test('/thimble-fix 2 <words> while a fixer works on a change that may be fix 2\'s: one fixer, whose end makes it part of fix 2', async () => {
-  // fix 2 is on; the person's words about it start fix 3, which may change fix 2; then "2 merge those into fix 2"
-  const s = setup()
-  s.fix.id = 3
-  s.others.push({ ...onFix(), id: 2, title: 'Ask about any card element' })
-  await s.call('session.start', { cwd: '/made-up/data' })
-  const r = await ask(s, 'the card is stuck on drawing, and e does not show the card in a thread')
-  expect(s.verbs()).toContain('new --made-in terminal --refines 2')
-  expect(String(r.text)).toContain('(fix 3, "make the bar say read"). If its change is about fix 2, it becomes part of fix 2, with no fix 3 of its own. The person sees on the bar')
-  expect(busySteps()).toContain('fixing fix 3')
-  const again = await ask(s, '2 merge those all into fix 2, not a separate fix')
-  // the same fixer, told to end with Changes fix 2; the kernel records that it changes fix 2 whatever its end says
-  expect(s.spawns.length).toBe(1)
-  expect(s.verbs().filter(v => v.startsWith('new'))).toEqual(['new --made-in terminal --refines 2'])
-  expect(s.verbs()).toContain('round 3 --always')
-  expect(s.sent).toEqual([{ to: { agentId: 'agent-fixer-1' }, text: 'The person adds to this change to fix 2 (round 2): merge those all into fix 2, not a separate fix\n\nEnd with the line `Changes fix 2` in place of the Title line: thimble makes your change part of fix 2.' }])
-  expect(String(again.text)).toBe('thimble gave these words to the fork that is already changing fix 2; its change becomes part of fix 2. Tell the person in one short line, then go on with their request.')
-  expect(fixingWord(s.fix)).toBe('changing fix 2')
-  // its end, even with a title of its own, folds into fix 2: one fix, ready again with every round
-  await s.end('Done.\n\nTitle: Card draws again\nWhat it does: The card finishes drawing, and e shows it in a thread.')
-  expect(s.verbs().filter(v => v.startsWith('done'))).toEqual(['done 3 --summary - --title Card draws again'])
-  expect(s.others[0]).toMatchObject({ state: 'ready', words: ['say read, not coverage', 'the card is stuck on drawing, and e does not show the card in a thread', 'merge those all into fix 2, not a separate fix'] })
-  expect(s.fix.state).toBe('removed')
-  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble changed fix 2: Ask about any card element · tests pass')
-})
-
-test('Claude\'s words for a fix that may change fix 2: a round says how to end, and Claude hears of fix 2 at the end, never of a number to decline', async () => {
-  const s = setup()
-  s.fix.id = 3
-  s.others.push({ ...onFix(), id: 2, title: 'Ask about any card element' })
-  await s.call('session.start', { cwd: '/made-up/data' })
-  await skillCall(s, 'the card is stuck on drawing')
-  const r = skillText(await skillCall(s, 'and e does nothing in a thread'))
-  expect(String(r.text)).toBe('thimble gave these words to the fork that already fixes fix 3 ("make the bar say read"). If its change is about fix 2, it becomes part of fix 2, with no fix 3 of its own. Tell the person in one short line, then go on with their request.')
-  expect(s.sent[0]!.text).toBe('Claude adds to fix 3 (round 2): and e does nothing in a thread\n\nWhen these words ask to make your change part of fix 2, end with the line `Changes fix 2` in place of the Title line.')
-  await s.end('Changes fix 2\nWhat it does: The card finishes drawing.')
-  const told = ((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
-  expect(told['fix-3']).toBe('The thimble change you started is now part of fix 2 ("Ask about any card element"): it is ready and tests pass; the person turns the changed fix on with y. Tell the person in one short line.')
+test("the fixes Claude reads, the bar's words and the subagent's name use the fix's name, not its number", () => {
+  const f = (o: Any) => ({ id: 2, title: 'Click any card element to ask about it', words: [], rounds: 1, made_in: 'terminal', created: 0, state: 'on', work: null, commit: 'c', files: [], tests: null, summary: '', error: null, ...o })
+  expect(fixSlug(f({}))).toBe('fix-click-any-card-element-ask')
+  expect(fixSlug(f({ title: '!!' }))).toBe('fix-2')
+  expect(fixingWord(f({ state: 'working' }))).toBe('fixing Click any card element to a…')
+  expect(fixingWord(f({ state: 'working', prev: { state: 'on' } }))).toBe('changing Click any card element to a…')
+  expect(fixesContext([f({ state: 'working', prev: { state: 'on' } }), f({ id: 3, title: 'Bar says read', state: 'off' }), f({ id: 4, state: 'removed' })])).toBe(
+    "The person's thimble fixes (start the fix-thimble skill with `N <words>` to change fix N, `new <words>` for a new fix):\n2  \"Click any card element to ask about it\" (on, being changed (working))\n3  \"Bar says read\" (off)")
+  expect(fixesContext([])).toBe('')
 })

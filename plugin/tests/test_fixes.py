@@ -717,10 +717,11 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert cli.main(["--help"]) == 0
     help_ = capsys.readouterr().out
     for line in ("thimble update ", "thimble reapply ", "thimble fixes ", "thimble fix show N", "thimble fix apply N",
-                 "thimble file issue N", "thimble file pr N", "thimble fix off [N]", "thimble fix on [N]", "thimble fix merge A B C",
+                 "thimble file issue N", "thimble file pr N", "thimble fix off [N]", "thimble fix on [N]",
                  "thimble fix diff N", "thimble fix remove N", "thimble fix export N"):
         assert f"\n    {line}" in help_, line
-    assert all(f"thimble {w}" not in help_ for w in ("doctor", "demo", "browser"))
+    assert all(f"thimble {w}" not in help_ for w in ("doctor", "demo", "browser", "fix merge"))
+    assert "thimble fix merge A B C" in cli.FIX_HELP  # the escape hatch stays in thimble fix --help only
     assert help_.index("thimble fix on [N]") < help_.index("Claude runs these in a session") < help_.index("thimble label [NAME]")
     monkeypatch.setattr(FX, "can_share", lambda: False)
     assert cli.main(["--help"]) == 0 and "thimble file" not in capsys.readouterr().out
@@ -782,121 +783,99 @@ def on_fix(w) -> dict:
     return FX.get(r["id"])
 
 
-def test_a_change_to_an_on_fix_folds_into_it_and_waits_for_y(world):
+def rows_of(width: int = 160) -> dict[str, list[str]]:
+    """thimble fix list's fix rows, by number: [state, the rest]."""
+    out = {}
+    for x in FX.list_lines(width)[3:]:
+        if x[:5].strip().isdigit():
+            n, rest = x.strip().split("  ", 1)
+            state, _, title = rest.strip().partition("  ")
+            out[n] = [state.strip(), title.strip()]
+    return out
+
+
+def test_a_follow_up_to_an_applied_fix_changes_it_in_place_y_swaps_the_version_and_u_goes_back(world):
     a = on_fix(world)
-    old = a["commit"]
-    b = FX.new("and keep the count", refines=a["id"])
-    assert b["refines"] == a["id"] and b["refines_always"] is False
-    # the copy is cut from mine, which holds fix 1
-    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    old = sh("git", "rev-parse", f"refs/thimble/fixes/{a['id']}", cwd=FX.live_dir())
+    # "it breaks when I click": a round of fix 1 itself, in a copy that holds fix 1; no new record
+    r = FX.round_(a["id"], "it breaks when I click", session="s-made-up")
+    assert r["id"] == a["id"] and r["state"] == "working" and r["rounds"] == 2 and r["prev"]["state"] == "on"
+    assert list(FX.records()) == [a["id"]]
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
     assert "read ${n}" in p.read_text()
-    p.write_text(p.read_text().replace("${n}", "${n} files"))
-    r = FX.done(b["id"], None, "The bar says read and the file count.", changes=str(a["id"]))
-    assert r["id"] == a["id"] and r["folded"] == b["id"] and r["state"] == "ready"
-    assert r["words"] == ["say read, not coverage", "and keep the count"] and r["rounds"] == 2
-    assert r["summary"] == "The bar says read and the file count." and r["title"] == "Bar says read"
-    assert r["files"] == [{"path": "plugin/bar/bar.tsx", "add": 1, "del": 1}] and r["commit"] != old
-    # one commit on the release: both rounds' change
+    # the version the person has stays on while the fixer works, and the list keeps one row for the fix
+    assert "read ${n}" in live_file("plugin/bar/bar.tsx")
+    assert rows_of() == {"1": ["on · changing", "Bar says read" + rows_of()["1"][1][len("Bar says read"):]]}
+    assert rows_of()["1"][0] == "on · changing" and "→" not in "\n".join(FX.list_lines(160))
+    p.write_text(p.read_text().replace("${n}", "${n ?? 0}"))
+    # the fixer's own title does not rename the fix
+    r = FX.done(r["id"], "Clicking read works", "The read item works when clicked.", session="s-made-up")
+    assert r["id"] == a["id"] and r["state"] == "ready" and r["title"] == "Bar says read" and r["commit"] != old
+    assert r["words"] == ["say read, not coverage", "it breaks when I click"]
+    # one commit on the release: the fix's change and the round's; mine keeps the old version until y
     assert sh("git", "rev-parse", f"{r['commit']}^", cwd=FX.live_dir()) == world["base"]
-    assert "read ${n} files" in sh("git", "show", f"{r['commit']}:plugin/bar/bar.tsx", cwd=FX.live_dir())
-    # the round leaves the list; mine no longer holds the old commit until y
-    assert FX.get(b["id"])["state"] == "removed" and not Path(b["work"]).exists()
-    assert [x["id"] for x in FX.listing()["fixes"]] == [a["id"]]
-    assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == world["base"]
+    assert "read ${n ?? 0}" in sh("git", "show", f"{r['commit']}:plugin/bar/bar.tsx", cwd=FX.live_dir())
+    assert sh("git", "rev-parse", f"refs/thimble/fixes/{a['id']}", cwd=FX.live_dir()) == old
+    assert "read ${n}`" in live_file("plugin/bar/bar.tsx") and rows_of()["1"][0] == "on · change ready"
     with pytest.raises(FX.FixError):
         FX.apply(a["id"], "a-guess")
-    FX.apply(a["id"], press(a["id"]))
-    assert FX.get(a["id"])["state"] == "on" and "read ${n} files" in live_file("plugin/bar/bar.tsx")
-    assert len(sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines()) == 2
-    shown = "\n".join(FX.show_lines(a["id"]))
-    assert 'You asked     "say read, not coverage"' in shown and 'Then          "and keep the count"' in shown
-    assert "2 rounds" in shown
+    # y: the new version in place of the old, one fix, one commit in mine
+    out = FX.apply(a["id"], press(a["id"]))
+    assert out["changed"] is True and out["reload"] is True
+    rec = FX.get(a["id"])
+    assert rec["state"] == "on" and rec["work"] is None and rec["prev"]["commit"] == old
+    assert "read ${n ?? 0}" in live_file("plugin/bar/bar.tsx")
+    assert sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines() == ["Bar says read", "thimble 0.10.2"]
+    assert rows_of()["1"][0] == "on" and list(FX.records()) == [a["id"]]
+    # u: back to the version before, still on; u again turns it off
+    out = FX.undo(a["id"])
+    assert out["back"] is True and FX.get(a["id"])["state"] == "on" and "prev" not in FX.get(a["id"])
+    assert "read ${n}`" in live_file("plugin/bar/bar.tsx")
+    FX.undo(a["id"])
+    assert FX.get(a["id"])["state"] == "off" and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
 
 
-def test_the_explicit_form_changes_an_off_fix_and_a_new_title_keeps_its_own_fix(world):
+def test_a_follow_up_to_an_off_fix_holds_its_change_and_a_round_that_changes_nothing_or_fails_leaves_it(world, monkeypatch):
     a = on_fix(world)
     FX.undo(a["id"])
-    # always: the change goes into fix 1 whatever the end says; its change is put on the copy first
-    b = FX.new("say files too", refines=a["id"], always=True)
-    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
-    assert "read ${n}" in p.read_text()
+    r = FX.round_(a["id"], "say files too")
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
+    assert "read ${n}" in p.read_text() and rows_of()["1"][0] == "working"
     p.write_text(p.read_text().replace("${n}", "${n} files"))
-    r = FX.done(b["id"], "Bar names files", "The bar says files.")
-    assert r["id"] == a["id"] and r["state"] == "ready" and r["rounds"] == 2
-    assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == world["base"]
-    # a fix that refines nothing, or whose end gives a title of its own, stays a fix of its own
-    c = FX.new("a note", refines=a["id"])
-    (Path(c["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
-    c = FX.done(c["id"], "A note", "Adds a note.")
-    assert c["id"] != a["id"] and c["state"] == "ready" and "folded" not in c
-    with pytest.raises(FX.FixError, match="only a fix that is on, off or ready"):
-        FX.new("more", refines=FX.new("x")["id"])
+    r = FX.done(r["id"], None, "The bar says files.")
+    assert r["state"] == "ready" and sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == world["base"]
+    FX.apply(a["id"], press(a["id"]))
+    assert FX.get(a["id"])["state"] == "on" and "read ${n} files" in live_file("plugin/bar/bar.tsx")
+    # a round that changes nothing: the fix stays as it was, with the person's words
+    r = FX.round_(a["id"], "what does it say?")
+    r = FX.done(r["id"], None, "No change needed.")
+    assert r["unchanged"] is True and r["state"] == "on" and r["work"] is None and "prev" not in r
+    assert r["words"][-1] == "what does it say?" and "read ${n} files" in live_file("plugin/bar/bar.tsx")
+    # a round whose tests fail: n leaves the fix as it was
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    r = FX.round_(a["id"], "and bold")
+    (Path(r["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `**read**`\n")
+    assert FX.done(r["id"], None, "Bold.")["state"] == "failed" and rows_of()["1"][0] == "on · change failed"
+    r = FX.not_now(a["id"])
+    assert r["state"] == "on" and "prev" not in r and r["work"] is None
+    assert "read ${n} files" in live_file("plugin/bar/bar.tsx")
+    # a fix that is still a copy (working or ready) gets more words in that copy, as before
+    b = FX.new("a note")
+    assert FX.round_(b["id"], "and another")["work"] == b["work"]
 
 
-def test_a_round_that_names_the_fix_it_may_change_goes_into_it_and_the_list_says_so(world):
+def test_the_list_shows_a_fix_being_changed_as_its_own_row_never_as_another_fix(world):
     a = on_fix(world)
-    b = FX.new("the card is stuck on drawing", refines=a["id"])
-    # the working row says which fix it may become part of, then that it will
-    assert f"→ fix {a['id']}?: the card is stuck" in "\n".join(FX.list_lines(160))
-    b = FX.round_(b["id"], "merge it into fix 1", always=True)
-    assert b["refines_always"] is True and b["rounds"] == 2
-    assert f"→ fix {a['id']}: the card is stuck" in "\n".join(FX.list_lines(160))
-    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
-    p.write_text(p.read_text().replace("${n}", "${n} files"))
-    # an end with a title of its own still goes into fix 1
-    r = FX.done(b["id"], "Card draws", "The card draws.")
-    assert r["id"] == a["id"] and r["folded"] == b["id"] and r["rounds"] == 3
-    assert r["words"] == ["say read, not coverage", "the card is stuck on drawing", "merge it into fix 1"]
-    # a round of a fix that refines nothing changes nothing more
-    c = FX.new("a note")
-    assert "refines_always" not in FX.round_(c["id"], "and another", always=True)
-
-
-def test_two_changes_to_one_fix_that_end_at_once_both_go_into_it(world, monkeypatch):
-    a = on_fix(world)
-    b = FX.new("and keep the count", refines=a["id"], always=True)
-    c = FX.new("and a note", refines=a["id"], always=True)
-    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
-    p.write_text(p.read_text().replace("${n}", "${n} files"))
-    (Path(c["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
-    # c's fold reads fix 1, then waits for the lock while b's fold changes fix 1
-    armed = []
-    real_enter, real_fold = FX.Lock.__enter__, FX.fold
-
-    def enter(self):
-        if armed:
-            armed.pop()()
-        return real_enter(self)
-
-    def fold(rec, target):
-        if rec["id"] == c["id"]:
-            armed.append(lambda: FX.done(b["id"], None, "Keeps the count."))
-        return real_fold(rec, target)
-
-    monkeypatch.setattr(FX.Lock, "__enter__", enter)
-    monkeypatch.setattr(FX, "fold", fold)
-    r = FX.done(c["id"], None, "Adds a note.")
-    assert r["id"] == a["id"] and r["folded"] == c["id"] and r["state"] == "ready" and r["rounds"] == 3
-    assert r["words"] == ["say read, not coverage", "and keep the count", "and a note"]
-    shown = sh("git", "show", "--stat", "--format=", r["commit"], cwd=FX.live_dir())
-    assert "plugin/bar/bar.tsx" in shown and "plugin/notes.md" in shown
-    assert "read ${n} files" in sh("git", "show", f"{r['commit']}:plugin/bar/bar.tsx", cwd=FX.live_dir())
-
-
-def test_a_change_that_does_not_fit_its_fix_becomes_a_new_fix(world):
-    a = on_fix(world)
-    b = FX.new("say coverage again", refines=a["id"])
-    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
-    p.write_text("const words = `covered ${n}`\n")
-    # fix 1's commit moves on meanwhile (made up: its ref points at another change of the same line)
-    other = FX.new("x")
-    q = Path(other["work"]) / "plugin" / "bar" / "bar.tsx"
-    q.write_text("const words = `seen ${n}`\n")
-    other = FX.done(other["id"], "Seen", "")
-    sh("git", "update-ref", f"refs/thimble/fixes/{a['id']}", other["commit"], cwd=FX.live_dir())
-    r = FX.done(b["id"], None, "The bar says covered.", changes=a["id"])
-    assert r["id"] == b["id"] and r["state"] == "ready" and r["fold_failed"] == a["id"]
-    assert FX.get(a["id"])["state"] == "on" and "covered" in sh("git", "show", f"{r['commit']}:plugin/bar/bar.tsx", cwd=FX.live_dir())
+    b = FX.new("a note")
+    (Path(b["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    FX.done(b["id"], "A note", "Adds a note.")
+    FX.round_(a["id"], "clicking any card element should ask about it")
+    lines = FX.list_lines(160)
+    assert lines[0] == "Your thimble fixes · thimble 0.10.2 with 1 on, 1 ready"
+    rows = rows_of()
+    assert rows["1"][0] == "on · changing" and rows["1"][1].startswith("Bar says read")
+    assert rows["2"][0] == "ready" and len(rows) == 2
+    assert not any("→" in x or "fix 1" in x.split('"')[0] for x in lines[3:5])
 
 
 def test_merge_makes_one_fix_of_several_with_the_persons_key_and_keeps_the_old_refs(world):
@@ -911,16 +890,16 @@ def test_merge_makes_one_fix_of_several_with_the_persons_key_and_keeps_the_old_r
     # only the person's key merges
     with pytest.raises(FX.FixError, match="person's key"):
         FX.merge([a["id"], b["id"], c["id"]], "a-guess")
-    out = FX.merge([a["id"], b["id"], c["id"]], press(a["id"]), "Bar says read, with a note", "The bar says read; a note.")
+    out = FX.merge([a["id"], b["id"], c["id"]], press(a["id"]))
     assert out["merged"] == [b["id"], c["id"]] and out["reload"] is True
     m = FX.get(a["id"])
-    assert m["state"] == "on" and m["title"] == "Bar says read, with a note" and m["rounds"] == 3
+    assert m["state"] == "on" and m["title"] == "Bar says read" and m["rounds"] == 3
     assert m["words"] == ["say read, not coverage", "a note", "explain the terms of my field"]
     assert sorted(f["path"] for f in m["files"]) == ["plugin/bar/bar.tsx", "plugin/notes.md"]
     assert FX.get(b["id"])["state"] == "merged" and FX.get(c["id"])["merged_into"] == a["id"]
     assert [r["id"] for r in FX.listing()["fixes"]] == [a["id"]]
     # mine: the release and one commit, which holds both changes
-    assert sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines() == ["Bar says read, with a note", "thimble 0.10.2"]
+    assert sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines() == ["Bar says read", "thimble 0.10.2"]
     assert "read ${n}" in live_file("plugin/bar/bar.tsx") and (FX.live_dir() / "plugin" / "notes.md").exists()
     # the old commits stay, for an undo by hand
     assert sh("git", "rev-parse", f"refs/thimble/fixes/{b['id']}", cwd=FX.live_dir()) == old[b["id"]]
@@ -929,6 +908,97 @@ def test_merge_makes_one_fix_of_several_with_the_persons_key_and_keeps_the_old_r
     # undo takes the merged fix off as one
     FX.undo(a["id"])
     assert "coverage ${n}" in live_file("plugin/bar/bar.tsx") and not (FX.live_dir() / "plugin" / "notes.md").exists()
+
+
+def test_a_follow_up_made_as_a_fix_of_its_own_on_stacked_fixes_merges_by_itself_after_what_it_needs(world):
+    # fix 1 and fix 2 are on; fix 3, a follow-up to fix 1 made as a fix of its own (before rounds changed fixes in
+    # place), was cut from mine, so it sits on both, and it also changes a line fix 2 added
+    a = on_fix(world)
+    b = FX.new("a note")
+    (Path(b["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    FX.done(b["id"], "A note", "Adds a note.")
+    FX.apply(b["id"], press(b["id"]))
+    c = FX.new("clicking read breaks it, and the note should say so")
+    wt = Path(c["work"])
+    (wt / "plugin" / "bar" / "bar.tsx").write_text("const words = `read ${n ?? 0}`\n")
+    (wt / "plugin" / "notes.md").write_text("made-up note: read works on click\n")
+    c = FX.done(c["id"], "Clicking read works", "The read item works when clicked.")
+    # merge 1 3: fix 3's own change goes into fix 1, which now sits after fix 2 (it needs fix 2's line); fix 2 stays
+    out = FX.merge([a["id"], c["id"]], press(a["id"]))
+    assert out["merged"] == [c["id"]] and out["redo"] == []
+    m = FX.get(a["id"])
+    assert m["state"] == "on" and m["title"] == "Bar says read" and FX.get(b["id"])["state"] == "on"
+    assert "read ${n ?? 0}" in live_file("plugin/bar/bar.tsx") and "read works on click" in live_file("plugin/notes.md")
+    assert sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines() == ["Bar says read", "A note", "thimble 0.10.2"]
+    # the merged commit holds fix 1's change and fix 3's, not fix 2's note itself
+    assert sorted(f["path"] for f in m["files"]) == ["plugin/bar/bar.tsx", "plugin/notes.md"]
+    assert "made-up note: read works on click" in sh("git", "show", f"{m['commit']}", cwd=FX.live_dir())
+    assert [r["id"] for r in FX.listing()["fixes"]] == [a["id"], b["id"]]
+
+
+def test_two_fixes_that_change_the_same_lines_differently_do_not_merge_and_the_line_says_to_ask_claude(world):
+    a = on_fix(world)
+    FX.undo(a["id"])
+    # fix 2 was made while fix 1 was off, on the same line
+    b = FX.new("say seen")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `seen ${n}`\n")
+    FX.done(b["id"], "Bar says seen", "")
+    FX.apply(a["id"], press(a["id"]))
+    before = (FX.home() / "fixes.jsonl").read_text()
+    with pytest.raises(FX.FixError) as e:
+        FX.merge([a["id"], b["id"]], press(a["id"]))
+    assert str(e.value) == ("fix 2 and fix 1 change the same lines in different ways, so git cannot join them; nothing "
+                            "was merged. In Claude Code, /thimble-fix 1 fold in fix 2 asks Claude to do it")
+    assert (FX.home() / "fixes.jsonl").read_text() == before and "read ${n}" in live_file("plugin/bar/bar.tsx")
+    # that request is a round of fix 1, whose fixer gets fix 2's change as a patch in its temp folder
+    r = FX.round_(a["id"], "fold in fix 2")
+    assert r["id"] == a["id"] and r["prev"]["state"] == "on"
+    assert r["patches"] == [{"id": b["id"], "title": "Bar says seen", "path": str(FX.tmp_dir(a["id"]) / "fix-2.patch")}]
+    assert "+const words = `seen ${n}`" in Path(r["patches"][0]["path"]).read_text()
+
+
+def stray(w, refines: int, words: str, path: str, text: str) -> dict:
+    """A follow-up made by the old path: a fix of its own, cut from mine, whose record refines another fix."""
+    r = FX.put({**FX.new(words), "refines": refines, "refines_always": False})
+    (Path(r["work"]) / path).write_text(text)
+    return FX.done(r["id"], "Follow-up regression in this fix", "Repairs it.")
+
+
+def test_a_stray_follow_up_from_before_folds_into_its_fix_by_itself_when_the_list_is_read(world):
+    # fix 1 and fix 2 are on; fix 3 refines fix 1 (the old path), is on too, and sits on both
+    a = on_fix(world)
+    b = FX.new("a note")
+    (Path(b["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    FX.done(b["id"], "A note", "Adds a note.")
+    FX.apply(b["id"], press(b["id"]))
+    c = stray(world, a["id"], "it breaks when I click", "plugin/bar/bar.tsx", "const words = `read ${n ?? 0}`\n")
+    FX.apply(c["id"], press(c["id"]))
+    # no command: reading the list folds it in, and fix 1 stays on with both changes
+    d = FX.listing()
+    assert d["folded"] == [{"id": c["id"], "into": a["id"], "folded": True}]
+    assert [r["id"] for r in d["fixes"]] == [a["id"], b["id"]] and FX.get(c["id"])["state"] == "merged"
+    assert FX.get(a["id"])["state"] == "on" and "read ${n ?? 0}" in live_file("plugin/bar/bar.tsx")
+    assert FX.get(a["id"])["words"] == ["say read, not coverage", "it breaks when I click"]
+    assert FX.listing()["folded"] == []
+    # a stray that is ready, not on: fix 1's new version, which waits for y; the version on stays until then
+    e = stray(world, a["id"], "and keep the count", "plugin/bar/bar.tsx", "const words = `read ${n ?? 0} files`\n")
+    assert FX.listing()["folded"] == [{"id": e["id"], "into": a["id"], "folded": True, "waits": True}]
+    t = FX.get(a["id"])
+    assert t["state"] == "ready" and t["prev"]["state"] == "on" and "files" not in live_file("plugin/bar/bar.tsx")
+    assert rows_of()["1"][0] == "on · change ready"
+    FX.apply(a["id"], press(a["id"]))
+    assert FX.get(a["id"])["state"] == "on" and "read ${n ?? 0} files" in live_file("plugin/bar/bar.tsx")
+
+
+def test_a_stray_whose_lines_conflict_with_its_fix_stays_marked_for_claude(world):
+    a = on_fix(world)
+    FX.undo(a["id"])
+    s = stray(world, a["id"], "say seen", "plugin/bar/bar.tsx", "const words = `seen ${n}`\n")
+    FX.apply(a["id"], press(a["id"]))
+    d = FX.listing()
+    assert d["folded"] == [{"id": s["id"], "into": a["id"], "conflict": True}]
+    assert FX.get(s["id"])["state"] == "ready" and FX.get(s["id"])["fold_conflict"] == a["id"]
+    assert FX.listing()["folded"] == [] and "read ${n}" in live_file("plugin/bar/bar.tsx")
 
 
 def test_merge_in_a_shell_asks_first_and_a_request_alone_does_not_merge(world, monkeypatch):

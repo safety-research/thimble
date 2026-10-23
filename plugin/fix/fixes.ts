@@ -35,28 +35,45 @@ export type Fix = {
   work: string | null; commit: string | null; files: FixFile[]; tests: string | null; summary: string; error: string | null
   note?: string; pr?: string; saved?: string; tests_tail?: string; released_in?: string
   pending?: { why: string; version: string; files?: string[]; tests?: string; old?: string } | null
-  /** a fix that is on, off or ready which this request may change (refines_always: it changes it) */
-  refines?: number; refines_always?: boolean; on_at?: number
-  /** done's answer: the round whose change went into this fix, or the fix it did not fit */
-  folded?: number; fold_failed?: number | string
+  on_at?: number
+  /** a fix changed in place (a round of a fix that was on, off or ready): its version before the round, which stays as
+   *  it was until the person's y puts the new version on, and which u brings back after it */
+  prev?: { state: string; commit?: string | null; title?: string; summary?: string; on_at?: number } | null
+  /** done's answer for a round of a fix changed in place that changed no code: the fix stays as it was */
+  unchanged?: boolean
+  /** the fixes merged into this one; fold_conflict: the fix this stray from before follows up on, whose lines conflict */
+  merged?: number[]; fold_conflict?: number
+  /** other fixes the person's words name ("fold in fix 4"): each one's change as a patch in the fixer's temp folder */
+  patches?: { id: number; title: string; path: string }[]
   /** the Claude Code session whose fixer works on it (new, round, redo): only that session ends it */
   session?: string | null
   /** the last check did not use the change, and why; kept until the next check, so that the next fixer in the copy
    *  (another round, at once, or r) is told */
   refused?: Refusal | null
 }
-/** The fix a working fix changes whatever its end says (the person named it), or null: its change becomes part of that
- *  fix, so the person and Claude hear of `a change to fix 2`, never of its own number. */
-export const changesFix = (f: Pick<Fix, 'refines' | 'refines_always'>): number | null => (f.refines != null && f.refines_always ? f.refines : null)
+/** A fix as the person and Claude read it in a session: its name (its title), cut to `n` cells. The number is the
+ *  shell's handle (thimble fix off 2), never the name. */
+export const fixName = (f: Pick<Fix, 'id' | 'title'>, n = 60): string => cut(f.title || `fix ${f.id}`, n)
 
-/** A working fix as the person and Claude read it: `a change to fix 2`, or `fix 3`. */
-export const fixName = (f: Fix): string => (changesFix(f) != null ? `a change to fix ${changesFix(f)}` : `fix ${f.id}`)
+/** Whether a fix had a version before this round: a change to a fix the person has, not a new fix. */
+export const isChange = (f: Pick<Fix, 'prev'>): boolean => !!f.prev
 
-/** The bar's step while a fixer works: `changing fix 2`, or `fixing fix 3`. */
-export const fixingWord = (f: Fix): string => (changesFix(f) != null ? `changing fix ${changesFix(f)}` : `fixing fix ${f.id}`)
+/** The bar's step while a fixer works: `fixing <name>` for a new fix, `changing <name>` for a fix the person has. */
+export const fixingWord = (f: Fix): string => `${isChange(f) ? 'changing' : 'fixing'} ${fixName(f, 28)}`
 
-/** For a working fix that may change another (refines, not always): the words that say so, else ''. */
-export const mayJoin = (f: Fix): string => (f.refines != null && !f.refines_always ? `If its change is about fix ${f.refines}, it becomes part of fix ${f.refines}, with no fix ${f.id} of its own.` : '')
+/** The fixer's subagent, by the fix's name: `fix-click-card-elements`. A new fix's name is the start of the person's
+ *  words until the fixer gives it a title. */
+export function fixSlug(f: Pick<Fix, 'id' | 'title'>): string {
+  const words = String(f.title || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean)
+  const STOP = new Set(['a', 'an', 'the', 'to', 'of', 'and', 'or', 'it', 'is', 'in', 'on', 'for', 'with', 'should', 'be', 'when', 'i', 'my', 'make', 'so'])
+  const kept = words.filter(w => !STOP.has(w))
+  let slug = ''
+  for (const w of kept.length ? kept : words) {
+    if (slug && slug.length + 1 + w.length > 28) break
+    slug = slug ? `${slug}-${w}` : w.slice(0, 28)
+  }
+  return `fix-${slug || f.id}`
+}
 
 /** Why the check did not use a fixer's change: the files it may not change (safety files, a binary file), or the end of
  *  the tests' output when they failed. */
@@ -65,15 +82,13 @@ export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
  *  u), failed (d what changed · r redo · n later), request (no code), a new release with the fixes replayed on it
  *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
- *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. `changed`
- *  (ready): a round changed this fix, which was on, off or ready; `notFolded` (ready): the fix a round was to change,
- *  which its change did not fit, so it is a new fix. ask: the fixer could not tell which fix the words are for, and
- *  the line asks (a number key for a fix, 0 a new fix, n never mind). */
+ *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
 export type FixLine = {
-  id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release' | 'ask'; said?: string; open?: boolean; reload?: 'pending' | 'restart'
-  changed?: boolean; notFolded?: number | string
-  /** ask: the fixes the words may be for (a number key each), the words, and who asked */
-  choices?: number[]; words?: string; by?: 'person' | 'claude'
+  id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release'; said?: string; open?: boolean; reload?: 'pending' | 'restart'
+  /** off: u brought back the fix's version before its last change, which is on (or off) as it was */
+  back?: boolean
+  /** request: a round of a fix the person has changed no code, so the fix stays as it was */
+  kept?: boolean
 }
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
@@ -192,10 +207,12 @@ async function load($: Engine, d: Any): Promise<void> {
 /** y on a ready fix: the fix goes on, and the session loads it. */
 export async function applyFix($: Engine, id: number): Promise<string | null> {
   const secret = await pressKey($, id)
-  const r = await kernelFix($, ['apply', String(id), '--ask', '-'], { stdin: secret, timeoutMs: 300000, doing: `applying fix ${id}` })
+  const was = await fixOf($, id)
+  const name = was ? `“${fixName(was)}”` : `Fix ${id}`
+  const r = await kernelFix($, ['apply', String(id), '--ask', '-'], { stdin: secret, timeoutMs: 300000, doing: `applying ${was ? fixName(was, 28) : `fix ${id}`}` })
   if (!r.ok) {
     await refreshFixes($)
-    return `Fix ${id} was not applied: ${cut(r.err || 'thimble fix apply gave nothing', 220)}`
+    return `${name} was not applied: ${cut(r.err || 'thimble fix apply gave nothing', 220)}`
   }
   const d = jsonOf<Any>(r.out) ?? {}
   await refreshFixes($)
@@ -204,8 +221,8 @@ export async function applyFix($: Engine, id: number): Promise<string | null> {
   // end (turn.complete runs reloadIfDue), and the line says so until the new load (reloaded)
   const reload = (await pluginDirSession($)) ? 'restart' : d.reload && (await mainRuns($)) ? 'pending' : undefined
   await setFixLine($, { id, kind: 'applied', ...(reload ? { reload } : {}) })
-  if (d.reload && !reload) $.ui.log(`thimble reloaded its plugins: fix ${id}${f ? `, “${f.title}”,` : ''} is on.`)
-  await tellAtNextPrompt($, `fix-${id}`, `The person applied thimble fix ${id}${f ? ` ("${f.title}")` : ''}: it is now part of their thimble${d?.version ? ` (${d.version})` : ''}.`)
+  if (d.reload && !reload) $.ui.log(`thimble reloaded its plugins: ${f ? `“${f.title}”` : `fix ${id}`} is on${d.changed ? ', in its new version' : ''}.`)
+  await tellAtNextPrompt($, `fix-${id}`, `The person applied their thimble fix "${f?.title ?? id}"${d.changed ? ' in its new version' : ''}: it is now part of their thimble${d?.version ? ` (${d.version})` : ''}.`)
   if (reload === 'pending') {
     reloadDue = true
     // the turn ended while the fix went on: its end found nothing due, so the reload runs now
@@ -219,14 +236,19 @@ export async function applyFix($: Engine, id: number): Promise<string | null> {
 
 /** u: the fix comes out of mine, kept for later. */
 export async function undoFix($: Engine, id: number): Promise<string | null> {
-  const r = await kernelFix($, ['undo', String(id)], { timeoutMs: 300000, doing: `undoing fix ${id}` })
-  if (!r.ok) return `Fix ${id} was not undone: ${cut(r.err || 'thimble fix undo gave nothing', 220)}. In a shell: thimble fix off`
+  const was = await fixOf($, id)
+  const name = was ? `“${fixName(was)}”` : `Fix ${id}`
+  const r = await kernelFix($, ['undo', String(id)], { timeoutMs: 300000, doing: `undoing ${was ? fixName(was, 28) : `fix ${id}`}` })
+  if (!r.ok) return `${name} was not undone: ${cut(r.err || 'thimble fix undo gave nothing', 220)}. In a shell: thimble fix off ${id}`
   const d = jsonOf<Any>(r.out) ?? {}
   await refreshFixes($)
   const l = await fixLineNow($)
-  if (l?.id === id) await setFixLine($, { id, kind: 'off' })
-  if (d.reload) $.ui.log(`thimble reloaded its plugins: fix ${id} is off.`)
-  await tellAtNextPrompt($, `fix-${id}`, `The person undid thimble fix ${id}: it is off, kept in their list.`)
+  // a fix changed in place goes back to its version before the change; else it goes off
+  if (l?.id === id) await setFixLine($, { id, kind: 'off', ...(d.back ? { back: true } : {}) })
+  if (d.reload) $.ui.log(`thimble reloaded its plugins: ${name} ${d.back ? 'is back to its version before' : 'is off'}.`)
+  await tellAtNextPrompt($, `fix-${id}`, d.back
+    ? `The person undid the last change to their thimble fix "${was?.title ?? id}": its version before is back.`
+    : `The person undid their thimble fix "${was?.title ?? id}": it is off, kept in their list.`)
   await load($, d)
   return null
 }
