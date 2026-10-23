@@ -1594,10 +1594,11 @@ def can_share() -> bool:
 
 
 class Paint:
-    """Colors for a terminal (the approved look: titles in bold lilac, on in green, commands in purple, the rest dim),
-    and plain text for a pipe, NO_COLOR, or Claude's Bash tool, which reads the same words."""
+    """Colors for a terminal (titles in bold purple, on in green, commands in purple, the rest dim), in the terminal's
+    own palette so that they read on a light theme and a dark one, and plain text for a pipe, NO_COLOR, or Claude's
+    Bash tool, which reads the same words."""
 
-    CODES = {"title": "1;38;5;183", "green": "38;5;79", "dim": "38;5;246", "cmd": "38;5;141", "bold": "1"}
+    CODES = {"title": "1;35", "green": "32", "dim": "90", "cmd": "35", "bold": "1"}
 
     def __init__(self, on: bool | None = None):
         if on is None:
