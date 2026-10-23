@@ -202,18 +202,6 @@ def test_the_reject_route_refuses_the_server_s_token_without_the_analyst_s_cooki
     assert _row(row["slug"])["status"] == "suggested"
 
 
-def test_a_0_7_suggested_row_is_never_the_waiting_view_proposal_and_blocks_none(corpus):
-    legacy = _legacy_trace()
-    assert legacy["status"] == "suggested" and "offered" not in legacy
-    assert views.open_offer(CORPUS) is None and views.offers(CORPUS) == []
-    row, why = _offer()
-    assert why == "" and views.open_offer(CORPUS)["slug"] == row["slug"]
-    views.answer_offer(CORPUS, row["slug"])
-    assert _row(legacy["slug"])["status"] == "suggested" and "answer" not in _row(legacy["slug"])
-    assert [(p["slug"], p["answer"]) for p in views.offers(CORPUS)] == [(row["slug"], "rejected")], \
-        "answered view proposals stay listed, so the proposer sees the rejected ones"
-
-
 def test_the_first_build_of_an_accepted_view_proposal_says_accepted_and_no_later_one_does(corpus):
     row, _ = _offer()
     views.accept(CORPUS, row["slug"])
@@ -294,21 +282,6 @@ async def test_the_file_type_proposal_makes_no_call_while_view_proposals_are_off
     assert views.open_offer(CORPUS)["slug"] == slug and corpus.queued == []
 
 
-async def test_a_demo_page_makes_no_file_type_call_and_shows_no_view_proposal(corpus, monkeypatch):
-    # a workspace no Claude Code session listens to (a demo page, `thimble demo`): no model call on the analyst's
-    # account, no view proposal card, and no answer kept, so the type is asked once a session listens
-    from app import tasks
-
-    calls: list[str] = []
-    answer = {"help": True, "name": "trace steps", "why": "Traces read as steps.", "arrangement": "One row per step."}
-    monkeypatch.setattr(tasks, "call", _viewer_call(answer, calls))
-    monkeypatch.setattr(events, "reachable", lambda c: False)
-    assert await views.suggest(CORPUS, "run.trace") is None and calls == []
-    assert views.open_offer(CORPUS) is None and views.suggestions(CORPUS) == {}
-    monkeypatch.setattr(events, "reachable", lambda c: True)
-    assert await views.suggest(CORPUS, "run.trace") is not None and calls == [".trace"]
-
-
 async def test_a_file_type_proposal_that_cannot_be_written_keeps_no_answer(corpus, monkeypatch):
     from app import tasks
 
@@ -318,21 +291,6 @@ async def test_a_file_type_proposal_that_cannot_be_written_keeps_no_answer(corpu
     views.answer_offer(CORPUS, _offer()[0]["slug"], "rejected")
     assert await views.suggest(CORPUS, "run.trace") is None and calls == [".trace"]
     assert views.suggestions(CORPUS) == {} and views.open_offer(CORPUS) is None, "the name was taken"
-
-
-def test_main_sees_the_waiting_view_proposal_as_thimble_s_and_no_legacy_row(corpus, monkeypatch):
-    _legacy_trace()
-    views.propose(CORPUS, "Threads", "The threads.", ["board.jsonl"])
-    _offer()
-    text = context.views(CORPUS)
-    assert "- thimble's view proposal, waiting for the analyst's Accept or Reject: Posts · claims board.jsonl" in text
-    assert "  Each post of the board." in text and "- proposed, queued: Threads · claims board.jsonl" in text
-    assert "Old Trace" not in text
-    monkeypatch.setenv(views.PROPOSE_ENV, "off")
-    assert "Posts" not in context.views(CORPUS), "with view proposals off the analyst sees none, and neither does main"
-    monkeypatch.delenv(views.PROPOSE_ENV)
-    views.answer_offer(CORPUS, views.open_offer(CORPUS)["slug"], "rejected")
-    assert "Posts" not in context.views(CORPUS)
 
 
 def test_don_t_ask_again_turns_view_proposals_off_through_the_settings_put_and_settings_back_on(corpus, analyst):

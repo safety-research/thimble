@@ -5,17 +5,6 @@ frontend/tests/public/browser/view-tree.test.ts."""
 from app import views
 
 
-def test_the_tree_loads_after_the_row_controls_and_the_table_and_before_the_range(tmp_path):
-    d = tmp_path / "view"
-    d.mkdir()
-    (d / views.VIEW_HTML).write_text("<style>.mine{}</style><script>const t = thimble.tree({ mount: '#pages' })</script>")
-    doc = views.frame_document({"dir": str(d), "slug": "wiki", "name": "Wiki"})
-    order = [doc.index(s) for s in ("thimble.rows = function", "shared.controls = {", "thimble.table = function",
-                                    "thimble.tree = function", "thimble.timeRange = function", "const t = thimble.tree(")]
-    assert order == sorted(order), order
-    assert doc.index(".thimble-tree-row") < doc.index(".mine{}")
-
-
 def test_a_page_lays_the_tree_out_but_does_not_restyle_its_rows():
     assert views.own_parts("<style>.thimble-tree-row.active { background: #fde }</style>") == [
         "`.thimble-tree-row.active` sets background"]

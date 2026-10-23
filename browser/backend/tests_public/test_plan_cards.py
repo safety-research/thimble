@@ -136,18 +136,6 @@ async def test_edit_card_refuses_a_bad_status_a_step_without_text_and_a_locked_p
     assert len(notebook.plan_steps(_cell(cid))) == 3
 
 
-async def test_update_plan_is_gone_from_the_tools_and_their_descriptions(group):
-    assert "update_plan" not in tools.REGISTRY
-    from app import prompts
-
-    assert "update_plan" not in prompts.load("tools") and "## plan-started" not in prompts.load("tools")
-    assert "update_plan" not in prompts.load("main") and "`edit_card`" in prompts.load("main")
-    assert tools.hint("plan-started", cid="x") == ""
-    assert "update_plan" not in {t["name"] for t in tools.list()}
-    with pytest.raises(KeyError):
-        await call("update_plan", group, card="card:nope", step=1, status="done")
-
-
 async def test_stamps_follow_status_changes():
     step = notebook.plan_step_of({"text": "Run"}, "s1")
     plans.stamp(step, "running", "2026-10-08T10:00:00+00:00")

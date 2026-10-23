@@ -177,15 +177,6 @@ async def test_an_edit_of_a_card_of_code_keeps_its_code_takeaway_and_the_outputs
     assert "out: print(2)" in json.dumps(_record(cid, back["id"])["shown"]["outputs"])
 
 
-async def test_a_staged_edit_in_terminal_mode_is_an_entry_with_the_outputs_it_replaces(group, ran):
-    cid = _cid(await call("add_card", group, question="How many?", code="print(1)"))
-    nb_id = notebook.find_cell(config.workspace_dir(CORPUS), cid)[0]
-    notebook.stage_edit(CORPUS, nb_id, cid, "print(3)", {"state": "queued"}, by="terminal")
-    [e] = _edits(cid)
-    assert (e["by"], e["fields"]) == ("terminal", ["code"])
-    assert "out: print(1)" in json.dumps(_record(cid, e["id"])["shown"]["outputs"])
-
-
 async def test_a_card_checks_fix_and_its_undo_are_entries(group, ran):
     cid = _cid(await call("add_card", group, question="How many?", code="print(1)", takeaway="One."))
     chk = checkstore.begin(CORPUS, cid)

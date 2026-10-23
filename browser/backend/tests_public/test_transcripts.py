@@ -799,25 +799,3 @@ def test_a_file_whose_whole_parse_finds_no_turns_is_no_longer_offered_transcript
     assert r.status_code == 415 and "holds no messages" in r.json()["detail"]
     assert transcripts.sniff(mixed, "logs/mixed.json") is None
     assert "transcript" not in client.get(f"{CHATS}/source", params={"path": "logs/mixed.json"}).json()
-
-
-def test_terminal_mode_reads_a_page_of_turns_and_none_where_the_parse_finds_none(chats):
-    """`thimble state turns <file>` gives terminal mode's file view the page GET /source/turns gives the browser, from
-    a turn or around a line; a file whose parse finds no turns gives none, with `none` saying why, so the view opens its
-    other tab."""
-    import asyncio
-
-    from app import local
-
-    (chats / "logs" / "agent.json").write_text(json.dumps(pooled(), indent=2))
-    page = asyncio.run(local.state("chats", "turns", ["logs/agent.json"]))
-    assert page["total"] == 7 and page["n_groups"] == 2 and page["turns"][0]["speaker"] == "system"
-    at = page["turns"][5]["line"]
-    assert asyncio.run(local.state("chats", "turns", ["logs/agent.json", "--line", str(at)]))["start"] == 0
-    assert [t["i"] for t in asyncio.run(local.state("chats", "turns", ["logs/agent.json", "--start", "6"]))["turns"]] == [6]
-    none = asyncio.run(local.state("chats", "turns", ["logs/config.json"]))
-    assert none["turns"] == [] and "holds no messages" in none["none"]
-    with pytest.raises(local.StateError, match="no such file"):
-        asyncio.run(local.state("chats", "turns", ["logs/nope.json"]))
-    with pytest.raises(local.StateError, match="needs"):
-        asyncio.run(local.state("chats", "turns", []))

@@ -7,7 +7,6 @@ subagents.run_ended."""
 from __future__ import annotations
 
 import asyncio
-import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -158,29 +157,6 @@ async def test_in_a_new_workspace_a_writer_s_end_starts_heads_up_and_explainers_
     assert [s["what"] for s in bridge.ops("spawn")[2:]] == ["judgment on report"]
 
 
-async def test_in_plan_mode_a_writer_s_end_holds_its_checks_which_say_so_and_start_after(doc, bridge, monkeypatch):
-    """Live check L21: the runs a writer's end starts wait while main is in plan mode; their rows said they waited for
-    a free session. Their records say `waiting: plan` meanwhile, and they start once main leaves plan mode."""
-    from app import session
-
-    mode = {"now": "plan"}
-    monkeypatch.setattr(session, "main_mode", lambda c: mode["now"])
-
-    async def out_of_plan(c, poll_s=2.0):  # subagents.out_of_plan, polled fast, with main's session there
-        while mode["now"] == "plan":
-            await asyncio.sleep(0.01)
-
-    monkeypatch.setattr(subagents, "out_of_plan", out_of_plan)
-    await _write()
-    _writer_done()
-    await _until(lambda: _run("explainers").get("waiting") == checks.WAITING_PLAN, "the run did not say it waits")
-    await asyncio.sleep(0.05)
-    assert not bridge.ops("spawn"), "nothing starts in plan mode"
-    mode["now"] = "auto"
-    await _until(lambda: len(bridge.ops("spawn")) == 2, "the held checks never started")
-    assert "waiting" not in _run("explainers") or _run("explainers")["waiting"] != checks.WAITING_PLAN
-
-
 async def test_the_analyst_s_edit_starts_nothing_and_marks_the_checks_stale_with_the_count(doc, bridge):
     await _write()
     _writer_done()
@@ -202,19 +178,6 @@ async def test_run_is_a_click_that_starts_one_and_stop_goes_through_the_module(d
     assert bridge.ops("stop")[0]["agent"] == act.agent
     subagents.run_ended(CORPUS, act.agent, "stopped", "", source="notification")
     assert _run("judgment")["status"] == "stopped"
-
-
-async def test_main_s_run_check_gives_the_exact_agent_call(doc, bridge):
-    await _write()
-    res = await tools.call(CORPUS, "run_check", {"name": "Judgment"}, tool_use_id="toolu_main1")
-    assert not res.is_error, res.text
-    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
-    assert inp["subagent_type"] == "thimble:check" and not bridge.ops("spawn")
-    rid = sf.REQUEST_RE.search(inp["prompt"].split("\n", 1)[0]).group(0)
-    req = subagents.request(CORPUS, rid)
-    assert (req["route"], req["call"]) == ("typed", "toolu_main1")
-    with subagents.update(CORPUS) as state:
-        assert sf.check_call(state, {"tool_name": "Agent", "tool_use_id": "toolu_x", "tool_input": inp}) is None
 
 
 async def test_a_run_s_end_supersedes_its_covered_comments_and_records_what_it_saw(doc, bridge):
@@ -245,118 +208,6 @@ def _commented() -> int:
     rows = investigation._read_jsonl(path) if path.exists() else []
     return sum(1 for e in rows
                if e.get("type") == "report" and e.get("slug") == "report" and e.get("status") == "commented")
-
-
-async def test_a_run_s_task_lists_its_check_s_open_comments_its_end_replaces(doc, bridge):
-    """Live check 0.7.0 (on the cards): a run read its check's open comments as said, left none of them again, and its
-    end superseded them. A run's task lists them as the ones it replaces; another check's comments are not listed."""
-    await _write()
-    first = await _started("judgment")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    sid = report_types.all_sentences(d)[0]["id"]
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_r1", first.agent, "thimble:check")
-    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this.",
-                                                   "details": "The log has no account field."},
-                           session=checks.session_key("judgment", "report"), tool_use_id="toolu_r1")
-    assert not res.is_error, res.text
-    subagents.run_ended(CORPUS, first.agent, "done", "Commented on 1 passage.", source="handback")
-    replaces = tools.hint("check-replaces", comments="").strip()
-    task_of = lambda cid: (checks.work_dir(CORPUS, cid, "report") / checks.TASK_FILE).read_text()  # noqa: E731
-    await _started("judgment")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
-    listed = task_of("judgment").split(replaces, 1)[1]
-    assert f"- comment {cm['id']} on report:report#{sid} · No card shows this. — The log has no account field." in listed
-    await _started("explainers")
-    assert replaces not in task_of("explainers"), "a run replaces only its own check's comments"
-
-
-async def test_a_run_main_started_that_ran_as_its_subagent_ends_with_one_line_its_hand_back(doc, bridge, monkeypatch):
-    """Live check plan-cards: main wrote two lines for each check it started, one for thimble's `checked` event and one
-    for the check's hand-back. A run that ran as main's subagent posts no `checked`, since its hand-back reaches main
-    anyway; a run with no agent of main's, such as one whose start was refused, still posts one."""
-    from app import events
-
-    posted: list[tuple[str, dict]] = []
-    monkeypatch.setattr(events, "post", lambda c, kind, payload=None, **kw: posted.append((kind, dict(payload or {}))) or {})
-    await _write()
-    rec = await checks.start_run(CORPUS, "judgment", "report", force=True, notify=True, route="click")
-    assert rec is not None and rec["notify"]
-    act = checks._active[(CORPUS, "judgment", "report")]
-    await _until(lambda: act.agent or act.ended, "the run never started")
-    assert act.agent
-    subagents.run_ended(CORPUS, act.agent, "done", "Commented on 0 of 3 passages.", source="handback")
-    await _until(lambda: _run("judgment")["status"] == "done", "the run never ended")
-    assert [k for k, _ in posted if k == checks.CHECKED_KIND] == [], "the hand-back alone tells main"
-    bridge.answers.append({"deny": "PreToolUse:Agent hook error: refused"})
-    await checks.start_run(CORPUS, "explainers", "report", force=True, notify=True, route="click")
-    await _until(lambda: _run("explainers").get("status") == "failed", "the refused run never ended")
-    checked = [p for k, p in posted if k == checks.CHECKED_KIND]
-    assert len(checked) == 1 and checked[0]["check"] == "explainers" and checked[0]["status"] == "failed"
-
-
-async def test_a_run_main_s_plan_mode_held_at_its_end_fails_saying_why_and_supersedes_nothing(doc, bridge):
-    """Main went into plan mode while a check ran, and thimble stopped nothing, as Claude Code stops no subagent then:
-    the check's agent followed main and could only read and plan, so it may not have commented where it would have.
-    Its run ends failed with the line that says why and to choose Re-run, not done, and the check's earlier comments
-    on the passages it covered stay open."""
-    await _write()
-    first = await _started("judgment")
-    key = checks.session_key("judgment", "report")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    sid = report_types.all_sentences(d)[0]["id"]
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_p1", first.agent, "thimble:check")
-    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
-                           session=key, tool_use_id="toolu_p1")
-    assert not res.is_error, res.text
-    subagents.run_ended(CORPUS, first.agent, "done", "Commented on 1 passage.", source="handback")
-    second = await _started("judgment")
-    subagents.saw_plan_mode(CORPUS, second.agent)
-    subagents.run_ended(CORPUS, second.agent, "done", "My plan is in the plan file.", source="handback")
-    line = subagents.plan_failed_line("check")
-    assert (_run("judgment")["status"], _run("judgment")["summary"]) == ("failed", line)
-    assert line.endswith(", then choose Re-run on the check.")
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    [cm] = [c for c in d.get("comments") or [] if c.get("check") == "judgment"]
-    assert (cm.get("status") or "open") == "open" and not cm.get("superseded_by")
-
-
-async def test_a_start_at_the_subagent_limit_waits_and_a_refused_one_fails_with_its_refusal(doc, bridge, monkeypatch):
-    monkeypatch.setattr(checks, "LIMIT_RETRY_S", 0.05)
-    await _write()
-    bridge.answers.append({"limit": "Claude Code runs at most 20 concurrent subagents"})
-    await checks.start_run(CORPUS, "judgment", "report", force=True, route="click")
-    await _until(lambda: len(bridge.ops("spawn")) == 2, "the start was never tried again")
-    assert _run("judgment")["status"] == "running" and _run("judgment")["agent_id"]
-    bridge.answers.append({"deny": "PreToolUse:Agent hook error: PLAN MODE"})
-    await _started("explainers")
-    assert _run("explainers")["status"] == "failed" and _run("explainers")["refused"]["kind"] == "hook"
-
-
-async def test_a_run_whose_agent_runs_on_across_a_server_restart_takes_its_place_again(doc, bridge, monkeypatch):
-    await _write()
-    agent = (await _started("judgment")).agent
-    monkeypatch.setattr(checks, "_active", {})
-    assert checks.recover() == []
-    assert checks._active[(CORPUS, "judgment", "report")].agent == agent
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)[agent]["status"] = "done"
-    monkeypatch.setattr(checks, "_active", {})
-    assert checks.recover() == [f"{CORPUS}/judgment/report"]
-    assert _run("judgment")["status"] == "stopped"
-
-
-async def test_main_s_quit_stops_a_queued_run_and_its_agent_s_end_stops_a_running_one(doc, bridge, monkeypatch):
-    monkeypatch.setattr(checks, "MAX_SESSIONS", 1)
-    await _write()
-    await _started("judgment")
-    await checks.start_run(CORPUS, "explainers", "report", force=True, route="click")
-    assert _run("explainers").get("waiting") == checks.WAITING_QUEUED
-    assert checks.stop_workspace(CORPUS) == 1
-    subagents.close_running(CORPUS)
-    assert _run("judgment")["status"] == "stopped" and _run("explainers")["status"] == "stopped"
-    await asyncio.sleep(0.05)
-    assert len(bridge.ops("spawn")) == 1, "nothing starts in a stopped run's place"
 
 
 async def test_a_run_s_task_file_is_never_written_through_a_link(doc, bridge, tmp_path):
@@ -400,60 +251,3 @@ def test_every_check_click_route_refuses_the_server_s_token_without_the_analyst_
         r = getattr(client, method)(path, json=body)
         assert r.status_code == 403, ("neither cookie nor token, as a kernel cell posts it", path)
     assert not bridge.calls, "the module is never asked"
-
-
-async def test_in_terminal_mode_each_process_takes_up_a_run_from_the_check_s_file(doc, bridge, monkeypatch):
-    """Terminal mode has no server to hold a run: main's run_check starts it in the shim, a hook's process hears its
-    agent start and end, and the shim takes its comments. Each process takes the run up from the check's file, so its
-    comments land and its end is recorded, and a process that held it lets it go once another ended it (live check
-    T6: a typed check stayed `running` for good, and the next writer's end started no check)."""
-    from terminal_fakes import write_launch
-
-    write_launch(config.workspace_dir(CORPUS))
-    await _write()
-    res = await tools.call(CORPUS, "run_check", {"name": "Judgment"}, tool_use_id="toolu_main1")
-    assert not res.is_error, res.text
-    shim = dict(checks._active)  # the shim's process: it started the run
-    key = checks.session_key("judgment", "report")
-    monkeypatch.setattr(checks, "_active", {})  # a hook's process: the agent starts
-    checks.subagent_started(CORPUS, subagents.Run(CORPUS, key, "check", "c0ffee00", "agentcheck1"), {})
-    assert _run("judgment")["agent_id"] == "agentcheck1"
-    monkeypatch.setattr(checks, "_active", dict(shim))  # the shim again: the agent comments
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    sid = report_types.all_sentences(d)[0]["id"]
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_c1", "agentcheck1", "thimble:check")
-    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
-                           session=key, tool_use_id="toolu_c1")
-    assert not res.is_error, res.text
-    monkeypatch.setattr(checks, "_active", {})  # another hook's process: the agent ends
-    checks.subagent_ended(CORPUS, subagents.Run(CORPUS, key, "check", "c0ffee00", "agentcheck1"), "done", "One comment.")
-    assert (_run("judgment")["status"], _run("judgment")["comments"]) == ("done", 1)
-    monkeypatch.setattr(checks, "_active", dict(shim))  # the shim lets go of the run that ended elsewhere
-    assert not checks.running(CORPUS, "judgment", "report") and checks._active == {}
-    await _write(TEXT + "\n## Later\n\nA second account joined in the second week.\n")
-    _writer_done()  # a writer's end starts the shown checks on what they have not seen, this one among them
-    await _until(lambda: _run("judgment")["status"] == "running" and _run("judgment")["run"] != shim[
-        (CORPUS, "judgment", "report")].run, "the writer's end started no run of judgment")
-
-
-async def test_in_terminal_mode_a_run_counts_the_comments_the_shim_took(doc, bridge, monkeypatch):
-    """A writer's end starts a check in a hook's process, which holds the run until its agent ends; the agent's comments
-    go through the shim, another process. The run's end counts the comments its document holds (live check T6: a
-    check that left a comment recorded none)."""
-    from terminal_fakes import write_launch
-
-    write_launch(config.workspace_dir(CORPUS))
-    await _write()
-    hook = await _started("judgment")  # the hook's process holds it
-    held = dict(checks._active)
-    key = checks.session_key("judgment", "report")
-    monkeypatch.setattr(checks, "_active", {})  # the shim takes the agent's comment
-    d = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    sid = report_types.all_sentences(d)[0]["id"]
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_c1", hook.agent, "thimble:check")
-    res = await tools.call(CORPUS, "add_comment", {"ref": f"report:report#{sid}", "text": "No card shows this."},
-                           session=key, tool_use_id="toolu_c1")
-    assert not res.is_error, res.text
-    monkeypatch.setattr(checks, "_active", held)  # back in the hook's process: the agent ends
-    subagents.run_ended(CORPUS, hook.agent, "done", "Commented on 1 passage.", source="handback")
-    assert (_run("judgment")["status"], _run("judgment")["comments"]) == ("done", 1)

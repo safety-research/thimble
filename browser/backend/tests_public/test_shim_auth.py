@@ -3,10 +3,8 @@ the event subscription only when the request proves the token in server.json, an
 (plugin/bin/thimble-mcp) believes no answer without that proof."""
 from __future__ import annotations
 
-import time
 
 from fastapi.testclient import TestClient
-from test_shim import INITIALIZE, INITIALIZED, _read, _send, _Server, _start, _stop
 
 from app import config, hook_auth
 from app.main import create_app
