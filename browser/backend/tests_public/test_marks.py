@@ -225,6 +225,82 @@ def test_a_takeaway_s_marks_are_checked_with_main_s_reply_and_a_card_s_cell_is_t
     assert notebook.takeaways_to_check(CORPUS) == []
 
 
+def _main_at(monkeypatch, cut: str | None):
+    from types import SimpleNamespace
+
+    lv = SimpleNamespace(sid=SID, cwd=str(config.corpus_dir(CORPUS)), config=None, config_known=False,
+                         transcript_path=None, model="", effort="", context_tokens=0, last_cut=cut)
+    monkeypatch.setattr(session, "current", lambda c: lv if c == CORPUS else None)
+
+
+def _verified(cid: str) -> list[dict]:
+    return [{"mark": n, "kind": "card", "evidence": {"ref": f"card:{cid}#{col}/agent-07"}, "status": "verified",
+             "correction": None, "reason": "the table says so"} for n, col in ((1, "merged"), (2, "total"))]
+
+
+def test_a_card_s_takeaway_is_checked_as_its_write_lands_and_main_s_reply_leaves_it_alone(_fresh, monkeypatch):
+    """A card written with cited words in its takeaway is checked right away, from main at its last finished turn, with
+    no reply's record; main's reply that ends while that check runs does not check the takeaway again."""
+    from app import notebook
+
+    cid = _seed_card("agent-07 merged [12](#) of [40](#) pull requests.", [TABLE])
+    _main_at(monkeypatch, "cut-1")
+    forks: list[tuple[str, str]] = []
+
+    async def go():
+        gate = asyncio.Event()
+
+        async def fork(c, main, cut, prompt):
+            forks.append((cut, prompt))
+            await gate.wait()
+            return {"answer": _answer(_verified(cid)), "calls": [], "error": None}
+
+        monkeypatch.setattr(marks, "run_fork", fork)
+        marks.card_written(CORPUS, cid)
+        await asyncio.sleep(0)  # the check took the takeaway
+        for _ in range(200):  # its marks are on the card, checking
+            if (notebook.get_cell(CORPUS, cid).get("takeaway_marks") or {}).get("items"):
+                break
+            await asyncio.sleep(0.02)
+        assert [m["status"] for m in notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]] == ["checking"] * 2
+        # main's reply ends meanwhile, with no marks of its own: nothing is left for it to check
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, marks.new_turn(), ["Done."], "cut-2", fork=fork)
+        gate.set()
+        await asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+
+    asyncio.run(go())
+    assert len(forks) == 1 and forks[0][0] == "cut-1"
+    assert f"in the takeaway of card:{cid} (Merged pull requests by agent)" in forks[0][1]
+    kept = notebook.get_cell(CORPUS, cid)["takeaway_marks"]
+    assert [m["status"] for m in kept["items"]] == ["verified", "verified"]
+    assert not list((config.workspace_dir(CORPUS) / "marks").glob("*.json"))  # no reply's record
+    assert notebook.takeaways_to_check(CORPUS) == []
+
+
+def test_a_takeaway_waits_while_its_card_check_may_rewrite_it_or_main_has_no_turn_to_fork(_fresh, monkeypatch):
+    from types import SimpleNamespace
+
+    from app import card_check, notebook
+
+    cid = _seed_card("agent-07 merged [12](#) of 40 pull requests.", [TABLE])
+    started: list[str] = []
+    monkeypatch.setattr(marks, "_spawn", lambda coro: (started.append("check"), coro.close()))
+    monkeypatch.setattr(card_check, "_runs", {(CORPUS, cid): SimpleNamespace(task=SimpleNamespace(done=lambda: False))})
+    _main_at(monkeypatch, "cut-1")
+    marks.card_written(CORPUS, cid)
+    assert started == []  # the card check's end calls card_written again
+    monkeypatch.setattr(card_check, "_runs", {})
+    monkeypatch.setenv("THIMBLE_RUNTIME", "off")
+    _main_at(monkeypatch, None)
+    marks.card_written(CORPUS, cid)
+    assert started == []  # main's first turn has not ended: its end checks the takeaway
+    _main_at(monkeypatch, "cut-1")
+    marks.card_written(CORPUS, cid)
+    assert started == ["check"]
+    assert notebook.takeaways_to_check(CORPUS)  # nothing ran: the takeaway still waits
+
+
 def test_a_printed_table_line_of_a_card_is_evidence_and_reads_as_a_table():
     cid = _seed_card("", [PRINTED])
     cards = marks.session_cards(CORPUS)

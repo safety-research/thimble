@@ -4175,12 +4175,22 @@ def _edit_args(body: CellEdit) -> dict:
 @router.put("/ws/{c}/notebooks/{nb}/cells/{cell_id}")
 async def update_cell(c: str, nb: str, cell_id: str, body: CellEdit) -> dict:
     _cell_in(c, nb, cell_id)
-    return edit_cell(c, cell_id, **_edit_args(body))
+    return _edited_route(c, cell_id, body)
 
 
 @router.put("/ws/{c}/cells/{cell_id}")
 async def update_cell_by_id(c: str, cell_id: str, body: CellEdit) -> dict:
-    return edit_cell(c, cell_id, **_edit_args(body))
+    return _edited_route(c, cell_id, body)
+
+
+def _edited_route(c: str, cell_id: str, body: CellEdit) -> dict:
+    """The analyst's edit of a card; a takeaway they wrote has its citations checked now (marks.card_written)."""
+    out = edit_cell(c, cell_id, **_edit_args(body))
+    if body.takeaway is not None:
+        from . import marks  # noqa: PLC0415
+
+        marks.card_written(c, cell_id)
+    return out
 
 
 @router.get("/ws/{c}/cells/{cell_id}")

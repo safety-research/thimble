@@ -415,6 +415,11 @@ async def _guarded(run: _Run) -> None:
         if _runs.get((run.c, run.cid)) is run:
             _runs.pop((run.c, run.cid), None)
         _log_timing(run)
+        # the takeaway as the check left it has its citations checked now (a check that superseded this one does that
+        # when it ends)
+        from . import marks  # noqa: PLC0415
+
+        marks.card_written(run.c, run.cid)
 
 
 def notebook_cell(c: str, cid: str) -> dict[str, Any] | None:

@@ -70,6 +70,21 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   const [card, setCard] = useState<HTMLElement | null>(null)
   // where the click that opened the takeaway's editor landed, for the caret
   const [editAt, setEditAt] = useState<{ x: number; y: number } | null>(null)
+  // a question or takeaway typed in place shows from the frame its editor closes, until the card comes back with it
+  const [typed, setTyped] = useState<{ field: CardField; value: string } | null>(null)
+  const typedOn = typed ? (typed.field === 'title' ? cell.title : cell.takeaway ?? '') : null
+  const typedFrom = useRef<string | null>(null)
+  useEffect(() => {
+    if (typed && typedOn !== typedFrom.current) setTyped(null)
+  }, [typed, typedOn])
+  const shown = typed ? { ...cell, [typed.field]: typed.value } : cell
+  const saveTyped = (field: CardField, value: string) => {
+    const before = field === 'title' ? cell.title : cell.takeaway ?? ''
+    return save(ctx, cell, field, value, () => p.onEdit(cell.id, null), (v) => {
+      typedFrom.current = before
+      setTyped(v == null ? null : { field, value: v })
+    })
+  }
 
   // a click on the text of the card selected alone edits it; anywhere else the board takes the press. The click that
   // selects a card does not also edit it
@@ -107,7 +122,7 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   useEffect(() => () => idle.current?.(), [])
   const ask = async (field: CardField, value: string) => {
     const text = value.trim()
-    await save(ctx, cell, field, text, () => p.onEdit(cell.id, null))
+    await saveTyped(field, text)
     setAsking(true)
     try {
       const request = await askMain(ctx.ws, text, { card: cell.id })
@@ -149,13 +164,13 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
       ref={(el) => p.register(cell.id, el)}
     >
       <CardFace
-        cell={cell}
+        cell={shown}
         width={p.w - CARD_PAD_X}
         label={label}
         cardRef={setCard}
         editing={p.editing}
         editAt={editAt}
-        onEdited={(field, v) => save(ctx, cell, field, v, () => p.onEdit(cell.id, null))}
+        onEdited={(field, v) => void saveTyped(field, v)}
         onAsk={(field, v) => void ask(field, v)}
         asking={asking}
         onTextDown={textDown}
@@ -213,17 +228,27 @@ export const CellCard = memo(function CellCard(p: CellCardProps) {
   )
 })
 
-/** Save a question or a takeaway typed in place; nothing is sent when it did not change. */
-async function save(ctx: { ws: string; refresh: () => void }, cell: Cell, field: CardField, value: string, done: () => void) {
-  done()
+/** Save a question or a takeaway typed in place; nothing is sent when it did not change. `show` gets the text to draw
+ * while the save goes out, in the same render as `done` closes the editor, and null when the save failed. */
+async function save(
+  ctx: { ws: string; refresh: () => void },
+  cell: Cell,
+  field: CardField,
+  value: string,
+  done: () => void,
+  show?: (v: string | null) => void,
+) {
   const next = value.trim()
-  if (next === (field === 'title' ? cell.title : cell.takeaway ?? '').trim()) return
-  if (field === 'title' && !next) return
+  const changed = next !== (field === 'title' ? cell.title : cell.takeaway ?? '').trim() && !(field === 'title' && !next)
+  if (changed) show?.(next)
+  done()
+  if (!changed) return
   track(field === 'title' ? 'cell-edit' : 'takeaway-edit', { target: `cell:${cell.id}`, detail: { field, via: 'inline' } })
   try {
     await api.updateCell(ctx.ws, cell.id, field === 'title' ? { title: next } : { takeaway: next })
     ctx.refresh()
   } catch (e) {
+    show?.(null)
     fail(e)
   }
 }
