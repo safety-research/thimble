@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import threading
 from pathlib import Path
 
@@ -464,3 +465,170 @@ def test_a_repair_that_finds_the_right_place_for_right_words_verifies_them(_fres
     same = {"kind": "card", "evidence": place, "status": "corrected", "correction": {"words": "243 against 104"}}
     got = marks.evidence().check_mark({"n": 1, "words": "243 against 104"}, same, [], "/", cards=cards)
     assert got["status"] == "failed" and got["failedBy"] == "check", got
+
+
+def _runs_card() -> list[dict]:
+    """The place of opus's issues closed, emergent and managed, on a card of made-up runs."""
+    _seed_card("", [RUNS])
+    cards = marks.session_cards(CORPUS)
+    return [{"ref": f"card:{cards[0]['id']}#issues%20closed/opus%20{s}"} for s in ("emergent", "managed")]
+
+
+def _wait_all():
+    return asyncio.gather(*(t for t in asyncio.all_tasks() if t is not asyncio.current_task()))
+
+
+def test_a_check_that_fails_a_mark_repairs_it_at_once_and_the_repair_s_answer_replaces_it(_fresh, monkeypatch):
+    """A reply's check that finds a mark wrong starts its repair as it ends, with the terminal's repair request word for
+    word: the mark is checking again, as for Repair, and the repair's answer is what the analyst sees. Main hears the
+    check's findings once, then how the repair ended, which thimble started."""
+    place = _runs_card()
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+    looks: list[str] = []
+    turn = marks.new_turn()
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        if "pressed x to repair" in prompt:
+            looks.append(marks.stored(CORPUS, turn)["items"][0]["status"])
+            out = [{"mark": 1, "kind": "card", "evidence": place, "status": "corrected",
+                    "correction": {"words": "243 against 104"}, "reason": "the card shows 243 and 104"}]
+        else:
+            out = [{"mark": 1, "kind": "card", "evidence": place, "status": "wrong", "correction": None,
+                    "reason": "The card shows 104, not 105."}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    async def go():
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, ["Opus closed [243 against 105](#) issues."], "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    assert len(seen) == 2, seen
+    first = marks.stored(CORPUS, turn)
+    assert seen[1].endswith("\n\n" + "\n".join((
+        marks.REPAIR_FIRST.format(n=1, found="found it wrong") + ': "The card shows 104, not 105."', *marks.REPAIR_TASK)))
+    assert looks == ["checking"]
+    (m,) = first["items"]
+    assert m["status"] == "corrected" and m["shown"] == "243 against 104" and m["was"] == "243 against 105", m
+    assert m.get("repair") is True
+    # the page reads each record of the turn: the mark spins, fails, spins again, and shows the repair's answer
+    statuses = [r["items"][0]["status"] for r in _log() if r["type"] == "marks" and r["turn"] == turn]
+    assert [s for i, s in enumerate(statuses) if not i or s != statuses[i - 1]] == ["checking", "failed", "checking", "corrected"], statuses
+    said = [t for _, t in _fresh if not t.startswith("notice")]
+    assert len(said) == 2, said
+    assert '"243 against 105" is flagged as wrong' in said[0]
+    assert said[1].startswith("A citation of yours failed its check, so thimble checked it again against the data.")
+    assert "pressed" not in said[1] and '"243 against 105" is corrected to "243 against 104"' in said[1]
+
+
+def test_a_repair_that_fails_again_starts_no_other_and_repair_asks_again(_fresh, monkeypatch):
+    place = _runs_card()
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+    turn = marks.new_turn()
+
+    async def fork(c, main, cut, prompt):
+        seen.append(prompt)
+        out = [{"mark": 1, "kind": "card", "evidence": place, "status": "wrong", "correction": None,
+                "reason": "The card shows 104, not 105."}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    async def go():
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        await marks.start_check(CORPUS, main, turn, ["Opus closed [243 against 105](#) issues."], "cut-1", fork=fork)
+        await _wait_all()
+        assert len(seen) == 2
+        (m,) = marks.stored(CORPUS, turn)["items"]
+        assert m["status"] == "failed" and m.get("repair") is True, m
+        # Repair, pressed by the analyst, checks it again as before, and main hears that the analyst asked
+        assert await marks.repair(CORPUS, turn=turn, n=1, fork=fork) == ""
+        await _wait_all()
+
+    asyncio.run(go())
+    assert len(seen) == 3 and "The analyst pressed x to repair citation 1." in seen[2]
+    said = [t for _, t in _fresh if not t.startswith("notice")]
+    assert "is still flagged as wrong" in said[1] and said[1].startswith("A citation of yours failed its check")
+    assert said[2].startswith("The analyst pressed Repair on a citation of yours")
+
+
+def test_marks_a_check_left_unchecked_or_verified_are_not_repaired(_fresh, monkeypatch):
+    place = _runs_card()
+    _main_at(monkeypatch, "cut-1")
+    seen: list[str] = []
+
+    async def failing(c, main, cut, prompt):
+        seen.append(prompt)
+        return {"error": "Claude Code exited with code 1"}
+
+    async def partial(c, main, cut, prompt):
+        seen.append(prompt)
+        out = [{"mark": 1, "kind": "card", "evidence": place, "status": "verified", "correction": None,
+                "reason": "the card shows 243 and 104"}]
+        return {"answer": _answer(out), "calls": [], "error": None}
+
+    main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+    stopped, partly = marks.new_turn(), marks.new_turn()
+    text = ["Opus closed [243 against 104](#) issues, in [3.7](#) hours."]
+
+    async def go():
+        await marks.start_check(CORPUS, main, stopped, text, "cut-1", fork=failing)
+        await marks.start_check(CORPUS, main, partly, text, "cut-1", fork=partial)
+        await _wait_all()
+
+    asyncio.run(go())
+    assert len(seen) == 2
+    assert [m["status"] for m in marks.stored(CORPUS, stopped)["items"]] == ["unchecked", "unchecked"]
+    # the answer left the second mark out: its check did not run, which is no finding to repair
+    assert [(m["status"], m.get("failedBy")) for m in marks.stored(CORPUS, partly)["items"]] == [("verified", None), ("failed", "none")]
+
+
+def test_main_hears_a_reply_s_check_while_a_repair_of_one_of_its_marks_runs(_fresh, monkeypatch):
+    """Two shares: the first fails its mark and repairs it; the reply's check still tells main when the second share
+    ends, while that repair runs, and the repair tells main of its own mark when it ends."""
+    place = _runs_card()
+    _main_at(monkeypatch, "cut-1")
+    turn = marks.new_turn()
+    told_while_repairing: list[int] = []
+
+    def said() -> list[str]:
+        return [t for _, t in _fresh if not t.startswith("notice")]
+
+    async def go():
+        repairing = asyncio.Event()
+
+        async def fork(c, main, cut, prompt):
+            if "pressed x to repair" in prompt:
+                repairing.set()
+                for _ in range(250):  # the second share ends, and main hears the reply's check
+                    if said():
+                        break
+                    await asyncio.sleep(0.02)
+                told_while_repairing.append(len(said()))
+                out = [{"mark": 1, "kind": "card", "evidence": place, "status": "corrected",
+                        "correction": {"words": "243 against 104"}, "reason": "the card shows 243 and 104"}]
+            elif "1. [243 against 105]" in prompt:
+                out = [{"mark": 1, "kind": "card", "evidence": place, "status": "wrong", "correction": None,
+                        "reason": "The card shows 104, not 105."}]
+            else:
+                await repairing.wait()
+                out = [{"mark": 2, "kind": "card", "evidence": place, "status": "corrected",
+                        "correction": {"words": "243 against 104"}, "reason": "the card shows 243 and 104"}]
+                out += [{"mark": k, "kind": "card", "evidence": place, "status": "verified", "correction": None,
+                         "reason": "the card shows it"} for k in (3, 4, 5)]
+            return {"answer": _answer(out), "calls": [], "error": None}
+
+        texts = ["Opus closed [243 against 105](#) issues.", "Run 0 closed [243 against 99](#) issues.",
+                 *[f"Run {i} closed [243 against 104](#) issues." for i in (1, 2, 3)]]
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        monkeypatch.setattr(marks, "split_marks", lambda items: [items[:1], items[1:]])
+        await marks.start_check(CORPUS, main, turn, texts, "cut-1", fork=fork)
+        await _wait_all()
+
+    asyncio.run(go())
+    assert told_while_repairing == [1]
+    assert len(said()) == 2, said()
+    assert '"243 against 99" is corrected to "243 against 104"' in said()[0] and "243 against 105" not in said()[0]
+    assert '"243 against 105" is corrected to "243 against 104"' in said()[1]
+    assert [m["status"] for m in marks.stored(CORPUS, turn)["items"]] == ["corrected"] * 2 + ["verified"] * 3
