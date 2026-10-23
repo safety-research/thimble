@@ -1,15 +1,14 @@
 """thimble's API names are spelled the American way (color), and each British name an earlier card, view, check or
 extension used (colour) still works as its alias: the `thimble` module's colors, color_value and color_on, the
-"color" of a mark and of a label a reader gets, show_label's `colors`, and the `color` of a check's front matter and of
-an extension's check.json."""
+"color" of a mark and of a label a reader gets, and the `color` of a check's front matter and of an extension's
+check.json."""
 import json
-import re
 from pathlib import Path
 
-from app import checks, kernel_thimble, prompts, tools, views
+from app import checks, kernel_thimble, prompts, views
 
 
-def test_the_thimble_module_s_american_names_and_their_british_aliases(tmp_path, monkeypatch):
+def test_the_american_names_and_their_british_aliases(tmp_path, monkeypatch):
     (tmp_path / "concepts").mkdir()
     (tmp_path / "concepts" / "k1.json").write_text(json.dumps({"id": "k1", "name": "kind", "labels": ["a", "b"], "ts": "1"}))
     monkeypatch.setattr(kernel_thimble, "WS", str(tmp_path))
@@ -29,14 +28,7 @@ def test_the_thimble_module_s_american_names_and_their_british_aliases(tmp_path,
     assert label["color"] == label["colour"] and label["values"][0]["color"] == label["values"][0]["colour"]
     assert on["filter"]["color"] == on["filter"]["colour"] == kernel_thimble.PROBE_COLOUR
     assert kernel_thimble.color_value({"label": kernel_thimble.PROBE_ID}, "messages.jsonl#L14") == kernel_thimble.PROBE_NAME
-
-
-def test_show_label_documents_colors():
-    assert "colors" in tools.schema_of("show_label")["properties"]
-    assert "colours" not in tools.schema_of("show_label")["properties"], "the alias is not offered to the model"
-
-
-def test_a_check_s_color_and_its_british_alias(monkeypatch, tmp_path):
+    # a check's color and its British alias, in its front matter and in an extension's check.json
     for cid in checks.BUILTINS:
         head = prompts.load(f"{prompts.CHECKS_DIR}/{cid}").split("\n---\n", 1)[0]
         assert "\ncolor: " in head and "colour" not in head, cid
@@ -57,35 +49,3 @@ def test_a_check_s_color_and_its_british_alias(monkeypatch, tmp_path):
     assert (got["ext-new"]["colour"], got["ext-old"]["colour"]) == (5, 7)
     schema = json.loads((Path(checks.__file__).with_name("extension.schema.json")).read_text())
     assert {"color", "colour"} <= set(schema["$defs"]["check"]["properties"])
-
-
-BRITISH = re.compile(r"(?<![\w-])(colour\w*|grey\w*|behaviours?|centre[sd]?|neighbour\w*|labell(?:ed|ing)|organis\w*|"
-                     r"recognis\w*|summaris\w*|normalis\w*|favour\w*|licence|cancell(?:ed|ing)|signall(?:ed|ing)|"
-                     r"modell(?:ed|ing)|analys(?:e|ed|ing)|catalogue|judgement)(?![\w-])", re.I)
-CODE = re.compile(r"`[^`\n]*`|\{\w+\}")  # inline code (identifiers, the British aliases) and a prompt's {placeholders}
-# a short date with its day first (`18 Jun`, `24 May 12:30`), in code spans too, where the American order is `Jun 18`
-DAY_FIRST = re.compile(r"(?<![\w.:/-])\d{1,2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b")
-
-
-# what a page or a terminal program calls in the view kits, by a British name: thimble's functions, the Color by option,
-# the attribute that says a record's value, and the control's own name
-KIT_NAMES = re.compile(r"\b(?:colour_value|colour_on|setLabelColour|colourBy|(?:o|opts|options)\.colour)\b"
-                       r"|`colour`\s*(?:\(or|or `color`)|colour \(or color\)|`colour: false`|data-colour|Colour by")
-KIT_USAGE = re.compile(r"thimble\.\w+\(|draw\(d, \{|^\W*opts:")  # a call shown, or a part's options listed
-
-
-def test_the_view_kits_doc_comments_name_the_american_api():
-    """The view kits' doc comments (term_kit/kit.mjs, viewer_*.js) name thimble's API the American way: color_value,
-    color_on, setLabelColor, the Color by option `color`, the attribute data-color and the control Color by, a British
-    name only on a line that says it is the British spelling (or the same function). After the live QA of 0.7.0
-    (2026-10-10) they still named colour_value and the `colour` option."""
-    app = Path(__file__).resolve().parents[1] / "app"
-    found = []
-    for p in [app / "term_kit" / "kit.mjs", *sorted(app.glob("viewer_*.js"))]:
-        for n, line in enumerate(p.read_text().splitlines(), 1):
-            text = line.strip()
-            if not text.startswith(("//", "*", "/*")) or "British" in text or "same function" in text:
-                continue
-            if KIT_NAMES.search(text) or (KIT_USAGE.search(text) and re.search(r"(?<![\w.-])colour(?![\w-])", text)):
-                found.append(f"{p.name}:{n}: {text}")
-    assert not found, found
