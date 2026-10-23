@@ -793,3 +793,15 @@ def test_an_api_error_reads_as_the_api_s_message_in_a_sentence_not_its_raw_answe
     bare = anthropic.InternalServerError("Error code: 500 - upstream reset", body=None,
                                          response=httpx.Response(500, request=httpx.Request("POST", "https://api.example.test")))
     assert llm.failure(bare) == "Claude's API answered 500: Error code: 500 - upstream reset"
+
+
+async def test_a_reply_claude_s_safeguards_moved_to_another_model_is_told_in_a_notice(on, monkeypatch):
+    from app import notices
+
+    switched = [Block(type="text", text="Here is the overview."),
+                Block(**{"type": "fallback", "from": {"model": "claude-opus-5-5"}, "to": {"model": "claude-opus-4-8"},
+                         "trigger": {"category": "cyber", "type": "refusal"}})]
+    api_key(monkeypatch, [switched])
+    await main_turn("What are these episodes?")
+    said = [n["text"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
+    assert said == ["Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."]
