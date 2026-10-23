@@ -120,10 +120,14 @@ export async function pressKey($: Engine, id: number): Promise<string> {
 }
 
 /** The session loads what live shows now, when the kernel says it changed. Last in a key's work: the reload loads
- *  this module again, so what the person should see is in $.state before it. */
+ *  this module again, so what the person should see is in $.state before it. Claude Code refuses a reload asked
+ *  inside a hook it waits on (a slash command's), so a refused one is asked again a moment after that hook. */
 async function load($: Engine, d: Any): Promise<void> {
   if (!d?.reload) return
-  if (!(await reloadPlugins($))) failNotice($, 'thimble changed, and Claude Code did not load it again by itself. Type /reload-plugins.')
+  if (await reloadPlugins($)) return
+  $.clock.after(300, () => {
+    void reloadPlugins($).then(ok => { if (!ok) failNotice($, 'thimble changed, and Claude Code did not load it again by itself. Type /reload-plugins.') })
+  })
 }
 
 /** y on a ready fix, or u on an off one in the list: the fix goes on, and the session loads it. */
