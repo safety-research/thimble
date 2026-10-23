@@ -29,6 +29,7 @@ import { failNotice } from '../bar/notice'
 import { openPane, paneNow } from '../core/pane'
 import { launchRepair, repairOf } from '../marks/checker'
 import { CITE_LOOK } from '../marks/evidence'
+import { plainSentence } from '../marks/message.js'
 import { NOT_RUN, rowMarks, type MarkItem } from '../marks/store'
 import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
 import { claimsBright, claimsStore, placeText, showClaims, type ClaimsArgs } from './term'
@@ -104,7 +105,7 @@ async function withMarks($: Engine, data: Any): Promise<Any> {
       if (!m) return { ...s, status: 'gone' }
       return {
         ...s, n: m.n, status: m.status, failedBy: m.failedBy, shown: m.shown.replace(/\*\*|`/g, ''), ...placeOf(m),
-        ...(m.was ? { was: m.was.replace(/\*\*|`/g, '') } : {}), ...(m.narrowed ? { narrowed: true } : {}), ...(m.reason ? { reason: m.reason } : {}), ...(m.evidence ? { evidence: m.evidence } : {}),
+        ...(m.was ? { was: m.was.replace(/\*\*|`/g, '') } : {}), ...(m.narrowed ? { narrowed: true } : {}), ...(m.rewrite ? { was: plainSentence(m.sentence), now: plainSentence(m.rewrite), rewritten: true } : {}), ...(m.reason ? { reason: m.reason } : {}), ...(m.evidence ? { evidence: m.evidence } : {}),
         ...(m.repair ? { repair: true } : {}),
       }
     }))

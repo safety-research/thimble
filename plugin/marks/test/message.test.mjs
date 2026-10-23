@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { blocks, inline, marksIn, plainSentence, runsText, sentenceOf, tableOf, withoutMarks, wrapRuns } from '../message.js'
+import { blocks, inline, marksIn, plainSentence, runsText, sentenceOf, tableOf, withoutMarks, withRewrites, wrapRuns } from '../message.js'
 
 const words = text => marksIn(text).map(m => m.words)
 
@@ -40,6 +40,15 @@ test('a sentence runs from the stop or line break before the mark to the next on
   // a `__` inside a name is part of it; around words it is bold
   const named = 'Late: __annotation-platform__underspecified__ at [87%](#).'
   assert.equal(sentenceOf(named, marksIn(named)[0]), 'Late: annotation-platform__underspecified at [87%].')
+})
+
+test("a sentence a check rewrote stands in place of the reply's, its citations marks again; the rest of the text stays", () => {
+  const text = 'First line.\n- On line 29, agent-07 wrote [“yes, that was me”](#) and closed [#118](#). Then it stopped.'
+  const out = withRewrites(text, [{ status: 'corrected', rewrite: '- On line 27, agent-07 wrote [“yes, that was me”] and closed [#118].' }])
+  assert.equal(out, 'First line.\n- On line 27, agent-07 wrote [“yes, that was me”](#) and closed [#118](#). Then it stopped.')
+  assert.equal(marksIn(out).length, 2)
+  // a sentence that would not hold the same marks leaves the text as it was
+  assert.equal(withRewrites(text, [{ status: 'corrected', rewrite: '- agent-07 wrote [“yes, that was me”].' }]), text)
 })
 
 test('a block with marks lays out as runs, each mark one group of runs with its own bold and code', () => {

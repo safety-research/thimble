@@ -3,7 +3,8 @@ import it too.
 
 A reply marks its claims as `[words](#)`. After the reply, the checker (a fork of the session, prompts/checker.md) gives
 one answer per mark: a status (`verified`, `corrected`, `narrowed`, `wrong`, `unconfirmed`), the evidence, and for a correction
-the new words. check_mark() decides what the person sees of that mark; its result wins over the checker's status.
+the new words, and the new sentence when words around them change too. check_mark() decides what the person sees of that
+mark; its result wins over the checker's status.
 
 What it guarantees. The checker judges what a claim means; this module makes sure the evidence it gave is real and
 shows the words, so a mark is never verified on evidence the checker made up:
@@ -70,13 +71,18 @@ is a correction. A correction whose evidence does not show its
 new words is not confirmed: its evidence confirms neither the new words nor the marked ones. A narrowing (`narrowed`)
 cites only a part of the marked words, which the evidence shows, and leaves the rest as the reply's own words (a
 translation, a gloss): it holds only when its words are a part of the marked ones, the evidence shows them, and the
-words it leaves out state no number or day, which would be a claim of the data. A mark the checker could
+words it leaves out state no number or day, which would be a claim of the data. A rewrite (`correction.sentence`)
+changes the words around the citation too, such as a paraphrase no record shows or a wrong line number: it holds only
+when it stays within the sentence (one line, no sentence added, every other citation of it as it was), the evidence
+shows its cited words, and each number, day or record name it puts outside the citation is one the evidence shows (a
+cited place's file and line count) and none the citation cited before. The check's evidence is the citation's
+evidence in every case, whatever call or place the reply pointed at. A mark the checker could
 not confirm is not confirmed, never wrong. A mark with no answer, or one this
 module cannot judge, fails as a check that did not run (`failedBy` `none`), which x in the tray starts again. A checker's note on the rest of the sentence stays beside the mark.
 
   check_all(marks, answer, calls, cwd, root, tmp, cards)  -> {parsed, results}: every mark of a reply
   check_mark(mark, item, calls, cwd, root, tmp, cards)    -> {n, status, shown, reason, failedBy?, evidence?, note?,
-                                                              was?, narrowed?}
+                                                              was?, narrowed?, rewrite?}
   card_index(cards)                                       -> the cards' places and values, one per line, for the checker
   terminal_cards(folder)                                  -> the terminal's cards (cards/<id>/meta.json, rows.json) as `cards`
   parse_answer(text)                               -> the last ```json array of the checker's answer, or None
@@ -1541,10 +1547,10 @@ def own_words(new: str, mark: dict[str, Any]) -> str:
     return norm_ws(new[at[start]:at[end - 1] + 1])
 
 
-def narrowed_part(new: str, words: str) -> tuple[str, str] | None:
+def narrowed_part(new: str, words: str) -> tuple[str, str, str] | None:
     """A narrowing's words as a part of the marked words: that part as the words write it (formatting aside), and the
-    words it leaves out; None when the new words are no part of the marked ones that starts and ends at a word's edge.
-    Quote marks compare as one mark, white space loosely."""
+    words before and after it that it leaves out; None when the new words are no part of the marked ones that starts
+    and ends at a word's edge. Quote marks compare as one mark, white space loosely."""
     plain = plain_map(words)[0]
     part = plain_map(new)[0].strip()
     if not part:
@@ -1557,15 +1563,154 @@ def narrowed_part(new: str, words: str) -> tuple[str, str] | None:
         inner_a = needle[0].isalnum() and i > 0 and (hay[i - 1].isalnum() or (needle[0].isdigit() and hay[i - 1] in ".," and hay[i - 2:i - 1].isdigit()))
         inner_b = needle[-1].isalnum() and j < len(hay) and (hay[j].isalnum() or (needle[-1].isdigit() and hay[j] in ".," and hay[j + 1:j + 2].isdigit()))
         if not inner_a and not inner_b:
-            return plain[i:j], norm_ws(f"{plain[:i]} {plain[j:]}")
+            return plain[i:j], norm_ws(plain[:i]), norm_ws(plain[j:])
         i = hay.find(needle, i + 1)
     return None
 
 
+# a block's marker that opens a sentence of sentenceOf: a heading's, a quote's, a list item's, a table row's
+LEAD = re.compile(r"^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d{1,9}[.)]\s+|\|\s*)+")
+SENTENCE_END = re.compile(r"[.!?][\"'”’)*_]*\s+(?=\S)")
+QUOTED = re.compile(r"\"[^\"]*\"|“[^”]*”")
+CITED = "⟨cited⟩"
+
+
+def citations_of(s: str) -> list[tuple[int, int]]:
+    """The citations of a sentence as sentenceOf writes it (each `[words]`): each `[` and the `]` that balances it, the
+    brackets included; brackets inside the words stay the words'."""
+    out: list[tuple[int, int]] = []
+    i = 0
+    while i < len(s):
+        if s[i] != "[":
+            i += 2 if s[i] == "\\" else 1
+            continue
+        depth, j = 0, i
+        while j < len(s):
+            if s[j] == "\\":
+                j += 2
+                continue
+            depth += {"[": 1, "]": -1}.get(s[j], 0)
+            if depth == 0:
+                break
+            j += 1
+        if j >= len(s):
+            break
+        out.append((i, j + 1))
+        i = j + 1
+    return out
+
+
+def loose(s: str) -> str:
+    """Words compared loosely: formatting, quote marks, white space, case and the punctuation at the words' ends aside."""
+    return " ".join(k for x in unmark(s).split() for k in [one_quote(x).strip(' "().,;:!?').lower()] if k)
+
+
+def rest_of(s: str, groups: list[tuple[int, int]], k: int) -> str:
+    """A sentence's words outside its citation k (CITED in its place), the other citations' words as plain words."""
+    out, at = "", 0
+    for i, (a, b) in enumerate(groups):
+        out += s[at:a] + (f" {CITED} " if i == k else s[a + 1:b - 1])
+        at = b
+    return norm_ws(out + s[at:])
+
+
+def sentence_rewrite(given: str, sentence: str, words: str) -> dict[str, Any] | str:
+    """The check's new sentence for a citation (`correction.sentence`), in the form of the mark's own (each citation
+    `[words]`): {sentence, cited, rest, was_rest}, the new sentence, its cited words, and the words outside the citation
+    in the new sentence and in the old one; or why it cannot stand in place of the old one. It stays within the old
+    sentence: one line, no sentence added, the block's marker kept, and every other citation of the sentence with its
+    words as they were (a sentence that writes them with no brackets has them bracketed where they stand)."""
+    if re.search(r"\n\s*\S", given.strip()):
+        return "the check's sentence runs over more than one line"
+    old = citations_of(sentence)
+    k = next((i for i, (a, b) in enumerate(old) if loose(sentence[a + 1:b - 1]) == loose(words)), None)
+    if k is None:
+        return "thimble could not find the citation in its sentence"
+    # a citation written as the reply writes one (`[words](#)`) is one too
+    new = norm_ws(given).replace("](#)", "]")
+    lead = LEAD.match(sentence)
+    if lead and not new.startswith(lead.group(0).strip()):
+        new = lead.group(0) + new
+    others = [sentence[a + 1:b - 1] for i, (a, b) in enumerate(old) if i != k]
+    groups = citations_of(new)
+    if len(groups) == 1 and others:
+        # the other citations written as plain words: bracketed where they stand, in order
+        a0, b0 = groups[0]
+        spans, at = [], 0
+        for w in others:
+            j = new.find(w, at)
+            if j >= 0 and a0 <= j < b0:
+                j = new.find(w, b0)
+            if j < 0:
+                return "the check's sentence leaves out another citation of it"
+            spans.append((j, j + len(w)))
+            at = j + len(w)
+        for a, b in sorted(spans, reverse=True):
+            new = f"{new[:a]}[{new[a:b]}]{new[b:]}"
+        groups = citations_of(new)
+    if len(groups) != len(old):
+        return "the check's sentence changes the other citations of it"
+    inner = [new[a + 1:b - 1] for a, b in groups]
+    fits = [j for j in range(len(groups)) if [loose(w) for i, w in enumerate(inner) if i != j] == [loose(w) for w in others]]
+    if not fits:
+        return "the check's sentence changes the other citations of it"
+    j = k if k in fits else fits[0]
+    # the sentences a quote holds are the quote's
+    ends = lambda x: len(SENTENCE_END.findall(QUOTED.sub("q", x)))  # noqa: E731
+    if ends(rest_of(new, groups, j)) > ends(rest_of(sentence, old, k)):
+        return "the check's sentence adds a sentence"
+    if not inner[j].strip():
+        return "the check's sentence cites no words"
+    return {"sentence": new, "cited": norm_ws(inner[j]), "rest": rest_of(new, groups, j), "was_rest": rest_of(sentence, old, k)}
+
+
+def evidence_text(evidence: dict[str, Any] | None) -> str:
+    """What the evidence shows the person, as text: a call's output, a file's cited lines and its place (the file and
+    the line), a card's title, place and value. Not the code: a number typed in code is no value of the data."""
+    if not evidence:
+        return ""
+    parts: list[str] = []
+    for p in [evidence, *(evidence.get("more") or [])]:
+        parts += [str(p[k]) for k in ("file", "title", "ref", "value", "output") if p.get(k)]
+        span = line_span(p.get("line")) if p.get("line") else None
+        if span:
+            # the cited lines, not the lines around them
+            parts.append(f"line {p['line']}")
+            parts += [str(r.get("text") or "") for r in p.get("lines") or [] if span[0] <= int(r.get("n") or 0) <= span[1]]
+        t = p.get("table") or {}
+        parts += [str(t.get("corner") or ""), *map(str, t.get("cols") or [])]
+        parts += [str(x) for r in t.get("rows") or [] for x in [r.get("label"), *(r.get("values") or [])]]
+    return "\n".join(parts)
+
+
+def uncited_values(runs: list[str], words: str, cited: str, shown: str, approx: bool = False) -> tuple[str, str] | None:
+    """The first run of words outside the citation that the check put in (a narrowing's words it left out, a rewrite's
+    new words around the citation) and that states a value of the data: a number, a day or a record's name. It holds
+    only when it is no value the marked words cited and the citation now leaves out (`left`), and the evidence shows
+    each of its values (`unshown`: `shown` is what the evidence shows). Its other words are the reply's own wording (a
+    translation, an explanation), as a narrowing's are."""
+    for run in runs:
+        nums = [v for v, _ in marked_numbers(wordnums(run, counts=True))]
+        days = calendar_days(run)
+        names = NAME.findall(run)
+        if not (nums or days or names):
+            continue
+        left = any(has_number(v, wordnums(words, counts=True)) and not has_number(v, wordnums(cited, counts=True)) for v in nums)
+        left = left or bool(days and calendar_days(words) and days_shown(run, words) and not days_shown(run, cited))
+        left = left or any(has_name(x, words) and not has_name(x, cited) for x in names)
+        if left:
+            return "left", run
+        # its values, not its words: a quoted translation is the reply's own wording too
+        said = wordnums(shown, counts=True)
+        if not (all(has_number(v, said, approx=approx) for v in nums) and (not days or days_shown(run, shown)) and all(has_name(x, shown) for x in names)):
+            return "unshown", run
+    return None
+
+
 def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[dict[str, Any]], cwd: str, root: str | None = None, tmp: str | None = None, cards: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?}. `mark` is {n, words,
-    sentence?}; `item` the checker's object for it (or None); `calls` the real Bash calls of the session ({command,
-    output, by}).
+    """What the person sees of one mark: {n, status, shown, reason, failedBy?, evidence?, note?, was?, narrowed?,
+    rewrite?}. `mark` is {n, words, sentence?}; `item` the checker's object for it (or None); `calls` the real Bash
+    calls of the session ({command, output, by}).
 
     The checker's status is `verified`, `corrected`, `narrowed` (only a part of the words is cited: a correction whose
     `narrowed` result keeps the rest as the reply's own words), `wrong` (the data show the claim false) or
@@ -1575,7 +1720,14 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     evidence is real, so the person sees what the check found. `failedBy` is `check` when the checker found the claim
     wrong, `evidence` when the claim is only not confirmed: the checker could not see it, or its evidence did not hold,
     `none` when the check gave no answer this module can judge (the plugin's marks/store.ts notRun).
-    A `note` is what the checker found wrong in the sentence outside the mark's own claim."""
+    A `note` is what the checker found wrong in the sentence outside the mark's own claim.
+
+    One path makes a citation correct: the check gives the cited words as they end (`correction.words`), and when other
+    words of the sentence change too, the whole sentence as it ends (`correction.sentence`, the cited words in
+    brackets). Its evidence is the citation's evidence, whatever the reply pointed at. A sentence that changes only the
+    cited words is a correction; one that keeps every word and cites fewer of them, a narrowing; any other, a rewrite
+    (`rewrite`: the new sentence, in the form of `sentence`). For each, the evidence shows the cited words, and the words
+    it puts outside the citation state no value the evidence does not show (uncited_values)."""
     n, words = mark["n"], str(mark["words"])
     out: dict[str, Any] = {"n": n, "status": "failed", "failedBy": "none", "shown": words, "reason": f"{NOT_RUN} Its answer left this citation out."}
     if not item:
@@ -1587,20 +1739,6 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     extra = {"note": note} if note else {}
     approx = approximate(mark)
     corr = item.get("correction") if isinstance(item.get("correction"), dict) else None
-    new = own_words(norm_ws(corr.get("words") or ""), mark) if status == "corrected" and corr else ""
-    if new and unmark(new) != unmark(words) and one_quote(unmark(new)) == one_quote(unmark(words)):
-        # a change of quote marks alone is no correction: the words hold as written
-        status, new = "verified", ""
-    if status == "wrong" and corr:
-        # a claim found wrong whose right words the check gave is a correction: the person sees the right words
-        found = own_words(norm_ws(corr.get("words") or ""), mark)
-        if found and one_quote(unmark(found)) != one_quote(unmark(words)):
-            status, new = "corrected", found
-    if status == "corrected" and (not new or unmark(new) == unmark(words)):
-        # a correction that leaves the words as they were found an error around them (a wrong place, a wrong
-        # condition), which the words cannot show: the mark is wrong, with the checker's reason
-        status = "wrong"
-        reason = reason or "the check gave no corrected words"
 
     def judged(by: str, why: str) -> dict[str, Any]:
         """The checker's verdict that the claim is wrong (`check`) or not confirmed (`evidence`), with the evidence it
@@ -1612,17 +1750,52 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
                 res["evidence"] = evidence
         return res
 
+    # the sentence as the check ends it: a correction, a narrowing or a rewrite
+    rewrite: dict[str, Any] | None = None
+    given = str(corr.get("sentence") or "") if corr else ""
+    if given.strip() and status in ("verified", "corrected", "narrowed", "wrong"):
+        got = sentence_rewrite(given, norm_ws(mark.get("sentence") or f"[{words}]"), words)
+        if isinstance(got, str):
+            return judged("evidence", f"Not confirmed: {got}.")
+        corr = {**corr, "words": got["cited"]}
+        if loose(got["rest"]) == loose(got["was_rest"]):
+            # only the cited words change: a correction of them, or no change
+            if loose(got["cited"]) != loose(words) and status in ("verified", "narrowed"):
+                status = "corrected"
+        elif loose(got["rest"].replace(CITED, got["cited"])) == loose(got["was_rest"].replace(CITED, words)):
+            # every word stays, fewer are cited
+            status = "narrowed"
+        else:
+            status, rewrite = "corrected", got
+    new = own_words(norm_ws(corr.get("words") or ""), mark) if status == "corrected" and corr and not rewrite else ""
+    if new and unmark(new) != unmark(words) and one_quote(unmark(new)) == one_quote(unmark(words)):
+        # a change of quote marks alone is no correction: the words hold as written
+        status, new = "verified", ""
+    if status == "wrong" and corr:
+        # a claim found wrong whose right words the check gave is a correction: the person sees the right words
+        found = own_words(norm_ws(corr.get("words") or ""), mark)
+        if found and one_quote(unmark(found)) != one_quote(unmark(words)):
+            status, new = "corrected", found
+    if status == "corrected" and not rewrite and (not new or unmark(new) == unmark(words)):
+        # a correction that leaves the words as they were found an error around them (a wrong place, a wrong
+        # condition), which the words cannot show: the mark is wrong, with the checker's reason
+        status = "wrong"
+        reason = reason or "the check gave no corrected words"
+
+    # the words the check puts outside the citation: a narrowing's left-out words, a rewrite's new words
+    runs: list[str] = []
     narrow = status == "narrowed"
     if narrow:
         part = narrowed_part(norm_ws(corr.get("words") or ""), words) if corr else None
         if not part:
             return judged("evidence", "Not confirmed: the check narrowed the citation to words that are not part of it.")
-        new, left = part
-        if left and (marked_numbers(wordnums(left, counts=True)) or calendar_days(left)):
-            # a number or a day is a claim of the data, which the citation cannot leave out
-            return judged("evidence", f"Not confirmed: the check cited only “{short(new, 60)}”, but the words it left out (“{short(left, 60)}”) state a value of the data.")
-        status, narrow = ("corrected", True) if re.search(r"\w", left) else ("verified", False)
+        new, *runs = part
+        runs = [r for r in runs if re.search(r"\w", r)]
+        status, narrow = ("corrected", True) if runs else ("verified", False)
         new = new if narrow else ""
+    if rewrite:
+        new = rewrite["cited"]
+        runs = put_in(rewrite["was_rest"], rewrite["rest"])
     if status == "wrong":
         return judged("check", reason or "the data do not show this claim")
     if status == "unconfirmed":
@@ -1630,21 +1803,35 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
     if status not in ("verified", "corrected"):
         return {**out, "reason": f"{NOT_RUN} It gave the status {status!r}."}
     # a narrowing puts no words in: the evidence shows the part it keeps
-    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if new and not narrow else "", cards)
+    changed = bool(new) and not narrow and loose(new) != loose(words)
+    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or words, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence
+    did = "cited only a part of the words" if narrow else "rewrote the sentence" if rewrite else "gave other words"
     if problems and new:
         # the check's verdict that the words are wrong rests on evidence that does not show its new words: neither the
         # old words nor the new ones are confirmed (a match of the old words there, such as the 250 of a test that
         # printed False, is no sign that they hold)
-        res.update(status="failed", shown=words, failedBy="evidence", reason=f"Not confirmed: the check {'cited only a part of the words' if narrow else 'gave other words'}, but {problems[0]}.")
-    elif problems:
+        res.update(status="failed", shown=words, failedBy="evidence", reason=f"Not confirmed: the check {did}, but {problems[0]}.")
+        return res
+    if problems:
         res.update(status="failed", failedBy="evidence", reason=f"Not confirmed: {problems[0]}. The claim may still be true.")
-    elif new:
+        return res
+    bad = uncited_values(runs, words, new or words, evidence_text(evidence), approx)
+    if bad:
+        why, run = bad
+        if why == "left" and narrow:
+            return judged("evidence", f"Not confirmed: the check cited only “{short(new, 60)}”, but the words it left out (“{short(norm_ws(' '.join(runs)), 60)}”) state a value of the data.")
+        if why == "left":
+            return judged("evidence", f"Not confirmed: the check's sentence leaves “{short(run, 60)}” out of the citation, a value of the data.")
+        return judged("evidence", f"Not confirmed: the check's sentence states “{short(run, 60)}”, which its evidence does not show.")
+    if new:
         res["was"] = words
         if narrow:
             res["narrowed"] = True
+        if rewrite:
+            res["rewrite"] = rewrite["sentence"]
     return res
 
 
@@ -1682,4 +1869,15 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
                             "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})."})
+    # a sentence is rewritten once: the rewrite of a second citation of it would undo the first one's
+    rewritten: set[str] = set()
+    for m, r in zip(marks, results):
+        if not r.get("rewrite"):
+            continue
+        key = norm_ws(m.get("sentence") or "")
+        if key in rewritten:
+            r.update(status="failed", failedBy="evidence", shown=str(m.get("words", "")), reason="Not confirmed: the check rewrote this sentence for another of its citations too.")
+            for k in ("rewrite", "was", "narrowed"):
+                r.pop(k, None)
+        rewritten.add(key)
     return {"parsed": items is not None, "results": results}

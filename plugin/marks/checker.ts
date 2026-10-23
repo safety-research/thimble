@@ -42,7 +42,7 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
-import { marksIn, sentenceOf } from './message.js'
+import { marksIn, plainSentence, sentenceOf } from './message.js'
 import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, notRun, type Reply, replyKeyOf, replyOf } from './store'
 
 type Engine = EngineInterface
@@ -154,10 +154,13 @@ function settle(r: Reply, now: number, items: MarkItem[]): Reply {
  *  reason, its note) are quoted, since they may quote the records. */
 const q = (w: string) => (/^["“]/.test(w) ? w : `"${w}"`)
 const why = (m: MarkItem) => (m.reason ? ` (the check: ${q(m.reason)})` : '')
-/** A correction as main reads it: a narrowing keeps the rest of the words in the reply, uncited. */
-const fixedLine = (m: MarkItem) => (m.narrowed
-  ? `- ${q(m.was ?? m.words)} is narrowed: only ${q(m.shown)} is cited, and the rest reads as your own words${why(m)}`
-  : `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`)
+/** A correction as main reads it: a narrowing keeps the rest of the words in the reply, uncited; a rewrite puts a new
+ *  sentence in place of the one main wrote. */
+const fixedLine = (m: MarkItem) => (m.rewrite
+  ? `- the sentence ${q(plainSentence(m.sentence))} is rewritten as ${q(plainSentence(m.rewrite))}, which cites ${q(m.shown)}${why(m)}`
+  : m.narrowed
+    ? `- ${q(m.was ?? m.words)} is narrowed: only ${q(m.shown)} is cited, and the rest reads as your own words${why(m)}`
+    : `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`)
 
 export function tellText(items: MarkItem[]): string {
   // a mark whose check did not run is no finding of the check's
@@ -329,7 +332,7 @@ export function repairRequest(m: MarkItem): string {
   const found = m.failedBy === 'evidence' ? 'could not confirm it' : 'found it wrong'
   return [
     `The analyst pressed x to repair citation ${m.n}. It may stand in an earlier reply than your last. The first check ${found}${m.reason ? `: ${q(m.reason)}` : '.'}`,
-    'Check it again from the start, and look in the records for the right value. When you find it, answer `corrected` with the true words and the evidence that shows them.',
+    'Check it again from the start, and make the citation correct: change the cited words, the sentence or the evidence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.',
     'When the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.',
   ].join('\n')
 }

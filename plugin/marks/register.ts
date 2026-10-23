@@ -28,7 +28,7 @@ import { openPane } from '../core/pane'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
-import { marksIn, withoutMarks } from './message.js'
+import { marksIn, withoutMarks, withRewrites } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { footerEl, messageEl, type MarkLook } from './view'
 
@@ -142,12 +142,14 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [whole, ...under] })
   }
   const marksOn = featureOn('marks')
-  const text = marksOn ? view.text : withoutMarks(view.text)
-  const marks = marksOn ? marksIn(text) : []
+  const words = marksOn ? view.text : withoutMarks(view.text)
   const reply = marksOn ? await rowMarks($, row) : null
+  const own = words === raw
+  // Claude's own words, with each sentence a check rewrote in place of the one Claude wrote
+  const text = own ? withRewrites(words, reply?.items ?? []) : words
+  const marks = marksOn ? marksIn(text) : []
   const spans = await spansFor($, row, text, marks)
   const under = await underText($, els, row, cols)
-  const own = text === raw
   if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length) {
     return own ? below() : below({ ...e, props: { ...e.props, text } })
   }
