@@ -2,8 +2,8 @@
 //
 //   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
 //                aboveBar). /thimble-settings and a click on `thimble` open the
-//                settings; the fixes' lifecycle (a `thimble fix` call, /thimble:fix, the person's next prompt; a
-//                `fix_ask` line of the change feed is core/feed.ts's); the counts after each of main's turns (counts.ts)
+//                settings; the person's next prompt takes the failure line; the counts after each of main's turns
+//                (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Coverage leaves the keys at the prompt, so r again closes it; the labels pane takes the keys (its
 //                number keys check records), and esc closes it
@@ -14,7 +14,6 @@ import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, recount } from './counts'
-import { fixCommand, refreshFixes } from './fix'
 import { failCleared, noticeLine, promptTyped } from './notice'
 
 type Engine = EngineInterface
@@ -61,11 +60,9 @@ export async function barKey($: Engine, k: string): Promise<{ later: () => Promi
 }
 
 export const registerBar: Register = on => {
-  // the fixes as they stand: one still working shows in the bar, and its draft opens when it is written;
   // /thimble-settings
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const r = await next(e)
-    void refreshFixes($).catch(() => undefined)
     try {
       await $.command.register({ name: 'thimble-settings', description: "thimble's settings: turn citations, cards, and the bar's coverage and labels on or off", immediate: true })
     } catch {
@@ -79,34 +76,19 @@ export const registerBar: Register = on => {
     return {}
   })
 
-  // a `thimble fix` call (main's or a subagent's): the bar's fix note, and the line when a fix came into use
-  on('tool.call', { tool: /^Bash$/ }, async ($, e, next) => {
-    const r = await next(e)
-    if (/\bthimble\b[^\n|;&]*\bfix\b/.test(String((e as Any).command || ''))) void refreshFixes($).catch(() => undefined)
-    return r
-  }).catch(($, e, next) => next(e))
-
-  // the end of a turn: the fixes again (a subagent may have worked on one); after main's, the counts
+  // the end of main's turn: the counts
   on('turn.complete', { turnId: /./ }, async ($, e, next) => {
     const r = await next(e)
-    void refreshFixes($).catch(() => undefined)
     if (e.agentId === undefined) {
       $.clock.after(0, () => { void recount($).catch(() => undefined) })
     }
     return r
   }).catch(($, e, next) => next(e))
 
-  // the person's own prompt: a failure line's keys go
+  // the person's own prompt: the failure line goes
   on('prompt.submit', { origin: { kind: /^(?:composer|bridge)$/ } }, async ($, e, next) => {
     if (!e.command) await promptTyped($).catch(() => undefined)
     return next(e)
-  }).catch(($, e, next) => next(e))
-
-  // /thimble:fix [words] (commands/fix.md): submit, undo, try and the list are answered here; any other words are the
-  // change the person wants, which the command's own text asks Claude to make
-  on('command.run', { command: /^(thimble:)?fix$/ }, async ($, e, next) => {
-    const r = await fixCommand($, e.args)
-    return r ?? next(e)
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {

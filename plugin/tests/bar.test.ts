@@ -1,10 +1,10 @@
 // The bar above the prompt and its panes, through the whole hooks module: its items per switch and state, a failure's
-// line and its f key, and the coverage pane drawn from `thimble coverage --json`. All data is made up.
+// line, and the coverage pane drawn from `thimble coverage --json`. All data is made up.
 // `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
-import { failNotice, promptTyped } from '../bar/notice'
+import { failNotice, noticeLine, promptTyped } from '../bar/notice'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,21 +121,25 @@ test('a letter right after r is a word: both go back to the prompt and no pane o
   expect(w.opened).not.toContain('thimble')
 })
 
-test('a failure shows its line with f and F, and f asks Claude for the fix', async ($, on) => {
+test('a failure shows its line, whole and with no keys, f types as usual, and the next prompt takes the line', async ($, on) => {
   const w = world(on, { ok: false, out: 'a made-up reason' })
+  // Claude Code's own typing, for a key thimble does not take
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   // the bar's first drawing counts once
   await $.ui.render(BAND)
   await w.clock.advance(100)
   const line = textOf(await $.ui.render(BAND))
-  expect(line).toContain('Coverage could not be counted: a made-up reason')
-  expect(line).toContain('f fix this')
-  expect(line).toContain('F report only')
-  await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'f' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'f' } as never)
+  expect(line).toContain('× Coverage could not be counted: a made-up reason')
+  expect(line).not.toContain('fix this')
+  // f is no key of thimble's: it goes into the box, and nothing is asked of Claude
+  const f = (await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'f' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'f' } as never)) as Any
+  expect(f.text).toBe('f')
   await w.clock.advance(400)
-  expect(w.submitted.some(t => t.includes('pressed f (fix this)') && t.includes('a made-up reason'))).toBe(true)
-  // the request went: the line is gone
-  expect(textOf(await $.ui.render(BAND))).not.toContain('f fix this')
+  expect(w.submitted.length).toBe(0)
+  expect(textOf(await $.ui.render(BAND))).toContain('a made-up reason')
+  await $.prompt.submit({ text: 'How many runs failed?', origin: { kind: 'composer' } } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain('a made-up reason')
 })
 
 test('a coverage record that cannot be read is named in words, and the labels still count', async ($, on) => {
@@ -181,20 +185,24 @@ test('each switch takes its items off the bar, and v waits while a design runs',
   expect(narrow).not.toContain('labels')
 })
 
-test('a failure while the person tries a fix keeps the fix line and its keys; the next prompt takes the failure away only', async () => {
-  const state: Record<string, unknown> = { fixLine: { slug: 'made-up-fix', title: 'Titles in teal' } }
+test('a failure is a line above the bar in red, a notice one not in red; the next prompt takes either away', async () => {
+  const state: Record<string, unknown> = {}
   const $ = stateOnly(state)
   failNotice($, 'A made-up card failed.')
   await new Promise(r => setTimeout(r, 1))
-  const both = textOf(await barRows($, ELS, 100, { on: () => true }))
-  expect(both).toContain('A made-up card failed.')
-  expect(both).toContain('f fix this')
-  expect(both).toContain('✓ Your thimble has the fix: Titles in teal')
-  expect(both).toContain('p submit · u undo')
+  const rows = await barRows($, ELS, 100, { on: () => true })
+  expect(rows.length).toBe(2)
+  expect(textOf(rows[0])).toBe('× A made-up card failed.')
+  expect(JSON.stringify(rows[0])).toContain('"color":"error"')
   await promptTyped($)
-  const after = textOf(await barRows($, ELS, 100, { on: () => true }))
-  expect(after).not.toContain('A made-up card failed.')
-  expect(after).toContain('p submit · u undo')
+  expect(textOf(await barRows($, ELS, 100, { on: () => true }))).not.toContain('A made-up card failed.')
+  noticeLine($, 'A made-up notice.')
+  await new Promise(r => setTimeout(r, 1))
+  const notice = await barRows($, ELS, 100, { on: () => true })
+  expect(textOf(notice[0])).toBe('A made-up notice.')
+  expect(JSON.stringify(notice[0])).toContain('"color":"warning"')
+  await promptTyped($)
+  expect((await barRows($, ELS, 100, { on: () => true })).length).toBe(1)
 })
 
 test('in a narrow coverage pane a long folder name is cut in its middle and its row keeps its count on one line', async ($, on) => {

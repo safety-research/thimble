@@ -1,8 +1,7 @@
 // bar.tsx: the bar, thimble's line above the prompt, as one drawing. Its rows, top down:
 //
-//   the failure line  only while there is one (bar/fix.ts failLineNow): a failure in red with `f fix this · F report
-//                  only`, or a notice. It wraps, so the whole failure shows
-//   the fix line   only while the person's thimble has a fix (bar/fix.ts fixLineNow), with `p submit · u undo`
+//   the failure line  only while there is one (bar/notice.ts failLineNow): a failure in red, or a notice. It wraps, so
+//                  the whole failure shows
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), `v card` while
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
@@ -19,9 +18,7 @@ import { vReady } from '../designer/v'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow, needCounts } from './counts'
-import { fixLineNow, pressFix } from './fix'
 import { failLineNow } from './notice'
-import { FAIL_KEYS, USE_KEYS } from './fixask.js'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -75,7 +72,7 @@ export async function barKeys($: Engine): Promise<Set<string>> {
   return new Set((await countItems($, featureOn, null)).map(x => x.key!).filter(Boolean))
 }
 
-/** The bar's rows: the fix line (when there is one) and the bar, `width` cells wide. */
+/** The bar's rows: the failure line (when there is one) and the bar, `width` cells wide. */
 export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean } = {}): Promise<Any[]> {
   const { Box, Button, Text } = els
   const on = o.on ?? featureOn
@@ -109,24 +106,13 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   return [...(preview ? [] : await lineRows($, els, width)), bar]
 }
 
-/** The failure line and the fix line: what failed or what changed, whole, then its keys, each a press that does what
- *  the key does. */
+/** The failure line: what failed, whole, in red, or a notice. */
 async function lineRows($: Engine, els: Any, width: number): Promise<Any[]> {
-  const { Box, Button, Text } = els
+  const { Box, Text } = els
   const fail = await failLineNow($)
-  const fix = await fixLineNow($)
-  const keys = (spec: string) => spec.split(' · ').flatMap((seg, i) => {
-    const [k, ...rest] = seg.split(' ')
-    const what = { f: 'fix', F: 'report', p: 'share', u: 'undo' }[k!] as 'fix' | 'report' | 'share' | 'undo'
-    return [
-      ...(i ? [Text({ key: `fs${i}`, dimColor: true, children: ' · ' })] : []),
-      Button({ key: `fix-${what}`, plain: true, label: seg, onPress: () => pressFix($, what), children: [Text({ key: `fk${i}`, color: KEY_COLOR, bold: true, children: k }), Text({ key: `fw${i}`, dimColor: true, children: ` ${rest.join(' ')}` })] }),
-    ]
-  })
-  const row = (key: string, text: Any, spec: string | null) => Box({ key, flexDirection: 'row', flexWrap: 'wrap', width, children: [text, ...(spec ? [Text({ key: `${key}-gap`, children: '   ' }), ...keys(spec)] : [])] })
-  const out: Any[] = []
-  if (fail?.kind === 'failed') out.push(row('fail-line', Text({ key: 'fail-text', color: 'error', wrap: 'wrap', children: `× ${fail.text.replace(/^[×!]\s*/, '')}` }), FAIL_KEYS))
-  else if (fail) out.push(row('fail-line', Text({ key: 'fail-text', color: 'warning', wrap: 'wrap', children: fail.text }), null))
-  if (fix) out.push(row('fix-line', Text({ key: 'fix-text', color: 'success', wrap: 'wrap', children: `✓ Your thimble has the fix: ${fix.title}` }), USE_KEYS))
-  return out
+  if (!fail) return []
+  const text = fail.kind === 'failed'
+    ? Text({ key: 'fail-text', color: 'error', wrap: 'wrap', children: `× ${fail.text.replace(/^[×!]\s*/, '')}` })
+    : Text({ key: 'fail-text', color: 'warning', wrap: 'wrap', children: fail.text })
+  return [Box({ key: 'fail-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [text] })]
 }

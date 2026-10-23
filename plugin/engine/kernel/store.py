@@ -7,7 +7,8 @@ The folder under analysis (the root) is the person's record, and thimble writes 
     folders/<folder>/labels/<name>.json   each label of a root with every version of its values (labels.py)
     cache/<folder>/                       the root's files' row counts, safe to delete
     events/<conversation>.jsonl           the session's change feed: one line per change the plugin acts on (a label
-                                          whose records wait for the model, a fix's share that waits for the person),
+                                          whose records wait for the model, a large label run that waits for the
+                                          person's choice),
                                           so the plugin learns of it from the kernel, not from what a command printed
     seen/<conversation>.jsonl             the files that Claude's own Read, Grep and Bash calls touched (the hooks
                                           module writes it, coverage reads it)

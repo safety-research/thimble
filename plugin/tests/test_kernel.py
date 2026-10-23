@@ -137,8 +137,8 @@ def test_the_command_labels_and_counts_coverage(root: Path) -> None:
 def test_the_command_lists_only_what_stays(root: Path) -> None:
     out = run(root, "--help")
     assert out.returncode == 0
-    assert "thimble label" in out.stdout and "thimble coverage" in out.stdout and "thimble fix" in out.stdout
-    for gone in ("thimble run", "thimble rows", "thimble save", "thimble claims"):
+    assert "thimble label" in out.stdout and "thimble coverage" in out.stdout
+    for gone in ("thimble run", "thimble rows", "thimble save", "thimble claims", "thimble fix"):
         assert gone not in out.stdout
     bad = run(root, "rows")
-    assert bad.returncode == 2 and "the commands are label, coverage and fix" in bad.stderr
+    assert bad.returncode == 2 and "the commands are label and coverage" in bad.stderr

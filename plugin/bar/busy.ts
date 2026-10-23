@@ -7,8 +7,6 @@
 //   improving the card          the designer fork after its first card, until it ends
 //   counting coverage           `thimble coverage`: the bar's count, the coverage pane (bar/counts.ts)
 //   labeling <name>             a --prompt label's model reads (labels/labels.ts)
-//   fixing: <title>             a fix Claude works on, while its record says `working` (bar/fix.ts refreshFixes)
-//   turning the fix on, …       `thimble fix <verb>` as the person's own command (bar/fix.ts)
 //
 //   busy($, word, work)       runs `work` as a job named by its step; its end (or failure) ends the job. tracked()
 //                             (telemetry.ts) does this for every model call, so a new call shows without code of its
@@ -20,7 +18,7 @@
 //                             most likely just started), as a turning glyph and its words, its seconds from SECS_MS
 //                             on, and the other steps that run beside it, by their words. Reading it makes the drawing
 //                             draw again at each tick.
-//   busySteps()               the steps running now, by their words, the oldest first (fix.ts starts a fix's step once).
+//   busySteps()               the steps running now, by their words, the oldest first.
 //
 // A job shorter than SHOW_MS never shows, so quick work does not flicker. A failure says itself where it happened
 // (failNotice). The times are the session's clock ($.clock), so a test steps them.

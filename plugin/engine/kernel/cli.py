@@ -10,9 +10,6 @@ session's permission mode and sandbox like any other command.
                                                (--wait waits for it; thimble label --help says more)
     thimble coverage [--all]                   what entered Claude's context, what was only computed over, and what
                                                was never touched (of this session, or of every session)
-    thimble fix new "TITLE" [--kind fix|feature|report] | status | use SLUG | undo | draft SLUG --from FILE
-                                               change or report thimble itself, in a copy of its code, and share it
-                                               only after the person reads the exact text (thimble fix --help)
 
 Add --json to label or coverage for the whole record.
 """
@@ -28,7 +25,6 @@ from typing import Any
 
 from . import coverage as CV
 from . import estimate as EST
-from . import fix as FX
 from . import labels as LB
 from .store import Store
 
@@ -425,119 +421,9 @@ def _label(st: Store, a: argparse.Namespace) -> int:
     return 0
 
 
-FIX_HELP = """Change thimble itself, or report a problem with it, from the session.
-
-    thimble fix new "TITLE" [--kind fix|feature|report]
-        makes a copy of the installed thimble's code (a git worktree on branch fix/<slug>, outside the data folder)
-        and prints where it is. A report has no copy.
-    thimble fix status [SLUG]      the fixes, or one fix
-    thimble fix use SLUG           loads the copy's plugin into the person's thimble
-    thimble fix title SLUG "TITLE" a new title, when a later round changed what the fix does
-    thimble fix undo               goes back to the release
-    thimble fix remove SLUG        turns the fix off when it is on, and deletes its copy and its record
-    thimble fix follow [now]       replays the fix that is on onto the newest release, at most once a day; in the
-                                   release already, or no longer fitting, it goes back to the release
-    thimble fix draft SLUG --from FILE
-        FILE is the issue in markdown ("# title" first), and for a fix or a feature a "## Change" section for the
-        pull request. thimble scans every part (the text, the diff, the branch, the commit messages), removes the
-        person's details, and shows the person the exact text. Only their choice sends it, or saves it as a file.
-
-Work in the copy, never in the data folder. Show the problem with a new test on made-up data with the same shape (for
-example 4 rows with ; between fields), never with the person's rows. Then make the change and run the plugin's tests
-in the copy.
-"""
-
-
-def _key(ask: str | None) -> str | None:
-    """The person's key for keep and send: `--ask -` reads it from stdin, where the plugin's preview writes it, so it is
-    in no argument and no file."""
-    return sys.stdin.readline().strip() if ask == "-" else ask
-
-
-def cmd_fix(a: argparse.Namespace) -> int:
-    try:
-        if a.verb == "new":
-            if not a.args:
-                print('give a title: thimble fix new "Rows opens CSV files with ; between fields"')
-                return 2
-            fx = FX.new(" ".join(a.args), a.kind)
-            if fx["kind"] == "report":
-                print(f"Report {fx['slug']}: no copy of the code is needed. Write the issue in a markdown file (what "
-                      f"happened, what was expected, a reproduction on made-up data), then: "
-                      f"thimble fix draft {fx['slug']} --from FILE")
-            else:
-                print(f"Fix {fx['slug']}: a copy of thimble {fx.get('version') or ''} at {fx['base'][:9]}, on branch "
-                      f"{fx['branch']}:\n  {fx['worktree']}")
-                print("Work there, not in the data folder: add a test on made-up data that shows the problem, make the "
-                      "change, and run the plugin's tests in the copy (python3 -m pytest plugin -q, or the targeted "
-                      f"test). Then `thimble fix use {fx['slug']}` loads it into the person's thimble. Leave the change "
-                      "uncommitted: a share takes the copy's whole change, committed or not, and makes its own commit.")
-            return 0
-        if a.verb == "status":
-            for line in FX.status_lines(a.args[0] if a.args else None):
-                print(line)
-            return 0
-        if a.verb == "use":
-            if not a.args:
-                print("name the fix: thimble fix use SLUG (thimble fix status lists them)")
-                return 2
-            print(FX.use(a.args[0]))
-            return 0
-        if a.verb == "title":
-            if len(a.args) < 2:
-                print('name the fix and its new title: thimble fix title SLUG "TITLE"')
-                return 2
-            print(FX.retitle(a.args[0], " ".join(a.args[1:])))
-            return 0
-        if a.verb == "undo":
-            print(FX.undo())
-            return 0
-        if a.verb == "remove":
-            if not a.args:
-                print("name the fix: thimble fix remove SLUG (thimble fix status lists them)")
-                return 2
-            print(FX.remove(a.args[0]))
-            return 0
-        if a.verb == "follow":
-            line = FX.follow(force=bool(a.args and a.args[0] == "now"))
-            if line:
-                print(line)
-            return 0
-        if a.verb == "draft":
-            if not a.args or not a.draft_file:
-                print("thimble fix draft SLUG --from FILE: FILE holds the issue in markdown, and a '## Change' section for a fix")
-                return 2
-            r = FX.draft(a.args[0], a.draft_file, Store())
-            n = r["removed"]
-            print(f"The person is reviewing the draft; {n} detail{'' if n == 1 else 's'} {'was' if n == 1 else 'were'} "
-                  f"removed. Nothing is sent until they choose to send it or save it as a file. Their choice reaches "
-                  f"you with their next message; `thimble fix status {a.args[0]}` shows it.")
-            for note in r["notes"]:
-                print(f"  note: {note}")
-            return 0
-        if a.verb == "keep":
-            if len(a.args) < 2:
-                print("thimble fix keep SLUG HIT --ask ID")
-                return 2
-            print(FX.keep(a.args[0], a.args[1], _key(a.ask), Store(), own_id=False))
-            return 0
-        if a.verb == "send":
-            if not a.args or not a.answer:
-                print("thimble fix send SLUG --answer send|file|cancel --ask ID")
-                return 2
-            for line in FX.send(a.args[0], a.answer, _key(a.ask), own_id=False):
-                print(line)
-            return 0
-    except FX.FixError as e:
-        print(f"thimble fix {a.verb}: {e}")
-        return 1
-    print(f"no verb {a.verb!r}: thimble fix new, status, use, title, undo, remove or draft")
-    return 2
-
-
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="thimble", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    sub = ap.add_subparsers(dest="cmd", metavar="{label,coverage,fix}")
+    sub = ap.add_subparsers(dest="cmd", metavar="{label,coverage}")
     p = sub.add_parser("label", help="give each record of a scope one of a few values", description=LABEL_HELP,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("name", nargs="?")
@@ -573,25 +459,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_coverage)
-    p = sub.add_parser("fix", help="change or report thimble itself", description=FIX_HELP,
-                       formatter_class=argparse.RawDescriptionHelpFormatter,
-                       usage="thimble fix {new,status,use,title,undo,remove,draft} ...")
-    p.add_argument("verb", metavar="{new,status,use,title,undo,remove,draft}")
-    p.add_argument("args", nargs="*", help=argparse.SUPPRESS)
-    p.add_argument("--kind", choices=FX.KINDS, default="fix", help="for new: fix (default), feature or report")
-    p.add_argument("--from", dest="draft_file", metavar="FILE", help="for draft: the draft in markdown")
-    # the person's choices in the preview, which their key or button runs (never Claude's to pass): keep SLUG HIT and
-    # send SLUG, each with `--ask -` and the secret of the person's key press on stdin, which only the preview holds
-    p.add_argument("--answer", choices=("send", "file", "cancel"), help=argparse.SUPPRESS)
-    p.add_argument("--ask", help=argparse.SUPPRESS)
-    p.set_defaults(fn=cmd_fix)
     args = list(sys.argv[1:] if argv is None else argv)
     if not args or args[0] in ("-h", "--help", "help"):
         # the commands in one screen: argparse's usage lines would only repeat them
         print(__doc__.strip())
         return 0
     if not args[0].startswith("-") and args[0] not in sub.choices:
-        ap.error(f"no command {args[0]!r}: the commands are label, coverage and fix")
+        ap.error(f"no command {args[0]!r}: the commands are label and coverage")
     a = ap.parse_args(args)
     if not getattr(a, "fn", None):
         print(__doc__.strip())

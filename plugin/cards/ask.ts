@@ -88,9 +88,8 @@ export async function sandbox($: Engine): Promise<Sandbox> {
 /** Why the sandbox does not work, and its fix. */
 export const sandboxWhy = (s: Pick<Sandbox, 'why' | 'fix'>) => `cards run only in Anthropic's sandbox runtime, which cannot start here: ${String(s.why).replace(/\.$/, '')}${s.fix ? `. ${s.fix.replace(/\.$/, '')}` : ''}`
 
-/** The line above the prompt when cards cannot draw: a notice with no keys when the fix is the machine's (a package to
- *  install, a setting: `f fix this` would hand Claude a fix that needs the person's sudo), else a failure line, which
- *  the person can report. */
+/** The line above the prompt when cards cannot draw: a notice when the fix is the machine's (a package to install, a
+ *  setting, which needs the person's sudo), else a failure line. */
 export function sandboxNotice($: Engine, text: string, machine: boolean): void {
   if (machine) noticeLine($, text, 'sandbox')
   else failNotice($, text, 'sandbox')

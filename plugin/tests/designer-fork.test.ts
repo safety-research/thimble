@@ -96,7 +96,7 @@ test("the fork's cards anchor to the answer v was pressed on, and a fork that dr
   expect(await designAnchor(s.$, 'agent-1')).toBe(null)
 })
 
-test("a refused design says that the model's safeguards refused it, and how to switch models, with no fix keys", async () => {
+test("a refused design says that the model's safeguards refused it, and how to switch models, as a notice, not a failure", async () => {
   const s = setup()
   await pressV(s)
   await s.call('turn.complete', end('refusal', '', { refusal: { category: null, explanation: null } }), async () => ({ text: '' }))

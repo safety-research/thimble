@@ -155,8 +155,8 @@ The terminal plugin:
 - **No line above the prompt, and no citations.** The plugin is not loaded in this session. Check that the folder is
   trusted and that thimble is enabled in `/plugin`. Managed settings that set `disableAllHooks` turn thimble off.
 - **`thimble: command not found` in Claude's Bash calls.** The same: the plugin is not loaded.
-- **A line above the prompt says something failed.** It says what failed and why. `f` asks Claude to fix it in thimble
-  for you, and `F` writes a report only.
+- **A line above the prompt says something failed.** It says what failed and why, and what to try when there is
+  something to try. It goes when you type your next prompt.
 - **"Cards cannot draw: cards run only in Anthropic's sandbox runtime, which cannot start here".** Cards never run
   without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
   ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, the command that allows it; when npm

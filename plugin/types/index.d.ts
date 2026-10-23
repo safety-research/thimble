@@ -46,18 +46,10 @@ declare module 'claude-code' {
       /** the bar's counts: the share of the folder's files Claude touched, in words, the labels, a number that changes
        *  with each count, and why the last count failed (bar/counts.ts) */
       counts: { coverage: string | null; labels: number; gen: number; error: string | null } | null
-      /** what the person opened inside a pane of the bar's, by kind: coverage {open, file}, fixshare {diff} (panes/) */
+      /** what the person opened inside a pane of the bar's, by kind: coverage {open, file} (panes/) */
       paneView: StateFamily<unknown>
-      /** the failure line (f F) or a notice, until the person's next prompt (bar/notice.ts) */
+      /** the failure line or a notice, until the person's next prompt (bar/notice.ts) */
       failLine: { kind: 'failed' | 'notice'; text: string; about?: string } | null
-      /** the fix the person's thimble has now, with p and u (bar/fix.ts) */
-      fixLine: { slug: string; title: string; said?: string } | null
-      /** the fixes that work now (bar/fix.ts), for the busy line */
-      fixes: { slug: string; title: string; kind: string }[]
-      /** each fix as refreshFixes last saw it, and the one that was on (bar/fix.ts), kept across a reload of the plugin */
-      fixSeen: { fixes: Record<string, { status: string; used: number; title: string }>; active: string | null }
-      /** a fix's share as its preview reads it, by slug (bar/fix.ts); never the ask's id */
-      fixShare: StateFamily<unknown>
 
       // ---- labels (labels/)
       /** goes up when a label changes (Claude's `thimble label` command, a wave of the model's reads, the person's

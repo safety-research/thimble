@@ -407,7 +407,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
   try {
     if (e.reason !== 'answer') {
       await giveUp($, c, e.reason === 'refusal' ? 'safeguards refused the check' : `the check ended: ${e.reason}`, forkEnd)
-      // a refusal is no failure of thimble's, so its line offers no fix of thimble
+      // a refusal is no failure of thimble's, so a notice, not a failure line
       if (e.reason === 'refusal') noticeLine($, giveUpLine(e.reason))
       else failNotice($, giveUpLine(e.reason))
       return

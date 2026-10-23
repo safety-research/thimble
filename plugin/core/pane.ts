@@ -5,7 +5,6 @@
 //   labels     ../labels/pane.tsx       the folder's labels and their records
 //   coverage   ../panes/coverage.tsx    what Claude read of the folder
 //   settings   ../panes/settings.tsx    the three switches
-//   fixshare   ../panes/fixshare.tsx    the preview of a fix's share
 //   claims     ../claims/seam.ts        the conversation's claims (c)
 //   threads    ../threads/seam.ts       the side threads (t)
 //   thread     ../threads/seam.ts       one side thread: what it is about, its turns, its input
@@ -21,7 +20,6 @@ import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
-import { drawFixShare } from '../panes/fixshare'
 import { drawSettings } from '../panes/settings'
 import { drawThreadsPane, threadUnder } from '../threads/seam'
 
@@ -83,7 +81,6 @@ export const registerPanes: Register = on => {
       if (now?.kind === 'labels') return withThread($, e, now, els, await drawLabels($, e, now.args, els))
       if (now?.kind === 'coverage') return withThread($, e, now, els, await drawCoverage($, e, now.args, els))
       if (now?.kind === 'settings') return await drawSettings($, e, now.args, els)
-      if (now?.kind === 'fixshare') return await drawFixShare($, e, now.args, els)
       if (now?.kind === 'claims') return withThread($, e, now, els, await drawClaimsPane($, e, now.args, els))
       if (now?.kind === 'threads' || now?.kind === 'thread') return await drawThreadsPane($, e, now.kind, now.args, els)
       return els.Text({ dimColor: true, children: now ? `thimble has no pane ${now.kind}.` : 'Nothing is open here.' })

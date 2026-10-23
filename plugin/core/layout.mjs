@@ -14,7 +14,6 @@
 //   seen/<conversation>.jsonl       what Claude's calls touched, for coverage (hooks/watch.ts)
 //   folders/<folder>/labels/        a folder's labels (engine/kernel/store.py)
 //   cache/<folder>/                 a folder's row counts (engine/kernel/store.py)
-//   fixes/                          the fixes (engine/kernel/fix.py)
 //   run/                            the card runner's socket (cards/ask.ts)
 //   tmp/                            the temp folder of a session that has no TMPDIR (core/home.ts tempDir)
 //
@@ -51,4 +50,3 @@ export const seenFile = (home, key, part = 1) => `${at(home)}/seen/${safeName(ke
 export const labelsDirOf = (home, realPath) => `${at(home)}/folders/${folderName(realPath)}/labels`
 export const runDir = home => `${at(home)}/run`
 export const tmpDir = home => `${at(home)}/tmp`
-export const fixesDir = home => `${at(home)}/fixes`
