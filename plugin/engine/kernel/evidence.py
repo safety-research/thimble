@@ -1137,6 +1137,15 @@ def quote_fragments(words: str) -> list[str]:
     return [f for f in frags if len(f) >= 3]
 
 
+def quoted_around(sentence: str, words: str) -> bool:
+    """Whether the sentence quotes the cited words with its quote marks around the citation's brackets, a stop or a
+    comma inside them: `u2 wrote "[I've been locked out]."`. Words that hold their own quote marks are left alone."""
+    w = norm_ws(words)
+    if not w or w[:1] in QUOTE_CHARS or w[-1:] in QUOTE_CHARS:
+        return False
+    return bool(re.search(r'"\[' + re.escape(one_quote(w)) + r'\][.,;:!?]?"', one_quote(norm_ws(sentence))))
+
+
 def forms(raw: str) -> list[tuple[str, bool]]:
     """The texts a line can hold words in: the line as written, and its JSON strings decoded (`decoded` True)."""
     out = [(raw, False)]
@@ -2028,7 +2037,11 @@ def check_mark(mark: dict[str, Any], item: dict[str, Any] | None, calls: list[di
         return {**out, "reason": f"{NOT_RUN} It gave the status {status!r}."}
     # a narrowing puts no words in: the evidence shows the part it keeps
     changed = bool(new) and not narrow and loose(new) != loose(words)
-    problems, evidence = check_evidence(unmark(new or words), kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards)
+    target = unmark(new or words)
+    if not new and quoted_around(str(mark.get("sentence") or ""), words):
+        # a quote whose marks stand around the citation (`"[I've been locked out]."`) is a direct quote too
+        target = f'"{target}"'
+    problems, evidence = check_evidence(target, kind, ev, calls, cwd, root, approx, tmp, unmark(words) if changed else "", cards)
     res: dict[str, Any] = {"n": n, "status": status, "shown": new or written, "reason": reason, **extra}
     if evidence:
         res["evidence"] = evidence

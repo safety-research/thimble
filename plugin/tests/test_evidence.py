@@ -325,6 +325,20 @@ def test_square_brackets_in_a_quote_are_the_quoters_words(tmp_path: Path):
     assert bad["status"] == "failed"
 
 
+def test_quote_marks_around_the_citation_make_it_a_quote_the_output_shows_word_for_word():
+    m = {"n": 1, "words": "I've been locked out", "sentence": 'At 09:18 agent-02 wrote "[I\'ve been locked out]."'}
+    found = 'print("[1]", "I\'ve been locked out" in text)'
+    printed = 'print("[1]", text[:60])'
+    # a test of whether the words are there shows no quote: only the record's own words do
+    r = check_mark(m, computed("[1] True"), [call(found, "[1] True\n")], "/data")
+    assert (r["status"], r["reason"]) == ("failed", "The result reads “[1] True”, not the quoted words."), r["reason"]
+    ok = check_mark(m, computed("[1] agent-02: I've been locked out of sudo"), [call(printed, "[1] agent-02: I've been locked out of sudo\n")], "/data")
+    assert ok["status"] == "verified"
+    # words in no quote marks stay the check's reading of the output, as before
+    plain = {"n": 1, "words": "was locked out", "sentence": "At 09:18 agent-02 [was locked out]."}
+    assert check_mark(plain, computed("[1] True"), [call(found, "[1] True\n")], "/data")["status"] == "verified"
+
+
 def test_a_claim_that_joins_two_places_cites_both(tmp_path: Path):
     (tmp_path / "shell.tsx").write_text("const shown = load()\n" + "x\n" * 80 + "write(path, shown)\n")
     ev = [{"file": "shell.tsx", "line": 1, "substring": "const shown = load()"}, {"file": "shell.tsx", "line": 82, "substring": "write(path, shown)"}]
