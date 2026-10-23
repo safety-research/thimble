@@ -189,12 +189,14 @@ type PaneKey = { k: string; label: string; onPress: () => unknown }
 
 /** The keys' row above the input bar, ` · ` between keys, as the other panes draw theirs: each a plain Button its key
  *  presses, drawn dim at rest (Claude Code draws its key, lit, then a colon, and the label). m sends the last answer to
- *  main once the thread answered; `more` are the pane's own (e on a card). The ring stays on the input bar as m comes
- *  (fieldSettled). */
+ *  main once the thread answered (then `already sent`); `more` are the pane's own (e on a card). The ring stays on the
+ *  input bar as m comes (fieldSettled). */
 function keysRow($: Engine, els: Any, t: Thread | null, more: PaneKey[] = []): Any[] {
   const { Box, Button, Text } = els
   const keys = [...more]
   if (t && answerToSend(t) === 'send') keys.push({ k: 'm', label: 'send this answer to Claude', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach Claude: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } })
+  // sent: m stays, saying so, so a second m is not typed into the prompt
+  else if (t && answerToSend(t) === 'sent') keys.push({ k: 'm', label: 'already sent', onPress: () => undefined })
   if (!keys.length) return []
   return [
     Text({ key: 'keys-gap', children: ' ' }),

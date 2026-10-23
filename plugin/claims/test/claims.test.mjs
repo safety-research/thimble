@@ -387,6 +387,90 @@ test('fourteen clusters: the map draws them all, cells shorter; only near cluste
   assert.equal(seen.size, 13)
 })
 
+/** A session's eleven clusters as a long session names them, two names longer than 60 characters, and 89 claims. */
+const ELEVEN = ['How many board posts mention a merge conflict in each run', 'What the merge-conflict count includes',
+  'How many PRs were bug fixes versus new features, by model', 'How the PRs were sorted into bug fixes and features',
+  'Which runs merged the most PRs, and whether emergent or managed runs merged more', 'How long PRs waited between opening and merge, by model',
+  'What share of PR reviews asked for changes, by model', 'Which agents reviewed the most PRs in each run',
+  'When the agents were busiest and whether activity dropped late in the runs', 'Why PRs were closed without merging',
+  'Whether runs with issues merged more PRs']
+function eleven() {
+  const st = emptyStore('s')
+  const qs = Array.from({ length: 89 }, (_, i) => ({ quote: `Fact ${i + 1} holds`, cluster: ELEVEN[(i * 7) % 11] }))
+  // the clusters come in an order of their own: the newest claim's cluster is not the first drawn
+  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: qs.map(q => `${q.quote}.`).join(' ') }], out: { claims: qs } })
+  return st
+}
+
+test("p n walk the clusters in reading order of the map as drawn, row by row and left to right; nothing chosen, n the first and p the last", () => {
+  const data = paneData(eleven())
+  for (const w of [70, 110]) {
+    const v = graphView(data, {}, { w, h: 70 })
+    assert.equal(v.order.length, 11)
+    // where each name stands: its last line (the foot of its cell) and its first column
+    const at = new Map()
+    v.graph.forEach((r, y) => { let x = 0; for (const run of r) { if (/^g:/.test(run.part || '') && run.s.trim()) { const k = run.part.slice(2); const o = at.get(k) || { y: -1, x: Infinity }; at.set(k, { y: Math.max(o.y, y), x: Math.min(o.x, x + run.s.length - run.s.trimStart().length) }) } x += run.s.length } })
+    const drawn = [...at.keys()].sort((p, q) => at.get(p).y - at.get(q).y || at.get(p).x - at.get(q).x)
+    assert.deepEqual(v.order, drawn)
+    assert.equal(hopCluster(v.order, null, 1), drawn[0])
+    assert.equal(hopCluster(v.order, null, -1), drawn.at(-1))
+    let k = null
+    const walked = []
+    for (let i = 0; i < 11; i++) { k = hopCluster(v.order, k, 1); walked.push(k) }
+    assert.deepEqual(walked, drawn)
+    assert.equal(hopCluster(v.order, drawn[0], -1), drawn.at(-1))
+  }
+  // a narrow pane's list and a short session's list: top to bottom
+  const narrow = graphView(data, {}, { w: 40, h: 70 })
+  assert.deepEqual(narrow.order, narrow.graph.map(r => r.find(x => /^g:/.test(x.part || '')).part.slice(2)))
+})
+
+test('a cluster name is kept whole and never cut in a word: the map ends it after a word in …, the header under the map shows it whole', () => {
+  const st = eleven()
+  assert.ok(ELEVEN.every(n => st.clusters.some(c => c.name === n)))
+  const data = paneData(st)
+  const v = graphView(data, {}, { w: 70, h: 70 })
+  for (const g of data.groups) {
+    const shown = v.graph.map(r => r.filter(x => x.part === `g:${g.id}` && x.s.trim()).map(x => x.s.trim()).join(' ')).filter(Boolean).join(' ')
+    if (shown === g.name) continue
+    assert.match(shown, / …$/, shown)
+    const words = shown.slice(0, -2).split(' ')
+    assert.deepEqual(words, g.name.split(' ').slice(0, words.length), shown)
+  }
+  // chosen: the header under the map wraps the name whole
+  const late = data.groups.find(g => g.name.startsWith('When the agents')).id
+  const chosen = graphView(data, { group: late }, { w: 50, h: 70 })
+  const head = chosen.panel.slice(1).filter(r => r.some(x => x.part === `g:${late}`)).map(r => rowText(r).replace(/^[● ] /, '').replace(/ · \d+ claims$/, '').trim())
+  assert.equal(head.join(' '), 'When the agents were busiest and whether activity dropped late in the runs')
+  // a narrow pane: the header wraps too, and the list of clusters cuts a name after a word
+  const narrow = graphView(data, { group: late }, { w: 40, h: 70 })
+  assert.ok(narrow.panel.map(rowText).join(' ').replace(/\s+/g, ' ').includes('dropped late in the runs'))
+  for (const r of narrow.graph) {
+    const name = rowText(r).replace(/^ ●? ?/, '').replace(/ \d+$/, '').trim()
+    if (name.endsWith('…')) assert.ok(ELEVEN.some(n => n.startsWith(name.slice(0, -2) + ' ')), name)
+    else assert.ok(ELEVEN.includes(name), name)
+  }
+  // a name too long for the store is cut after a word
+  const big = emptyStore('s')
+  applyTurn(big, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: 'One fact holds.' }], out: { claims: [{ quote: 'One fact holds', cluster: 'word '.repeat(60) }] } })
+  assert.match(big.clusters[0].name, /^(word )+…$/)
+  assert.ok(big.clusters[0].name.length <= 160)
+})
+
+test('a store of v 1 cut cluster names at 60 characters: read, such a name ends after its last whole word in …', () => {
+  const cut60 = 'When the agents were busiest and whether activity dropped la'
+  assert.equal(cut60.length, 60)
+  const old = readStore({ v: 1, claims: [{ id: 'c1', text: 'A fact.', by: 'claude', cluster: 'k1' }, { id: 'c2', text: 'Another.', by: 'claude', cluster: 'k2' }],
+    clusters: [{ id: 'k1', name: cut60, turn: 1, named: 1 }, { id: 'k2', name: 'Why PRs were closed without merging', turn: 1, named: 1 }] }, 's')
+  assert.deepEqual(old.clusters.map(c => c.name), ['When the agents were busiest and whether activity dropped …', 'Why PRs were closed without merging'])
+  assert.equal(old.v, 2)
+  // the header wraps it with its … on the line of the word before
+  const head = graphView(paneData(old), { group: 'k1' }, { w: 72, h: 40 }).panel.map(rowText)
+  assert.ok(head.some(l => /activity$/.test(l)) && head.some(l => /^ {2}dropped … · 1 claim$/.test(l)), head.join('\n'))
+  // a store of v 2 keeps a name of 60 characters as it is
+  assert.equal(readStore({ v: 2, claims: [], clusters: [{ id: 'k1', name: cut60 }] }, 's').clusters[0].name, cut60)
+})
+
 test('a long list pages by a screen: a press on ↑ N earlier or ↓ N more', () => {
   const st = emptyStore('s')
   const qs = Array.from({ length: 80 }, (_, i) => ({ quote: `Run ${i + 1} copied an answer`, cluster: 'copying' }))

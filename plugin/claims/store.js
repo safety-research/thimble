@@ -4,11 +4,15 @@
 // A claim is one statement the transcript makes, of one kind. One JSON file per conversation, claims.json in its kept
 // folder (core/env.ts keptDir):
 //
-//   {v: 1, session, updated,
+//   {v: 2, session, updated,
 //    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?, why?,
 //              links?: [{to, how: supports | contradicts | same topic}]}],
 //    clusters: [{id, name, turn, named}],
 //    gaps: [{turn, why}]}
+//
+//   a name   a cluster's name is kept whole (up to MAX_NAME characters, past that cut after a word); the pane cuts it
+//            only to draw it. A store of v 1 kept names cut at 60 characters, often in a word: read, such a name ends
+//            after its last whole word, then …
 //
 //   a place  {row, by, turn, quote, sentence, start, end}: where a claim was said, the message row, who said it
 //            (claude | person), the words matched and their sentence, as offsets into the row's markdown.
@@ -35,15 +39,34 @@ const MAX_TEXT = 200
 const MAX_QUOTE = 240
 const MAX_SENTENCE = 320
 const MAX_WHY = 240
+/** A cluster's name is kept up to this many characters (past that, cut after a word). */
+const MAX_NAME = 160
+/** The length a store of v 1 cut every cluster name at. */
+const V1_NAME = 60
 /** A cluster grown this much since it was named is offered to the lens to rename or split. */
 export const GROWN = { least: 6, factor: 2 }
 
 const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '')
 const cutTo = (s, n) => (s.length <= n ? s : s.slice(0, n - 1).trimEnd() + '…')
 
+/** Words cut to at most n characters after a whole word, ` …` where they were cut; a first word longer than n is cut
+ *  in it (nothing else fits). */
+export function cutWords(text, n) {
+  const s = String(text ?? '').replace(/\s+/g, ' ').trim()
+  const a = Array.from(s)
+  if (a.length <= n) return s
+  // the words that end by n - 2 characters, so ` …` fits after them
+  const room = a.slice(0, Math.max(1, n - 1)).join('')
+  const at = room.lastIndexOf(' ')
+  return at > 0 ? `${room.slice(0, at).trimEnd()} …` : `${room}…`
+}
+
+/** A cluster's name as kept: whole, up to MAX_NAME characters. */
+const nameOf = v => cutWords(typeof v === 'string' ? v : '', MAX_NAME)
+
 /** A new, empty store for a session. */
 export function emptyStore(session = '') {
-  return { v: 1, session: String(session || ''), updated: null, claims: [], clusters: [], gaps: [] }
+  return { v: 2, session: String(session || ''), updated: null, claims: [], clusters: [], gaps: [] }
 }
 
 /** A store read from its file's text (or parsed JSON): whatever holds is kept, the rest starts empty. A map of the
@@ -61,6 +84,8 @@ export function readStore(text, session = '') {
     return { ...rest, said: (Array.isArray(c.said) ? c.said : []).filter(p => p?.by !== 'folder'), ...(Array.isArray(c.links) ? { links: c.links.filter(l => !l?.folder) } : {}) }
   }).map(c => ({ ...c, said: Array.isArray(c.said) ? c.said : [], sources: (Array.isArray(c.sources) ? c.sources : []).map(sourceOf).filter(Boolean) }))
   s.clusters = (Array.isArray(d.clusters) ? d.clusters : []).filter(c => c && c.id && c.from !== 'folder')
+  // a store of v 1 cut each name at 60 characters, often in a word: the name ends after its last whole word, then …
+  if (!(Number(d.v) >= 2)) s.clusters = s.clusters.map(c => (Array.from(String(c.name ?? '')).length === V1_NAME ? { ...c, name: cutWords(c.name, V1_NAME - 1) } : c))
   s.gaps = Array.isArray(d.gaps) ? d.gaps : []
   for (const [k, v] of Object.entries(d)) if (!(k in s) && k !== 'folder' && k !== 'folderAsked') s[k] = v
   return oneNameOneCluster(s)
@@ -336,7 +361,7 @@ export const sizeOf = (store, id) => store.claims.filter(c => c.cluster === id).
 /** The cluster a claim names: a cluster's id, else a cluster's name (any case), else a new cluster of that name. An
  *  empty name puts it between clusters (null). */
 export function clusterFor(store, ref, turn = null) {
-  const raw = str(String(ref ?? '').replace(/^new\s*:\s*/i, ''), 60)
+  const raw = nameOf(String(ref ?? '').replace(/^new\s*:\s*/i, ''))
   if (!raw) return null
   const byId = store.clusters.find(c => c.id === raw)
   if (byId) return byId.id
@@ -366,7 +391,7 @@ function applyClusters(store, list, grown, turn) {
     if (!x || typeof x !== 'object') continue
     if (x.split) {
       const from = store.clusters.find(c => c.id === String(x.split))
-      const name = str(x.name, 60)
+      const name = nameOf(x.name)
       const ids = new Set((Array.isArray(x.claims) ? x.claims : []).map(String))
       const moving = store.claims.filter(c => from && c.cluster === from.id && ids.has(c.id))
       if (!from || !name || !moving.length || moving.length === sizeOf(store, from.id)) continue
@@ -376,7 +401,7 @@ function applyClusters(store, list, grown, turn) {
       done.push({ split: from.id, into: id, name, claims: moving.map(c => c.id) })
     } else if (x.id) {
       const c = store.clusters.find(k => k.id === String(x.id))
-      const name = str(x.name, 60)
+      const name = nameOf(x.name)
       if (!c || !name || name === c.name) continue
       done.push({ renamed: c.id, from: c.name, to: name })
       c.name = name

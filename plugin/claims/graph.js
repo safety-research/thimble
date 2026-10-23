@@ -37,7 +37,7 @@
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, part}.
 import { blocks } from '../marks/message.js'
 import { evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printLine } from '../tray/tray.mjs'
-import { edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
+import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
 
 const cut = (s, k) => (Array.from(String(s ?? '')).length <= k ? String(s ?? '') : Array.from(String(s ?? '')).slice(0, Math.max(0, k - 1)).join('') + '…')
 const one = s => String(s ?? '').replace(/\s+/g, ' ').trim()
@@ -64,6 +64,10 @@ export function wrap(text, n) {
   if (cur) out.push(cur)
   return out
 }
+
+/** A cluster's name wrapped to lines of at most n characters (wrap), a … that ends it on the line of the word before
+ *  it. */
+export const wrapName = (name, n) => wrap(one(name).replace(/ …$/, '\u2060…'), n).map(l => l.replace('\u2060…', ' …'))
 
 /** A cluster's color: the six categorical tones in turn. */
 export const toneOf = i => `c${(Math.max(0, i) % 6) + 1}`
@@ -202,21 +206,17 @@ export function spread(nodes, clusters, edges, { w, h, cols = 0 }) {
   // name shows in full (a cell too short for all its lines ends the last one in …)
   const names = cells.map(sl => {
     const room = Math.max(4, sl.w - 2)
-    // at most three lines (fewer in a short cell), the last ending in … when the name goes on
+    // at most three lines (fewer in a short cell), the last ending after a whole word in … when the name goes on
     const most = Math.max(1, Math.min(3, sl.h - 1))
-    let lines = wrap(sl.g.name, room)
-    if (lines.length > most) {
-      const words = lines[most - 1].split(' ')
-      while (words.length > 1 && len(words.join(' ')) + 2 > room) words.pop()
-      lines = [...lines.slice(0, most - 1), cut(`${words.join(' ')} …`, room)]
-    }
+    let lines = wrapName(sl.g.name, room)
+    if (lines.length > most) lines = [...lines.slice(0, most - 1), cutWords(`${lines.slice(most - 1).join(' ')} …`, room)]
     const l = Math.max(1, ...lines.map(len))
     const jx = (hash(sl.g.id + 'x') - 0.5) * Math.max(0, sl.w - l - 2) * 0.3
     const x = Math.max(sl.x + 1, Math.min(sl.x + sl.w - l - 1, Math.round(sl.x + (sl.w - l) / 2 + jx)))
     // a blank row under it, before the next row of clusters, where the cell has room
     const gap = sl.y + sl.h < H && sl.h >= lines.length + 3 ? 1 : 0
     const y = Math.max(0, Math.min(H - lines.length, sl.y + sl.h - lines.length - gap))
-    return { id: sl.g.id, name: sl.g.name, lines, x, y, len: l }
+    return { id: sl.g.id, name: sl.g.name, lines, x, y, len: l, cell: { x: sl.x, y: sl.y } }
   })
   const taken = []
   const onName = (x, y) => names.some(nm => y >= nm.y && y < nm.y + nm.lines.length && x >= nm.x - 2 && x <= nm.x + nm.len + 1)
@@ -256,7 +256,7 @@ export function spread(nodes, clusters, edges, { w, h, cols = 0 }) {
       pos.set(nd.id, got)
     })
   })
-  return { pos, names: names.map(({ id, name, lines, x, y }) => ({ id, name, lines, x, y })), h: H }
+  return { pos, names: names.map(({ id, name, lines, x, y, cell }) => ({ id, name, lines, x, y, cell })), h: H }
 }
 /** A claim's history: the claims before it that it corrected, itself, and the claims after it that corrected it, oldest
  *  first. A claim never corrected and correcting none has a history of one. */
@@ -299,9 +299,9 @@ export function claimGroup(data, c) {
   return (data.groups || []).some(g => g.id != null && String(g.id) === k) ? k : '-'
 }
 
-/** What the pane shows: the claim the state names, else the cluster it names; else, at rest, nothing chosen and the
- *  cluster n lights first: the one of the newest correction of the last turn, else of the newest claim. New claims do
- *  not move the selection. {claim, group, chosen}: claim null while a cluster is chosen or at rest. */
+/** What the pane shows: the claim the state names, else the cluster it names; else, at rest, nothing chosen (`group`
+ *  then the cluster of the newest correction of the last turn, else of the newest claim). New claims do not move the
+ *  selection. {claim, group, chosen}: claim null while a cluster is chosen or at rest. */
 export function selectedOf(data, st = {}) {
   const claims = data.claims || []
   if (!claims.length) return { claim: null, group: null, chosen: false }
@@ -322,11 +322,12 @@ export function freshOf(data, st = {}) {
   return new Set((data.claims || []).filter(c => c.turn === data.last).map(c => c.id))
 }
 
-/** The key of the cluster after or before the one given (n p), in the order the clusters are listed. */
-export function hopCluster(data, key, dir) {
-  const order = (data.groups || []).map(groupKey)
+/** The key of the cluster after or before the one given (n p), in `order` (the clusters' keys in reading order:
+ *  graphView's `order`), else in the order the data lists them. No key (nothing chosen): n the first, p the last. */
+export function hopCluster(orderOrData, key, dir) {
+  const order = Array.isArray(orderOrData) ? orderOrData.map(String) : (orderOrData?.groups || []).map(groupKey)
   if (!order.length) return null
-  const at = order.indexOf(String(key))
+  const at = key == null ? -1 : order.indexOf(String(key))
   return order[at < 0 ? (dir > 0 ? 0 : order.length - 1) : (at + dir + order.length) % order.length]
 }
 
@@ -434,7 +435,7 @@ export function evidenceOf(c) {
 /** What the side thread about the pane is about: the claim selected, the cluster selected, or the place a claim was
  *  said. Text a model reads. */
 export function threadAbout(c, source = false, cluster = null) {
-  if (!c && cluster) return `the claims of this session as a graph, in clusters; the cluster selected is "${cut(cluster.name, 120)}" (${cluster.n} claim${cluster.n === 1 ? '' : 's'})`
+  if (!c && cluster) return `the claims of this session as a graph, in clusters; the cluster selected is "${cutWords(cluster.name, 160)}" (${cluster.n} claim${cluster.n === 1 ? '' : 's'})`
   if (!c) return 'the claims of this session as a graph, in clusters'
   if (source) return `where the claim "${cut(c.text, 200)}" was said (${whenOf(c) || 'this session'})`
   const said = (c.said || []).find(x => x.sentence || x.quote)
@@ -807,14 +808,16 @@ export function groupOf(data, key) {
 
 /** A cluster's name over its list, as rows W wide, each a press on `part`. Chosen alone (`lit`): `● name` bold in the
  *  cluster's color; above a claim: the dot in the color and the name bold; `dim` (another cluster is chosen): all dim.
- *  The name wraps (one line, cut, when
- *  `narrow`), and `after` (dim) follows it. */
+ *  The name is whole, wrapped (never cut), and `after` (dim) follows it, on a row of its own when the last line has
+ *  no room for it. */
 function nameRows(name, tone, W, { after = '', part = null, lit = false, dim = false, narrow = false } = {}) {
-  const room = narrow ? Math.max(8, W - 3 - len(after)) : Math.max(12, W - 14)
-  const lines = narrow ? [cut(one(name), room)] : wrap(name, room)
+  const room = narrow ? Math.max(8, W - 2) : Math.max(12, W - 14)
+  const lines = wrapName(name, room)
+  if (!lines.length) lines.push('')
   const look = lit ? { tone, bold: true } : dim ? { tone: 'dim' } : { bold: true }
   const rows = lines.map((l, i) => [{ s: i ? '  ' : '● ', ...(i ? {} : lit ? { tone, bold: true } : { tone: dim ? 'dim' : tone }), part }, { s: l, ...look, part }])
-  if (after) rows[rows.length - 1].push({ s: ` ${after}`, tone: 'dim', part })
+  if (after && 2 + len(lines[lines.length - 1] ?? '') + 1 + len(after) <= W) rows[rows.length - 1].push({ s: ` ${after}`, tone: 'dim', part })
+  else if (after) rows.push([{ s: '  ', part }, { s: after, tone: 'dim', part }])
   return rows
 }
 
@@ -939,7 +942,7 @@ function clusterLines(groups, W, { group, chosen }) {
   return groups.map(g => {
     const on = chosen && g.key === group
     const t = toneOf(g.i)
-    const name = cut(g.name, Math.max(6, W - 4 - String(g.n).length))
+    const name = cutWords(g.name, Math.max(6, W - 4 - String(g.n).length))
     return on
       ? [{ s: ' ' }, { s: `● ${name}`, tone: t, bold: true, part: `g:${g.key}` }, { s: ` ${g.n}`, tone: 'dim', part: `g:${g.key}` }]
       : [{ s: ' ' }, { s: '●', tone: t, part: `g:${g.key}` }, { s: ` ${name}`, part: `g:${g.key}` }, { s: ` ${g.n}`, tone: 'dim', part: `g:${g.key}` }]
@@ -970,10 +973,12 @@ function counted(data) {
  * {claim, group, at, open, cite, all, whole, from}: the claim picked, else the cluster chosen (its key), the last turn
  * when it was chosen; with a claim, whether its evidence is open, the citation shown, the whole history, the whole
  * evidence; `from` the first claim of the list's window, once the person paged. `bright`: claims came in a moment ago.
- * Returns {head, graph, panel, claim, group, chosen, cites, shown, cut, fixes, windowed, narrow, cellRows, listed, data};
- * `data` the data as fitted. head, graph and panel are rows of runs, a run's `part` what a press on it does (`g:<key>`
- * a cluster, `d:<id>` a dot, `n:<id>` a claim of the cluster, `ev-N` a citation, `cite-prev` `cite-next` the citation
- * before or after, `was-<id>` another version of the claim, `pg:<i>` a screen of the list from its claim i).
+ * Returns {head, graph, panel, claim, group, chosen, cites, shown, cut, fixes, windowed, narrow, cellRows, listed, data,
+ * order}; `data` the data as fitted; `order` the clusters' keys in reading order as drawn (the map's cells row by row,
+ * left to right; a list top to bottom), the order p n walk. head, graph and panel are rows of runs, a run's `part` what
+ * a press on it does (`g:<key>` a cluster, `d:<id>` a dot, `n:<id>` a claim of the cluster, `ev-N` a citation,
+ * `cite-prev` `cite-next` the citation before or after, `was-<id>` another version of the claim, `pg:<i>` a screen of
+ * the list from its claim i).
  */
 export function graphView(raw, st = {}, { w = 90, h = 40, bright = false } = {}) {
   const W = Math.max(24, w)
@@ -992,16 +997,17 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false } = {})
   // `+N new` for a moment: the claims that came in while browsing, else the last look's
   const head = [headRuns(data, { narrow, fresh: bright ? fresh.size || claims.filter(c => c.turn != null && c.turn === data.last).length : 0 })]
   for (const g of data.gaps || []) head.push([{ s: `Turn ${g.turn} was not read: `, tone: 'bad' }, { s: cut(g.why || 'the look at the answer failed', W - 24), tone: 'dim' }])
-  const none = { claim: null, group: null, chosen: false, cites: 0, shown: null, cut: false, fixes: 0, windowed: false, narrow, cellRows: 0, data }
+  const none = { claim: null, group: null, chosen: false, cites: 0, shown: null, cut: false, fixes: 0, windowed: false, narrow, cellRows: 0, data, order: [] }
   if (!claims.length) return { head, graph: [], panel: [], ...none }
-  if (few) return { head, graph: [], ...result(listOf({ data, claim, group, chosen, tone, W, byId, st, fresh, narrow })), claim, group, chosen, narrow, cellRows: 0, listed: true, data }
   const mapped = counted(data)
+  const listed = mapped.map(g => g.key)
+  if (few) return { head, graph: [], ...result(listOf({ data, claim, group, chosen, tone, W, byId, st, fresh, narrow })), claim, group, chosen, narrow, cellRows: 0, listed: true, data, order: listed }
   const top = head.length + 1
   const detail = room => (chosen ? panelOf({ data, claim, group, tone, W, byId, room, st, fresh, narrow }) : null)
   if (narrow) {
     const list = clusterLines(mapped, W, { group, chosen })
     const panel = detail(H - top - list.length - KEYS_ROWS)
-    return { head, graph: list, ...result(panel), claim, group, chosen, narrow, cellRows: 0, data }
+    return { head, graph: list, ...result(panel), claim, group, chosen, narrow, cellRows: 0, data, order: listed }
   }
   const cols = mapColumns(W)
   const cellRowsOf = Math.ceil(mapped.length / Math.min(cols, mapped.length))
@@ -1015,7 +1021,9 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false } = {})
     panel = detail(H - top - ch * cellRowsOf - KEYS_ROWS)
   }
   const graph = graphOf({ data, claims, groups: mapped, edges: data.edges || [], W, h: ch * cellRowsOf, cols, group, tone, chosen, fresh }).rows()
-  return { head, graph, ...result(panel), claim, group, chosen, narrow, cellRows: ch, data }
+  // the clusters as the map draws them, row by row and left to right: the order p n walk
+  const drawn = layOf(claims, mapped, data.edges || [], W, ch * cellRowsOf, cols).names.slice().sort((a, b) => a.cell.y - b.cell.y || a.cell.x - b.cell.x)
+  return { head, graph, ...result(panel), claim, group, chosen, narrow, cellRows: ch, data, order: drawn.map(nm => (nm.id === '' ? '-' : nm.id)) }
 }
 
 /** What the detail gives the view. */
