@@ -39,8 +39,8 @@ import { usePinnedView, ViewUpdated } from './viewVersion'
 import { DeleteViewConfirm } from './ViewsBar'
 import { useTypeViewers } from './typeViewers'
 import { markOpened, useReadyViews, useUpdatedViews } from './viewReady'
-import { compact, errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type ViewProps } from './views/common'
-import { clockOf, keysFor, nameOf, pick, textOf, turnOver } from './views/transcript'
+import { errMsg, LaneHead, recordExcerpt, targetOf, type ViewDef, type ViewProps } from './views/common'
+import { clockOf, keysFor, nameOf, pick, streamLine, textOf, turnOver } from './views/transcript'
 import { withoutEscapes } from './views/raw'
 import { pickView, scoreViews, viewByType } from './views/registry'
 import { useDelimiter } from './views/table'
@@ -664,10 +664,31 @@ export function useRecordLines(ws: string, ref: string | undefined, path: string
 /** the keys where a record of a log, such as an event, names its agent (backend transcripts.OWNER_KEYS) */
 const AGENT_KEYS = 'agent|agent_name|agent_id'
 
+/** A record with no words to show as one line a person reads, in place of its JSON: each field as `key: value`, a
+ * nested value as `{…}` or `[…]`. Pure. */
+export function fieldsLine(obj: Record<string, unknown>, max = 300): string {
+  const parts: string[] = []
+  for (const [k, v] of Object.entries(obj)) {
+    const shown = v == null ? 'null' : Array.isArray(v) ? (v.length ? '[…]' : '[]') : typeof v === 'object' ? (Object.keys(v).length ? '{…}' : '{}') : String(v)
+    parts.push(`${k}: ${shown.replace(/\s+/g, ' ').slice(0, 80)}`)
+  }
+  return parts.join(' · ').slice(0, max)
+}
+
 /** A record as the loupe and a record's tooltip name it: its index, who and when (the keys the Transcript mode reads,
  * the sniff's else those the record carries; who, without a speaker, the agent the record names, else its type; when as
  * its time of day), and its first two lines of words. */
 export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color: string | null): PreviewRecord {
+  const obj = recordObject(rec)
+  // a Claude Code stream's record reads as the Transcript view shows it, never as its JSON: a message's words and tool
+  // calls, a system record's summary
+  const line = obj && (!hint || hint.format === 'stream') ? streamLine(obj, hint?.wrap) : null
+  if (obj && line != null) {
+    const who = typeof obj.type === 'string' ? obj.type : null
+    const keys = keysFor(hint, [obj])
+    const when = clockOf(pick(obj, keys.time)) ?? clockOf((obj as { timestamp?: unknown }).timestamp)
+    return { line: rec.line, who, when, text: (who && line.startsWith(`${who} · `) ? line.slice(who.length + 3) : line).slice(0, 280), color }
+  }
   const first = (s: string) =>
     s
       .split('\n')
@@ -675,12 +696,13 @@ export function previewOf(rec: SourceRecord, hint: TranscriptHint | null, color:
       .slice(0, 2)
       .join('\n')
       .slice(0, 280)
-  const obj = recordObject(rec)
   if (!obj) return { line: rec.line, who: null, when: null, text: first(recordExcerpt(rec)), color }
   const keys = keysFor(hint, [obj])
   const who = nameOf(pick(obj, keys.author)) ?? nameOf(pick(obj, AGENT_KEYS)) ?? (typeof obj.type === 'string' ? obj.type : null)
   const when = clockOf(pick(obj, keys.time))
-  const body = textOf(pick(obj, keys.body)) ?? rec.blocks.find((b) => b.kind !== 'raw')?.text ?? compact(obj, 300)
+  // a JSON line the server sends as text has that text as its block: its JSON, which is no words to show
+  const own = obj !== rec.record ? (rec.record as { text?: unknown }).text : undefined
+  const body = textOf(pick(obj, keys.body)) ?? rec.blocks.find((b) => b.kind !== 'raw' && b.text !== own)?.text ?? fieldsLine(obj)
   return { line: rec.line, who, when, text: first(body), color }
 }
 

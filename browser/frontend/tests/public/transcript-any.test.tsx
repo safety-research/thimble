@@ -654,3 +654,25 @@ describe('a PDF ref', () => {
     expect(localStorage.getItem(Object.keys(localStorage).find((k) => k.includes('viewOf:docs/a.pdf')) ?? '')).toContain('pdf')
   })
 })
+
+describe("the loupe's line of a Claude Code stream record", () => {
+  const json = (n: number, obj: object) => line(n, JSON.stringify(obj))
+  const stream: TranscriptHint = { format: 'stream', score: 1 }
+  test('reads as the Transcript view shows it: a system record as its summary, a message as its words and tool calls, never its JSON', () => {
+    const sys = previewOf(json(3, { type: 'system', subtype: 'thinking_tokens', estimated_tokens: 3900, session_id: 's-1' }), stream, null)
+    expect(sys).toMatchObject({ who: 'system', text: 'thinking_tokens' })
+    const progress = previewOf(json(4, { type: 'tool_progress', tool_name: 'Bash', elapsed_time_seconds: 12, session_id: 's-1' }), stream, null)
+    expect(progress.text).toBe('Bash · 12s')
+    const call = { type: 'assistant', timestamp: '2026-05-02T10:04:00Z', message: { content: [{ type: 'text', text: 'Running the tests now.' }, { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'pytest -q tests/' } }] } }
+    expect(previewOf(json(5, call), stream, null)).toMatchObject({ who: 'assistant', when: '10:04:00', text: 'Running the tests now. · Bash pytest -q tests/' })
+    const result = { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: '12 passed in 0.4s' }] } }
+    expect(previewOf(json(6, result), stream, null).text).toBe('12 passed in 0.4s')
+    // a turn that holds only redacted thinking, which the view gives no row, names what it holds
+    expect(previewOf(json(7, { type: 'assistant', message: { content: [{ type: 'thinking', thinking: '', signature: 'x' }] } }), stream, null).text).toBe('thinking')
+    for (const p of [sys, progress]) expect(p.text).not.toMatch(/[{"]/)
+  })
+  test('a record with no words of any kind reads as its fields, not as JSON', () => {
+    const p = previewOf(json(8, { id: 8, ok: true, params: { pr: 66191 }, tags: [] }), null, null)
+    expect(p.text).toBe('id: 8 · ok: true · params: {…} · tags: []')
+  })
+})
