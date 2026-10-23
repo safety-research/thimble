@@ -17,8 +17,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import { busyWhile } from '../bar/busy'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
-import { fixerCall, fixerCheck, fixerEnded, fixOfAgent, FIXER } from './fixer'
-import { fixesDir, refreshFixes, reloadIfDue } from './fixes'
+import { fixerCall, fixerCheck, fixerEnded, fixOfAgent, FIXER, recoverFixers } from './fixer'
+import { fixesDir, fixesNow, refreshFixes, reloadIfDue } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
 import { requestFix } from './request'
@@ -62,9 +62,9 @@ export const registerFix: Register = on => {
     void (async () => {
       await knowFixers($)
       const list = await refreshFixes($)
-      for (const f of list?.fixes ?? []) {
-        if (f.state === 'working') void busyWhile($, `fixing: ${cut(f.title, 36)} · in a copy`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
-      }
+      const working = (list?.fixes ?? []).filter(f => f.state === 'working')
+      for (const f of working) void busyWhile($, `fixing: ${cut(f.title, 36)} · in a copy`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
+      await recoverFixers($, working)
     })().catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
@@ -116,7 +116,12 @@ export const registerFix: Register = on => {
   // the end of main's turn: a reload of the plugins asked inside it runs now
   on('turn.complete', { reason: /^[\s\S]*$/ }, async ($, e, next) => {
     const r = await next(e)
-    if (e.agentId === undefined) $.clock.after(0, () => { void reloadIfDue($).catch(() => undefined) })
+    if (e.agentId === undefined) {
+      $.clock.after(0, () => {
+        void reloadIfDue($).catch(() => undefined)
+        void (async () => recoverFixers($, ((await fixesNow($))?.fixes ?? []).filter(f => f.state === 'working')))().catch(() => undefined)
+      })
+    }
     return r
   }).catch(($, e, next) => next(e))
 

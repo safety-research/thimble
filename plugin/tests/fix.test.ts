@@ -145,7 +145,9 @@ test('a request starts the fixer in its copy; its shell runs in the sandbox, and
   expect((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-2', agentId: 'agent-fixer-1', file_path: `${WORK}/plugin/bar/bar.tsx` }, ran)).result.ran).toBe(`${WORK}/plugin/bar/bar.tsx`)
   expect(String((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-3', agentId: 'agent-fixer-1', file_path: '/made-up/data/notes.md' }, ran)).deny)).toContain('only its copy')
   expect(String((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-3b', agentId: 'agent-fixer-1', file_path: `${WORK}/../../live/plugin/x.ts` }, ran)).deny)).toContain('only its copy')
-  expect(String((await s.call('tool.call', { tool: 'WebFetch', tool_use_id: 'tu-4', agentId: 'agent-fixer-1', url: 'https://example.com' }, ran)).deny)).toContain('only Bash')
+  expect(String((await s.call('tool.call', { tool: 'WebFetch', tool_use_id: 'tu-4', agentId: 'agent-fixer-1', url: 'https://example.com' }, ran)).deny)).toContain('works offline')
+  // its hand-back, which ends its run, goes through
+  expect((await s.call('tool.call', { tool: 'SubagentHandback', tool_use_id: 'tu-4b', agentId: 'agent-fixer-1', message: 'Title: x' }, async () => ({ result: { ran: 'handed back' } }))).result.ran).toBe('handed back')
   // main: thimble's own verbs and folder are refused; the person's shell verbs are not
   expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5', command: 'thimble fix apply 1 --ask -' }, ran)).deny)).toContain('Only thimble and the person')
   expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-5b', command: 'cd x && thimble  fix send 1 --answer pr' }, ran)).deny)).toContain('Only thimble and the person')

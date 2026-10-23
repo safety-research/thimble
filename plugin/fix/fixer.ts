@@ -125,8 +125,9 @@ export async function fixerCall($: Engine, e: Any, id: number): Promise<{ comman
     const ok = p.startsWith('/') && !p.split('/').includes('..') && writable(argv).some(w => p === w || p.startsWith(`${w}/`))
     return ok ? null : { deny: `The fixer changes only its copy of thimble (${writable(argv)[0] ?? 'the copy'}); ${p || 'that file'} is outside it.` }
   }
-  if (['Read', 'Grep', 'Glob'].includes(e.tool)) return null
-  return { deny: `The fixer uses only Bash, Read, Write, Edit, Grep and Glob.` }
+  // what reaches past the copy and the sandbox: the network, other agents, other servers
+  if (/^(?:WebFetch|WebSearch|Agent|Task|SendMessage)$|^mcp__/.test(String(e.tool))) return { deny: `The fixer works offline, in its copy of thimble: ${e.tool} is not for it.` }
+  return null
 }
 
 /** A fixer's call needs no dialog when thimble wrapped it in the sandbox, or it writes in its copy. */
@@ -165,6 +166,24 @@ export async function fixerEnded($: Engine, e: Any, id: number): Promise<void> {
   const kind = done?.state === 'ready' ? 'ready' : done?.state === 'request' ? 'request' : 'failed'
   await setFixLine($, { id, kind })
   if (kind === 'ready') await tellAtNextPrompt($, `fix-${id}`, `thimble's fixer finished fix ${id} ("${done?.title}"); it waits for the person's y. Nothing for you to do.`)
+}
+
+/** A fix that still says `working` whose fixer no longer runs (its end came while the plugin reloaded, or never
+ *  reached it): thimble takes what its copy holds, as at its end. */
+export async function recoverFixers($: Engine, working: Fix[]): Promise<void> {
+  if (!working.length) return
+  const map = await fixers($)
+  let alive: Set<string>
+  try {
+    alive = new Set((await $.agent.list()).filter(a => !['completed', 'failed', 'killed', 'ended', 'stopped'].includes(String(a.status))).map(a => a.id))
+  } catch {
+    return
+  }
+  for (const f of working) {
+    const ids = Object.entries(map).filter(([, id]) => id === f.id).map(([a]) => a)
+    if (ids.some(a => alive.has(a))) continue
+    await fixerEnded($, { agentId: ids[0] ?? '', answer: '' }, f.id)
+  }
 }
 
 /** The fixer could not be told apart (a reload lost it) or failed to start: the line says so. */
