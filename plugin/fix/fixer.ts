@@ -97,7 +97,20 @@ export async function startFixer($: Engine, fix: Fix, earlier = false): Promise<
   await $.state.set(FIXERS, { ...(await fixers($)), [r.agentId]: fix.id } as never)
   const word = `fixing: ${cut(fix.title, 36)} · in a copy`
   void busyWhile($, word, async () => (await fixOf($, fix.id))?.state === 'working')
+  watch($, fix.id)
   return null
+}
+
+/** While a fix works, a look every few seconds: a fixer that ended without its end reaching this plugin (a reload
+ *  between) is taken as it stands. */
+function watch($: Engine, id: number): void {
+  let t: { cancel?: () => void } | null = null
+  const look = async () => {
+    const f = await fixOf($, id)
+    if (f?.state !== 'working') { t?.cancel?.(); return }
+    await recoverFixers($, [f])
+  }
+  try { t = $.clock.every(5000, () => { void look().catch(() => undefined) }) as unknown as { cancel?: () => void } } catch { t = null }
 }
 
 const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`
@@ -149,7 +162,16 @@ export function endOf(answer: string): { title: string; summary: string; request
 }
 
 /** The fixer ended: thimble commits its change and tests it, then the line says what came of it. */
+const ending = new Set<number>()
+
 export async function fixerEnded($: Engine, e: Any, id: number): Promise<void> {
+  if (ending.has(id)) return
+  ending.add(id)
+  try { await ended($, e, id) } finally { ending.delete(id) }
+}
+
+async function ended($: Engine, e: Any, id: number): Promise<void> {
+  if ((await fixOf($, id))?.state !== 'working') return
   const all = await fixers($)
   delete all[String(e.agentId)]
   await $.state.set(FIXERS, all as never)
