@@ -295,6 +295,7 @@ test('a corrected citation draws as a settled one (underlined, the purple tint o
   expect(citeLook('x', 'dark')).toEqual({ underline: true, hover: { scope: citeScope('x'), backgroundColor: '#423054' } })
   expect(citeLook('x', 'light')).toEqual({ underline: true, hover: { scope: citeScope('x'), backgroundColor: '#f3e6ff' } })
   expect([citeTint('failed', 'dark'), citeTint('failed', 'light')]).toEqual(['#4b3430', '#faebea'])
+  expect(els.some(n => n.type === 'Text' && /\?/.test(String(n.props.children)))).toBe(false)
   // without a gutter (a reply inside the tray's frame) no margin cell stands before its rows: they start at the left
   const rowsOf = (gutter?: boolean) => messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: false, spin: '', gutter, onMark: () => undefined }).props.children
   expect(rowsOf()[0].props.children[0].props.width).toBe(2)

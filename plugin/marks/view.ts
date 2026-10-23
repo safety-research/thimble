@@ -22,13 +22,14 @@
 //                its words: only the part the check cited is the mark, the rest reads as the reply's plain words
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
 //                did not show them), or it did not run or gave no answer: red (`error`), underlined, with ` ×`
-//                after it, a soft red tint on hover. One look whatever the cause
+//                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
+//                look whatever the cause
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
-// explainer in teal, underlined; a span inside a mark's words keeps the mark's press and look, its `tint` behind them
-// in place of the citation's. While the tray shows
+// explainer highlighted teal or a heads-up orange (a fill behind the words); a span inside a mark's words keeps the
+// mark's press and look, its fill behind them in place of the citation's tint. While the tray shows
 // a mark (`focus`), it is drawn bold on its tint, so the open one is easy to find. `dim` draws the words dim (a rewrite of them runs),
 // and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
 //
@@ -120,7 +121,7 @@ export function citeHeat(id: string): { hover: { scope: string } } {
 
 /** A citation's words wherever they show (the reply, the tray, the evidence, the claims and threads panes): the text's
  *  own color, underlined (Claude Code's underline takes the text's color), no tint at rest, so they read as the
- *  reply's words and stand apart from an explainer's teal and a heads-up's orange, which are colored words; the
+ *  reply's words and stand apart from an explainer's teal and a heads-up's orange, which are fills behind words; the
  *  citations' tint behind them on hover (citeHover, its group named by `id`). */
 export function citeLook(id: string, theme: Theme = themeLast()): { underline: true; hover: { scope: string; backgroundColor: string } } {
   return { underline: true, hover: citeHover(id, 'verified', theme) }
@@ -222,7 +223,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   if (r.tag === 'spin') p.color = PURPLE
   else if (r.tag) p.color = 'error'
   else Object.assign(p, wordsLook(look.status, id))
-  // a span inside the mark's words: its tint at rest, the citation's on hover
+  // a span inside the mark's words: its fill at rest, the citation's tint on hover
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
   if (bg) p.backgroundColor = bg
