@@ -3,7 +3,8 @@
 # commit adds, the names of the files it adds, and its message, for:
 #
 #   - absolute home folder paths (/home/<name>/, /Users/<name>/) and paths under /mnt, except the tests' made-up
-#     home /home/t/ and the placeholders /home/you/, /home/user/ and /home/<name>/;
+#     homes and mounts (/home/t/, /home/dev/, /Users/sam/, /mnt/data/, ... in GENERIC_ALLOW) and the placeholders
+#     /home/you/, /home/user/ and /home/<name>/;
 #   - private key headers and token shapes (Anthropic, OpenAI, GitHub, AWS, Google, Slack, Hugging Face, npm, Stripe,
 #     JSON web tokens);
 #   - what gitleaks finds, when gitleaks is installed;
@@ -82,9 +83,14 @@ GENERIC = [
     ('Stripe key', r'[rs]k_live_[A-Za-z0-9]{20,}', WORD_BEFORE),
     ('JSON web token', r'eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}', WORD_BEFORE),
 ]
-# Text these match is never a finding: the made-up home folder the tests use, /home/t/, and the placeholders the docs
-# use, such as /home/you/. A placeholder in angle brackets or with a $ (/home/<name>/, /home/$USER/) never matches.
-GENERIC_ALLOW = [r'/(?:home|Users)/(?:t|you|user|username|name|me)(?![\w.-])']
+# Text these match is never a finding: the made-up home folders and mounts the tests and their fixtures use (a home of
+# one letter, such as /home/t/; a role, such as /home/dev/; the two made-up people ana and sam; /mnt/data/, /mnt/disk/,
+# /mnt/d/), a path cut short with … (/mnt/…/x), and the placeholders the docs use, such as /home/you/. A placeholder in
+# angle brackets or with a $ (/home/<name>/, /home/$USER/) never matches.
+GENERIC_ALLOW = [
+    r'/(?:home|Users)/(?:[a-z]|you|user|username|name|me|someone|dev|ci|analyst|kept|ana|sam)(?![\w.-])',
+    r'/mnt[/](?:data|disk|d|…)(?![\w.-])',
+]
 
 # The author and owner of a plugin are public on purpose: their values in a plugin's manifest are never findings.
 MANIFEST = re.compile(r'(^|/)\.claude-plugin/(plugin|marketplace)\.json$')
