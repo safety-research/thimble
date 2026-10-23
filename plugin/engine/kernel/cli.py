@@ -9,12 +9,10 @@ In a shell:
                                    release still needs, once
     thimble fixes                  your fixes that are not in the release: on, off or ready (also: thimble fix list)
     thimble fix show N             what fix N does, in a few lines
+    thimble fix apply N            use a ready fix now (it asks y/N first)
     thimble fix share N            post fix N as a GitHub issue; you check it before it goes
-    thimble fix off N | on N       turn fix N off, or on (on asks for your key in the terminal)
-    thimble fix off | on           all your fixes off (the plain release), or on again
-    thimble browser [FOLDER]       the browser workbench on a folder (the same as thimble-browser)
-    thimble demo [NAME...]         the demo datasets, in the browser workbench
-    thimble doctor                 a checklist of what works, with the fix for each problem
+    thimble fix off [N]            one fix off, or all of them (the plain release)
+    thimble fix on [N]             one fix on, or all of them again (asks y/N first)
 
 In Claude Code, /thimble-fix <what should work differently> asks Claude for a new fix.
 
@@ -29,11 +27,6 @@ Claude runs these in a session:
                                                (--wait waits for it; thimble label --help says more)
     thimble coverage [--all]                   what entered Claude's context, what was only computed over, and what
                                                was never touched (of this session, or of every session)
-    thimble fix [list|show ID|diff ID|export ID [--to DIR]|share ID|off|on|update]
-                                               your changes to thimble: list them, read one, save one as files, share
-                                               one as a GitHub issue you check and submit, turn them all off (the plain
-                                               release) or on again. In thimble, /thimble-fix <words> asks for one and
-                                               /thimble-fix lists them
     thimble update --continue                  in the session thimble reapply opens: records the fixes Claude brought
                                                back, turns them on, and leaves out the rest
 
@@ -505,12 +498,6 @@ def cmd_reapply(a: argparse.Namespace) -> int:
     return FX.cmd_reapply(a)
 
 
-def cmd_doctor(a: argparse.Namespace) -> int:
-    from . import shell as SH  # noqa: PLC0415
-
-    return SH.doctor(a)
-
-
 def _no_share(text: str) -> str:
     from . import fixes as FX  # noqa: PLC0415
 
@@ -597,16 +584,9 @@ def main(argv: list[str] | None = None) -> int:
                        "back what is still needed, and runs thimble update --continue. Run it in a shell.")
     p.add_argument("--print", action="store_true", help="print Claude's first message, and open nothing")
     p.set_defaults(fn=cmd_reapply)
-    p = sub.add_parser("doctor", help="a checklist of what works, with the fix for each problem")
-    p.add_argument("--offline", action="store_true", help="do not look for a newer release")
-    p.set_defaults(fn=cmd_doctor)
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "fixes":
         args = ["fix", "list", *args[1:]]
-    if args and args[0] in ("browser", "demo"):
-        from . import shell as SH  # noqa: PLC0415
-
-        return SH.browser(args[0], args[1:])
     if not args or args[0] in ("-h", "--help", "help"):
         # the commands in one screen: argparse's usage lines would only repeat them
         print(_help())
