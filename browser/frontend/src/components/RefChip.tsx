@@ -1,7 +1,8 @@
 // A ref on every surface. Standalone (no `value`) it is a Chip: the icon of what it points to and a short name, the
 // evidence chip for the data and the accent chip for the agent's work (refTone). Inside prose (`value`) it is an inline
 // citation: the text itself is the link, with a quiet accent underline. `cite` marks a citation; in GlyphCites contexts
-// a standalone citation is its target's glyph alone, a file's the glyph of its type (lib/fileGlyph). The links toggle
+// a standalone citation is its target's glyph alone, a file's the glyph of its type (lib/fileGlyph), except a citation
+// of a whole card, which is the card's chip with its name, as the chips under a step's Cards are. The links toggle
 // hides every citation (lib/links). Hovering shows the evidence in a label: the excerpt with the record's facts and the
 // cited words highlighted; for a table cell (`card:<id>#<col>/<row>`) the table around it, or in place when the table is
 // drawn right above; for printed output lines (`@out<i>#L<n>`) the lines around it; for a call (`call:<chat>/<n>`) the
@@ -58,7 +59,7 @@ export { decodeLabel }
 
 /** True where a standalone citation is its target's glyph alone, its name in the hover, so a long name does not crowd
  * the text: chat replies, inside a card's content wherever the card is drawn, and a report's text. A cited number stays
- * the link's text. */
+ * the link's text, and a whole card's citation its chip with the card's short name. */
 export const GlyphCites = createContext(false)
 
 const ID_TOKEN = /\b(cell|concept|chat|group|report|view|call)[:]([A-Za-z0-9_-]{4,})(?:\/\d+)?(?:#[A-Za-z0-9_@.-]*)?/g
@@ -233,8 +234,8 @@ export interface RefChipProps {
   late?: boolean
   /** the chip carries `data-anchor`, so a ⌘-click on it asks about its ref */
   anchor?: boolean
-  /** a citation in prose: its target's glyph alone where GlyphCites holds (and for a card anywhere), and hidden while
-   * the links are off */
+  /** a citation in prose: its target's glyph alone where GlyphCites holds (and for a part of a card anywhere), a whole
+   * card's chip with its name, and hidden while the links are off */
   cite?: boolean
 }
 
@@ -286,10 +287,12 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const wholeCell = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null ? parsed.cellId : null
   const asText = value != null
   const icon = refIcon(ref)
-  // a standalone citation of a card, or inside a card or report text (GlyphCites), is its glyph alone with its name in
-  // the hover; a chip that lists what a step made keeps its name
+  // a standalone citation of a part of a card (a table's cell, an output's lines), or inside a chat reply, a card or
+  // report text (GlyphCites), is its glyph alone with its name in the hover; a citation of a whole card is the card's
+  // chip with its name, as the chips that list what a step made are
   const glyphCites = useContext(GlyphCites)
-  const iconOnly = !asText && !broken && !!cite && (glyphCites || parsed?.kind === 'cell')
+  const wholeCard = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null && parsed.step == null
+  const iconOnly = !asText && !broken && !!cite && !wholeCard && (glyphCites || parsed?.kind === 'cell')
 
   const call = parsed?.kind === 'call' ? parsed : null
   useEffect(() => ensureRefName(ws, ref), [ws, ref])

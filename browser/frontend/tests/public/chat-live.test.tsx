@@ -86,7 +86,7 @@ describe('citations in a reply read inline', () => {
     expect(rule(css('components.css'), '.mark')).toMatch(/display: inline-block;/)
   })
 
-  test('a card pointed at in a reply is a small glyph in the line, with no box', () => {
+  test('a file pointed at in a reply is a small glyph in the line, with no box', () => {
     const r = rule(css('refchip.css'), '.chat-text .chip.refchip-icon')
     expect(r).toMatch(/border: 0;/)
     expect(r).toMatch(/background: none;/)
