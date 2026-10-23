@@ -668,6 +668,16 @@ def test_a_card_s_cell_is_evidence_and_shows_as_its_table_with_the_cell_cited():
     assert fixed["status"] == "corrected" and fixed["shown"] == "12" and fixed["was"] == "15"
 
 
+def test_a_total_the_cell_s_column_name_gives_counts_as_shown_but_never_alone():
+    cards = [{"id": "b7c2d4", "title": "Backlog left per run", "outputs": [
+        {"out": 0, "corner": "run", "cells": [["of_40_still_open", "run-a", "12"], ["of_40_still_open", "run-b", "9"]]}]}]
+    ok = check_mark(mark("12 of the 40 PRs"), card("card:b7c2d4#of_40_still_open/run-a"), [], "/data", cards=cards)
+    assert ok["status"] == "verified"
+    # the column's name gives the total only beside the cell's own value
+    assert check_mark(mark("40 PRs"), card("card:b7c2d4#of_40_still_open/run-a"), [], "/data", cards=cards)["status"] == "failed"
+    assert check_mark(mark("13 of the 40 PRs"), card("card:b7c2d4#of_40_still_open/run-a"), [], "/data", cards=cards)["status"] == "failed"
+
+
 def test_a_card_s_printed_line_is_evidence_and_a_printed_table_reads_as_a_table():
     r = check_mark(mark("12"), card("card:k3f9a1@out1#L3"), [], "/data", cards=CARDS)
     assert r["status"] == "verified"

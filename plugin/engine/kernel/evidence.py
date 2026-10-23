@@ -1674,6 +1674,21 @@ def _card_shown(target: str, ps: list[dict[str, Any]]) -> dict[str, Any]:
     return shown
 
 
+def framed(target: str, places: list[dict[str, Any]], approx: bool = False) -> bool:
+    """Cells show words that also name a number their column's name gives: "139 of the 176 PRs" cites the cell 139 of
+    the column `of_176_still_open`. A cell's value must show a number of the words itself; its row's and its column's
+    names, read as words, may show the rest, as a total or a unit."""
+    cells = [p for p in places if p["out"][0] == "cells"]
+    if not cells or len(cells) != len(places):
+        return False
+    values = wordnums("\n".join(p["value"] for p in cells), counts=True)
+    nums = marked_numbers(wordnums(target, counts=True))
+    if not any(has_number(v, values, dates=d, approx=approx) for v, d in nums):
+        return False
+    names = "\n".join(f"{p['text']} {re.sub(r'[_.]+', ' ', str(p['col']))}" for p in cells)
+    return shows(target, names, approx)
+
+
 def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
     """The problems of card evidence, and the evidence to show: each cited place must be one of the session's cards,
     and together they show the words (a cell's value, with its row's name; a line of printed output). Words that hold
@@ -1694,7 +1709,8 @@ def check_card(target: str, ev: Any, cards: list[dict[str, Any]] | None, approx:
     shown = {**shown_all[0], **({"more": shown_all[1:]} if len(shown_all) > 1 else {})}
     values, texts = [p["value"] for p in places], [p["text"] for p in places]
     one = places[0]
-    if not (shows(target, "\n".join(values), approx) or shows(target, "\n".join(texts), approx)):
+    if not (shows(target, "\n".join(values), approx) or shows(target, "\n".join(texts), approx)
+            or framed(target, places, approx)):
         if len(places) > 1:
             return [instead(" and ".join(p["where"] for p in places), target, texts, approx)], shown
         if one["out"][0] == "cells":
