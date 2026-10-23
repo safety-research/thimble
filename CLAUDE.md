@@ -25,10 +25,10 @@ https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) 
    - **Claude Code sign-in**: show this text and get a yes: "This uses your Claude subscription through Claude Code
      and will launch headless Claude Code sessions in the background." Run `thimble-browser --setup --how claude-code
      --yes`.
-   - **API key**: never see the key. Give the user one command for their system that writes it from the clipboard to
-     a file only they can read, such as `(umask 077; pbpaste > ~/.thimble-api-key)` on macOS (Linux: `wl-paste` or
-     `xclip -selection clipboard -o`). When they say it is done, run `thimble-browser --setup --key-file
-     ~/.thimble-api-key`. Never read, print or copy that file. Offer to delete it, and delete it only on a yes.
+   - **API key**: never see the key. Give the user one command to run in their own terminal (not with `!` here)
+     that writes it from the clipboard to a file only they can read, such as `(umask 077; pbpaste >
+     ~/.thimble-api-key)` on macOS (Linux: `wl-paste` or `xclip -selection clipboard -o`). When they say it is done,
+     run `thimble-browser --setup --key-file ~/.thimble-api-key`. Never read, print or copy that file. Offer to delete it, and delete it only on a yes.
    - **WIF**: ask for the path of its config file, or offer to look for one; on a yes, run `thimble-browser --setup
      --find-wif`, which lists the files it can use, by path only. Run `thimble-browser --setup --how wif --wif-file
      <path>`. Never print the file.
