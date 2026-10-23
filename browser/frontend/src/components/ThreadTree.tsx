@@ -13,7 +13,7 @@ import { Popover } from './Menu'
 import { Spinner } from './Spinner'
 import { Tipped, useTooltip } from './Tooltip'
 
-/** What a row's waiting dot says. */
+/** What a row's waiting dot says, unless the row names its own wait (ThreadNode.waitText). */
 export const WAITING_TEXT = 'Waiting for you'
 
 export interface ThreadNode {
@@ -31,6 +31,8 @@ export interface ThreadNode {
   unread?: boolean
   /** a permission prompt of its session or its fork waits for the analyst */
   waiting?: boolean
+  /** what the waiting dot says on hover, when not "Waiting for you" (Claude Code asks its agent in the terminal) */
+  waitText?: string
   /** mono at the row's right edge: when an agent's run ended (13:40) */
   time?: string
   /** how an agent's run ended: the green check for done, ✕ for a failed or stopped run */
@@ -326,8 +328,8 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
           {!n.running && n.ended === 'done' && <Mark kind="verified" label="done" className="tt-mark" />}
           {!n.running && n.ended === 'failed' && <Mark kind="failed" label="failed" className="tt-mark" />}
           {(n.waiting || hidden?.waiting) && (
-            <Tipped text={WAITING_TEXT} className="tt-wait-tip">
-              <span className="dot tt-dot tt-waiting" role="img" aria-label={WAITING_TEXT} />
+            <Tipped text={(n.waiting && n.waitText) || WAITING_TEXT} className="tt-wait-tip">
+              <span className="dot tt-dot tt-waiting" role="img" aria-label={(n.waiting && n.waitText) || WAITING_TEXT} />
             </Tipped>
           )}
           {((n.unread && !isCur) || hidden?.unread) && <span className="dot tt-dot" role="img" aria-label="Unread" />}

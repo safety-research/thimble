@@ -1,7 +1,7 @@
 // The top bar: at the left the thimble mark and the corpus's folder in mono, which opens the switcher, the server's
-// workspaces as the start page lists them (WorkspaceList), this one marked; the surfaces' tabs over the main area (a
-// click shows the surface, a drag takes it to a pane); at the right Undo and Redo (shell/undo.ts), Report a problem,
-// the citations toggle (Hide citations), the theme popover and the settings gear.
+// workspaces as the start page lists them (WorkspaceList), this one marked, and on a demo page the Demo tag (DemoTag);
+// the surfaces' tabs over the main area (a click shows the surface, a drag takes it to a pane); at the right Undo and
+// Redo (shell/undo.ts), Report a problem, the citations toggle (Hide citations), the theme popover and the settings gear.
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Button, type TabOption } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -12,6 +12,7 @@ import { bus, type ProblemPrefill, type Tab } from '../lib/bus'
 import { toggleLinks, useLinksVisible } from '../lib/links'
 import type { WorkspaceRow } from '../lib/types'
 import { shortPath, shownPath } from '../lib/workspace'
+import { DemoTag } from './DemoTag'
 import { ProblemReportPopover } from './ProblemReport'
 import { SettingsPopover } from './SettingsPopover'
 import { ThemePopover } from './ThemePopover'
@@ -102,6 +103,7 @@ export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopB
         <Icon name="thimble" size={18} className="shell-mark" />
         <span className="shell-word">thimble</span>
         <WorkspaceSwitcher ws={ws} label={path ? shortPath(path) : ws} />
+        <DemoTag />
       </span>
       <nav className="tabs shell-tabs" role="tablist" aria-label="Surfaces">
         {tabs.map((t) => (

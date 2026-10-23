@@ -96,6 +96,7 @@ describe('the card', () => {
       for (const above of [false, true]) {
         const el = await card(meta(extra), { attached: { session: 's1', cwd: '/c', since: '' } }, above)
         expect(el.textContent, JSON.stringify(extra)).not.toMatch(/In your terminal|agent tray|\/tasks/)
+        expect(el.querySelector('.chat-sub-terminal')).toBeNull()
       }
     // a running card with nothing else to say has no empty row under its head
     const running = await card(meta({}), null, true)

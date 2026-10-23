@@ -509,6 +509,25 @@
 .wu-bar .wu-stop {
   flex: none;
 }
+/* in Writing's place while Claude Code asks the writer a permission prompt in the terminal (WriteAction): words, not a
+   button, with the still warning dot that marks a wait for the analyst everywhere */
+.wu-wait {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin-left: 6px;
+  color: var(--text-secondary);
+  font: var(--type-body-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wu-wait-dot {
+  width: 8px;
+  height: 8px;
+}
 .wu-bar > .chip {
   margin-right: 4px;
 }
@@ -3051,8 +3070,10 @@ body .bn-mantine .bn-form-popover .mantine-TextInput-input {
   }
 }
 
-/* a check whose passages the analyst changed since it ran: how many, then Run (Checks.StaleRow) */
+/* a check whose passages the analyst changed since it ran: how many, then Run (Checks.StaleRow); a run whose agent
+   waits on a permission prompt in the terminal says so the same way */
 .wu-check-stale,
+.wu-check-wait,
 .wu-check-refused {
   display: flex;
   flex-wrap: wrap;

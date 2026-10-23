@@ -11,6 +11,7 @@ import { Icon, type IconName } from '../components/Icon'
 import { Menu, Popover } from '../components/Menu'
 import { api } from '../lib/api'
 import { bus } from '../lib/bus'
+import { demoStop } from '../lib/demo'
 import { refreshProposals, useProposals } from '../lib/proposals'
 import { useViewList } from '../lib/views'
 import { startSurfaceDrag } from '../lib/surfaces'
@@ -86,7 +87,7 @@ export interface BuiltView {
 /** Whether a proposal is a view the bar lists: built, or built before and being changed now. Pure. */
 export function listedAsView(p: Proposal, known: ReadonlySet<string>): boolean {
   if (p.status === 'built') return true
-  return (p.status === 'queued' || p.status === 'building') && (!!p.revision || known.has(p.slug))
+  return (p.status === 'queued' || p.status === 'building') && !p.held && (!!p.revision || known.has(p.slug))
 }
 
 /** The views the bar lists and the proposals not yet built (which the bar does not show), from the views list and the
@@ -110,8 +111,9 @@ export function barList(list: readonly View[], all: readonly Proposal[]): { view
       .filter((v) => !proposals.some((p) => p.slug === v.slug))
       .map((v) => ({ slug: v.slug, name: v.name, first_file: v.first_file, files: v.files, n_files: v.n_files, claims: v.claims, built: v.built, version: v.version, label_controls: v.label_controls, libs: v.libs, builtin: v.origin === 'builtin' })),
   ]
-  // a view proposal (`suggested`) waits on the chat's card until it is accepted
-  return { views: built, proposals: proposals.filter((p) => !listed.includes(p) && p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested') }
+  // a view proposal (`suggested`) waits on the chat's card until it is accepted, and a held proposal (an orientation's
+  // from before 0.8.0) appears once it is built
+  return { views: built, proposals: proposals.filter((p) => !listed.includes(p) && p.status !== 'built' && p.status !== 'dropped' && p.status !== 'suggested' && !p.held) }
 }
 
 /** The views the bar lists and the proposals not yet built (barList), read and kept fresh; `ready` once both lists
@@ -177,7 +179,7 @@ export function ViewsBar({ ws, value, onChange, views, compact = false }: Props)
   }
   const sendAsk = () => {
     const text = ask.trim()
-    if (!text) return
+    if (!text || demoStop()) return
     track('view-build', { target: 'panel:files', detail: { asked: true } })
     setAsking(false)
     setAsk('')

@@ -1767,6 +1767,19 @@ button.model-line-part[aria-expanded='true'] {
   margin-top: 3px;
   color: var(--status-warning);
 }
+/* the Manual-mode notice (backend notices `manual-mode`): the problem red of a failure for its edge, glyph and words, in
+   both themes (the tokens change with the theme) */
+.chat-notice[data-kind='manual-mode']:not([data-closed]) {
+  border-color: var(--status-negative);
+  background: var(--status-negative-soft);
+  color: var(--status-negative);
+}
+.chat-foot .chat-notice[data-kind='manual-mode']:not([data-closed]) {
+  background: color-mix(in oklab, var(--status-negative) 12%, var(--surface-card));
+}
+.chat-notice[data-kind='manual-mode']:not([data-closed]) .chat-notice-ico {
+  color: var(--status-negative);
+}
 .chat-notice-body {
   display: flex;
   flex: 1 1 auto;
@@ -1964,6 +1977,12 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-tertiary);
   font: var(--type-body-sm);
   white-space: nowrap;
+}
+/* in the spinner's place while Claude Code asks the builder in the terminal (ViewChip), and on a card's note line */
+.view-chip-wait,
+.chat-sub-wait-dot {
+  width: 8px;
+  height: 8px;
 }
 button.view-chip-values {
   display: inline-flex;

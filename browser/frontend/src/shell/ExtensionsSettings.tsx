@@ -7,9 +7,11 @@
 // until its switch turns it off; one that cannot run here whatever the switch says (switched off in thimble's config,
 // or unable to load) has its switch disabled and drawn off. One thimble ships that is not added reads as off, and
 // turning it on adds it on Save. An extension's views follow it, each with its own switch, which stands where the check
-// on whether it fits put it until the analyst moves it, and the check's reason as its line. Conflicts among the running
-// extensions are listed under the rows.
+// on whether it fits put it until the analyst moves it, and the check's reason as its line. An extension with
+// orientation instructions or an orientation program that comes on where an orientation ran asks whether to run it now;
+// the answer is sent with the rest on Save. Conflicts among the running extensions are listed under the rows.
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Segmented } from '../components/Button'
 import { Icon } from '../components/Icon'
 import { Switch } from '../components/Switch'
 import type { ExtensionRow, Extensions, LocalExtension, LocalViewRow } from '../lib/types'
@@ -53,6 +55,18 @@ export function changedLocalViews(loaded: LocalViewRow[], now: Record<string, bo
   return loaded.filter((v) => v.slug in now && now[v.slug] !== v.on).map((v) => [v.slug, now[v.slug]])
 }
 
+/** Whether the row asks to run the extension's orientation now: it is switched on here and either the server offers
+ * it, or Run now can run it here, an orientation ran here, and this switch was just turned on. Pure. */
+export function asksToRun(e: ExtensionRow, on: boolean, orientationRan: boolean): boolean {
+  if (!on || e.locked) return false
+  return !!e.offer || (!!e.orients && orientationRan && !e.on)
+}
+
+/** The answers a save sends, [extension, run] for each row that still asks and was answered. Pure. */
+export function answeredRuns(data: Extensions, on: Record<string, boolean>, answers: Record<string, boolean>): [string, boolean][] {
+  return data.extensions.filter((e) => e.name in answers && asksToRun(e, !!on[e.name], !!data.orientation_ran)).map((e) => [e.name, answers[e.name]])
+}
+
 /** The line under an extension's name: why it does not run here, else its description, else what it gives. One
  * thimble ships that is not added has no why, since its switch off says it. Pure. */
 export function extensionLine(e: ExtensionRow): string {
@@ -90,6 +104,12 @@ export const localViewDetails = (v: LocalViewRow): Detail[] => (v.file_viewer &&
 /** The version beside an extension's name: only for one thimble does not ship, since a shipped one has thimble's. Pure. */
 export const extensionVersion = (e: ExtensionRow): string => (e.builtin ? '' : e.version)
 
+type RunAnswer = 'run' | 'not' | ''
+const RUN_OPTIONS = [
+  { value: 'run', label: 'Run now' },
+  { value: 'not', label: 'Not now' },
+] as const
+
 type RowKind = 'local-view' | 'extension' | 'extension-view'
 
 interface RowProps {
@@ -103,12 +123,13 @@ interface RowProps {
   wrap?: boolean
   details?: Detail[]
   control: ReactNode
+  children?: ReactNode
 }
 
-/** One row: the name, the switch at the right of the name, and the line under it, cut to one line unless it is a
- * reason. When there are `details`, or the line is cut, a caret after the name opens the row:
+/** One row: the name, the switch at the right of the name, the line under it, cut to one line unless it is a reason,
+ * and `children` under all that. When there are `details`, or the line is cut, a caret after the name opens the row:
  * the line in full, then the details. */
-function SwitchRow({ row, kind, labelId, name, version, line, wrap, details = [], control }: RowProps) {
+function SwitchRow({ row, kind, labelId, name, version, line, wrap, details = [], control, children }: RowProps) {
   const [open, setOpen] = useState(false)
   const [cut, setCut] = useState(false)
   const [nameCut, setNameCut] = useState(false)
@@ -180,6 +201,7 @@ function SwitchRow({ row, kind, labelId, name, version, line, wrap, details = []
           )}
         </div>
       )}
+      {children}
     </div>
   )
 }
@@ -193,6 +215,8 @@ interface Props {
   /** the switches of the workspace's own views, by view */
   localOn: Record<string, boolean>
   setLocalOn: (slug: string, v: boolean) => void
+  answers: Record<string, boolean>
+  setAnswer: (name: string, run: boolean) => void
 }
 
 function LocalGroup({ local, on, setOn }: { local: LocalExtension; on: Record<string, boolean>; setOn: (slug: string, v: boolean) => void }) {
@@ -220,7 +244,7 @@ function LocalGroup({ local, on, setOn }: { local: LocalExtension; on: Record<st
   )
 }
 
-export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn, localOn, setLocalOn }: Props) {
+export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn, localOn, setLocalOn, answers, setAnswer }: Props) {
   const local = data.local?.views.length ? data.local : null
   if (!data.extensions.length && !local) return null
   return (
@@ -232,6 +256,7 @@ export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn, localOn
             {EXTENSIONS_LABEL}
           </h3>
           {data.extensions.map((e) => {
+            const asks = asksToRun(e, !!on[e.name], !!data.orientation_ran)
             const id = `settings-ext-${e.name}`
             return (
               <div className="settings-ext" key={e.name} data-extension={e.name} data-active={e.active}>
@@ -245,7 +270,21 @@ export function ExtensionsSettings({ data, on, setOn, viewOn, setViewOn, localOn
                   wrap={!e.addable && !!e.note}
                   details={extensionDetails(e)}
                   control={<Switch checked={!!on[e.name] && !e.locked} disabled={e.locked} onChange={(v) => setOn(e.name, v)} aria-labelledby={id} />}
-                />
+                >
+                  {asks && (
+                    <div className="settings-ext-ask">
+                      <span>Run its orientation now?</span>
+                      <Segmented<RunAnswer>
+                        size="sm"
+                        track
+                        label={`Run ${e.name}'s orientation now?`}
+                        options={RUN_OPTIONS}
+                        value={e.name in answers ? (answers[e.name] ? 'run' : 'not') : ''}
+                        onChange={(v) => setAnswer(e.name, v === 'run')}
+                      />
+                    </div>
+                  )}
+                </SwitchRow>
                 {(e.views ?? []).map((v) => {
                   const k = viewKey(e.name, v.slug)
                   const vid = `settings-ext-${e.name}-${v.slug}`
