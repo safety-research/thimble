@@ -13,8 +13,15 @@ https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) 
      them, and Claude draws cards of the data. It needs Node.js and Python, and no other access.
    - **The browser workbench too**: the same work in a web page on this machine. It takes about 1 GB of disk and needs
      access to the Claude API: an API key, Workload Identity Federation, or their Claude Code sign-in.
-2. If `~/.local/bin/thimble` exists, it is thimble 0.9's launcher. Tell the user, and offer `thimble uninstall` (or
-   removing that file) before you go on.
+2. thimble 0.9 is here when `~/.local/bin/thimble` or `~/.thimble/app` exists, or when `scripts/install.sh` (step 3)
+   stops with what it found and the commands that remove it. 0.10 does not load while 0.9's plugin is installed.
+   Before you remove anything, tell the user plainly that removing 0.9 deletes its workspaces (cards, notebooks,
+   labels, reports), which 0.10 cannot open, and offer to move them aside first (`mv ~/.thimble/app/workspaces
+   ~/thimble-0.9-workspaces`; a 0.9 clone keeps them in its own `workspaces/`, which removal leaves alone). Remove 0.9
+   only on a yes, with the commands the script printed (for `thimble uninstall`, run `~/.local/bin/thimble uninstall
+   --yes`, since you cannot answer its question; when it fails, the commands it lists after it). Never pass
+   `--remove-0.9`: it needs a terminal. When this session had 0.9 loaded, each tool call then reports "Plugin
+   directory does not exist": tell the user to type `/reload-plugins`, and go on.
 3. Clone the repository (or use the local folder the user names) and run `scripts/install.sh` in it, with
    `--no-browser` for the plugin alone, and `--no-setup` (step 4 asks instead). Add `--local` when the source is a
    local folder, so the plugin comes from it. The script checks what is missing first, one line each, and installs
