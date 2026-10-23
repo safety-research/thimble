@@ -13,8 +13,10 @@
 //   state: fixView (the selection, the marks, the diff), fixSubmit and fixDraft (submit.ts)
 import type { EngineInterface } from 'claude-code'
 
+import { quiet } from '../core/askcell.js'
 import { openPane } from '../core/pane'
 import { cut, textWidth } from '../core/text.js'
+import { ACCENT } from '../core/theme'
 import { allOffOn, applyFix, diffText, type Fix, fixesNow, refreshFixes, removeFix, shownPath, sizeOf, undoFix } from './fixes'
 import { redoFix } from './request'
 import { type Draft, draftNow, type Hit, submitAction, submitFixes, submitNow, submitSkip } from './submit'
@@ -24,7 +26,8 @@ type Engine = EngineInterface
 type Any = any
 
 const VIEW = { plugin: 'thimble', key: 'fixView' } as const
-const KEY_COLOR = 'suggestion'
+/** A key the person can press, in thimble's accent as the bar draws its keys (core/theme.ts). */
+const KEY_COLOR = ACCENT
 
 type View = { sel: number | null; marked: number[]; diff: boolean }
 
@@ -75,7 +78,8 @@ function keys(els: Any, list: [string, string, () => unknown][]): Any {
   // a plain Button with a hotkey draws `d: diff`, the key in the accent color
   return Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: list.flatMap(([k, w, press], i) => [
     ...(i ? [Text({ key: `ks${i}`, dimColor: true, children: ' · ' })] : []),
-    Button({ key: `key-${k}`, plain: true, hotkey: k, label: w, onPress: press }),
+    // under the pointer its words brighten and underline, never Claude Code's inverse, as the other panes' keys do
+    Button({ key: `key-${k}`, plain: true, hotkey: k, label: w, hover: quiet(`fix-key-${k}`), onPress: press }),
   ]) })
 }
 

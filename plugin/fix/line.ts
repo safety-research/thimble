@@ -15,6 +15,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { thimbleHome } from '../core/home'
 import { cut, textWidth } from '../core/text.js'
+import { ACCENT } from '../core/theme'
 import { applyFix, type Fix, fixesDir, fixLineNow, fixOf, notNow, setFixLine, shownPath, sizeOf, undoFix } from './fixes'
 import { openFixes } from './pane'
 import { redoFix } from './request'
@@ -23,7 +24,8 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-const KEY_COLOR = 'suggestion'
+/** A key the person can press, in thimble's accent as the bar draws its keys (core/theme.ts). */
+const KEY_COLOR = ACCENT
 
 /** The keys the line takes now, by its kind. */
 const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['d', 'r', 'n'], request: ['n'] }
@@ -91,10 +93,10 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
       dim('m', ` · ${cut(f?.error || 'its tests failed', Math.max(20, width - textWidth(title) - 30))}`)]
     second = [Text({ key: 'i', children: '  ' }), ...keyText(els, 'd', 'diff', 0), ...keyText(els, 'r', 'redo', 1), ...keyText(els, 'n', 'not now', 2)]
   } else if (l.kind === 'request') {
-    first = [Text({ key: 'g', color: 'suggestion', children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
+    first = [Text({ key: 'g', color: KEY_COLOR, children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
     second = [Text({ key: 'i', children: '  ' }), ...keyText(els, 'n', 'ok', 0), dim('m', ' · /thimble-fix lists it, and s submits it')]
   } else if (l.kind === 'update') {
-    first = [Text({ key: 'g', color: 'suggestion', children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · /thimble-fix lists your fixes')]
+    first = [Text({ key: 'g', color: KEY_COLOR, children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · /thimble-fix lists your fixes')]
   } else if (l.kind === 'problem') {
     first = [Text({ key: 't', color: 'error', wrap: 'wrap', children: `× ${l.said || `fix ${l.id} did not go through`}` })]
   } else return []
