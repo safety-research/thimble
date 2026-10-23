@@ -302,7 +302,9 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
   const unresolved = !parsed && !broken
   const wholeCell = parsed?.kind === 'cell' && parsed.col == null && parsed.out == null ? parsed.cellId : null
   const asText = value != null
-  const icon = refIcon(ref)
+  // a ref that names a folder with no slash after it shows the folder glyph once its label finds it a folder
+  const [folder, setFolder] = useState(false)
+  const icon = folder ? 'folder' : refIcon(ref)
   // a standalone citation of a part of a card (a table's cell, an output's lines), or inside a chat reply, a card or
   // report text (GlyphCites), is its glyph alone with its name in the hover; a citation of a whole card is the card's
   // chip with its name, as the chips that list what a step made are
@@ -426,6 +428,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
         if (lines) return setPop({ state: 'ok', rect, excerpt: '', kind: 'cell', lines })
         return setPop({ state: 'error', rect, message: 'This line is no longer in the card\'s output' })
       }
+      if (r.meta?.folder) setFolder(true)
       const cell = wholeCell ? cellOf(r) : null
       const where = [hiddenPath(ref), spanWhere(ref), whereOf(r)].filter(Boolean).join(' · ') || undefined
       // a record of a file reads as the record (canvas/quotes), never its JSON or markdown source, with the cited words

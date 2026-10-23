@@ -17,13 +17,14 @@ const GLYPHS: [RegExp, IconName][] = [
 ]
 
 /** Every glyph glyphOf gives. */
-export const FILE_GLYPHS: readonly IconName[] = [...GLYPHS.map(([, g]) => g), 'page']
+export const FILE_GLYPHS: readonly IconName[] = [...GLYPHS.map(([, g]) => g), 'page', 'folder']
 
 /** The glyph of a file, by its kind as its name says (VS Code's way): braces for JSON and
  * JSON lines, a grid for tables, a cylinder for databases, the markdown mark, a terminal for a shell script, a notebook,
  * a picture, an archive, sliders for configuration, angle brackets for source code, a page with lines for text, and a
- * bare page for anything else. */
+ * bare page for anything else; a folder for a name that ends in a slash. */
 export function glyphOf(name: string): IconName {
+  if (name.endsWith('/')) return 'folder'
   const base = name.slice(name.lastIndexOf('/') + 1)
   for (const [re, glyph] of GLYPHS) if (re.test(base)) return glyph
   return 'page'
