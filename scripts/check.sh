@@ -16,6 +16,10 @@
 #              the sandbox tests need scripts/install.sh to have run
 #   page       the page's type check, unit tests and build (browser/frontend), after npm ci when its packages are missing
 #
+# Each test has a time limit, so a test that hangs fails with its name: 120 s for node --test and pytest (the browser's
+# in browser/backend/pyproject.toml; the plugin's when pytest-timeout is installed), and vitest's testTimeout (10 s) for
+# the page.
+#
 # The plugin's steps need claude (Claude Code 2.1.307 or later), node 22.18 or later, and Python 3.10 or later with pytest:
 # THIMBLE_PYTHON, else python3. The browser's steps need uv and node 22.12 or later. Each step runs with a Claude Code
 # config folder and a THIMBLE_HOME of its own, made fresh and deleted after, so it never reads or writes your own; the
@@ -49,8 +53,12 @@ for step in "${steps[@]}"; do
     node)
       files=()
       while IFS= read -r f; do files+=("$f"); done < <(find plugin -name '*.test.mjs' -not -path '*/node_modules/*' | sort)
-      node --test "${files[@]}" ;;
-    python) "$THIMBLE_PYTHON" -m pytest plugin -q -p no:cacheprovider ;;
+      node --test --test-timeout=120000 "${files[@]}" ;;
+    python)
+      limit=()  # with pytest-timeout (CI installs it), a test that runs past 120 s fails with its name and its stack
+      if "$THIMBLE_PYTHON" -c 'import pytest_timeout' 2>/dev/null; then limit=(--timeout=120 --timeout-method=thread)
+      else echo "pytest-timeout is not installed, so a test that hangs holds the run"; fi
+      "$THIMBLE_PYTHON" -m pytest plugin -q -p no:cacheprovider ${limit[@]+"${limit[@]}"} ;;
     parity) browser_tests tests_public/test_prompts.py tests_public/test_american_names.py ;;
     server) browser_tests -n "${THIMBLE_TEST_WORKERS:-8}" tests_public ;;
     page)
