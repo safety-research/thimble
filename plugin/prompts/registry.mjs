@@ -78,9 +78,9 @@ export const TEXTS = {
     use: 'the system prompt of the thimble:fixer subagent that /thimble-fix starts',
   },
   'fix-draft': {
-    about: "a pull request's title and summary for one of the person's fixes, before the privacy scan",
-    reader: 'fix/submit.ts',
-    use: 'one model call per fix the person submits',
+    about: "a public GitHub issue's title, what was wrong and how it was fixed, for one of the person's fixes, before the privacy scan",
+    reader: 'fix/share.ts',
+    use: 'one model call per fix the person shares',
   },
 }
 
