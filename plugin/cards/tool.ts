@@ -11,8 +11,8 @@
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
 //      the designer fork called; a new version draws in the card's place
 //   4. tries the call's actions, keys and clicks in order, then puts the card back as it was
-//   5. answers what the card read (rows, columns, the first row), the text copy at the card's width, and the copy after
-//      each action
+//   5. answers what the card read (rows, columns, the first row), the text copy at the card's width, the copy at the
+//      width a side pane leaves it when texts wrap there that fit at the card's width, and the copy after each action
 //
 // So Claude learns what its card shows without printing the rows itself. A call with `id` draws a new version of that
 // card in the card's place, under the call that first drew it or under the answer v was pressed on (its view whole, or
@@ -27,6 +27,7 @@ import { failCleared } from '../bar/notice'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
 import { tempDir } from '../core/home'
+import { paneNow } from '../core/pane'
 import { mainTurn } from '../core/turn'
 import { designAnchor } from '../designer/v'
 import { threadCardAnchor } from '../threads/seam'
@@ -35,7 +36,7 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
 import { ask, sandboxNotice } from './ask'
-import { applyAnswer, askCard, canRedraw, cardWidth, screenRows } from './draw'
+import { applyAnswer, askCard, canRedraw, cardWidth, cardWidthBesidePane, screenRows } from './draw'
 import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
@@ -160,6 +161,15 @@ function copyText(lines: string[], cut: number[], width: number): string[] {
   return out
 }
 
+/** The card as a side pane draws it, when texts that fit on their rows at the card's width wrap there (the runner's
+ *  load says: runner.mjs besideOf). */
+function besidePane(beside: Any, width: number): string[] {
+  if (!beside?.wrapped?.length) return []
+  const lines = beside.wrapped as number[]
+  const which = `line${lines.length > 1 ? 's' : ''} ${lines.slice(0, 8).join(', ')}`
+  return ['', `When a side pane opens beside the conversation, the card is ${beside.width} columns wide, and texts that fit on their rows at ${width} columns wrap onto more rows there (${which}):`, ...copyText(beside.lines, beside.cut, beside.width)]
+}
+
 /** What a call answers when the version did not draw: what to fix, or, when the runner cannot start, that the card is
  *  not the cause (the person sees why in the failure line). */
 function failed(id: string, r: Any, update: boolean): string {
@@ -234,7 +244,9 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   }
 
   const width = (await treeOf($, id))?.width ?? cardWidth()
-  const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width })
+  // a pane open now: the card is drawn at the width it leaves, and no narrower copy is asked for
+  const beside = (await paneNow($)) ? 0 : cardWidthBesidePane()
+  const r = await ask($, 'load', { id, version, title, view: view.text, rows: `${dir}/rows.json`, state: null, width, beside })
   if (!r?.ok) {
     // the folder stays as the last call's, for the next call's `edits`; the version on screen stays
     await remember({ ...meta, last: version, lastFile: file }, { version: meta.version, error: String(r?.error || 'no answer'), ...(r?.down ? { down: true } : {}) })
@@ -279,6 +291,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const other = asked.filter(k => !/^\p{L}$/u.test(k))
   if (other.length) out.push(`Note on the view: a card takes letters only, so it does not get ${other.join(' ')}. The analyst has not seen ${other.length > 1 ? 'these keys' : 'this key'} on the card.`)
   out.push('', `What it draws, ${width} columns wide:`, ...copyText(r.lines, r.cut, width))
+  out.push(...besidePane(r.beside, width))
 
   let tallest = r.lines.length
   const actions = Array.isArray(input.actions) ? input.actions : []

@@ -3,9 +3,10 @@
 // terminal lays out the same tree, and returns the lines. It is the text copy Claude reads after each card call, and
 // the drawing a renderer without Claude Code's own (the browser, later) can use.
 //
-//   layoutLines(tree, width)  {lines, cut}: the lines, trailing spaces removed, and the numbers of the lines that hold
-//                             cells past the width (cut there, as the terminal cuts them). The tree is laid out in a
-//                             column Box `width` cells wide, the box client.tsx draws it in.
+//   layoutLines(tree, width)  {lines, cut, wrapped}: the lines, trailing spaces removed, the numbers of the lines that
+//                             hold cells past the width (cut there, as the terminal cuts them), and the texts that
+//                             wrap onto more rows than their own lines (each {line, text}: its first line's number).
+//                             The tree is laid out in a column Box `width` cells wide, the box client.tsx draws it in.
 //   wrapText(text, cols, mode) a text's rows: wrapped at words, or cut with …
 //   buttonText(p, c)          what a Button shows: `[ label ]`, or the label alone when plain
 //   pressAt(tree, width, x, y) the Button around lines (a Box with onPress) that a click on a cell presses
@@ -398,10 +399,12 @@ function compute(node, W, wMode, H, hMode, place) {
 function grid(width) {
   const rows = []
   const past = new Set()
+  const wrapped = []
   const ensure = y => { while (rows.length <= y) rows.push(new Array(width).fill(' ')) }
   return {
     rows,
     get cut() { return [...past].sort((a, b) => a - b) },
+    wrapped,
     put(x, y, s, clip) {
       if (y < 0) return
       if (clip && (y < clip.y0 || y >= clip.y1)) return
@@ -435,6 +438,7 @@ function paint(node, g, x0, y0, clip) {
   if (node.kind === 'text') {
     const rows = wrapText(node.text, Math.max(0, w), node.wrap)
     rows.forEach((r, i) => g.put(x, y + i, r, clip))
+    if (rows.length > node.text.split('\n').length) g.wrapped.push({ line: y + 1, text: node.text })
     return
   }
   if (h > 0) g.height(y + h)
@@ -495,5 +499,5 @@ export function layoutLines(tree, width) {
   g.height(Math.round(root.lay.h))
   paint(root, g, 0, 0, null)
   const lines = g.rows.map(r => r.join('').replace(/\s+$/, ''))
-  return { lines, cut: g.cut.map(y => y + 1) }
+  return { lines, cut: g.cut.map(y => y + 1), wrapped: g.wrapped.sort((a, b) => a.line - b.line) }
 }

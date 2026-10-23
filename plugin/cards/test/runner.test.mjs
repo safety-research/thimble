@@ -175,6 +175,23 @@ test('a text copy at another width leaves the card as it was: its width and its 
   assert.deepEqual((await ask('copy', { id })).lines, ['n 1', '[ one ]'])
 })
 
+test('a row laid out wider than the width a side pane leaves the card comes back with that copy; a paragraph that wraps at both widths does not', async () => {
+  const view = `function view(p, s) { const { Box, Text } = s.elements
+  return Box({ flexDirection: 'column', children: [
+    Text({ children: '-'.repeat(s.columns) }),
+    Text({ children: 'a paragraph of words that wraps at either width, so the person reads it as words' }),
+    Text({ children: 'ada'.padEnd(12) + '3 of 9 merged'.padEnd(16) + '1.19 h run' }),
+  ] }) }`
+  const { r } = await load(view, { width: 40, beside: 24 })
+  assert.equal(r.lines.length, 5)
+  assert.deepEqual(r.beside.wrapped, [6])
+  assert.equal(r.beside.width, 24)
+  assert.deepEqual(r.beside.lines.slice(5), ['ada         3 of 9', 'merged   1.19 h run'])
+  // the row fits at the narrower width too: nothing comes back
+  const fits = await load(view.replace("'1.19 h run'", "''"), { width: 40, beside: 30 })
+  assert.equal(fits.r.beside, undefined)
+})
+
 test('a Button around lines is a Box that a click anywhere on its lines presses', async () => {
   const group = `function view(p, s) { const { Box, Text, Button } = s.elements
   const st = s.state || { n: 0 }
