@@ -39,6 +39,7 @@ import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
+import { revealCard } from '../cards/draw'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
 import { launchRepair, repairOf } from '../marks/checker'
@@ -254,9 +255,11 @@ async function linksOf($: Engine, f: Frame, text: string): Promise<{ marks: { st
 
 // ------------------------------------------------------------------------------------------------ what the person does
 
-/** Bring a mark into view where the chat draws it (a key may open one in a reply above the screen). */
+/** Bring a mark into view where the chat draws it (a press on the bar's ] may open one in a reply above the screen): a
+ *  card by the row it is drawn in (cards/draw.ts revealCard). Claude Code moves the chat for a press, not for a key. */
 async function reveal($: Engine, at: { row: string; card?: string }): Promise<void> {
-  await quietly($.ui.scroll(at.card ? { to: { key: `frame-${at.card}` }, block: 'nearest' } : { to: { requestId: at.row }, block: 'nearest' }))
+  if (at.card) await quietly(revealCard($, at.card))
+  else await quietly($.ui.scroll({ to: { requestId: at.row }, block: 'nearest' }))
 }
 
 /** Open the tray on a mark (a press on it, ] and [): its answer becomes the one the keys act on. */

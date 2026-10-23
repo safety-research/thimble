@@ -119,7 +119,7 @@ export const registerCards: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // a card's Client posted: a Button or a click
-  on('ui.message', { element: /^card-c[0-9a-f]+(-\d+)?$/ }, async ($, e) => cardPost($, cardOfKey(String(e.element)).id, e.data))
+  on('ui.message', { element: /^card-c[0-9a-f]+(-\d+)?$/ }, async ($, e) => cardPost($, cardOfKey(String(e.element)).id, e.data, String(e.requestId ?? '')))
     .catch(() => ({}))
 
   // a card's Client failed on screen: the card says why where it stood

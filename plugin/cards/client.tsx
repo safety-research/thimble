@@ -11,8 +11,8 @@
 //   {press: n, width}               a Button, by the number the runner gave its onPress, in the drawing at `width`
 //   {pointer: {down, up, button}, width}   a click, sent when the button comes up
 //
-// Each post carries the width the instance draws at, so the answer's props are the drawing at that width (a card
-// shows at two widths at once when a side pane holds its copy).
+// Each post carries the width the instance draws at; the hooks answer with the drawing at the width the instance's
+// frame draws at now (a card shows at two widths at once when a side pane holds its copy).
 //
 // A drawing hook may not write the session's state, so the card's frame asks through its Client, whose posts reach a
 // hook that may.
@@ -109,9 +109,11 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
 
   // the region the card's tree is laid out in, as layout.js's cardRoot lays it out for the text copy: what is wider is
   // cut at its edge, as the copy says, so a view never draws over the frame. The frame hands only a drawing laid out at
-  // this width (draw.ts), and none while that drawing comes
+  // this width (draw.ts), and none while that drawing comes; should the region still be narrower (the frame squeezed
+  // in a chat narrower than it was told), the tree keeps its width and is cut at the region's edge: no row of it wraps
   const tree = props?.tree ? draw(props.tree, false) : E.Text({ dimColor: true, children: 'drawing…' })
-  return E.Box({ flexDirection: 'column', width, overflow: 'hidden', children: [tree] })
+  const laid = E.Box({ flexDirection: 'column', width, flexShrink: 0, children: [tree] })
+  return E.Box({ flexDirection: 'column', width, overflow: 'hidden', children: [laid] })
 }
 
 export default Card
