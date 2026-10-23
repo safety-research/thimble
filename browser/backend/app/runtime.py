@@ -64,6 +64,7 @@ ENV = "THIMBLE_RUNTIME"
 DIR = "runtime"
 MAIN = "main"
 FORK_TYPE = "fork"
+FIXER = "fixer"  # the role of thimble fix's fork (fixes.py), whose folder is its copy of thimble
 MAIN_BUILTINS = ("Read", "Grep", "Glob", "Bash", "WebFetch", "WebSearch")
 AGENT_BUILTINS = ("Read", "Grep", "Glob", "Bash", "Edit", "Write", "WebFetch", "WebSearch")
 WEB = ("WebFetch", "WebSearch")
@@ -423,11 +424,25 @@ class Space:
             with contextlib.suppress(Exception):
                 for d in writes:
                     d.mkdir(parents=True, exist_ok=True)
+        cwd = self.corpus
+        if conv.kind == "fork" and conv.role == FIXER:
+            # thimble fix's fixer (fixes.py): main's conversation and tools, and Edit and Write, in the fix's copy of
+            # thimble, which it alone writes, with its temp folder. Claude Code resumes main's session only from
+            # main's folder, so there the copy is an added folder
+            from . import fixes  # noqa: PLC0415
+
+            work, more, writes = fixes.fixer_roots(int(conv.values.get("fix") or 0))
+            writes = [*writes, tmp]
+            reads = [*reads, *more]
+            builtins = [*builtins, *(b for b in ("Edit", "Write") if b not in builtins)]
+            edits = None
+            if engine() == "api":
+                cwd = work
         with contextlib.suppress(Exception):
             if (userconf.load_or_defaults(self.c)[0].get("agents") or {}).get("main", {}).get("web") == "off":
                 builtins = [b for b in builtins if b not in WEB]
         return Spec(system=system, builtins=runtime_tools.available(builtins) if engine() == "api" else builtins,
-                    thimble=names, model=model, effort=effort, cwd=self.corpus, workspace=self.ws,
+                    thimble=names, model=model, effort=effort, cwd=cwd, workspace=self.ws,
                     read_roots=reads, write_roots=writes, private=self.private(), home=tmp, fast=fast,
                     corpus_edits=edits, no_write=protected(self.ws))
 

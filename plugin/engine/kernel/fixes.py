@@ -66,7 +66,8 @@ PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 # patterns over the repository's paths). The refusal names each file with what it is.
 PROTECTED_KINDS = {
     "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/fix/*", "plugin/prompts/fixer.md",
-                     "plugin/prompts/fix-draft.md", "browser/backend/app/dev.py"),
+                     "plugin/prompts/fix-draft.md", "browser/backend/app/dev.py", "browser/backend/app/fixes.py",
+                     "browser/frontend/src/chat/FixStrip.tsx", "browser/frontend/src/chat/fix.ts"),
     "the privacy scan": ("plugin/engine/kernel/privacy.py",),
     "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "browser/backend/app/kernel_wrap.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),
@@ -373,6 +374,9 @@ def _repoint() -> None:
     rel = release()
     if rel.get("pointed"):
         return
+    if not _marketplace():
+        # Claude Code has no thimble marketplace (the browser workbench alone): nothing to point, and nothing to copy
+        return
     entry = {"source": "directory", "path": str(live_dir())}
     p = config_dir() / "settings.json"
     try:
@@ -448,8 +452,10 @@ def sandbox_argv(fid: int | str, path_extra: list[str] | None = None) -> list[st
     lit = lambda p: {"path": p, "literal": True}  # noqa: E731
     system = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", "/etc"]
     seccomp = str(srt / "node_modules" / "@anthropic-ai" / "sandbox-runtime" / "vendor" / "seccomp")
+    # THIMBLE_FIX_READ: more folders the tests read (the browser workbench's page packages, which its copy links)
+    extra = [x for x in os.environ.get("THIMBLE_FIX_READ", "").split(os.pathsep) if x.startswith("/")]
     shown = [*(system + [seccomp] if linux else []), *tools, str(PLUGIN / "sandbox"), str(wt), str(tmp),
-             *([common] if common else [])]
+             *([common] if common else []), *extra]
     hidden = ["/"] if linux else ["/Users", "/Volumes", "/private/tmp", "/private/var/tmp", "/private/var/folders",
                                    str(Path.home()), str(thimble_home())]
     rules = {

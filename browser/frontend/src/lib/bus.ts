@@ -25,6 +25,8 @@ export type Events = {
   /** `accepted`: the first build of a view the analyst accepted from a view proposal (files/viewReady.ts) */
   view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; accepted?: boolean; version?: string }
   ticket: { id: string; n: number; status: string }
+  /** a fix of the person's thimble moved on (backend fixes._event): its phase or how it ended */
+  fix: { id: number; state: string }
   /** `rows` false: the label's rows stayed as they were (turned on or off, recoloured, a filter set) */
   concepts: { concept: string; what: string; rows?: boolean }
   filter: { scope: FilterScope; concept?: string; value?: string }

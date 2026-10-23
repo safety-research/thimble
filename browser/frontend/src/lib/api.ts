@@ -1,4 +1,5 @@
 // The typed client for every route of the backend's API.
+import type { FixStatus } from '../chat/fix'
 import type {
   CanvasResponse,
   Extensions,
@@ -658,6 +659,14 @@ export const api = {
       body: JSON.stringify({ kind: 'card', payload: { text: body.text, group: `request:${body.request}`, ...(body.doc ? { doc: body.doc } : {}), ...(body.after ? { after: body.after } : {}), ...(body.card ? { card: body.card } : {}) } }),
     }),
 
+  // ---- thimble fix: the person's changes to their own thimble (backend fixes.py) ----
+  fixes: () => j<FixStatus>(`${apiBase()}/fixes`),
+  /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows */
+  requestFix: (ws: string, words: string, page: string) =>
+    j<{ fix: { id: number; title: string; state: string } }>(`${apiBase()}/ws/${enc(ws)}/fixes`, { method: 'POST', body: JSON.stringify({ words, page }) }),
+  undoFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${id}/undo`, { method: 'POST' }),
+  redoFix: (ws: string, id: number) => j<{ fix: { id: number } }>(`${apiBase()}/ws/${enc(ws)}/fixes/${id}/redo`, { method: 'POST' }),
+  dismissFix: (id: number) => j<{ ok: boolean }>(`${apiBase()}/fixes/${id}/dismiss`, { method: 'POST' }),
   // ---- tickets ----
   tickets: (workspace: string) => j<Ticket[]>(`${apiBase()}/dev/tickets${q({ workspace })}`),
   ticket: (id: string) => j<Ticket>(`${apiBase()}/dev/tickets/${enc(id)}`),

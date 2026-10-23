@@ -1803,6 +1803,54 @@ button.model-line-part[aria-expanded='true'] {
 .chat-notice-row[data-closed] .chat-notice-ico {
   color: var(--text-tertiary);
 }
+/* thimble fix (chat/FixStrip.tsx): one row above the composer for the person's newest fix. While it works, a spinner
+   and its step on the card's surface; once it ended, its result on the result's wash (on: positive, did not pass:
+   warning), with Undo or Redo and Dismiss at the row's end */
+.chat-fix {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0 0 8px;
+  padding: 4px 4px 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: var(--type-body-sm);
+}
+.chat-fix[data-kind='fixed'] {
+  border-color: var(--status-positive);
+  background: color-mix(in oklab, var(--status-positive) 10%, var(--surface-card));
+}
+.chat-fix[data-kind='failed'],
+.chat-fix[data-kind='problem'] {
+  border-color: var(--status-warning);
+  background: color-mix(in oklab, var(--status-warning) 12%, var(--surface-card));
+}
+.chat-fix-ico {
+  flex: none;
+  color: var(--text-secondary);
+}
+.chat-fix[data-kind='fixed'] .chat-fix-ico {
+  color: var(--status-positive);
+}
+.chat-fix[data-kind='failed'] .chat-fix-ico,
+.chat-fix[data-kind='problem'] .chat-fix-ico {
+  color: var(--status-warning);
+}
+.chat-fix-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 0;
+  overflow-wrap: anywhere;
+}
+.chat-fix-act.btn,
+.chat-fix-x.btn {
+  flex: none;
+}
 /* a start that did not happen (chat/Refused): one card on the warning's soft wash, the agent named, why on one line,
    the request in full behind a disclosure, and the kind's buttons */
 .chat-refused {

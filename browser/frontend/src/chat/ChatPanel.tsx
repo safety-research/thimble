@@ -58,6 +58,8 @@ import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
 import { LabelAsks } from './LabelAsk'
 import { NoticeStrip } from './Notice'
+import { fixWords, pageText } from './fix'
+import { FixStrip } from './FixStrip'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -698,6 +700,18 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
+    // `/thimble-fix <words>`: a change to the person's own thimble, made by a fork of main with what the page shows now
+    const fixing = fixWords(text)
+    if (fixing !== null) {
+      track('ui-click', { target: 'fix:new' })
+      return api
+        .requestFix(ws, fixing, pageText())
+        .then(() => true)
+        .catch((e: Error) => {
+          bus.emit('toast', { text: `thimble fix did not start: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' })
+          return false
+        })
+    }
     // what the analyst sends shows at the list's end, also when they had scrolled up to read: the list follows it
     nearEnd.current = true
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
@@ -836,6 +850,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           <LabelAsks ws={ws} />
           <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
+          <FixStrip ws={ws} />
           {orientClosedText ? (
             <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
               <Icon name="terminal" size={13} className="chat-continue-ico" />
