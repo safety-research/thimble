@@ -7,8 +7,9 @@
   padding: 0;
   border: 0;
   border-radius: 0;
-  /* a citation's look (marks.css .mark-words): the text's color, underlined in it, on the citations' purple tint */
-  background: var(--cite-tint);
+  /* a citation's look (marks.css .mark-words): the text's color, underlined in it; the citations' purple tint on hover
+     and while its label is open */
+  background: none;
   color: inherit;
   font: inherit;
   font-variant-numeric: tabular-nums;
@@ -23,8 +24,9 @@
   transition: var(--transition-color), background-color var(--dur-fast) var(--ease-out);
 }
 .refchip.refchip-value:hover,
-.refchip.refchip-value:focus-visible {
-  background: var(--cite-tint-strong);
+.refchip.refchip-value:focus-visible,
+.refchip.refchip-value.is-open {
+  background: var(--cite-tint);
   outline: none;
 }
 /* the links toggle is off (lib/links): a citation chip goes, a cited number stays as plain text, and the space before
@@ -34,7 +36,8 @@
   display: none;
 }
 :root[data-links='off'] .refchip-citation.refchip-value,
-:root[data-links='off'] .refchip-citation.refchip-value:hover {
+:root[data-links='off'] .refchip-citation.refchip-value:hover,
+:root[data-links='off'] .refchip-citation.refchip-value.is-open {
   color: inherit;
   background: none;
   text-decoration-line: none;
@@ -71,12 +74,12 @@
 .refedit-token .chip-ico {
   stroke-width: 2px;
 }
-/* states: unable to verify, red words underlined, no tint, × after them; not linked and unknown, dotted and quiet */
-.refchip.refchip-value.broken,
-.refchip.refchip-value.broken:hover {
-  color: var(--status-negative);
-  background: none;
-}
+/* states: unable to verify, red words underlined, × after them, a soft red tint on hover and while open; not linked and
+   unknown, dotted and quiet, never tinted */
+.refchip.refchip-value.broken { color: var(--status-negative); }
+.refchip.refchip-value.broken:hover,
+.refchip.refchip-value.broken:focus-visible,
+.refchip.refchip-value.broken.is-open { background: var(--cite-tint-failed); }
 .refchip.refchip-value.broken::after {
   content: '\00a0×';
   display: inline-block;
@@ -85,7 +88,9 @@
 .refchip.refchip-value.refchip-quiet,
 .refchip.refchip-value.refchip-unresolved,
 .refchip.refchip-value.refchip-quiet:hover,
-.refchip.refchip-value.refchip-unresolved:hover {
+.refchip.refchip-value.refchip-unresolved:hover,
+.refchip.refchip-value.refchip-quiet.is-open,
+.refchip.refchip-value.refchip-unresolved.is-open {
   color: inherit;
   background: none;
   text-decoration-style: dotted;

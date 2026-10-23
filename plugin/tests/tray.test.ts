@@ -4,8 +4,7 @@
 // the tray; 0 closes it. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { citeWords } from '../marks/evidence'
-import { citeLook } from '../marks/view'
+import { citeTint } from '../marks/view'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -98,7 +97,7 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('passed: 28')
   // the value bold in the citations' look, the place dim
   const drawnBand = all(await $.ui.render(above()))
-  expect(drawnBand.some(n => n.type === 'Text' && n.props?.backgroundColor === citeWords().backgroundColor && n.props?.underline === true && n.props?.bold === true && textOf(n) === '12')).toBe(true)
+  expect(drawnBand.some(n => n.type === 'Text' && n.props?.backgroundColor === undefined && (n.hover ?? n.props?.hover)?.backgroundColor === citeTint() && n.props?.underline === true && n.props?.bold === true && textOf(n) === '12')).toBe(true)
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'runs/summary.txt:4')?.props).toMatchObject({ dimColor: true })
   expect(band).toContain('a ask')
   expect(band).toContain('0 close')
@@ -106,7 +105,7 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   // the citation draws in focus in the answer
   const drawn = await $.ui.render(answer('row-t1', TEXT))
   const cite = all(drawn).find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
-  expect(all(cite).some(n => n.type === 'Text' && n.props?.backgroundColor === 'selectionBg' && textOf(n) === '12 of 40')).toBe(true)
+  expect(all(cite).some(n => n.type === 'Text' && n.props?.backgroundColor === citeTint() && n.props?.bold === true && textOf(n) === '12 of 40')).toBe(true)
 
   // a question typed with the tray open: its scope goes with it, the tray closes, and the prompt shows what it was about
   await $.prompt.submit({ text: 'why so many?', origin: { kind: 'composer' } } as never)
@@ -138,9 +137,12 @@ test('a corrected value computed by code: purple in the reply; the line that pri
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11. One run was retried.',
     evidence: { kind: 'computed', by: 'checker', code: 'import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)', output: 'runs: 40\nfailed: 11\npassed: 29', highlight: [[17, 19]] },
   }, 's-tray-2')
-  // the corrected words draw as a settled citation: underlined on the purple tint
+  // the corrected words draw as a settled citation: underlined, the purple tint on hover
   const drawn = all(await $.ui.render(answer('row-t1', TEXT)))
-  expect(drawn.find(n => n.type === 'Text' && textOf(n) === '11 of 40')?.props).toMatchObject(citeLook())
+  const corrected = drawn.find(n => n.type === 'Text' && textOf(n) === '11 of 40')
+  expect(corrected?.props).toMatchObject({ underline: true })
+  expect(corrected?.props?.backgroundColor).toBeUndefined()
+  expect(corrected?.hover ?? corrected?.props?.hover).toMatchObject({ backgroundColor: citeTint() })
   expect(textOf(drawn)).not.toContain('corrected')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let drawnBand = all(await $.ui.render(above()))
@@ -171,7 +173,7 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(band).toContain('c one line')
   expect(band).not.toContain('Output of the code')
   expect(band).not.toContain('The code')
-  expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === citeWords().backgroundColor && n.props?.underline === true && n.props?.bold === true && textOf(n) === '11')).toBe(true)
+  expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === undefined && (n.hover ?? n.props?.hover)?.backgroundColor === citeTint() && n.props?.underline === true && n.props?.bold === true && textOf(n) === '11')).toBe(true)
   // c again: back to the one line
   await clock.advance(2000)
   await $.prompt.edit(key('c'))

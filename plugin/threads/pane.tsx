@@ -40,7 +40,7 @@ import { claimsThreadScope } from '../claims/seam'
 import { cut, textWidth } from '../core/text.js'
 import { blocks, inline, marksIn, tableOf } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
-import { citeLook, messageEl } from '../marks/view'
+import { citeHeat, citeLook, messageEl } from '../marks/view'
 import type { ThreadScope } from './seam'
 import { askThread, cardsOfTurn, isSending, listThreads, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
 import { aboutOf, askWords, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
@@ -307,15 +307,19 @@ export function passageRuns(text: string, max = 600): PassageRun[] {
   return kept
 }
 
-/** A passage's runs as one wrapped text: a citation's words in the citations' look, as the reply draws them. */
+/** A passage's runs as one wrapped text: a citation's words in the citations' look, as the reply draws them. They are
+ *  Texts nested in the passage's, which alone can heat a hover group on the terminal, so the passage's citations are one
+ *  group: the pointer over the passage lights them. */
 function passageEl(els: Any, runs: PassageRun[]): Any {
   const { Text } = els
-  return Text({ key: 'passage', children: runs.map((r, k) => {
+  const id = `passage:${runs.map(r => r.s).join('')}`
+  const cited = runs.some(r => r.mark !== undefined)
+  return Text({ key: 'passage', ...(cited ? citeHeat(id) : {}), children: runs.map((r, k) => {
     const p: Any = { key: `p${k}`, children: r.s }
     if (r.b) p.bold = true
     if (r.it) p.italic = true
     if (r.code) p.color = 'permission'
-    if (r.mark !== undefined) Object.assign(p, citeLook())
+    if (r.mark !== undefined) Object.assign(p, citeLook(id))
     return Text(p)
   }) })
 }

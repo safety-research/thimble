@@ -327,7 +327,7 @@ export function mergeLook(msgs, out, memory) {
 
 /** The explainers' and heads-ups' colors. Their words are drawn in a color of Claude Code's theme, underlined, so the
  *  theme picks a shade that reads on its own background: an explainer teal (`planMode`), a heads-up orange (`claude`).
- *  A citation is underlined in the text's color on a purple tint (marks/view.ts citeLook), and a citation the check
+ *  A citation is underlined in the text's color, a purple tint on hover (marks/view.ts citeLook), and a citation the check
  *  could not confirm (failed) is red, underlined, so the four stay apart. Inside a citation's words, an
  *  explainer or a heads-up shows as a faint tint of its own color behind them (`glossTint`, `headsTint`: one per theme,
  *  as a background takes no theme key), in place of the citation's; the one the tray shows is bold on that tint. */

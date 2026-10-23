@@ -30,6 +30,7 @@ import { openPane, paneNow } from '../core/pane'
 import { themeNow } from '../core/theme'
 import { launchRepair, repairOf } from '../marks/checker'
 import { citeWords } from '../marks/evidence'
+import { citeHeat } from '../marks/view'
 import { plainSentence } from '../marks/message.js'
 import { NOT_RUN, rowMarks, type MarkItem } from '../marks/store'
 import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
@@ -60,22 +61,25 @@ function look(tone: string | null | undefined): Record<string, unknown> {
 
 /** One row of runs: plain Text, with one Button for each stretch of runs that share a part (a press on it). Each
  *  Button's key is the row's key and its part, so no two in the pane share one: a dot is `<row>:n:<id>`. Cited words
- *  are underlined, and the cited words in evidence look as in the citations' card (citeWords). */
+ *  are underlined, and the cited words in evidence look as in the citations' card (citeWords: tinted on hover). */
 function rowEl(els: Any, runs: Run[], key: string, press: (part: string) => unknown): unknown {
   const { Box, Button, Text } = els
+  // the row's cited words are one hover group: a Text that holds them nested joins it, so the pointer over it lights them
+  const id = `claims:${key}`
+  const heat = (rs: Run[]) => (rs.some(r => r.tint) ? citeHeat(id) : {})
   const span = (r: Run, i: number) => Text({
     key: `t${i}`, ...look(r.tone), ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}),
-    ...(r.tint ? citeWords() : {}), children: r.s,
+    ...(r.tint ? citeWords(id) : {}), children: r.s,
   })
   if (!runs.length) return Text({ key, children: ' ' })
-  if (!runs.some(r => r.part)) return Text({ key, wrap: 'truncate-end', children: runs.map(span) })
+  if (!runs.some(r => r.part)) return Text({ key, wrap: 'truncate-end', ...heat(runs), children: runs.map(span) })
   const kids: unknown[] = []
   for (let i = 0; i < runs.length;) {
     const part = runs[i]!.part
     if (!part) { kids.push(span(runs[i]!, i)); i++; continue }
     let j = i
     while (j < runs.length && runs[j]!.part === part) j++
-    kids.push(Button({ key: `${key}:${part}`, plain: true, onPress: () => press(part), children: runs.slice(i, j).map((r, k) => span(r, i + k)) }))
+    kids.push(Button({ key: `${key}:${part}`, plain: true, ...heat(runs.slice(i, j)), onPress: () => press(part), children: runs.slice(i, j).map((r, k) => span(r, i + k)) }))
     i = j
   }
   return Box({ key, flexDirection: 'row', children: kids })

@@ -9,7 +9,7 @@ import { checkSpans, restoredKeys, type Span } from '../core/answerview'
 import { ownKeys } from '../hooks/keys'
 import { looksByWords } from '../marks/register'
 import { marksIn } from '../marks/message.js'
-import { messageEl } from '../marks/view'
+import { citeTint, messageEl } from '../marks/view'
 import type { MarkItem } from '../marks/store'
 import { promptStub } from './stubs'
 
@@ -71,7 +71,8 @@ test('a span is a press of its own; inside a citation it keeps the citation pres
   inner.props.onPress()
   expect(pressed).toEqual(['span', 'mark'])
   const innerText = all(inner).find(n => n.type === 'Text' && n.props.children === 'user query')
-  expect(innerText.props).toMatchObject({ backgroundColor: 'selectionBg', bold: true })
+  // the citation the tray shows keeps the citation's tint, bold, so the open one is easy to find
+  expect(innerText.props).toMatchObject({ backgroundColor: citeTint(), bold: true })
   // the span's own words: its color, underlined, no fill; inside the citation: underlined on the span's tint, in place of the citation's
   const ownText = all(own).find(n => n.type === 'Text' && n.props.children === 'hydrate')
   expect(ownText.props).toMatchObject({ color: 'planMode', underline: true })
@@ -79,7 +80,7 @@ test('a span is a press of its own; inside a citation it keeps the citation pres
   expect(ownText.props.tint).toBe(undefined)
   const calm = messageEl(ELS, { text: TEXT, marks, looks: [{ n: 1, status: 'verified' }], key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined, spans, focus: null })
   const tinted = all(calm).find(n => n.type === 'Text' && n.props.children === 'user query')
-  expect(tinted.props).toMatchObject({ underline: true, backgroundColor: '#2b3b39' })
+  expect(tinted.props).toMatchObject({ underline: true, backgroundColor: '#2b3b39', hover: { backgroundColor: citeTint() } })
   expect(tinted.props.color).toBe(undefined)
   // dim words and the ▸ of an answer picked for the keys
   const dim = messageEl(ELS, { text: 'Two runs failed.', marks: [], looks: [], key: 'd', cols: 100, first: true, spin: '⠋', onMark: () => undefined, dim: true, lead: '▸' })

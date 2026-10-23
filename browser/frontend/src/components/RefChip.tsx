@@ -454,7 +454,7 @@ export function RefChip({ ref, value, compact, workspace, broken, brokenWhy, qui
 
   const kind = asText ? undefined : parsed?.kind
   const anchorAttrs = anchor && !unresolved ? { 'data-anchor': ref, 'data-anchor-text': value ?? label } : {}
-  const cls = ['refchip', asText ? 'refchip-value' : '', cite ? 'refchip-citation' : '', iconOnly ? 'refchip-icon' : '', kind && INTERNAL.has(kind) ? 'refchip-internal' : '', broken ? 'broken' : '', quiet && !broken ? 'refchip-quiet' : '', unresolved ? 'refchip-unresolved' : '', compact ? 'refchip-compact' : '', late ? 'refchip-late' : '']
+  const cls = ['refchip', asText ? 'refchip-value' : '', cite ? 'refchip-citation' : '', iconOnly ? 'refchip-icon' : '', kind && INTERNAL.has(kind) ? 'refchip-internal' : '', broken ? 'broken' : '', quiet && !broken ? 'refchip-quiet' : '', unresolved ? 'refchip-unresolved' : '', compact ? 'refchip-compact' : '', late ? 'refchip-late' : '', pop ? 'is-open' : '']
     .filter(Boolean)
     .join(' ')
   const artifact = pop?.state === 'ok' && pop.cell ? primaryArtifact(pop.cell.outputs) : null

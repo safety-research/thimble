@@ -11,23 +11,25 @@
 // (checker.ts tellText), and a detail the person must see is a heads-up's.
 //
 // A mark's look by its status. Every mark is underlined, whatever its status, so a citation reads as one; the status
-// shows as its look (citeLook) and the sign after it:
-//   pending      the turn still runs: the text's own color, underlined, on the citations' light purple tint
+// shows as its look (wordsLook) and the sign after it. At rest no tint is behind the words; the pointer over a citation
+// (any piece of it, when it wraps: one hover group per citation) puts its tint behind all of it, as does the tray
+// showing it:
+//   pending      the turn still runs: the text's own color, underlined; the citations' light purple tint on hover
 //   checking     as pending, and a turning glyph right after it
 //   verified     as pending
 //   corrected    the corrected words in place of the marked ones, as pending: once corrected it holds, so it
 //                looks as a verified one does (its tray card says it was corrected). A narrowed one (`narrowed`) keeps
 //                its words: only the part the check cited is the mark, the rest reads as the reply's plain words
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
-//                did not show them), or it did not run or gave no answer: red (`error`), underlined, no tint, with
-//                ` ×` after it. One look whatever the cause
-//   unchecked    underlined in the text's color, no tint: words no check is for (a side thread's citations, or new
-//                ones in a version shown in place of Claude's words)
+//                did not show them), or it did not run or gave no answer: red (`error`), underlined, with ` ×`
+//                after it, a soft red tint on hover. One look whatever the cause
+//   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
+//                place of Claude's words)
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
 // explainer in teal, underlined; a span inside a mark's words keeps the mark's press and look, its `tint` behind them
 // in place of the citation's. While the tray shows
-// a mark (`focus`), it is drawn bold on the selection's background. `dim` draws the words dim (a rewrite of them runs),
+// a mark (`focus`), it is drawn bold on its tint, so the open one is easy to find. `dim` draws the words dim (a rewrite of them runs),
 // and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
 //
 // Where side threads can be asked about its passages (`passages`), each row of blocks is a passage (a heading's, its
@@ -83,25 +85,52 @@ export type Passage = { text: string; label: string }
 /** A purple that follows the person's theme (Claude Code's color for a merged pull request): the turning glyph. */
 const PURPLE = 'merged'
 
-/** The citations' tint, behind their words. A background takes no theme key, so it is one hex per theme set
- *  (core/theme.ts): the light purple rgba(179,107,255,.24) over a dark terminal's #1e1e1e, rgba(135,0,255,.10) over a
- *  light one's #ffffff. */
+/** The citations' tint, behind their words on hover and while the tray shows one. A background takes no theme key, so
+ *  it is one hex per theme set (core/theme.ts): the light purple rgba(179,107,255,.24) over a dark terminal's #1e1e1e,
+ *  rgba(135,0,255,.10) over a light one's #ffffff (the browser's --cite-tint). */
 export const CITE_TINT: Record<Theme, string> = { dark: '#423054', light: '#f3e6ff' }
 
-/** A citation's words wherever they show (the reply, the tray, the evidence, the claims and threads panes): the text's
- *  own color, underlined (Claude Code's underline takes the text's color), on the citations' tint, so they stand apart
- *  from an explainer's teal and a heads-up's orange, which are colored words. The theme set is the one the drawing hook
- *  read last (themeNow). */
-export function citeLook(theme: Theme = themeLast()): { underline: true; backgroundColor: string } {
-  return { underline: true, backgroundColor: CITE_TINT[theme] }
+/** A failed citation's tint, a soft red, as CITE_TINT is made: rgba(255,138,122,.2) over #1e1e1e, rgba(201,58,40,.10)
+ *  over #ffffff (the browser's --cite-tint-failed). The purple behind red words reads muddy. */
+export const FAILED_TINT: Record<Theme, string> = { dark: '#4b3430', light: '#faebea' }
+
+/** A citation's tint by its status, in the theme set the drawing hook read last (themeNow). */
+export function citeTint(status: MarkStatus = 'verified', theme: Theme = themeLast()): string {
+  return (status === 'failed' ? FAILED_TINT : CITE_TINT)[theme]
 }
 
-/** A citation's words by its status, as the header comment says: failed red and underlined, unchecked underlined in
- *  the text's color, every other status citeLook. */
-export function wordsLook(status: MarkStatus): { underline: true; color?: string; backgroundColor?: string } {
-  if (status === 'failed') return { underline: true, color: 'error' }
-  if (status === 'unchecked') return { underline: true }
-  return citeLook()
+/** A hover group's name for a citation's id (`<reply key>:<n>`): short and stable, as Claude Code takes at most 64
+ *  characters. Every piece of a citation joins its group, so one that wraps lights as one. */
+export function citeScope(id: string): string {
+  let h = 0x811c9dc5
+  for (let i = 0; i < id.length; i++) { h ^= id.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0 }
+  return `cite-${h.toString(36)}`
+}
+
+/** The `hover` of a citation's words: its tint, while the pointer is over any member of its group. */
+export function citeHover(id: string, status: MarkStatus = 'verified', theme: Theme = themeLast()): { scope: string; backgroundColor: string } {
+  return { scope: citeScope(id), backgroundColor: citeTint(status, theme) }
+}
+
+/** The props that make a Text that holds cited words (a Text nested in a Text cannot heat its group on the terminal)
+ *  join their group, so the pointer over it lights them. */
+export function citeHeat(id: string): { hover: { scope: string } } {
+  return { hover: { scope: citeScope(id) } }
+}
+
+/** A citation's words wherever they show (the reply, the tray, the evidence, the claims and threads panes): the text's
+ *  own color, underlined (Claude Code's underline takes the text's color), no tint at rest, so they read as the
+ *  reply's words and stand apart from an explainer's teal and a heads-up's orange, which are colored words; the
+ *  citations' tint behind them on hover (citeHover, its group named by `id`). */
+export function citeLook(id: string, theme: Theme = themeLast()): { underline: true; hover: { scope: string; backgroundColor: string } } {
+  return { underline: true, hover: citeHover(id, 'verified', theme) }
+}
+
+/** A citation's words by its status, as the header comment says: failed red and underlined, its tint a soft red; every
+ *  other status citeLook. */
+export function wordsLook(status: MarkStatus, id: string): { underline: true; color?: string; hover: { scope: string; backgroundColor: string } } {
+  if (status === 'failed') return { underline: true, color: 'error', hover: citeHover(id, 'failed') }
+  return citeLook(id)
 }
 
 /** A narrowed mark's runs: the part of its words the check cited (`shown`) stays the mark's, the words before and after
@@ -185,17 +214,24 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const p: Any = { children: r.s }
   if (r.b) p.bold = true
   if (r.it) p.italic = true
-  // the words underlined in every status; the turning glyph (purple) and the sign after them (failed: red) are not words
+  // the words underlined in every status; the turning glyph (purple) and the sign after them (failed: red) are not words.
+  // Every piece of the citation, its sign too, joins one hover group (`<key>:<n>`), so the pointer over any of them
+  // lights all its words, on every line it wraps to
+  const id = `${o.key}:${look.n}`
+  const tint = citeHover(id, look.status)
   if (r.tag === 'spin') p.color = PURPLE
   else if (r.tag) p.color = 'error'
-  else Object.assign(p, wordsLook(look.status))
-  // a span inside the mark's words: its tint in place of the citation's
+  else Object.assign(p, wordsLook(look.status, id))
+  // a span inside the mark's words: its tint at rest, the citation's on hover
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
   if (bg) p.backgroundColor = bg
-  if (o.focus === r.mark) { p.bold = true; p.backgroundColor = 'selectionBg' }
+  // the one the tray shows: bold, and its tint kept, so the open one is easy to find
+  if (o.focus === r.mark) { p.bold = true; if (!r.tag) p.backgroundColor = tint.backgroundColor }
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
-  return els.Button({ key, plain: true, label, hover: { bold: true }, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
+  // no inverse under the pointer (Claude Code inverts a plain Button): the tint shows the hover
+  const hover = r.tag ? { scope: tint.scope, inverse: false } : { ...tint, inverse: false }
+  return els.Button({ key, plain: true, label, hover, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
 }
 
 /** One laid-out line: its runs, each mark a press. A line with marks is a row of its words and presses, cut at its end

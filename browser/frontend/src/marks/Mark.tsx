@@ -1,6 +1,6 @@
 // A mark on the words of a claim in Claude's reply (marks.ts), drawn as a card's citation is (components/RefChip): the
-// words keep the text's color, underlined in it, on the citations' purple tint, and hovering or opening one deepens the
-// tint. A mark the check could not confirm is red and underlined, with no tint, and `×` after the words.
+// words keep the text's color, underlined in it, and hovering or opening one puts the citations' purple tint behind
+// them. A mark the check could not confirm is red and underlined, with `×` after the words, its tint a soft red.
 // Hovering opens its evidence in the citation's label (RefChip's .refchip-pop), and a click keeps it open:
 //
 //   computed   the head names the code that ran; the lines of its real output around the marked words, the words

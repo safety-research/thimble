@@ -10,7 +10,8 @@ import { failLineNow } from '../bar/notice'
 import { awaitsCheck, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { marksIn, withRewrites } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
-import { citeLook, footerEl, messageEl } from '../marks/view'
+import { highlighted } from '../marks/evidence'
+import { citeLook, citeScope, citeTint, footerEl, messageEl } from '../marks/view'
 import { tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -275,22 +276,25 @@ test('a resumed session draws the marks as their check left them; a check the se
   expect((await rowMarks(again, 'row-2'))!.items[0]).toMatchObject({ status: 'failed', failedBy: 'none', reason: 'The check did not run.' })
 })
 
-test('a corrected citation draws as a settled one (underlined on the purple tint); a failed one red with ×, whatever failed it; each underlined', () => {
+test('a corrected citation draws as a settled one (underlined, the purple tint on hover); a failed one red with ×, whatever failed it; each underlined', () => {
   const text = 'Merged [15 of 40](#), opened [7](#), closed [3](#).'
   const marks = marksIn(text)
   const looks = [{ n: 1, status: 'corrected', shown: '12 of 40' }, { n: 2, status: 'failed' }, { n: 3, status: 'failed' }] as Any
   const els = all(messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: true, spin: '', onMark: () => undefined }))
   const look = (words: string) => els.find(n => n.type === 'Text' && n.props.children === words)?.props
-  expect(look('12 of 40')).toEqual({ children: '12 of 40', ...citeLook() })
-  expect(look('7')).toEqual({ children: '7', color: 'error', underline: true })
-  expect(look('3')).toEqual({ children: '3', color: 'error', underline: true })
+  // no tint at rest; on hover the citation's, a failed one's soft red
+  expect(look('12 of 40')).toEqual({ children: '12 of 40', ...citeLook('k:1') })
+  expect(look('7')).toEqual({ children: '7', color: 'error', underline: true, hover: { scope: citeScope('k:2'), backgroundColor: citeTint('failed') } })
+  expect(look('3')).toEqual({ children: '3', color: 'error', underline: true, hover: { scope: citeScope('k:3'), backgroundColor: citeTint('failed') } })
   expect(els.filter(n => n.type === 'Text' && n.props.children === ' ×').length).toBe(2)
   expect(look(' ×')?.underline).toBeUndefined()
   expect(look(' ×')?.backgroundColor).toBeUndefined()
+  expect(look(' ×')?.hover).toBeUndefined()
   expect(look(' ×')).toMatchObject({ color: 'error' })
-  // the tint of each theme set
-  expect(citeLook('dark')).toEqual({ underline: true, backgroundColor: '#423054' })
-  expect(citeLook('light')).toEqual({ underline: true, backgroundColor: '#f3e6ff' })
+  // the tint of each theme set, behind the words only on hover
+  expect(citeLook('x', 'dark')).toEqual({ underline: true, hover: { scope: citeScope('x'), backgroundColor: '#423054' } })
+  expect(citeLook('x', 'light')).toEqual({ underline: true, hover: { scope: citeScope('x'), backgroundColor: '#f3e6ff' } })
+  expect([citeTint('failed', 'dark'), citeTint('failed', 'light')]).toEqual(['#4b3430', '#faebea'])
   // without a gutter (a reply inside the tray's frame) no margin cell stands before its rows: they start at the left
   const rowsOf = (gutter?: boolean) => messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: false, spin: '', gutter, onMark: () => undefined }).props.children
   expect(rowsOf()[0].props.children[0].props.width).toBe(2)
@@ -301,6 +305,45 @@ test('a corrected citation draws as a settled one (underlined on the purple tint
   expect(textOf(footerEl(ELS, { key: 'f', spin: '⠋', checking: 1 }))).toBe('⠋ checking 1 citation')
 })
 
+test('a citation lights on hover as one, on every line it wraps to: one hover group per citation, no tint at rest, its tint kept while the tray shows it', () => {
+  const text = 'Yes: [19 of the 22 failures](#) came after [the config change on Tuesday afternoon at 14:05, right before the first failed run](#), out of [41 runs](#).'
+  const marks = marksIn(text)
+  const looks = [{ n: 1, status: 'verified' }, { n: 2, status: 'verified' }, { n: 3, status: 'failed' }] as Any
+  const draw = (focus: number | null) => all(messageEl(ELS, { text, marks, looks, key: 'mk-row-9', cols: 40, first: true, spin: '', focus, onMark: () => undefined }))
+  const buttons = (els: Any[], n: number) => els.filter(b => b.type === 'Button' && String(b.props.label).startsWith(`citation ${n}:`))
+  const els = draw(null)
+  // the second citation wraps to more than one line: a Button on each, all of one hover group, each lit with the tint
+  const wrapped = buttons(els, 2)
+  expect(wrapped.length).toBeGreaterThan(1)
+  const scope = citeScope('mk-row-9:2')
+  expect(scope.length).toBeLessThanOrEqual(64)
+  for (const b of wrapped) {
+    expect(b.props.hover).toEqual({ scope, backgroundColor: citeTint(), inverse: false })
+    const words = all(b).find(n => n.type === 'Text')!
+    expect(words.props.backgroundColor).toBeUndefined()
+    expect(words.props.hover).toEqual({ scope, backgroundColor: citeTint() })
+    expect(words.props.underline).toBe(true)
+  }
+  // each citation its own group; the failed one's tint the soft red, its × in the group without a tint of its own
+  const others = [...buttons(els, 1), ...buttons(els, 3)].map(b => b.props.hover.scope)
+  expect(others.every(x => x !== scope)).toBe(true)
+  const failed = buttons(els, 3)
+  expect(failed.find(b => textOf(b) === '41 runs')!.props.hover).toEqual({ scope: citeScope('mk-row-9:3'), backgroundColor: citeTint('failed'), inverse: false })
+  expect(failed.find(b => textOf(b) === ' ×')!.props.hover).toEqual({ scope: citeScope('mk-row-9:3'), inverse: false })
+  // the tray shows the second: every piece of it bold on the tint, the others as at rest
+  const open = draw(1)
+  for (const b of buttons(open, 2)) expect(all(b).find(n => n.type === 'Text')!.props).toMatchObject({ bold: true, backgroundColor: citeTint() })
+  expect(all(buttons(open, 1)[0]).find(n => n.type === 'Text')!.props.backgroundColor).toBeUndefined()
+  expect(all(draw(2).filter(b => b.type === 'Button' && textOf(b) === '41 runs')[0]).find(n => n.type === 'Text')!.props).toMatchObject({ bold: true, backgroundColor: citeTint('failed') })
+  // cited words in evidence are Texts nested in their line's: the line joins their group, so the pointer over it lights them
+  const line = highlighted(ELS, 'failed: 12', [[8, 10]], 'o1')
+  const cited = all(line).find(n => n.type === 'Text' && n.props.children === '12')!
+  expect(cited.props).toMatchObject({ bold: true, underline: true, hover: { backgroundColor: citeTint() } })
+  expect(cited.props.backgroundColor).toBeUndefined()
+  expect(line.props.hover).toEqual({ scope: cited.props.hover.scope })
+  expect(highlighted(ELS, 'runs: 40', [], 'o0').props.hover).toBeUndefined()
+})
+
 test("a narrowed citation: only the part the check cited is the mark; Claude's own words around it stay, as plain words", () => {
   const text = 'Most are by [one user, "Kalmbot", with the summary "Seite gelöscht." ("page deleted")](#).'
   const marks = marksIn(text)
@@ -308,7 +351,7 @@ test("a narrowed citation: only the part the check cited is the mark; Claude's o
   const els = all(messageEl(ELS, { text, marks, looks, key: 'k', cols: 200, first: true, spin: '', onMark: () => undefined }))
   const texts = els.filter(n => n.type === 'Text' && typeof n.props.children === 'string')
   const cited = texts.find(n => n.props.children === 'one user, "Kalmbot", with the summary "Seite gelöscht."')
-  expect(cited?.props).toMatchObject(citeLook())
+  expect(cited?.props).toMatchObject(citeLook('k:1'))
   const rest = texts.find(n => String(n.props.children).includes('("page deleted")'))
   expect(rest).toBeDefined()
   expect(rest!.props.underline).toBeUndefined()

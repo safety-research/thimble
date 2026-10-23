@@ -728,8 +728,9 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const avail = inner - 2
   const roomT = title.length + right.length + 3 <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
   const tone = TONES[f.kind]
-  // a citation's title is its words, drawn as the reply draws them (marks/view.ts wordsLook); the frame keeps its tone
-  const titleLook = f.kind === 'citation' ? wordsLook(citeStatus ?? 'failed') : { color: tone }
+  // a citation's title is its words, drawn as the reply draws them (marks/view.ts wordsLook: tinted on hover); the frame
+  // keeps its tone
+  const titleLook = f.kind === 'citation' ? wordsLook(citeStatus ?? 'failed', `tray:${f.row}:${f.n}`) : { color: tone }
   const head = Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [
     Text({ key: 't', bold: true, ...titleLook, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
     status

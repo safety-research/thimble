@@ -20,7 +20,7 @@ import { themeNow } from '../core/theme'
 import { plainSentence } from './message.js'
 import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
 import { tableLines } from './table.mjs'
-import { citeLook, wordsLook } from './view'
+import { citeHeat, citeLook, wordsLook } from './view'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -36,21 +36,25 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
 }
 
 /** The cited words' look wherever their evidence shows (this pane, the tray, the claims pane): bold, in a citation's
- *  look in the reply (view.ts citeLook: the text's color, underlined, on the citations' purple tint). */
-export const citeWords = () => ({ ...citeLook(), bold: true })
+ *  look in the reply (view.ts citeLook: the text's color, underlined; the citations' purple tint on hover of `id`'s
+ *  group). */
+export const citeWords = (id: string) => ({ ...citeLook(id), bold: true })
 
-/** A line of text with spans of it highlighted (the cited words in citeWords), as Text runs. */
+/** A line of text with spans of it highlighted (the cited words in citeWords), as Text runs. The cited words are Texts
+ *  nested in the line's, which alone can heat a hover group on the terminal: the line joins their group, so the pointer
+ *  over the line lights them. */
 export function highlighted(els: Any, text: string, spans: [number, number][], key: string): Any {
+  const id = `ev:${key}:${text}`
   const parts: Any[] = []
   let at = 0
   spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]).forEach(([a, b], k) => {
     if (a < at) return
     if (a > at) parts.push(text.slice(at, a))
-    parts.push(els.Text({ key: `h${k}`, ...citeWords(), children: text.slice(a, b) }))
+    parts.push(els.Text({ key: `h${k}`, ...citeWords(id), children: text.slice(a, b) }))
     at = b
   })
   if (at < text.length) parts.push(text.slice(at))
-  return els.Text({ key, wrap: 'wrap', children: parts.length ? parts : ' ' })
+  return els.Text({ key, wrap: 'wrap', ...(parts.some(x => typeof x !== 'string') ? citeHeat(id) : {}), children: parts.length ? parts : ' ' })
 }
 
 /** The output's lines around its first highlight, each with the parts of the spans that fall in it; `rows` of them
@@ -162,10 +166,12 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   const m: MarkItem | undefined = reply?.items.find(x => x.n === n)
   if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' })
   const st = STATUS[m.status] ?? STATUS.failed!
-  const head = Text({ key: 'head', wrap: 'wrap', children: [
+  // the citation's words as the reply draws them; the head joins their hover group, as they are nested in it
+  const id = `evidence:${row}:${n}`
+  const head = Text({ key: 'head', wrap: 'wrap', ...citeHeat(id), children: [
     Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
     '  ',
-    Text({ key: 'w', ...wordsLook(m.status), children: m.shown.replace(/\*\*|`/g, '') }),
+    Text({ key: 'w', ...wordsLook(m.status, id), children: m.shown.replace(/\*\*|`/g, '') }),
   ] })
   const rows: Any[] = [head]
   if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `${m.rewrite ? 'sentence rewritten' : m.narrowed ? 'narrowed' : 'corrected'}; was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}` }))

@@ -556,7 +556,7 @@ function wholeRows(ev, W) {
 
 /**
  * A citation as its card in the reply draws it, as rows of runs W wide: the cited words bold in the citations' look
- * (tinted; a failed one's red and underlined) and
+ * (underlined, tinted on hover; a failed one's red) and
  * its check beside them (`✓ verified · cite`); what it was, when the check corrected it, or why it failed, dim; then
  * its evidence (snippetOf): the code line in the code's color or the file's place dim, then the line after a dim │, the
  * cited words tinted (the rest dim where the line was cut), and `+ N more lines` under it when the output has more.
