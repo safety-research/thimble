@@ -4,12 +4,14 @@
 //                          (fixer.ts) works in it in the background; while the line of a fix with a copy shows, the
 //                          words are a new round of that fix (request.ts)
 //   /thimble-fix           Your fixes (pane.tsx)
-//   the fixer's calls      Bash in the sandbox runtime, Write and Edit only in its copy, no dialog for either
-//   everyone else's calls  only thimble and the person's keys apply, submit or record a fix: Claude's own `thimble fix`
-//                          calls of those verbs, and its writes into the fixes' folder, are refused
-//   the fixer's end        thimble commits and tests the change; the line above the bar offers y apply · d diff · n
+//   the fixer's calls      Claude Code's own permission handling, in the person's mode, as any subagent's
+//   every call             only thimble and the person's keys apply, submit or record a fix: Claude's `thimble fix`
+//                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
+//                          fixes' copies, are refused
+//   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it · d · n
 //   the person's prompt    a line that only told something goes (line.ts)
-//   session start          a newer release: the fixes that are on replay on it, and one line says what came of it
+//
+// A newer release comes with `thimble update` in a shell, never inside Claude Code.
 //
 // The kernel (engine/kernel/fixes.py) holds the records and makes every change to live; nothing here edits a file of
 // thimble's or of Claude Code's.
@@ -18,8 +20,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import { busyWhile } from '../bar/busy'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
-import { fixerCall, fixerCheck, fixerEnded, fixOfAgent, FIXER, recoverFixers } from './fixer'
-import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloadIfDue, setFixLine, updateFixes } from './fixes'
+import { fixerEnded, fixOfAgent, recoverFixers } from './fixer'
+import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloadIfDue, setFixLine } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
 import { requestFix } from './request'
@@ -30,9 +32,6 @@ type Any = any
 
 /** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), never Claude's. */
 const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|done|apply|notnow|redo|undo|remove|sandbox|draft|keep|send)\b/
-
-/** Whether this session looked for a new release already (kept across a reload of the module). */
-const UPDATED = { plugin: 'thimble', key: 'fixUpdated' } as const
 
 /** The fixers this load knows, so a guard that fails can still refuse their calls. */
 const fixerAgents = new Set<string>()
@@ -73,18 +72,13 @@ export const registerFix: Register = on => {
       const working = (list?.fixes ?? []).filter(f => f.state === 'working')
       for (const f of working) void busyWhile($, `fixing: ${cut(f.title, 36)} · in a copy`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
       await recoverFixers($, working)
-      // a newer release: the fixes that are on replay on it, once per session (a reload starts the module again)
-      if (list?.pointed && !(await $.state.get(UPDATED)).value) {
-        await $.state.set(UPDATED, true as never)
-        await updateFixes($)
-      }
     })().catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 
   on('command.run', { command: 'thimble-fix' }, async ($, e) => {
     const words = String(e.args || '').trim()
-    if (/^update$/i.test(words)) return { text: (await updateFixes($)) || 'Your thimble is the newest release.' }
+    if (/^update$/i.test(words)) return { text: 'A newer thimble comes with `thimble update` in a shell, outside Claude Code. It keeps your fixes.' }
     if (!words) {
       const placed = await openFixes($)
       return placed ? {} : { text: 'Your fixes open in a pane in a wider terminal. In a shell: thimble fix list' }
@@ -92,32 +86,16 @@ export const registerFix: Register = on => {
     return { text: await requestFix($, words) }
   })
 
-  // the model never starts the fixer: only /thimble-fix does
-  on('agent.offer', { agent: FIXER }, () => ({ isOffered: false }) as never).catch(() => ({ isOffered: false }) as never)
-
-  // the fixer's calls: its shell in the sandbox, its writes in its copy
-  on('tool.call', { agentId: /^[\s\S]+$/ }, async ($, e, next) => {
-    const id = await fixOfAgent($, e.agentId)
-    if (id == null) return next(e)
-    fixerAgents.add(String(e.agentId))
-    const r = await fixerCall($, e, id)
-    if (r?.deny) return { deny: r.deny }
-    return r?.command ? next({ ...e, command: r.command } as never) : next(e)
-  }).catch(($, e, next) => (next.called ? next(e) : fixerAgents.has(String(e.agentId)) ? { deny: 'thimble could not check this call of the fixer.' } : next(e)))
-
-  // everyone else's: the verbs and the folder that are thimble's own
+  // every call, the fixer's too: the verbs and the folder that are thimble's own and the person's keys'. The fixer's
+  // other calls go through Claude Code's own permission handling, as any subagent's do
   on('tool.call', { tool: /^(?:Bash|Write|Edit|MultiEdit|NotebookEdit)$/ }, async ($, e, next) => {
-    if (e.agentId && (await fixOfAgent($, e.agentId)) != null) return next(e)
+    if (e.agentId && (await fixOfAgent($, e.agentId)) != null) {
+      // the fixer writes in its copy (~/.thimble/fixes/work/<id>), which the folder rule allows
+      fixerAgents.add(String(e.agentId))
+    }
     const no = await refusal($, e)
     return no ? { deny: no } : next(e)
-  }).catch(($, e, next) => next(e))
-
-  // the fixer's calls need no dialog: thimble put them in the sandbox, or in its copy
-  on('tool.check', { agentId: /^[\s\S]+$/ }, async ($, e, next) => {
-    const id = await fixOfAgent($, e.agentId)
-    if (id == null || !(await fixerCheck($, e, id))) return next(e)
-    return { decision: 'allow', reason: "thimble's fixer: in the sandbox runtime, in its copy of thimble" } as never
-  }).catch(($, e, next) => next(e))
+  }).catch(($, e, next) => (fixerAgents.has(String(e.agentId)) ? { deny: 'thimble could not check this call of the fixer.' } : next(e)))
 
   // the fixer's end: thimble commits and tests its change, a moment after (the tests take a while)
   on('turn.complete', { agentId: /^[\s\S]+$/ }, async ($, e, next) => {
