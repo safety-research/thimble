@@ -11,15 +11,26 @@
 #   thimble-browser -c | --continue       continue the folder's latest session: its chat, canvas, report and labels
 #   thimble-browser -r | --resume [ID]    pick an earlier session from a list (or the session of chat ID)
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it
+#   thimble-browser --demo [NAME...]      the demo datasets (also: thimble demo)
 #   thimble-browser --setup --how claude-code --yes | --key-file F | --how wif --wif-file F   the same, without asking
 #   thimble-browser --setup --find-wif    list the Workload Identity Federation config files found, by path
 #
 # The workbench keeps its workspaces and its choice in ~/.thimble-browser, or in THIMBLE_BROWSER_HOME, apart from the
 # terminal plugin's ~/.thimble. The server listens on 127.0.0.1, on port 8300 or the next free one (--port N takes N alone).
+# Once `thimble update` has put the workbench on ~/.thimble/fixes/live (the newest release with your fixes), this runs
+# the workbench from there.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
-folder="" setup=0 setup_args=() session=new
+fixes="${THIMBLE_HOME:-$HOME/.thimble}/fixes"
+if [ -z "${THIMBLE_BROWSER_LIVE:-}" ] && [ -f "$fixes/browser-ready" ] && [ -x "$fixes/live/browser/scripts/thimble-browser" ] \
+   && [ "$(cd "$fixes/live/browser" && pwd -P)" != "$root" ]; then
+  export THIMBLE_BROWSER_LIVE=1
+  echo "thimble-browser: from ${fixes/#$HOME/\~}/live, the release thimble update installed, with your fixes" >&2
+  exec "$fixes/live/browser/scripts/thimble-browser" "$@"
+fi
+
+folder="" setup=0 setup_args=() session=new demo=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -c | --continue) session=continue; shift ;;
@@ -31,7 +42,8 @@ while [ $# -gt 0 ]; do
     --port) [ $# -ge 2 ] || { echo "thimble-browser: --port needs a number" >&2; exit 2; }; export THIMBLE_PORT="$2"; shift 2 ;;
     --port=*) export THIMBLE_PORT="${1#--port=}"; shift ;;
     --setup) setup=1; shift; setup_args=("$@"); break ;;
-    -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --demo) demo=1; shift; setup_args=("$@"); break ;;
+    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "thimble-browser: unknown option $1 (see --help)" >&2; exit 2 ;;
     *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else echo "thimble-browser: $1 is not a folder" >&2; exit 2; fi; shift ;;
   esac
@@ -47,6 +59,10 @@ py="$root/backend/.venv/bin/python"
 
 if [ "$setup" = 1 ]; then
   cd "$root/backend" && exec "$py" -m app.claude_access setup "${setup_args[@]}"
+fi
+if [ "$demo" = 1 ]; then
+  [ -f "$root/backend/app/demo.py" ] || { echo "thimble-browser: this release of the workbench has no demos" >&2; exit 1; }
+  cd "$root/backend" && exec "$py" -m app.cli demo ${setup_args[@]+"${setup_args[@]}"}
 fi
 
 # the page is built the first time, and again when its sources are newer than the build (after a pull, say)

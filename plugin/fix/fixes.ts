@@ -33,14 +33,15 @@ export type FixFile = { path: string; add: number | null; del: number | null }
 export type Fix = {
   id: number; title: string; words: string[]; rounds: number; made_in: string; created: number; state: string
   work: string | null; commit: string | null; files: FixFile[]; tests: string | null; summary: string; error: string | null
-  note?: string; pr?: string; saved?: string; tests_tail?: string
+  note?: string; pr?: string; saved?: string; tests_tail?: string; released_in?: string
+  pending?: { why: string; version: string; files?: string[]; tests?: string; old?: string } | null
 }
-export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; gen: number }
+export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
  *  u), failed (d what changed · r redo · n later), request (no code), a new release with the fixes replayed on it
- *  (update), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
+ *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
  *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
-export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart' }
+export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release'; said?: string; open?: boolean; reload?: 'pending' | 'restart' }
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
 
@@ -225,21 +226,23 @@ export async function diffText($: Engine, id: number): Promise<string> {
   return r?.ok ? r.out : ''
 }
 
-/** A newer release, and the fixes replayed on it (at session start, and /thimble-fix update): the line says what came
- *  of it, and the session loads it. The words, or '' when nothing changed. */
-export async function updateFixes($: Engine): Promise<string> {
-  const r = await kernelFix($, ['update', '--json'], { timeoutMs: 600000, doing: 'replaying your fixes on a new thimble' })
-  if (!r.ok) {
-    await setFixLine($, { id: 0, kind: 'problem', said: `Your fixes could not move to the new thimble: ${cut(r.err || 'thimble fix update gave nothing', 200)}. They stay as they were.` })
-    return ''
-  }
-  const d = jsonOf<Any>(r.out) ?? {}
+/** /thimble-fix update: thimble update runs in a shell, not in this session, because it changes the thimble the session
+ *  runs. The reply says so, with the commands. */
+export const UPDATE_IN_SHELL = 'thimble update runs in a shell, not inside Claude Code: it changes the thimble this session runs. In a terminal, run thimble update; it says when to run thimble reapply for your fixes. Then type /reload-plugins here.'
+
+/** At session start, while thimble runs from live: one line when a newer release is out. Nothing moves until the
+ *  person runs thimble update (it can take minutes, and a fix that does not fit needs them). */
+export async function checkUpdate($: Engine): Promise<void> {
+  const r = await kernelFix($, ['update', '--check', '--json'], { timeoutMs: 60000 }).catch(() => null)
+  const d = r?.ok ? jsonOf<Any>(r.out) : null
+  if (d?.newer) await setFixLine($, { id: 0, kind: 'release', said: `thimble ${d.to} is out (you have ${d.from}) · in a shell: thimble update` })
+}
+
+/** Claude ran `thimble update` (the pending fixes' prompt asks for --continue): the session loads what it changed at the
+ *  end of the turn, and the list shows the fixes as they are now. */
+export async function updateRan($: Engine): Promise<void> {
+  reloadDue = true
   await refreshFixes($)
-  if (!d.said) return ''
-  await setFixLine($, { id: 0, kind: 'update', said: String(d.said) })
-  await tellAtNextPrompt($, 'fix-update', `thimble moved to a new release and replayed the person's fixes on it: ${d.said}.`)
-  await load($, d)
-  return String(d.said)
 }
 
 /** The path of the fixes' home, as the person reads it (~ for the home folder). */

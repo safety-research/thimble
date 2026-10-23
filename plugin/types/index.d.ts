@@ -107,6 +107,8 @@ declare module 'claude-code' {
       /** the line above the bar for one fix: ready, applied, off, failed, request, or a problem; whether d opened what
        *  changed; a reload that waits for Claude's turn or a restart (fixes.ts FixLine) */
       fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart' } | null
+      /** whether this session looked for a newer release already (register.ts) */
+      fixUpdated: boolean
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
       fixers: Record<string, number>
       /** the fixes Claude started with the fix-thimble skill, by the fix's id (fixer.ts) */

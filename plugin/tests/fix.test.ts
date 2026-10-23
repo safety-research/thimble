@@ -93,13 +93,14 @@ function setup() {
     if (verb === 'undo') { fix.state = 'off'; return ok({ id: 1, reload: true }) }
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
     if (verb === 'diff') return ok('diff --git a/plugin/bar/bar.tsx b/plugin/bar/bar.tsx\n-  coverage\n+  read\n')
-    if (verb === 'update') return ok(fix.state === 'on' ? { said: 'thimble 0.10.3 · 1 fix carried', carried: [1], reload: true } : { said: '', reload: false })
+    if (verb === 'update' && argv.includes('--check')) return ok({ from: '0.10.2', to: '0.10.3', newer: fix.state === 'on' })
     if (verb === 'share') {
       const given = stdin ? JSON.parse(stdin) : null
       return ok({ id: 1, title: given?.title || fix.title, took: 'took 1 file name out of the text', opened: true, page: `${HOME}/fixes/share/1/index.html`, url: 'https://github.com/safety-research/thimble/issues/new?title=Bar%20says%20read&body=What%20was%20wrong', shortened: false, text: given ? 'claude' : 'earlier' })
     }
     return ok({})
   }
+  const where = { root: '/made-up/data' }
   const $: Any = {
     plugin: { root: '/made-up/plugin', name: 'thimble' },
     env: { get: async (k: string) => ({ THIMBLE_HOME: HOME, HOME: '/made-up/home', THIMBLE_ROOT: '/made-up/data' } as Record<string, string>)[k] },
@@ -118,7 +119,7 @@ function setup() {
       spawn: async (a: Any) => { spawns.push(a); const agentId = `agent-fixer-${spawns.length}`; agents.push({ id: agentId, status: 'running' }); return { model: 'claude-made-up', agentId } },
       list: async () => agents,
     },
-    session: { id: async () => 's-fix', cwd: async () => '/made-up/data', root: async () => '/made-up/data', send: async (a: Any) => { sent.push(a); return { isDelivered: true } } },
+    session: { id: async () => 's-fix', cwd: async () => where.root, root: async () => where.root, send: async (a: Any) => { sent.push(a); return { isDelivered: true } } },
     config: { list: async () => config },
     process: { run: async (argv: string[], o: Any = {}) => { ran.push({ argv, ...(o.stdin != null ? { stdin: o.stdin } : {}) }); return argv.includes('fix') ? kernel(argv, o.stdin) : { exitCode: 0, stdout: '', stderr: '' } } },
     command: { run: async (c: Any) => { commands.push(c.command); return {} }, register: async () => ({ command: 'thimble-fix' }) },
@@ -143,7 +144,7 @@ function setup() {
     await call('turn.complete', { turnId: 't-f', agentId, reason: 'answer', answer, durationMs: 9, isAborted: false }, async () => ({}))
     await tick()
   }
-  return { $, call, tick, end, made: () => { made = true }, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked }
+  return { $, call, tick, end, made: () => { made = true }, ran, spawns, commands, files, fix, opened, toasts, notes, sent, agents, config, state, verbs, copied, asked, where }
 }
 
 /** A request, and the fixer's end with what it says. */
@@ -365,14 +366,50 @@ test("Claude starts a fix with the fix-thimble skill: the same fork starts, Clau
   expect(told['fix-1']).toBe('The thimble fix you started, fix 1 ("Legend shows every row"), is ready and tests pass; the person turns it on with y. Tell the person in one short line.')
 })
 
-test('a newer release comes with thimble update in a shell: the session start replays nothing, and /thimble-fix update says where', async () => {
+test('at session start one line says a newer release is out, once a session; /thimble-fix update says to run thimble update in a shell', async () => {
   const s = setup()
   s.fix.state = 'on'
   s.made()
   await s.call('session.start', { cwd: '/made-up/data' })
   await s.tick()
+  expect(s.verbs()).toContain('update --check --json')
   expect(s.verbs()).not.toContain('update --json')
-  expect(String((await s.call('command.run', { command: 'thimble-fix', args: 'update' })).text)).toContain('`thimble update` in a shell')
+  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 is out (you have 0.10.2) · in a shell: thimble update')
+  expect(s.commands).toEqual([])
+  // the reload starts the module again: no second look in this session
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect(s.verbs().filter(v => v === 'update --check --json').length).toBe(1)
+  await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  // /thimble-fix update: the session does not move thimble under itself; the reply names the shell's commands
+  const r = await s.call('command.run', { command: 'thimble-fix', args: 'update' })
+  await s.tick()
+  expect(s.verbs()).not.toContain('update --json')
+  expect(String(r.text)).toContain('In a terminal, run thimble update')
+  expect(String(r.text)).toContain('thimble reapply')
+  expect(s.commands).toEqual([])
+})
+
+test("the session opened in live edits live's code, and its thimble update --continue reloads at the end of the turn; other sessions may not", async () => {
+  const ran = async (e: Any) => ({ result: { ran: e.command ?? e.file_path ?? '' } })
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  expect(String((await s.call('tool.call', { tool: 'Edit', tool_use_id: 'tu-l1', file_path: `${HOME}/fixes/live/plugin/bar/bar.tsx` }, ran)).deny)).toContain('thimble alone')
+  const t = setup()
+  t.where.root = `${HOME}/fixes/live`
+  await t.call('session.start', { cwd: t.where.root })
+  expect((await t.call('tool.call', { tool: 'Edit', tool_use_id: 'tu-l2', file_path: `${HOME}/fixes/live/plugin/bar/bar.tsx` }, ran)).result.ran).toBe(`${HOME}/fixes/live/plugin/bar/bar.tsx`)
+  // never the records or the key presses, also by way of ..
+  expect(String((await t.call('tool.call', { tool: 'Write', tool_use_id: 'tu-l3', file_path: `${HOME}/fixes/live/../asks/1.json` }, ran)).deny)).toContain('thimble alone')
+  expect(String((await t.call('tool.call', { tool: 'Write', tool_use_id: 'tu-l4', file_path: `${HOME}/fixes/fixes.jsonl` }, ran)).deny)).toContain('thimble alone')
+  expect(String((await t.call('tool.call', { tool: 'Write', tool_use_id: 'tu-l5', file_path: `${HOME}/fixes/work/../asks/1.json` }, ran)).deny)).toContain('thimble alone')
+  // Claude's thimble update --continue: the plugins load again when its turn ends
+  await t.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-l6', command: 'thimble update --continue' }, ran)
+  expect(t.commands).toEqual([])
+  await t.call('turn.complete', { turnId: 't-1', reason: 'answer', answer: 'Done.', durationMs: 9, isAborted: false }, async () => ({}))
+  await t.tick()
+  expect(t.commands).toEqual(['reload-plugins'])
 })
 
 test('the text copy of a drawing: a row side by side, a column one under another, a button by its words', () => {

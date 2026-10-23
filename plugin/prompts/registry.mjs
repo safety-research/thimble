@@ -82,6 +82,11 @@ export const TEXTS = {
     reader: 'fix/share.ts',
     use: 'one model call per fix the person shares',
   },
+  reapply: {
+    about: 'bring back the fixes thimble update set aside, each one the new release still needs, once',
+    reader: 'engine/kernel/fixes.py',
+    use: 'the first message of the Claude Code session that thimble reapply opens in live',
+  },
 }
 
 /** A text's file, as a path from the plugin's root. */
