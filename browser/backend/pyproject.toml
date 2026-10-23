@@ -37,10 +37,12 @@ dev = ["pytest>=8", "pytest-asyncio>=0.23", "pytest-xdist>=3.6", "pytest-timeout
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-# a test that runs longer than this fails with its name and every thread's stack (pytest-timeout), rather than holding
-# the run: the thread method works where a test waits in C or in an event loop, and under xdist only its worker ends
+# a test that runs longer than this fails with its name (pytest-timeout), rather than holding the run: the thread method
+# ends it wherever it waits, in C or in an event loop's close, and under xdist only its worker ends. An xdist worker's
+# own output goes nowhere, so pytest's faulthandler prints every thread's stack to the log a little before
 timeout = 120
 timeout_method = "thread"
+faulthandler_timeout = 110
 testpaths = ["tests_public"]
 pythonpath = ["."]
 

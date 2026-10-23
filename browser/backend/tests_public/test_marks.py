@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,20 @@ def test_split_marks_keeps_a_sentence_together_and_caps_the_forks():
     assert len(shares) == marks.MAX_FORKS and sum(len(s) for s in shares) == 40
     assert [m["n"] for s in shares for m in s] == list(range(1, 41))
     assert marks.split_marks(items[:3]) == [items[:3]]
+
+
+def test_the_loop_closes_when_it_cancels_a_check_that_is_starting_node():
+    """The check of a reply's marks runs in the background, so the loop's close (a server that stops, a test that ends)
+    can cancel it while marks_of starts Node. The close still ends: on Python 3.12.3 an asyncio subprocess cancelled
+    before its pipes connect held it forever. The loop runs in a thread of its own, so a close that hangs fails here."""
+    async def a_turn_that_ends() -> None:
+        asyncio.get_running_loop().create_task(marks.marks_of(["We saw [12](#) runs."]))
+        await asyncio.sleep(0)  # the check starts Node; the loop closes before Node's pipes are connected
+
+    loop = threading.Thread(target=asyncio.run, args=(a_turn_that_ends(),), daemon=True)
+    loop.start()
+    loop.join(30)
+    assert not loop.is_alive(), "the loop's close is still waiting for the check it cancelled"
 
 
 def test_a_reply_s_marks_are_checked_and_the_validator_decides(_fresh, tmp_path):
