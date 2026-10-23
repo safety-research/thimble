@@ -120,8 +120,8 @@ def _body(rec: dict[str, Any], d: dict[str, str]) -> str:
     fixed = d["fixed"] or ("(no change: Claude could not do it in code)" if request else "(say how it works now)")
     return (f"### What was wrong\n\n{d['wrong'] or '(say what you saw)'}\n\n"
             f"### {'What it needs' if request else 'How it was fixed'}\n\n{fixed}\n\n"
-            f"<sub>thimble {version} · {rec.get('made_in') or 'terminal'} · "
-            f"{'asked through' if request else 'fixed by'} <code>thimble fix</code></sub>\n")
+            f"thimble {version} · {rec.get('made_in') or 'terminal'} · "
+            f"{'asked through' if request else 'fixed by'} `thimble fix`\n")
 
 
 def _scan(text: str, st: Store | None) -> tuple[list[dict[str, Any]], str]:
@@ -361,8 +361,8 @@ def pr_preview(fid: int | str, st: Store | None = None) -> dict[str, Any]:
         raise FX.FixError(f"fix {n} changes a binary file; a pull request from thimble holds text changes only")
     d, _src = _given(rec, None)
     title = FX.short(d["title"] or rec["title"], 72)
-    body = (_body(rec, d) + f"\nOpened with <code>thimble file pr</code>, on thimble {version} "
-            f"(<code>{base[:7]}</code>).\n")
+    body = (_body(rec, d) + f"\nOpened with `thimble file pr`, on thimble {version} "
+            f"(`{base[:7]}`).\n")
     hits, text = _scan(f"{title}\n{body}", st)
     title, _, body = text.partition("\n")
     title = title.strip()

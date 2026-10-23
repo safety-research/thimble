@@ -98,7 +98,7 @@ def test_it_warns_shows_what_would_go_and_no_sends_nothing(world, gh, monkeypatc
     # the body: share's text, the person's data file taken out, with the line that says how it was opened
     assert "    ### What was wrong" in lines and "    After Claude read ‹data file›, the bar's item still said coverage." in lines
     assert "    ### How it was fixed" in lines
-    assert f"    Opened with <code>thimble file pr</code>, on thimble 0.10.2 (<code>{world['base'][:7]}</code>)." in lines
+    assert f"    Opened with `thimble file pr`, on thimble 0.10.2 (`{world['base'][:7]}`)." in lines
     assert "board-7.jsonl" not in out
     assert "  ✓ privacy check: took 1 file name out of the text; nothing of yours in the code" in lines
     assert asked == ["\nOpen this pull request on safety-research/thimble? [y/N] "]

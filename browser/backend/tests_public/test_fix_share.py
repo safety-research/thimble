@@ -53,7 +53,7 @@ def test_share_puts_claudes_text_through_the_scan_into_githubs_link(home, monkey
     q = parse_qs(urlsplit(out["url"]).query)
     assert out["url"].startswith("https://github.com/safety-research/thimble/issues/new?")
     assert q["title"] == [TEXT["title"]] and q["body"][0].startswith(f"### What was wrong\n\n{TEXT['wrong']}")
-    assert "· browser · fixed by <code>thimble fix</code>" in q["body"][0]
+    assert "· browser · fixed by `thimble fix`" in q["body"][0]
     # no local page: the analyst's tab goes to GitHub
     assert not (home / "fixes" / "share" / "2" / "index.html").exists()
 

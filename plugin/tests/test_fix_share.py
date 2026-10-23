@@ -57,7 +57,7 @@ def test_the_draft_goes_through_the_scan_and_says_what_it_took_out(world, monkey
     # GitHub Markdown: a heading for each part, the version line small at the end
     assert r["body"].startswith("### What was wrong\n\nAfter Claude read")
     assert "\n\n### How it was fixed\n\nThe bar's coverage item now says read" in r["body"]
-    assert r["body"].rstrip().endswith("<sub>thimble 0.10.2 · terminal · fixed by <code>thimble fix</code></sub>")
+    assert r["body"].rstrip().endswith("thimble 0.10.2 · terminal · fixed by `thimble fix`")
     assert r["marks"] == ["‹data file›"]
     # Claude's draft is kept for the next share of the same fix (the shell has no model call), before the scan
     assert json.loads((SH.share_dir(rec["id"]) / "given.json").read_text())["wrong"] == DRAFT["wrong"]
@@ -75,7 +75,7 @@ def test_with_no_draft_the_text_is_the_persons_words_and_what_the_fixer_said(wor
     # a request with no code says what it needs, not how it was fixed
     q = FX.done(FX.new("explain the terms of my field")["id"], "Explain terms of my field", "It needs the person's words.")
     body = SH.share(q["id"])["body"]
-    assert "### What it needs\n\nIt needs the person's words." in body and "asked through <code>thimble fix</code>" in body
+    assert "### What it needs\n\nIt needs the person's words." in body and "asked through `thimble fix`" in body
     # a fix that is still being made has nothing to share
     w = FX.new("make the minimap smaller")
     with pytest.raises(FX.FixError, match="nothing to share yet"):
