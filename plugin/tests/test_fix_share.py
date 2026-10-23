@@ -1,6 +1,5 @@
 """thimble fix share (engine/kernel/share.py): the share draft and its privacy scan, the GitHub link (its encoding and its
-length cap), the share page, and what `thimble fix share ID` prints. Nothing is sent: the page is a local file, and the
-command that would open it is a fake. The world is test_fixes.py's made-up thimble 0.10.2. All data here is made up."""
+length cap), and what `thimble fix share ID` prints. Nothing is sent: the command that would open the link is a fake. The world is test_fixes.py's made-up thimble 0.10.2. All data here is made up."""
 from __future__ import annotations
 
 import json
@@ -39,7 +38,7 @@ def query(url: str) -> dict[str, str]:
 
 @pytest.fixture
 def opened(world, monkeypatch, tmp_path):
-    """The command that opens the page: a fake that logs the file it was given."""
+    """The command that opens the link: a fake that logs what it was given."""
     log = tmp_path / "opened.log"
     fake = tmp_path / "open-fake"
     fake.write_text(f"#!/bin/sh\necho \"$1\" >> '{log}'\n")
@@ -55,9 +54,10 @@ def test_the_draft_goes_through_the_scan_and_says_what_it_took_out(world, monkey
     assert r["took"] == "took 1 file name out of the text"
     assert "board-7.jsonl" not in r["title"] + r["body"] + r["url"]
     assert "After Claude read ‹data file›, the bar's item still said coverage." in r["body"]
-    assert r["body"].startswith("What was wrong: After Claude read")
-    assert "\n\nHow it was fixed: The bar's coverage item now says read" in r["body"]
-    assert r["body"].rstrip().endswith("thimble 0.10.2 · terminal · fixed by thimble fix")
+    # GitHub Markdown: a heading for each part, the version line small at the end
+    assert r["body"].startswith("### What was wrong\n\nAfter Claude read")
+    assert "\n\n### How it was fixed\n\nThe bar's coverage item now says read" in r["body"]
+    assert r["body"].rstrip().endswith("<sub>thimble 0.10.2 · terminal · fixed by <code>thimble fix</code></sub>")
     assert r["marks"] == ["‹data file›"]
     # Claude's draft is kept for the next share of the same fix (the shell has no model call), before the scan
     assert json.loads((SH.share_dir(rec["id"]) / "given.json").read_text())["wrong"] == DRAFT["wrong"]
@@ -70,12 +70,12 @@ def test_with_no_draft_the_text_is_the_persons_words_and_what_the_fixer_said(wor
     monkeypatch.setattr(FX, "session_terms", lambda st: {})
     r = SH.share(rec["id"])
     assert r["text"] == "record" and r["title"] == "Bar says read"
-    assert r["body"].startswith("What was wrong: say read, not coverage\n\nHow it was fixed: The bar's coverage item says read.")
+    assert r["body"].startswith("### What was wrong\n\nsay read, not coverage\n\n### How it was fixed\n\nThe bar's coverage item says read.")
     assert r["took"] == "found nothing of yours to take out"
     # a request with no code says what it needs, not how it was fixed
     q = FX.done(FX.new("explain the terms of my field")["id"], "Explain terms of my field", "It needs the person's words.")
     body = SH.share(q["id"])["body"]
-    assert "What it needs: It needs the person's words." in body and "asked through thimble fix" in body
+    assert "### What it needs\n\nIt needs the person's words." in body and "asked through <code>thimble fix</code>" in body
     # a fix that is still being made has nothing to share
     w = FX.new("make the minimap smaller")
     with pytest.raises(FX.FixError, match="nothing to share yet"):
@@ -90,12 +90,12 @@ def test_the_link_is_githubs_new_issue_page_with_the_text_encoded(world, monkeyp
     got = query(r["url"])
     assert got["title"] == DRAFT["title"] and got["body"] == r["body"]
     assert "50% & more" in got["body"] and "✓" in got["body"]
-    # every character outside the unreserved ones is encoded, as the page's script encodes it
+    # every character outside the unreserved ones is encoded
     assert not re.search(r"[^A-Za-z0-9_.~%&=?/:-]", r["url"].split("?", 1)[1].replace("title=", "").replace("&body=", ""))
     assert "%20" in r["url"] and "+" not in r["url"].split("?", 1)[1]
 
 
-def test_a_long_text_is_cut_to_fit_the_link_and_the_page_says_so(world, monkeypatch, opened):
+def test_a_long_text_is_cut_to_fit_the_link_and_the_shell_says_so(world, monkeypatch, opened):
     rec = fix_on(world)
     monkeypatch.setattr(FX, "session_terms", lambda st: {})
     long = "The explainer cut its last line. " * 400
@@ -105,37 +105,12 @@ def test_a_long_text_is_cut_to_fit_the_link_and_the_page_says_so(world, monkeypa
     assert body.endswith("…") and r["body"].startswith(body[:-1])
     # the link holds as much of the text as fits
     assert len(r["url"]) > SH.URL_MAX - 20
-    # the page has the whole text, and the cap, for its own link and its note
-    assert json.loads(re.search(r'<script id="data" type="application/json">(.*?)</script>', Path(r["page"]).read_text(), re.S).group(1))["max"] == SH.URL_MAX
+    assert "  · the text is longer than a GitHub link holds, so the link has the first part of it" in SH.lines(r)
     short = SH.issue_url("A title", "short text", "safety-research/thimble")
     assert short[1] is False and query(short[0])["body"] == "short text"
 
 
-def test_the_page_is_one_local_file_that_holds_the_text_safely(world, monkeypatch, opened):
-    rec = fix_on(world)
-    monkeypatch.setattr(FX, "session_terms", lambda st: {})
-    r = SH.share(rec["id"], {**DRAFT, "wrong": "a cell held </script><img src=x onerror=alert(1)> & more"})
-    page = Path(r["page"])
-    assert page == FX.home() / "share" / str(rec["id"]) / "index.html"
-    text = page.read_text()
-    # the draft cannot end the page's script: < > & are escaped inside its JSON
-    assert "</script><img" not in text and "\\u003c/script\\u003e" in text
-    data = json.loads(re.search(r'<script id="data" type="application/json">(.*?)</script>', text, re.S).group(1))
-    assert data["body"] == r["body"] and data["title"] == r["title"] and data["repo"] == "safety-research/thimble"
-    # nothing outside the page: no request from the page itself, one button to GitHub, a slot for a screenshot
-    assert not re.search(r"""(?:src|href)=["']https?:""", text)
-    assert "default-src 'none'" in text
-    assert ">Open a GitHub issue</button>" in text and text.count('class="go"') == 1
-    assert "it may show your data" in text and "Copy image" in text
-    # opened once, with the page's path (the opener runs on its own, so its log may come a moment later)
-    for _ in range(50):
-        if opened.exists() and opened.read_text().strip():
-            break
-        time.sleep(0.1)
-    assert opened.read_text().split() == [str(page)]
-
-
-def test_the_shell_prints_what_happened_and_the_link(world, monkeypatch, opened, capsys, tmp_path):
+def test_the_shell_prints_the_link_and_opens_it_only_when_asked(world, monkeypatch, opened, capsys, tmp_path):
     rec = fix_on(world)
     (tmp_path / "shell").mkdir()
     monkeypatch.chdir(tmp_path / "shell")  # the shell stands in a folder of its own
@@ -145,21 +120,28 @@ def test_the_shell_prints_what_happened_and_the_link(world, monkeypatch, opened,
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "Share fix 1: Bar says read for coverage"
     assert out[1] == "  ✓ privacy check: took 1 file name out of the text"
-    assert out[2] == "  ✓ opened the share page in your browser"
-    assert out[3].startswith("On the share page: check the title and text, then Open a GitHub issue.")
-    assert out[3].endswith("Nothing leaves your computer until you press Submit there.")
-    assert out[4].startswith("No browser here (a remote machine)? Open this link on your computer: https://github.com/")
-    # a machine with no browser: the page's path instead, and still the link
-    monkeypatch.setenv("THIMBLE_OPEN", "none")
-    assert CLI.main(["fix", "share", str(rec["id"])]) == 0
+    assert out[2].startswith("Open this link to post it as a GitHub issue.")
+    assert out[2].endswith("nothing is sent until you do.")
+    assert out[3] == "" and out[4].startswith("https://github.com/safety-research/thimble/issues/new?title=")
+    # no local page, and nothing opened
+    assert not (SH.share_dir(rec["id"]) / "index.html").exists()
+    time.sleep(0.3)
+    assert not opened.exists()
+    # --open opens GitHub's page itself, once (the opener runs on its own, so its log may come a moment later)
+    assert CLI.main(["fix", "share", str(rec["id"]), "--open"]) == 0
     out = capsys.readouterr().out.splitlines()
-    assert out[2] == f"  · no browser to open here; the share page is {FX._tilde(str(SH.share_dir(rec['id']) / 'index.html'))}"
-    # --json --no-open, as the plugin and the browser call it, with Claude's draft on stdin
+    assert out[2] == "  ✓ opened the link in your browser"
+    for _ in range(50):
+        if opened.exists() and opened.read_text().strip():
+            break
+        time.sleep(0.1)
+    assert opened.read_text().split() == [out[-1]]
+    # --json, as the plugin and the browser call it, with Claude's draft on stdin
     p = subprocess.run([sys.executable, str(Path(SH.__file__).resolve().parents[1] / "thimble.py"), "fix", "share", "1",
-                        "--json", "--no-open", "--draft", "-"], input=json.dumps(DRAFT), capture_output=True, text=True)
+                        "--json", "--draft", "-"], input=json.dumps(DRAFT), capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     d = json.loads(p.stdout)
-    assert d["opened"] is False and d["text"] == "claude" and d["title"] == DRAFT["title"]
+    assert d["opened"] is False and d["text"] == "claude" and d["title"] == DRAFT["title"] and "page" not in d
     assert CLI.main(["fix", "share", "9"]) == 1
     assert "there is no fix 9" in capsys.readouterr().err
 

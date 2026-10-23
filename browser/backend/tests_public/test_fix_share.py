@@ -1,6 +1,6 @@
 """Share on a fix in the browser (app/fix_share.py): the analyst's click alone; Claude's text, then the plugin kernel's
-share page (`thimble fix share --no-open`, run for real on a made-up fix record), served under a policy of its own; and
-when Claude writes no text, the page still comes, with why. Nothing is sent. All data here is made up."""
+GitHub link (`thimble fix share`, run for real on a made-up fix record); and when Claude writes no text, the link still
+comes, with why. Nothing is sent. All data here is made up."""
 from __future__ import annotations
 
 import asyncio
@@ -35,10 +35,10 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_share_is_a_route_of_the_server():
     assert "fix_share" in main.ROUTER_MODULES
     paths = {r.path for r in fix_share.router.routes}
-    assert paths == {"/fixes/{fid}/share", "/fixes/{fid}/share/page"}
+    assert paths == {"/fixes/{fid}/share"}
 
 
-def test_share_writes_claudes_text_through_the_scan_into_a_page_served_with_its_own_policy(home, monkeypatch, analyst):
+def test_share_puts_claudes_text_through_the_scan_into_githubs_link(home, monkeypatch, analyst):
     seen: dict = {}
 
     async def drafted(c, rec):
@@ -49,21 +49,16 @@ def test_share_writes_claudes_text_through_the_scan_into_a_page_served_with_its_
     out = asyncio.run(fix_share.share_route(2, analyst, fix_share.ShareBody(ws="w1")))
     assert seen == {"c": "w1", "id": 2}
     assert out["title"] == TEXT["title"] and out["text"] == "claude" and out["note"] == ""
-    assert out["page"] == "/api/fixes/2/share/page"
+    assert "page" not in out
     q = parse_qs(urlsplit(out["url"]).query)
     assert out["url"].startswith("https://github.com/safety-research/thimble/issues/new?")
-    assert q["title"] == [TEXT["title"]] and q["body"][0].startswith(f"What was wrong: {TEXT['wrong']}")
-    assert "· browser · fixed by thimble fix" in q["body"][0]
-    page = asyncio.run(fix_share.page_route(2))
-    html = page.body.decode()
-    assert ">Open a GitHub issue</button>" in html and "it may show your data" in html
-    policy = page.headers["content-security-policy"]
-    assert "default-src 'none'" in policy and "frame-ancestors 'none'" in policy and "connect-src" not in policy
-    # the page is the kernel's file, in the plugin's home
-    assert (home / "fixes" / "share" / "2" / "index.html").read_text() == html
+    assert q["title"] == [TEXT["title"]] and q["body"][0].startswith(f"### What was wrong\n\n{TEXT['wrong']}")
+    assert "· browser · fixed by <code>thimble fix</code>" in q["body"][0]
+    # no local page: the analyst's tab goes to GitHub
+    assert not (home / "fixes" / "share" / "2" / "index.html").exists()
 
 
-def test_without_claudes_text_the_page_still_comes_and_says_why(home, monkeypatch, analyst):
+def test_without_claudes_text_the_link_still_comes_and_says_why(home, monkeypatch, analyst):
     async def no_text(c, rec):
         return "Claude did not write the text (timeout)"
 
@@ -71,14 +66,11 @@ def test_without_claudes_text_the_page_still_comes_and_says_why(home, monkeypatc
     out = asyncio.run(fix_share.share_route(2, analyst, None))
     assert out["note"] == "Claude did not write the text (timeout)" and out["text"] == "record"
     assert out["title"] == "Minimap covers cards"
-    assert parse_qs(urlsplit(out["url"]).query)["body"][0].startswith("What was wrong: the minimap hides the last lines")
+    assert parse_qs(urlsplit(out["url"]).query)["body"][0].startswith("### What was wrong\n\nthe minimap hides the last lines")
 
 
-def test_share_is_the_analysts_click_and_a_missing_page_or_fix_says_so(home, monkeypatch):
+def test_share_is_the_analysts_click(home, monkeypatch):
     stranger = Request({"type": "http", "headers": [], "state": {}})
     with pytest.raises(HTTPException) as e:
         asyncio.run(fix_share.share_route(2, stranger, None))
     assert e.value.status_code == 403
-    with pytest.raises(HTTPException) as e:
-        asyncio.run(fix_share.page_route(2))
-    assert e.value.status_code == 404 and "press Share" in e.value.detail

@@ -7,9 +7,9 @@
 //                turns a ready or off fix on (only this press does: the fix's code then runs as thimble), u turns an
 //                on fix off, r redo, s shares the marked fixes (or the selected one), g merges the marked fixes into
 //                the one marked first (merge.ts; only this press does), x removes, a turns every fix off or on.
-//   Share        after s, in place of the selected fix: for each fix shared, what the privacy check took out, whether
-//                its share page opened in the browser (share.ts), and what to do there; o opens the page again, c
-//                copies the GitHub link for a machine with no browser. Nothing is sent from here.
+//   Share        after s, in place of the selected fix: for each fix shared, what the privacy check took out and what
+//                to do with its GitHub link (share.ts); o opens GitHub's new-issue page with the text, c copies the
+//                link. Nothing is sent from here.
 //   Submit       for the fix the walk is on: where it goes and as whom, each detail the scan removed with its
 //                placeholder and why, and the exact text that leaves. y sends (a pull request), w saves the same text
 //                as files, k keeps the first detail that can be kept, esc cancels. Only these presses send. No key
@@ -27,7 +27,7 @@ import { testsWord } from './fixer'
 import { allOffOn, applyFix, type Fix, fixesNow, refreshFixes, removeFix, shownPath, sizeOf, undoFix } from './fixes'
 import { mergeFixes } from './merge'
 import { redoFix } from './request'
-import { copyLink, openAgain, type ShareState, shareFixes, shareNow } from './share'
+import { copyLink, openOnGitHub, type ShareState, shareFixes, shareNow } from './share'
 import { type Draft, draftNow, type Hit, submitAction, submitFixes, submitNow, submitSkip } from './submit'
 
 type Engine = EngineInterface
@@ -101,7 +101,7 @@ function diffRows(els: Any, diff: string, width: number): Any[] {
   })
 }
 
-/** After s: each fix shared, what the privacy check took out, whether its page opened, and what to do on it. */
+/** After s: each fix shared, what the privacy check took out, and what to do with its GitHub link. */
 async function shareRows($: Engine, els: Any, s: ShareState): Promise<Any[]> {
   const { Text } = els
   const out: Any[] = []
@@ -118,14 +118,13 @@ async function shareRows($: Engine, els: Any, s: ShareState): Promise<Any[]> {
       continue
     }
     out.push(check(`sht${id}`, `privacy check: ${it.took}`))
-    out.push(it.opened ? check(`sho${id}`, 'opened the share page in your browser') : Text({ key: `sho${id}`, wrap: 'wrap', children: `  · no browser to open here; the share page is ${await shownPath($, it.page || '')}` }))
+    if (it.opened) out.push(check(`sho${id}`, 'opened the GitHub issue in your browser'))
     if (it.shortened) out.push(Text({ key: `shl${id}`, dimColor: true, wrap: 'wrap', children: '  · the text is longer than a GitHub link holds, so the link has the first part of it' }))
     if (it.note) out.push(Text({ key: `shn${id}`, color: 'warning', wrap: 'wrap', children: `  · ${it.note}` }))
   }
   if (s.items.some(x => !x.problem)) {
     out.push(Text({ key: 'shg', children: ' ' }))
-    out.push(Text({ key: 'shw', wrap: 'wrap', children: 'On the share page: check the title and text, then Open a GitHub issue. GitHub opens its own page with your text filled in; paste your screenshot there if you added one, and press Submit. Nothing leaves your computer until you press Submit there.' }))
-    out.push(Text({ key: 'shr', dimColor: true, wrap: 'wrap', children: 'No browser here (a remote machine)? c copies the GitHub link, to open on your computer.' }))
+    out.push(Text({ key: 'shw', wrap: 'wrap', children: "o opens GitHub's new-issue page with this text, c copies its link. Read the text there, paste a screenshot if you want, and press Submit; nothing is sent until you do." }))
   }
   return out
 }
@@ -213,7 +212,7 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
     ['x', 'remove', async () => say(await removeFix($, sel.id))],
     ['a', list?.on === false ? 'all on' : 'all off', async () => say(await allOffOn($, list?.on === false))],
     ...(sharedOne ? [
-      ['o', 'open the page again', async () => say(await openAgain($, sharedOne.id))] as [string, string, () => unknown],
+      ['o', 'open on GitHub', async () => say(await openOnGitHub($, sharedOne.id))] as [string, string, () => unknown],
       ['c', 'copy the link', async () => say(await copyLink($, sharedOne.url || ''))] as [string, string, () => unknown],
     ] : []),
   ])

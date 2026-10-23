@@ -10,7 +10,7 @@ In a shell:
     thimble fixes                  your fixes that are not in the release: on, off or ready (also: thimble fix list)
     thimble fix show N             what fix N does, in a few lines
     thimble fix apply N            use a ready fix now (it asks y/N first)
-    thimble fix share N            post fix N as a GitHub issue; you check it before it goes
+    thimble fix share N [--open]   a link that posts fix N as a GitHub issue; you check it on GitHub first
     thimble fix off [N]            one fix off, or all of them (the plain release)
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
 
@@ -453,7 +453,7 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
                                      ready), title, date and the start of your words (also: thimble fix list)
     thimble fix show N               what fix N does, in a few lines
     thimble fix apply N              use a ready fix now (it asks y/N first)
-    thimble fix share N              post fix N as a GitHub issue; you check it before it goes
+    thimble fix share N [--open]     a link that posts fix N as a GitHub issue; you check it on GitHub first
     thimble fix off N | on N         turn fix N off, or on (on asks for your key in the terminal)
     thimble fix off | on             all your fixes off (the plain release), or on again
     thimble fix merge A B C          fixes B and C become part of fix A: one change, one title (asks y/N first)
@@ -562,7 +562,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("more", nargs="*", help=argparse.SUPPRESS)  # merge: the third fix and on
     p.add_argument("--json", action="store_true")
     p.add_argument("--to", metavar="DIR")
-    p.add_argument("--no-open", dest="no_open", action="store_true", help="share: write the page, do not open it")
+    p.add_argument("--open", dest="open", action="store_true", help="share: open the GitHub link in your browser too")
     p.add_argument("--draft", help=argparse.SUPPRESS)  # share: Claude's draft as JSON on stdin (-)
     p.add_argument("--words", help=argparse.SUPPRESS)
     p.add_argument("--title", help=argparse.SUPPRESS)

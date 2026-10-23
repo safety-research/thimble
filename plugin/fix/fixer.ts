@@ -1,17 +1,24 @@
 // fixer.ts: thimble's fixer, the subagent that makes a change the person asked for, in the background, in a scratch
 // copy of thimble (~/.thimble/fixes/work/<id>). It is a fork of the person's session, so it sees the conversation
-// ("this" means something in it); prompts/fixer.md opens its first message. Its calls go through Claude Code's own
-// permission handling in the person's mode, as any subagent's do.
+// ("this" means something in it); prompts/fixer.md opens its first message.
 //
 //   startFixer($, fix, words)   forks the session into the copy, with the words and a text copy of what thimble shows
 //                               now (screen.ts); the bar shows `fixing: <title>` with its time
+//   fixerCall($, e, id)         each of its tool calls: Bash runs in the sandbox runtime (the kernel's `fix sandbox`
+//                               gives the command's start: no network, reads only the system, its tools and the copy,
+//                               writes only the copy and its temp folder), in the foreground, for at most 5 minutes;
+//                               Write and Edit only in the copy; its other calls as they are
+//   fixerCheck($, e)            a Bash call thimble put in the sandbox needs no dialog, as Claude Code's own sandboxed
+//                               commands need none, unless the person's rules deny the command; its other calls go
+//                               through Claude Code's own permission handling in the person's mode
 //   liveFixer($)                the fix whose fixer still works, and its agent: more words for it go to that fixer
 //   fixerEnded($, e)            its end: thimble commits the change in the copy and runs the tests (`thimble fix done`),
 //                               then the line above the bar asks whether to use it (y; the person's key applies it), and
 //                               Claude Code sends a notification. When Claude started the fix, Claude is told, so that it
 //                               can tell the person.
 //
-//   state: fixers (agentId → the fix's id), fixBy (the fixes Claude started, by their id)
+//   state: fixers (agentId → the fix's id), fixBy (the fixes Claude started, by their id), fixerBox (the sandbox
+//          command's start, by the fix's id)
 import type { EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
@@ -30,6 +37,7 @@ type Any = any
 
 const FIXERS = { plugin: 'thimble', key: 'fixers' } as const
 const BY = { plugin: 'thimble', key: 'fixBy' } as const
+const BOX = { plugin: 'thimble', key: 'fixerBox' } as const
 
 /** Who asked for a fix: the person (/thimble-fix), or Claude (the fix-thimble skill). */
 export type Asker = 'person' | 'claude'
@@ -133,6 +141,9 @@ async function start($: Engine, fix: Fix, earlier: boolean, screen: string): Pro
   } catch (err) {
     return `The fixer did not start (${cut(String((err as Error)?.message || err), 200)}).`
   }
+  // the command's start for its shell, kept for each of its Bash calls
+  const box = await sandboxOf($, fix.id)
+  if (typeof box === 'string') return `The fixer did not start: ${box}`
   // no type: a fork of the session, which sees the conversation
   const refines = fix.refines != null ? await fixOf($, fix.refines) : null
   // the person's other fixes that are on, newest first: the words may be about one of them
@@ -160,6 +171,67 @@ function watch($: Engine, id: number): void {
   } catch {
     t = null
   }
+}
+
+/** The sandbox command's start for a fix's shell (`thimble fix sandbox <id>`), kept by the fix's id; a string says why
+ *  there is none. */
+async function sandboxOf($: Engine, id: number): Promise<string[] | string> {
+  const all = ((await $.state.get(BOX)).value ?? {}) as Record<string, string[]>
+  if (all[String(id)]) return all[String(id)]!
+  const r = await kernelFix($, ['sandbox', String(id)], { timeoutMs: 30000 })
+  const argv = r.ok ? jsonOf<string[]>(r.out) : null
+  if (!Array.isArray(argv) || !argv.length) return cut(r.err || 'the sandbox could not be set up', 220)
+  await $.state.set(BOX, { ...(((await $.state.get(BOX)).value ?? {}) as Record<string, string[]>), [String(id)]: argv } as never)
+  return argv
+}
+
+/** A fixer's shell command runs at most this long (the Bash tool's own limit, in milliseconds). */
+export const FIXER_BASH_MS = 300000
+
+const quote = (s: string) => `'${s.replaceAll("'", "'\\''")}'`
+
+/** The places the sandbox lets the fixer write: its copy and its temp folder. */
+function writable(argv: string[]): string[] {
+  const rules = jsonOf<Any>(argv[argv.indexOf('--srt') + 2] ?? '')
+  return ((rules?.filesystem?.allowWrite ?? []) as { path: string }[]).map(x => String(x.path).replace(/\/+$/, ''))
+}
+
+/** The Bash commands thimble put in the sandbox, by tool_use_id: the command as run → the command as the fixer wrote
+ *  it, for their check. */
+const wrapped = new Map<string, { run: string; asked: string }>()
+
+/** One tool call of a fixer: its shell command put in the sandbox, a write outside its copy refused, else as it is. */
+export async function fixerCall($: Engine, e: Any, id: number): Promise<{ call?: Any; deny?: string } | null> {
+  const isWrite = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)
+  if (e.tool !== 'Bash' && !isWrite) return null
+  const argv = await sandboxOf($, id)
+  if (typeof argv === 'string') return { deny: `thimble could not set up this fix's sandbox (${argv}); end now.` }
+  if (isWrite) {
+    const p = String(e.file_path ?? e.notebook_path ?? '')
+    const ok = p.startsWith('/') && !p.split('/').includes('..') && writable(argv).some(w => p === w || p.startsWith(`${w}/`))
+    return ok ? null : { deny: `The fixer changes only its copy of thimble (${writable(argv)[0] ?? 'the copy'}); ${p || 'that file'} is outside it.` }
+  }
+  const asked = String(e.command ?? '')
+  const run = [...argv, asked].map(quote).join(' ')
+  if (e.tool_use_id) wrapped.set(String(e.tool_use_id), { run, asked })
+  const timeout = Math.min(Number(e.timeout) > 0 ? Number(e.timeout) : FIXER_BASH_MS, FIXER_BASH_MS)
+  return { call: { ...e, command: run, timeout, run_in_background: false } }
+}
+
+/** The call ran: its command is no longer kept. */
+export function fixerCallDone(e: Any): void {
+  if (e.tool_use_id) wrapped.delete(String(e.tool_use_id))
+}
+
+/** A fixer's Bash call that thimble put in the sandbox: allowed, unless the person's rules deny the command as the
+ *  fixer wrote it. Null for any other call (Claude Code decides). */
+export async function fixerCheck($: Engine, e: Any): Promise<{ decision: 'allow' | 'deny'; reason: string } | null> {
+  if (e.tool !== 'Bash' || !e.tool_use_id) return null
+  const w = wrapped.get(String(e.tool_use_id))
+  if (!w || w.run !== String((e.input as Any)?.command ?? '')) return null
+  const own = await $.tool.check({ tool: 'Bash', input: { command: w.asked } } as never).catch(() => null)
+  if ((own as Any)?.decision === 'deny') return { decision: 'deny', reason: String((own as Any).reason || 'the person\'s settings deny this command') }
+  return { decision: 'allow', reason: "thimble's fixer: in the sandbox runtime, which reads and writes only its copy of thimble" }
 }
 
 /** The newest fix whose fixer still works, and its agent, or null: more words for that fix go to it. A fixer that

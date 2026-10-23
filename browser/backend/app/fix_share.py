@@ -3,12 +3,10 @@ the terminal's Your fixes does (plugin/fix/share.ts).
 
     POST /api/fixes/{fid}/share       Claude writes the title, what was wrong and how it was fixed (the plugin's
                                       prompts/fix-draft.md, on the dev row's model of Settings); then the kernel's
-                                      `thimble fix share ID --no-open` (plugin/engine/kernel/share.py) takes the analyst's
-                                      names and values out of it, writes the share page, and says what it took out
-    GET  /api/fixes/{fid}/share/page  that page, under a policy of its own: its inline script and style, the images the
-                                      analyst adds, and nothing else
+                                      `thimble fix share ID` (plugin/engine/kernel/share.py) takes the analyst's names and
+                                      values out of it and gives GitHub's new-issue link with the text, and what it took out
 
-The page opens in the analyst's own tab; its one button opens GitHub's new-issue page with the text in its link. Nothing
+The analyst opens the link in their own tab, reads the text on GitHub's page and presses Submit there. Nothing
 is sent from here at any point. The fixes are the plugin's (its home, THIMBLE_PLUGIN_HOME or ~/.thimble), so a fix made
 in the terminal shares from here too. When Claude writes no text, the kernel uses the text an earlier share had, else the
 analyst's words and what the fixer said, and the answer says why.
@@ -26,7 +24,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from . import config
@@ -34,10 +31,6 @@ from . import config
 router = APIRouter()
 
 PLUGIN_HOME_ENV = "THIMBLE_PLUGIN_HOME"
-# the page's own policy: its inline script and style, the screenshot the analyst adds (a blob: or data: image), no
-# request of its own, and no frame around it
-PAGE_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; "
-            "frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 
 
 def plugin_home() -> Path:
@@ -131,7 +124,7 @@ class ShareBody(BaseModel):
 
 @router.post("/fixes/{fid}/share")
 async def share_route(fid: int, http: Request, body: ShareBody | None = None) -> dict[str, Any]:
-    """The analyst's Share: Claude's text, then the kernel's share page, not opened here (the page opens it in a tab).
+    """The analyst's Share: Claude's text, then the kernel's GitHub link, which the page opens in a tab.
     The analyst's click alone: the server's token, which Claude's tools hold, is not enough."""
     from . import subagents  # noqa: PLC0415
 
@@ -141,21 +134,10 @@ async def share_route(fid: int, http: Request, body: ShareBody | None = None) ->
         raise HTTPException(404, err or f"there is no fix {fid}")
     rec = json.loads(out)
     d = await drafted(body.ws if body else None, rec)
-    args = ["share", str(fid), "--json", "--no-open", *([] if isinstance(d, str) else ["--draft", "-"])]
+    args = ["share", str(fid), "--json", *([] if isinstance(d, str) else ["--draft", "-"])]
     ok, out, err = await asyncio.to_thread(kernel, args, stdin=None if isinstance(d, str) else json.dumps(d), timeout=180)
     if not ok:
         raise HTTPException(409, err or "thimble fix share gave nothing")
     r = json.loads(out)
     return {**{k: r.get(k) for k in ("id", "title", "took", "url", "shortened", "text")},
-            "page": f"/api/fixes/{int(fid)}/share/page", "note": d if isinstance(d, str) else ""}
-
-
-@router.get("/fixes/{fid}/share/page")
-async def page_route(fid: int) -> HTMLResponse:
-    p = plugin_home() / "fixes" / "share" / str(int(fid)) / "index.html"
-    try:
-        text = p.read_text("utf-8")
-    except OSError:
-        raise HTTPException(404, f"fix {fid} has no share page yet: press Share on it") from None
-    return HTMLResponse(text, headers={"Content-Security-Policy": PAGE_CSP, "Cache-Control": "no-store",
-                                       "Referrer-Policy": "no-referrer"})
+            "note": d if isinstance(d, str) else ""}
