@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { display, firstMessage, forkDirective, nameOf, nextMessage, sentNote, threadKey, turnsOf } from '../threads.mjs'
+import { display, elementPart, firstMessage, forkDirective, nameOf, nextMessage, sentNote, threadKey, turnsOf } from '../threads.mjs'
 
 test('one thread per citation, explainer, card or pane; a citation\'s evidence pane is that citation\'s thread', () => {
   const cite = threadKey({ about: '41 of the 44', mark: { row: 'row-1', kind: 'citation', n: 2 } })
@@ -63,3 +63,10 @@ test("a fork's transcript is the thread's turns: the question after its directiv
   assert.match(sentNote({ subject: 'Runs', turns: shown }), /^The analyst sent you the answer of a side thread about Runs\. They asked there: "and the 3\?"\nThe side agent answered:\nThey used the old config\.\n\nReply to the analyst: say what this answer changes in what you told them, if anything\.$/)
 })
 
+
+test('a click on a run of a card names the run and its row; a bar, which has no words, its row', () => {
+  assert.equal(elementPart('managed', 'managed  PRs only   ████   2 merged / 9'), 'managed — managed  PRs only  ████  2 merged / 9')
+  assert.equal(elementPart('████', 'managed  PRs only   ████   2 merged / 9'), 'managed  PRs only  ████  2 merged / 9')
+  assert.equal(elementPart('Runs by day', 'Runs by day'), 'Runs by day')
+  assert.equal(elementPart('   ', ''), '')
+})

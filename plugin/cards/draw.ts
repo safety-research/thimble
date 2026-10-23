@@ -4,7 +4,8 @@
 // call, since the old place is in the terminal's scrollback: canRedraw). Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
-//   frame         the card's frame: its title, the Client, a failure, and the keys that reach it now; left of it, the
+//   frame         the card's frame: its title (a click asks about the card), the Client (a click on a run of its words
+//                 asks about that run: client.tsx), a failure, and the keys that reach it now; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
 //                 asked), beside the line a click selected (`▸`), about that part, else beside the title; nothing for a card the version of its answer shown now leaves out (core/answerview.ts
 //                 cardHidden)
@@ -16,7 +17,7 @@
 //                 lists the key, else the newest that lists it
 //   cardTake      a letter at an empty prompt that a card takes (hooks/keys.ts asks): the key at once, and its undo when
 //                 the person was typing a word
-//   cardPost      what a card's Client sends: Button presses and clicks
+//   cardPost      what a card's Client sends: Button presses, clicks, and a click on a run of words (its side thread)
 //   cardText      a card's text copy as it draws now (for v)
 //   revealCard    the card's row brought into view in the conversation
 //
@@ -33,10 +34,11 @@ import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, underCard } from '../core/answerview'
-import { askCell } from '../core/askcell.js'
+import { askCell, quiet } from '../core/askcell.js'
 import { cut } from '../core/text.js'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
+import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
 import { layoutLines } from './layout.js'
@@ -249,17 +251,20 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
   // the title on a line of its own, then the card
   const client = E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) })
+  // the line a click or a key selected (`▸`, the card guide's marker): the margin asks about that part of the card,
+  // beside it, so a click on a bar and one on the ? next to it start a thread about the bar
+  const sel = fault ? null : selectedLine(current?.tree, width)
+  const ask = await cardAsk($, meta.id, meta.title, sel?.text ?? '')
+  // the title asks about the whole card when clicked, its words underlined under the pointer
+  const whole = sel ? await cardAsk($, meta.id, meta.title) : ask
+  const title = E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title })
   const rows: Any[] = [
-    E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title }),
+    whole ? E.Button({ key: 'title-ask', plain: true, label: `ask about ${whole.label}`, onPress: whole.press, hover: quiet(`card-title-${meta.id}`), children: [title] }) : title,
     // a drawing wider than the frame: its columns past the frame's edge are cut
     ...(fault ? [] : [width > inside ? E.Box({ key: 'cut', flexDirection: 'column', width: inside, overflow: 'hidden', children: [client] }) : client]),
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
-  // the line a click or a key selected (`▸`, the card guide's marker): the margin asks about that part of the card,
-  // beside it, so a click on a bar and one on the ? next to it start a thread about the bar
-  const sel = fault ? null : selectedLine(current?.tree, width)
-  const ask = await cardAsk($, meta.id, meta.title, sel?.text ?? '')
   const titleRows = Math.max(1, Math.ceil(Array.from(meta.title).length / Math.max(1, inside)))
   const box = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: ask ? 0 : 2, width: inside + 4, children: rows })
   // the margin left of the frame, in the 2 columns of its indent, beside its title: asks a side thread about the card
@@ -375,6 +380,13 @@ const handled = new Map<string, number>()
 async function clientEvent($: Engine, meta: CardMeta, ev: Any): Promise<Any> {
   if (ev.seen) { await markSeen($, meta.id); return null }
   if (typeof ev.rows === 'number') { heights.set(meta.id, ev.rows); return null }
+  // a click on a run of the card's words: the side thread about it, as the margin asks about the card
+  if (ev.ask && typeof ev.ask === 'object') {
+    const element = { text: String(ev.ask.text ?? '').slice(0, 400), line: String(ev.ask.line ?? '').slice(0, 400) }
+    const a = await cardAsk($, meta.id, meta.title, '', element)
+    if (a) await Promise.resolve(a.press()).catch(() => undefined)
+    return null
+  }
   if (typeof ev.draw === 'string') {
     const [gen, width] = ev.draw.split(':').map(Number)
     return gen === meta.gen && width ? { width, r: await askCard($, meta, 'draw', { width }) } : null
@@ -409,7 +421,7 @@ function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: The
  *  needs. */
 function propsAt(meta: CardMeta, t: CardTree | null | undefined, room: number, theme: Theme): Any {
   const d = drawingAt(t, meta.gen, room, theme)
-  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme) }
+  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme), tint: citeTint('verified', theme), accent: accent() }
 }
 
 /** A Client's post: the events it has not had an answer for, each handled once, in order. After a press or a click,

@@ -504,6 +504,8 @@ function inContext(card, op, args, ms) {
   // blank rows between the card's parts (space.js), in the places the version's first drawing gave them, so no key moves
   // them; a view that reads clicks by cell keeps its rows where it drew them
   if (r.ok && r.tree && !r.cells) r.tree = spaced(r.tree, Number(args.width) || card.width || 80, card.plan)
+  // and its tree says so (`cells` on its top node), so the Client leaves its clicks to the view (client.tsx)
+  else if (r.ok && r.tree && typeof r.tree === 'object') r.tree = { ...r.tree, p: { ...(r.tree.p || {}), cells: true } }
   delete r.cells
   if (r.ok && drawnSize(r.tree) > MAX_TREE) {
     drop(card)

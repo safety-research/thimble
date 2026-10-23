@@ -1,5 +1,5 @@
 // client.tsx: the one Client module that draws every card. Claude Code runs it in the terminal's drawing thread; draw.ts
-// names it by this file and hands it the card's drawing as props: {tree, width, need, ack}, the plain tree the runner
+// names it by this file and hands it the card's drawing as props: {tree, width, need, ack, tint, accent}, the plain tree the runner
 // made of the view (Box, Text and Button nodes with the props each element takes), or null before there is one. It
 // holds no data and no logic of the card. It sends the hooks module events:
 //
@@ -10,6 +10,8 @@
 //                                   so the hooks know whether the screen shows it
 //   {press: n, width}               a Button, by the number the runner gave its onPress, in the drawing at `width`
 //   {pointer: {down, up, button}, width}   a click, sent when the button comes up
+//   {ask: {text, line}, width}      a click on a run of words the view drew outside its Buttons: a side thread about
+//                                   it, `line` the words of the row it stands in
 //
 // Each post carries the width the instance draws at; the hooks answer with the drawing at the width the instance's
 // frame draws at now (a card shows at two widths at once when a side pane holds its copy).
@@ -50,6 +52,14 @@ function pick(p: Record<string, unknown> | undefined, names: string[]): Record<s
   return out
 }
 
+/** The words a node draws: a row's side by side, a column's one line under another. */
+function wordsOf(n: Node): string {
+  if (typeof n === 'string') return n
+  if (!n || typeof n !== 'object') return ''
+  const col = n.t === 'Box' && (n.p?.flexDirection === 'column' || n.p?.flexDirection === 'column-reverse')
+  return (Array.isArray(n.c) ? n.c : []).map(wordsOf).join(col ? '\n' : '')
+}
+
 const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   const E = surface.elements as Any
   const width = Number(props?.width) || surface.columns || 80
@@ -88,11 +98,41 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     send({ pointer: { down: { x: d.x, y: d.y }, up: { x: ev.x, y: ev.y }, button: d.button }, width })
   })
 
-  const kids = (c: Node[] | undefined, inText: boolean): Any[] => (Array.isArray(c) ? c : []).map(k => draw(k, inText)).filter(x => x != null)
-  function draw(n: Node, inText: boolean): Any {
-    if (typeof n === 'string') return inText ? n : E.Text({ children: n })
+  // every run of words the view drew (a label, a bar, a number) asks a side thread about itself when clicked, and shows
+  // it is clickable under the pointer: thimble's tint behind it (`tint`, the citations' hover, for the theme the
+  // drawing is in) and its words underlined; a bar of glyphs, which fills its cells and so hides a tint, takes thimble's
+  // color (`accent`) in place of its own. Never Claude Code's inverse of a plain Button. The Button holds only the run's
+  // one Text, as a Button holds strings and Text only (Claude Code draws no Button that holds a Box), so wrapping a run
+  // never breaks a card that drew without it. Not inside the view's own Buttons (a Button around lines is a Box with
+  // onPress), and not at all on a card that reads clicks by cell (the runner marks its tree `cells`), so the view's
+  // clicks come first
+  const cells = !!(props?.tree && typeof props.tree === 'object' && props.tree.p?.cells)
+  let asks = 0
+  const tint = typeof props?.tint === 'string' && props.tint ? { backgroundColor: props.tint } : {}
+  const accent = typeof props?.accent === 'string' && props.accent ? props.accent : ''
+  /** A run of words (a Text's props and children) that asks about itself when clicked; `text` its words. */
+  const askable = (p: Record<string, unknown>, children: Any[], text: string, line: string): Any => {
+    if (!text.trim()) return E.Text({ ...p, children })
+    const key = `ask-${++asks}`
+    const scope = `${me.id}-${key}`
+    const words = /[\p{L}\p{N}]/u.test(text)
+    const look = words ? { underline: true, ...tint } : accent ? { color: accent } : tint
+    return E.Button({
+      key, plain: true, label: `ask about ${text.trim().slice(0, 60)}`,
+      hover: { scope, inverse: false, ...look },
+      onPress: () => send({ ask: { text, line }, width }),
+      children: [E.Text({ ...p, hover: { scope, ...look }, children })],
+    })
+  }
+  const kids = (c: Node[] | undefined, inText: boolean, line = '', owned = false): Any[] => (Array.isArray(c) ? c : []).map(k => draw(k, inText, line, owned)).filter(x => x != null)
+  function draw(n: Node, inText: boolean, line = '', owned = false): Any {
+    if (typeof n === 'string') return inText ? n : owned || cells ? E.Text({ children: n }) : askable({}, [n], n, line || n)
     if (!n || typeof n !== 'object') return null
-    if (n.t === 'Text') return E.Text({ ...pick(n.p, TEXT), children: kids(n.c, true) })
+    if (n.t === 'Text') {
+      if (inText || owned || cells) return E.Text({ ...pick(n.p, TEXT), children: kids(n.c, true) })
+      const text = wordsOf(n)
+      return askable(pick(n.p, TEXT), kids(n.c, true), text, line || text)
+    }
     if (inText) return null
     if (n.t === 'Button') {
       const press = n.p?.onPress
@@ -103,7 +143,11 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
         children: kids(n.c, true),
       })
     }
-    if (n.t === 'Box') return E.Box({ ...pick(n.p, BOX), children: kids(n.c, false) })
+    if (n.t === 'Box') {
+      // a row's runs each ask about themselves on that row's line (a bar beside its label and number)
+      const row = n.p?.flexDirection !== 'column' && n.p?.flexDirection !== 'column-reverse'
+      return E.Box({ ...pick(n.p, BOX), children: kids(n.c, false, row ? line || wordsOf(n) : '', owned || typeof n.p?.onPress === 'number') })
+    }
     return null
   }
 
