@@ -117,7 +117,7 @@ function setup() {
     if (verb === 'update' && argv.includes('--check')) return ok({ from: '0.10.2', to: '0.10.3', newer: fix.state === 'on' })
     if (verb === 'share') {
       const given = stdin ? JSON.parse(stdin) : null
-      return ok({ id: 1, title: given?.title || fix.title, took: 'took 1 file name out of the text', opened: true, page: `${HOME}/fixes/share/1/index.html`, url: 'https://github.com/safety-research/thimble/issues/new?title=Bar%20says%20read&body=What%20was%20wrong', shortened: false, text: given ? 'claude' : 'earlier' })
+      return ok({ id: 1, title: given?.title || fix.title, took: 'took 1 file name out of the text', opened: argv.includes('--open'), url: 'https://github.com/safety-research/thimble/issues/new?title=Bar%20says%20read&body=What%20was%20wrong', shortened: false, text: given ? 'claude' : 'earlier' })
     }
     return ok({})
   }
@@ -446,7 +446,7 @@ test('the text copy of a drawing: a row side by side, a column one under another
   expect(screenText(drawn)).toBe('thimble  r coverage 43%\na **link**')
 })
 
-test("s in Your fixes shares the selected fix: Claude's text, then the share page; o opens it again and c copies the link", async () => {
+test("s in Your fixes shares the selected fix: Claude's text, then its GitHub link; o opens it on GitHub and c copies the link", async () => {
   const s = setup()
   await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
   await s.call('command.run', { command: 'thimble-fix', args: '' })
@@ -466,13 +466,15 @@ test("s in Your fixes shares the selected fix: Claude's text, then the share pag
   const text = textOf(drawn)
   expect(text).toContain('Share fix 1: Bar says coverage, not read')
   expect(text).toContain('  ✓ privacy check: took 1 file name out of the text')
-  expect(text).toContain('  ✓ opened the share page in your browser')
-  expect(text).toContain('Nothing leaves your computer until you press Submit there.')
-  // o: the page again from the same text, no model call; c: the link on the clipboard
-  expect([buttons(drawn)['key-o']!.label, buttons(drawn)['key-c']!.label]).toEqual(['open the page again', 'copy the link'])
+  expect(text).not.toContain('opened')
+  expect(text).toContain("o opens GitHub's new-issue page with this text, c copies its link.")
+  expect(text).toContain('nothing is sent until you do.')
+  // o: GitHub's page from the same text, no model call; c: the link on the clipboard
+  expect([buttons(drawn)['key-o']!.label, buttons(drawn)['key-c']!.label]).toEqual(['open on GitHub', 'copy the link'])
   await buttons(drawn)['key-o']!.onPress()
   expect(s.asked.length).toBe(1)
-  expect(s.ran.filter(x => x.argv.includes('share')).at(-1)?.argv.slice(-2)).toEqual(['1', '--json'])
+  expect(s.ran.filter(x => x.argv.includes('share')).at(-1)?.argv.slice(-3)).toEqual(['1', '--json', '--open'])
+  expect(textOf(await drawFixes(s.$, e, {}, ELS))).toContain('  ✓ opened the GitHub issue in your browser')
   await buttons(drawn)['key-c']!.onPress()
   expect(s.copied).toEqual(['https://github.com/safety-research/thimble/issues/new?title=Bar%20says%20read&body=What%20was%20wrong'])
   // moving in the list shows the fix again

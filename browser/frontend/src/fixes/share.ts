@@ -1,16 +1,16 @@
 // share.ts: Share on a fix (backend app/fix_share.py), as s in the terminal's Your fixes. Claude writes the issue's
 // title, what was wrong and how it was fixed; thimble's privacy check takes the analyst's names and values out; the
-// share page opens in a new tab. Its one button opens GitHub's new-issue page with the text filled in, and the analyst
-// pastes a screenshot and presses Submit there. Nothing is sent from thimble.
+// GitHub's new-issue page opens in a new tab with the text filled in, and the analyst reads it, pastes a screenshot if
+// they want and presses Submit there. Nothing is sent from thimble.
 import { claimKey, describeDetail, signInNeeded } from '../lib/api'
 import { apiUrl } from '../lib/browserKey'
 
-/** What the server said of a share: the title after the check, what the check took out, GitHub's link with the text, the
- *  page's address, and why Claude wrote no text when it did not (`note`). */
-export type Shared = { id: number; title: string; took: string; url: string; shortened: boolean; text: string; page: string; note: string }
+/** What the server said of a share: the title after the check, what the check took out, GitHub's link with the text,
+ *  and why Claude wrote no text when it did not (`note`). */
+export type Shared = { id: number; title: string; took: string; url: string; shortened: boolean; text: string; note: string }
 
-/** POST /api/fixes/{id}/share. `tab`, a tab opened at the click (so no pop-up blocker stops it), then shows the page;
- *  on a failure it closes. */
+/** POST /api/fixes/{id}/share. `tab`, a tab opened at the click (so no pop-up blocker stops it), then shows GitHub's
+ *  page; on a failure it closes. */
 export async function shareFix(id: number, ws: string | null, tab: Window | null = null): Promise<Shared> {
   try {
     await claimKey()
@@ -26,7 +26,10 @@ export async function shareFix(id: number, ws: string | null, tab: Window | null
       throw new Error(`Fix ${id} was not shared: ${detail}`)
     }
     const out = (await res.json()) as Shared
-    if (tab) tab.location.href = apiUrl(out.page)
+    if (tab) {
+      tab.opener = null
+      tab.location.href = out.url
+    }
     return out
   } catch (err) {
     tab?.close()
@@ -34,10 +37,10 @@ export async function shareFix(id: number, ws: string | null, tab: Window | null
   }
 }
 
-/** The line under Share once it worked: what the check took out, and where the page is. Pure. */
+/** The line under Share once it worked: what the check took out, and where GitHub's page is. Pure. */
 export function sharedLine(s: Pick<Shared, 'took' | 'note' | 'shortened'>, opened: boolean): string {
-  const parts = [`Privacy check: ${s.took}.`, opened ? 'The share page opened in a new tab.' : 'Open the share page below.']
+  const parts = [`Privacy check: ${s.took}.`, opened ? 'GitHub opened in a new tab: read the text there and press Submit.' : 'Open the GitHub issue below, read the text there and press Submit.']
   if (s.shortened) parts.push('The text is longer than a GitHub link holds, so the link has the first part of it.')
-  if (s.note) parts.push(`${s.note.replace(/\.$/, '')}; the page has your words and what the fix does.`)
+  if (s.note) parts.push(`${s.note.replace(/\.$/, '')}; the issue has your words and what the fix does.`)
   return parts.join(' ')
 }
