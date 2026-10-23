@@ -639,12 +639,52 @@ export function fitAfterCompile(spec: unknown): { spec: unknown; patch: (vg: Spe
   return { spec: { ...rest, width: 300 }, patch }
 }
 
+/** Why a chart drew nothing: `rows`, its marks had no rows to draw; `size`, it had rows but drew every one as a bar
+ * under a pixel wide or tall. */
+export type NothingDrawn = 'rows' | 'size'
+
+/** What the card says under a chart that drew nothing, so its empty panels are never taken for a chart. */
+export const NOTHING_DRAWN: Record<NothingDrawn, string> = {
+  rows: 'The chart draws nothing: its data has no rows.',
+  size: 'The chart draws nothing: each of its bars is under a pixel wide or tall.',
+}
+
+type SceneMark = { marktype?: string; role?: string; items?: SceneItem[] }
+type SceneItem = { width?: number; height?: number; items?: SceneMark[] }
+
+/** Why the Vega-Lite chart whose scene starts at `root` (its view's scenegraph().root) drew nothing, or null when it
+ * drew a mark or there is no scene. Axes, legends and titles are no marks, and panels with no rows have none, so a scene
+ * without marks had no rows. A bar under a pixel wide or tall is not drawn; any other mark with a row is. Pure. */
+export function nothingDrawn(root: unknown): NothingDrawn | null {
+  let marks = 0
+  let rows = 0
+  let shown = 0
+  const walk = (m: SceneMark | undefined) => {
+    if (!m) return
+    const own = m.role === 'mark' && m.marktype !== 'group'
+    if (own) marks++
+    for (const it of m.items ?? []) {
+      if (own) {
+        rows++
+        if (m.marktype !== 'rect' || (Math.abs(it.width ?? 0) >= 1 && Math.abs(it.height ?? 0) >= 1)) shown++
+      }
+      for (const c of it.items ?? []) walk(c)
+    }
+  }
+  if (!root) return null
+  walk(root as SceneMark)
+  if (shown) return null
+  return marks && rows ? 'size' : 'rows'
+}
+
 /** A chart as drawChart left it in its box: its view, which a resize refits (refitChart), and how to take it away. */
 export interface DrawnChart {
   view: FitView
   finalize: () => void
   /** the chart takes its box's width (usesContainerWidth), so a resize only refits it */
   container: boolean
+  /** why it drew nothing (nothingDrawn), or null when it drew its marks */
+  nothing: NothingDrawn | null
 }
 
 export interface DrawOptions {
@@ -687,7 +727,8 @@ export async function drawChart(el: HTMLElement, spec: Spec, load: () => Promise
     const r = await m.default(el, compiled.spec as any, { actions: false, config: vegaConfig() as any, patch, loader: dataOnly(m.vega.loader()) })
     if (!alive()) return r.finalize()
     const container = usesContainerWidth(sized)
-    current = { view: r.view as unknown as FitView, finalize: r.finalize, container }
+    const scene = (r.view as { scenegraph?: () => { root?: unknown } }).scenegraph?.()
+    current = { view: r.view as unknown as FitView, finalize: r.finalize, container, nothing: nothingDrawn(scene?.root) }
     opts.drawn?.(current)
     const over = measureOverrun(el)
     const box = el.clientWidth

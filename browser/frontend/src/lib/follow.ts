@@ -2,20 +2,37 @@
 // canvas goes to the card (canvas/Canvas.tsx), unless the person is busy. Busy means a press, a key or the wheel in the
 // last FOLLOW_QUIET_MS, or the focus in a field outside the chat (the report's editor, a label's form). The chat's own
 // composer does not count: it keeps the focus after a message is sent, and the panes beside it can change without
-// touching what is typed there. A card the person made, and the history the stream replays on load, are never followed.
+// touching what is typed there. A card the person made, and the history the stream replays on load, are never followed;
+// nor is a card a chat working in the background made (a writer's figure, an orientation's card), and while a writer
+// writes, or for AFTER_WRITER_MS after it ends, a Report the person has open stays open.
 import { isReplay } from './events'
 
 /** How long after the person's last press, key or wheel the page leaves the panes alone. */
 export const FOLLOW_QUIET_MS = 5000
 
-const PERSON = new Set(['user', 'analyst'])
+/** How long after a writer ends a Report the person has open stays open: main hears that the writer ended and may answer
+ * with cards of its own. */
+export const AFTER_WRITER_MS = 60_000
 
-/** The card a stream event says Claude made: a `cell` record of a card created, by a maker other than the person.
- * A record without a maker (a server from before `by`) is not followed. Pure. */
+const PERSON = new Set(['user', 'analyst'])
+/** the roles of the chats that work in the background (the chat's `role`, the record's `by_role`): what they make is
+ * not what the person is watching the chat for */
+const BACKGROUND = new Set(['writer', 'orient', 'check', 'dev', 'dev-ticket', 'labels'])
+
+/** The card a stream event says Claude made: a `cell` record of a card created, by a maker other than the person and
+ * other than a chat that works in the background (`by_role`). A record without a maker (a server from before `by`) is
+ * not followed. Pure. */
 export function cardClaudeMade(ev: Record<string, unknown>): string | null {
   if (ev.type !== 'cell' || ev.op !== 'created' || typeof ev.cell !== 'string') return null
   const by = typeof ev.by === 'string' ? ev.by : ''
+  if (typeof ev.by_role === 'string' && BACKGROUND.has(ev.by_role)) return null
   return by && !PERSON.has(by) ? ev.cell : null
+}
+
+/** Whether a Report the person has open stays open: a pane shows the report while a writer writes, or less than
+ * AFTER_WRITER_MS after the last one ended (`ended`, a performance.now() time, null when none ended). Pure. */
+export function reportHeld(shown: readonly string[], writing: boolean, ended: number | null, now: number): boolean {
+  return shown.includes('report') && (writing || (ended != null && now - ended < AFTER_WRITER_MS))
 }
 
 let lastInput = -Infinity
@@ -51,9 +68,9 @@ export function mayFollow(): boolean {
 }
 
 /** Whether a stream event should show the canvas: a card Claude made, no pane showing the canvas (the canvas goes to
- * the card itself then), and the page free to follow. */
-export function showsCanvas(ev: Record<string, unknown>, shown: readonly string[]): boolean {
-  return !!cardClaudeMade(ev) && !shown.includes('canvas') && mayFollow()
+ * the card itself then), the Report not held open (`held`, reportHeld), and the page free to follow. */
+export function showsCanvas(ev: Record<string, unknown>, shown: readonly string[], held = false): boolean {
+  return !!cardClaudeMade(ev) && !shown.includes('canvas') && !held && mayFollow()
 }
 
 /** For tests: forget the last input, or set it to `at`. */

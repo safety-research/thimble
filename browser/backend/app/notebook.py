@@ -1859,6 +1859,17 @@ def _reject_data_run(cell: dict) -> None:
 _subscribers: dict[tuple[str, str], set[asyncio.Queue]] = {}  # (workspace, notebook id) -> queues
 
 
+def _maker_role(workspace: str, by: str) -> str | None:
+    """The role of the chat that made a card (`chat:<id>`, tools.Ctx.cell_author): main, thread, writer, ...; None for
+    any other maker or a chat that is gone."""
+    if not by.startswith("chat:") or not ID_RE.match(by[5:]):
+        return None
+    from . import agents  # noqa: PLC0415
+
+    meta = agents.meta_or_none(workspace, by[5:])
+    return str(meta.get("role") or "") or None if meta else None
+
+
 def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
     """Announce a card change: the whole cell on its group's SSE, and one `cell {notebook, cell, kind}` record on the
     workspace stream. `what` names the change (ran, note, edited, deleted). Off the event loop the workspace record is
@@ -1882,8 +1893,12 @@ def _emit(workspace: str, cell: dict, *, what: str | None = None) -> None:
         if op:  # the history's op (created, edited, ran, deleted, ...): the Canvas tab's dot lights for a card made or gone
             rec["op"] = op
         if op == "created" and cell.get("created_by"):
-            # who made it (user or analyst for the person): the page goes to a card Claude made (frontend lib/follow.ts)
+            # who made it (user or analyst for the person): the page goes to a card Claude made (frontend lib/follow.ts),
+            # unless the chat that made it works in the background, as a writer does (its chat's role)
             rec["by"] = str(cell["created_by"])
+            role = _maker_role(workspace, rec["by"])
+            if role:
+                rec["by_role"] = role
         investigation.emit(workspace, investigation.MAIN, rec)
     except RuntimeError:  # no running loop: a worker thread; the group's SSE carried it
         pass

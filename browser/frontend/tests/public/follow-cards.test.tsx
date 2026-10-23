@@ -5,7 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { Canvas } from '../../src/canvas/Canvas.tsx'
 import { dispatch } from '../../src/lib/events.ts'
-import { busy, cardClaudeMade, FOLLOW_QUIET_MS, mayFollow, setLastInput, showsCanvas } from '../../src/lib/follow.ts'
+import { AFTER_WRITER_MS, busy, cardClaudeMade, FOLLOW_QUIET_MS, mayFollow, reportHeld, setLastInput, showsCanvas } from '../../src/lib/follow.ts'
 import { show, single } from '../../src/shell/panes.ts'
 import type { CanvasResponse, Cell, Group } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -21,6 +21,25 @@ describe('which cards the page follows', () => {
     expect(cardClaudeMade({ type: 'cell', op: 'edited', cell: 'c1', by: 'main' })).toBeNull()
     expect(cardClaudeMade({ type: 'cell', op: 'created', cell: 'c1' })).toBeNull()
     expect(cardClaudeMade({ type: 'view', op: 'created', cell: 'c1', by: 'main' })).toBeNull()
+  })
+
+  test("a card a chat working in the background made (a writer's figure, an orientation's card) is not followed", () => {
+    for (const role of ['main', 'thread', 'subagent']) expect(cardClaudeMade({ type: 'cell', op: 'created', cell: 'c1', by: 'chat:x', by_role: role }), role).toBe('c1')
+    for (const role of ['writer', 'orient', 'check', 'dev']) expect(cardClaudeMade({ type: 'cell', op: 'created', cell: 'c1', by: 'chat:x', by_role: role }), role).toBeNull()
+  })
+
+  test('an open Report stays open while a writer writes and for a while after it ends; other surfaces do not', () => {
+    const now = 100_000
+    expect(reportHeld(['report'], true, null, now)).toBe(true)
+    expect(reportHeld(['report'], false, now - AFTER_WRITER_MS + 1, now)).toBe(true)
+    expect(reportHeld(['report'], false, now - AFTER_WRITER_MS, now)).toBe(false)
+    expect(reportHeld(['report'], false, null, now)).toBe(false)
+    expect(reportHeld(['files'], true, null, now)).toBe(false)
+    setLastInput(performance.now() - FOLLOW_QUIET_MS - 1)
+    const made = { type: 'cell', op: 'created', cell: 'c1', by: 'chat:main', by_role: 'main' }
+    expect(showsCanvas(made, ['report'], true)).toBe(false)
+    expect(showsCanvas(made, ['report'], false)).toBe(true)
+    setLastInput()
   })
 
   test('the person is busy for a few seconds after a press, a key or the wheel, and while a field outside the chat has the focus', () => {

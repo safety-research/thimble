@@ -160,7 +160,10 @@ body[data-cmd] .board-stage * {
 
 /* -------- cards: a 32px chrome row over the question, the body, the takeaway behind the 2px ink rule. A hairline
    ring at rest, a darker ring and the float on hover, the accent ring when selected. The chrome shows on hover and
-   selection, and its row keeps its room at rest so nothing moves -------- */
+   selection, and its row keeps its room at rest so nothing moves. The accent ring is inset, drawn inside the card's box
+   with its background: an outer ring is painted outside the box, and on a zoomed board, while a spinner turned in the
+   card (sent to main, running, a citation's check), Chrome lost that outside paint on the left and top edges, so the
+   border jumped when the spinner stopped -------- */
 .bcell {
   position: absolute;
   cursor: default;
@@ -187,13 +190,13 @@ body[data-cmd] .board-stage * {
   box-shadow: 0 0 0 1px rgba(var(--ink-rgb), 0.16), var(--shadow-float);
 }
 .bcell.is-selected .canvas-card {
-  box-shadow: 0 0 0 1.5px var(--accent);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 .bcell.is-selected.is-collapsed .canvas-card {
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent), var(--shadow-float);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent), var(--shadow-float);
 }
 .bcell.is-dragging .canvas-card {
-  box-shadow: 0 0 0 1.5px var(--accent), var(--shadow-float);
+  box-shadow: inset 0 0 0 1.5px var(--accent), var(--shadow-float);
 }
 .bcell.is-dimmed {
   opacity: 0.35;
