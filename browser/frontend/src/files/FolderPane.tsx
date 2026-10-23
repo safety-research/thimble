@@ -1,6 +1,6 @@
 // A folder open in the File browser, as a ref that names a folder opens it: its folders, then its files, in the tree's
 // order, each with its size or the files it holds where the server knows them. Only the rows in view are rendered. A
-// row opens its file or folder in a tab of its own.
+// row opens its file or folder in a tab of its own, once for a double-click.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
@@ -70,7 +70,8 @@ export function FolderPane({ state, lead, onOpen }: { state: FolderState | undef
               className={'files-row folder-pane-row' + (r.dir ? ' files-dir' : ' files-file') + (r.hidden ? ' files-hidden' : '')}
               data-anchor={r.dir ? undefined : r.path}
               data-anchor-text={r.dir ? undefined : r.path}
-              onClick={() => onOpen(r.path)}
+              // a double-click's second click lands on the row of the listing its first click opened, so only the first opens
+              onClick={(e) => e.detail <= 1 && onOpen(r.path)}
               onKeyDown={key(r.path)}
             >
               <Icon className="files-glyph" name={r.dir ? 'folder' : glyphOf(r.name)} size={13} />

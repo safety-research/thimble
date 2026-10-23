@@ -33,7 +33,7 @@ import { CellCard, type CardAction, type CardField, type Edge } from './Cell'
 import { CommentLayer, shownCanvasComments, useCanvasComments } from './CommentLayer'
 import { conceptName, useConcepts } from './concepts'
 import { CanvasContext, type CanvasCtx } from './context'
-import { Controls, type CanvasLabel } from './Controls'
+import { Controls, MINIMAP_ROOM, type CanvasLabel } from './Controls'
 import { labelValues } from './details'
 import { DetailPanel, LabelPanel, type OutputCite } from './DetailPanel'
 import { Focus } from './Focus'
@@ -42,6 +42,7 @@ import {
   DEFAULT_VIEW,
   DOUBLE_MS,
   HEAD,
+  MINIMAP,
   PAD,
   activeFrame,
   analystGroup,
@@ -106,7 +107,7 @@ const WAIT_MS = 5000
 /** how long a card stays in view on the shown tab before it counts as seen (landing.ts) */
 const SEEN_MS = 800
 /** the controls' column at the bottom right, which Fit leaves clear */
-const CONTROLS_W = 180 + 14 + 16
+const CONTROLS_W = MINIMAP.w + 14 + 16
 
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
@@ -1551,6 +1552,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                 onZoom={zoomStep}
                 onFit={fit}
                 onMinimap={onMinimap}
+                roomy={vpSize.w >= MINIMAP_ROOM}
                 filter={cardFilter}
                 onFilter={setCardFilter}
                 onClear={clearCanvasFilter}

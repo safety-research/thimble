@@ -217,3 +217,10 @@ async def test_a_label_run_that_left_units_unlabeled_is_told_and_one_that_did_no
     assert _open(f"label:{k['id']}") is None
     s = _open(f"safeguards:label:{k['id']}")
     assert s["text"] == "Claude's safeguards switched 8 of the label claims a PR's calls from Opus 5.5 to Opus 4.8."
+
+
+def test_units_with_no_text_are_counted_in_the_count_s_own_form():
+    assert concepts.blank_text_cause(1, "record", "runs/a/board.jsonl#L3") == (
+        "1 record has no readable text (e.g. runs/a/board.jsonl#L3), so it was not labeled")
+    assert concepts.blank_text_cause(1200, "agent", "runs/a/agent-01.jsonl") == (
+        "1,200 files have no readable text (e.g. runs/a/agent-01.jsonl), so they were not labeled")

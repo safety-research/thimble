@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // A ref that names a folder opens it in the File browser (src/files/FolderPane.tsx): its folders, then its files, each
-// with its size or how many files it holds, and a row opens its file or folder.
+// with its size or how many files it holds, and a row opens its file or folder, once for a double-click.
 import { act } from 'react'
 import { afterEach, beforeAll, describe, expect, test } from 'vitest'
 import { FolderPane, folderRows } from '../../src/files/FolderPane.tsx'
@@ -51,6 +51,12 @@ describe('a folder opened in the File browser', () => {
       rows[3].click()
     })
     expect(opened).toEqual(['images/day/a', 'images/day/shot-10.png'])
+    // a double-click opens the folder alone: its second click falls on the row now under the pointer
+    await act(async () => {
+      rows[1].dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+      rows[2].dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
+    })
+    expect(opened).toEqual(['images/day/a', 'images/day/shot-10.png', 'images/day/b'])
     const empty = await mount(<FolderPane state={{ state: 'ok', listing: { path: 'x', folders: [], files: [] } }} lead={null} onOpen={() => {}} />)
     expect(empty.textContent).toContain('This folder is empty.')
   })

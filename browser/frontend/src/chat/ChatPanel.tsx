@@ -307,6 +307,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   const flowRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLElement>(null)
   const footRef = useRef<HTMLDivElement>(null)
+  const stack = useMoreBelow()
   // the tree: collapsed to one row by default
   const treeKey = storageKey(ws, 'threads-collapsed')
   const [treeCollapsed, setTreeCollapsed] = useState(() => readStorage<boolean>(treeKey, true))
@@ -830,11 +831,15 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
           </CallFocusContext.Provider>
         </div>
         <div ref={footRef} className="chat-foot">
-          <Holds className="chat-main-holds" alert={main.meta?.alert} />
-          {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
-          {!touring && <ProposalCard ws={ws} />}
-          <LabelAsks ws={ws} />
-          <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
+          {/* what waits for the analyst above the composer, together at most a part of the column's height, so the
+              transcript keeps its room; more of it scrolls */}
+          <div className="chat-foot-stack" ref={stack.ref} onScroll={stack.check} data-more={stack.more || undefined}>
+            <Holds className="chat-main-holds" alert={main.meta?.alert} />
+            {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
+            {!touring && <ProposalCard ws={ws} />}
+            <LabelAsks ws={ws} />
+            <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
+          </div>
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
           {orientClosedText ? (
             <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
@@ -863,6 +868,38 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       </section>
     </ThreadsContext.Provider>
   )
+}
+
+/** Whether a box that scrolls holds more below what it shows: `ref` goes on the box and `check` on its scroll; its
+ * size and its children's are watched. */
+export function useMoreBelow() {
+  const [more, setMore] = useState(false)
+  const box = useRef<HTMLDivElement | null>(null)
+  const check = useCallback(() => {
+    const el = box.current
+    setMore(!!el && el.scrollHeight - el.scrollTop - el.clientHeight > 2)
+  }, [])
+  const ro = useRef<ResizeObserver | null>(null)
+  const mo = useRef<MutationObserver | null>(null)
+  const ref = useCallback(
+    (el: HTMLDivElement | null) => {
+      ro.current?.disconnect()
+      mo.current?.disconnect()
+      box.current = el
+      if (!el) return
+      if (typeof ResizeObserver !== 'undefined') {
+        ro.current = new ResizeObserver(check)
+        ro.current.observe(el)
+      }
+      if (typeof MutationObserver !== 'undefined') {
+        mo.current = new MutationObserver(check)
+        mo.current.observe(el, { childList: true, subtree: true })
+      }
+      check()
+    },
+    [check],
+  )
+  return { ref, check, more }
 }
 
 /** The kinds of a thread's `error` record that end a run without a reply the analyst can read (backend

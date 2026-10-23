@@ -4,7 +4,8 @@
 // check's run left comments on the cards that the analyst has not looked at, until the menu opens
 // (report/newComments.ts). At the bottom right: the search menu (the card filter, cardFilter.ts), the zoom and Fit, and
 // the minimap, where a press or drag moves the view. While a filter is set the minimap draws the kept cards in ink, the
-// rest faint.
+// rest faint. The minimap folds into the zoom bar where the board is too narrow to show it beside a card (minimapOpen),
+// and the bar's map button opens or folds it; the viewer's choice is kept in this browser.
 import { useEffect, useRef, useState, type MouseEvent, type WheelEvent } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -29,6 +30,24 @@ export interface CanvasLabel {
   values: { value: string; count: number }[]
 }
 
+/** Below this viewport width (screen px), the minimap would cover the text of a card at a readable zoom. */
+export const MINIMAP_ROOM = 1000
+const MAP_KEY = 'thimble.canvas.minimap'
+
+/** Whether the minimap shows: the viewer's own choice ('open' or 'folded', kept in this browser), else whether the
+ * board has room for it beside a card. Pure. */
+export function minimapOpen(choice: string | null, roomy: boolean): boolean {
+  return choice === 'open' ? true : choice === 'folded' ? false : roomy
+}
+
+function storedMapChoice(): string | null {
+  try {
+    return globalThis.localStorage?.getItem(MAP_KEY) ?? null
+  } catch {
+    return null
+  }
+}
+
 export interface ControlsProps {
   board: Board
   lay: Layout
@@ -43,6 +62,8 @@ export interface ControlsProps {
   onZoom: (dir: 1 | -1) => void
   onFit: () => void
   onMinimap: (e: MouseEvent<HTMLDivElement>) => void
+  /** the board's viewport is wide enough to show the minimap beside a card (MINIMAP_ROOM) */
+  roomy: boolean
   /** the card filter and what it can choose from; onClear clears it and the label filter together */
   filter: CardFilter
   onFilter: (f: CardFilter) => void
@@ -66,6 +87,17 @@ export interface ControlsProps {
 
 export function Controls(p: ControlsProps) {
   const set = activeParts(p.filter).length + (p.label ? 1 : 0)
+  const [choice, setChoice] = useState(storedMapChoice)
+  const mapShown = minimapOpen(choice, p.roomy)
+  const toggleMap = () => {
+    const next = mapShown ? 'folded' : 'open'
+    setChoice(next)
+    try {
+      globalThis.localStorage?.setItem(MAP_KEY, next)
+    } catch {
+      // the choice holds for this page only
+    }
+  }
   // a press or a wheel on the controls stays off the board, which would start a marquee or pan under them
   const hold = { onMouseDown: (e: MouseEvent) => e.stopPropagation(), onWheel: (e: WheelEvent<HTMLDivElement>) => e.stopPropagation() }
   return (
@@ -111,7 +143,12 @@ export function Controls(p: ControlsProps) {
             <button type="button" className="bctl-btn bctl-fit" onClick={p.onFit}>
               Fit
             </button>
+            <span className="bctl-sep" />
+            <TipButton tip={mapShown ? 'Fold the map' : 'Show the map'} className="bctl-btn bctl-sq bctl-map-toggle" aria-expanded={mapShown} onClick={toggleMap}>
+              <Icon name={mapShown ? 'chevron-down' : 'chevron-up'} size={14} />
+            </TipButton>
           </div>
+          {mapShown && (
           <div className="bctl-map" style={{ width: MINIMAP.w, height: MINIMAP.h }} onMouseDown={p.onMinimap} aria-label="Minimap" role="img">
             {p.board.groups.map((g) => {
               const r = p.lay.rects.get(g.id)
@@ -124,6 +161,7 @@ export function Controls(p: ControlsProps) {
             })}
             <span className="bctl-map-view" style={{ left: p.map.view.x, top: p.map.view.y, width: p.map.view.w, height: p.map.view.h }} />
           </div>
+          )}
         </div>
       </div>
     </>

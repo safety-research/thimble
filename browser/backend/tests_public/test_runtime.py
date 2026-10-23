@@ -777,3 +777,31 @@ async def test_on_claude_code_sign_in_a_new_chat_is_a_new_session_and_resume_res
     await sp.switch(first)
     await main_turn("And now?")
     assert seen["options"].resume == "sess-1"
+
+
+def test_an_api_error_reads_as_the_api_s_message_in_a_sentence_not_its_raw_answer():
+    import anthropic
+    import httpx
+
+    body = {"type": "error", "request_id": "req_made_up",
+            "error": {"type": "invalid_request_error", "message": "messages.3.content.1.fallback.from: Field required"}}
+    e = anthropic.BadRequestError(f"Error code: 400 - {body}", body=body,
+                                  response=httpx.Response(400, request=httpx.Request("POST", "https://api.example.test")))
+    assert llm.failure(e) == "Claude's API answered 400 (invalid request): messages.3.content.1.fallback.from: Field required."
+    assert "{" not in llm.failure(e)
+    # an answer whose body holds no message keeps its own text
+    bare = anthropic.InternalServerError("Error code: 500 - upstream reset", body=None,
+                                         response=httpx.Response(500, request=httpx.Request("POST", "https://api.example.test")))
+    assert llm.failure(bare) == "Claude's API answered 500: Error code: 500 - upstream reset"
+
+
+async def test_a_reply_claude_s_safeguards_moved_to_another_model_is_told_in_a_notice(on, monkeypatch):
+    from app import notices
+
+    switched = [Block(type="text", text="Here is the overview."),
+                Block(**{"type": "fallback", "from": {"model": "claude-opus-5-5"}, "to": {"model": "claude-opus-4-8"},
+                         "trigger": {"category": "cyber", "type": "refusal"}})]
+    api_key(monkeypatch, [switched])
+    await main_turn("What are these episodes?")
+    said = [n["text"] for n in notices.open_notices(CORPUS) if n.get("kind") == "safeguards"]
+    assert said == ["Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."]

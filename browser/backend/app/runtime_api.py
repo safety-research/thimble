@@ -39,6 +39,21 @@ def _load(path: Any) -> list[dict[str, Any]]:
     return got
 
 
+def fallback_records(content: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The reply's model switches as the transcript tells them, as Claude Code writes them: for each `fallback` block
+    (Claude's safeguards answered with another model), a `model_refusal_fallback` record with the model asked for and
+    the one that answered, which the chat's mirror makes a notice of (session._switched)."""
+    from . import session  # noqa: PLC0415
+
+    out = []
+    for b in content:
+        if isinstance(b, dict) and b.get("type") == "fallback":
+            was, now = (b.get("from") or {}).get("model"), (b.get("to") or {}).get("model")
+            out.append({"type": "system", "subtype": session.FALLBACK_SUBTYPE, "direction": "retry",
+                        "originalModel": was or "", "fallbackModel": now or ""})
+    return out
+
+
 def reply_blocks(final: Any) -> list[dict[str, Any]]:
     """A reply's blocks as the conversation keeps them and sends them again: in the API's own field names (a fallback
     block's `from`, which the SDK names `from_`)."""
@@ -270,6 +285,8 @@ async def turn(conv: Any, text: str) -> Any:
             _save(path, messages)
             blocks, server_results = runtime_tools.server_blocks_to_records(content)
             usage = final.usage.model_dump(mode="json", exclude_none=True) if getattr(final, "usage", None) else {}
+            for switch in fallback_records(content):
+                conv.emit(switch)
             conv.emit_assistant(blocks, str(getattr(final, "model", "") or spec.model), usage)
             conv.live_text(key, None)
             conv.emit_results(server_results)
