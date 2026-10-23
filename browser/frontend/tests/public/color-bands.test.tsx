@@ -221,3 +221,45 @@ test('the bands keep within the room of the one bar and its gap, narrower as mor
   await act(async () => (globalThis as { __set?: (b: readonly (string | null)[]) => void }).__set!([null, null]))
   expect(t.querySelector('.reader-bands')).toBeNull()
 })
+
+test("with a label first, a record of a highlighted value takes the value's color as a tint across its row, and its hover names the label, its value and the text it marks; a key first tints nothing", async () => {
+  const marked = new Map(ROWS)
+  marked.set(`${PATH}#L2`, new Map([['a', { ...row(2, 'tactic'), spans: ['git push --force'] }]]))
+  writeColor('w', PATH, { by: 'l:a', picks: ['l:a', 'k:type'], off: {} })
+  function Records() {
+    got = useColorBy('w', PATH, true, labels, RECORDS, marked, 5)
+    return (
+      <ColorContext.Provider value={got.colors}>
+        {RECORDS.map((r) => (
+          <RecordCard key={r.line} path={PATH} line={r.line} target={null} hit={false} header="turn">
+            words
+          </RecordCard>
+        ))}
+      </ColorContext.Provider>
+    )
+  }
+  const el = await mount(<Records />)
+  await settle()
+  const cards = () => [...el.querySelectorAll<HTMLElement>('.reader-record')]
+  expect(got!.colors!.get(2)!.tint).toBe(PURPLE)
+  expect(cards()[1].classList.contains('has-cb-tint')).toBe(true)
+  expect(cards()[1].style.getPropertyValue('--cb-tint')).toBe(PURPLE)
+  expect(cards()[1].title).toBe('tactic: tactic\n“git push --force”')
+  // "other" is no highlighted value: no tint, but its hover still says what the label gave it
+  expect(cards()[3].classList.contains('has-cb-tint')).toBe(false)
+  expect(cards()[3].title).toBe('tactic: other')
+  // a record the label never read: neither
+  expect(cards()[0].classList.contains('has-cb-tint')).toBe(false)
+  expect(cards()[0].title).toBe('')
+  // a value turned off takes its tint off too
+  await act(async () => got!.toggle('tactic', false))
+  expect(cards()[1].classList.contains('has-cb-tint')).toBe(false)
+  // a key first: the bands only
+  await act(async () => got!.toggle('tactic', false))
+  writeColor('w', PATH, { by: 'k:type', picks: ['k:type'], off: {} })
+  unmountAll()
+  const k = await mount(<Records />)
+  await settle()
+  expect(k.querySelector('.has-cb-tint')).toBeNull()
+  expect(got!.colors!.get(2)!.tint).toBeNull()
+})

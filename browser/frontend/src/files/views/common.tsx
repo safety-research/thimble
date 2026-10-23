@@ -267,7 +267,8 @@ export const LANE_GLYPH_PX = 13
 
 /** One record as a row: the label gutter, the line number, the head in mono, the blocks under it; a highlighted value
  * with nothing to mark as a tint behind the text. In the Transcript mode, a band per Color by choice on its left edge,
- * in the color of its value of each (EdgeBands), none of the first while its value is turned off in Color by, and no
+ * in the color of its value of each (EdgeBands), with a label first a soft tint of its value's color across the row
+ * and, on hover, the labels' names and values, none of the first while its value is turned off in Color by, and no
  * row while its value is turned off in Filter by, unless a ref points at it (ColorContext, FilterContext). With `fold`, a click on the head folds the record to one line, the head and the summary, and a click
  * on that line opens it again (FoldContext keeps it per file); a ref's record shows open until it is folded under the
  * ref. A folded record keeps its blocks in the page, hidden, so that the find finds them and opens it (UNFOLD_EVENT). */
@@ -309,9 +310,11 @@ export function RecordCard({ path, line, target, hit, className, header, text, c
     setFolded(f)
   }
   const banded = !!cb?.bands.some(Boolean)
-  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', banded && 'has-cb', fold && 'has-fold', folded && 'is-folded'].filter(Boolean).join(' ')
+  const tint = cb?.tint ?? null
+  const cls = ['reader-card', 'reader-record', className, isT && 'reader-target', isT && hit && 'reader-hit', marks.cells.length && 'has-gutter', marks.tint && 'has-tint', banded && 'has-cb', tint && 'has-cb-tint', fold && 'has-fold', folded && 'is-folded'].filter(Boolean).join(' ')
+  const style = tint ? ({ ...markStyle(marks), '--cb-tint': tint } as CSSProperties) : markStyle(marks)
   return (
-    <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={markStyle(marks)}>
+    <div className={cls} data-line={line} data-anchor={`${path}#L${line}`} data-anchor-text={text || undefined} style={style} title={cb?.title ?? undefined}>
       {banded && <EdgeBands bands={cb!.bands} />}
       <LaneGutter cells={marks.cells} />
       <span className="reader-lineno mono" title={no != null ? `line ${line}` : undefined}>

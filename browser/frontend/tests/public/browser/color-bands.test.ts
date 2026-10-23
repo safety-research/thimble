@@ -172,3 +172,34 @@ for (const mode of ['transcript', 'table'])
     assert.equal(await off.locator('.has-cb').count(), 0)
     await off.close()
   }, 120_000)
+
+test("Files' Transcript mode with a label first: each record the label marks takes a soft tint of its value's color across the whole row, a little stronger on the dark paper, and its hover names the label and its value; the others keep the plain row", async (ctx) => {
+  if (!browser) return ctx.skip()
+  const page = await open('?mode=transcript&picks=l:a,k:speaker')
+  await page.waitForFunction(() => document.querySelectorAll('.reader-record.has-cb-tint').length > 3)
+  const rows = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>('.reader-record[data-line]')].map((el) => {
+        const bg = getComputedStyle(el).backgroundColor
+        const alpha = /\/\s*([\d.]+)\)$/.exec(bg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)$/.exec(bg)?.[1] ?? (bg === 'transparent' ? '0' : '1')
+        return { line: Number(el.dataset.line), bg, alpha: Number(alpha), title: el.title }
+      }),
+    )
+  const light = await rows()
+  assert.ok(light.length > 8, `records drawn: ${light.length}`)
+  for (const r of light) {
+    if (tactic(r.line)) {
+      assert.ok(Math.abs(r.alpha - 0.14) < 0.02, `record ${r.line} takes a soft tint: ${r.bg}`)
+      assert.equal(r.title, 'tactic: tactic')
+    } else {
+      assert.equal(r.alpha, 0, `record ${r.line} keeps the plain row: ${r.bg}`)
+      assert.equal(r.title, 'tactic: other')
+    }
+  }
+  if (process.env.THIMBLE_SHOTS) await page.screenshot({ path: path.join(process.env.THIMBLE_SHOTS, 'label-tint-light.png') })
+  await page.evaluate(() => document.documentElement.setAttribute('data-paper', 'dark'))
+  const dark = await rows()
+  for (const r of dark.filter((x) => tactic(x.line))) assert.ok(Math.abs(r.alpha - 0.18) < 0.02, `record ${r.line} on the dark paper: ${r.bg}`)
+  if (process.env.THIMBLE_SHOTS) await page.screenshot({ path: path.join(process.env.THIMBLE_SHOTS, 'label-tint-dark.png') })
+  await page.close()
+}, 120_000)
