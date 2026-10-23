@@ -14,8 +14,8 @@ declare module 'claude-code' {
       /** main's text rows of the turn that runs, until its reply's marks are in the store: [{ row, text, at }] */
       marksRows: { row: string; text: string; at: number }[]
       /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
-       *  check of one mark again, which x in the tray started */
-      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean }>
+       *  check of one mark again, which x in the tray started, or thimble when the check failed it (`auto`) */
+      marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string }>
 
       // ---- cards (cards/)
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,
