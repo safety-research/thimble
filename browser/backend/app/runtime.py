@@ -31,11 +31,12 @@ security plugin skips person-installed plugins' prompt.context and session.appen
 When Claude cannot be reached the way chosen (no choice, no key, a WIF file that cannot be used), a turn writes one
 card into the chat (ACCESS_KIND) that says what is missing and opens the setup step; never a raw error.
 
-Main's chats. Each start of thimble-browser opens a new chat of main, as each `claude` starts a new session: the
-workspace's cards, canvas, reports and labels stay, and main's log in the page keeps the earlier chats above a `New
-chat` line. `--continue` and `--resume` bring an earlier chat back (Space.switch, from the register route's `chat`):
-main's conversation (convs/main-<sid>.<engine>.json) and its transcript are that chat's again. runtime/main.json names
-the chat that is main now; main_chats lists them for the launcher's picker.
+Main's chats. Each start of thimble-browser is a new session of the folder, a workspace as empty as at its first start
+(folder_sessions.py); `--continue` and `--resume` bring an earlier session back whole, with its chat of main. A session
+can hold several chats of main (a workspace from before sessions, or the register route's `chat` "new"): Space.switch
+makes one main, and main's conversation (convs/main-<sid>.<engine>.json) and its transcript are that chat's again.
+runtime/main.json names the chat that is main now; chats_in lists them. When the workspace's folder goes (moved aside
+or deleted, ledger), forget drops its runtime, so the next ensure reads the folder in its place.
 
 THIMBLE_RUNTIME=off turns this off (0.8's own tests); it is on otherwise.
 """
@@ -465,13 +466,13 @@ def _last_uuid(path: Path) -> str | None:
 
 
 def _chat_of(path: Path) -> dict[str, Any]:
-    """{turns, first}: how many turns a main transcript holds (the user records that open one) and the first message
-    the analyst typed in it, as one line."""
-    turns, first, other = 0, "", ""
+    """{turns, first, start}: how many turns a main transcript holds (the user records that open one), the first message
+    the analyst typed in it, as one line, and when its first turn began (the record's timestamp, '' when none)."""
+    turns, first, other, start = 0, "", "", ""
     try:
         f = path.open(encoding="utf-8")
     except OSError:
-        return {"turns": 0, "first": ""}
+        return {"turns": 0, "first": "", "start": ""}
     with f:
         for ln in f:
             try:
@@ -482,6 +483,7 @@ def _chat_of(path: Path) -> dict[str, Any]:
             if rec.get("type") != "user" or not isinstance(content, str):
                 continue
             turns += 1
+            start = start or str(rec.get("timestamp") or "")
             if first:
                 continue
             m = EVENT_BODY_RE.match(content)
@@ -490,15 +492,20 @@ def _chat_of(path: Path) -> dict[str, Any]:
                 first = body
             elif not other:
                 other = body
-    return {"turns": turns, "first": first or other}
+    return {"turns": turns, "first": first or other, "start": start}
 
 
 def main_chats(c: str) -> list[dict[str, Any]]:
-    """The workspace's chats of main that hold a turn, the latest first: {id, at (the last write, epoch seconds),
-    turns, first (the first message), current (main's now)}. For the launcher's --continue and --resume."""
+    """The workspace's chats of main that hold a turn, the latest first (chats_in)."""
     from . import config  # noqa: PLC0415
 
-    d = config.workspace_dir(c) / DIR
+    return chats_in(config.workspace_dir(c) / DIR)
+
+
+def chats_in(d: Path) -> list[dict[str, Any]]:
+    """The chats of main that hold a turn in a workspace's runtime folder `d`, the latest first: {id, at (the last
+    write, epoch seconds), turns, first (the first message), start (when its first turn began), current (main's now)}.
+    Reads only, so it lists a session moved aside as well (folder_sessions)."""
     now = str(_read_json(d / "main.json").get("session") or "")
     out = []
     for p in d.glob("*.jsonl") if d.is_dir() else ():
@@ -557,6 +564,19 @@ def ensure(c: str) -> Space:
         sp = _spaces[c] = Space(c)
     sp.attach()
     return sp
+
+
+async def forget(c: str) -> None:
+    """The workspace's folder goes (ledger: moved aside for a new session, or deleted): its conversations' running turns
+    stop, awaited, so none writes into the folder that takes its place, and its runtime is dropped, so the next ensure
+    reads that folder (a new session's empty one, or a session brought back)."""
+    sp = _spaces.pop(c, None)
+    if sp is None:
+        return
+    for conv in [sp.main, *sp.convs.values()]:
+        if conv.running:
+            conv.queue.clear()
+            await _cancel(conv.task)
 
 
 def ensure_soon(c: str) -> None:
