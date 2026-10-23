@@ -10,7 +10,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { turnCounts } from '../bar/counts'
-import { takeFailLine } from '../bar/notice'
+import { promptTyped } from '../bar/notice'
 import { turnCards } from '../cards/store'
 import { turnClaims } from '../claims/term'
 import { turnAnswers } from '../core/answers'
@@ -57,6 +57,6 @@ async function turnOver($: Engine): Promise<void> {
   try { await turnClaims($) } catch { /* the claims */ }
   try { await turnThreads($) } catch { /* the side threads */ }
   try { await turnTray($) } catch { /* the tray */ }
-  try { await takeFailLine($) } catch { /* the failure line */ }
+  try { await promptTyped($) } catch { /* the failure line */ }
   try { await turnCounts($) } catch { /* the bar's counts */ }
 }
