@@ -50,7 +50,7 @@ export function wordsOfSkill(text: string): string {
 }
 
 /** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), never Claude's. */
-const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|done|apply|notnow|redo|undo|remove|sandbox|draft|keep|send)\b/
+const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|done|apply|merge|notnow|redo|undo|remove|sandbox|draft|keep|send)\b/
 
 /** The fixers this load knows, so a guard that fails can still refuse their calls. */
 /** Whether this session looked for a newer release already (kept across a reload of the module). */

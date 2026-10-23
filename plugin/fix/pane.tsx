@@ -5,8 +5,8 @@
 //                redo, request, sent, saved), its title, its date and a note; under the list what the selected fix
 //                changed: the person's words, what Claude did, its files and tests. j k move, ↵ selects, m marks, y
 //                turns a ready or off fix on (only this press does: the fix's code then runs as thimble), u turns an
-//                on fix off, r redo, s shares the marked fixes (or the selected one), x removes, a turns every fix
-//                off or on.
+//                on fix off, r redo, s shares the marked fixes (or the selected one), g merges the marked fixes into
+//                the one marked first (merge.ts; only this press does), x removes, a turns every fix off or on.
 //   Share        after s, in place of the selected fix: for each fix shared, what the privacy check took out and what
 //                to do with its GitHub link (share.ts); o opens GitHub's new-issue page with the text, c copies the
 //                link. Nothing is sent from here.
@@ -25,6 +25,7 @@ import { cut, textWidth } from '../core/text.js'
 import { ACCENT } from '../core/theme'
 import { testsWord } from './fixer'
 import { allOffOn, applyFix, type Fix, fixesNow, refreshFixes, removeFix, shownPath, sizeOf, undoFix } from './fixes'
+import { mergeFixes } from './merge'
 import { redoFix } from './request'
 import { copyLink, openOnGitHub, type ShareState, shareFixes, shareNow } from './share'
 import { type Draft, draftNow, type Hit, submitAction, submitFixes, submitNow, submitSkip } from './submit'
@@ -193,13 +194,22 @@ export async function drawFixes($: Engine, e: Any, _args: unknown, els: Any): Pr
     await setView($, { marked: [], diff: false, share: true })
     await shareFixes($, ids)
   }
+  // the marked fixes become one under the one marked first: by this key alone
+  const merge = async () => {
+    const ids = v.marked.filter(id => fixes.some(f => f.id === id))
+    const said = await mergeFixes($, ids)
+    if (!said) await setView($, { marked: [], sel: ids[0] ?? null })
+    say(said)
+  }
   // o and c act on the shared fix the list has selected, else the first one shared
   const sharedOne = shared?.items.find(x => x.id === sel.id && !x.problem) ?? shared?.items.find(x => !x.problem)
   const key = keys(els, [
     ['j', 'down', move(1)], ['k', 'up', move(-1)], ['m', 'mark', mark],
     ...(sel.state === 'on' ? [['u', 'undo', undo] as [string, string, () => unknown]] : [['y', 'use it now', use] as [string, string, () => unknown]]),
     ['r', 'redo', async () => say(await redoFix($, sel.id))],
-    ['s', v.marked.length > 1 ? `share ${v.marked.length}` : 'share', share], ['x', 'remove', async () => say(await removeFix($, sel.id))],
+    ['s', v.marked.length > 1 ? `share ${v.marked.length}` : 'share', share],
+    ...(v.marked.length > 1 ? [['g', `merge ${v.marked.length} into fix ${v.marked[0]}`, merge] as [string, string, () => unknown]] : []),
+    ['x', 'remove', async () => say(await removeFix($, sel.id))],
     ['a', list?.on === false ? 'all on' : 'all off', async () => say(await allOffOn($, list?.on === false))],
     ...(sharedOne ? [
       ['o', 'open on GitHub', async () => say(await openOnGitHub($, sharedOne.id))] as [string, string, () => unknown],

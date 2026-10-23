@@ -8,7 +8,7 @@ import { TEXTS, fileOf } from './registry.mjs'
 
 type Engine = EngineInterface
 
-export type PromptName = 'guidance' | 'card-tool' | 'checker' | 'designer' | 'labels' | 'observer' | 'observer-turn' | 'lens-explain' | 'lens-heads' | 'lens-claims' | 'explain-expand' | 'squeeze' | 'thread' | 'fixer' | 'fix-draft'
+export type PromptName = 'guidance' | 'card-tool' | 'checker' | 'designer' | 'labels' | 'observer' | 'observer-turn' | 'lens-explain' | 'lens-heads' | 'lens-claims' | 'explain-expand' | 'squeeze' | 'thread' | 'fixer' | 'fix-draft' | 'fix-merge'
 
 const texts = new Map<string, string>()
 
