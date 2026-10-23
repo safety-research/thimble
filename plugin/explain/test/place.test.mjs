@@ -79,13 +79,16 @@ test('a look places each explainer in the newest message that holds it, adds to 
   assert.deepEqual(mergeLook(msgs, { glosses: [{ term: 'p95' }], heads: null }, { glossed: ['P95'] }).placed, [])
 })
 
-test('the colors: theme keys for the words, apart from the citations; a tint per theme inside a citation', () => {
+test('the colors: a highlight per theme, a stronger one in focus; the frames in theme keys apart from the citations', () => {
+  const lum = hex => { const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
   for (const theme of ['dark', 'light']) {
     const c = markColors(theme)
     assert.equal(c.gloss, 'planMode')
     assert.equal(c.heads, 'claude')
     assert.ok(![c.gloss, c.heads].some(k => ['merged', 'warning', 'error'].includes(k)))
+    assert.notEqual(c.glossBg, c.headsBg)
+    // light fills under the light theme's dark text, deep ones under the dark theme's light text
+    for (const k of ['glossBg', 'headsBg', 'glossFocus', 'headsFocus']) assert.ok(theme === 'light' ? lum(c[k]) > 0.6 : lum(c[k]) < 0.45, `${theme} ${k}`)
   }
-  assert.notEqual(markColors('dark').glossTint, markColors('light').glossTint)
-  assert.notEqual(markColors('dark').headsTint, markColors('dark').glossTint)
+  assert.notEqual(markColors('dark').glossBg, markColors('light').glossBg)
 })

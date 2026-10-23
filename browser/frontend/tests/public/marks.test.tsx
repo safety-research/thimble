@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A reply's marks drawn by what the check found (marks/Mark.tsx), as a card's citations are drawn: two looks, verified
 // (a correction shows its new words and looks verified) and failed (a wrong mark, one the check could not confirm, one
-// no check could run: ? after the words), and a click opens the evidence in the citation's label.
+// no check could run: a red × after the words, as the terminal draws it), and a click opens the evidence in the citation's label.
 import { act } from 'react'
 import { afterEach, expect, test } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'

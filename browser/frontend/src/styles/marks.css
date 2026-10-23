@@ -58,7 +58,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--status-warning);
+  color: var(--status-negative);
 }
 .mark-pop-state { color: var(--text-tertiary); }
 .mark-ev { display: flex; flex-direction: column; min-width: 0; }
@@ -80,4 +80,4 @@
 /* the line under a reply some of whose marks failed: how many */
 .marks-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font: var(--type-body-sm); }
 .marks-foot-counts { display: flex; gap: 10px; color: var(--text-tertiary); }
-.marks-foot-n.is-failed { color: var(--status-warning); }
+.marks-foot-n.is-failed { color: var(--status-negative); }

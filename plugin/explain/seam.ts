@@ -5,7 +5,7 @@
 // The observer's look after each answer gives explainers (terms the analyst may lack the background for) and at most
 // one heads-up (a detail they should know before they rely on the answer). explainMerge places each on the words of the
 // newest message that holds them (place.mjs mergeLook) and keeps it as that message's part `explain`. The row draws
-// each as a press on its words: an explainer in teal, a heads-up in orange, each underlined (place.mjs markColors); a press
+// each as a press on its words: an explainer highlighted teal, a heads-up orange (place.mjs markColors); a press
 // opens the tray on it (tray/seam.ts openTray), and Claude hears with the next prompt that the analyst opened it
 // (core/engaged.ts). A term is explained once per conversation; the lenses' digests name the terms already explained
 // and the heads-ups already given, which this module keeps in the conversation's folder (explain.json).
@@ -86,8 +86,8 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
       id: p.id,
       start: p.start,
       end: p.end,
-      look: { color: heads ? c.heads : c.gloss, underline: true, tint: heads ? c.headsTint : c.glossTint },
-      focus: { bold: true, backgroundColor: heads ? c.headsTint : c.glossTint },
+      look: { backgroundColor: heads ? c.headsBg : c.glossBg },
+      focus: { bold: true, backgroundColor: heads ? c.headsFocus : c.glossFocus },
       label: `${heads ? 'heads up' : 'explain'} ${text.slice(p.start, p.end).replace(/`/g, '')}`.slice(0, 120),
       onPress: async () => {
         await openTray($, { row, kind, id: p.id })

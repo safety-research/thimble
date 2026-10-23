@@ -104,8 +104,10 @@ test("after a look, the answer's explainer and heads-up stand on their words in 
   expect(part!.items.h1).toMatchObject({ kind: 'heads', title: 'Only one network', todo: 'Check the other office.' })
   const spans = await spansFor(s.$, 't1-row', ANSWER, [{ start: 57, end: 75, words: '41 of the 44' }])
   expect(spans.map(x => ANSWER.slice(x.start, x.end))).toEqual(['retry budget', '30 seconds after a drop'])
-  expect(spans[0]!.look).toEqual({ color: 'planMode', underline: true, tint: '#2b3b39' })
-  expect(spans[1]!.look).toEqual({ color: 'claude', underline: true, tint: '#47322b' })
+  // a highlight: a fill behind the words, teal for an explainer, orange for a heads-up, the words in the theme's text color
+  expect(spans[0]!.look).toEqual({ backgroundColor: '#1e4d47' })
+  expect(spans[1]!.look).toEqual({ backgroundColor: '#5c3a17' })
+  expect(spans[1]!.focus).toEqual({ bold: true, backgroundColor: '#80521f' })
   expect(spans[0]!.label).toBe('explain retry budget')
   expect(await explainState(s.$)).toEqual({ glossed: ['retry budget'], headsGiven: ['Only one network'] })
   expect(JSON.parse(s.files.get('/made-up/.thimble/conversations/s-explain/explain.json')!)).toEqual({ glossed: ['retry budget'], headsGiven: ['Only one network'] })
@@ -160,16 +162,16 @@ test('a Longer that fails says why and how to try again; the explainer stays as 
   expect((await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!.items.g1!.expanded).toBe(undefined)
 })
 
-test('the light theme gives the light tints, and a change of theme the other set', async () => {
+test('the light theme gives the light fills, and a change of theme the other set', async () => {
   setOptions({})
   const s = setup([LOOK], { theme: 'light' })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
   const spans = await spansFor(s.$, 't1-row', ANSWER, [])
-  expect(spans.find(x => x.id === 'g1')!.look).toEqual({ color: 'planMode', underline: true, tint: '#d6e8e6' })
+  expect(spans.find(x => x.id === 'g1')!.look).toEqual({ backgroundColor: '#c4eee6' })
   // the person picks a dark theme: a second later, the next drawing reads it (each clock read here is 100 ms on)
   s.setTheme('dark-daltonized')
   expect(await themeNow(s.$)).toBe('light')
   for (let i = 0; i < 12; i++) await s.$.clock.now()
   expect(await themeNow(s.$)).toBe('dark')
-  expect((await spansFor(s.$, 't1-row', ANSWER, [])).find(x => x.id === 'g1')!.look.tint).toBe('#2b3b39')
+  expect((await spansFor(s.$, 't1-row', ANSWER, [])).find(x => x.id === 'g1')!.look.backgroundColor).toBe('#1e4d47')
 })

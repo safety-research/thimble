@@ -171,10 +171,12 @@ describe('what the page shows', () => {
   test("the tour's steps about the chat say it is a demo there, and stay as they were elsewhere", () => {
     const live = tourSteps('⌘', true, false)
     const demo = tourSteps('⌘', true, true)
-    expect(live[0].title).toBe('Your Claude Code session')
-    expect(live[0].body).toBe('This chat is your Claude Code session: ask it anything about the files.')
+    expect(live[0].title).toBe('Your chat with Claude')
+    expect(live[0].body).toBe('Ask Claude anything about the files here.')
     expect(demo[0].title).toBe('The chat')
-    expect(demo[0].body).toBe("This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files.")
+    expect(demo[0].body).toBe("This is a demo and thimble isn't connected to Claude, so you can't type here. With Claude connected, ask it anything about the files here.")
+    // true however the workbench reaches Claude (an API key, WIF or the Claude Code sign-in): no step names Claude Code
+    for (const s of [...live, ...demo]) expect(`${s.title} ${typeof s.body === 'string' ? s.body : ''}`).not.toMatch(/Claude Code/)
     expect(demo[0].body).not.toMatch(/folder of your own|run thimble/)
     expect(demo.some((s) => s.body === sessionTexts(true).ask)).toBe(true)
     expect(demo.length).toBe(live.length)
@@ -186,7 +188,7 @@ describe('what the page shows', () => {
         expect(`${s.title} ${typeof s.body === 'string' ? s.body : ''}`).not.toMatch(/terminal/i)
         expect((s as unknown as Record<string, unknown>).terminal).toBeUndefined()
       }
-    expect(tourSteps('⌘', true, false).map((s) => s.title).slice(0, 2)).toEqual(['Your Claude Code session', 'Files'])
+    expect(tourSteps('⌘', true, false).map((s) => s.title).slice(0, 2)).toEqual(['Your chat with Claude', 'Files'])
   })
 
   test("the tour's welcome says the line first on a demo page, then asks; elsewhere it asks and says the tour uses example data", () => {

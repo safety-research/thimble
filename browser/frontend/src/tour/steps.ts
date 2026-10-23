@@ -203,9 +203,42 @@ const cardExample = (api: Api): Example => {
   return { els: { card: art, wrap: w, real: false }, layout }
 }
 
+// ---------- the right sidebar (shell/LabelsSidebar.tsx), which the top bar's Labels and Comments buttons open, each on
+// its own section. A step about it opens the real one on its section with that button, so the panes make room for it
+// as they do for the analyst, and lays its example (examples.json, captured) over it; the step's end puts the sidebar
+// back as the analyst had it.
+type SideSection = 'labels' | 'comments'
+const realSide = () => [...document.querySelectorAll<HTMLElement>('aside.lside')].find((e) => !e.closest('.tour-root')) ?? null
+const sideButton = (section: string) => document.querySelector<HTMLElement>(`.shell-side-btn[data-side="${section}"]`)
+/** The sidebar open on `section`; what it returns puts it back as it was. */
+const holdSide = (section: SideSection) => {
+  const was = realSide()?.dataset.section ?? null
+  if (was !== section) sideButton(section)?.click()
+  return () => {
+    const now = realSide()?.dataset.section ?? null
+    // a click on the open section's button closes the sidebar, a click on the other's shows that one
+    if (now !== was) sideButton(was ?? now ?? section)?.click()
+  }
+}
+/** The example sidebar on `section`, laid over the real one while it is open. */
+const sideExample = (api: Api, section: SideSection) => {
+  const wrap = api.snap(section === 'labels' ? 'labelsSide' : 'commentsSide', 'tour-ex-side')
+  const aside = wrap.firstElementChild as HTMLElement
+  aside.removeAttribute('data-section')
+  Object.assign(aside.style, { width: '100%', maxWidth: 'none', height: '100%', margin: '0' })
+  Object.assign(api.tag(wrap).style, { top: '14px', right: '44px' })
+  const layout = () => {
+    const S = api.rectOf(realSide())
+    wrap.style.display = S ? '' : 'none'
+    if (S) Object.assign(wrap.style, { left: `${S.x}px`, top: `${S.y}px`, width: `${S.width}px`, height: `${S.height}px` })
+    return !!S
+  }
+  return { wrap, aside, layout }
+}
+
 // ---------- Labels: one agent's transcript in the Transcript view with two labels on it, each in colours of its own:
 // what each step does (four values) and whether it coordinates with other agents (yes/no); the ruler beside it shows
-// both down the whole file. Captured, with the Labels pane that lists them.
+// both down the whole file. Captured, with the Labels sidebar that lists them, over the real one, which the step opens.
 const labelsExample = (api: Api): Example => {
   const realReader = () => api.q('[data-panel="files"] .reader')
   const rd = api.snap('txReader', 'tour-ex-reader')
@@ -214,32 +247,27 @@ const labelsExample = (api: Api): Example => {
   Object.assign(rd.style, { display: 'flex', flexDirection: 'column', background: api.groundOf(realReader() || api.q(filesPanel)) })
   Object.assign(reader.style, { flex: '1', minHeight: '0', overflow: 'hidden' })
   Object.assign(api.tag(rd).style, { left: '50%', right: 'auto', transform: 'translateX(-50%)' })
-  const lab = api.snap('txLabels', 'tour-ex-labels')
-  lab.style.background = api.groundOf(api.q('.files-labels'))
-  Object.assign(api.tag(lab).style, { right: '40px' })
   holdBrowser(api)
+  const side = sideExample(api, 'labels')
+  const putBack = holdSide('labels')
   const status = statusExample(api, 'agent-05.jsonl · Transcript')
-  api.ex.append(rd, lab, status.wrap)
+  api.ex.append(rd, side.wrap, status.wrap)
   // the transcript opens at line 22 and stays there while the panel's size changes, until anything else scrolls it
   let pinned = true,
     setTo: number | null = null
   const layout = () => {
     status.layout()
+    const placed = side.layout()
     let r = api.rectOf(realReader())
     if (!r) {
       const p = api.rectOf(api.q(filesPanel)),
         sd = api.rectOf(api.q('.files-side'))
+      // in a narrow Files panel thimble hides its sidebar: the transcript then takes the whole panel
       if (p && sd) r = { x: sd.x + sd.width, y: sd.y, width: p.x + p.width - sd.x - sd.width, height: sd.height }
+      else if (p) r = { x: p.x, y: p.y, width: p.width, height: p.height }
     }
-    // in a narrow Files panel thimble hides its sidebar: the example's Labels pane then takes the reader's left 250 px
-    const L = api.rectOf(api.q('.files-labels'))
-    if (r && !L) {
-      Object.assign(lab.style, { left: `${r.x}px`, width: '250px', top: `${r.y + r.height - lab.offsetHeight}px` })
-      r = { x: r.x + 251, y: r.y, width: r.width - 251, height: r.height }
-    }
-    if (!r) return false
+    if (!r || !placed) return false
     Object.assign(rd.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
-    if (L) Object.assign(lab.style, { left: `${L.x}px`, width: `${L.width}px`, top: `${L.y + L.height - lab.offsetHeight}px` })
     const sc = rd.querySelector<HTMLElement>('.reader-body')
     if (!sc || !sc.clientHeight) return
     if (pinned && setTo != null && Math.abs(sc.scrollTop - setTo) > 1) pinned = false
@@ -259,7 +287,7 @@ const labelsExample = (api: Api): Example => {
       Object.assign(thumb.style, { height: `${h}px`, transform: `translateY(${span > 0 ? ((bar.clientHeight - h) * sc.scrollTop) / span : 0}px)` })
     }
   }
-  return { els: { reader: rd, labels: lab, status: status.wrap }, layout }
+  return { els: { reader: rd, labels: side.wrap, status: status.wrap }, layout, cleanup: putBack }
 }
 
 // ---------- the Report and its checks: the example (a captured report with its figures and the comments of its check
@@ -273,6 +301,7 @@ const reportExample = (api: Api): Example => {
   Object.assign(w.style, { background: api.groundOf(panel()), overflow: 'hidden' })
   const spacer = w.querySelector<HTMLElement>('.wu-bar-spacer')
   api.tag(spacer ?? w)
+  asReportNow(w)
   // the report's first figure, a dense timeline chart, becomes a small table that makes one point in plain words (the
   // figure markup is the report's own, from its table figure)
   const first = w.querySelector('figure.wu-fig[data-tour-anchor="card:fb1d3ae9"]'),
@@ -294,12 +323,8 @@ const reportExample = (api: Api): Example => {
         table,
         '<thead><tr><th>When</th><th>Connections in use</th><th>Version running</th></tr></thead><tbody>' + rows.map(([a, b, c]) => `<tr><th>${a}</th><td>${b}</td><td>${c}</td></tr>`).join('') + '</tbody>',
       )
-    const cap = fig.querySelector<HTMLElement & { value?: string }>('.wu-fig-caption')
-    const text = 'The database came close to its limit only while version 4.12.0 was running.'
-    if (cap) {
-      cap.textContent = text
-      if ('value' in cap) cap.value = text
-    }
+    const cap = fig.querySelector('.wu-fig-caption')
+    if (cap) cap.textContent = 'The database came close to its limit only while version 4.12.0 was running.'
     if (table) table.style.width = '100%'
     first.replaceWith(fig)
   }
@@ -346,6 +371,11 @@ const reportExample = (api: Api): Example => {
   }
   const checkRow = [...w.querySelectorAll<HTMLElement>('.wu-check')].find((e) => /Alternative explanations/.test(e.textContent ?? ''))
   const checksCount = w.querySelector('.wu-checks-head .wu-count')
+  // the Comments sidebar, which the checks step opens: the checks with their comments, the new one among them once made
+  const side = sideExample(api, 'comments')
+  const sideRow = side.aside.querySelector<HTMLElement>('[data-category="alternative-explanations"]')
+  const sideCount = side.aside.querySelector('.lside-heading .lside-n')
+  let putBack: (() => void) | null = null
   const els = {
     root: w,
     page: w.querySelector<HTMLElement>('.wu-page'),
@@ -354,9 +384,23 @@ const reportExample = (api: Api): Example => {
     checkRow,
     checksCount,
     checksShown: false,
+    side: null as HTMLElement | null,
     hideChecks: () => {},
     showMargin: () => {},
     showChecks: () => {},
+    showSide: () => {},
+    hideSide: () => {},
+  }
+  els.showSide = () => {
+    if (!putBack) putBack = holdSide('comments')
+    if (!side.wrap.isConnected) api.ex.append(side.wrap)
+    els.side = side.wrap
+  }
+  els.hideSide = () => {
+    putBack?.()
+    putBack = null
+    side.wrap.remove()
+    els.side = null
   }
   // the check's comment cards, placed as thimble's margin places them (report/Margin.tsx): each 8px above its passage's
   // first line, stacked 8px apart so no two meet; measured again every frame, since the page's width, its fonts and
@@ -387,6 +431,8 @@ const reportExample = (api: Api): Example => {
     rulerPlain(true)
     if (checkRow) checkRow.style.display = 'none'
     if (checksCount) checksCount.textContent = '3'
+    if (sideRow) sideRow.style.display = 'none'
+    if (sideCount) sideCount.textContent = '0'
   }
   // the margin alone, empty, as thimble stands it while a check is on and before its comments come
   els.showMargin = () => {
@@ -399,11 +445,14 @@ const reportExample = (api: Api): Example => {
     rulerPlain(false)
     if (checkRow) checkRow.style.display = ''
     if (checksCount) checksCount.textContent = '4'
+    if (sideRow) sideRow.style.display = ''
+    if (sideCount) sideCount.textContent = '4'
   }
   els.hideChecks()
   const layout = () => {
     const r = api.rectOf(panel())
     if (!r) return false
+    if (els.side) side.layout()
     Object.assign(w.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` })
     const k = Math.min(1, r.width / w0)
     els.k = k
@@ -420,7 +469,36 @@ const reportExample = (api: Api): Example => {
       if (rulerThumb.style.transform !== at) Object.assign(rulerThumb.style, { height: `${h}px`, transform: at })
     }
   }
-  return { els, layout }
+  return { els, layout, cleanup: () => els.hideSide() }
+}
+/** The captured Report (examples.json) as the Report stands now: no Slides, Story or Video beside it; the cards an
+ * orientation made listed under Your work; a figure's caption whole, as text, with no scroll of its own (the capture
+ * has the field it was once edited in); and the checks in the sidebar's Comments pane. */
+const asReportNow = (w: HTMLElement) => {
+  w.querySelectorAll('.wu-types .seg-opt').forEach((b) => {
+    if (/^(slides|story|video)$/.test(b.querySelector('[data-doc-chip]')?.getAttribute('data-doc-chip') ?? '')) b.remove()
+  })
+  const orient = w.querySelector('.wu-sec[data-section="orientation"]'),
+    yours = w.querySelector('.wu-sec[data-section="yours"]')
+  if (orient && yours) {
+    const rows = [...orient.querySelectorAll('.wu-card-row')]
+    yours.querySelector('.wu-sec-head')?.after(...rows)
+    const n = yours.querySelector('.wu-sec-head .wu-count')
+    if (n) n.textContent = String(yours.querySelectorAll('.wu-card-row').length)
+    orient.remove()
+  }
+  w.querySelectorAll<HTMLTextAreaElement>('textarea.wu-fig-caption').forEach((ta) => {
+    const cap = document.createElement('div')
+    cap.className = 'wu-fig-caption chat-text wu-fig-caption-read'
+    const p = document.createElement('p')
+    p.textContent = ta.value
+    cap.append(p)
+    ta.replaceWith(cap)
+  })
+  const checks = w.querySelector('.wu-checks')
+  checks?.setAttribute('aria-label', 'Comments')
+  const name = checks?.querySelector('.wu-checks-head .wu-sec-name')
+  if (name) name.textContent = 'Comments'
 }
 // the page scrolled so `el` stands `above` px (as drawn) from the page's top
 const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth = true) => {
@@ -433,17 +511,17 @@ const scrollTo = (api: Api, el: Element | null | undefined, above = 120, smooth 
 const inReport = (api: Api, sel: string) => (api.els.root as HTMLElement | undefined)?.querySelector<HTMLElement>(sel) ?? null
 
 /** What the steps about the chat and the ⌘-click box say: on a demo page (`demo`, lib/demo), that thimble isn't
- * connected to a live Claude Code session there, so the chat takes no typing, and what the chat is in a live
- * session. */
+ * connected to Claude there, so the chat takes no typing, and what the chat is once it is. True however the workbench
+ * reaches Claude: an API key, Workload Identity Federation or the Claude Code sign-in. */
 export function sessionTexts(demo: boolean): { chat: [string, string]; ask: string } {
   if (!demo) {
     return {
-      chat: ['Your Claude Code session', 'This chat is your Claude Code session: ask it anything about the files.'],
+      chat: ['Your chat with Claude', 'Ask Claude anything about the files here.'],
       ask: 'Type a question and press Enter. On a real card, the answer comes in a new thread in the chat.',
     }
   }
   return {
-    chat: ['The chat', "This is a demo and thimble isn't connected to a live Claude Code session, so you can't type here. In a live session, this chat is your Claude Code session: ask it anything about the files."],
+    chat: ['The chat', "This is a demo and thimble isn't connected to Claude, so you can't type here. With Claude connected, ask it anything about the files here."],
     ask: 'Type a question and press Enter. With Claude connected, the answer comes in a new thread in the chat.',
   }
 }
@@ -471,15 +549,16 @@ export function tourSteps(key: string, chat = true, demo = false): Step[] {
     {
       tab: 'files', example: filesExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       title: 'Files',
-      body: 'The files browser exposes global views on the corpus.',
+      body: 'The file browser lists the folder’s files. Click one to read it.',
     },
     {
       tab: 'files', example: labelsExample, leave: releaseBrowser, place: 'left', align: 'end', pad: 0, radius: 0,
-      anchor: (api) => [api.els.labels, api.els.reader],
+      // the transcript first, so the popover stands beside it; the sidebar and the button that opens it
+      anchor: (api) => [api.els.reader, api.els.labels, sideButton('labels')],
       scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
       scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
       title: 'Labels',
-      body: 'Labels are custom classifiers that are applied to files.',
+      body: 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.',
     },
     {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
@@ -628,24 +707,30 @@ export function tourSteps(key: string, chat = true, demo = false): Step[] {
       // the whole Report surface: its bar (with Export), the cards and checks, and the page
       tab: 'report', example: reportExample, anchor: reportPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       title: 'The Report',
-      body: 'It is written from your cards and threads, with the cards as its figures. You can edit it and export it.',
+      body: 'Your report, with cards as its figures. Write it yourself or ask Claude to revise it. Export it when it is done.',
       scroll: (api) => api.els.page ?? null,
-      // the check is made on the next step: until then the report shows none of its comments
-      demo: async (api) => api.els.hideChecks?.(),
+      // the check is made on the next step: until then the report shows none of its comments, and no Comments sidebar
+      demo: async (api) => {
+        api.els.hideSide?.()
+        api.els.hideChecks?.()
+      },
     },
     {
-      tab: 'report', example: reportExample, anchor: reportPanel, place: 'left', align: 'start', pad: 0, radius: 12,
+      // the Report, the Comments sidebar beside it and the button that opens it
+      tab: 'report', example: reportExample, place: 'left', align: 'start', pad: 0, radius: 12,
+      anchor: (api) => [reportPanel, ...(api.els.side ? [api.els.side, sideButton('comments')] : [])],
       title: 'Checks',
-      body: 'Checks read the report and comment on its passages. Press + in Checks and describe what to look for, in a line.',
+      body: 'Checks read the report and the cards, and comment on what they find. Press + under Comments to add one: say what to look for, in a line. Comments, at the top, lists the checks and their comments.',
       note: 'Reopen this tour from Settings.',
       scroll: (api) => api.els.page ?? null,
-      // + in the Checks pane opens a new check, which is named and described; it runs, and its comments sit beside the
-      // passages they are about
+      leave: (api) => api.els.hideSide?.(),
+      // + in the Report's Comments pane opens a new check, which is named and described; it runs, its comments sit beside
+      // the passages they are about, and the Comments sidebar opens beside the Report with the check and its comments
       demo: async (api) => {
         const plus = inReport(api, '.wu-checks-add')
         const p = api.rectOf(plus)
         if (!plus || !p) return
-        if (api.els.checksShown) return
+        if (api.els.checksShown) return api.els.showSide()
         api.els.hideChecks()
         api.cursor.show(p.x + 180, p.y - 140)
         await api.sleep(500)
@@ -689,6 +774,10 @@ export function tourSteps(key: string, chat = true, demo = false): Step[] {
         await api.sleep(1300)
         scrollTo(api, inReport(api, '.wu-cm'), 220)
         await api.sleep(1500)
+        // the Comments sidebar, where every check and its comments are listed
+        api.els.showSide()
+        await api.sleep(1200)
+        scrollTo(api, inReport(api, '.wu-cm'), 220)
       },
     },
   ]

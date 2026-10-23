@@ -62,7 +62,7 @@ import { ServerDown } from './ServerDown'
 import { SessionGone, useSessionGone } from './SessionGone'
 import { Toasts } from './Toasts'
 import { TopBar } from './TopBar'
-import { LabelsSidebar } from './LabelsSidebar'
+import { LabelsSidebar, type SideSection } from './LabelsSidebar'
 import { TourHost } from './TourHost'
 
 export const CHAT_WIDTH = { def: 308, min: 280, max: 640 }
@@ -244,10 +244,10 @@ export function Shell({ ws }: { ws: string }) {
     }
   }, [ws, firstOpen])
   const gone = useSessionGone(ws)
-  // the Labels and Comments sidebar (LabelsSidebar.tsx), open or closed; it pushes the panes, or the chat when it is the only thing
-  // open, rather than covering them
-  const [side, setSide] = useState(false)
-  useEffect(() => bus.on('openLabels', () => setSide(true)), [])
+  // the right sidebar (LabelsSidebar.tsx) on its Labels or its Comments section, or closed (null); it pushes the panes, or
+  // the chat when it is the only thing open, rather than covering them
+  const [side, setSide] = useState<SideSection | null>(null)
+  useEffect(() => bus.on('openLabels', () => setSide('labels')), [])
   const demo = useDemo()
 
   // the main area's left edge: the window's 12px margin, the chat column and the 12px seam, or the collapsed strip
@@ -396,7 +396,7 @@ export function Shell({ ws }: { ws: string }) {
             />
           </main>
         </div>
-        {side && <LabelsSidebar ws={ws} onClose={() => setSide(false)} />}
+        {side && <LabelsSidebar ws={ws} section={side} onClose={() => setSide(null)} />}
       </div>
       {drag && <DragGhost drag={drag} />}
       <CmdPointer ws={ws} />

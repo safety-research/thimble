@@ -2,11 +2,11 @@
 // of a claim, `[352](#)`, found with the terminal plugin's own module (plugin/marks/message.js), so the page, the
 // terminal and the server read the same marks.
 //
-// A mark draws as a card's citation does (components/RefChip): the words in the text's color over a thin accent
-// underline. Once its check settled it has one of two looks:
+// A mark draws as a card's citation does (components/RefChip): the words in the text's own color, underlined in the
+// citations' purple, their light purple tint on hover. Once its check settled it has one of two looks:
 //   verified   the plain look; a corrected mark shows its corrected words and looks verified too
-//   failed     the check could not confirm it (wrong, not confirmed, or no check could run): a dashed underline in the
-//              warning color and `?` after the words
+//   failed     the check could not confirm it (wrong, not confirmed, or no check could run): red words, underlined,
+//              `×` after them and a soft red tint on hover, as the terminal draws it
 // While the reply streams (`pending`) and while its check runs (`checking`) it has the plain look.
 import { marksIn } from '../../../../plugin/marks/message.js'
 

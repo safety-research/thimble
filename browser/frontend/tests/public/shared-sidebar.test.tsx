@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-// The shared Labels and Comments sidebar (src/shell/LabelsSidebar.tsx, src/shell/CommentsList.tsx): one sidebar with the
-// labels and the comment categories; a category's Show in sets where its check comments (Chat: Claude's answers), its
-// detail edits its definition and lists its open comments as links, those on Claude's answers too, and Apply sends a
-// comment to Claude in main's chat.
+// The shared Labels and Comments sidebar (src/shell/LabelsSidebar.tsx, src/shell/CommentsList.tsx): one sidebar that
+// shows the labels or the comment categories, the section the top bar's Labels or Comments button opened; a category's
+// Show in sets where its check comments (Chat: Claude's answers), its detail edits its definition and lists its open
+// comments as links, those on Claude's answers too, and Apply sends a comment to Claude in main's chat.
 import { act } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { applyText, type CommentItem } from '../../src/shell/CommentsList.tsx'
@@ -66,11 +66,18 @@ test('a surface turned on or off changes what the check covers, and never leaves
   expect(withCover({ covers: ['documents'] }, 'documents', false)).toBeNull()
 })
 
-test('one sidebar holds the labels and the comment categories, each with its count and Show in', async () => {
+test('the sidebar shows the section its button opened: the labels, or the comment categories with their counts and Show in', async () => {
   serve()
-  const el = await mount(<LabelsSidebar ws="w1" onClose={() => undefined} />)
+  const labels = await mount(<LabelsSidebar ws="w1" section="labels" onClose={() => undefined} />)
   await settle()
-  expect([...el.querySelectorAll('.lside-section')].map((s) => s.getAttribute('data-section'))).toEqual(['labels', 'comments'])
+  expect([...labels.querySelectorAll('.lside-section')].map((s) => s.getAttribute('data-section'))).toEqual(['labels'])
+  expect(labels.querySelector('.lside-heading')?.textContent).toBe('Labels 0')
+  expect(labels.querySelector('[data-category]')).toBeNull()
+  unmountAll()
+  const el = await mount(<LabelsSidebar ws="w1" section="comments" onClose={() => undefined} />)
+  await settle()
+  expect([...el.querySelectorAll('.lside-section')].map((s) => s.getAttribute('data-section'))).toEqual(['comments'])
+  expect(el.querySelector('.lside-heading')?.textContent).toBe('Comments 4')
   const rows = [...el.querySelectorAll('[data-category]')]
   expect(rows.map((r) => r.getAttribute('data-category'))).toEqual(['details', 'judgment', NOTES])
   expect(rows[0].querySelector('.lside-name')?.textContent).toBe('Important details3')
@@ -84,7 +91,7 @@ test('one sidebar holds the labels and the comment categories, each with its cou
 test("Cards on a category's Show in makes its check comment on the cards", async () => {
   const patches: { url: string; body: unknown }[] = []
   serve(patches)
-  const el = await mount(<LabelsSidebar ws="w1" onClose={() => undefined} />)
+  const el = await mount(<LabelsSidebar ws="w1" section="comments" onClose={() => undefined} />)
   await settle()
   const cards = [...el.querySelectorAll('[data-category="judgment"] .lside-chip')][1] as HTMLButtonElement
   await act(async () => cards.click())
@@ -94,7 +101,7 @@ test("Cards on a category's Show in makes its check comment on the cards", async
 test("Chat on a category's Show in makes its check read Claude's answers", async () => {
   const patches: { url: string; body: unknown }[] = []
   serve(patches)
-  const el = await mount(<LabelsSidebar ws="w1" onClose={() => undefined} />)
+  const el = await mount(<LabelsSidebar ws="w1" section="comments" onClose={() => undefined} />)
   await settle()
   const chat = [...el.querySelectorAll('[data-category="judgment"] .lside-chip')][0] as HTMLButtonElement
   expect(chat.textContent).toBe('Chat')
@@ -106,7 +113,7 @@ test("a category's detail edits its definition and lists its comments as links, 
   serve()
   const asked: { chatId: string; send?: string }[] = []
   const off = bus.on('openChat', (e) => asked.push(e))
-  const el = await mount(<LabelsSidebar ws="w1" onClose={() => undefined} />)
+  const el = await mount(<LabelsSidebar ws="w1" section="comments" onClose={() => undefined} />)
   await settle()
   const open = el.querySelector('[data-category="details"] .lside-name') as HTMLButtonElement
   await act(async () => open.click())
