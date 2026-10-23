@@ -562,7 +562,7 @@ export function cardCount(board: Board, id: string): number {
 
 // ---- the minimap: a fixed scale over the content and a margin, centred in the box, the viewfinder held inside it ----
 
-export const MINIMAP = { w: 180, h: 116, pad: 4, margin: 200 }
+export const MINIMAP = { w: 204, h: 116, pad: 4, margin: 200 }
 
 export interface Minimap {
   /** plane point -> minimap point */

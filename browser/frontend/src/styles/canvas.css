@@ -1601,8 +1601,8 @@ audio.bcell-media {
   pointer-events: none;
 }
 
-/* -------- the controls: Card · Group at the top right; at the bottom right, one 180-wide group of the search, the
-   zoom, Fit and the minimap -------- */
+/* -------- the controls: Card · Group at the top right; at the bottom right, one 204-wide group of the search, the
+   zoom, Fit, the map's fold and the minimap (MINIMAP.w) -------- */
 /* the tonal step over the pane's paper, made solid so the cards the board slides under it do not show through */
 .bctl {
   --bctl-bg: color-mix(in oklab, var(--bg-panel), rgb(var(--ink-rgb)) 4%);
@@ -1634,7 +1634,7 @@ audio.bcell-media {
 .bctl-nav {
   display: flex;
   flex-direction: column;
-  width: 180px;
+  width: 204px;
   border-radius: var(--radius-card);
   background: var(--bctl-bg);
 }
@@ -1642,6 +1642,11 @@ audio.bcell-media {
   background: transparent;
   border-bottom: 1px solid var(--border-hairline);
   border-radius: var(--radius-card) var(--radius-card) 0 0;
+}
+/* with the minimap folded, the bar is the whole group */
+.bctl-nav .bctl-bar:last-child {
+  border-bottom: 0;
+  border-radius: var(--radius-card);
 }
 .bctl-nav .bctl-map {
   border-radius: 0 0 var(--radius-card) var(--radius-card);
