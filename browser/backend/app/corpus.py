@@ -1117,6 +1117,7 @@ class RegisterBody(BaseModel):
     exact: bool = False  # register this folder even inside a registered one
     shown: str | None = None  # the folder as the analyst named it, through a symlink; null clears it, absent keeps it
     name: str | None = None  # the name a new registration takes in place of the basename (`thimble demo`'s demo-<dataset>)
+    chat: str | None = None  # thimble-browser's chat of main: "new", or an earlier chat's id (runtime.open_chat)
 
 
 @router.post("/corpora/register", status_code=201)
@@ -1132,6 +1133,12 @@ def register_corpus(body: RegisterBody) -> dict[str, Any]:
     view_calls.registered(str(rec["name"]))
     from . import runtime  # noqa: PLC0415
 
+    if body.chat:
+        try:
+            runtime.open_chat(str(rec["name"]), body.chat)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return rec
     runtime.ensure_soon(str(rec["name"]))  # main is attached at once, so the page opens on a live chat
     return rec
 

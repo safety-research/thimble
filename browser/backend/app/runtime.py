@@ -25,6 +25,12 @@ security plugin skips person-installed plugins' prompt.context and session.appen
 When Claude cannot be reached the way chosen (no choice, no key, a WIF file that cannot be used), a turn writes one
 card into the chat (ACCESS_KIND) that says what is missing and opens the setup step; never a raw error.
 
+Main's chats. Each start of thimble-browser opens a new chat of main, as each `claude` starts a new session: the
+workspace's cards, canvas, reports and labels stay, and main's log in the page keeps the earlier chats above a `New
+chat` line. `--continue` and `--resume` bring an earlier chat back (Space.switch, from the register route's `chat`):
+main's conversation (convs/main-<sid>.<engine>.json) and its transcript are that chat's again. runtime/main.json names
+the chat that is main now; main_chats lists them for the launcher's picker.
+
 THIMBLE_RUNTIME=off turns this off (0.8's own tests); it is on otherwise.
 """
 from __future__ import annotations
@@ -34,6 +40,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import secrets
 import time
 import uuid
@@ -59,6 +66,12 @@ NOTES_HEAD = "(thimble, since your last turn:)"
 MAIN_MODEL = "claude-opus-5-5"
 MAIN_EFFORT = "high"
 PRIVATE_FILES = ("claude-access.json", "anthropic-api-key", "server.json", "session.key", "paired.json")
+NEW = "new"  # the register route's `chat` for a new chat of main (open_chat)
+CHAT_CHIP = "session"  # the kind of main's line where a chat starts or comes back (session.CHIP_KIND)
+NEW_CHAT = "New chat"
+RESUMED_CHAT = "Resumed the chat that began with: {first}"
+SID_OK = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+EVENT_BODY_RE = re.compile(r'^\s*<thimble-event\s[^>]*?kind="([^"]*)"[^>]*>\n?(.*?)\n?</thimble-event>\s*$', re.S)
 
 
 def enabled() -> bool:
@@ -174,6 +187,9 @@ class Conv:
         return self.task is not None and not self.task.done()
 
     def state_path(self, engine_kind: str) -> Path:
+        """The engine's state of the conversation: main's is its current chat's (Space.switch)."""
+        if self.kind == "main":
+            return self.space.dir / "convs" / f"{MAIN}-{self.space.sid}.{engine_kind}.json"
         return self.space.dir / "convs" / f"{self.id}.{engine_kind}.json"
 
     def emit(self, rec: dict[str, Any]) -> dict[str, Any]:
@@ -257,9 +273,45 @@ class Space:
         self.sid = str(rec.get("session") or "") or str(uuid.uuid4())
         if not rec.get("session"):
             (self.dir / "main.json").write_text(json.dumps({"session": self.sid, "at": _now()}), encoding="utf-8")
-        self.main = Conv(self, MAIN, "main", transcript=Transcript(self.main_path, self.sid))
+        for kind in ("api", "cc"):  # main's state from before chats were kept apart is its chat's
+            old, new = self.dir / "convs" / f"{MAIN}.{kind}.json", self.dir / "convs" / f"{MAIN}-{self.sid}.{kind}.json"
+            if old.is_file() and not new.exists():
+                with contextlib.suppress(OSError):
+                    old.rename(new)
+        self.main = self._main_conv()
         self.convs: dict[str, Conv] = {}
         self.notes: dict[str, list[str]] = {}
+
+    def _main_conv(self) -> Conv:
+        tr = Transcript(self.main_path, self.sid)
+        tr.last = _last_uuid(self.main_path)  # a chat brought back goes on from its last record
+        return Conv(self, MAIN, "main", transcript=tr)
+
+    async def switch(self, sid: str | None) -> bool:
+        """Make chat `sid` main, or a new chat for None: main's running turn stops, runtime/main.json names the chat,
+        the mirror follows its transcript (session.attach, which reads a chat brought back from its end), and main's
+        log gets one line that says so. A new chat while main's chat has no turn yet is that chat. False when
+        nothing changed. ValueError for an id that is no chat of this workspace."""
+        from . import agents  # noqa: PLC0415
+
+        if sid is not None and (not SID_OK.match(sid) or not (self.dir / f"{sid}.jsonl").is_file()):
+            raise ValueError(f"no chat {sid} in this workspace")
+        if sid == self.sid or (sid is None and not _chat_of(self.main_path)["turns"]):
+            self.attach()
+            return False
+        if self.main.running:
+            self.main.queue.clear()
+            await _cancel(self.main.task)
+        self.sid = sid or str(uuid.uuid4())
+        (self.dir / "main.json").write_text(json.dumps({"session": self.sid, "at": _now()}), encoding="utf-8")
+        self.main = self._main_conv()
+        self.attach()
+        if sid is None:
+            agents.chip(self.c, CHAT_CHIP, NEW_CHAT)
+        else:
+            got = _chat_of(self.main_path)
+            agents.chip(self.c, CHAT_CHIP, RESUMED_CHAT.format(first=got["first"] or "a chat"))
+        return True
 
     @property
     def main_path(self) -> Path:
@@ -370,6 +422,80 @@ def _read_json(p: Path) -> dict[str, Any]:
     except (OSError, ValueError):
         return {}
     return got if isinstance(got, dict) else {}
+
+
+def _last_uuid(path: Path) -> str | None:
+    try:
+        with path.open("rb") as f:
+            f.seek(max(0, path.stat().st_size - 65536))
+            lines = f.read().splitlines()
+    except OSError:
+        return None
+    for ln in reversed(lines):
+        with contextlib.suppress(ValueError):
+            rec = json.loads(ln)
+            if isinstance(rec, dict) and rec.get("uuid"):
+                return str(rec["uuid"])
+    return None
+
+
+def _chat_of(path: Path) -> dict[str, Any]:
+    """{turns, first}: how many turns a main transcript holds (the user records that open one) and the first message
+    the analyst typed in it, as one line."""
+    turns, first, other = 0, "", ""
+    try:
+        f = path.open(encoding="utf-8")
+    except OSError:
+        return {"turns": 0, "first": ""}
+    with f:
+        for ln in f:
+            try:
+                rec = json.loads(ln)
+            except ValueError:
+                continue
+            content = (rec.get("message") or {}).get("content") if isinstance(rec, dict) else None
+            if rec.get("type") != "user" or not isinstance(content, str):
+                continue
+            turns += 1
+            if first:
+                continue
+            m = EVENT_BODY_RE.match(content)
+            body = " ".join((m.group(2) if m else content).split())
+            if m and m.group(1) == "main":
+                first = body
+            elif not other:
+                other = body
+    return {"turns": turns, "first": first or other}
+
+
+def main_chats(c: str) -> list[dict[str, Any]]:
+    """The workspace's chats of main that hold a turn, the latest first: {id, at (the last write, epoch seconds),
+    turns, first (the first message), current (main's now)}. For the launcher's --continue and --resume."""
+    from . import config  # noqa: PLC0415
+
+    d = config.workspace_dir(c) / DIR
+    now = str(_read_json(d / "main.json").get("session") or "")
+    out = []
+    for p in d.glob("*.jsonl") if d.is_dir() else ():
+        sid = p.name[: -len(".jsonl")]
+        if not SID_OK.match(sid):
+            continue
+        got = _chat_of(p)
+        if got["turns"]:
+            out.append({"id": sid, "at": p.stat().st_mtime, **got, "current": sid == now})
+    return sorted(out, key=lambda r: r["at"], reverse=True)
+
+
+def open_chat(c: str, chat: str) -> bool:
+    """Space.switch from a request's thread (the register route): `chat` is "new" or a chat's id. Waits for the switch;
+    False when the runtime is off or did not change chats. ValueError for an unknown id."""
+    if not enabled() or _loop is None or not _loop.is_running():
+        return False
+
+    async def go() -> bool:
+        return await ensure(c).switch(None if chat == NEW else chat)
+
+    return asyncio.run_coroutine_threadsafe(go(), _loop).result(timeout=30)
 
 
 def _live_shown(text: str) -> str:

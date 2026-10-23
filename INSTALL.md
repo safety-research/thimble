@@ -157,6 +157,7 @@ The browser workbench:
 1. Run `thimble-browser` in a folder of files. It starts the server on 127.0.0.1, port 8300 or the next free one, and
    prints the page's sign-in link. The installer asked how it reaches Claude (an API key, Workload Identity
    Federation, or your Claude Code sign-in); when it did not, the page asks at its first start.
+   Each start opens a new chat; `thimble-browser --continue` (`-c`) or `--resume` (`-r`) brings an earlier one back.
 2. Open the link, and ask in the page's chat: "How many runs failed, and why?" Claude answers with a card whose claims
    cite the files.
 

@@ -566,3 +566,96 @@ async def test_the_checker_and_proposer_forks_run_on_the_messages_api_without_cl
     assert got["answer"] == '{"n": 1, "output": "2"}' and not got["error"]
     res = await proposer._fork(SimpleNamespace(c=CORPUS, sid="s", cwd="."), "cut", "Propose.", "claude-opus-5-5", "low", "")
     assert proposer.answer_text(proposer.read_stream(res["stdout"])) == '{"show": false, "why": "nothing to show"}'
+
+
+# --------------------------------------------------------------------------- main's chats (thimble-browser -c / -r)
+
+
+def asked(client: FakeClient, i: int) -> str:
+    """The text of request `i`'s messages, to see which chat's turns it carried."""
+    return json.dumps(client.bodies[i]["messages"])
+
+
+async def test_a_new_chat_starts_main_anew_and_resume_brings_the_earlier_one_back(on, monkeypatch):
+    client = api_key(monkeypatch, [text("Two incidents happened."), text("Hello again."), text("Still two.")])
+    await main_turn("What happened?")
+    sp = runtime._spaces[CORPUS]
+    first = sp.sid
+    assert await sp.switch(None)
+    assert sp.sid != first and json.loads((sp.dir / "main.json").read_text())["session"] == sp.sid
+    await main_turn("Hi")
+    assert "What happened?" not in asked(client, 1)  # the new chat holds none of the first one's turns
+    got = shape(main_records())
+    assert ("chip", "New chat") in got and ("user", "What happened?") in got  # the earlier chat stays in the page
+    rows = runtime.main_chats(CORPUS)
+    assert [(r["first"], r["turns"], r["current"]) for r in rows] == [("Hi", 1, True), ("What happened?", 1, False)]
+    assert await sp.switch(first)
+    await main_turn("And now?")
+    assert "What happened?" in asked(client, 2) and "Hi" not in asked(client, 2)
+    assert ("chip", "Resumed the chat that began with: What happened?") in shape(main_records())
+    assert shape(main_records())[-1][0] == "done"
+
+
+async def test_a_new_chat_while_main_has_no_turn_is_that_chat_and_an_unknown_id_is_refused(on, monkeypatch):
+    api_key(monkeypatch, [])
+    sp = runtime.ensure(CORPUS)
+    sid = sp.sid
+    assert not await sp.switch(None) and sp.sid == sid
+    with pytest.raises(ValueError):
+        await sp.switch("no-such-chat")
+
+
+def test_main_s_state_from_before_chats_were_kept_apart_is_its_chat_s(on):
+    d = config.workspace_dir(CORPUS) / runtime.DIR
+    (d / "convs").mkdir(parents=True, exist_ok=True)
+    (d / "main.json").write_text(json.dumps({"session": "s1"}))
+    (d / "convs" / "main.api.json").write_text("[]")
+    sp = runtime.ensure(CORPUS)
+    assert sp.main.state_path("api") == d / "convs" / "main-s1.api.json" and sp.main.state_path("api").is_file()
+
+
+def test_the_launcher_picks_the_latest_chat_an_id_or_one_by_number(on, monkeypatch, capsys):
+    from app import cli
+
+    rows = [{"id": "bbb222", "at": 200.0, "turns": 3, "first": "Second question", "current": True},
+            {"id": "aaa111", "at": 100.0, "turns": 1, "first": "First question", "current": False}]
+    monkeypatch.setattr(runtime, "main_chats", lambda c: rows)
+    folder = config.corpus_dir(CORPUS)
+    monkeypatch.setattr(cli, "known_corpus", lambda cwd, data: (CORPUS, folder))
+    data = folder.parent
+    assert cli.pick_chat(folder, data, "new") == "new"
+    assert cli.pick_chat(folder, data, "continue") == "bbb222"
+    assert cli.pick_chat(folder, data, "aaa") == "aaa111"
+    assert cli.pick_chat(folder, data, "zzz") is None
+    answers = iter(["9", "2"])
+    monkeypatch.setattr("builtins.input", lambda _: next(answers))
+    assert cli.pick_chat(folder, data, "pick") == "aaa111"
+    out = capsys.readouterr().out
+    assert "1. " in out and "3 turns  Second question" in out and "1 turn  First question" in out
+    monkeypatch.setattr(runtime, "main_chats", lambda c: [])
+    assert cli.pick_chat(folder, data, "continue") is None
+    assert "no earlier chat" in capsys.readouterr().out
+
+
+async def test_on_claude_code_sign_in_a_new_chat_is_a_new_session_and_resume_resumes_its_own(on, monkeypatch):
+    from claude_agent_sdk import AssistantMessage, ResultMessage, SystemMessage, TextBlock
+
+    def script(sid: str) -> list[Any]:
+        return [SystemMessage(subtype="init", data={"session_id": sid}),
+                AssistantMessage(content=[TextBlock(text="ok")], model="claude-opus-5-5"),
+                ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                              session_id=sid)]
+
+    seen: dict[str, Any] = {}
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    fake_sdk(monkeypatch, script("sess-1"), seen)
+    await main_turn("What happened?")
+    sp = runtime._spaces[CORPUS]
+    first = sp.sid
+    await sp.switch(None)
+    fake_sdk(monkeypatch, script("sess-2"), seen)
+    await main_turn("Hi")
+    assert seen["options"].resume is None
+    await sp.switch(first)
+    await main_turn("And now?")
+    assert seen["options"].resume == "sess-1"
