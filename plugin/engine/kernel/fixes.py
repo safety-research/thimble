@@ -65,8 +65,9 @@ PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 # the files a fix may not change, by what each one is: what keeps undo, off, the sandbox and the scan working (fnmatch
 # patterns over the repository's paths). The refusal names each file with what it is.
 PROTECTED_KINDS = {
-    "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/fix/*", "plugin/prompts/fixer.md",
-                     "plugin/prompts/fix-draft.md", "browser/backend/app/dev.py"),
+    "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/engine/kernel/share.py", "plugin/fix/*",
+                     "plugin/prompts/fixer.md", "plugin/prompts/fix-draft.md", "browser/backend/app/dev.py",
+                     "browser/backend/app/fix_share.py", "browser/frontend/src/fixes/share*"),
     "the privacy scan": ("plugin/engine/kernel/privacy.py",),
     "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "browser/backend/app/kernel_wrap.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),

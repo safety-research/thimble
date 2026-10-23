@@ -10,10 +10,11 @@ session's permission mode and sandbox like any other command.
                                                (--wait waits for it; thimble label --help says more)
     thimble coverage [--all]                   what entered Claude's context, what was only computed over, and what
                                                was never touched (of this session, or of every session)
-    thimble fix [list|show ID|diff ID|export ID [--to DIR]|off|on|update]
-                                               your changes to thimble: list them, read one, save one as files, turn
-                                               them all off (the plain release) or on again. In thimble,
-                                               /thimble-fix <words> asks for one and /thimble-fix lists them
+    thimble fix [list|show ID|diff ID|export ID [--to DIR]|share ID|off|on|update]
+                                               your changes to thimble: list them, read one, save one as files, share
+                                               one as a GitHub issue you check and submit, turn them all off (the plain
+                                               release) or on again. In thimble, /thimble-fix <words> asks for one and
+                                               /thimble-fix lists them
 
 Add --json to label or coverage for the whole record.
 """
@@ -438,6 +439,8 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
     thimble fix show ID              one fix: your words, what it does, its files and tests
     thimble fix diff ID              its change
     thimble fix export ID [--to DIR] its patch and its record as files in DIR (default: here); nothing is sent
+    thimble fix share ID             a page in your browser to share it as a GitHub issue: you check the text, and
+                                     you submit it on GitHub; thimble sends nothing
     thimble fix off                  thimble as the plain release; your fixes are kept
     thimble fix on                   your fixes on again
     thimble fix update               a newer release, with your fixes replayed on it (thimble does this at each start)
@@ -449,6 +452,10 @@ in thimble, never a shell command."""
 def cmd_fix(a: argparse.Namespace) -> int:
     from . import fixes as FX  # noqa: PLC0415
 
+    if a.verb == "share":
+        from . import share as SH  # noqa: PLC0415
+
+        return SH.cmd(a)
     return FX.cmd(a)
 
 
@@ -494,12 +501,14 @@ def main(argv: list[str] | None = None) -> int:
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
     p.add_argument("verb", nargs="?", default="list",
-                   choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "done", "apply", "notnow",
+                   choices=("list", "show", "diff", "export", "share", "off", "on", "update", "new", "round", "done", "apply", "notnow",
                             "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
     p.add_argument("id", nargs="?")
     p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)
     p.add_argument("--json", action="store_true")
     p.add_argument("--to", metavar="DIR")
+    p.add_argument("--no-open", dest="no_open", action="store_true", help="share: write the page, do not open it")
+    p.add_argument("--draft", help=argparse.SUPPRESS)  # share: Claude's draft as JSON on stdin (-)
     p.add_argument("--words", help=argparse.SUPPRESS)
     p.add_argument("--title", help=argparse.SUPPRESS)
     p.add_argument("--summary", help=argparse.SUPPRESS)
