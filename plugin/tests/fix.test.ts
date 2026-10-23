@@ -8,6 +8,8 @@
 // stay in its copy. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
+import { busySteps } from '../bar/busy'
+import { fixingWord } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { notStarted, registerFix, wordsOfSkill } from '../fix/register'
 import { textOf as screenText, TEXT_ELS } from '../fix/screen'
@@ -88,7 +90,8 @@ function setup() {
     }
     // the check refused the change: another round in the same copy; the test's refusal was for the first round only
     if (verb === 'again') { Object.assign(fix, { state: 'working', rounds: fix.rounds + 1, refuse: null }); return ok(fix) }
-    if (verb === 'round') { Object.assign(fix, { words: [...fix.words, stdin], rounds: fix.rounds + 1, state: 'working' }); return ok(fix) }
+    // --always: the words name the fix this one refines, so its change goes into that fix whatever the end says
+    if (verb === 'round') { Object.assign(fix, { words: [...fix.words, stdin], rounds: fix.rounds + 1, state: 'working' }, argv.includes('--always') && fix.refines != null ? { refines_always: true } : {}); return ok(fix) }
     if (verb === 'done') {
       const t = argv.indexOf('--title')
       Object.assign(fix, { state: argv.includes('--request') ? 'request' : 'ready', title: t > 0 ? argv[t + 1] : fix.title, summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }] })
@@ -638,7 +641,9 @@ test('/thimble-fix 5 <words> always changes fix 5; /thimble-fix new <words> is a
   s.others.push({ ...onFix(), state: 'off' })
   await s.call('session.start', { cwd: '/made-up/data' })
   const r = await ask(s, '5 keep the percent')
-  expect(String(r.text)).toContain('in a copy (fix 1, "make the bar say read", a change to fix 5)')
+  // a change to fix 5, never a fix of its own number: Claude and the bar speak of fix 5
+  expect(String(r.text)).toBe('thimble started a fork of this conversation that changes fix 5 in the background, in a copy. The person sees "changing fix 5" on the bar while it works, and decides with a key whether to use the changed fix. Tell the person in one short line, then go on with their request. thimble tells you when it ends.')
+  expect(busySteps()).toContain('changing fix 5')
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe('keep the percent')
   expect(s.verbs()).toContain('new --made-in terminal --refines 5 --always')
   expect(String(s.spawns[0].prompt)).toContain('The person asked to change their fix 5')
@@ -687,3 +692,43 @@ test('when the fixer cannot tell which fix the words are for, the line asks; a n
   expect(rows).toEqual([])
 })
 
+
+test('/thimble-fix 2 <words> while a fixer works on a change that may be fix 2\'s: one fixer, whose end makes it part of fix 2', async () => {
+  // fix 2 is on; the person's words about it start fix 3, which may change fix 2; then "2 merge those into fix 2"
+  const s = setup()
+  s.fix.id = 3
+  s.others.push({ ...onFix(), id: 2, title: 'Ask about any card element' })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  const r = await ask(s, 'the card is stuck on drawing, and e does not show the card in a thread')
+  expect(s.verbs()).toContain('new --made-in terminal --refines 2')
+  expect(String(r.text)).toContain('(fix 3, "make the bar say read"). If its change is about fix 2, it becomes part of fix 2, with no fix 3 of its own. The person sees on the bar')
+  expect(busySteps()).toContain('fixing fix 3')
+  const again = await ask(s, '2 merge those all into fix 2, not a separate fix')
+  // the same fixer, told to end with Changes fix 2; the kernel records that it changes fix 2 whatever its end says
+  expect(s.spawns.length).toBe(1)
+  expect(s.verbs().filter(v => v.startsWith('new'))).toEqual(['new --made-in terminal --refines 2'])
+  expect(s.verbs()).toContain('round 3 --always')
+  expect(s.sent).toEqual([{ to: { agentId: 'agent-fixer-1' }, text: 'The person adds to this change to fix 2 (round 2): merge those all into fix 2, not a separate fix\n\nEnd with the line `Changes fix 2` in place of the Title line: thimble makes your change part of fix 2.' }])
+  expect(String(again.text)).toBe('thimble gave these words to the fork that is already changing fix 2; its change becomes part of fix 2. Tell the person in one short line, then go on with their request.')
+  expect(fixingWord(s.fix)).toBe('changing fix 2')
+  // its end, even with a title of its own, folds into fix 2: one fix, ready again with every round
+  await s.end('Done.\n\nTitle: Card draws again\nWhat it does: The card finishes drawing, and e shows it in a thread.')
+  expect(s.verbs().filter(v => v.startsWith('done'))).toEqual(['done 3 --summary - --title Card draws again'])
+  expect(s.others[0]).toMatchObject({ state: 'ready', words: ['say read, not coverage', 'the card is stuck on drawing, and e does not show the card in a thread', 'merge those all into fix 2, not a separate fix'] })
+  expect(s.fix.state).toBe('removed')
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble changed fix 2: Ask about any card element · tests pass')
+})
+
+test('Claude\'s words for a fix that may change fix 2: a round says how to end, and Claude hears of fix 2 at the end, never of a number to decline', async () => {
+  const s = setup()
+  s.fix.id = 3
+  s.others.push({ ...onFix(), id: 2, title: 'Ask about any card element' })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await skillCall(s, 'the card is stuck on drawing')
+  const r = skillText(await skillCall(s, 'and e does nothing in a thread'))
+  expect(String(r.text)).toBe('thimble gave these words to the fork that already fixes fix 3 ("make the bar say read"). If its change is about fix 2, it becomes part of fix 2, with no fix 3 of its own. Tell the person in one short line, then go on with their request.')
+  expect(s.sent[0]!.text).toBe('Claude adds to fix 3 (round 2): and e does nothing in a thread\n\nWhen these words ask to make your change part of fix 2, end with the line `Changes fix 2` in place of the Title line.')
+  await s.end('Changes fix 2\nWhat it does: The card finishes drawing.')
+  const told = ((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['fix-3']).toBe('The thimble change you started is now part of fix 2 ("Ask about any card element"): it is ready and tests pass; the person turns the changed fix on with y. Tell the person in one short line.')
+})

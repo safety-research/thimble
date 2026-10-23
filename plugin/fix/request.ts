@@ -6,14 +6,16 @@
 //   /thimble-fix <words>      the fixer's round, else a round of the fix the line shows, else a new fix; while the fix
 //                             the person applied last is on, the new fix's fixer is told of it, and its end may say
 //                             `Changes fix N`: the kernel then folds the change into that fix (ready again, for y)
-//   /thimble-fix N <words>    always a change to fix N (on, off or ready)
+//   /thimble-fix N <words>    always a change to fix N (on, off or ready); while a fixer works on fix N or on a change
+//                             to it, a round of that fixer, whose change then becomes part of fix N: one fixer
+//                             changes a fix at a time, so two changes to it never cross
 //   /thimble-fix new <words>  always a new fix
 import type { EngineInterface } from 'claude-code'
 
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { type Asker, liveFixer, screenNow, setAsker, startFixer } from './fixer'
-import { type Fix, fixesNow, fixLineNow, fixOf, jsonOf, kernelFix, refreshFixes, setFixLine } from './fixes'
+import { type Fix, changesFix, fixesNow, fixingWord, fixLineNow, fixName, fixOf, jsonOf, kernelFix, mayJoin, refreshFixes, setFixLine } from './fixes'
 
 type Engine = EngineInterface
 
@@ -48,21 +50,23 @@ export async function request($: Engine, said: string, by: Asker = 'person', tel
   const form = formOf(said, (await refreshFixes($))?.fixes ?? [])
   const words = form.words
   // a fixer still works: the words go to it, and the kernel keeps them as a round of its fix (not when the person
-  // names another fix, or asks for a new one)
-  const live = await liveFixer($)
-  if (live && !form.fresh && (form.target == null || form.target === live.fix.id)) {
-    const r = await kernelFix($, ['round', String(live.fix.id)], { stdin: words, timeoutMs: 60000 })
+  // asks for a new one). Words that name fix N go to the fixer of fix N or of a change to it, which then changes fix N
+  // whatever its end says (--always)
+  const live = await liveFixer($, form.target)
+  if (live && !form.fresh) {
+    const always = form.target != null && form.target !== live.fix.id
+    const r = await kernelFix($, ['round', String(live.fix.id), ...(always ? ['--always'] : [])], { stdin: words, timeoutMs: 60000 })
     const fix = r.ok ? jsonOf<Fix>(r.out) : null
-    if (!fix) return { text: `× thimble could not add these words to fix ${live.fix.id}: ${cut(r.err || 'thimble fix gave nothing', 240)}`, fix: null, failed: true, round: true }
+    if (!fix) return { text: `× thimble could not add these words to ${fixName(live.fix)}: ${cut(r.err || 'thimble fix gave nothing', 240)}`, fix: null, failed: true, round: true }
     await refreshFixes($)
     let sent: { isDelivered?: boolean; reason?: string } | undefined
     try {
-      sent = await $.session.send({ to: { agentId: live.agentId }, text: `${who} adds to fix ${fix.id} (round ${fix.rounds}): ${words}` } as never) as never
+      sent = await $.session.send({ to: { agentId: live.agentId }, text: roundText(fix, who, words) } as never) as never
     } catch (err) {
       sent = { isDelivered: false, reason: String((err as Error)?.message || err) }
     }
-    if (!sent?.isDelivered) return { text: `× The fork fixing fix ${fix.id} did not get these words (${cut(String(sent?.reason || 'not delivered'), 160)}). They are kept with the fix: once it ends, r in /thimble-fix redoes it with them.`, fix, failed: true, round: true }
-    return { text: `The fork fixing fix ${fix.id} has these words too. Keep going.`, fix, failed: false, round: true }
+    if (!sent?.isDelivered) return { text: `× The fork ${fixingWord(fix)} did not get these words (${cut(String(sent?.reason || 'not delivered'), 160)}). They are kept with the fix: once it ends, r in /thimble-fix redoes it with them.`, fix, failed: true, round: true }
+    return { text: `The fork ${fixingWord(fix)} has these words too. Keep going.`, fix, failed: false, round: true }
   }
   const l = await fixLineNow($)
   const named = form.target != null ? await fixOf($, form.target) : null
@@ -87,12 +91,21 @@ export async function request($: Engine, said: string, by: Asker = 'person', tel
     await refreshFixes($)
     return { text: `× ${bad} The words are kept as a request: thimble fix list, in a shell, lists it.`, fix, failed: true, round }
   }
-  if (by === 'person' && tell) await tellAtNextPrompt($, `fix-${fix.id}`, `The person asked thimble's fixer for a change to thimble itself (fix ${fix.id}); it works in the background in a copy, and thimble shows the person the result. Nothing for you to do.`)
+  if (by === 'person' && tell) await tellAtNextPrompt($, `fix-${fix.id}`, `The person asked thimble's fixer for a change to thimble itself (${fixName(fix)}); it works in the background in a copy, and thimble shows the person the result. Nothing for you to do.`)
   return round
     ? { text: `A fork of this session is fixing fix ${fix.id} again, with these words, in the background. Keep going.`, fix, failed: false, round }
     : named
       ? { text: `A fork of this session is changing fix ${named.id} in the background. Keep going.`, fix, failed: false, round, named: named.id }
-      : { text: `A fork of this session is fixing it in the background (fix ${fix.id}: ${cut(fix.title, 60)}). Keep going.`, fix, failed: false, round }
+      : { text: `A fork of this session is fixing it in the background (fix ${fix.id}: ${cut(fix.title, 60)}). ${mayJoin(fix) ? `${mayJoin(fix)} ` : ''}Keep going.`, fix, failed: false, round }
+}
+
+/** What a live fixer reads of a round: the words, and for a change to fix N, how its end makes the change part of fix N
+ *  (always, when the person named fix N; when the words ask, when it may change fix N). */
+export function roundText(fix: Fix, who: string, words: string): string {
+  const n = changesFix(fix)
+  if (n != null) return `${who} adds to this change to fix ${n} (round ${fix.rounds}): ${words}\n\nEnd with the line \`Changes fix ${n}\` in place of the Title line: thimble makes your change part of fix ${n}.`
+  const said = `${who} adds to fix ${fix.id} (round ${fix.rounds}): ${words}`
+  return fix.refines != null ? `${said}\n\nWhen these words ask to make your change part of fix ${fix.refines}, end with the line \`Changes fix ${fix.refines}\` in place of the Title line.` : said
 }
 
 /** r: the fix again, in a new copy cut from your thimble as it is now, with the earlier change to start from. */

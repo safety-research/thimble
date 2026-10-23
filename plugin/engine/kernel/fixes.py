@@ -590,13 +590,15 @@ def again(fid: int | str, session: str | None = None) -> dict[str, Any]:
     return put(rec)
 
 
-def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, Any]:
-    """More words for a fix whose copy is still there: a new round of the same fix, whose fixer works in `session`."""
+def round_(fid: int | str, words: str, session: str | None = None, always: bool = False) -> dict[str, Any]:
+    """More words for a fix whose copy is still there: a new round of the same fix, whose fixer works in `session`.
+    `always`: the words name the fix it refines, so its change goes into that fix whatever the end says."""
     rec = get(fid)
     if not _is_checkout(rec.get("work")):
         raise FixError(f"fix {rec['id']} has no copy any more; ask for a new fix")
     rec.update(words=[*rec.get("words", []), words.strip()], rounds=int(rec.get("rounds") or 1) + 1, state="working",
-               error=None, **({"session": session} if session else {}))
+               error=None, **({"session": session} if session else {}),
+               **({"refines_always": True} if always and rec.get("refines") is not None else {}))
     return put(rec)
 
 
@@ -672,6 +674,10 @@ def fold(rec: dict[str, Any], target: int | str) -> dict[str, Any]:
     if tgt["id"] == rec["id"] or tgt.get("state") not in REFINABLE or not tgt.get("commit"):
         return put({**rec, "fold_failed": tgt["id"]})
     with Lock():
+        # the target as it is now: another round may have folded into it while this one waited for the lock
+        tgt = get(tgt["id"])
+        if tgt.get("state") not in REFINABLE or not tgt.get("commit"):
+            return put({**rec, "fold_failed": tgt["id"]})
         old = git("rev-parse", f"refs/thimble/fixes/{tgt['id']}", cwd=wt)
         parent = git("rev-parse", f"{old}^", cwd=wt)
         git("checkout", "-q", "--detach", old, cwd=wt)
@@ -1626,6 +1632,9 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     if not fixes:
         return [f"{c('title', 'Your thimble fixes')} · thimble {d['version']} with no fixes of yours", "", f"  {new_fix}"]
     words = {r["id"]: (state_word(r) if d["on"] or r.get("state") != "on" else "off") for r in fixes}
+    # a fixer at work on a change to another fix: its row says which (it becomes part of that fix at its end)
+    titles = {r["id"]: (f"→ fix {r['refines']}{'' if r.get('refines_always') else '?'}: {r['title']}"
+                        if r.get("state") == "working" and r.get("refines") is not None else r["title"]) for r in fixes}
     counts: dict[str, int] = {}
     for w in words.values():
         counts[w] = counts.get(w, 0) + 1
@@ -1634,13 +1643,13 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     out = [f"{c('title', 'Your thimble fixes')} · thimble {d['version']} with {', '.join(parts)}", ""]
     iw = max(1, *(len(str(r["id"])) for r in fixes))
     sw = max(6, *(len(w) for w in words.values()))
-    tw = min(40, max(3, *(len(r["title"]) for r in fixes)))
+    tw = min(40, max(3, *(len(t) for t in titles.values())))
     out.append(c("dim", f"  {'#':>{iw}}  {'state':<{sw}}  {'fix':<{tw}}   made    you asked"))
     for r in fixes:
-        row = f"  {r['id']:>{iw}}  {words[r['id']]:<{sw}}  {short(r['title'], tw):<{tw}}   {_date(r.get('created')):<5}   "
+        row = f"  {r['id']:>{iw}}  {words[r['id']]:<{sw}}  {short(titles[r['id']], tw):<{tw}}   {_date(r.get('created')):<5}   "
         room = max(16, width - len(row) - 1)
         asked = f'"{short(_first_line(r), room - 2)}"' if _first_line(r) else ""
-        out.append(f"  {r['id']:>{iw}}  {_state_paint(c, r, d['on'], sw)}  {short(r['title'], tw):<{tw}}   "
+        out.append(f"  {r['id']:>{iw}}  {_state_paint(c, r, d['on'], sw)}  {short(titles[r['id']], tw):<{tw}}   "
                    f"{_date(r.get('created')):<5}   {asked}".rstrip())
     on_ids = [r["id"] for r in fixes if words[r["id"]] == "on"]
     off_ids = [r["id"] for r in fixes if r.get("state") in ("off", "ready")]
@@ -2196,7 +2205,7 @@ def cmd(a) -> int:
         elif verb == "new":
             out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.refines, a.always, a.session))
         elif verb == "round":
-            out_json(round_(a.id, stdin_text() or a.words or "", a.session))
+            out_json(round_(a.id, stdin_text() or a.words or "", a.session, a.always))
         elif verb == "again":
             out_json(again(a.id, a.session))
         elif verb == "done":

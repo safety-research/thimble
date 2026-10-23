@@ -31,12 +31,11 @@
 // thimble's or of Claude Code's.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { busyWhile } from '../bar/busy'
 import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
-import { fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes, recoverFixers } from './fixer'
-import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
+import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes, recoverFixers } from './fixer'
+import { changesFix, fixesDir, fixesNow, fixLineNow, mayJoin, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { request } from './request'
 
@@ -73,9 +72,17 @@ async function startFromSkill($: Engine, words: string): Promise<string> {
   if (asked) await $.state.set(ASKED, 0 as never)
   const r = await request($, words, asked ? 'person' : 'claude', false)
   if (r.failed || !r.fix) return `${r.text.replace(/^×\s*/, '')} Tell the person in one short line.`
-  return r.round
-    ? `thimble gave these words to the fork that already fixes fix ${r.fix.id} ("${r.fix.title}"). Tell the person in one short line, then go on with their request.`
-    : `thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix ${r.fix.id}, "${r.fix.title}"${r.named != null ? `, a change to fix ${r.named}` : ''}). The person sees on the bar while it works, and decides with a key whether to use the fix. Tell them in one short line, then go on with their request. thimble tells you when the fix ends.`
+  // a change to fix N (the person named it) is fix N's, never a fix of its own number
+  const n = changesFix(r.fix)
+  const then = 'Tell the person in one short line, then go on with their request.'
+  if (r.round) {
+    return n != null
+      ? `thimble gave these words to the fork that is already changing fix ${n}; its change becomes part of fix ${n}. ${then}`
+      : [`thimble gave these words to the fork that already fixes fix ${r.fix.id} ("${r.fix.title}").`, mayJoin(r.fix), then].filter(Boolean).join(' ')
+  }
+  return n != null
+    ? `thimble started a fork of this conversation that changes fix ${n} in the background, in a copy. The person sees "changing fix ${n}" on the bar while it works, and decides with a key whether to use the changed fix. ${then} thimble tells you when it ends.`
+    : [`thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix ${r.fix.id}, "${r.fix.title}").`, mayJoin(r.fix), `The person sees on the bar while it works, and decides with a key whether to use the fix. ${then} thimble tells you when the fix ends.`].filter(Boolean).join(' ')
 }
 
 /** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), never Claude's. */
@@ -142,7 +149,7 @@ export const registerFix: Register = on => {
       // a reload the line waited for: this is it
       else await reloaded($)
       const working = await ownFixes($, (list?.fixes ?? []).filter(f => f.state === 'working'))
-      for (const f of working) void busyWhile($, `fixing fix ${f.id}`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
+      for (const f of working) busyFixer($, f, async () => (await refreshFixes($))?.fixes.find(x => x.id === f.id))
       await recoverFixers($, working)
       // a newer release: one line says so, once per session (a reload starts the module again)
       if (list?.pointed && !(await $.state.get(UPDATED)).value) {

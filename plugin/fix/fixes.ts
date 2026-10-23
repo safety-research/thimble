@@ -45,6 +45,19 @@ export type Fix = {
    *  (another round, at once, or r) is told */
   refused?: Refusal | null
 }
+/** The fix a working fix changes whatever its end says (the person named it), or null: its change becomes part of that
+ *  fix, so the person and Claude hear of `a change to fix 2`, never of its own number. */
+export const changesFix = (f: Pick<Fix, 'refines' | 'refines_always'>): number | null => (f.refines != null && f.refines_always ? f.refines : null)
+
+/** A working fix as the person and Claude read it: `a change to fix 2`, or `fix 3`. */
+export const fixName = (f: Fix): string => (changesFix(f) != null ? `a change to fix ${changesFix(f)}` : `fix ${f.id}`)
+
+/** The bar's step while a fixer works: `changing fix 2`, or `fixing fix 3`. */
+export const fixingWord = (f: Fix): string => (changesFix(f) != null ? `changing fix ${changesFix(f)}` : `fixing fix ${f.id}`)
+
+/** For a working fix that may change another (refines, not always): the words that say so, else ''. */
+export const mayJoin = (f: Fix): string => (f.refines != null && !f.refines_always ? `If its change is about fix ${f.refines}, it becomes part of fix ${f.refines}, with no fix ${f.id} of its own.` : '')
+
 /** Why the check did not use a fixer's change: the files it may not change (safety files, a binary file), or the end of
  *  the tests' output when they failed. */
 export type Refusal = { why: string; files: string[]; tests?: string }

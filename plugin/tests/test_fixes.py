@@ -829,6 +829,56 @@ def test_the_explicit_form_changes_an_off_fix_and_a_new_title_keeps_its_own_fix(
         FX.new("more", refines=FX.new("x")["id"])
 
 
+def test_a_round_that_names_the_fix_it_may_change_goes_into_it_and_the_list_says_so(world):
+    a = on_fix(world)
+    b = FX.new("the card is stuck on drawing", refines=a["id"])
+    # the working row says which fix it may become part of, then that it will
+    assert f"→ fix {a['id']}?: the card is stuck" in "\n".join(FX.list_lines(160))
+    b = FX.round_(b["id"], "merge it into fix 1", always=True)
+    assert b["refines_always"] is True and b["rounds"] == 2
+    assert f"→ fix {a['id']}: the card is stuck" in "\n".join(FX.list_lines(160))
+    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("${n}", "${n} files"))
+    # an end with a title of its own still goes into fix 1
+    r = FX.done(b["id"], "Card draws", "The card draws.")
+    assert r["id"] == a["id"] and r["folded"] == b["id"] and r["rounds"] == 3
+    assert r["words"] == ["say read, not coverage", "the card is stuck on drawing", "merge it into fix 1"]
+    # a round of a fix that refines nothing changes nothing more
+    c = FX.new("a note")
+    assert "refines_always" not in FX.round_(c["id"], "and another", always=True)
+
+
+def test_two_changes_to_one_fix_that_end_at_once_both_go_into_it(world, monkeypatch):
+    a = on_fix(world)
+    b = FX.new("and keep the count", refines=a["id"], always=True)
+    c = FX.new("and a note", refines=a["id"], always=True)
+    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("${n}", "${n} files"))
+    (Path(c["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    # c's fold reads fix 1, then waits for the lock while b's fold changes fix 1
+    armed = []
+    real_enter, real_fold = FX.Lock.__enter__, FX.fold
+
+    def enter(self):
+        if armed:
+            armed.pop()()
+        return real_enter(self)
+
+    def fold(rec, target):
+        if rec["id"] == c["id"]:
+            armed.append(lambda: FX.done(b["id"], None, "Keeps the count."))
+        return real_fold(rec, target)
+
+    monkeypatch.setattr(FX.Lock, "__enter__", enter)
+    monkeypatch.setattr(FX, "fold", fold)
+    r = FX.done(c["id"], None, "Adds a note.")
+    assert r["id"] == a["id"] and r["folded"] == c["id"] and r["state"] == "ready" and r["rounds"] == 3
+    assert r["words"] == ["say read, not coverage", "and keep the count", "and a note"]
+    shown = sh("git", "show", "--stat", "--format=", r["commit"], cwd=FX.live_dir())
+    assert "plugin/bar/bar.tsx" in shown and "plugin/notes.md" in shown
+    assert "read ${n} files" in sh("git", "show", f"{r['commit']}:plugin/bar/bar.tsx", cwd=FX.live_dir())
+
+
 def test_a_change_that_does_not_fit_its_fix_becomes_a_new_fix(world):
     a = on_fix(world)
     b = FX.new("say coverage again", refines=a["id"])
