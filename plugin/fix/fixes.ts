@@ -277,12 +277,13 @@ export const FIX_ALONE = [
  *  runs. The reply says so, with the commands. */
 export const UPDATE_IN_SHELL = 'thimble update runs in a shell, not inside Claude Code: it changes the thimble this session runs. In a terminal, run thimble update; it says when to run thimble reapply for your fixes. Then type /reload-plugins here.'
 
-/** At session start, while thimble runs from live: one line when a newer release is out. Nothing moves until the
- *  person runs thimble update (it can take minutes, and a fix that does not fit needs them). */
+/** At session start, while thimble runs from live: one line when a newer release is out, or on a dev install when the
+ *  person's checkout is at a new commit (once per commit: `say`). Nothing moves until the person runs thimble update
+ *  (it can take minutes, and a fix that does not fit needs them). */
 export async function checkUpdate($: Engine): Promise<void> {
-  const r = await kernelFix($, ['update', '--check', '--json'], { timeoutMs: 60000 }).catch(() => null)
+  const r = await kernelFix($, ['update', '--check', '--once', '--json'], { timeoutMs: 60000 }).catch(() => null)
   const d = r?.ok ? jsonOf<Any>(r.out) : null
-  if (d?.newer) await setFixLine($, { id: 0, kind: 'release', said: `thimble ${d.to} is out (you have ${d.from}) · in a shell: thimble update` })
+  if (d?.newer && d.say !== false) await setFixLine($, { id: 0, kind: 'release', said: d.line || `thimble ${d.to} is out (you have ${d.from}) · in a shell: thimble update` })
 }
 
 /** Claude ran `thimble update` (the pending fixes' prompt asks for --continue): the session loads what it changed at the

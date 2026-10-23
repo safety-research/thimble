@@ -495,7 +495,12 @@ things. It sets them aside, so thimble is the plain release, and keeps each fix'
                                      fix with no commit is left out, because the release does it or it cannot work there
     thimble update --check           only says whether a newer release is out
 
-Afterwards: /reload-plugins in Claude Code, and restart thimble-browser."""
+Afterwards: /reload-plugins in Claude Code, and restart thimble-browser.
+
+A dev install (scripts/install.sh --local) follows your own checkout instead of the releases: after `git pull`, thimble
+update moves thimble and your fixes onto the commit you checked out. It fetches nothing and leaves out changes you have
+not committed. Each fix that still applies cleanly is replayed onto that commit; one that does not is set aside for
+thimble reapply, as above."""
 
 
 def cmd_update(a: argparse.Namespace) -> int:
@@ -601,6 +606,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--session", help=argparse.SUPPRESS)  # new, round, again, redo, done: the Claude Code session of the fixer
     p.add_argument("--answer", choices=("pr", "file"), default="file", help=argparse.SUPPRESS)
     p.add_argument("--ask", help=argparse.SUPPRESS)
+    p.add_argument("--check", action="store_true", help=argparse.SUPPRESS)  # update: the session's check (plugin/fix)
+    p.add_argument("--once", action="store_true", help=argparse.SUPPRESS)  # update --check: a dev install's commit, once
     p.set_defaults(fn=cmd_fix)
     p = sub.add_parser("file", help="send a fix to thimble's public repository: an issue, or a pull request",
                        description=FILE_HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -616,6 +623,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--continue", dest="cont", action="store_true",
                    help="record the commits Claude made for the pending fixes, and turn them on")
     p.add_argument("--check", action="store_true", help="only say whether a newer release is out")
+    p.add_argument("--once", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_update)
     p = sub.add_parser("reapply", help="Claude brings back the fixes thimble update set aside",

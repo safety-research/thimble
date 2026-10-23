@@ -19,6 +19,9 @@ scripts/install.sh --local
 session start or after `/reload-plugins`. To load it for one session only, without installing it, start Claude Code in
 a folder of data files with `claude --plugin-dir /path/to/thimble/plugin`.
 
+Once you have fixes (thimble fix), Claude Code loads thimble from `~/.thimble/fixes/live` instead: after `git pull`,
+`thimble update` moves thimble and your fixes onto the commit you checked out.
+
 The browser workbench runs from the checkout too: `thimble-browser FOLDER` builds the page again when its sources
 changed, so an edit to the page shows when you start it again.
 

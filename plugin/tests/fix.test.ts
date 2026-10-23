@@ -132,7 +132,7 @@ function setup() {
     }
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
     if (verb === 'diff') return ok('diff --git a/plugin/bar/bar.tsx b/plugin/bar/bar.tsx\n-  coverage\n+  read\n')
-    if (verb === 'update' && argv.includes('--check')) return ok({ from: '0.10.2', to: '0.10.3', newer: fix.state === 'on' })
+    if (verb === 'update' && argv.includes('--check')) return ok(fix.check ?? { from: '0.10.2', to: '0.10.3', newer: fix.state === 'on' })
     if (verb === 'share') {
       const given = stdin ? JSON.parse(stdin) : null
       return ok({ id: 1, title: given?.title || fix.title, took: 'took 1 file name out of the text', opened: argv.includes('--open'), url: 'https://github.com/safety-research/thimble/issues/new?title=Bar%20says%20read&body=What%20was%20wrong', shortened: false, text: given ? 'claude' : 'earlier' })
@@ -549,14 +549,14 @@ test('at session start one line says a newer release is out, once a session; /th
   s.made()
   await s.call('session.start', { cwd: '/made-up/data' })
   await s.tick()
-  expect(s.verbs()).toContain('update --check --json')
+  expect(s.verbs()).toContain('update --check --once --json')
   expect(s.verbs()).not.toContain('update --json')
   expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('↑ thimble 0.10.3 is out (you have 0.10.2) · in a shell: thimble update')
   expect(s.commands).toEqual([])
   // the reload starts the module again: no second look in this session
   await s.call('session.start', { cwd: '/made-up/data' })
   await s.tick()
-  expect(s.verbs().filter(v => v === 'update --check --json').length).toBe(1)
+  expect(s.verbs().filter(v => v === 'update --check --once --json').length).toBe(1)
   await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
   expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
   // /thimble-fix update: the session does not move thimble under itself; the reply names the shell's commands
@@ -566,6 +566,26 @@ test('at session start one line says a newer release is out, once a session; /th
   expect(String(r.text)).toContain('In a terminal, run thimble update')
   expect(String(r.text)).toContain('thimble reapply')
   expect(s.commands).toEqual([])
+})
+
+test("on a dev install the line names the checkout's new commit, once for that commit", async () => {
+  const line = 'Your checkout is at next at abc1234, and thimble runs 99b439d · in a shell: thimble update'
+  const s = setup()
+  s.fix.state = 'on'
+  s.made()
+  s.fix.check = { dev: true, from: '99b439d', to: 'next at abc1234', newer: true, say: true, line }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.tick()
+  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain(`↑ ${line}`)
+  // the next session: the kernel already said this commit (say: false), so no line
+  const t = setup()
+  t.fix.state = 'on'
+  t.made()
+  t.fix.check = { dev: true, from: '99b439d', to: 'next at abc1234', newer: true, say: false, line }
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await t.tick()
+  expect(t.verbs()).toContain('update --check --once --json')
+  expect(await fixLineRows(t.$, ELS, 110)).toEqual([])
 })
 
 test("the session opened in live edits live's code, and its thimble update --continue reloads at the end of the turn; other sessions may not", async () => {

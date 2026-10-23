@@ -414,10 +414,25 @@ def test_a_request_with_no_code_goes_as_an_issue(world, monkeypatch, tmp_path):
     assert not any(x.startswith(("repo fork", "pr create")) for x in ghlog.read_text().splitlines())
 
 
+def as_github(w) -> Path:
+    """The install as a GitHub one: Claude Code's own clone of the marketplace, at the installed commit. A release
+    update is for GitHub installs; a clone install follows the person's checkout (test_dev_install_*)."""
+    cc_clone = w["cc"] / "plugins" / "marketplaces" / "thimble"
+    if cc_clone.exists():
+        sh("git", "fetch", "-q", str(w["rel"]), "+refs/heads/*:refs/heads/*", "--update-head-ok", cwd=cc_clone)
+        sh("git", "reset", "-q", "--hard", w["base"], cwd=cc_clone)
+    else:
+        sh("git", "clone", "-q", str(w["rel"]), str(cc_clone))
+    (w["cc"] / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {
+        "source": {"source": "github", "repo": "made-up/thimble"}, "installLocation": str(cc_clone)}}))
+    return cc_clone
+
+
 @pytest.fixture
 def upstream(world, tmp_path, monkeypatch):
     """thimble's repository as a made-up upstream: a bare repository whose tag v0.10.2 is the installed release, and
-    publish(files, tag) adds a release on top of the newest one."""
+    publish(files, tag) adds a release on top of the newest one. The install is a GitHub one."""
+    as_github(world)
     bare = tmp_path / "upstream.git"
     sh("git", "clone", "-q", "--bare", str(world["rel"]), str(bare))
     sh("git", "tag", "v0.10.2", world["base"], cwd=bare)
@@ -462,7 +477,7 @@ def test_update_sets_the_fixes_aside_and_reapply_brings_back_what_the_release_st
     monkeypatch.delenv("CLAUDECODE", raising=False)
     a, b, c = three_fixes(world)
     assert FX.update()["newer"] is False  # v0.10.2 is what runs
-    sh("git", "tag", "v0.10.2", world["base"], cwd=world["rel"])  # the person's clone has the tags too
+    sh("git", "tag", "v0.10.2", world["base"], cwd=FX.live_dir())  # live has the tags too
     FX.write_json(FX.home() / "release.json", {k: v for k, v in FX.release().items() if k != "tag"})
     assert FX.update(check=True)["from"] == "0.10.2"
     # 0.10.3 has the note as it is, and its own legend on the line fix c changed
@@ -599,6 +614,107 @@ def test_update_check_skips_release_candidates_and_never_steps_back(world, upstr
     assert FX.update()["newer"] is False
 
 
+def commit_in_checkout(w, files: dict[str, str], message: str) -> str:
+    for path, text in files.items():
+        p = w["rel"] / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    sh("git", "add", *files, cwd=w["rel"])
+    sh("git", "commit", "-q", "-m", message, cwd=w["rel"])
+    return sh("git", "rev-parse", "HEAD", cwd=w["rel"])
+
+
+def test_dev_install_update_moves_live_to_the_checkouts_head_and_replays_the_fixes_that_apply(world, monkeypatch, capsys):
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.setenv("THIMBLE_UPDATE_URL", str(world["tmp"] / "no-such-upstream.git"))  # never read on a dev install
+    a, b, c = three_fixes(world)
+    base7 = world["base"][:7]
+    # the person pulls a branch: it has the note as fix b made it, its own legend, and a new file
+    sh("git", "checkout", "-q", "-b", "next", cwd=world["rel"])
+    new = commit_in_checkout(world, {"plugin/notes.md": "made-up note\n", "plugin/legend.ts": "const legend = `quiet`\n",
+                                     "plugin/other.md": "x\n"}, "made-up work")
+    to = f"next at {new[:7]}"
+    # the session's line: once for this commit
+    check = FX.update(check=True, once=True)
+    assert (check["newer"], check["say"], check["to"]) == (True, True, to)
+    assert check["line"] == f"Your checkout is at {to}, and thimble runs {base7} · in a shell: thimble update"
+    assert FX.update(check=True, once=True)["say"] is False
+    assert cli.main(["fix", "update", "--check", "--once", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["say"] is False
+    assert cli.main(["update", "--check"]) == 0 and capsys.readouterr().out.strip() == check["line"]
+    calls_before = len(calls(world))
+    out = FX.update()
+    live = FX.live_dir()
+    # fix a applies as it is and is on again; the checkout already has b; c's file changed there, so Claude fits it
+    assert (out["back"], out["had"], out["aside"]) == ([a], [b], [c])
+    assert FX.release()["base"] == new and sh("git", "rev-parse", "mine^", cwd=live) == new
+    assert "read ${n}" in live_file("plugin/bar/bar.tsx") and live_file("plugin/legend.ts") == "const legend = `quiet`\n"
+    assert (live / "plugin" / "other.md").exists()
+    assert FX.get(a)["state"] == "on" and FX.get(a)["commit"] == sh("git", "rev-parse", "mine", cwd=live)
+    assert FX.get(b)["state"] == "released" and FX.state_word(FX.get(b)) == f"in {to}"
+    assert FX.get(c)["state"] == "pending" and Path(FX.get(c)["pending"]["old"]) == FX.home() / "pending" / new[:7] / f"fix-{c}.patch"
+    assert out["lines"] == [
+        f"Updated thimble to your checkout {base7} → {to} (terminal plugin)", "",
+        f"Your fix is on again, replayed onto {to}: Bar says read.",
+        f"Already in {to}, so it leaves thimble fixes: A note.", "",
+        f"1 local fix did not apply cleanly to {to}. It is off for now: Claude fits it", "to the new code.", "",
+        "Bring it back:  thimble reapply",
+        f"  Claude opens, checks each fix against {to}, keeps what is still needed, and turns it on.", "",
+        "Then  Terminal: /reload-plugins in Claude Code"]
+    assert out["reload"] is True and "plugin update thimble@thimble" in calls(world)[calls_before:]
+    assert json.loads(live_file("plugin/.claude-plugin/plugin.json"))["version"].startswith("0.10.2+fix.")
+    # thimble reapply and --continue, as after a release
+    text = FX.reapply_argv()["argv"][1]
+    assert f"The person updated thimble from {base7} to {to}." in text and "{{" not in text
+    assert Path(FX.reapply_argv()["prompt"]) == FX.home() / "pending" / f"{new[:7]}.md"
+    (live / "plugin" / "legend.ts").write_text("const legend = `quiet · untouched ${n}`\n")
+    sh("git", "commit", "-q", "-am", "Legend counts untouched", cwd=live)
+    assert FX.continue_()["recorded"] == [c] and FX.get(c)["state"] == "on"
+    # nothing new: the up-to-date line, and no line in the session
+    assert FX.update()["lines"] == [f"thimble is up to date with your checkout ({to})."]
+    assert FX.update(check=True, once=True)["newer"] is False
+    # a checkout moved back, on a detached HEAD: thimble follows it and says so
+    sh("git", "checkout", "-q", "--detach", world["base"], cwd=world["rel"])
+    out = FX.update()
+    assert out["lines"][:2] == [f"Updated thimble to your checkout {new[:7]} → {base7} (terminal plugin)",
+                                f"{base7} is older than what thimble ran ({new[:7]}); thimble moved back to it, as you checked it out."]
+    assert out["back"] == [a] and out["aside"] == [c] and FX.release()["base"] == world["base"]
+    assert json.loads(live_file("plugin/.claude-plugin/plugin.json"))["version"].startswith("0.10.2+fix.")
+
+
+def test_dev_install_up_to_date_and_uncommitted_changes(world, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    base7 = world["base"][:7]
+    assert FX.update()["lines"] == [f"thimble is up to date with your checkout (main at {base7})."]
+    assert not FX.live_dir().exists()
+    # changes not committed: one line says they are not included, and live never has them
+    (world["rel"] / "plugin" / "bar" / "bar.tsx").write_text("const words = `draft ${n}`\n")
+    note = ("Your checkout has changes that are not committed (plugin/bar/bar.tsx); they are not included. Commit them, "
+            "then run thimble update again.")
+    assert FX.update()["lines"] == [f"thimble is up to date with your checkout (main at {base7}).", note]
+    new = commit_in_checkout(world, {"plugin/other.md": "x\n"}, "made-up work")
+    out = FX.update()
+    assert out["lines"][:2] == [f"Updated thimble to your checkout {base7} → main at {new[:7]} (terminal plugin)", note]
+    assert out["aside"] == [] and FX.release()["pointed"] is True and FX.release()["base"] == new
+    assert "coverage ${n}" in live_file("plugin/bar/bar.tsx") and (FX.live_dir() / "plugin" / "other.md").exists()
+    # with no fix on, the copy Claude Code makes is named by the commit, so it loads the new code
+    assert json.loads(live_file("plugin/.claude-plugin/plugin.json"))["version"] == f"0.10.2+{new[:7]}"
+
+
+def test_a_github_install_follows_releases_not_the_commit_its_clone_has(world, upstream, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    cc_clone = world["cc"] / "plugins" / "marketplaces" / "thimble"
+    (cc_clone / "plugin" / "other.md").write_text("x\n")
+    sh("git", "add", "-A", cwd=cc_clone)
+    sh("git", "commit", "-q", "-m", "made-up commit after the release", cwd=cc_clone)
+    out = FX.update()
+    assert out["lines"] == ["thimble 0.10.2 is the newest release."] and "dev" not in out
+    check = FX.update(check=True, once=True)
+    assert check["newer"] is False and "line" not in check and "say" not in check
+
+
 def test_update_puts_the_browser_on_live_and_links_packages_while_the_lock_files_match(world, upstream, monkeypatch, tmp_path):
     for part, lock in (("backend", "uv.lock"), ("frontend", "package-lock.json")):
         p = world["rel"] / "browser" / part / lock
@@ -624,6 +740,7 @@ def test_update_puts_the_browser_on_live_and_links_packages_while_the_lock_files
     for name in ("uv", "npm"):
         fake(world["bin"] / name, log)
     monkeypatch.setenv("PATH", f"{world['bin']}:{os.environ['PATH']}")
+    as_github(world)
     sh("git", "clone", "-q", "--bare", str(world["rel"]), str(tmp_path / "upstream2.git"))
     sh("git", "tag", "v0.10.2", world["base"], cwd=tmp_path / "upstream2.git")
     monkeypatch.setenv("THIMBLE_UPDATE_URL", str(tmp_path / "upstream2.git"))
