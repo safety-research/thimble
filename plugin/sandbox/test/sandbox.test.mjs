@@ -122,19 +122,6 @@ test('the probe\'s runner starts with a temp folder too long for a socket in it,
   assert.deepEqual(readdirSync(long), [])
 })
 
-test('setup.mjs names what srt lacks on Linux, with the one command that installs it', { skip: process.platform !== 'linux' }, () => {
-  // a PATH with Node alone: no bubblewrap, socat or ripgrep, and no package manager
-  const bin = join(dir, 'bin')
-  mkdirSync(bin)
-  symlinkSync(s.node, join(bin, 'node'))
-  const r = spawnSync(join(bin, 'node'), [SETUP, '--json'], { encoding: 'utf8', env: { PATH: bin, THIMBLE_HOME: process.env.THIMBLE_HOME } })
-  const got = JSON.parse(r.stdout)
-  assert.equal(got.ok, false)
-  assert.match(got.why, /^this machine lacks what the sandbox needs: .*bubblewrap/)
-  assert.match(got.fix, /bubblewrap, socat, ripgrep/)
-  assert.equal(r.status, 1)
-})
-
 test('the sandbox starts its command with the system\'s bash, also when PATH finds another bash first', () => {
   // as Homebrew on Linux, Nix or conda set PATH up: a bash in a folder the rules hide
   const own = join(dir, 'own-bash')
@@ -153,17 +140,6 @@ function withFailingBwrap(said) {
   return JSON.parse(r.stdout)
 }
 
-test('the AppArmor fix is given only when bubblewrap could not make its namespaces', { skip: process.platform !== 'linux' }, () => {
-  const other = withFailingBwrap('bwrap: execvp /made-up/bash: No such file or directory')
-  assert.equal(other.ok, false)
-  assert.match(other.why, /execvp \/made-up\/bash/)
-  assert.doesNotMatch(other.fix, /AppArmor|sysctl/)
-  const userns = withFailingBwrap('bwrap: setting up uid map: Permission denied')
-  assert.equal(userns.ok, false)
-  const restricted = readFileSync('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', { encoding: 'utf8', flag: 'r' }).trim() === '1'
-  if (restricted) assert.equal(userns.fix, 'AppArmor keeps bubblewrap from making its namespaces. Allow them: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0')
-})
-
 /** setup.mjs in a THIMBLE_HOME of its own, with npm's cache of its own; `env` adds to its environment. */
 function freshSetup(env = {}) {
   const home = mkdtempSync(join(dir, 'home-'))
@@ -177,12 +153,35 @@ const answer = child => new Promise(resolve => {
   child.on('exit', () => resolve(JSON.parse(out.trim().split('\n').pop())))
 })
 
-test('npm that cannot reach its registry: the fix says how to see why, and the command that tries again', async () => {
-  const got = await answer(freshSetup({ npm_config_registry: 'http://127.0.0.1:9/', npm_config_fetch_retries: '0' }).run())
-  assert.equal(got.ok, false)
-  assert.match(got.why, /^npm could not install the sandbox runtime .*ECONNREFUSED/)
-  assert.match(got.fix, /`npm ping`/)
-  assert.ok(got.fix.endsWith(`run: node ${SETUP} --probe`), got.fix)
+test('setup.mjs names the fix of what keeps the sandbox from installing or starting: what srt lacks on Linux, AppArmor only when bubblewrap could not make its namespaces, and an npm that cannot reach its registry', async () => {
+  if (process.platform === 'linux') {
+    // what srt lacks on Linux, with the one command that installs it
+    // a PATH with Node alone: no bubblewrap, socat or ripgrep, and no package manager
+    const bin = join(dir, 'bin')
+    mkdirSync(bin)
+    symlinkSync(s.node, join(bin, 'node'))
+    const r = spawnSync(join(bin, 'node'), [SETUP, '--json'], { encoding: 'utf8', env: { PATH: bin, THIMBLE_HOME: process.env.THIMBLE_HOME } })
+    const got = JSON.parse(r.stdout)
+    assert.equal(got.ok, false)
+    assert.match(got.why, /^this machine lacks what the sandbox needs: .*bubblewrap/)
+    assert.match(got.fix, /bubblewrap, socat, ripgrep/)
+    assert.equal(r.status, 1)
+    // the AppArmor fix is given only when bubblewrap could not make its namespaces
+    const other = withFailingBwrap('bwrap: execvp /made-up/bash: No such file or directory')
+    assert.equal(other.ok, false)
+    assert.match(other.why, /execvp \/made-up\/bash/)
+    assert.doesNotMatch(other.fix, /AppArmor|sysctl/)
+    const userns = withFailingBwrap('bwrap: setting up uid map: Permission denied')
+    assert.equal(userns.ok, false)
+    const restricted = readFileSync('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', { encoding: 'utf8', flag: 'r' }).trim() === '1'
+    if (restricted) assert.equal(userns.fix, 'AppArmor keeps bubblewrap from making its namespaces. Allow them: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0')
+  }
+  // npm that cannot reach its registry: the fix says how to see why, and the command that tries again
+  const npm = await answer(freshSetup({ npm_config_registry: 'http://127.0.0.1:9/', npm_config_fetch_retries: '0' }).run())
+  assert.equal(npm.ok, false)
+  assert.match(npm.why, /^npm could not install the sandbox runtime .*ECONNREFUSED/)
+  assert.match(npm.fix, /`npm ping`/)
+  assert.ok(npm.fix.endsWith(`run: node ${SETUP} --probe`), npm.fix)
 })
 
 test('a setup waits for the install another setup is making, and takes over the lock of one that is gone', async () => {

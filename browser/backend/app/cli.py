@@ -4356,125 +4356,6 @@ def cmd_revert(_: argparse.Namespace) -> int:
     return 0 if res.get("ok") else 1
 
 
-# ----------------------------------------------------------------------------- update (INSTALL.md "Update")
-
-RELEASE_ZIP_PATTERN = "thimble-*.zip"
-RELEASE_SUMS = "SHA256SUMS"  # the release's digests, which update.sh checks the zip against
-DOWNLOAD_TIMEOUT_S = 600.0
-UPDATE_NO_GH_LINE = ("thimble update: could not download the latest release of {repo}: the GitHub CLI (gh) is not installed "
-                     "(https://cli.github.com).")
-UPDATE_FROM_LINE = "Download it from {url} and run: thimble update --from <path to thimble-*.zip>"
-# gh answers "release not found" for three different causes, since GitHub returns 404 to all of them: the repo has no
-# published release (a pre-release does not count as the latest), the account cannot see the repo, or gh is not logged
-# in and the repo is private. download_release asks gh which one it is, so each gets its own line.
-UPDATE_FAILED_LINES = {
-    "no-gh": (UPDATE_NO_GH_LINE, UPDATE_FROM_LINE),
-    "no-release": ("thimble update: {repo} has no published release yet (gh: release not found).",
-                   "If you were sent a release zip, run: thimble update --from <path to thimble-*.zip>"),
-    "no-login": ("thimble update: gh is not logged in, so it cannot download releases of {repo}. Run `gh auth login`, "
-                 "then thimble update again.",
-                 "Or, with a release zip: thimble update --from <path to thimble-*.zip>"),
-    "no-access": ("thimble update: the GitHub account gh is logged in as cannot see {repo}. Check `gh auth status`.",
-                  "Or, with a release zip: thimble update --from <path to thimble-*.zip>"),
-    "failed": ("thimble update: could not download the latest release of {repo} with gh ({detail}).",
-               UPDATE_FROM_LINE),
-    "no-sums": ("thimble update: the latest release of {repo} has no SHA256SUMS, so the downloaded zip cannot be "
-                "checked; nothing was installed.", UPDATE_FROM_LINE),
-}
-
-
-def release_repo() -> str:
-    """The `owner/name` slug the releases live on: RELEASE.json's `repo` when the install carries one, else the
-    `repository` of plugin.json (feedback.repo_slug, which the problem report uses as well)."""
-    from . import feedback  # noqa: PLC0415 — imported lazily, as for `thimble feedback`
-
-    return feedback.repo_slug(config.REPO_ROOT)
-
-
-def releases_url(repo: str | None = None) -> str:
-    return f"https://github.com/{repo or release_repo()}/releases/latest"
-
-
-def update_script() -> Path:
-    return config.REPO_ROOT / "scripts" / "update.sh"
-
-
-# the flags `thimble update` passes on to install.sh through update.sh: for 0.8.x install.sh ignores all but --no-plugin
-# and --require-pinned, with a line that says so (0.7's sandbox, plugin and startup-file flags)
-INSTALL_FLAGS = ("--sandbox-deps", "--no-sandbox-deps", "--plugin", "--no-plugin", "--no-modify-path", "--modify-path",
-                 "--require-pinned")
-
-
-def _gh_ok(gh: str, *args: str) -> bool:
-    """True when `gh args` exits 0; False when it fails, times out or cannot start."""
-    try:
-        return subprocess.run([gh, *args], capture_output=True, text=True, timeout=60).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
-
-def download_release(repo: str, into: Path) -> tuple[Path | None, str, str]:
-    """`gh release download` of the latest release's zip and its SHA256SUMS into `into`: (the zip, "", "") on success,
-    else (None, the cause, a detail). The cause is a key of UPDATE_FAILED_LINES; the detail is gh's first error line, for
-    the "failed" line."""
-    gh = shutil.which("gh")
-    if not gh:
-        return None, "no-gh", ""
-    cmd = [gh, "release", "download", "--repo", repo, "--pattern", RELEASE_ZIP_PATTERN, "--pattern", RELEASE_SUMS,
-           "--dir", str(into)]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=DOWNLOAD_TIMEOUT_S)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        _log(f"gh release download failed: {type(e).__name__}: {e}")
-        return None, "failed", type(e).__name__
-    if r.returncode != 0:
-        err = (r.stderr or "").strip()
-        _log(f"gh release download failed ({r.returncode}): {err[:300]}")
-        if "release not found" in err.lower():
-            # the repo's host alone, since `gh auth status` without one fails when the token of any host it knows is bad
-            host = repo.split("/")[0] if repo.count("/") == 2 else "github.com"
-            if not _gh_ok(gh, "auth", "status", "--hostname", host):
-                return None, "no-login", ""
-            if not _gh_ok(gh, "repo", "view", repo, "--json", "name"):
-                return None, "no-access", ""
-            return None, "no-release", ""
-        return None, "failed", (err.splitlines() or [f"exit code {r.returncode}"])[0][:200]
-    zips = sorted(into.glob(RELEASE_ZIP_PATTERN))
-    if not zips:
-        return None, "failed", f"no {RELEASE_ZIP_PATTERN} in the release"
-    if not (into / RELEASE_SUMS).is_file():
-        return None, "no-sums", ""
-    return zips[-1], "", ""
-
-
-def run_update_script(*args: str) -> int:
-    """scripts/update.sh of this tree with `args`; its output passes through, its exit code is returned."""
-    return subprocess.call(["bash", str(update_script()), *args])
-
-
-def cmd_update(args: argparse.Namespace) -> int:
-    """`thimble update [--from <zip>] [--dry-run]`: --from hands the zip to update.sh; no argument downloads the latest
-    release and its SHA256SUMS with gh, and update.sh checks the zip against it; a checkout skips the download
-    (update.sh pulls). When the download fails: two lines naming the cause and the --from form, and exit 1."""
-    extra = ["--dry-run"] if getattr(args, "dry_run", False) else []
-    extra += ["--browser", args.browser] if getattr(args, "browser", None) else []
-    extra += getattr(args, "install_flags", None) or []
-    if getattr(args, "from_", None):
-        return run_update_script("--from", args.from_, *extra)
-    if is_git_checkout():
-        return run_update_script(*extra)
-    repo = release_repo()
-    with tempfile.TemporaryDirectory(prefix="thimble-update-") as tmp:
-        zip_path, cause, detail = download_release(repo, Path(tmp))
-        if zip_path is None:
-            first, second = UPDATE_FAILED_LINES[cause]
-            print(first.format(repo=repo, detail=detail))
-            print(second.format(url=releases_url(repo)))
-            return 1
-        print(f"thimble update: downloaded {zip_path.name}")
-        return run_update_script("--from", str(zip_path), "--sums", str(Path(tmp) / RELEASE_SUMS), *extra)
-
-
 # ----------------------------------------------------------------------------- the `server` group
 
 SERVER_UP_ALIASES = ("ensure",)
@@ -4841,13 +4722,6 @@ def build_parser() -> argparse.ArgumentParser:
     er = exs.add_parser("remove", help="remove an added extension (a folder used in place stays where it is)")
     er.add_argument("name")
     ex.set_defaults(fn=cmd_extension)
-    u = sub.add_parser("update", help="bring the install up to date: the latest GitHub release via gh, or --from <zip>")
-    u.add_argument("--from", dest="from_", metavar="ZIP", help="a downloaded release zip (thimble-<version>-<sha>.zip)")
-    u.add_argument("--dry-run", action="store_true", help="print update.sh's steps; change nothing")
-    u.add_argument("--browser", choices=("bundled", "system", "off"), help="passed on to install.sh")
-    for flag in INSTALL_FLAGS:
-        u.add_argument(flag, dest="install_flags", action="append_const", const=flag, help="passed on to install.sh")
-    u.set_defaults(fn=cmd_update)
     la = sub.add_parser("launch-args", help="for plugin/bin/thimble: the plugin folder, the --effort and --settings values, the tools that end a turn without text, main's --name, the session id, the env, unset and note lines, then main's prompt")
     la.add_argument("--cwd")
     la.add_argument("--resume", action="store_true", help="a line before the prompt: the folder's last main session")
@@ -4870,8 +4744,6 @@ def build_parser() -> argparse.ArgumentParser:
                          "that is main in --cwd's workspace")
     pr.add_argument("--lead", help="text printed before the prompts, when they print")
     pr.set_defaults(fn=cmd_prompt)
-    from . import demo  # noqa: PLC0415 — `thimble demo`: the demo datasets and their pre-cached orientations
-    demo.add_parser(sub)
     return ap
 
 

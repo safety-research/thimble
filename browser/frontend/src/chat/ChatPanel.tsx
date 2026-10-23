@@ -53,13 +53,11 @@ import { mainEdits, mainRelays, STAGE_TEXT, threadStage, type ThreadStage } from
 import { answeredSince, composerTarget, pickItems, threadKind, threadLabels, threadNodes, threadsRunning, type ThreadKind } from './threads'
 import { RoleChip } from './RoleChip'
 import { useChat, type ChatState } from './useChat'
-import { pendingAsks, TERMINAL_WAIT, terminalWaits, waitingAt, waitingChats } from './waiting'
+import { pendingAsks, waitingAt, waitingChats } from './waiting'
 import { PermissionCard } from './PermissionCard'
 import { ProposalCard } from './ProposalCard'
 import { LabelAsks } from './LabelAsk'
 import { NoticeStrip } from './Notice'
-import { DemoNote } from './DemoNote'
-import { DEMO_NOTE, demoStop, useDemo } from '../lib/demo'
 import { pendingRequests } from './permissions'
 
 const LIST_DEBOUNCE_MS = 300
@@ -466,17 +464,15 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
     for (const p of main.meta?.permissions ?? []) if (p.chat) ids.add(p.chat)
     return ids
   }, [chats, main.meta?.permissions])
-  // the chats of thimble's agents that wait in the terminal, where Claude Code asks them, and the chats they run under
-  const terminalIds = useMemo(() => terminalWaits(main.meta, chats), [chats, main.meta])
   const items = useMemo(
     () =>
       pickItems(
         chats,
         (m) => (m.id === current ? chat.running : !!m.running),
         (m) => (m.id === current ? false : isUnread(seen, m.id, m.n_messages)),
-        { current, waiting: waitingIds, terminal: terminalIds },
+        { current, waiting: waitingIds },
       ),
-    [chats, current, chat.running, seen, waitingIds, terminalIds],
+    [chats, current, chat.running, seen, waitingIds],
   )
   const labels = useMemo(() => threadLabels(items), [items])
   // a thread the analyst left while it answered says so once its answer is in: a toast with its chip, beside the dot
@@ -596,10 +592,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // open (chat/waiting.ts)
   const stripped = !!strip
   const waitingFor = useMemo(() => (stripped && stripSession ? waitingAt(stripSession.id, metaMap.values()) : null), [stripped, stripSession, metaMap])
-  // the session the strip follows waits on a permission prompt in the terminal, its own or a step's: the strip says so
-  const inTerminal = stripped && !!stripSession && terminalIds.has(stripSession.id)
-  if (strip && inTerminal) strip.title = TERMINAL_WAIT
-  const waiting = !!waitingFor || inTerminal
+  const waiting = !!waitingFor
   // every request of every session that waits for the analyst, on the one card above the composer
   const asks = useMemo(() => pendingRequests(main.meta, metaMap.values()), [main.meta, metaMap])
   // the latest orientation, which the orientation's composer and main's message_orientation reach
@@ -619,8 +612,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // which is known once main's meta has loaded
   const attached = main.meta?.attached ?? null
   const detached = !!main.meta && !attached
-  // a demo page (lib/demo): no view proposal, and the composer is disabled, its hover saying why
-  const demo = useDemo()
   // the orientation the composer would reach, when it cannot take a message here: an earlier Claude Code session's or an
   // earlier version's, whose text takes the composer's place (backend orient_session.latest's 409 and 410)
   const orientMeta = target.to === 'orient' ? metaMap.get(target.chat) ?? (curMeta?.id === target.chat ? curMeta : null) : null
@@ -707,7 +698,6 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
 
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
-    if (demoStop()) return Promise.resolve(false)
     if (target.to === 'orient') {
       // the latest orientation takes the analyst's message itself: it resumes the finished session, or waits for the run
       // going on to end; from one of its steps, its thread opens, where the message and the reply show
@@ -839,11 +829,10 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
         <div ref={footRef} className="chat-foot">
           <Holds className="chat-main-holds" alert={main.meta?.alert} />
           {asks.length > 0 && <PermissionCard ws={ws} asks={asks} metas={metaMap} labels={labels} />}
-          {!touring && !demo && <ProposalCard ws={ws} />}
-          {!demo && <LabelAsks ws={ws} />}
+          {!touring && <ProposalCard ws={ws} />}
+          <LabelAsks ws={ws} />
           <NoticeStrip ws={ws} current={current} labels={labels} onOpen={setCurrent} />
           {strip && <TaskStrip title={strip.title} steps={strip.steps} count={strip.count} open={stripOpen} onToggle={() => setStripOpen((o) => !o)} waiting={waiting} />}
-          <DemoNote />
           {orientClosedText ? (
             <div className="chat-continue" role="note" data-continue={orientContinue ?? undefined}>
               <Icon name="terminal" size={13} className="chat-continue-ico" />
@@ -862,8 +851,7 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
               onSend={send}
               sending={target.to === 'orient' ? sendingOrient : target.to === 'view' ? sendingView : target.to === 'main' ? main.streaming : chat.streaming}
               placeholder={`Reply in ${target.to === 'main' ? 'main' : target.to === 'orient' ? labels.get(target.chat) ?? 'orient' : curPath}…`}
-              disabled={demo || chat.loading || !!chat.error}
-              tip={demo ? DEMO_NOTE : undefined}
+              disabled={chat.loading || !!chat.error}
               stop={stopWhat ? { label: stopWhat.label, onStop: stopNow, busy: stopping === stopKey } : undefined}
               thread={current}
             />
@@ -1215,8 +1203,7 @@ function TicketView({ ws, id, chat, mainRecords, ticket, onTicket: setTicket }: 
 }
 
 /** The strip behind the composer's top edge while the thread works: the spinner, what it is doing, how many steps; it
- * opens on the steps. A pending permission prompt shows a still dot in place of the spinner (and one Claude Code asks
- * in the terminal makes the title TERMINAL_WAIT, set by the caller); a session waiting to retry
+ * opens on the steps. A pending permission prompt shows a still dot in place of the spinner; a session waiting to retry
  * after an API capacity error shows a countdown row with Retry now. */
 function TaskStrip({ title, steps, count, open, onToggle, waiting = false, retry = null, onRetry }: { title: string; steps: ToolStep[]; count: string; open: boolean; onToggle: () => void; waiting?: boolean; retry?: SessionAlert | null; onRetry?: () => Promise<unknown> }) {
   const retryLine = useRetryText(retry)

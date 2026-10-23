@@ -92,6 +92,10 @@ def bridge(monkeypatch) -> FakeBridge:
     mod = types.ModuleType("app.module_bridge")
     for name in ("live", "why_not", "request", "push_roles", "main_session", "moved_to"):
         setattr(mod, name, getattr(fake, name))
+    # the reason subagents.refusal_before compares why_not's with, while a session attached moments ago may still connect
+    from app import module_bridge as real  # noqa: PLC0415
+
+    mod.NOT_LOADED = real.NOT_LOADED
     monkeypatch.setitem(sys.modules, "app.module_bridge", mod)
     # `from . import module_bridge` reads the package's attribute first, which the real bridge sets once any test has
     # imported it, so the fake replaces that too

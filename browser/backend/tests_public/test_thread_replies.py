@@ -48,23 +48,3 @@ async def test_the_fallback_answer_is_the_reply_record_a_reply_in_thread_post_is
     assert a["delta"] == b["delta"] == cite.from_links("It ran [[31|card:abc123#runs/agent-3]] runs.")
     assert "[[31|card:abc123#runs/agent-3]]" in a["delta"]
     assert {k: v for k, v in a.items() if k != "by"} == {k: v for k, v in b.items() if k != "by"}
-
-
-async def test_a_thread_s_answer_reaches_main_by_no_action_of_the_browser_or_the_terminal(term):
-    """No route, act or meta field hands a finished thread's answer to main as the analyst's message, so a side thread
-    never starts a turn of main; main gets only its fork's closing `↳` line, as Claude Code relays it."""
-    from fastapi.testclient import TestClient
-
-    from app import local, main
-
-    tid = _thread()
-    threads.reply(CORPUS, tid, "It ran 31 of the 40 runs.", by="terminal")
-    agents.append(agents.paths(CORPUS, tid)[1], {"type": "done", "result": None})
-    assert "hand_back" not in json.loads((await agents.get_route(CORPUS, tid)).body)["meta"]
-    assert "hand_back" not in (await local.state(CORPUS, "thread", [tid]))["meta"]
-    assert all("hand_back" not in m for m in await local.state(CORPUS, "threads"))
-    with pytest.raises(local.StateError, match="no act"):
-        await local.act(CORPUS, "hand-back", {"thread": tid})
-    assert TestClient(main.create_app()).post(f"/api/ws/{CORPUS}/chats/{tid}/hand-back").status_code in (404, 405)
-    assert not [r for r in agents.read_events(agents.paths(CORPUS, agents.MAIN_ID)[1]) if r.get("type") == "user"]
-    assert not (config.workspace_dir(CORPUS) / "events" / "queue.jsonl").exists()

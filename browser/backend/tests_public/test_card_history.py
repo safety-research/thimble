@@ -3,7 +3,7 @@ whichever path, is an entry of its `edited` list naming the fields it changed, a
 groups, small: the fields it changed alone, and for new code the outputs the card showed before. The card as it stood
 before a kept edit opens to read (GET /cells/{id}/versions/{entry}), and Restore (POST .../restore) makes the card that
 version again as an edit of the analyst's, itself an entry. The paths: edit_card on a note and on a plan (edit_cell), on a
-card of code (edit_and_run, and stage_edit in terminal mode), the analyst's edits in the browser (PUT /cells/{id}), a
+card of code (edit_and_run), the analyst's edits in the browser (PUT /cells/{id}), a
 card check's fix and its Undo, and a takeaway written over another; a card's first takeaway is part of its making."""
 from __future__ import annotations
 
@@ -175,15 +175,6 @@ async def test_an_edit_of_a_card_of_code_keeps_its_code_takeaway_and_the_outputs
     back = _edits(cid)[-1]
     assert back["by"] == "user" and back["fields"] == ["code", "takeaway"]
     assert "out: print(2)" in json.dumps(_record(cid, back["id"])["shown"]["outputs"])
-
-
-async def test_a_staged_edit_in_terminal_mode_is_an_entry_with_the_outputs_it_replaces(group, ran):
-    cid = _cid(await call("add_card", group, question="How many?", code="print(1)"))
-    nb_id = notebook.find_cell(config.workspace_dir(CORPUS), cid)[0]
-    notebook.stage_edit(CORPUS, nb_id, cid, "print(3)", {"state": "queued"}, by="terminal")
-    [e] = _edits(cid)
-    assert (e["by"], e["fields"]) == ("terminal", ["code"])
-    assert "out: print(1)" in json.dumps(_record(cid, e["id"])["shown"]["outputs"])
 
 
 async def test_a_card_checks_fix_and_its_undo_are_entries(group, ran):

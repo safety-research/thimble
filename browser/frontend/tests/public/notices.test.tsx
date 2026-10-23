@@ -22,7 +22,6 @@ const SIGN_IN = "Couldn't check for a view proposal: Claude Code isn't signed in
 const BLOCKED = "Couldn't check for a view proposal: Claude's safeguards blocked the request."
 const DOWNGRADE = "Claude's safeguards switched this reply from Opus 5.5 to Opus 4.8."
 const BUILD = 'The view Agent Network failed to build: the page did not load.'
-const MANUAL = 'Manual mode: Claude Code asks before most commands. In your terminal, press shift+tab for auto mode, or start with `thimble --permission-mode auto`.'
 const TRY = { label: 'Try again', do: 'proposals-retry' }
 const OFF = { label: 'Turn off view proposals', do: 'proposals-off' }
 const record = (id: string, text: string, extra: Record<string, unknown> = {}): ChatRecord => ({ type: 'notice', ts: '2026-10-14T10:00:00Z', id, kind: 'proposals', text, ...extra }) as ChatRecord
@@ -335,23 +334,6 @@ describe('the strip above the composer, and the rows', () => {
     expect(lines(el)).toEqual(["Main Claude's reply in main failed: Claude Code isn't signed in. In your terminal: run /login (or claude auth login in a shell)."])
     await click(el.querySelector('.chat-notice-open'))
     expect(opened).toEqual(['main'])
-  })
-
-  test('the Manual-mode notice shows in every chat in red (its kind), its command as code, and × dismisses it on the server', async () => {
-    open = [{ id: 'mm1', key: 'manual-mode', kind: 'manual-mode', text: MANUAL }]
-    for (const chat of ['main', 'thread-2']) {
-      const el = await strip('nt-manual', chat)
-      const n = el.querySelector('.chat-notice')!
-      expect(n.getAttribute('data-kind')).toBe('manual-mode')
-      expect(n.querySelector('.chat-notice-text')?.textContent).toBe(MANUAL.replace(/`/g, ''))
-      expect(n.querySelector('.chat-notice-text code')?.textContent).toBe('thimble --permission-mode auto')
-      unmountAll()
-    }
-    const el = await strip('nt-manual')
-    await click(el.querySelector('.chat-notice-x'))
-    await settle()
-    expect(el.querySelector('.chat-notice')).toBeNull()
-    expect(sent).toEqual(['POST /api/ws/nt-manual/notices/mm1/dismiss'])
   })
 
   test("a browser's sign-in notice is left out in that browser; another browser's shows with Sign it out, which signs it out and goes", async () => {

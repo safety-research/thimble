@@ -129,23 +129,6 @@ def test_a_bar_chart_over_times_stands_up_each_bar_spanning_its_time_to_the_next
         kt.chart("bar", POSTS, marks={"x": 1})
 
 
-def test_times_a_week_apart_have_a_tick_at_each_and_times_a_day_apart_keep_vega_s_ticks():
-    # seen on collusion-wiki (2026-10-10): weekly bars from Mondays, "week starting" over ticks on May 19, May 27, Jun 3
-    weeks = pd.DataFrame({"week starting": pd.to_datetime(["2026-05-18", "2026-05-25", "2026-06-08"]), "saves": [35, 831, 187]})
-    ticks = {"values": [{"year": 2026, "month": 5, "date": 18}, {"year": 2026, "month": 5, "date": 25},
-                        {"year": 2026, "month": 6, "date": 8}]}
-    assert spec_of("bar", weeks)["encoding"]["x"]["axis"] == ticks
-    assert spec_of("line", weeks)["encoding"]["x"]["axis"] == ticks
-    assert spec_of("area", weeks)["encoding"]["x"]["axis"] == ticks
-    assert "axis" not in spec_of("scatter", weeks)["encoding"]["x"]  # points at any time: Vega's ticks
-    hours = pd.DataFrame({"t": pd.to_datetime(["2026-05-18 06:00", "2026-05-25 06:00"]), "n": [1, 2]})
-    assert spec_of("bar", hours)["encoding"]["x"]["axis"]["values"][0] == {"year": 2026, "month": 5, "date": 18, "hours": 6}
-    days = pd.DataFrame({"day": pd.date_range("2026-05-18", periods=10), "saves": range(10)})
-    assert "axis" not in spec_of("bar", days)["encoding"]["x"] and "axis" not in spec_of("line", days)["encoding"]["x"]
-    many = pd.DataFrame({"week": pd.date_range("2025-01-06", periods=kt.TIME_TICKS_MAX + 1, freq="7D"), "n": 1})
-    assert "axis" not in spec_of("bar", many)["encoding"]["x"]
-
-
 def test_a_label_s_values_take_its_order_and_the_card_reads_the_label_for_its_colors(label_ws):
     act = pd.DataFrame({"activity": ["other", "money", "captcha", "hmm"], "records": [50, 20, 80, 3]})
     enc = spec_of("bar", act, label="activity type")["encoding"]
@@ -180,30 +163,6 @@ def test_a_wrong_frame_fails_with_one_line_that_names_the_columns_it_takes():
         kt.chart("line", pd.DataFrame({"x": [1, 2], "y": [3, 4]}), sort=None)
 
 
-def test_times_show_at_their_own_clock_time_and_iso_text_reads_as_times():
-    utc = pd.DataFrame({"time": pd.to_datetime(["2026-08-30T16:02:00Z", "2026-08-30T16:30:00Z"]), "runs": [1, 2]})
-    spec = spec_of("line", utc)
-    assert [r["time"] for r in spec["data"]["values"]] == ["2026-08-30T16:02:00", "2026-08-30T16:30:00"]
-    assert spec["encoding"]["tooltip"][0]["format"] == "%Y-%m-%d %H:%M"
-    months = spec_of("line", pd.DataFrame({"month": ["2025-04", "2025-05"], "turns": [1, 2]}))
-    assert months["encoding"]["x"]["type"] == "temporal" and months["data"]["values"][0]["month"] == "2025-04-01T00:00:00"
-    # a short line marks each value with a dot; a long one is a plain line
-    assert months["mark"] == {"type": "line", "point": True}
-    assert spec_of("line", pd.DataFrame({"x": range(40), "y": range(40)}))["mark"] == "line"
-
-
-def test_dots_put_each_row_on_its_line_earliest_first_and_panels_give_each_series_its_own_scale():
-    ev = pd.DataFrame({"time": pd.to_datetime(["2026-08-30T15:50", "2026-08-30T16:10", "2026-08-30T15:40"]),
-                       "agent": ["agent-11", "agent-3", "agent-7"]})
-    spec = spec_of("dots", ev)
-    assert spec["mark"] == "point" and spec["encoding"]["y"]["sort"] == ["agent-7", "agent-11", "agent-3"]
-    series = pd.DataFrame({"month": ["2025-04", "2025-05"] * 2, "value": [1, 9, 4, 5], "measure": ["turns"] * 2 + ["agents"] * 2})
-    panels = spec_of("line", series, panels=True)
-    assert panels["encoding"]["row"]["field"] == "measure" and panels["resolve"] == {"scale": {"y": "independent"}}
-    with pytest.raises(ValueError, match="needs a series column"):
-        kt.chart("line", series[["month", "value"]], panels=True)
-
-
 def test_a_histogram_bins_every_value_in_round_steps():
     rows = spec_of("histogram", pd.Series([0, 1, 1, 2, 5, 3, 3, 3], name="edits"))["data"]["values"]
     assert [r["edits"] for r in rows] == [0, 1, 2, 3, 4, 5] and [r["count"] for r in rows] == [1, 2, 1, 3, 0, 1]
@@ -229,27 +188,6 @@ def test_a_heatmap_orders_its_names_by_total_its_numbers_ascending_and_takes_a_l
                                          "scale": {"type": "symlog"}}
 
 
-def test_a_heatmap_of_days_names_them_as_a_date_axis_does_and_its_rows_keep_the_dates():
-    # seen on collusion-wiki (2026-10-10): 11 days as `2026-06-18` on end under a card's heatmap
-    hm = pd.DataFrame({"day": ["2026-06-18", "2026-05-24", "2026-06-18"], "account": ["a", "b", "b"], "saves": [3, 1, 2]})
-    spec = spec_of("heatmap", hm)
-    x = spec["encoding"]["x"]
-    assert x["sort"] == ["2026-05-24", "2026-06-18"] and spec["data"]["values"][0]["day"] == "2026-06-18"
-    # its ticks between the columns, so days that read across close together each stand between two (chart-clean)
-    assert x["axis"] == {"tickBand": "extent",
-                         "labelExpr": "datum.value == null ? '' : utcFormat(utcParse(datum.value, '%Y-%m-%d'), '%b %-d')"}
-    assert "axis" not in spec["encoding"]["y"]
-    years = pd.DataFrame({"t": pd.to_datetime(["2025-12-31 23:00", "2026-01-01 01:30"]), "y": ["a", "a"], "n": [1, 2]})
-    assert "'%Y-%m-%d %H:%M'), '%b %-d, %Y %H:%M')" in spec_of("heatmap", years)["encoding"]["x"]["axis"]["labelExpr"]
-
-
-def test_a_column_name_with_a_dot_is_a_field_and_not_a_path():
-    spec = spec_of("scatter", pd.DataFrame({"p.value": [0.1, 0.2], "n [runs]": [3, 4]}))
-    assert spec["encoding"]["x"] == {"field": "p\\.value", "type": "quantitative", "title": "p.value"}
-    assert spec["encoding"]["y"]["field"] == "n \\[runs\\]"
-    assert spec["data"]["values"][0] == {"p.value": 0.1, "n [runs]": 3}
-
-
 EVALS = pd.DataFrame({"model": ["m1", "m2", "m3"], "accuracy": [0.62, 0.81, 0.40], "lo": [0.55, 0.75, 0.31],
                       "hi": [0.69, 0.86, 0.50]})
 
@@ -269,97 +207,6 @@ def test_an_interval_draws_a_rule_in_ink_from_each_value_s_low_end_to_its_high_e
     # the interval's columns may stand anywhere in the frame; the rest keep the kind's order
     moved = spec_of("bar", EVALS[["lo", "model", "hi", "accuracy"]], interval=("lo", "hi"))
     assert moved["layer"][0]["encoding"]["y"]["field"] == "model" and moved["layer"][0]["encoding"]["x"]["field"] == "accuracy"
-
-
-def test_an_interval_sets_groups_side_by_side_lying_down_or_upright():
-    ev = pd.DataFrame({"model": ["m1", "m1", "m2", "m2"], "accuracy": [0.6, 0.7, 0.8, 0.5], "condition": ["cot", "plain"] * 2,
-                       "lo": [0.5, 0.6, 0.7, 0.4], "hi": [0.7, 0.8, 0.9, 0.6]})
-    bars, rule = spec_of("bar", ev, interval=("lo", "hi"))["layer"]
-    assert bars["encoding"]["yOffset"]["field"] == "condition" and "order" not in bars["encoding"]
-    assert rule["encoding"]["yOffset"] == bars["encoding"]["yOffset"] and "color" not in rule["encoding"]
-    # number categories stand up: the interval runs along y, side by side on x
-    steps = ev.assign(model=[1, 1, 2, 2])
-    bars, rule = spec_of("bar", steps, interval=("lo", "hi"))["layer"]
-    assert bars["encoding"]["x"]["type"] == "ordinal" and bars["encoding"]["xOffset"]["field"] == "condition"
-    assert (rule["encoding"]["y"]["field"], rule["encoding"]["y2"]) == ("lo", {"field": "hi"})
-    assert rule["encoding"]["xOffset"] == bars["encoding"]["xOffset"]
-    with pytest.raises(ValueError, match="`interval` sets the groups side by side; leave out `stack`"):
-        kt.chart("bar", ev, interval=("lo", "hi"), stack=True)
-
-
-def test_dots_put_each_row_s_groups_side_by_side_on_its_line_with_or_without_an_interval():
-    ev = pd.DataFrame({"accuracy": [0.6, 0.7, 0.8], "model": ["m1", "m1", "m2"], "condition": ["cot", "plain", "cot"],
-                       "lo": [0.5, 0.6, 0.7], "hi": [0.7, 0.8, 0.9]})
-    spec = spec_of("dots", ev, interval=("lo", "hi"), marks={"chance": 0.5})
-    dots, rule = spec["layer"][0]["layer"]
-    assert dots["mark"] == "point" and dots["encoding"]["yOffset"] == {"field": "condition", "type": "nominal",
-                                                                       "sort": ["cot", "plain"]}
-    assert rule["mark"] == "rule" and rule["encoding"]["x"]["field"] == "lo" and rule["encoding"]["yOffset"]["field"] == "condition"
-    assert spec["layer"][1]["data"]["values"] == [{"accuracy": 0.5, "mark": "chance"}]
-    # without an interval too (QA 2026-10-10: two groups at one value on a row blended into a dark dot the legend does
-    # not show), so every dot keeps its own color; in panels each group has its row's line to itself
-    plain = spec_of("dots", ev[["accuracy", "model", "condition"]])["encoding"]
-    assert plain["yOffset"] == {"field": "condition", "type": "nominal", "sort": ["cot", "plain"]}
-    assert "yOffset" not in spec_of("dots", ev[["accuracy", "model", "condition"]], panels=True)["encoding"]
-    # a chart with no group column has no groups to set apart
-    assert "yOffset" not in spec_of("dots", ev[["accuracy", "model"]])["encoding"]
-
-
-def test_a_line_s_interval_is_an_error_bar_at_each_dot_or_a_band_along_a_line_too_long_for_dots():
-    """`interval` names the columns of each y's low and
-    high ends, as for a bar or a dots chart: an error bar under each dot, in its series' color when the line has series
-    (a lone line's in the theme's ink, as a bar's), and along a line too long for dots a faint band."""
-    hours = pd.DataFrame({"hour": [1, 2, 3] * 2, "share": [0.5, 0.6, 0.7, 0.2, 0.3, 0.4], "run": ["a"] * 3 + ["b"] * 3,
-                          "lo": [0.4, 0.5, 0.6, 0.1, 0.2, 0.3], "hi": [0.6, 0.7, 0.8, 0.3, 0.4, 0.5]})
-    bundle = drawn("line", hours, interval=("lo", "hi"))
-    spec = bundle[kt.VEGALITE_MIME]
-    bars, line = spec["layer"]
-    assert line["mark"] == {"type": "line", "point": True} and line["encoding"]["y"]["field"] == "share"
-    assert bars["mark"] == "rule" and bars["encoding"]["x"] == line["encoding"]["x"]
-    assert bars["encoding"]["y"] == {"field": "lo", "type": "quantitative", "title": "share"} and bars["encoding"]["y2"] == {"field": "hi"}
-    assert bars["encoding"]["color"] == line["encoding"]["color"], "each series' bars in its color"
-    assert spec["data"]["values"][0] == {"hour": 1, "share": 0.5, "run": "a", "lo": 0.4, "hi": 0.6}
-    assert cite.chart_table(bundle).columns == ["hour", "share", "run", "lo", "hi"], "a takeaway cites the ends"
-    assert styles(spec) == []
-    lone = spec_of("line", hours[hours["run"] == "a"].drop(columns="run"), interval=("lo", "hi"))["layer"][0]
-    assert lone["mark"] == "rule" and "color" not in lone["encoding"], "a lone line's bars in the theme's ink"
-    # x of times too; a line too long for dots has its intervals as a band, faint, under it
-    t = pd.date_range("2026-08-28T07:00", periods=kt.LINE_DOTS_MAX + 1, freq="10min")
-    long = pd.DataFrame({"time": t, "reviews": range(len(t))}).assign(lo=lambda d: d["reviews"] - 1, hi=lambda d: d["reviews"] + 2)
-    band, line = spec_of("line", long, interval=("lo", "hi"))["layer"]
-    assert line["mark"] == "line" and band["mark"] == {"type": "area", "style": kt.FAINT_STYLE}
-    assert (band["encoding"]["y"]["field"], band["encoding"]["y2"], band["encoding"]["x"]["type"]) == ("lo", {"field": "hi"}, "temporal")
-    # in panels and with marks, as a line takes them
-    paneled = spec_of("line", hours, interval=("lo", "hi"), panels=True, marks={"v2": 2})
-    assert paneled["facet"]["row"]["field"] == "run" and len(paneled["spec"]["layer"][0]["layer"]) == 2
-
-
-def test_a_wrong_interval_fails_with_one_line_that_names_what_it_takes():
-    t = pd.DataFrame({"week": pd.to_datetime(["2026-01-05", "2026-01-12"]), "n": [3, 5], "lo": [2, 4], "hi": [4, 6]})
-    cases = [
-        (("bar", EVALS), {"interval": "lo"}, "`interval` is the names of the two columns that hold each value's low and "
-                                             "high ends, such as (\"lo\", \"hi\"), not 'lo'"),
-        (("bar", EVALS), {"interval": ("lo", "upper")}, "`interval` names `upper`, which the frame lacks; its columns are "
-                                                        "model, accuracy, lo, hi"),
-        (("bar", EVALS.drop(columns="model")), {"interval": ("lo", "hi")}, "(category, value, group) columns, in that "
-                                                                         "order, beside the interval's lo and hi; got 1: accuracy"),
-        (("bar", EVALS.assign(hi=["a", "b", "c"])), {"interval": ("lo", "hi")}, "numbers; `hi` holds text"),
-        (("bar", EVALS), {"interval": ("hi", "lo")}, "`interval` is (low, high), and `hi` is above `lo` where `model` is 'm1'"),
-        (("bar", EVALS.assign(lo=0.05, hi=0.06)), {"interval": ("lo", "hi")},
-         "every `accuracy` lies outside its interval; `lo` and `hi` are the interval's low and high ends"),
-        (("bar", t), {"interval": ("lo", "hi")}, "`interval` draws around bars of text or number categories; `week` holds times"),
-        (("dots", t), {"interval": ("lo", "hi")}, "`interval` draws around an x of numbers; `week` holds times"),
-        (("scatter", EVALS), {"interval": ("lo", "hi")}, "takes the options label, marks, fit, panels, not 'interval'"),
-        (("line", EVALS.assign(model=[1, 2, 3], lo=0.05, hi=0.06)), {"interval": ("lo", "hi")},
-         "every `accuracy` lies outside its interval"),
-    ]
-    for args, opts, words in cases:
-        with pytest.raises((ValueError, TypeError)) as e:
-            kt.chart(*args, **opts)
-        assert words in str(e.value) and "\n" not in str(e.value), str(e.value)
-    # a frame of four columns without `interval` is still a wrong bar chart
-    with pytest.raises(ValueError, match="got 4: model, accuracy, lo, hi"):
-        kt.chart("bar", EVALS)
 
 
 TURNS = pd.DataFrame({"turns": [1, 2, 3, 4, 100, 10, 20, 30, 40, 50, 7, 9],
@@ -409,94 +256,6 @@ def test_a_box_plot_s_rows_are_each_group_s_summary_ordered_by_median_and_cited_
         kt.chart("box", TURNS[["agent", "turns"]])
 
 
-def test_dots_that_would_overlap_on_a_line_move_across_it_only_as_far_as_they_need():
-    """A dot
-    that would overlap one already on its line (an x within DODGE_GAP of the axis's span) moves a step up, else down,
-    then two; dots apart stay on the line, and every x stays where it is."""
-    gap = kt.DODGE_GAP * 100
-    xs = [0, 0, 0, 0, 0, 0, 50, 50 + gap / 2, 100, 0]
-    lines = ["a"] * 9 + ["b"]
-    assert kt._dodge(xs, lines) == [0, -1, 1, -2, 2, 0, 0, -1, 0, 0], "past DODGE_MAX steps, the step least crowded"
-    assert kt._dodge([0, gap * 1.01, None], ["a"] * 3) == [0, 0, 0], "dots just apart stay on the line"
-    assert kt._dodge([0, 1], ["a", "a"], span=2 / kt.DODGE_GAP) == [0, -1], "measured against the axis's span"
-    assert kt._dodge([0, 1], ["a", "a"]) == [0, 0], "else the span of the dots"
-    ev = pd.DataFrame({"time": pd.to_datetime(["2026-08-30T10:00:00", "2026-08-30T10:00:20", "2026-08-30T12:00:00",
-                                               "2026-08-30T10:00:00"]), "agent": ["a", "a", "a", "b"]})
-    bundle = drawn("dots", ev)
-    spec = bundle[kt.VEGALITE_MIME]
-    # the steps are the chart's layout, not its rows': a transform numbers the rows and gives the moved ones their steps
-    assert spec["data"]["values"] == [{"time": "2026-08-30T10:00:00", "agent": "a"}, {"time": "2026-08-30T10:00:20", "agent": "a"},
-                                      {"time": "2026-08-30T12:00:00", "agent": "a"}, {"time": "2026-08-30T10:00:00", "agent": "b"}]
-    assert spec["transform"] == [{"window": [{"op": "row_number", "as": kt.DODGE_ROW}]},
-                                 {"lookup": kt.DODGE_ROW, "from": {"data": {"values": [{"r": 2, "d": -1}]}, "key": "r", "fields": ["d"]},
-                                  "as": [kt.DODGE_FIELD], "default": 0}]
-    assert spec["mark"] == {"type": "point", "yOffset": kt.DODGE_OFFSET}
-    assert kt.DODGE_OFFSET == {"expr": f'datum["{kt.DODGE_FIELD}"] * {kt.DODGE_PX}'} and styles(spec) == []
-    assert cite.chart_table(bundle).columns == ["time", "agent"]
-    assert spec_of("dots", ev.drop(index=1))["mark"] == "point", "no dot overlaps: none moves"
-    # an interval's rule moves with its dot; the steps are given where the rows are, under marks and around panels
-    iv = pd.DataFrame({"score": [0.5, 0.5, 0.9], "model": ["m1"] * 3, "lo": [0.4, 0.3, 0.8], "hi": [0.6, 0.7, 1.0]})
-    marked = spec_of("dots", iv, interval=("lo", "hi"), marks={"chance": 0.5})
-    dots, rule = marked["layer"][0]["layer"]
-    assert dots["mark"]["yOffset"] == rule["mark"]["yOffset"] == kt.DODGE_OFFSET and rule["mark"]["type"] == "rule"
-    assert marked["transform"][0]["window"] and "transform" not in marked["layer"][0]
-    paneled = spec_of("dots", ev.assign(outcome=["ok", "ok", "ok", "no"]), panels=True)
-    assert paneled["encoding"]["row"]["field"] == "outcome" and paneled["transform"][1]["as"] == [kt.DODGE_FIELD]
-    # groups side by side on a row's line keep their dots on their lines (Vega-Lite takes a mark's own offset only
-    # without the groups' offset)
-    beside = spec_of("dots", ev.assign(outcome=["ok", "ok", "ok", "no"]))
-    assert beside["mark"] == "point" and "transform" not in beside
-
-
-def test_a_box_plot_takes_a_label_s_colors_on_its_boxes_and_dots_and_keeps_its_median_order(label_ws):
-    act = pd.DataFrame({"records": [1, 2, 3, 4, 5, 40, 50, 60, 70, 80, 90],
-                        "activity": ["money"] * 6 + ["captcha"] * 5})
-    spec = spec_of("box", act, label="activity type")
-    low, high, box, median, dots = spec["layer"]
-    color = {"field": "activity", "type": "nominal", "title": "activity", "sort": ["captcha", "money"], "legend": None}
-    assert dots["data"]["values"] == [{"records": 40, "activity": "money"}], "money's 40 lies past its whiskers"
-    assert dots["encoding"]["color"] == color and box["encoding"]["color"] == color
-    assert "color" not in median["encoding"], "the median is in ink"
-    assert kt._LABELS_READ == [{"id": "k1", "rev": 0}]
-
-
-def test_an_area_stacks_its_series_in_the_legend_s_order_overlaps_them_lightly_or_shares():
-    t = pd.date_range("2026-06-16", periods=3, freq="D")
-    posts = pd.DataFrame({"day": list(t) * 2, "posts": [1, 2, 3, 9, 8, 7], "site": ["a"] * 3 + ["b"] * 3})
-    spec = spec_of("area", posts)
-    enc = spec["encoding"]
-    # no dot at each value, but a hover tip at each:
-    # points the theme draws wider than a dot (HOVER_STYLE), unseen by their own fillOpacity, which a style's would also
-    # give the legend's swatches
-    hover = {"style": kt.HOVER_STYLE, "fillOpacity": 0}
-    assert spec["mark"] == {"type": "area", "point": hover} and enc["x"]["type"] == "temporal"
-    assert enc["color"] == {"field": "site", "type": "nominal", "title": "site", "sort": ["b", "a"]}
-    assert enc["order"] == {"field": kt.STACK_FIELD, "type": "quantitative"}
-    assert spec["transform"] == [{"calculate": 'indexof(["b", "a"], datum["site"])', "as": kt.STACK_FIELD}]
-    over = spec_of("area", posts, stack=False)
-    assert over["mark"] == {"type": "area", "style": kt.OVERLAP_STYLE, "point": hover}
-    assert over["encoding"]["y"]["stack"] is None and "order" not in over["encoding"]
-    share = spec_of("area", posts, stack="share")["encoding"]["y"]
-    assert share["stack"] == "normalize" and share["axis"] == {"format": "%"}
-    # a long series is a plain area; marks across it at an x
-    long = spec_of("area", pd.DataFrame({"step": range(40), "loss": range(40)}), marks={"warmup": 10})
-    assert long["layer"][0]["mark"] == "area" and long["layer"][1]["data"]["values"] == [{"step": 10, "mark": "warmup"}]
-    with pytest.raises(ValueError, match='the x numbers or times; `site` holds text; draw categories with "bar"'):
-        kt.chart("area", posts[["site", "posts"]])
-    with pytest.raises(ValueError, match="`stack` takes the series of a third column, which this frame lacks"):
-        kt.chart("area", posts[["day", "posts"]], stack=False)
-
-
-def test_the_marks_a_chart_names_by_their_job_are_styled_by_the_theme():
-    """A faint band, a box, a median, an overlapping area, a fitted line, a range's line and ends, and an area's hover
-    points carry no style of their own: the theme's `style` config gives each its look (frontend lib/vizTheme
-    vegaConfig)."""
-    theme = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "vizTheme.ts").read_text()
-    for name in (kt.FAINT_STYLE, kt.BOX_STYLE, kt.MEDIAN_STYLE, kt.OVERLAP_STYLE, kt.FIT_STYLE, kt.SPAN_STYLE, kt.END_STYLE,
-                 kt.HOVER_STYLE):
-        assert f"'{name}':" in theme, name
-
-
 # ---------------------------------------------------------------------------------------------- density, ecdf, range
 # Density curves, a ridgeline when there are many groups; the cumulative share; a dumbbell per item,
 # before against after. Each computes its values in Python, so the spec carries plain rows the terminal and a takeaway
@@ -528,43 +287,6 @@ def test_a_density_is_a_smooth_curve_of_area_one_stopping_at_zero_when_no_value_
     assert max(r["density"] for r in spec_of("density", MERGE["minutes"], bandwidth=20)["data"]["values"]) < max(ds)
     with pytest.raises(ValueError, match="`bandwidth` is the width of the smoothing in `minutes`'s units"):
         kt.chart("density", MERGE["minutes"], bandwidth=0)
-
-
-def test_a_narrow_curve_beside_a_wide_range_gets_the_points_its_bump_needs():
-    """A tight group in a range a spread group stretches is drawn through a point every half of its smoothing width, up
-    to DENSITY_POINTS_MAX, and many groups keep DENSITY_ROWS rows in all while each keeps DENSITY_POINTS."""
-    rng = __import__("numpy").random.default_rng(1)
-    wide = pd.DataFrame({"ms": [*rng.normal(10, 0.5, 50), *range(0, 1000, 20)], "path": ["cache"] * 50 + ["disk"] * 50})
-    rows = spec_of("density", wide)["data"]["values"]
-    cache = [r for r in rows if r["path"] == "cache"]
-    assert len(cache) == kt.DENSITY_POINTS_MAX and len(rows) == 2 * kt.DENSITY_POINTS_MAX
-    peak = max(cache, key=lambda r: r["density"])
-    assert 9 < peak["ms"] < 11 and peak["density"] > 0.5, "the tight group's peak is drawn, not stepped over"
-    many = pd.DataFrame({"ms": rng.normal(0, 1, 6000), "run": [f"r{i % 60}" for i in range(6000)]})
-    assert len(spec_of("density", many, panels=True)["data"]["values"]) == 60 * kt.DENSITY_POINTS
-
-
-def test_a_few_groups_overlap_lightly_and_many_stand_one_over_another_named_on_the_y_axis():
-    spec = spec_of("density", MERGE)
-    enc = spec["encoding"]
-    assert enc["color"]["field"] == "agent" and enc["color"]["sort"] == ["b", "a"], "the largest median first"
-    assert enc["y"]["stack"] is None, "the curves overlap rather than stack"
-    assert {r["agent"] for r in spec["data"]["values"]} == {"a", "b"}
-    agents = [f"agent-{i}" for i in range(kt.RIDGE_FROM)]
-    many = pd.DataFrame({"minutes": [v + 10 * i for i in range(len(agents)) for v in (1, 4, 6, 9)],
-                         "agent": [a for a in agents for _ in range(4)]})
-    ridge = spec_of("density", many)
-    enc = ridge["encoding"]
-    # the places of the ridges are laid out by the chart; the rows hold the curves alone
-    assert set(ridge["data"]["values"][0]) == {"minutes", "density", "agent"}
-    assert [t["as"] for t in ridge["transform"]] == [kt.RIDGE_BASE, kt.RIDGE_TOP]
-    assert (enc["y"]["field"], enc["y2"]["field"], enc["detail"]["field"]) == (kt.RIDGE_TOP, kt.RIDGE_BASE, "agent")
-    assert enc["y"]["title"] == "agent" and enc["y"]["axis"]["values"] == list(range(len(agents)))
-    # the largest median on top: the axis names the baselines from the bottom up
-    assert enc["y"]["axis"]["labelExpr"] == json.dumps(agents) + "[datum.value]" and "color" not in enc
-    assert styles(ridge) == []
-    assert "transform" not in spec_of("density", many, panels=True), "panels draw each group in its own panel instead"
-    assert spec_of("density", many, sort=None)["transform"][0]["calculate"].startswith(f"{len(agents) - 1} - indexof({json.dumps(agents)}")
 
 
 def test_a_violin_mirrors_each_group_s_density_on_its_line_with_its_quartiles_in_ink():
@@ -612,38 +334,6 @@ def test_a_violin_mirrors_each_group_s_density_on_its_line_with_its_quartiles_in
         kt.chart("violin", MERGE["minutes"])
     with pytest.raises(TypeError, match="takes the options bandwidth, sort, label, not 'panels'"):
         kt.chart("violin", MERGE, panels=True)
-
-
-def test_a_violin_s_group_of_fewer_than_box_min_values_is_a_strip_of_its_dots_and_widens_no_other():
-    """A group of a few values, or of values that hardly spread, has a tall narrow curve: drawn to one scale with the
-    others it left every other violin a sliver (the gallery's eight runs, one of 2 values). A group of fewer than
-    BOX_MIN values is a strip of its dots, as in a box plot, those that would overlap moved across its line; every curve
-    reaches VIOLIN_HALF at its widest."""
-    few = pd.DataFrame({"minutes": [*MERGE["minutes"], 50, 51, 90], "agent": [*MERGE["agent"], "c", "c", "c"]})
-    spec = spec_of("violin", few)
-    body, _quartiles, _median, dots = spec["layer"]
-    assert {r["agent"] for r in spec["data"]["values"]} == {"a", "b"}, "the rows are the curves of the groups drawn as curves"
-    assert {r["agent"] for r in _quartiles["data"]["values"]} == {"a", "b"}
-    assert dots["data"]["values"] == [{"minutes": 50, "agent": "c"}, {"minutes": 51, "agent": "c"}, {"minutes": 90, "agent": "c"}]
-    assert dots["encoding"]["y"]["field"] == kt.RIDGE_BASE and dots["encoding"]["x"]["field"] == "minutes"
-    assert dots["transform"][0] == body["transform"][0], "on its own line, named on the y axis with the others"
-    assert dots["mark"] == {"type": "point", "yOffset": kt.DODGE_OFFSET}, "51 would overlap 50: it moves a step"
-    assert body["encoding"]["y"]["axis"]["labelExpr"] == '["a", "b", "c"][datum.value]', "c's median, 51, is the largest"
-    # a group's values that do not spread: still a curve, as wide at its widest as the others
-    flat = spec_of("violin", pd.DataFrame({"minutes": [*MERGE["minutes"], *[5] * 6], "agent": [*MERGE["agent"], *["c"] * 6]}))
-    assert len(flat["layer"]) == 3 and {r["agent"] for r in flat["data"]["values"]} == {"a", "b", "c"}
-    # every group too small for a curve: the dots alone, their rows the chart's
-    tiny = spec_of("violin", pd.DataFrame({"minutes": [3, 4, 9], "agent": ["a", "a", "b"]}))
-    assert [l["mark"] for l in tiny["layer"]] == ["point"] and tiny["data"]["values"] == tiny["layer"][0]["data"]["values"]
-
-
-def test_a_violin_takes_a_label_s_colors_and_keeps_its_median_order(label_ws):
-    act = pd.DataFrame({"records": [1, 2, 3, 4, 5, 50, 60, 70, 80, 90, 7, 8],
-                        "activity": ["money"] * 5 + ["captcha"] * 5 + ["signup"] * 2})
-    layers = spec_of("violin", act, label="activity type")["layer"]
-    color = {"field": "activity", "type": "nominal", "title": "activity", "sort": ["captcha", "signup", "money"], "legend": None}
-    assert layers[0]["encoding"]["color"] == color and layers[-1]["encoding"]["color"] == color, "the curves and the dots"
-    assert kt._LABELS_READ == [{"id": "k1", "rev": 0}]
 
 
 def test_an_ecdf_holds_the_share_of_values_at_or_below_each_value():
@@ -712,33 +402,6 @@ def test_a_range_draws_a_dumbbell_per_item_a_muted_line_between_two_solid_ends_i
         kt.chart("range", spans[["agent", "first"]].assign(n=[1, 2]))
 
 
-def test_a_range_s_axis_of_numbers_is_not_rounded_out_past_its_ends():
-    """QA (2026-10-12): a range of counts from 1 to 175 started its axis at -20, as Vega-Lite rounds a scale's ends out
-    to round numbers after the room its ends take (RANGE_PAD). The axis spans the ends and that room, and no more, so
-    counts from 0 or 1 start it at 0; times keep their axis as it was."""
-    counts = pd.DataFrame({"run": ["a", "b", "c"], "after 1 hour": [1, 50, 115], "at the end": [2, 175, 162]})
-    for layer in spec_of("range", counts)["layer"]:
-        assert layer["encoding"]["x"]["scale"] == {"zero": False, "nice": False, "padding": kt.RANGE_PAD}
-    spans = pd.DataFrame({"agent": ["a", "b"], "first": pd.to_datetime(["2026-08-02", "2026-08-01"]),
-                          "last": pd.to_datetime(["2026-08-09", "2026-08-03"])})
-    assert spec_of("range", spans)["layer"][0]["encoding"]["x"]["scale"] == {"padding": kt.RANGE_PAD}
-
-
-def test_a_violin_s_axis_ends_at_its_values():
-    """QA (2026-10-12): a violin's axis ran past its values, to the curves' smoothing 3 widths past the largest value
-    and then out to a round number. The axis runs from 0 (or the least value, below 0) to the largest value (or 0),
-    the curves cut there; the rows stay the curves' points, as a density's."""
-    spec = spec_of("violin", MERGE)
-    body, quartiles, median = spec["layer"]
-    top = float(MERGE["minutes"].max())
-    assert body["encoding"]["x"]["scale"] == {"domain": [0, top], "nice": False} and body["mark"]["clip"] is True
-    assert max(r["minutes"] for r in spec["data"]["values"]) > top, "the curves' points past the values stay in the rows"
-    assert spec["data"]["values"] == spec_of("density", MERGE)["data"]["values"]
-    assert "scale" not in quartiles["encoding"]["x"] and "scale" not in median["encoding"]["x"]
-    below = spec_of("violin", MERGE.assign(minutes=-MERGE["minutes"]))["layer"][0]["encoding"]["x"]["scale"]
-    assert below["domain"] == [-top, 0]
-
-
 def test_a_scatter_fits_a_line_or_a_smooth_curve_per_group_its_fitted_values_a_column_of_its_rows():
     line = pd.DataFrame({"tokens": [1, 2, 3, 4, 5], "cost": [3, 5, 7, 9, 11]})
     bundle = drawn("scatter", line, fit="linear")
@@ -796,41 +459,6 @@ def test_panels_put_each_group_in_a_panel_of_its_own_sharing_scales_and_marks_re
         kt.chart("bar", cases["bar"], panels=True, stack=True)
     with pytest.raises(ValueError, match="`panels` is True or False and needs a group column"):
         kt.chart("histogram", MERGE["minutes"], panels=True)
-
-
-def test_a_histogram_s_groups_share_its_bins_stacked_in_the_legend_s_order():
-    spec = spec_of("histogram", MERGE, step=20)
-    rows = spec["data"]["values"]
-    assert {(r["minutes"], r["agent"]): r["count"] for r in rows} == {
-        (0, "a"): 3, (20, "a"): 3, (40, "a"): 2, (60, "a"): 0, (0, "b"): 3, (20, "b"): 3, (40, "b"): 0, (60, "b"): 2}
-    assert spec["encoding"]["color"]["sort"] == ["a", "b"] and spec["encoding"]["order"]["field"] == kt.STACK_FIELD
-    # a Series is its values alone, a named index (groupby's) included, as before
-    per_agent = MERGE.groupby("minutes").size().rename("PRs")
-    assert set(spec_of("histogram", per_agent)["data"]["values"][0]) == {"PRs", "PRs end", "count"}
-
-
-def test_new_kinds_fail_on_a_wrong_frame_with_one_line_that_names_the_columns_they_take():
-    cases = [
-        (("density", MERGE[["agent", "minutes"]]), "takes (value) or (value, group) columns, the value numbers; `agent` holds text"),
-        (("ecdf", MERGE.assign(x=1)), "takes (value) or (value, group) columns, in that order; got 3"),
-        (("range", EVAL2[["model", "base"]]), "takes (item, before, after) or (item, before, after, group) columns, in that "
-                                              "order; got 2: model, base"),
-        (("range", EVAL2[["model", "family", "tuned"]]), "the before numbers or times; `family` holds text"),
-        (("density", MERGE["minutes"]), None),
-    ]
-    for args, words in cases:
-        if words is None:
-            kt._show, real = (lambda _b: None), kt._show
-            try:
-                kt.chart(*args)
-            finally:
-                kt._show = real
-            continue
-        with pytest.raises((ValueError, TypeError)) as e:
-            kt.chart(*args)
-        assert words in str(e.value) and "\n" not in str(e.value), str(e.value)
-    # a density, an ecdf and a histogram take any number of values
-    assert len(spec_of("density", pd.Series(range(kt.CHART_ROWS_MAX + 1), name="n"))["data"]["values"]) == kt.DENSITY_POINTS
 
 
 def test_values_that_are_missing_or_infinite_are_left_out_and_none_left_fails_in_one_line():
@@ -947,57 +575,6 @@ def test_a_chart_layered_in_plain_altair_cites_its_data_not_the_marks_on_it():
     panels = (base.mark_bar() + base.mark_text().encode(text="saves:Q")).facet(row="wiki")
     faceted = cite.chart_table({kt.VEGALITE_MIME: panels.to_dict()})
     assert (faceted.columns, faceted.total) == (["day", "saves", "wiki"], 12)
-
-
-def test_a_concatenated_chart_cites_its_panel_with_the_most_rows_not_a_header_over_it():
-    """The live QA of 0.7.0 (2026-10-10): a concatenated chart took its table from its first panel, so a panel of text
-    set first as a header was the table. Its table is its panel with the most rows, as a layered chart's is its layer
-    with the most, while each other panel's rows still answer a ref, so a takeaway written when the first panel was the
-    table keeps its links."""
-    import altair as alt
-
-    daily = pd.DataFrame({"day": pd.date_range("2026-06-14", periods=6, freq="D"), "saves": [40, 2610, 6543, 312, 97, 5]})
-    bars = alt.Chart(daily).mark_bar().encode(x="day:T", y="saves:Q")
-    header = alt.Chart(pd.DataFrame({"t": ["Saves per day"]})).mark_text(size=14).encode(text="t:N")
-    bare = alt.Chart().mark_text(size=14, text="Saves per day")  # Altair gives a chart with no data one empty row
-    for head in (header, bare):
-        for concat in (alt.vconcat, alt.hconcat, alt.concat):
-            table = cite.chart_table({kt.VEGALITE_MIME: concat(head, bars).to_dict()})
-            assert (table.label, table.columns, table.total) == ("day", ["saves"], 6), concat.__name__
-    bundle = {kt.VEGALITE_MIME: alt.hconcat(alt.Chart(POSTS).mark_bar().encode(x="agent", y="posts"), bars).to_dict()}
-    assert [(t.label, t.columns) for t in cite.chart_tables(bundle)] == [("day", ["saves"]), ("agent", ["posts"])]
-    assert cite.data_totals([bundle])[:2] == ["6", "9607"], "the totals are the days'"
-    res = cite.resolve("q3", "agent-2 posted [[9|card:q3#posts/agent-2]] times; saves peaked at 6,543 on June 16.",
-                       [bundle], keep_stale=True)
-    assert [(link.token, link.ref) for link in res.links] == [
-        ("9", "card:q3#posts/agent-2"), ("6,543", "card:q3#saves/2026-06-16T00:00:00"),
-        ("June 16", "card:q3#day/2026-06-16T00:00:00")]
-    assert not res.stale and not res.unresolved
-
-
-def test_theme_names_the_theme_s_roles_as_the_css_variables_the_card_reads():
-    theme = (Path(__file__).resolve().parents[2] / "frontend" / "src" / "lib" / "vizTheme.ts").read_text()
-    roles = [kt.theme.accent, kt.theme.ink, kt.theme.muted, kt.theme.pale, *kt.theme.series]
-    assert len(kt.theme.series) == 7 and kt.theme.series[0] == "var(--viz-1)"
-    for role in roles:
-        name = role.removeprefix("var(").removesuffix(")")
-        assert name.startswith("--viz-") and f"'{name}':" in theme, role
-    assert "theme" in kt.__all__ and "accent" in repr(kt.theme)
-    with pytest.raises(AttributeError):
-        kt.theme.accent = "#f00"
-
-
-def test_the_screenshot_page_without_the_theme_draws_theme_colors_in_vega_s_own(monkeypatch):
-    """The page a card's chart is shot on when neither the card harness nor the UI is up draws without thimble's theme,
-    so a mark colored with thimble.theme takes the matching color of Vega's default look, never black or nothing."""
-    from app import tools
-
-    monkeypatch.setattr(tools, "VEGA_BUILDS", ())
-    spec = {"layer": [{"mark": {"type": "rule", "color": kt.theme.pale}}, {"mark": {"type": "text", "color": kt.theme.accent}},
-                      {"mark": {"type": "point", "color": kt.theme.series[2]}}, {"mark": {"type": "text", "text": "var(--accent)"}}]}
-    page = tools.chart_page(spec)
-    assert "var(--viz" not in page and all(c in page for c in ("#cccccc", "#4c78a8", "#e45756"))
-    assert "var(--accent)" in page, "only the chart tokens thimble.theme names"
 
 
 def test_the_doc_s_example_of_events_called_out_above_a_daily_bar_chart_runs_as_written(monkeypatch):

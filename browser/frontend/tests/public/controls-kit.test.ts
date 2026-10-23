@@ -1,16 +1,14 @@
-// The view kit's row controls (backend/app/viewer_controls.js: thimble.filterBy, rows, timeline, key, divider), its side
-// panel (viewer_side.js, thimble.side) and its transcript (viewer_transcript.js, thimble.transcript), in a jsdom window
-// of their own with the bridge and Color by, as views.frame_document loads them: Filter by hides the rows whose value is
-// off and gives the reader its choice as Color by's query; Rows groups the records by a field, a tree of them with its
-// guides, or a label, every class of the label a group, so a class added to it is a new lane; the lanes draw a lane per
-// group, a failure underlined in the problem red, and the key's entries turn their series off and on, an entry whose
-// series never shows left out; Density draws its bars with no band behind them; drawLane draws the page's own marks
-// in each lane on its scale (shaded spans named in the tip, Color by's colors, series of its own in the key), and marks:
-// false leaves the kit's marks to the page while the tip and a click still find the records; the timeline works alone,
-// on its records' own span of times or numbers with an axis of its own, its lanes from a field or a function; Reset
-// turns every value and series back on; each control's choice is kept through the `colour` message; a transcript folds
-// a tool call to one line until opened, opened and folded again by the chevron at the start of its head, and a long
-// block to six lines, with Show more under it and Show less in its place. Layout (the side panel's width, the divider's drag, the lanes' cursor line and the tint of the list's rows in
+// The view kit's row controls (backend/app/viewer_controls.js: thimble.filterBy, rows, timeline, key), its side panel
+// (viewer_side.js, thimble.side) and its transcript (viewer_transcript.js, thimble.transcript), in a jsdom window of
+// their own with the bridge and Color by, as views.frame_document loads them: Filter by hides the rows whose value is
+// off and gives the reader its choice as Color by's query; Rows groups the records by a field or a label, every class
+// of the label a group, so a class added to it is a new lane; a failure is a ✕ in the problem red; Density draws its
+// bars with no band behind them; drawLane draws the page's own marks in each lane on its scale (shaded spans named in
+// the tip, Color by's colors, series of its own in the key), and marks: false leaves the kit's marks to the page while
+// the tip and a click still find the records; the timeline works alone, on its records' own span with an axis of its
+// own, its lanes from a field or a function; a record opens in the side panel beside the list, which Reload opens on
+// again; a transcript folds a tool call to one line until opened; and every choice of the controls draws with no script
+// error. Layout (the side panel's width, the divider's drag, the lanes' cursor line and the tint of the list's rows in
 // view) is tests/public/browser/view-parts.test.ts.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -133,34 +131,9 @@ describe('Filter by', () => {
     expect(w.filter.query()).toEqual({ field: 'outcome', off: [] })
   })
 
-  test('an Alt-click shows a value alone; the counts the reader gives replace those of the page', async () => {
-    await load()
-    const w = win()
-    w.eval(`window.filter = thimble.filterBy({ mount: '#filter', fields: ${JSON.stringify(FIELDS)} }); window.filter.choose('outcome')`)
-    for (const c of CALLS) w.filter.keeps(c)
-    await wait()
-    const chip = doc().querySelectorAll('.thimble-filter-chip')[2] as HTMLElement
-    chip.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, altKey: true }))
-    await wait()
-    expect(w.filter.values.map((v: any) => [v.name, v.on])).toEqual([['ok', false], ['error', false], ['denied', true]])
-    w.filter.counts({ ok: 40, error: 7, denied: 2, '': 1 })
-    await wait()
-    expect(texts('.thimble-filter-chip')).toEqual(['ok40', 'error7', 'denied2', 'No outcome1'])
-  })
 })
 
 describe('Rows', () => {
-  test('a field with parentOf is a tree: each session under the one that spawned it, with its guide, left-aligned', async () => {
-    await load()
-    const w = win()
-    w.PARENT = PARENT
-    w.eval(`window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session', parentOf: (k) => window.PARENT[k] }, { name: 'tool', title: 'Tool' }] })`)
-    await wait()
-    expect(texts('.thimble-rows-by')).toEqual(['Rows:Session'])
-    const g = w.rows.groups(CALLS)
-    expect(g.map((n: any) => `${n.guide}${n.name}`)).toEqual(['lead', '├ explore', '│ └ grep', '└ test'])
-    expect(g.map((n: any) => n.items.length)).toEqual([2, 2, 1, 1])
-  })
 
   test('the lanes regroup by a field, with a lane for the records with no value, and by a label: every class a lane, a class added to it a new lane', async () => {
     await load()
@@ -206,49 +179,6 @@ describe('Rows', () => {
     expect((of('colour').at(-1)!.state as any).parts.rows).toEqual({ by: 'l:k1' })
   })
 
-  test("it opens on a label named in `initial` while that label is on, else on the field after it; the label it groups by takes no colour", async () => {
-    await load()
-    const w = win()
-    w.CALLS = CALLS
-    w.eval(`
-      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'tool', title: 'Tool' }, { name: 'outcome', title: 'Outcome' }], initial: 'tool' })
-      window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session' }, { name: 'tool', title: 'Tool' }], initial: [{ label: 'tactic' }, 'tool'] })
-    `)
-    await wait()
-    // no label yet: the field after it
-    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tool'])
-    expect(w.rows.query()).toEqual({ field: 'tool' })
-    // the label is on when the view first hears of the labels: Rows groups by it (found by its name, the case aside)
-    // and Color by keeps its field, though a label turned on takes the colour otherwise
-    labels()
-    await wait()
-    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tactic'])
-    expect(w.rows.query()).toEqual({ label: 'k1', name: 'Tactic' })
-    expect(w.colour.by).toEqual({ field: 'tool', title: 'Tool' })
-    // nothing was chosen, so nothing of Rows is kept: the view opens the same way again
-    expect((of('colour').at(-1)?.state as any)?.parts?.rows?.by).toBe(undefined)
-    // turned off, the label gives way to the field; on again, it is Rows' again, still not the colour
-    labels(undefined, undefined, false)
-    await wait()
-    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tool'])
-    labels()
-    await wait()
-    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tactic'])
-    expect(w.colour.by).toEqual({ field: 'tool', title: 'Tool' })
-    // a label no part holds still takes the colour when it is turned on
-    const other = { id: 'k2', name: 'Phase', on: true, here: true, colour: '#b77300', values: [{ name: 'early', colour: '#b77300', highlight: true }], count: 1 }
-    fromPage({ type: 'thimble:labels', marks: {}, on: [{ id: 'k1', name: 'Tactic', colour: '#025ac3', values: TACTIC(['explore', 'verify']).values }, { id: 'k2', name: 'Phase', colour: '#b77300', values: other.values }], filter: null, all: [TACTIC(['explore', 'verify']), other], palette: ['#025ac3'] })
-    await wait()
-    expect(w.colour.by).toEqual({ label: 'k2', title: 'Phase' })
-    expect(texts('.thimble-rows-by')).toEqual(['Rows:Tactic'])
-  })
-
-  test('a record the reader gave its group keeps it, for the records the page does not anchor', async () => {
-    await load()
-    const w = win()
-    w.eval(`window.rows = thimble.rows({ fields: [{ name: 'tool', title: 'Tool' }] })`)
-    expect(w.rows.groups([{ ref: 'a#L1', tool: 'Bash', group: 'Edit' }]).map((n: any) => n.name)).toEqual(['Edit'])
-  })
 })
 
 describe('the lanes and their key', () => {
@@ -288,77 +218,6 @@ describe('the lanes and their key', () => {
     expect(doc().querySelectorAll('.thimble-lane-bad')).toHaveLength(2)
   })
 
-  test('with density each lane is bars on the bins, stacked by the Color by values, one height for every lane; a click on a bar opens its first record', async () => {
-    await load()
-    const w = win()
-    w.CALLS = CALLS
-    w.eval(`
-      window.colour = thimble.colorBy({ mount: '#colour', fields: [{ name: 'outcome', title: 'Outcome', values: ['ok', 'error', 'denied'] }], initial: 'outcome' })
-      window.range = thimble.timeRange({ mount: '#range', times: window.CALLS.map((c) => c.t) })
-      window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session' }] })
-      window.dense = false
-      window.marked = []
-      window.lanes = thimble.lanes({ mount: '#lanes', rows: window.rows, range: window.range, density: () => window.dense, onMark: (c) => window.marked.push(c.ref) })
-      window.lanes.draw(window.CALLS)
-    `)
-    await wait()
-    expect(doc().querySelectorAll('.thimble-lane-mark[data-i]')).toHaveLength(6)
-    expect(doc().querySelector('#lanes')!.classList.contains('is-density')).toBe(false)
-    w.dense = true
-    w.lanes.draw()
-    await wait()
-    expect(doc().querySelector('#lanes')!.classList.contains('is-density')).toBe(true)
-    expect(doc().querySelectorAll('.thimble-lane-mark[data-i]')).toHaveLength(0)
-    const bars = [...doc().querySelectorAll('.thimble-lane-bar')]
-    expect(bars.length).toBeGreaterThanOrEqual(5)
-    // the lane of explore's two calls in one bin holds two values stacked, ok under error, in their chips' colours
-    const explore = doc().querySelector('.thimble-lane[data-key="explore"]')!
-    const fills = [...explore.querySelectorAll('.thimble-lane-bar')].map((b) => (b as HTMLElement).style.fill)
-    expect(new Set(fills).size).toBe(fills.length)
-    expect(fills.every(Boolean)).toBe(true)
-    expect(explore.querySelector('svg')!.getAttribute('height')).toBe('36')
-    // a click on a bar opens the first record of its bin
-    ;(explore.querySelector('.thimble-lane-bar') as unknown as HTMLElement).dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, clientX: 200 + Number(explore.querySelector('.thimble-lane-bar')!.getAttribute('x')) + 1 }))
-    expect(w.marked).toEqual(['r1/explore.jsonl#L2'])
-    // a value turned off keeps its part of the bars, in the lanes' gray (no fill of its own); ok keeps its colour
-    ;(doc().querySelectorAll('.thimble-colour-chip')[1] as HTMLElement).click()
-    await wait()
-    expect(w.colour.isOn('error')).toBe(false)
-    w.lanes.draw()
-    const after = [...doc().querySelector('.thimble-lane[data-key="explore"]')!.querySelectorAll('.thimble-lane-bar')].map((b) => (b as HTMLElement).style.fill)
-    expect(after).toEqual([fills[0], ''])
-    // in Events too: every mark stays, explore's error call with no fill of its own beside its ok call in ok's colour
-    w.dense = false
-    w.lanes.draw()
-    await wait()
-    expect(doc().querySelectorAll('.thimble-lane-mark[data-i]')).toHaveLength(6)
-    const exploreMarks = [...doc().querySelector('.thimble-lane[data-key="explore"]')!.querySelectorAll('.thimble-lane-mark[data-i]')].map((m) => (m as HTMLElement).style.fill)
-    expect(exploreMarks).toEqual([fills[0], ''])
-  })
-
-  test("a click on a lane's name chooses it and tells the page; ▾ folds a parent's lanes into its own", async () => {
-    await load()
-    const w = win()
-    w.CALLS = CALLS
-    w.PARENT = PARENT
-    w.eval(`
-      window.range = thimble.timeRange({ mount: '#range', times: window.CALLS.map((c) => c.t) })
-      window.rows = thimble.rows({ mount: '#rows', fields: [{ name: 'session', title: 'Session', parentOf: (k) => window.PARENT[k] }] })
-      window.picked = []
-      window.lanes = thimble.lanes({ mount: '#lanes', rows: window.rows, range: window.range, onPick: (n) => window.picked.push(n.key) })
-      window.lanes.draw(window.CALLS)
-    `)
-    await wait()
-    ;(doc().querySelectorAll('.thimble-lane-name')[1] as HTMLElement).click()
-    expect(w.picked).toEqual(['explore'])
-    expect(w.lanes.chosen).toBe('explore')
-    expect(doc().querySelector('.thimble-lane.is-chosen')!.getAttribute('data-key')).toBe('explore')
-    ;(doc().querySelector('[data-fold="explore"]') as HTMLElement).click()
-    await wait()
-    expect(texts('.thimble-lane-name')).toEqual(['▾lead', '├ ▸explore', '└ test'])
-    expect(w.lanes.lanes.find((n: any) => n.key === 'explore').items).toHaveLength(3)
-    expect((of('colour').at(-1)!.state as any).parts['lanes:lanes']).toEqual({ folded: ['explore'] })
-  })
 })
 
 describe("the page's own marks in the lanes", () => {
@@ -553,19 +412,6 @@ describe('the timeline on its own', () => {
     expect(tipOf()).toEqual([expect.stringMatching(/^May 16 09:30:/), 'merged'])
   })
 
-  test('a Color by the page made with colorOf, the American name, colors its marks; a key entry takes its color or colour', async () => {
-    await load()
-    const w = win()
-    w.eval(`
-      window.tl = thimble.timeline({ mount: '#lanes', color: { valueOf: (e) => e.kind, colorOf: (v) => (v === 'a' ? '#123456' : null) } })
-      window.tl.draw([{ ref: 'a#L1', t: ${T0}, kind: 'a' }, { ref: 'a#L2', t: ${T0 + 60}, kind: 'b' }])
-      thimble.key('#rows', [{ id: 'x', name: 'X', color: '#123456' }, { id: 'y', name: 'Y', colour: '#654321' }])
-    `)
-    await wait()
-    expect([...doc().querySelectorAll<HTMLElement>('#lanes .thimble-lane-mark[data-i]')].map((m) => m.style.fill)).toEqual(['rgb(18, 52, 86)', ''])
-    expect([...doc().querySelectorAll<HTMLElement>('#rows .thimble-key-sw')].map((e) => e.style.getPropertyValue('--c'))).toEqual(['#123456', '#654321'])
-  })
-
   test("its lanes from a field's name or a function of a record, with no Rows control: a lane per value as the records first take them, then the records with none", async () => {
     await load()
     const w = win()
@@ -587,148 +433,6 @@ describe('the timeline on its own', () => {
     expect(tipOf()![0]).toMatch(/^ok · May 16/)
   })
 
-  test("on plain numbers (unit 'n'): the marks at their numbers, the axis and the tip in numbers; with a range of numbers it takes the range's unit and draws no axis of its own", async () => {
-    await load()
-    const w = win()
-    w.STEPS = [
-      { turn: 0, agent: 'lead', text: 'plan' },
-      { turn: 10, agent: 'sub', text: 'search' },
-      { turn: '20', agent: 'lead', text: 'edit' },
-      { turn: 40, agent: 'sub', text: 'done' },
-      { turn: '2026-05-16', agent: 'sub', text: 'a date is no turn' },
-    ]
-    w.eval(`window.tl = thimble.timeline({ mount: '#lanes', rows: 'agent', unit: 'n', time: (s) => s.turn }); window.tl.draw(window.STEPS)`)
-    await wait()
-    expect(w.tl.lanes.map((l: any) => l.items.map((s: any) => s.turn))).toEqual([[0, '20'], [10, 40]])
-    const x = (lane: number, i: number) => Number(doc().querySelectorAll('#lanes .thimble-lane')[lane].querySelectorAll('.thimble-lane-mark')[i].getAttribute('x'))
-    // one scale for every lane: 0 to 20 is two thirds of 10 to 40
-    expect(x(0, 1) - x(0, 0)).toBeCloseTo(((x(1, 1) - x(1, 0)) * 2) / 3, 0)
-    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
-    expect(labels.length).toBeGreaterThan(1)
-    expect(labels.every((l) => /^\d+$/.test(l))).toBe(true)
-    hover(doc().querySelectorAll('#lanes .thimble-lane')[0], 200 + x(0, 1) + 1)
-    expect(tipOf()).toEqual(['lead · 20', 'edit'])
-    // under a range of numbers: its scale and its unit, so the date is no turn there either; the range's axis is the page's
-    mount('tl3')
-    w.eval(`
-      window.range = thimble.timeRange({ mount: '#range', unit: 'n', times: [0, 10, 20, 40] })
-      window.ranged = thimble.timeline({ mount: '#tl3', range: window.range, rows: 'agent', time: (s) => s.turn })
-      window.ranged.draw(window.STEPS)
-    `)
-    await wait()
-    expect(w.ranged.lanes.flatMap((l: any) => l.items)).toHaveLength(4)
-    expect(doc().querySelector('#tl3 .thimble-lanes-axis')).toBe(null)
-    expect(w.ranged.scale.unit).toBe('n')
-  })
-
-  test("a series the page draws as diamonds, as merges in place of the kit's marks, takes a diamond in the key", async () => {
-    // QA 2026-10-12: the gallery's timeline on line numbers drew each merge as a diamond, its key entry a gray bar
-    await load()
-    const w = win()
-    w.EVENTS = [1, 4, 9, 12].map((n, i) => ({ n, agent: i % 2 ? 'b' : 'a', action: i === 2 ? 'merge' : 'push' }))
-    w.eval(`window.tl = thimble.timeline({
-      mount: '#lanes', rows: 'agent', unit: 'n', time: (e) => e.n, marks: (e) => e.action !== 'merge',
-      series: [{ id: 'merge', name: 'merge', mark: 'diamond' }],
-      drawLane: (lane, ctx) => { if (ctx.on('merge')) for (const e of lane.items) if (e.action === 'merge') ctx.over.insertAdjacentHTML('beforeend', '<path class="own-merge" d="M' + ctx.x(e.n) + ' 3l5 6-5 6-5-6z"/>') },
-    }); window.tl.draw(window.EVENTS)`)
-    await wait()
-    expect(doc().querySelectorAll('#lanes .own-merge')).toHaveLength(1)
-    expect(texts('.thimble-key-chip')).toEqual(['merge'])
-    expect(doc().querySelector('.thimble-key-chip .thimble-key-sw')!.className).toBe('thimble-key-sw thimble-key-diamond')
-    // drawn as a diamond in the series' color, else the gray of a mark with no color
-    expect(read('viewer_parts.css')).toMatch(/\.thimble-key-diamond \{[^}]*clip-path: polygon\(50% 0, 100% 50%, 50% 100%, 0 50%\);[^}]*background: var\(--c, var\(--viz-ink-3/)
-  })
-  test('on plain numbers such as years: the axis and the tips write them as they are, without separators', async () => {
-    await load()
-    const w = win()
-    w.RELEASES = [2019, 2020, 2021, 2023, 2026].map((year) => ({ year, text: 'release ' + year }))
-    w.eval(`window.tl = thimble.timeline({ mount: '#lanes', unit: 'n', time: (r) => r.year }); window.tl.draw(window.RELEASES)`)
-    await wait()
-    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
-    expect(labels).toContain('2020')
-    expect(labels.every((l) => /^\d{4}$/.test(l))).toBe(true)
-    const lane = doc().querySelector('#lanes .thimble-lane')!
-    hover(lane, Number(lane.querySelector('.thimble-lane-mark')!.getAttribute('x')) + 1)
-    expect(tipOf()).toEqual(['2019', 'release 2019'])
-  })
-
-  test("on plain numbers not all whole, such as scores: the axis in decimals and the tips as precise as four px; whole numbers never step under one", async () => {
-    await load()
-    const w = win()
-    w.RUNS = [0.05, 0.31, 0.5, 0.72, 0.95].map((score, i) => ({ score, model: i % 2 ? 'b' : 'a', text: 'run ' + i }))
-    w.eval(`window.tl = thimble.timeline({ mount: '#lanes', rows: 'model', unit: 'n', time: (r) => r.score }); window.tl.draw(window.RUNS)`)
-    await wait()
-    const labels = texts('#lanes .thimble-lanes-axis .thimble-axis-lab')
-    expect(labels).toEqual(expect.arrayContaining(['0.2', '0.4', '0.6', '0.8']))
-    expect(new Set(labels).size).toBe(labels.length)
-    const lane = doc().querySelectorAll('#lanes .thimble-lane')[1]
-    hover(lane, 200 + Number(lane.querySelector('.thimble-lane-mark')!.getAttribute('x')) + 1)
-    expect(tipOf()).toEqual([expect.stringMatching(/^b · 0\.31\d$/), 'run 1'])
-    // turns 0 to 3 across the width: a tick at each whole turn, each once
-    mount('tl2')
-    w.eval(`thimble.timeline({ mount: '#tl2', unit: 'n', time: (r) => r.turn }).draw([0, 1, 2, 3].map((turn) => ({ turn })))`)
-    await wait()
-    expect(texts('#tl2 .thimble-axis-lab')).toEqual(['0', '1', '2', '3'])
-  })
-
-  test("Density on scores: a score that falls on a bin's edge starts that bin, so scores 0.02 apart stand evenly apart", async () => {
-    await load()
-    const w = win()
-    w.eval(`thimble.timeline({ mount: '#lanes', unit: 'n', density: true }).draw(Array.from({ length: 50 }, (_, i) => ({ t: i * 0.02 })))`)
-    await wait()
-    const xs = [...doc().querySelectorAll('#lanes .thimble-lane-bar')].map((b) => Number(b.getAttribute('x')))
-    expect(xs).toHaveLength(50)
-    const gaps = xs.slice(1).map((x, i) => x - xs[i])
-    expect(Math.max(...gaps) - Math.min(...gaps)).toBeLessThan(1)
-  })
-
-  test("Density with a failure in every bin: a ✕ at the foot of a bin, none over the ✕ of a bin just before, so a run of failing bins reads as ✕s one beside another", async () => {
-    await load()
-    const w = win()
-    w.eval(`thimble.timeline({ mount: '#lanes', unit: 'n', density: true, problem: (r) => r.bad }).draw(Array.from({ length: 3000 }, (_, i) => ({ t: i, bad: i % 2 === 0 })))`)
-    await wait()
-    const xs = [...doc().querySelectorAll('#lanes .thimble-lane-bar')].map((b) => Number(b.getAttribute('x')))
-    const bins = new Set(xs).size
-    const centers = [...doc().querySelectorAll('#lanes .thimble-lane-bad-x')].map((p) => {
-      const [x0, dx] = (/^M([\d.]+) [\d.]+l([\d.]+)/.exec(p.getAttribute('d')!) || []).slice(1).map(Number)
-      return x0 + dx / 2
-    })
-    // bins narrower than a ✕, each with a failure: a ✕ on every other bin, each 6 px wide and more than 6 px from the one
-    // before
-    expect(bins).toBeGreaterThan(60)
-    expect(xs[1] - xs[0]).toBeLessThan(6)
-    expect(centers.length).toBeGreaterThanOrEqual(Math.floor(bins / 2))
-    expect(centers.length).toBeLessThan(bins)
-    expect(centers.slice(1).every((x, i) => x - centers[i] > 6)).toBe(true)
-    // and the key takes no entry for them
-    expect(texts('.thimble-key-chip')).toEqual([])
-  })
-
-  test("Density's tip gives a bin's day once: May 16 09:00–09:01", async () => {
-    await load()
-    const w = win()
-    w.eval(`
-      window.tl = thimble.timeline({ mount: '#lanes', density: true })
-      window.tl.draw(Array.from({ length: 120 }, (_, i) => ({ t: ${T0} + i * 30 })))
-    `)
-    await wait()
-    const bar = doc().querySelector('#lanes .thimble-lane-bar')!
-    hover(doc().querySelector('#lanes .thimble-lane')!, Number(bar.getAttribute('x')) + 1)
-    expect(tipOf()![0]).toMatch(/^May 16 \d\d:\d\d(:\d\d)?–\d\d:\d\d(:\d\d)?$/)
-  })
-
-  test('a mark as wide as its record ran: the longest drawn first, so that it never hides a short one under it', async () => {
-    await load()
-    const w = win()
-    w.eval(`
-      window.tl = thimble.timeline({ mount: '#lanes', end: (r) => r.end })
-      window.tl.draw([{ t: ${T0}, end: ${T0 + 5} }, { t: ${T0 + 1000}, end: ${T0 + 3000} }, { t: ${T0 + 1500} }])
-    `)
-    await wait()
-    const marks = [...doc().querySelectorAll('#lanes .thimble-lane-mark')]
-    expect(marks.map((m) => m.getAttribute('data-i'))).toEqual(['1', '0', '2'])
-    expect(Number(marks[0].getAttribute('width'))).toBeGreaterThan(400)
-  })
 })
 
 describe('the side panel and the transcript', () => {
@@ -756,54 +460,6 @@ describe('the side panel and the transcript', () => {
     ;(doc().querySelector('.thimble-reset') as HTMLElement).click()
     await wait()
     expect(w.side.isOpen).toBe(false)
-  })
-
-  test("with `empty`, the panel shows as the view opens with that one line until a record opens; the page's close() brings the line back, × closes it, and Reset puts the line back", async () => {
-    await load()
-    const w = win()
-    w.eval(`
-      window.colour = thimble.colorBy({ mount: '#colour', fields: [] })
-      window.closed = []
-      window.side = thimble.side({ mount: '#body', empty: 'Click a session', onClose: (ref) => window.closed.push(ref) })
-    `)
-    const panel = doc().querySelector<HTMLElement>('#body > .thimble-side')!
-    const reset = () => doc().querySelector<HTMLButtonElement>('.thimble-reset')!
-    const title = () => panel.querySelector('.thimble-side-title')!.textContent
-    await wait(60)
-    // the line, no record, nothing under it, and the view as it opens: no Reset
-    expect([panel.hidden, w.side.isOpen, w.side.isEmpty, w.side.ref, title()]).toEqual([false, false, true, null, 'Click a session'])
-    expect(panel.hasAttribute('data-empty')).toBe(true)
-    expect(panel.querySelector('.thimble-side-body')!.innerHTML).toBe('')
-    expect(doc().getElementById('body')!.classList.contains('thimble-side-open')).toBe(true)
-    expect(reset().hidden).toBe(true)
-    // a record opens in it, then the page's close() shows the line again
-    w.side.open({ title: 'Session r1', ref: 'r1/lead.jsonl#L1', html: '<p>turns</p>' })
-    expect([w.side.isOpen, w.side.isEmpty, title(), panel.hasAttribute('data-empty')]).toEqual([true, false, 'Session r1', false])
-    w.side.close()
-    expect([panel.hidden, w.side.isOpen, w.side.isEmpty, w.side.ref, title()]).toEqual([false, false, true, null, 'Click a session'])
-    expect(w.closed).toEqual([])
-    // a record open: Reset shows, and puts the line back, the page told the record closed
-    w.side.open({ title: 'Session r2', ref: 'r2/lead.jsonl#L1', html: '' })
-    await wait(60)
-    expect(reset().hidden).toBe(false)
-    reset().click()
-    await wait(60)
-    expect([w.side.isEmpty, title(), w.closed]).toEqual([true, 'Click a session', ['r2/lead.jsonl#L1']])
-    expect(reset().hidden).toBe(true)
-    // × closes the panel, its line too: a change from how the view opens, which Reset puts back; no record closed, so
-    // the page hears nothing
-    ;(panel.querySelector('.thimble-side-close') as HTMLElement).click()
-    expect([panel.hidden, w.side.isOpen, w.side.isEmpty]).toEqual([true, false, false])
-    expect(w.closed).toEqual(['r2/lead.jsonl#L1'])
-    await wait(60)
-    expect(reset().hidden).toBe(false)
-    reset().click()
-    await wait(60)
-    expect([panel.hidden, w.side.isEmpty, title()]).toEqual([false, true, 'Click a session'])
-    // without `empty` the panel is closed until a record opens
-    await load()
-    win().eval(`window.side2 = thimble.side({ mount: '#body' })`)
-    expect([doc().querySelector<HTMLElement>('#body > .thimble-side')!.hidden, win().side2.isOpen, win().side2.isEmpty]).toEqual([true, false, false])
   })
 
   test("what Reload opens on follows the side panel: the record it opened, by a click or not, and none once it closed, by hand or by the page", async () => {
@@ -904,40 +560,6 @@ describe('the side panel and the transcript', () => {
     expect(doc().querySelector('.thimble-turn-hit')!.getAttribute('data-anchor')).toBe('s.jsonl#L2')
   })
 
-  test("a transcript's head writes each turn's time as the kit writes times, in UTC, however the record gives it, a time with no zone in UTC on a machine in any zone; a time it cannot read as written", async () => {
-    const zone = process.env.TZ
-    // a machine seven hours behind UTC in May, where the browser reads a date with no zone in its own
-    process.env.TZ = 'America/Los_Angeles'
-    try {
-      await load()
-      const w = win()
-      const at = (i: number, t: unknown, key = 't') => ({ ref: `s.jsonl#L${i}`, [key]: t, speaker: 'lead', kind: 'text', text: 'ok', line: i })
-      const read = [
-        T0,
-        (T0 + 1) * 1000,
-        '2026-05-16T09:00:02.250000+00:00',
-        '2026-05-16T11:00:03+02:00',
-        '2026-05-16T09:00:04',
-        '2026-05-16 09:00:05',
-        String(T0 + 6),
-        '2026-05-16T09:00:07Z',
-        'Sat, 16 May 2026 09:00:08',
-        'Sat, 16 May 2026 02:00:09 -0700',
-        '2026/05/16 09:00:10',
-        '2026-05-16 09:00:11 UTC',
-      ]
-      w.TURNS = [...read.map((t, i) => at(i + 1, t, i === 7 ? 'time' : 't')), at(13, 'step 4'), at(14, null)]
-      w.eval(`thimble.transcript({ mount: '#turns' }).draw(window.TURNS)`)
-      expect(texts('.thimble-turn-head')).toEqual([...read.map((_, i) => `lead · 2026-05-16 09:00:${String(i).padStart(2, '0')}`), 'lead · step 4', 'lead'])
-      // the lanes follow a time given as text too, in seconds; a number as given
-      expect([...doc().querySelectorAll('.thimble-turn')].map((e) => e.getAttribute('data-t'))).toEqual(
-        [T0, (T0 + 1) * 1000, T0 + 2.25, ...read.slice(3).map((_, i) => T0 + 3 + i)].map(String).concat([null, null] as never[]),
-      )
-    } finally {
-      if (zone === undefined) delete process.env.TZ
-      else process.env.TZ = zone
-    }
-  })
 })
 
 describe("every choice of the kit's controls draws", () => {

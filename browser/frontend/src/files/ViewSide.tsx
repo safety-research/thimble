@@ -10,7 +10,6 @@ import { Button } from '../components/Button'
 import { Spinner } from '../components/Spinner'
 import { api, labelApi } from '../lib/api'
 import { bus } from '../lib/bus'
-import { demoStop } from '../lib/demo'
 import { refreshProposals } from '../lib/proposals'
 import { track } from '../lib/telemetry'
 import type { ConceptRun, LabelDraft } from '../lib/types'
@@ -180,7 +179,6 @@ export function AddLabelControls({ ws, view }: { ws: string; view: BuiltView }) 
     }
   }, [asked, view.updating])
   const ask = () => {
-    if (demoStop()) return
     setAsked(true)
     track('view-build', { target: `view:${view.slug}`, detail: { change: 'label controls' } })
     api

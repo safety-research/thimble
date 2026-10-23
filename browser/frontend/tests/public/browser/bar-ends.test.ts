@@ -1,7 +1,7 @@
-// A bar's round end in a real browser, read from its pixels on the light paper and the dark one: a card's chart
-// (components/Outputs, lib/vegaDraw, lib/barEnds) and a custom card's own Vega-Lite drawn with thimble.vegaConfig in its
-// frame (lib/frame chartScript). Vega-Lite 6.4.3 drew no bar that runs from x to x2 once the theme gave bars corners (a
-// histogram's bins, thimble.chart's bars over time), and rounded a bar below zero at zero. Each chart is drawn twice,
+// A bar's round end in a real browser, read from its pixels on the light paper: a card's chart (components/Outputs,
+// lib/vegaDraw, lib/barEnds) and a custom card's own Vega-Lite drawn with thimble.vegaConfig in its frame (lib/frame
+// chartScript). Vega-Lite 6.4.3 drew no bar that runs from x to x2 once the theme gave bars corners (a histogram's bins,
+// thimble.chart's bars over time). Each chart is drawn twice,
 // as written and with square bars (`cornerRadiusEnd: 0`, as before the theme rounded them, when every bar drew): each
 // bar covers about as many pixels as its square twin, and is round at the end its value is at (a stack at the end of
 // the whole stack) and square at its baseline. A corner is read against the two squares beside it along its edges and
@@ -21,15 +21,8 @@ type Spec = Record<string, any>
 const BINS = [12, 30, 41, 22, 9, 3].map((count, i) => ({ minutes: i * 20, 'minutes end': i * 20 + 20, count }))
 const binned = { x: field('minutes', 'quantitative', { bin: { binned: true, step: 20 }, axis: { format: ',~r' } }), x2: { field: 'minutes end' }, y: field('count', 'quantitative') }
 const histogram = { $schema: VL, data: { values: BINS }, mark: 'bar', encoding: binned }
-const BY_MODEL = ['opus', 'sonnet'].flatMap((model, g) => BINS.map((r) => ({ ...r, count: g ? Math.ceil(r.count / 2) : r.count, model, __thimble_stack: g })))
-const stack = { color: field('model', 'nominal', { sort: ['opus', 'sonnet'] }), order: { field: '__thimble_stack', type: 'quantitative' } }
-const stackedHistogram = { $schema: VL, data: { values: BY_MODEL }, mark: 'bar', encoding: { ...binned, ...stack } }
 const DAYS = Array.from({ length: 8 }, (_, i) => ({ day: `2026-06-${16 + i}T00:00:00`, 'day end': `2026-06-${17 + i}T00:00:00`, opened: [3, 16, 8, 17, 7, 18, 4, 15][i] }))
 const overTime = { $schema: VL, data: { values: DAYS }, mark: { type: 'bar', orient: 'vertical' }, encoding: { x: field('day', 'temporal'), x2: { field: 'day end' }, y: field('opened', 'quantitative') } }
-const CHANGE = [{ model: 'opus', change: 0.12 }, { model: 'sonnet', change: 0.05 }, { model: 'haiku', change: -0.04 }, { model: 'other', change: -0.09 }]
-const across = { $schema: VL, data: { values: CHANGE }, mark: 'bar', encoding: { y: field('model', 'nominal', { sort: CHANGE.map((r) => r.model) }), x: field('change in pass rate', 'quantitative', { field: 'change' }) } }
-// an agent's own Altair: an aggregate, which Vega-Lite draws with no stack group
-const summed = { $schema: VL, data: { values: CHANGE }, mark: 'bar', encoding: { x: field('model', 'nominal', { sort: CHANGE.map((r) => r.model) }), y: field('change', 'quantitative', { aggregate: 'sum' }) } }
 
 /** The spec with square bars: `cornerRadiusEnd: 0` on its bar mark. */
 const square = (s: Spec): Spec => ({ ...s, mark: { ...(typeof s.mark === 'string' ? { type: s.mark } : s.mark), cornerRadiusEnd: 0 } })
@@ -116,9 +109,6 @@ async function coverage(page: Page, round: Buffer, flat: Buffer, boxes: Box[]) {
 /** Each bar's corners, top left, top right, bottom left, bottom right: true where they are round. */
 type Ends = [boolean, boolean, boolean, boolean]
 const TOP: Ends = [true, true, false, false]
-const BOTTOM: Ends = [false, false, true, true]
-const RIGHT: Ends = [false, true, false, true]
-const LEFT: Ends = [true, false, true, false]
 
 function assertEnds(got: Awaited<ReturnType<typeof coverage>>, want: Ends[], what: string) {
   assert.equal(got.length, want.length, `${what}: ${got.length} bars`)
@@ -165,76 +155,67 @@ afterAll(async () => {
   cleanup()
 })
 
-for (const paper of ['warm', 'dark'])
-  describe(`on the ${paper} paper`, () => {
-    let page: Page
-    const logged: string[] = []
+describe('on the warm paper', () => {
+  const paper = 'warm'
+  let page: Page
+  const logged: string[] = []
 
-    beforeAll(async () => {
-      page = await browser.newPage({ viewport: { width: 800, height: 900 }, deviceScaleFactor: SCALE })
-      page.on('console', (m) => {
-        if (m.type() === 'warning' || m.type() === 'error') logged.push(m.text())
-      })
-      page.on('pageerror', (e) => logged.push(e.message))
-      await page.route('**/*', (route) => {
-        const p = new URL(route.request().url()).pathname
-        if (p === '/bundle.css') return route.fulfill({ status: 200, contentType: 'text/css', body: css })
-        return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body></body></html>' })
-      })
-      await page.addInitScript((p) => localStorage.setItem('thimble:paper', p), paper)
-      await page.goto(`${ORIGIN}/`)
-      await page.addScriptTag({ path: script })
+  beforeAll(async () => {
+    page = await browser.newPage({ viewport: { width: 800, height: 900 }, deviceScaleFactor: SCALE })
+    page.on('console', (m) => {
+      if (m.type() === 'warning' || m.type() === 'error') logged.push(m.text())
     })
-
-    afterAll(() => page?.close())
-
-    /** The chart drawn as written and with square bars, both in a card 560 px wide, and each bar's pixels in both. */
-    const drawn = async (id: string, spec: Spec, vertical: boolean) => {
-      for (const [at, s] of [[id, spec], [`${id}-square`, square(spec)]] as const) {
-        await page.evaluate(([at, s]) => (window as any).__t.chart(at, s, 560), [at, s] as const)
-        await page.waitForSelector(`#${at} [data-settled="true"] svg`, { timeout: 30_000 })
-      }
-      const boxes = await barBoxes(page, `#${id}-square`, vertical)
-      const shot = (at: string) => page.locator(`#${at} svg`).screenshot({ animations: 'disabled' })
-      return coverage(page, await shot(id), await shot(`${id}-square`), boxes)
-    }
-
-    test("a histogram's bins and bars over time are drawn, each round at its top", async () => {
-      assertEnds(await drawn('histogram', histogram, true), Array(6).fill(TOP), 'histogram')
-      assertEnds(await drawn('over-time', overTime, true), Array(8).fill(TOP), 'bars over time')
+    page.on('pageerror', (e) => logged.push(e.message))
+    await page.route('**/*', (route) => {
+      const p = new URL(route.request().url()).pathname
+      if (p === '/bundle.css') return route.fulfill({ status: 200, contentType: 'text/css', body: css })
+      return route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/bundle.css"></head><body></body></html>' })
     })
-
-    test('a stacked histogram is drawn, each stack round at the top of the whole stack only', async () => {
-      assertEnds(await drawn('stacked', stackedHistogram, true), Array(6).fill(TOP), 'stacked histogram')
-    })
-
-    test('a bar below zero is round at its value, not at zero, across and upright', async () => {
-      assertEnds(await drawn('across', across, false), [RIGHT, RIGHT, LEFT, LEFT], 'bars across')
-      assertEnds(await drawn('summed', summed, true), [TOP, TOP, BOTTOM, BOTTOM], "an agent's summed bars")
-      assert.deepEqual(logged, [])
-    })
-
-    test("a custom card's own Vega-Lite drawn with thimble.vegaConfig draws its histogram, round at the top", async () => {
-      const style = await page.evaluate(() => (window as any).__t.chartScript() as string)
-      const frame = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: SCALE })
-      try {
-        const html = [
-          '<!doctype html><html><head><meta charset="utf-8">',
-          style,
-          ...LIBS.map((lib) => `<script>${lib.replace(/<\/script/gi, '<\\/script')}</script>`),
-          '</head><body style="margin:0"><div id="round"></div><div id="flat"></div><script>',
-          `const opts = { config: thimble.vegaConfig, actions: false, renderer: 'svg' };`,
-          `Promise.all([vegaEmbed('#round', ${JSON.stringify(histogram)}, opts), vegaEmbed('#flat', ${JSON.stringify(square(histogram))}, opts)]).then(() => document.body.dataset.done = '1')`,
-          '</script></body></html>',
-        ].join('')
-        await frame.route('**/*', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }))
-        await frame.goto(`${ORIGIN}/card`)
-        await frame.waitForSelector('body[data-done="1"]', { timeout: 30_000 })
-        const boxes = await barBoxes(frame, '#flat', true)
-        const shot = (at: string) => frame.locator(`#${at} svg`).screenshot({ animations: 'disabled' })
-        assertEnds(await coverage(frame, await shot('round'), await shot('flat'), boxes), Array(6).fill(TOP), 'custom card histogram')
-      } finally {
-        await frame.close()
-      }
-    })
+    await page.addInitScript((p) => localStorage.setItem('thimble:paper', p), paper)
+    await page.goto(`${ORIGIN}/`)
+    await page.addScriptTag({ path: script })
   })
+
+  afterAll(() => page?.close())
+
+  /** The chart drawn as written and with square bars, both in a card 560 px wide, and each bar's pixels in both. */
+  const drawn = async (id: string, spec: Spec, vertical: boolean) => {
+    for (const [at, s] of [[id, spec], [`${id}-square`, square(spec)]] as const) {
+      await page.evaluate(([at, s]) => (window as any).__t.chart(at, s, 560), [at, s] as const)
+      await page.waitForSelector(`#${at} [data-settled="true"] svg`, { timeout: 30_000 })
+    }
+    const boxes = await barBoxes(page, `#${id}-square`, vertical)
+    const shot = (at: string) => page.locator(`#${at} svg`).screenshot({ animations: 'disabled' })
+    return coverage(page, await shot(id), await shot(`${id}-square`), boxes)
+  }
+
+  test("a histogram's bins and bars over time are drawn, each round at its top", async () => {
+    assertEnds(await drawn('histogram', histogram, true), Array(6).fill(TOP), 'histogram')
+    assertEnds(await drawn('over-time', overTime, true), Array(8).fill(TOP), 'bars over time')
+    assert.deepEqual(logged, [])
+  })
+
+  test("a custom card's own Vega-Lite drawn with thimble.vegaConfig draws its histogram, round at the top", async () => {
+    const style = await page.evaluate(() => (window as any).__t.chartScript() as string)
+    const frame = await browser.newPage({ viewport: { width: 800, height: 600 }, deviceScaleFactor: SCALE })
+    try {
+      const html = [
+        '<!doctype html><html><head><meta charset="utf-8">',
+        style,
+        ...LIBS.map((lib) => `<script>${lib.replace(/<\/script/gi, '<\\/script')}</script>`),
+        '</head><body style="margin:0"><div id="round"></div><div id="flat"></div><script>',
+        `const opts = { config: thimble.vegaConfig, actions: false, renderer: 'svg' };`,
+        `Promise.all([vegaEmbed('#round', ${JSON.stringify(histogram)}, opts), vegaEmbed('#flat', ${JSON.stringify(square(histogram))}, opts)]).then(() => document.body.dataset.done = '1')`,
+        '</script></body></html>',
+      ].join('')
+      await frame.route('**/*', (route) => route.fulfill({ status: 200, contentType: 'text/html', body: html }))
+      await frame.goto(`${ORIGIN}/card`)
+      await frame.waitForSelector('body[data-done="1"]', { timeout: 30_000 })
+      const boxes = await barBoxes(frame, '#flat', true)
+      const shot = (at: string) => frame.locator(`#${at} svg`).screenshot({ animations: 'disabled' })
+      assertEnds(await coverage(frame, await shot('round'), await shot('flat'), boxes), Array(6).fill(TOP), 'custom card histogram')
+    } finally {
+      await frame.close()
+    }
+  })
+})

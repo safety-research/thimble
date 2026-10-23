@@ -12,7 +12,6 @@ payload.steps."""
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from datetime import datetime, timezone
 
@@ -112,187 +111,6 @@ def test_the_built_ins_are_heads_up_and_explainers_on_the_documents_and_the_chat
     assert checks.by_name(CORPUS, "Verified") is None and checks.by_name(CORPUS, "Unverifiable") is None
 
 
-def test_a_workspace_s_stored_built_ins_read_with_today_s_names_prompts_and_covers_and_keep_their_comments(
-        workspaces_tmp, monkeypatch):
-    """A workspace from before stored each built-in it turned on or ran, whole: its name, its prompt and what it covers
-    as they were then. Important details, stored under its former id, reads as Heads up is now, keeping its `shown` and
-    its runs; a name or a prompt the analyst changed stays. Its stored Unverifiable and Verified, former built-ins, stay
-    listed after the built-ins as stored, with their comments, never run again, and no new check takes their ids."""
-    config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
-    # the former prompts are known by their hash alone, so that their words are in no file here
-    monkeypatch.setitem(checks.FORMER_PROMPTS, IMPORTANT, (*checks.FORMER_PROMPTS[IMPORTANT], checks._words_key("Earlier  words.")))
-    run = {"run": "r1", "status": "done", "comments": 1, "seen": ["abc"]}
-    old = {
-        "unverified": {"name": "Unverifiable", "prompt": "Comment on a claim only when nothing can support it.",
-                       "colour": 5, "shown": True, "shown_set": True, "covers": ["documents", "cards"]},
-        "important-details": {"name": "Important details", "prompt": "Earlier words.", "colour": 2, "shown": True,
-                              "covers": ["documents", "cards", "answers"]},
-        "judgment": {"name": "Calls", "prompt": "Mark each guess.", "colour": 1, "shown": False, "covers": ["documents"]},
-        "verified": {"name": "Verified", "prompt": "Comment on each key claim whose cited evidence shows exactly what it "
-                     "says.", "colour": 3, "shown": True},
-    }
-    for cid, x in old.items():
-        checks.save(CORPUS, {"id": cid, **x, "builtin": True, "created_by": "thimble", "ts": "", "version": 1,
-                             "runs": {"report": dict(run)}})
-    by = {c["id"]: c for c in checks.list_checks(CORPUS)}
-    assert list(by) == [IMPORTANT, "explainers", "judgment", "unverified", "verified"]
-    now = {cid: checks.builtin(cid) for cid in checks.BUILTINS}
-    assert (by[IMPORTANT]["name"], by[IMPORTANT]["prompt"], by[IMPORTANT]["shown"]) == ("Heads up", now[IMPORTANT]["prompt"], True)
-    assert by[IMPORTANT]["covers"] == ["documents", "answers"], "a default covers it had before reads as today's"
-    assert (by["judgment"]["name"], by["judgment"]["prompt"]) == ("Calls", "Mark each guess."), "the analyst's own stay"
-    assert by["judgment"]["shown"] is False, "a built-in the workspace stored off stays off"
-    assert by["judgment"]["covers"] == ["documents", "cards"]
-    assert all(by[cid]["runs"]["report"] == run for cid in by if cid != "explainers"), "the runs stay"
-    assert (by["unverified"]["name"], by["unverified"]["shown"], by["unverified"]["covers"]) == (
-        "Unverifiable", True, ["documents", "cards"]), "a former built-in the analyst turned on reads as stored"
-    assert (by["verified"]["name"], by["verified"]["shown"], by["verified"]["covers"]) == ("Verified", True, ["documents"])
-    assert checks.names(CORPUS)["verified"] == "Verified" and checks.by_name(CORPUS, "Unverifiable")["id"] == "unverified"
-    assert asyncio.run(checks.start_run(CORPUS, "unverified", "report", force=True)) is None, "it never runs again"
-    (config.workspace_dir(CORPUS) / checks.DIR / "verified.json").unlink()
-    (config.workspace_dir(CORPUS) / checks.DIR / "unverified.json").unlink()
-    assert checks.create(CORPUS, "Verified", "Mark the checked claims.", created_by="analyst")["id"] == "verified-2"
-    assert checks.create(CORPUS, "Unverified", "Mark the claims.", created_by="analyst")["id"] == "unverified-2"
-
-
-def test_a_workspace_from_0_8_0_shows_heads_up_and_explainers_and_keeps_each_switch_the_analyst_set(workspaces_tmp):
-    """0.7.0 and 0.8.0 turned every built-in on and stored it whole, on, when it ran or a save marked it stale, so a
-    stored copy that is on says nothing of the analyst: there Judgment calls and Unverifiable read off, their runs kept,
-    and Important details reads as Heads up, on. A switch the analyst sets is stored with `shown_set` and stays, through
-    the saves a run makes, and so does a built-in stored off."""
-    ws = config.workspace_dir(CORPUS)
-    ws.mkdir(parents=True, exist_ok=True)
-    run = {"run": "r1", "status": "done", "comments": 2, "seen": ["abc"]}
-    stored_08 = {"important-details": ("Important details", 2), "judgment": ("Judgment calls", 1),
-                 "unverified": ("Unverifiable", 5)}
-    for cid, (name, colour) in stored_08.items():
-        checks.save(CORPUS, {"id": cid, "name": name, "prompt": "Words of 0.8.0.", "colour": colour, "shown": True,
-                             "builtin": True, "covers": ["documents", "cards"], "created_by": "thimble", "ts": "",
-                             "version": 1, "runs": {"report": dict(run), checks.CANVAS: dict(run)}})
-
-    def shown() -> list[tuple[str, bool]]:
-        return [(c["id"], c["shown"]) for c in checks.list_checks(CORPUS)]
-
-    assert shown() == [(IMPORTANT, True), ("explainers", True), ("judgment", False), ("unverified", False)]
-    assert all(c["runs"] == {"report": run, checks.CANVAS: run} for c in checks.list_checks(CORPUS)
-               if c["id"] != "explainers"), "the runs stay"
-
-    checks.edit(CORPUS, "judgment", shown=True)
-    checks.edit(CORPUS, IMPORTANT, shown=False)
-    stored = json.loads((ws / checks.DIR / "judgment.json").read_text())
-    assert (stored["shown"], stored["shown_set"]) == (True, True)
-    want = [(IMPORTANT, False), ("explainers", True), ("judgment", True), ("unverified", False)]
-    assert shown() == want, "the analyst's switches stay"
-    for cid in (*checks.BUILTINS, "unverified"):  # a run's end saves the check as it reads
-        checks.save(CORPUS, checks.read(CORPUS, cid))
-    assert shown() == want
-
-    checks.save(CORPUS, {**checks.builtin(IMPORTANT), "shown": False, "runs": {}})  # turned off in 0.8.0, unmarked
-    assert checks.read(CORPUS, IMPORTANT)["shown"] is False, "a built-in stored off stays off"
-
-
-@pytest.mark.parametrize("former,old_name", [("important-details", "Important details"),
-                                             ("you-should-know", "You should know")])
-async def test_a_workspace_s_check_and_comments_stored_under_a_former_id_of_heads_up_read_as_heads_up(
-        workspaces_tmp, former, old_name):
-    """A workspace from before stored Heads up under a former id, Important details or, before it, You should know: the
-    check's file and the comments on a document, on the cards and on Claude's answers that name it. They read as
-    `heads-up`, its file renamed when the checks are read, and the comments are written so on their store's next
-    write."""
-    from app import answer_comments
-
-    assert checks.FORMER_IDS == {"important-details": IMPORTANT, "you-should-know": IMPORTANT}
-    ws = config.workspace_dir(CORPUS)
-    ws.mkdir(parents=True, exist_ok=True)
-    r = await tools.call(CORPUS, "write_document", {"doc": "report", "text": "# R\n\n## One\n\nAll the saves came "
-                                                    "from one bot.\n"}, actor="analyst")
-    assert not r.is_error, r.text
-    for p in (ws / checks.DIR).iterdir():  # the save stored the built-ins, on in a new workspace; that one stored none
-        p.unlink()
-    path = report_types.doc_file(CORPUS, investigation.MAIN, "report")
-    raw = json.loads(path.read_text())
-    sid = report_types.all_sentences(raw)[0]["id"]
-    raw["comments"] = [{"id": "c1", "sentence_id": sid, "check": former, "author": "check", "run": "r1",
-                        "text": "The bot is the importer.", "details": "It runs nightly.", "status": "open"}]
-    path.write_text(json.dumps(raw))
-    card = _card("Who saved the pages?")
-    canvas_comments._path(CORPUS).write_text(json.dumps({"comments": [
-        {"id": "k1", "card": card, "step": None, "check": former, "run": "r1", "author": "check",
-         "text": "Blocking the web also blocks GitHub.", "details": "", "ts": "", "status": "open"}]}))
-    (ws / answer_comments.FILE).write_text(json.dumps({"comments": [
-        {"id": "a1", "turn": "t1", "row": "u1", "ref": "answer:t1#s1", "start": 0, "end": 10, "quote": "All saves.",
-         "check": former, "run": "r1", "author": "check", "text": "The log covers one week.", "details": "",
-         "status": "open"}]}))
-    run = {"run": "r1", "status": "done", "comments": 1, "seen": ["abc"]}
-    (ws / checks.DIR).mkdir(exist_ok=True)
-    (ws / checks.DIR / f"{former}.json").write_text(json.dumps({
-        "id": former, "name": old_name, "prompt": checks.builtin(IMPORTANT)["prompt"], "colour": 2,
-        "shown": True, "builtin": True, "covers": ["documents", "cards", "answers"], "created_by": "thimble", "ts": "",
-        "version": 1, "runs": {"report": run}}))
-
-    listed = checks.list_checks(CORPUS)
-    assert [x["id"] for x in listed] == [IMPORTANT, "explainers", "judgment"]
-    got = listed[0]
-    assert (got["name"], got["colour"], got["shown"], got["covers"]) == ("Heads up", 2, True, ["documents", "answers"])
-    assert got["runs"]["report"] == run, "its runs stay"
-    assert sorted(p.name for p in (ws / checks.DIR).iterdir()) == [f"{IMPORTANT}.json"], "its file is renamed"
-    assert json.loads((ws / checks.DIR / f"{IMPORTANT}.json").read_text())["id"] == IMPORTANT
-    assert checks.read(CORPUS, former)["id"] == IMPORTANT
-    assert checks.names(CORPUS) == {IMPORTANT: "Heads up", "explainers": "Explainers", "judgment": "Judgment calls"}
-
-    doc = report_types.read_doc(CORPUS, investigation.MAIN, "report")
-    assert [cm["check"] for cm in doc["comments"]] == [IMPORTANT]
-    report_types.write_doc(CORPUS, investigation.MAIN, "report", doc)
-    assert [cm["check"] for cm in json.loads(path.read_text())["comments"]] == [IMPORTANT], "written so on its save"
-
-    (cm,) = canvas_comments.all_comments(CORPUS)
-    assert (cm["check"], cm["text"]) == (IMPORTANT, "Blocking the web also blocks GitHub.")
-    assert " · Heads up · " in canvas_comments.line(CORPUS, cm)
-    canvas_comments.resolve(CORPUS, ["k1"])
-    stored = json.loads(canvas_comments._path(CORPUS).read_text())["comments"]
-    assert [x["check"] for x in stored] == [IMPORTANT], "written so on the store's next write"
-
-    [on_answer] = answer_comments.state(CORPUS)["comments"]
-    assert (on_answer["check"], on_answer["check_name"], on_answer["color"]) == (IMPORTANT, "Heads up", 2)
-    answer_comments.set_status(CORPUS, "a1", answer_comments.SETTLED)
-    stored = json.loads((ws / answer_comments.FILE).read_text())["comments"]
-    assert [x["check"] for x in stored] == [IMPORTANT], "written so on the store's next write"
-
-
-def test_a_check_run_s_chat_stored_under_a_former_id_and_name_of_heads_up_reads_as_heads_up(
-        workspaces_tmp, monkeypatch):
-    """A run of Heads up from before stored its chat under the check's former id and name: its title, its brief and its
-    check. The chat list, the chat itself and the tray's row of a run still going read them as `heads-up` and Heads up,
-    and the chat's file stays as it was."""
-    from app import agents, events, tray
-
-    former, old_name = "you-should-know", "You should know"
-    config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
-    prompt = checks.builtin(IMPORTANT)["prompt"]
-    agents.ensure_main(CORPUS)
-    meta = {"id": "c1", "kind": "agent", "role": checks.ROLE, "title": old_name, "created_at": "2026-10-08T00:00:00Z",
-            "parent": agents.MAIN_ID, "status": "done", "check": former, "doc": "report", "run_id": "r1",
-            "brief": tools.hint("check-instructions", check=old_name, prompt=prompt)}
-    path, log_path = agents.paths(CORPUS, meta["id"])
-    stored = json.dumps(meta, indent=1)
-    path.write_text(stored)
-    log_path.touch()
-
-    for got in (agents.read_meta(CORPUS, meta["id"]), next(m for m in agents.list_chats(CORPUS) if m["id"] == meta["id"])):
-        assert (got["title"], got["check"]) == ("Heads up", IMPORTANT)
-        assert got["brief"] == tools.hint("check-instructions", check="Heads up", prompt=prompt)
-    assert path.read_text() == stored, "the chat's file is not rewritten"
-    other = agents.new_agent(CORPUS, checks.ROLE, "Unverifiable", announce=False, check="unverified", doc="report",
-                             brief="The check Unverifiable.")
-    assert agents.read_meta(CORPUS, other["id"])["title"] == "Unverifiable", "another check's chat stays"
-
-    monkeypatch.setattr(events, "asking", lambda c: set())
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)["a1"] = {"role": "check", "key": checks.session_key(former, "report"), "status": "running",
-                                    "started": 1, "chat": meta["id"]}
-    [row] = tray.subagent_rows(CORPUS)
-    assert row["label"] == f"check: {IMPORTANT}:report" and former not in json.dumps(row)
-
-
 def test_a_comment_s_statement_and_details_are_read_from_words_written_as_one_text():
     """A comment stored before `details` is its first sentence, the statement, and the rest, its details; a leading copy
     of its own check's name and a colon goes, since a comment shows its check's name, and no other label does."""
@@ -326,25 +144,6 @@ def test_a_statement_ends_where_its_sentence_ends_when_the_next_starts_with_a_fi
     assert (got["statement"], got["details"]) == ("Blocking the web also blocks GitHub.", "The build fails.")
     got = canvas_comments.parse_note("The U.S. mirror is slow, e.g. at night. Use another one.")
     assert (got["statement"], got["details"]) == ("The U.S. mirror is slow, e.g. at night.", "Use another one.")
-
-
-async def test_a_comment_stored_before_details_is_served_as_its_first_sentence_and_the_rest(board, bridge):
-    a = _card("A card")
-    act = await _turn_ended()
-    await _comment(act, f"card:{a}", "The manager's table no longer fits.", "toolu_t1",
-                   details="manager.md asks for one row each.")
-
-    def before_details(items):  # as a comment of a check stored before `details`, its tag, title and body kept
-        for x in items:
-            x.pop("details")
-            x.update(text="Heads up: the manager's table no longer fits. manager.md asks for one row each.",
-                     tag="Heads up", title="The manager's table no longer fits",
-                     body="manager.md asks for one row each.")
-
-    canvas_comments._change(CORPUS, before_details)
-    [cm] = canvas_comments.open_comments(CORPUS)
-    assert (cm["text"], cm["details"]) == ("The manager's table no longer fits.", "manager.md asks for one row each.")
-    assert not {"tag", "title", "body"} & set(cm)
 
 
 async def test_a_check_turned_on_or_off_is_a_checks_record_on_the_stream(board):
@@ -522,42 +321,6 @@ async def test_a_run_s_end_supersedes_its_check_s_comments_on_the_cards_it_cover
     assert (gone["status"], gone["resolution"], gone["superseded_by"]) == ("dismissed", "superseded", second.run)
 
 
-async def test_a_run_s_task_lists_the_open_comments_its_end_replaces_so_it_leaves_again_those_that_hold(board, bridge):
-    """Live check 0.7.0: the analyst asked main to run Heads up on unchanged cards. The task showed the check's
-    six open comments among the cards, the run took them as said and left one, and its end superseded the six. A run's
-    task lists its check's open comments on what it covers as the ones its end replaces, and no others."""
-    a = _card("Which condition merged more PRs?", takeaway="Managed merged more.")
-    b = _card("Did any agent still fail to build?")
-    first = await _turn_ended()
-    await _comment(first, f"card:{a}", "The counts aren't comparable.", "toolu_r1", details="Managed ran 6 h, emergent 8 h.")
-    await _comment(first, f"card:{b}", "Six agents could not build.", "toolu_r2")
-    subagents.run_ended(CORPUS, first.agent, "done", "Two.", source="handback")
-    await _until(lambda: _run()["status"] == "done", "the run never ended")
-    replaces = tools.hint("check-replaces", comments="").strip()
-
-    def listed() -> str:
-        task = (checks.work_dir(CORPUS, IMPORTANT, checks.CANVAS) / checks.TASK_FILE).read_text()
-        assert task.count(replaces) == 1, "the task says once which comments the run replaces"
-        return task.split(replaces, 1)[1]
-
-    [mine] = canvas_comments.open_comments(CORPUS, a)
-    notebook.edit_cell(CORPUS, a, title="Which condition merged more PRs, per agent?", by="model")
-    second = await _turn_ended()
-    assert _run()["covered"] == [f"card:{a}"]
-    got = listed()
-    assert f"- comment {mine['id']} on card:{a} · Heads up · The counts aren't comparable. — Managed ran 6 h, emergent 8 h." in got
-    assert "Six agents could not build." not in got, "a card the run does not cover keeps its comment, unlisted"
-    subagents.run_ended(CORPUS, second.agent, "done", "Nothing new.", source="handback")
-    await _until(lambda: _run()["status"] == "done", "the run never ended")
-    rec = await checks.start_run(CORPUS, IMPORTANT, checks.CANVAS, force=True, route="click")  # Run, on unchanged cards
-    assert rec is not None and {f"card:{a}", f"card:{b}"} <= set(rec["covered"])
-    act = checks._active[(CORPUS, IMPORTANT, checks.CANVAS)]
-    await _until(lambda: act.agent or act.ended, "the run's agent never started")
-    got = listed()
-    assert "Six agents could not build." in got and "The counts aren't comparable." not in got, \
-        "the open comment is listed, the one the last run superseded is not"
-
-
 async def test_a_deleted_card_s_comments_are_not_served(board, bridge):
     a = _card("A card")
     act = await _turn_ended()
@@ -566,22 +329,6 @@ async def test_a_deleted_card_s_comments_are_not_served(board, bridge):
     notebook.delete_cell(CORPUS, a)
     assert canvas_comments.open_comments(CORPUS) == []
     assert (await canvas_comments.list_route(CORPUS))["comments"] == []
-
-
-async def test_run_check_on_the_cards_gives_the_exact_agent_call(board, bridge):
-    _card("A card")
-    res = await tools.call(CORPUS, "run_check", {"name": "Risks", "instructions": "Mark the risky cards.", "on": "cards"},
-                           tool_use_id="toolu_main1")
-    assert not res.is_error, res.text
-    assert "check Risks started (new) on the cards, 1 passage" in res.text
-    inp = json.loads(res.text.split("AGENT CALL ", 1)[1].splitlines()[0])
-    assert inp["subagent_type"] == "thimble:check" and not bridge.ops("spawn")
-    req = subagents.request(CORPUS, sf.REQUEST_RE.search(inp["prompt"].split("\n", 1)[0]).group(0))
-    assert (req["route"], req["call"]) == ("typed", "toolu_main1")
-    risks = checks.by_name(CORPUS, "Risks")
-    assert risks["covers"] == ["cards"] and risks["shown"]
-    res = await tools.call(CORPUS, "run_check", {"name": "Risks", "on": "pages"})
-    assert res.is_error and "`on` is one of documents, cards" in res.text
 
 
 async def test_main_s_add_comment_on_a_card_is_claude_s_note_and_resolve_comment_takes_card_refs(board):

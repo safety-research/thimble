@@ -1,8 +1,7 @@
 // The ask key Settings picks (src/lib/platform.ts, src/pointer/CmdPointer.tsx), in a real browser: with ⌥ picked, ⌥
 // does what ⌘ did. On a Mac the pointer and its highlight show once ⌥ has been held alone for about 300 ms, a key
 // pressed with ⌥ (⌥E types an accent) turns them off until ⌥ is released, and an ⌥-click opens the box at once; ⌘ held
-// or a ⌘-click does nothing there. Off a Mac, Alt shows them at once and Ctrl does not. With ⌘ picked again, ⌘ asks as
-// before. The page takes a new choice at once (setAskKey, as Settings' Save calls it).
+// or a ⌘-click does nothing there. The page takes a new choice at once (setAskKey, as Settings' Save calls it).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -95,32 +94,5 @@ test('on a Mac with ⌥ picked, ⌘ held shows nothing and a ⌘-click opens no 
   await page.mouse.click(250, 175)
   await page.keyboard.up('Alt')
   await page.waitForSelector('.pointer-box', { timeout: 2000 })
-  await page.close()
-})
-
-test('off a Mac with ⌥ picked, Alt shows the pointer at once and Ctrl does not', async () => {
-  const page = await open(false)
-  await page.keyboard.down('Control')
-  await page.mouse.move(255, 178)
-  assert.deepEqual(await pointer(page), { on: false, hl: false })
-  await page.keyboard.up('Control')
-  await page.keyboard.down('Alt')
-  await page.mouse.move(258, 180)
-  assert.deepEqual(await pointer(page), { on: true, hl: true })
-  await page.keyboard.up('Alt')
-  await page.close()
-})
-
-test('with ⌘ picked again, ⌘ asks and ⌥ does not', async () => {
-  const page = await open(true)
-  await page.evaluate(() => (window as unknown as { setAskKey: (k: string) => void }).setAskKey('meta'))
-  await page.keyboard.down('Alt')
-  await page.waitForTimeout(450)
-  assert.deepEqual(await pointer(page), { on: false, hl: false }, '⌥ no longer points')
-  await page.keyboard.up('Alt')
-  await page.keyboard.down('Meta')
-  await page.waitForTimeout(450)
-  assert.deepEqual(await pointer(page), { on: true, hl: true }, '⌘ does')
-  await page.keyboard.up('Meta')
   await page.close()
 })

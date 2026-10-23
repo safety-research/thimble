@@ -23,7 +23,6 @@
 //   turnsOf(messages)             the fork's transcript ($.session.messages, as: 'api') as the thread's turns
 //   stepWords(step, root)         a step without the folders it ran in, for the pane's `N steps` row
 //   display(thread, turns)        those turns as the person reads them: each question as they asked it
-//   answerOf(messages)            its last answer
 //   rowsOf(list, now)             the thread list's rows: key, name, status, questions, last question, how long ago
 //   ago(at, now)                  how long ago, in a word: `now`, `4m`, `2h`, `3d`
 //   cardPart(copy)                the part of a card a question is about: its selected line, from its text copy
@@ -235,12 +234,6 @@ export function turnsOf(messages) {
     }
   }
   return out
-}
-
-export function answerOf(messages) {
-  const turns = turnsOf(messages)
-  for (let i = turns.length - 1; i >= 0; i--) if (turns[i].role === 'claude' && turns[i].text) return turns[i].text
-  return ''
 }
 
 /**

@@ -9,6 +9,9 @@
 #   browser-server  the browser workbench's server tests, with bubblewrap and the sandbox runtime
 #   browser-page    the browser workbench's page: type check, unit tests and build
 #
+# Each test has a time limit of its own (scripts/check.sh), so a test that hangs fails with its name and its stack, and
+# each job a timeout-minutes a few times its usual length, so a job that stalls anyway ends rather than holding a runner.
+#
 # Claude Code comes from npm (@anthropic-ai/claude-code), pinned to a version the plugin was tested with. Its
 # `claude plugin validate` and `claude plugin test` need no login.
 name: checks
@@ -53,7 +56,7 @@ jobs:
   plugin:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       CLAUDE_CODE_VERSION: 2.1.307
     steps:
@@ -72,10 +75,10 @@ jobs:
       - name: Install Claude Code
         run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
 
-      - name: Install Python with pandas and pytest
+      - name: Install Python with pandas, pytest and pytest-timeout
         run: |
           uv venv --python 3.12 "$RUNNER_TEMP/py"
-          uv pip install --python "$RUNNER_TEMP/py/bin/python" pandas pytest
+          uv pip install --python "$RUNNER_TEMP/py/bin/python" pandas pytest pytest-timeout
           echo "THIMBLE_PYTHON=$RUNNER_TEMP/py/bin/python" >> "$GITHUB_ENV"
 
       - name: Install the sandbox's system packages, and let bubblewrap make its namespaces (the runner's AppArmor keeps it from them)
@@ -118,7 +121,7 @@ jobs:
   browser-server:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -183,7 +186,7 @@ jobs:
   browser-page:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

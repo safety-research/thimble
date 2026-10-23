@@ -1,11 +1,16 @@
-// The whole hooks module in one session: it loads, a session starts, a prompt goes through, and the line above the
-// prompt draws, with a failure line on it, without throwing. All data is made up. `claude plugin test plugin`.
+// The whole hooks module in one session: it loads, a session starts with the plugin's bin/ first on the PATH
+// (hooks/path.ts), a prompt goes through, and the line above the prompt draws, with a failure line on it, without
+// throwing. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { labelsDirOf } from '../core/layout.mjs'
+import { binFirst } from '../hooks/path'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
+
+// the plugin's folder: the one above this test's
+const BIN = `${new URL('..', import.meta.url).pathname.replace(/\/+$/, '')}/bin`
 
 const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
 
@@ -26,7 +31,8 @@ function world(on: Any) {
   on('fs.write', () => ({ value: undefined }))
   on('fs.list', () => ({ value: [] }))
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
-  on('env.set', () => ({ value: {} }))
+  const paths: (string | undefined)[] = []
+  on('env.set', (_$: unknown, e: { name: string; value?: string }) => { if (e.name === 'PATH') paths.push(e.value); return { value: {} } })
   on('ui.toast', () => ({ value: undefined }))
   // a folder of data (made up) with labels of this conversation's, whose coverage cannot be counted: the bar's failure
   // line says so
@@ -37,7 +43,7 @@ function world(on: Any) {
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
   on('prompt.submit', (_$: unknown, e: { text: string }) => ({ text: e.text }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
-  return { clock }
+  return { clock, paths }
 }
 
 test('the module loads, a session starts, a prompt goes through, and the bar draws', async ($, on) => {
@@ -45,6 +51,10 @@ test('the module loads, a session starts, a prompt goes through, and the bar dra
   // the bar shows from the start, and the session's start counts the folder
   expect(textOf(await $.ui.render(BAND))).toContain('thimble')
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  // the plugin's bin/ goes first on the PATH once, the rest kept in its order, never twice
+  expect(w.paths).toEqual([`${BIN}:/usr/bin`])
+  expect(binFirst('/home/t/.local/bin:/usr/bin:/p/bin', '/p/bin')).toBe('/p/bin:/home/t/.local/bin:/usr/bin')
+  expect(binFirst('/p/bin/:/usr/bin', '/p/bin')).toBe('/p/bin:/usr/bin')
   const r = (await $.prompt.submit({ text: 'How many runs failed?' } as never)) as Any
   expect(r.text).toBe('How many runs failed?')
   // the count after the start failed: its failure line

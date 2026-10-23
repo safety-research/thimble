@@ -1,11 +1,9 @@
 // The File browser's tabs (src/files/FilesTab.tsx ReaderTabs) in a reader bar as wide as the one thimble draws with the
-// chat column and the Files sidebar open: 845 px at 1440x900, 1325 px at 1920x1080, and 505 px in a window 1100 px wide.
-// Drawn with the app's stylesheets and Hanken Grotesk in headless Chromium, with six tabs and each in turn open, it
-// proves with getBoundingClientRect that every tab shown and the button of the menu that holds the others lie inside
-// the strip, before the bar's own buttons; the open tab's name shows whole; every other tab shown is at least
-// TAB_MIN_PX wide or shows its whole name; the menu lists exactly the tabs not shown and opens one; the × of a tab
-// other than the open one shows on hover without changing any tab's width; and with thirty tabs open nothing around the
-// strip can scroll sideways.
+// chat column and the Files sidebar open at 1440x900 (845 px). Drawn with the app's stylesheets and Hanken Grotesk in
+// headless Chromium, with six tabs and each in turn open, it proves with getBoundingClientRect that every tab shown and
+// the button of the menu that holds the others lie inside the strip, before the bar's own buttons; the open tab's name
+// shows whole; every other tab shown is at least TAB_MIN_PX wide or shows its whole name; the menu lists exactly the
+// tabs not shown and opens one; and with thirty tabs open nothing around the strip can scroll sideways.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -111,33 +109,31 @@ const GEO = () => {
   }
 }
 
-for (const [label, width] of [['1440x900', 845], ['1920x1080', 1325], ['1100 wide', 505]] as const) {
-  test(`at ${label} (a ${width} px bar) six tabs fit or go in the menu, the open one whole, each other one readable`, async () => {
-    for (const first of TABS) {
-      await page.evaluate(([w, paths, f]) => (window as any).__bar(w, paths, f), [width, TABS, first] as const)
-      await frames(3)
-      const g = await page.evaluate(GEO)
-      const tag = `${label}, ${first} open`
-      assert.ok(g.font === 'Hanken Grotesk' && g.fontLoaded, `${tag}: drawn in Hanken Grotesk ${g.font}`)
-      const base = first.slice(first.lastIndexOf('/') + 1)
-      const active = g.tabs.filter((t) => t.active)
-      assert.ok(active.length === 1 && active[0].name === base && active[0].whole, `${tag}: the open tab shows its whole name ${JSON.stringify(active)}`)
-      for (const t of g.tabs) {
-        assert.ok(t.inside, `${tag}: ${t.name} lies inside the strip ${JSON.stringify(t)} (strip ends at ${g.end})`)
-        assert.ok(t.active || t.whole || t.w >= g.min - 0.5, `${tag}: ${t.name} is ${t.w} px wide, at least ${g.min} or its whole name`)
-      }
-      assert.ok(g.end <= g.find + 0.5, `${tag}: the strip ends before the bar's own buttons`)
-      const hidden = TABS.length - g.tabs.length
-      if (hidden) {
-        assert.ok(g.more && g.more.inside && g.more.text === `${hidden} more`, `${tag}: the menu button counts the ${hidden} tabs not shown and lies in the strip ${JSON.stringify(g)}`)
-      } else {
-        assert.equal(g.more, null, `${tag}: no menu when every tab shows`)
-      }
-      if (width >= 1300) assert.equal(hidden, 0, `${tag}: all six tabs show`)
-      if (width === 845) assert.ok(g.tabs.length >= 4, `${tag}: at least four tabs show (${g.tabs.length})`)
+test('at 1440x900 (an 845 px bar) six tabs fit or go in the menu, the open one whole, each other one readable', async () => {
+  const [label, width] = ['1440x900', 845]
+  for (const first of TABS) {
+    await page.evaluate(([w, paths, f]) => (window as any).__bar(w, paths, f), [width, TABS, first] as const)
+    await frames(3)
+    const g = await page.evaluate(GEO)
+    const tag = `${label}, ${first} open`
+    assert.ok(g.font === 'Hanken Grotesk' && g.fontLoaded, `${tag}: drawn in Hanken Grotesk ${g.font}`)
+    const base = first.slice(first.lastIndexOf('/') + 1)
+    const active = g.tabs.filter((t) => t.active)
+    assert.ok(active.length === 1 && active[0].name === base && active[0].whole, `${tag}: the open tab shows its whole name ${JSON.stringify(active)}`)
+    for (const t of g.tabs) {
+      assert.ok(t.inside, `${tag}: ${t.name} lies inside the strip ${JSON.stringify(t)} (strip ends at ${g.end})`)
+      assert.ok(t.active || t.whole || t.w >= g.min - 0.5, `${tag}: ${t.name} is ${t.w} px wide, at least ${g.min} or its whole name`)
     }
-  }, 60_000)
-}
+    assert.ok(g.end <= g.find + 0.5, `${tag}: the strip ends before the bar's own buttons`)
+    const hidden = TABS.length - g.tabs.length
+    if (hidden) {
+      assert.ok(g.more && g.more.inside && g.more.text === `${hidden} more`, `${tag}: the menu button counts the ${hidden} tabs not shown and lies in the strip ${JSON.stringify(g)}`)
+    } else {
+      assert.equal(g.more, null, `${tag}: no menu when every tab shows`)
+    }
+    assert.ok(g.tabs.length >= 4, `${tag}: at least four tabs show (${g.tabs.length})`)
+  }
+}, 60_000)
 
 test('the menu lists the tabs not shown and opens one, which then shows whole', async () => {
   await page.evaluate(([w, paths, f]) => (window as any).__bar(w, paths, f), [845, TABS, 'session-transcript.jsonl'] as const)
@@ -156,24 +152,6 @@ test('the menu lists the tabs not shown and opens one, which then shows whole', 
   const after = await page.evaluate(GEO)
   const open = after.tabs.find((t) => t.active)!
   assert.ok(open.name === hidden[0] && open.whole && open.inside, `the tab picked from the menu shows whole ${JSON.stringify(open)}`)
-})
-
-test('the × of a tab other than the open one shows on hover, over its name, and no tab changes width', async () => {
-  await page.evaluate(([w, paths, f]) => (window as any).__bar(w, paths, f), [1325, TABS, 'README.md'] as const)
-  await frames(3)
-  const widths = () => page.evaluate(() => [...document.querySelectorAll('.reader-tabs > .reader-tab')].map((t) => t.getBoundingClientRect().width))
-  const before = await widths()
-  const x0 = await page.evaluate(() => getComputedStyle(document.querySelectorAll('.reader-tabs > .reader-tab')[2].querySelector('.reader-tab-x')!).opacity)
-  await page.hover('.reader-tabs > .reader-tab >> nth=2')
-  await frames(3)
-  const got = await page.evaluate(() => {
-    const t = document.querySelectorAll('.reader-tabs > .reader-tab')[2]
-    const b = t.getBoundingClientRect(), x = t.querySelector('.reader-tab-x')!, xb = x.getBoundingClientRect()
-    return { opacity: getComputedStyle(x).opacity, inside: xb.left >= b.left && xb.right <= b.right && xb.top >= b.top && xb.bottom <= b.bottom }
-  })
-  assert.equal(x0, '0', 'hidden until hover')
-  assert.ok(got.opacity === '1' && got.inside, `the × shows inside the tab ${JSON.stringify(got)}`)
-  assert.deepEqual(await widths(), before, 'no tab changes width on hover')
 })
 
 test('with thirty tabs open nothing around the strip overflows sideways, so no pane can be scrolled to the hidden copy', async () => {

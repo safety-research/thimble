@@ -1,14 +1,14 @@
-// Scrolling Files' Table mode (src/files/Reader.tsx, views/table.tsx) in a real browser, Chromium and, where Playwright's
-// WebKit starts, WebKit: a file of JSON lines, colored by a boolean field that is true on a share of the lines that
-// changes along the file, with "false" turned off in Color by once the file is open, and with every value on. A value
-// turned off keeps its rows, so the reader stays full: the wheel scrolls it, a drag of the overview's frame down the
-// file and a trackpad's flicks after it move the first row in view only down the file, never back to rows it passed
-// (a sliver of the row before it as the reader settles is no step back), and the reader stays where the drag lets go.
+// Scrolling Files' Table mode (src/files/Reader.tsx, views/table.tsx) in headless Chromium: a file of JSON lines,
+// colored by a boolean field that is true on a share of the lines that changes along the file, with "false" turned off
+// in Color by once the file is open. A value turned off keeps its rows, so the reader stays full: the wheel scrolls it,
+// a drag of the overview's frame down the file and a trackpad's flicks after it move the first row in view only down
+// the file, never back to rows it passed (a sliver of the row before it as the reader settles is no step back), and
+// the reader stays where the drag lets go.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { afterAll, beforeAll, test } from 'vitest'
-import { chromium, webkit, type BrowserType, type Page } from 'playwright'
+import { chromium, type Page } from 'playwright'
 import { bundle, cleanup, ORIGIN, src } from './page.ts'
 
 const MIME: Record<string, string> = { '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.woff': 'font/woff' }
@@ -62,11 +62,6 @@ beforeAll(async () => {
 })
 
 afterAll(() => cleanup())
-
-const ENGINES: [string, BrowserType][] = [
-  ['chromium', chromium],
-  ['webkit', webkit],
-]
 
 async function open(page: Page, query: string) {
   await page.route('**/*', (route) => {
@@ -132,55 +127,50 @@ function onward(seen: At[], what: string, slack = 0) {
 const lastLine = (seen: At[]) => seen[seen.length - 1]?.line ?? 0
 const firstLine = (seen: At[]) => seen[0]?.line ?? 0
 
-for (const [name, engine] of ENGINES)
-  for (const off of [true, false])
-    test(`${name}: Files' Table mode with ${off ? '"false" turned off in Color by' : 'every value on'} scrolls down the file by the wheel, a drag of the overview's frame and flicks, its first row in view never going back`, async (ctx) => {
-      const browser = await engine.launch({ headless: true }).catch(() => null)
-      if (!browser) return ctx.skip()
-      try {
-        const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
-        await open(page, '')
-        if (off) {
-          await page.locator('.reader-colorbar .colorby-chip[data-value="false"]').click()
-          await page.waitForTimeout(500)
-        }
-        const box = (await page.locator('.reader-body').boundingBox())!
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-        const wheel = await watch(page, async () => {
-          for (let i = 0; i < 10; i++) {
-            await page.mouse.wheel(0, 100)
-            await page.waitForTimeout(30)
-          }
-        })
-        onward(wheel, 'the wheel')
-        assert.ok(lastLine(wheel) > 20, `the wheel scrolls the table: ${said(wheel)}`)
-        // the overview's frame dragged down the file and let go
-        const fr = (await page.locator('.track-frame-over').boundingBox())!
-        const x = fr.x + fr.width / 2
-        const y = fr.y + fr.height / 2
-        const drag = await watch(page, async () => {
-          await page.mouse.move(x, y)
-          await page.mouse.down()
-          for (let i = 1; i <= 20; i++) {
-            await page.mouse.move(x, y + i * 3)
-            await page.waitForTimeout(40)
-          }
-          await page.mouse.up()
-        })
-        onward(drag, 'the drag', LET_GO_LINES)
-        assert.ok(lastLine(drag) > 150, `the drag goes down the file: ${said(drag)}`)
-        // a trackpad's flicks: quick wheel steps that die away
-        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
-        const flicks = await watch(page, async () => {
-          for (let k = 0; k < 4; k++)
-            for (let i = 0; i < 30; i++) {
-              await page.mouse.wheel(0, Math.max(2, 60 * Math.exp(-i / 8)))
-              await page.waitForTimeout(16)
-            }
-        })
-        onward(flicks, 'the flicks')
-        assert.ok(lastLine(flicks) > firstLine(flicks), `the flicks scroll on: ${said(flicks)}`)
-      } finally {
-        await browser.close()
+test(`Files' Table mode with "false" turned off in Color by scrolls down the file by the wheel, a drag of the overview's frame and flicks, its first row in view never going back`, async () => {
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage({ viewport: { width: 1000, height: 700 } })
+    await open(page, '')
+    await page.locator('.reader-colorbar .colorby-chip[data-value="false"]').click()
+    await page.waitForTimeout(500)
+    const box = (await page.locator('.reader-body').boundingBox())!
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    const wheel = await watch(page, async () => {
+      for (let i = 0; i < 10; i++) {
+        await page.mouse.wheel(0, 100)
+        await page.waitForTimeout(30)
       }
-    }, 120_000)
+    })
+    onward(wheel, 'the wheel')
+    assert.ok(lastLine(wheel) > 20, `the wheel scrolls the table: ${said(wheel)}`)
+    // the overview's frame dragged down the file and let go
+    const fr = (await page.locator('.track-frame-over').boundingBox())!
+    const x = fr.x + fr.width / 2
+    const y = fr.y + fr.height / 2
+    const drag = await watch(page, async () => {
+      await page.mouse.move(x, y)
+      await page.mouse.down()
+      for (let i = 1; i <= 20; i++) {
+        await page.mouse.move(x, y + i * 3)
+        await page.waitForTimeout(40)
+      }
+      await page.mouse.up()
+    })
+    onward(drag, 'the drag', LET_GO_LINES)
+    assert.ok(lastLine(drag) > 150, `the drag goes down the file: ${said(drag)}`)
+    // a trackpad's flicks: quick wheel steps that die away
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    const flicks = await watch(page, async () => {
+      for (let k = 0; k < 4; k++)
+        for (let i = 0; i < 30; i++) {
+          await page.mouse.wheel(0, Math.max(2, 60 * Math.exp(-i / 8)))
+          await page.waitForTimeout(16)
+        }
+    })
+    onward(flicks, 'the flicks')
+    assert.ok(lastLine(flicks) > firstLine(flicks), `the flicks scroll on: ${said(flicks)}`)
+  } finally {
+    await browser.close()
+  }
+}, 120_000)

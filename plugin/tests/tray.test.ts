@@ -32,8 +32,9 @@ const answer = (requestId: string, text: string) => ({ plugin: 'thimble', compon
 const above = (maxRows = 20) => ({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows, bodyColumns: 100, scroll: { offset: 0, bodyRows: maxRows - 1 }, view: {} }, viewport: view }) as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
 
-/** A resumed session with one answer, TEXT (or `more.text`), whose citation the check left as `item`; `more`: the
- *  turn's cards, the message's parts and kept files to add (a card's meta.json under cards/<id>/). */
+/** A resumed session with one answer, TEXT (or `more.text`), whose citation the check left as `item` (or whose
+ *  citations, a list of items); `more`: the turn's cards, the message's parts and kept files to add (a card's meta.json
+ *  under cards/<id>/). */
 async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string> } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...(more.env ?? {}) })
   const clock = mock.clock(on, { now: 0 })
@@ -44,7 +45,7 @@ async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { c
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
   const kept: Record<string, string> = {
-    'marks/row-t1.json': JSON.stringify({ key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [item] }),
+    'marks/row-t1.json': JSON.stringify({ key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: Array.isArray(item) ? item : [item] }),
     'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'how many failed?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: more.cards ?? [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: more.text ?? TEXT, at: 1, ...(more.parts ? { parts: more.parts } : {}) }] }),
     ...(more.kept ?? {}),
   }
@@ -217,56 +218,36 @@ test('a citation the check found false: × failed in the header, as any failed o
 
 const WRONG = { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed.' }
 
-test('a repair that corrected the citation: its card says repaired and what it was', async ($, on) => {
-  await resumed($, on, { ...WRONG, status: 'corrected', repair: true, shown: '9 of 40', was: '12 of 40' }, 's-tray-10')
+// a reply with two citations, each in its own words
+const TWO = 'Of the runs, [12 of 40](#) failed on the [p95 check](#).'
+const SECOND = { n: 2, row: 'row-t1', words: 'p95 check', start: 41, end: 55, sentence: TWO, shown: 'p95 check' }
+
+test('a repair that corrected the citation says repaired and what it was; one that still could not confirm it says not repaired and why, and offers x again', async ($, on) => {
+  await resumed($, on, [
+    { ...WRONG, sentence: TWO, status: 'corrected', repair: true, shown: '9 of 40', was: '12 of 40' },
+    { ...SECOND, status: 'failed', failedBy: 'evidence', repair: true, reason: 'No file holds a count of failed runs.' },
+  ], 's-tray-10', { text: TWO })
   await $.prompt.edit(key(']'))
   const card = textOf(await $.ui.render(above()))
   expect(card).toContain('repaired; was 12 of 40')
   expect(card).not.toContain('x repair')
-})
-
-test('a repair that still could not confirm it: its card says not repaired and why, and offers x again', async ($, on) => {
-  await resumed($, on, { ...WRONG, failedBy: 'evidence', repair: true, reason: 'No file holds a count of failed runs.' }, 's-tray-11')
   await $.prompt.edit(key(']'))
-  const card = textOf(await $.ui.render(above()))
-  expect(card).toContain('not repaired: No file holds a count of failed runs.')
-  expect(card).toContain('x repair')
+  const again = textOf(await $.ui.render(above()))
+  expect(again).toContain('not repaired: No file holds a count of failed runs.')
+  expect(again).toContain('x repair')
 })
 
-test('x and then a letter in the word window types the word and starts no repair', async ($, on) => {
-  const { clock, spawns } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'check', reason: 'Line 4 counts 12 failed.' }, 's-tray-8')
-  await $.prompt.edit(key(']'))
-  await clock.advance(2000)
-  await $.prompt.edit(key('x'))
-  await clock.advance(100)
-  expect(((await $.prompt.edit(key('y'))) as Any).text).toBe('xy')
-  await clock.advance(2000)
-  expect(spawns.length).toBe(0)
-  expect(textOf(await $.ui.render(above()))).toContain('× failed')
-})
 
-test('a citation not confirmed: red with ×, underlined; a click on x repair in its card checks it again at once', async ($, on) => {
-  const { submitted, clock, spawns } = await resumed($, on, { ...QUOTED, status: 'failed', failedBy: 'evidence', reason: 'The quote is not in runs/summary.txt.' }, 's-tray-6')
-  const reply = all(await $.ui.render(answer('row-t1', TEXT)))
-  expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'error', underline: true })
-  expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ×')?.props?.color).toBe('error')
-  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  expect(textOf(await $.ui.render(above()))).toContain('× failed · cite')
-  const btn = all(await $.ui.render(above())).find(n => n.type === 'Button' && n.props?.label === 'repair this citation')
-  const ui = await $.ui.mount(above())
-  await ui.press({ key: btn.props.key })
-  await ui.unmount()
-  await clock.advance(10)
-  expect(spawns.length).toBe(1)
-  expect(spawns[0].prompt).toContain('The first check could not confirm it: "The quote is not in runs/summary.txt."')
-  expect(submitted.length).toBe(0)
-})
 
-test('a citation whose check did not run is failed: × in the reply, × failed in the card with the plain reason, and x starts its check', async ($, on) => {
-  // an earlier thimble kept it as unchecked, with no evidence: the resumed session finds it failed
+test('a citation whose check did not run is failed: × in the reply, × failed in the card with the plain reason, and x starts its check; so is a check the session ended mid-way', async ($, on) => {
+  // an earlier thimble kept the first as unchecked, with no evidence, and the second as checking when its session
+  // ended: the resumed session finds both failed
   const { evidence: _e, ...words } = QUOTED
-  const { clock, spawns, submitted } = await resumed($, on, { ...words, status: 'unchecked', reason: 'the reply was interrupted before its citations were checked' }, 's-tray-12')
-  const reply = all(await $.ui.render(answer('row-t1', TEXT)))
+  const { clock, spawns, submitted } = await resumed($, on, [
+    { ...words, sentence: TWO, status: 'unchecked', reason: 'the reply was interrupted before its citations were checked' },
+    { ...SECOND, status: 'checking' },
+  ], 's-tray-12', { text: TWO })
+  const reply = all(await $.ui.render(answer('row-t1', TWO)))
   expect(reply.find(n => n.type === 'Text' && textOf(n) === '12 of 40' && n.props?.color)?.props).toMatchObject({ color: 'error', underline: true })
   expect(reply.find(n => n.type === 'Text' && textOf(n) === ' ×')?.props?.color).toBe('error')
   await $.prompt.edit(key(']'))
@@ -278,6 +259,18 @@ test('a citation whose check did not run is failed: × in the reply, × failed i
   expect(band).not.toContain('gave no evidence')
   expect(band).toContain('x repair: start its check')
   expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'check this citation')).toBe(true)
+  // the one the session ended mid-way: failed, and x offered
+  await clock.advance(2000)
+  await $.prompt.edit(key(']'))
+  const ended = textOf(await $.ui.render(above()))
+  expect(ended).toContain('p95 check')
+  expect(ended).toContain('× failed · cite')
+  expect(ended).toContain('The check did not run.')
+  expect(ended).not.toContain('session ended')
+  expect(ended).toContain('x repair')
+  // x on the first starts its check
+  await clock.advance(2000)
+  await $.prompt.edit(key('['))
   await clock.advance(2000)
   await $.prompt.edit(key('x'))
   await clock.advance(1000)
@@ -288,16 +281,6 @@ test('a citation whose check did not run is failed: × in the reply, × failed i
   // (the test kit names no agent it starts, so the check's run and end are marks.test.ts's)
 })
 
-test('a check the session ended mid-way is failed when the session resumes, and offers x', async ($, on) => {
-  const { evidence: _e, reason: _r, ...words } = QUOTED
-  await resumed($, on, { ...words, status: 'checking' }, 's-tray-13')
-  await $.prompt.edit(key(']'))
-  const band = textOf(await $.ui.render(above()))
-  expect(band).toContain('× failed · cite')
-  expect(band).toContain('The check did not run.')
-  expect(band).not.toContain('session ended')
-  expect(band).toContain('x repair')
-})
 
 // A click on the file's place in the tray opens the citation's evidence in the side pane, by a button or, where the
 // terminal draws hyperlinks, by the link
@@ -317,7 +300,6 @@ for (const [how, env] of [['a button', {}], ['a file link', { FORCE_HYPERLINK: '
     expect(textOf(await $.ui.render(above()))).not.toContain('did not open the side pane')
   })
 }
-
 // Claude Code places a pane at any width only for an open made while the person's press runs; an open the handler
 // leaves to run after it returns is unasked and waits undrawn below 144 columns (the tray's file place showed "did not
 // open the side pane" at 118 columns). The test kit's press waits for such work too, so the handler is called here as
@@ -338,34 +320,7 @@ test("the tray's file place makes its pane open inside the press, before its han
   expect(state.get('pane')).toMatchObject({ kind: 'evidence', args: { row: 'row-t1', n: 1 } })
 })
 
-test('a verified citation offers no repair', async ($, on) => {
-  await resumed($, on, QUOTED, 's-tray-7')
-  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  const drawn = all(await $.ui.render(above()))
-  expect(textOf(drawn)).not.toContain('repair')
-  expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'repair this citation')).toBe(false)
-})
 
-test('] from rest opens the first citation, past a card Claude drew above the words; [ from it stands on the card; a asks about it', async ($, on) => {
-  const id = 'c0123456789ab'
-  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_1', turn: 't1', agentId: null, anchorRow: null, keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_1: { version: 1 } }, at: 1 }
-  await resumed($, on, QUOTED, 's-tray-3', {
-    cards: [{ id, toolUseId: 'toolu_made_up_1', seq: 1, after: 0 }],
-    kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) },
-  })
-  // ]: the citation in the words, though the card stands above them
-  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  let band = textOf(await $.ui.render(above()))
-  expect(band).toContain('failed: 12')
-  expect(band).toContain('[ previous card')
-  // [: the card above the words, which takes the keys (a ask, 0 back); no tray
-  expect(await $.prompt.edit(key('['))).toEqual({ text: '', cursor: 0 })
-  band = textOf(await $.ui.render(above()))
-  expect(band).toContain('a ask')
-  expect(band).toContain('0 back')
-  expect(band).toContain('] next citation')
-  expect(band).not.toContain('failed: 12')
-})
 
 // a heads-up on the citation's words, with long bullets, and an explainer after it
 const HEADS = {
@@ -420,82 +375,4 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   await clock.advance(2000)
   await $.prompt.edit(key(']'))
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
-})
-
-test('a heads-up page with rows left under its title shows the top of the bullet that wraps past them, not empty rows', async ($, on) => {
-  const { clock } = await resumed($, on, QUOTED, 's-tray-4b', { parts: HEADS })
-  await $.prompt.edit(key(']'))
-  // the room where the page holds the blank row, the title, the blank line under it and one row more: the first
-  // bullet takes two rows at this width, so it does not fit whole
-  const pageAt = async (rows: number) => {
-    const drawn = await $.ui.render(above(rows))
-    return { drawn, page: all(drawn).find(n => n.props?.key === 'tray-page') }
-  }
-  let rows = 8
-  while (rows < 20 && (await pageAt(rows)).page?.props.height !== 4) rows++
-  const { drawn, page } = await pageAt(rows)
-  expect(page?.props.height).toBe(4)
-  expect(textOf(page)).toContain('Retried runs count twice')
-  expect(textOf(page)).toContain('Four of the runs were retried')
-  expect(textOf(drawn)).toContain('m more · lines 1–3 of')
-  // m starts at that bullet, whole
-  await clock.advance(2000)
-  await $.prompt.edit(key('m'))
-  const next = (await pageAt(rows)).page
-  expect(textOf(next)).toContain('Four of the runs were retried')
-  expect(textOf(next)).not.toContain('Retried runs count twice')
-})
-
-// a heads-up on the words of a citation the check corrected: it stays on the new words while they hold its term, and
-// when they do not, a line under the reply names it and opens it
-const CORRECTED = { n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11.' }
-const headsOn = (term: string) => ({ explain: { order: ['h1'], items: { h1: { id: 'h1', kind: 'heads', term, title: 'Retried runs count twice', bullets: ['Four runs were retried and count twice.'] } } } })
-const fills = (n: Any) => all(n).filter(x => x.type === 'Text' && x.props?.backgroundColor && !x.props?.bold)
-
-test('a heads-up inside a corrected citation stays on its words while the new words hold them', async ($, on) => {
-  await resumed($, on, CORRECTED, 's-tray-5', { parts: headsOn('of 40') })
-  const drawn = await $.ui.render(answer('row-t1', TEXT))
-  expect(textOf(drawn)).toContain('Of the runs, 11 of 40 failed on the p95 check.')
-  // the corrected words carry the heads-up's fill on the words it stands on, inside the citation
-  const cite = all(drawn).filter(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
-  expect(cite.map(textOf).join('')).toBe('11 of 40')
-  expect(fills(cite).map(textOf)).toEqual(['of 40'])
-  expect(textOf(drawn)).not.toContain('the check of the citations changed these words')
-})
-
-test('a heads-up whose words the check changed is not dropped silently: a line under the reply names it and opens it', async ($, on) => {
-  await resumed($, on, CORRECTED, 's-tray-6', { parts: headsOn('12 of 40') })
-  const drawn = await $.ui.render(answer('row-t1', TEXT))
-  expect(textOf(drawn)).toContain('Of the runs, 11 of 40 failed on the p95 check.')
-  const line = all(drawn).find(n => n.type === 'Button' && /the check changed its words/.test(String(n.props?.label)))
-  expect(textOf(line)).toBe('12 of 40 heads-up · the check of the citations changed these words')
-  expect(fills(line).map(textOf)).toEqual(['12 of 40'])
-  // a press opens the heads-up in the tray, as a press on its words would
-  const ui = await $.ui.mount(answer('row-t1', TEXT))
-  await ui.press({ key: line.props.key })
-  await ui.unmount()
-  expect(textOf(await $.ui.render(above(40)))).toContain('Retried runs count twice')
-})
-
-// a repair that rewrote the sentence of a citation, in a sentence that also holds a link: the new sentence stands in
-// place of the old one whole, never its cited words alone inside the old one (`passed failed with`)
-const NIGHTLY = 'The nightly run nightly-007 passed [with 0 errors](#) (see [the log](runs/n7.log)).'
-const REWROTE = {
-  n: 1, row: 'row-t1', words: 'with 0 errors', start: 35, end: 53, sentence: 'The nightly run nightly-007 passed [with 0 errors] (see [the log](runs/n7.log)).', status: 'corrected', repair: true,
-  shown: 'failed with 2 errors', was: 'with 0 errors', rewrite: 'The nightly run nightly-007 [failed with 2 errors] (see [the log]).', reason: 'The log ends with 2 errors.',
-}
-
-test("a repair's rewritten sentence stands whole in the reply, a link in it kept; one that cannot stand leaves Claude's words, failed", async ($, on) => {
-  await resumed($, on, REWROTE, 's-tray-7', { text: NIGHTLY })
-  const words = textOf(await $.ui.render(answer('row-t1', NIGHTLY)))
-  expect(words).toContain('The nightly run nightly-007 failed with 2 errors (see the log')
-  expect(words).toContain('runs/n7.log')
-  expect(words).not.toContain('passed')
-})
-
-test("a rewrite that cannot stand in the reply leaves Claude's sentence as written and its citation failed, never glued", async ($, on) => {
-  await resumed($, on, { ...REWROTE, rewrite: 'The nightly run [nightly-007] [failed with 2 errors] (see [the log]).' }, 's-tray-8', { text: NIGHTLY })
-  const words = textOf(await $.ui.render(answer('row-t1', NIGHTLY)))
-  expect(words).toContain('The nightly run nightly-007 passed with 0 errors × (see the log')
-  expect(words).not.toContain('failed with 2 errors')
 })

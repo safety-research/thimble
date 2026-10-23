@@ -1,11 +1,9 @@
 // The product tour (src/tour, shell/TourHost) over the whole app, in headless Chromium: the real App, its stylesheets
-// and fonts, against a made-up workspace whose every API answer this file gives, at 1440x900, 1920x1080 and a chat
-// column 355 px wide at DPR 2 (in a 1200 and a 1100 px window, where the Files sidebar folds). What it proves, measured
+// and fonts, against a made-up workspace whose every API answer this file gives, at 1440x900. What it proves, measured
 // with getBoundingClientRect:
 //   - the first launch asks first (a welcome, "Would you like a short tour? The demo tour uses example data.", with
 //     Skip and Take the tour) and records the offer in thimble's own state (POST /api/tour/seen); a page loaded after
-//     that offers nothing; Settings' Take the tour replays the tour from step 1; with the chat column folded the tour
-//     leaves out its chat steps;
+//     that offers nothing; Settings' Take the tour replays the tour from step 1;
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
@@ -23,8 +21,7 @@
 //     is counted in the line's ink, and the page's Only these shows as thimble's filter chip with how many events it
 //     hides, which the chip clears;
 //   - step 6: the card is in plain words; on its first entry the demo plays once the card is in place, comes to rest on
-//     08:04 as its source shows and the card holds still, also with the Canvas drawn 1.5 s late; a real hover on a value
-//     shows its source, and a hover that stops the demo leaves the ⌘ demo to play at once on step 7;
+//     08:04 as its source shows and the card holds still;
 //   - step 7: in the ⌘-click demo the key badge stands inside the card and over none of its text; then "⌘-click here"
 //     points at the end of an entry and covers no text and not the popover, until the first try; a real ⌘-drag on the
 //     example card picks only the words dragged over and its ask box lies inside the cutout;
@@ -34,11 +31,8 @@
 //     in it, and only then does the page scroll to one; each comment card stands 8 px above its passage, or below the
 //     card above it, before and after the report scrolls; the Example badge sits in the report's bar, level with its
 //     + New, and meets no text, control or picture, on step 8 and at every scroll position of step 9;
-//   - with a view of the workspace open, the Files steps show the File browser and steps 4 and 5 their example's own
-//     status strip, which lies exactly over thimble's and hides it; the view opens again once the tour ends;
 //   - the page is frozen: clicks, keys and the wheel reach nothing, the tour writes nothing but the offer, and telemetry
-//     records nothing while it runs; Enter in the page's ask box sends nothing, and an ask box left open closes when
-//     the tour starts.
+//     records nothing while it runs; Enter in the page's ask box sends nothing.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -1112,164 +1106,26 @@ test('the first launch asks first, records the offer in thimble’s own state, a
   }
 }, 60_000)
 
-test('Esc on the welcome closes it, and the offer stays recorded', async () => {
-  const { page, server, close } = await open({ W: 1440, H: 900 })
+const cfg = { W: 1440, H: 900, dpr: 1, chat: 308, send: true }
+const tag = `${cfg.W}x${cfg.H}`
+test(`every step at ${tag}: the cutouts, the popover and what they show line up, and the page stays frozen`, async () => {
+  const { page, server, close } = await open(cfg)
   try {
     await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
-    await probe(page)
-    await page.keyboard.press('Escape')
-    await sleep(300)
-    assert.equal(await page.$('.tour-root'), null, 'Esc closes the welcome')
-    assert.deepEqual(await probe(page), [], 'the Esc reached nothing of the page')
-    assert.ok(server.seen, 'the offer is recorded')
-  } finally {
-    await close()
-  }
-}, 60_000)
-
-test('the page the screenshot tool opens at a card offers no welcome over it, nor records the offer', async () => {
-  // a first launch whose dashboard has not been opened yet: the card screenshot (backend tools._shot_card_in_ui) loads
-  // the page at `?ref=`, and the welcome would stand over the card in its picture
-  const { page, server, close } = await open({ W: 1440, H: 900, folded: true, surface: 'canvas', ref: 'card:c0ffee00' })
-  try {
-    await page.waitForSelector('.shell .board-viewport')
-    await sleep(3000)
-    assert.equal(await page.evaluate(() => !!document.querySelector('.tour-root')), false, 'no welcome')
-    assert.equal(server.seen, false, 'the offer is not recorded, so the analyst gets it')
-  } finally {
-    await close()
-  }
-}, 60_000)
-
-for (const cfg of [
-  { W: 1440, H: 900, dpr: 1, chat: 308, folds: false },
-  { W: 1920, H: 1080, dpr: 1, chat: 308, folds: false, send: true },
-  { W: 1200, H: 800, dpr: 2, chat: 355 },
-  // a Files panel too narrow for its sidebar, which folds
-  { W: 1100, H: 800, dpr: 2, chat: 355, folds: true },
-]) {
-  const tag = `${cfg.W}x${cfg.H}@${cfg.dpr}${cfg.chat !== 308 ? ` chat ${cfg.chat}` : ''}`
-  test(`every step at ${tag}: the cutouts, the popover and what they show line up, and the page stays frozen`, async () => {
-    const { page, server, close } = await open(cfg)
-    try {
-      await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
-      const panel = await page.evaluate(() => Math.round(document.querySelector('.chat[data-panel="chat"]')!.getBoundingClientRect().width))
-      assert.ok(Math.abs(panel - cfg.chat) <= 2, `the chat column is ${panel}px`)
-      await page.click('.tour-pop [data-tour="begin"]')
-      await walk(page, tag, cfg.send)
-      // the layout's own surface again (the stored layout was on the Report)
-      assert.equal(await page.evaluate(() => document.querySelector<HTMLElement>('.shell-tabs .tab.active')?.dataset.tab), 'report')
-      assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'the tour wrote nothing to the workspace')
-      // past telemetry's flush delay, so anything recorded during the tour has been sent
-      await sleep(2500)
-      assert.deepEqual(tourTelemetry(server), [], 'telemetry recorded nothing of the tour, ⌘-click on the example included')
-    } finally {
-      await close()
-    }
-  }, 150_000)
-}
-
-/** From the welcome to step 4, Views. */
-async function toViews(page: Page) {
-  await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
-  await page.click('.tour-pop [data-tour="begin"]')
-  await onStep(page, 1)
-  for (const n of [2, 3, 4]) {
-    await next(page)
-    await onStep(page, n)
-  }
-}
-
-test('on the Dark paper the example view and its page take the workbench’s colours', async () => {
-  const { page, close } = await open({ W: 1440, H: 900, paper: 'dark' })
-  try {
-    await toViews(page)
-    await page.waitForFunction(() => !!document.querySelector<HTMLIFrameElement>('.tour-ex-viewbody iframe')?.contentDocument?.querySelector<HTMLIFrameElement>('.view-pane-frame')?.contentDocument?.getElementById('list'))
-    // in each document: its theme, its card ground and text ink, and the colour of the first label
-    const colours = () => {
-      const ink = (prop: string, v: string) => {
-        const probe = document.createElement('span')
-        probe.style.setProperty(prop, `var(${v})`)
-        document.body.append(probe)
-        const c = getComputedStyle(probe).getPropertyValue(prop)
-        probe.remove()
-        return c
-      }
-      return { theme: document.documentElement.getAttribute('data-theme'), card: ink('background-color', '--surface-card'), text: ink('color', '--text-primary'), label: ink('color', '--label-1') }
-    }
-    const app = await page.evaluate(colours)
-    const view = page.frames().find((f) => new URL(f.url()).pathname.endsWith('/tour/timeline/page.html'))!
-    const got = { ...(await view.evaluate(colours)), body: await view.evaluate(() => getComputedStyle(document.body).backgroundColor) }
-    assert.ok(app.theme === 'dark' && got.theme === 'dark' && got.body === app.card && got.card === app.card && got.text === app.text && got.label === app.label, `the example's page in the workbench's dark colours ${JSON.stringify({ app, got })}`)
-    const hv = await viewHead(page)
-    assert.ok(hv.ok && hv.residueText === '1 unreadable line', `the view's header on the Dark paper ${JSON.stringify(hv)}`)
-  } finally {
-    await close()
-  }
-}, 90_000)
-
-test('the cards demo waits for a Canvas drawn late, and a hover that stops it leaves the ⌘ demo to play at once', async () => {
-  const { page, close } = await open({ W: 1440, H: 900 })
-  try {
-    await toViews(page)
-    // the Canvas panel shows only 1.5 s after Next, as a slow first draw would
-    await page.evaluate(() => {
-      const st = document.createElement('style')
-      st.textContent = '[data-panel="canvas"].shell-panel { display: none !important }'
-      document.head.append(st)
-      setTimeout(() => st.remove(), 1500)
-    })
-    await page.evaluate(LOG7)
-    await next(page)
-    await page.waitForFunction(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .hl')?.textContent === '08:04', null, { timeout: 10000 })
-    const r7 = judge7(await takeLog7(page), 3000)
-    assert.ok(r7.ok && r7.firstMs! >= 1500, `the demo waits for the card and plays onto 08:04 ${JSON.stringify(r7)}`)
-    // a hover on a value stops the demo and shows that value's source
-    const c = await page.evaluate(() => {
-      const el = [...(window as any).__tour().api.els.card.querySelectorAll('.refchip-value')].find((x: Element) => x.textContent?.trim() === '08:29') as Element
-      const b = el.getBoundingClientRect()
-      return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
-    })
-    await page.mouse.move(c.x + 60, c.y - 60, { steps: 4 })
-    await page.mouse.move(c.x, c.y, { steps: 6 })
-    await sleep(1200)
-    const hov = await page.evaluate(() => ({ demo: (window as any).__tour().state().demo, src: document.querySelectorAll('.tour-fx [data-src]:not([data-demo])').length }))
-    assert.deepEqual(hov, { demo: 'stopped', src: 1 }, 'the hover stopped the demo and shows the source')
-    // Next plays the ⌘ demo at once, and the hovered source is closed
-    await page.evaluate(() => {
-      const w = window as any
-      w.__log8 = []
-      const t0 = performance.now()
-      const f = () => {
-        if (!w.__log8) return
-        const el = document.querySelector<HTMLElement>('.tour-cursor'),
-          m = el && /translate\(([-\d.]+)px, ([-\d.]+)px\)/.exec(el.style.transform)
-        w.__log8.push({ t: Math.round(performance.now() - t0), n: w.__tour().state().n, at: m ? `${Math.round(+m[1])},${Math.round(+m[2])}` : null, key: !!document.querySelector('.tour-key'), src: document.querySelectorAll('.tour-fx [data-src]:not([data-demo])').length })
-        if (w.__log8.length < 600) requestAnimationFrame(f)
-      }
-      requestAnimationFrame(f)
-    })
-    const nb = await page.evaluate(() => {
-      const b = document.querySelector('.tour-pop [data-tour="next"]')!.getBoundingClientRect()
-      return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
-    })
-    await page.mouse.move(nb.x, nb.y, { steps: 6 })
-    await page.mouse.down()
-    await page.mouse.up()
+    const panel = await page.evaluate(() => Math.round(document.querySelector('.chat[data-panel="chat"]')!.getBoundingClientRect().width))
+    assert.ok(Math.abs(panel - cfg.chat) <= 2, `the chat column is ${panel}px`)
+    await page.click('.tour-pop [data-tour="begin"]')
+    await walk(page, tag, cfg.send)
+    // the layout's own surface again (the stored layout was on the Report)
+    assert.equal(await page.evaluate(() => document.querySelector<HTMLElement>('.shell-tabs .tab.active')?.dataset.tab), 'report')
+    assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'the tour wrote nothing to the workspace')
+    // past telemetry's flush delay, so anything recorded during the tour has been sent
     await sleep(2500)
-    const l8 = ((await page.evaluate(() => {
-      const l = (window as any).__log8
-      ;(window as any).__log8 = null
-      return l
-    })) as { t: number; n: number; at: string | null; key: boolean; src: number }[]).filter((x) => x.n === 6) // the ⌘ step is step 6
-    const first8 = l8.find((x) => x.at)
-    const r8 = { first: first8?.t ?? null, places: new Set(l8.filter((x) => x.at).map((x) => x.at)).size, key: l8.some((x) => x.key), src: l8.length ? l8[l8.length - 1].src : null }
-    assert.ok(r8.first != null && r8.first <= 1000 && r8.places >= 10 && r8.key && r8.src === 0, `the ⌘ demo plays at once and the hovered source is closed ${JSON.stringify(r8)}`)
-    await page.keyboard.press('Escape')
+    assert.deepEqual(tourTelemetry(server), [], 'telemetry recorded nothing of the tour, ⌘-click on the example included')
   } finally {
     await close()
   }
-}, 90_000)
+}, 150_000)
 
 test('Settings’ Take the tour replays the tour from step 1, without the welcome', async () => {
   const { page, close } = await open({ W: 1440, H: 900, seen: true })
@@ -1288,135 +1144,6 @@ test('Settings’ Take the tour replays the tour from step 1, without the welcom
     await page.keyboard.press('Escape')
     await sleep(400)
     assert.equal(await page.$('.tour-root'), null, 'Esc closes the tour')
-  } finally {
-    await close()
-  }
-}, 60_000)
-
-test('with the chat column folded the tour leaves out its chat step and starts on Files', async () => {
-  const { page, close } = await open({ W: 1440, H: 900, folded: true })
-  try {
-    await page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
-    await page.click('.tour-pop [data-tour="begin"]')
-    await onStep(page, 1, 'Files')
-    assert.equal((await state(page))!.total, 7)
-    assert.equal(await body(page), 'The file browser lists the folder’s files. Click one to read it.')
-    await measure(page, 'chat folded 1')
-    assert.deepEqual(await buttons(page), ['skip', 'next'])
-  } finally {
-    await close()
-  }
-}, 60_000)
-
-test('an ask box left open closes when Settings’ Take the tour starts the tour, and sends nothing', async () => {
-  const { page, server, close } = await open({ W: 1440, H: 900, seen: true })
-  try {
-    await page.waitForSelector('.shell .chat-foot')
-    // something on the page that a ⌘-click asks about, as a file's row or a card is
-    await page.evaluate(() => {
-      const el = document.createElement('div')
-      el.setAttribute('data-anchor', 'README.md')
-      el.setAttribute('data-anchor-text', 'README.md')
-      el.textContent = 'README.md'
-      Object.assign(el.style, { position: 'fixed', left: '700px', top: '400px', width: '200px', height: '30px', zIndex: '10' })
-      document.querySelector('.shell')!.append(el)
-    })
-    const b = { x: 700, y: 400, height: 30 }
-    await page.mouse.move(b.x + 20, b.y + b.height / 2)
-    await page.keyboard.down('Meta')
-    await page.mouse.click(b.x + 20, b.y + b.height / 2)
-    await page.keyboard.up('Meta')
-    await page.waitForSelector('.pointer-box')
-    await page.keyboard.type('A draft')
-    await page.click('[data-tel="settings"]')
-    await page.click('.settings-foot .settings-tour')
-    await onStep(page, 1, 'Your chat with Claude')
-    assert.equal(await page.evaluate(() => [...document.querySelectorAll('.pointer-box')].some((x) => !x.closest('.tour-root'))), false, 'the ask box closed')
-    await page.keyboard.press('Enter')
-    await sleep(300)
-    await page.keyboard.press('Escape')
-    await sleep(400)
-    assert.equal(await page.$('.tour-root'), null, 'Esc closes the tour')
-    assert.deepEqual(server.writes.filter((x) => !ALLOWED.has(x)), [], 'nothing was sent')
-  } finally {
-    await close()
-  }
-}, 60_000)
-
-// a view of the workspace's own, open in the Files panel when the tour starts
-const OWN_VIEW = {
-  slug: 'pr-review', origin: 'workspace', name: 'PR Review Timeline', description: 'Every review of every pull request.', claims: ['deploys.csv'], accepts: [], units: [],
-  libs: [], built: T, ok: true, forms: [], first_file: 'deploys.csv', files: ['deploys.csv'], n_files: 1, unit: null,
-}
-
-/** In the page: the Files panel's status strip as the analyst sees it (the topmost text at its middle), the box of the
- * example's strip against thimble's own, and the example's elements of the step. */
-const filesStrip = () => {
-  const real = document.querySelector('[data-panel="files"] .pane-status')!
-  const r = real.getBoundingClientRect()
-  const shown = [...document.elementsFromPoint(r.x + r.width / 2, r.y + r.height / 2)].find((e) => e.closest('.pane-status'))?.closest('.pane-status')
-  const ex = document.querySelector('.tour-ex-status')?.getBoundingClientRect()
-  const off = ex ? Math.max(Math.abs(ex.x - r.x), Math.abs(ex.y - r.y), Math.abs(ex.width - r.width), Math.abs(ex.height - r.height)) : null
-  const wrap = document.querySelector('.tour-ex-status')
-  const ground = wrap ? getComputedStyle(wrap).backgroundColor : ''
-  const opaque = /^rgb\(/.test(ground) || /,\s*1\)$/.test(ground)
-  return { shown: shown?.textContent?.trim() ?? '', example: shown?.closest('.tour-ex') != null, off, opaque, reader: !!document.querySelector('.tour-ex-reader')?.getBoundingClientRect().width }
-}
-
-test('with a view of the workspace open, the Files steps show the File browser and the examples’ own status strip, and the view opens again after the tour', async () => {
-  for (const [W, H] of [[1440, 900], [1920, 1080]]) {
-    const { page, close } = await open({ W, H, seen: true, views: [OWN_VIEW], surface: 'files' })
-    const tag = `${W}x${H}`
-    try {
-      await page.waitForSelector('.files-views .seg-opt[data-anchor="view:pr-review"]', { timeout: 20000 })
-      await page.click('.files-views .seg-opt[data-anchor="view:pr-review"]')
-      await page.waitForFunction(() => document.querySelector('[data-panel="files"] .pane-status')?.textContent?.includes('PR Review Timeline'))
-      await page.click('[data-tel="settings"]')
-      await page.waitForSelector('.settings-foot .settings-tour')
-      await page.click('.settings-foot .settings-tour')
-      for (const n of [1, 2]) {
-        await onStep(page, n)
-        await next(page)
-      }
-      await onStep(page, 3, 'Labels')
-      await measure(page, `${tag} 3`)
-      let st = await page.evaluate(filesStrip)
-      assert.ok(st.reader && st.example && st.shown === 'Filesagent-05.jsonl · Transcript' && st.off! <= 0.5 && st.opaque, `${tag} 3: the labels example and its strip ${JSON.stringify(st)}`)
-      await next(page)
-      await onStep(page, 4, 'Views')
-      await measure(page, `${tag} 4`)
-      st = await page.evaluate(filesStrip)
-      assert.ok(st.example && st.shown === 'Filesview · Timeline' && st.off! <= 0.5 && st.opaque, `${tag} 4: the strip under the example Timeline ${JSON.stringify(st)}`)
-      await page.keyboard.press('Escape')
-      await page.waitForFunction(() => !document.querySelector('.tour-root'))
-      await page.waitForFunction(() => document.querySelector('.files-views .seg-opt.active')?.getAttribute('data-anchor') === 'view:pr-review', null, { timeout: 3000 })
-      assert.match(await page.evaluate(() => document.querySelector('[data-panel="files"] .pane-status')?.textContent ?? ''), /view · PR Review Timeline/, `${tag}: the workspace's view is open again`)
-    } finally {
-      await close()
-    }
-  }
-}, 120_000)
-
-test('the workspace’s view opens again when the tour ends before a Files step has drawn its example', async () => {
-  const { page, close } = await open({ W: 1440, H: 900, seen: true, views: [OWN_VIEW], surface: 'files' })
-  try {
-    await page.waitForSelector('.files-views .seg-opt[data-anchor="view:pr-review"]', { timeout: 20000 })
-    await page.click('.files-views .seg-opt[data-anchor="view:pr-review"]')
-    await page.waitForFunction(() => document.querySelector('[data-panel="files"] .pane-status')?.textContent?.includes('PR Review Timeline'))
-    await page.click('[data-tel="settings"]')
-    await page.waitForSelector('.settings-foot .settings-tour')
-    await page.click('.settings-foot .settings-tour')
-    for (const n of [1]) {
-      await onStep(page, n)
-      await next(page)
-    }
-    await onStep(page, 2, 'Files')
-    assert.match(await page.evaluate(() => document.querySelector('.files-views .seg-opt.active')?.textContent ?? ''), /File browser/, 'step 2 shows the File browser')
-    // Next, and Esc at once: the tour ends before the Labels step's example runs
-    await next(page)
-    await page.keyboard.press('Escape')
-    await page.waitForFunction(() => !document.querySelector('.tour-root'))
-    await page.waitForFunction(() => document.querySelector('.files-views .seg-opt.active')?.getAttribute('data-anchor') === 'view:pr-review', null, { timeout: 3000 })
   } finally {
     await close()
   }

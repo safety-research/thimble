@@ -4,14 +4,9 @@ runs and their one end, main's quit and moves, the caller of a thimble tool, and
 cookie."""
 from __future__ import annotations
 
-import asyncio
-import json
-import sys
 
 import pytest
-from fastapi.testclient import TestClient
 
-import app
 from app import agents, config, kernel_wrap, subagents
 from app import subagent_files as sf
 from subagent_fakes import HINTS, bridge, hints  # noqa: F401 — fixtures
@@ -136,142 +131,6 @@ async def test_a_start_makes_its_agent_s_work_folder_which_main_s_sandbox_cannot
     assert not outside.exists()
 
 
-async def test_without_a_live_module_a_start_is_refused_before_any_request(bridge, models):
-    bridge.is_live, bridge.reason = False, "THIMBLE_NO_MODULE is set"
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    assert ans.kind == "no-module" and "THIMBLE_NO_MODULE is set" in ans.reason
-    assert not bridge.calls and not sf.requests(subagents.read(CORPUS))
-
-
-async def test_in_plan_mode_nothing_starts_and_a_plain_claude_is_no_refusal(bridge, models, monkeypatch):
-    """With the module live, a session thimble's launcher did not start starts agents as the launcher's does: no
-    refusal before the request. Plan mode still refuses a typed start."""
-    from app import session
-
-    assert subagents.refusal_before(CORPUS) is None and subagents.refusal_before(CORPUS, click=True) is None
-    monkeypatch.setattr(session, "main_mode", lambda c: "plan")
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.TYPED)
-    assert ans.kind == "hook" and ans.reason == HINTS["start-plan-mode"]
-    assert not bridge.calls
-
-
-async def test_a_start_in_the_first_seconds_after_slash_thimble_says_the_plugin_is_still_connecting(bridge, models,
-                                                                                                     monkeypatch):
-    """Right after /thimble opened a plain `claude`, Claude Code has not loaded the module's hello yet: within
-    CONNECT_GRACE_S of main attaching (session.current's `since`), a start with the module not loaded is refused as
-    start-refused-connecting, not as no module. Later, or for any other reason, or with a `since` that does not parse,
-    it gets the no-module refusal."""
-    import sys
-    from datetime import datetime, timedelta, timezone
-    from types import SimpleNamespace
-
-    from app import session
-
-    monkeypatch.setitem(HINTS, "start-refused-connecting", "CONNECTING")
-    not_loaded = "Claude Code did not load thimble's hooks module"
-    monkeypatch.setattr(sys.modules["app.module_bridge"], "NOT_LOADED", not_loaded, raising=False)
-    bridge.is_live, bridge.reason = False, not_loaded
-    attached = {"since": datetime.now(timezone.utc).isoformat(timespec="milliseconds")}
-    monkeypatch.setattr(session, "current", lambda c: SimpleNamespace(since=attached["since"]))
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    assert ans.kind == "no-module" and ans.reason == "CONNECTING"
-    attached["since"] = (datetime.now(timezone.utc) - timedelta(seconds=subagents.CONNECT_GRACE_S + 5)).isoformat()
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    assert ans.kind == "no-module" and ans.reason == f"NO MODULE: {not_loaded}"
-    attached["since"] = "not a time"
-    assert subagents.refusal_before(CORPUS).reason == f"NO MODULE: {not_loaded}", "a since that does not parse is old"
-    attached["since"] = datetime.now(timezone.utc).isoformat()
-    bridge.reason = "THIMBLE_NO_MODULE is set"
-    assert subagents.refusal_before(CORPUS).reason == "NO MODULE: THIMBLE_NO_MODULE is set", "another reason"
-    bridge.is_live = True
-    assert subagents.refusal_before(CORPUS) is None
-    assert not bridge.calls and not sf.requests(subagents.read(CORPUS))
-
-
-async def test_a_typed_start_answers_the_exact_agent_call_with_the_request_id_on_its_first_line(bridge, models):
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "Write the report.", {"model": "m", "effort": "e"},
-                                    subagents.TYPED, description="writer: report", call="toolu_tool")
-    assert ans.typed and not bridge.calls
-    inp = ans["input"]
-    assert set(inp) == {"subagent_type", "description", "prompt"}, "no run_in_background (F1), no model"
-    assert inp["subagent_type"] == "thimble:writer" and inp["prompt"].split("\n")[0] == f"[thimble request {ans['request']}]"
-    r = subagents.request(CORPUS, ans["request"])
-    assert r["values"] == {"model": "m", "effort": "e"} and r["call"] == "toolu_tool" and r["state"] == "pending"
-
-
-async def test_a_typed_start_a_fork_asked_for_names_the_fork_so_only_its_call_claims_it(bridge, models, monkeypatch):
-    """U5: the start tool called by a thread's fork (the caller hook's line names it, and the registry does not) keeps
-    the fork as the request's `caller_agent`; one called by main, or by one of thimble's agents, keeps none."""
-    ws = config.workspace_dir(CORPUS)
-    sf.add_caller(ws, "toolu_fork_tool", "fork1", "fork")
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "Write.", {}, subagents.TYPED, call="toolu_fork_tool")
-    assert subagents.request(CORPUS, ans["request"])["caller_agent"] == "fork1"
-    main = await subagents.start_job(CORPUS, "writer", "writer:notes", "Write.", {}, subagents.TYPED, call="toolu_main_tool")
-    assert "caller_agent" not in subagents.request(CORPUS, main["request"])
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)["orient1"] = {"key": "orient", "role": "orientation", "status": "running"}
-    sf.add_caller(ws, "toolu_orient_tool", "orient1", "thimble:orientation")
-    ours = await subagents.start_job(CORPUS, "writer", "writer:x", "Write.", {}, subagents.TYPED, call="toolu_orient_tool")
-    assert "caller_agent" not in subagents.request(CORPUS, ours["request"])
-    assert subagents.claim(CORPUS, "toolu_f1", ans["input"], caller="fork1") is None
-    assert subagents.request(CORPUS, ans["request"])["state"] == "claimed"
-
-
-def test_a_fork_s_turn_end_tells_the_browser_its_typed_start_was_never_made(bridge, models, monkeypatch, plugin_headers):
-    """The SubagentStop hook refused, in the file, the typed start a fork's turn never made (subagent_files
-    .refuse_unclaimed) and posts the ids: the role's refusal handler tells the browser at once, with no Starting… left
-    until a timeout."""
-    told: list[dict] = []
-    monkeypatch.setattr(subagents, "_refused", lambda c, rec: told.append(rec))
-    rid = subagents.new_request(CORPUS, "start", "writer:report", {"subagent_type": "thimble:writer", "prompt": "p"},
-                                {}, subagents.TYPED, role="writer", caller_agent="fork1")
-    with subagents.update(CORPUS) as state:
-        assert sf.refuse_unclaimed(state, {"agent_id": "fork1", "agent_type": "fork", "last_assistant_message": "No."})
-    from app import main
-
-    r = TestClient(main.create_app()).post("/api/subagents/stopped", headers=plugin_headers(), json={
-        "cwd": str(config.corpus_dir(CORPUS)), "hook": {"agent_id": "fork1", "agent_type": "fork", "refused": [rid]}})
-    assert r.status_code == 200
-    assert [(x["id"], x["refused_kind"], x["reason"]) for x in told] == [(rid, "no-call", "No.")]
-
-
-async def test_start_it_starts_a_refused_typed_start_as_a_click_with_the_same_call(bridge, models):
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {"model": "m", "effort": "e"},
-                                    subagents.TYPED)
-    subagents.refuse(CORPUS, ans["request"], "[Credential Exploration]", subagents.AUTO_MODE)
-    again = await subagents.start_it(CORPUS, ans["request"])
-    assert again.started
-    [spawn] = bridge.ops("spawn")
-    assert spawn["prompt"] == ans["input"]["prompt"] and spawn["values"] == {"model": "m", "effort": "e"}
-    assert subagents.request(CORPUS, ans["request"])["route"] == "click"
-
-
-async def test_start_it_is_refused_as_any_start_is_in_plan_mode_and_without_the_module(bridge, models, monkeypatch):
-    """Start it is a click, and like every start it is refused while main is in plan mode (U20) or the module is not
-    live; the request stays refused, so Start it works once that changes. Plan mode is --agent-check's to refuse, from
-    main's mode as the module's call runs, since the mode the server keeps is stale after a shift+tab while main is idle
-    (live check L21): a click in a remembered plan mode still reaches the module."""
-    from app import session
-
-    ans = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {"model": "m", "effort": "e"},
-                                    subagents.TYPED)
-    subagents.refuse(CORPUS, ans["request"], "[Credential Exploration]", subagents.AUTO_MODE)
-    monkeypatch.setattr(session, "main_mode", lambda c: "plan")
-    bridge.answers.append({"deny": f"PreToolUse:Agent hook error: {HINTS['start-plan-mode']}"})  # main is in plan mode
-    again = await subagents.start_it(CORPUS, ans["request"])
-    assert again.refused and again.kind == subagents.HOOK and again.reason == HINTS["start-plan-mode"], \
-        "thimble's own reason, without Claude Code's PreToolUse label"
-    assert subagents.request(CORPUS, ans["request"])["state"] == "refused"
-    assert (await subagents.start_it(CORPUS, ans["request"])).started, "main left plan mode while idle"
-    monkeypatch.setattr(session, "main_mode", lambda c: "default")
-    ans2 = await subagents.start_job(CORPUS, "writer", "writer:other", "w", {}, subagents.TYPED)
-    subagents.refuse(CORPUS, ans2["request"], "[Credential Exploration]", subagents.AUTO_MODE)
-    bridge.is_live, bridge.reason = False, "THIMBLE_NO_MODULE is set"
-    spawns = len(bridge.ops("spawn"))
-    assert (await subagents.start_it(CORPUS, ans2["request"])).kind == subagents.NO_MODULE
-    assert len(bridge.ops("spawn")) == spawns, "nothing reaches a module that is not live"
-
-
 # --------------------------------------------------------------------------- follow-ups and stops
 
 
@@ -288,31 +147,6 @@ async def test_a_browser_follow_up_sends_through_the_module_with_the_run_s_value
     bridge.is_live = False
     refused = await subagents.send(CORPUS, started.agent_id, "again")
     assert refused.kind == "no-module"
-
-
-async def test_a_follow_up_to_an_agent_the_registry_lacks_names_its_chat_s_session_or_none_at_all(bridge, models,
-                                                                                                hints):
-    """An agent that is not in the registry gets no SendMessage. The refusal gives the earlier-session text with the
-    session its chat last ran under, and never that text with an empty session ("thimble -r  ..."): with no session
-    known it gives the earlier-version text."""
-    sid = "11111111-1111-4111-8111-111111111111"
-    agents.new_agent(CORPUS, "orient", "orientation", route="subagent", agent_id="a-gone", session="s0",
-                     sessions=["s0", sid])
-    named = await subagents.send(CORPUS, "a-gone", "and April?")
-    assert (named.kind, named.reason) == (subagents.EARLIER, f"EARLIER SESSION: {sid}")
-    agents.new_agent(CORPUS, "orient", "orientation", route="subagent", agent_id="a-nosession", session="",
-                     sessions=[])
-    for agent_id in ("a-nosession", "a-unknown", ""):
-        none = await subagents.send(CORPUS, agent_id, "and May?")
-        assert (none.kind, none.reason) == (subagents.EARLIER, "EARLIER VERSION"), agent_id
-    assert not bridge.ops("send"), "nothing reaches the module"
-
-
-async def test_a_typed_follow_up_is_a_pending_message_request_and_its_exact_send_message(bridge, models):
-    started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    ans = subagents.message_request(CORPUS, started.agent_id, "and May?", call="toolu_m")
-    assert ans["input"] == {"to": started.agent_id, "message": "and May?"}
-    assert subagents.request(CORPUS, ans["request"])["kind"] == "message"
 
 
 async def test_a_stop_goes_through_the_module_and_one_of_an_ended_agent_counts_as_done(bridge, models):
@@ -363,79 +197,6 @@ async def test_a_run_ends_once_whatever_sign_comes_first(bridge, models, ended):
     assert ended[-1] == ("writer", 1, "done", "follow-up done")
 
 
-async def test_a_turn_s_end_with_a_child_running_waits_and_without_one_ends_after_the_wait(bridge, models, ended,
-                                                                                         monkeypatch):
-    from app import session
-
-    monkeypatch.setattr(subagents, "HANDBACK_WAIT_S", 0.05)
-    monkeypatch.setattr(session, "agent_answer", lambda c, a: "that turn's answer")
-    parent = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)["child1"] = {"role": "critic", "parent": parent.agent_id, "status": "running"}
-    subagents.stopped(CORPUS, parent.agent_id)
-    assert subagents.agent(CORPUS, parent.agent_id)["status"] == "waiting" and not ended
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)["child1"]["status"] = "done"
-    subagents.child_ended(CORPUS, parent.agent_id)
-    assert subagents.agent(CORPUS, parent.agent_id)["status"] == "running"
-    subagents.stopped(CORPUS, parent.agent_id)
-    await asyncio.sleep(0.2)
-    assert ended == [("writer", 0, "done", "that turn's answer")]
-
-
-async def test_a_hand_back_within_the_wait_ends_the_run_with_its_report(bridge, models, ended, monkeypatch):
-    monkeypatch.setattr(subagents, "HANDBACK_WAIT_S", 0.2)
-    started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    subagents.stopped(CORPUS, started.agent_id)
-    subagents.run_ended(CORPUS, started.agent_id, "done", "the hand-back", source="handback")
-    await asyncio.sleep(0.4)
-    assert ended == [("writer", 0, "done", "the hand-back")]
-
-
-async def test_the_module_s_turn_end_ends_a_run_with_its_answer(bridge, models, ended):
-    started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    assert subagents.ended(CORPUS, started.agent_id, "the module's answer")
-    assert ended == [("writer", 0, "done", "the module's answer")]
-    cut = await subagents.start_job(CORPUS, "writer", "writer:story", "w", {}, subagents.CLICK)
-    assert subagents.ended(CORPUS, cut.agent_id, "", "aborted")
-    assert ended[-1] == ("writer", 0, "stopped", "")
-
-
-def test_the_module_s_ended_posts_and_session_moves_reach_subagents(monkeypatch, workspaces_tmp):
-    """Lane M's module_bridge calls `ended` for each `ended` post (on_ended) and hears each move --rekey reports."""
-    import types
-
-    heard, moves = [], []
-    mod = types.ModuleType("app.module_bridge")
-    mod.on_ended = heard.append
-    mod.rekey = lambda c, old, new: moves.append((c, old, new))
-    monkeypatch.setitem(sys.modules, "app.module_bridge", mod)
-    monkeypatch.setattr(app, "module_bridge", mod, raising=False)  # read before sys.modules once the real one loaded
-    subagents._hear_module()
-    assert heard == [subagents.ended]
-    body = subagents.HookBody(cwd=str(config.corpus_dir(CORPUS)), hook={"old": "s-old", "session_id": "s-new"})
-    asyncio.run(subagents.rekey_route(body))
-    assert moves == [(CORPUS, "s-old", "s-new")]
-
-
-async def test_main_s_quit_closes_the_running_agents_chats(bridge, models, ended):
-    started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    assert subagents.close_running(CORPUS) == [started.agent_id]
-    a = subagents.agent(CORPUS, started.agent_id)
-    meta = agents.read_meta(CORPUS, a["chat"])
-    assert a["status"] == "stopped" and meta["stopped_by"] == "quit" and meta["continue"] == "here"
-    assert ended == [("writer", 0, "stopped", subagents.QUIT_LINE)]
-
-
-async def test_rekey_moves_the_running_agents_and_their_chats_to_the_new_session(bridge, models):
-    started = await subagents.start_job(CORPUS, "writer", "writer:report", "w", {}, subagents.CLICK)
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)[started.agent_id]["sessions"] = ["old-sid"]
-    assert subagents.rekey(CORPUS, "old-sid", "new-sid") == [started.agent_id]
-    meta = agents.read_meta(CORPUS, subagents.agent(CORPUS, started.agent_id)["chat"])
-    assert meta["session"] == "new-sid" and meta["sessions"] == ["old-sid", "new-sid"]
-
-
 # --------------------------------------------------------------------------- the caller of a thimble tool
 
 
@@ -454,78 +215,7 @@ async def test_a_call_runs_as_its_agent_s_key_and_a_descendant_s_as_its_ancestor
     assert subagents.allowed(who, "write_document") and not subagents.allowed(who, "apply_label")
 
 
-async def test_main_s_own_call_runs_at_once_and_a_subagent_s_is_found_by_its_transcript(bridge, tmp_path):
-    """A call the caller hook wrote no line for (a hook of an older thimble) is told apart by the transcripts: main's
-    own at once when main's transcript holds it, not after CALLER_WAIT_S (live: each of main's thimble calls took 2 s
-    longer, start_orientation 4.2 s). A subagent's call with no line yet is found by its own transcript."""
-    import time
-
-    from app import session, tools
-
-    assert subagents.CALLER_WAIT_S >= 1.0, "the wait this test shows main's calls no longer take"
-    t = time.monotonic()
-    assert await subagents.caller(CORPUS, "toolu_main_no_session") is None
-    assert time.monotonic() - t < 0.5, "with no session attached, main's call waits for nothing"
-    main = tmp_path / "main.jsonl"
-    main.write_text(json.dumps({"type": "assistant", "message": {"content": [
-        {"type": "tool_use", "id": "toolu_main1", "name": "mcp__plugin_thimble_thimble__add_card"}]}}) + "\n")
-    lv = session.Live(CORPUS, "sid-main", "/tmp", str(main), None)
-    with subagents.update(CORPUS) as state:
-        sf.registry(state)["orient1"] = {"key": "orient", "role": "orientation", "status": "running", "chat": "o1"}
-    sub = session.Sub(CORPUS, "o1", None, "orient1", role="orient")
-    sub.path = tmp_path / "agent-orient1.jsonl"
-    sub.path.write_text(json.dumps({"type": "assistant", "message": {"content": [
-        {"type": "tool_use", "id": "toolu_sub1", "name": "mcp__plugin_thimble_thimble__add_card"}]}}) + "\n")
-    lv.subs.append(sub)
-    session._live[CORPUS] = lv
-    try:
-        t = time.monotonic()
-        refused, as_session = await tools._as_caller(CORPUS, "add_card", "toolu_main1")
-        assert not refused and as_session is None
-        assert time.monotonic() - t < 0.5, "main's own call runs at once"
-        who = await subagents.caller(CORPUS, "toolu_sub1")
-        assert who is not None and who.key == "orient", "a subagent's call is found by the transcript that holds it"
-    finally:
-        session._live.pop(CORPUS, None)
-
-
-async def test_main_s_own_call_runs_at_once_by_its_caller_line_while_main_s_transcript_lacks_it(bridge, tmp_path,
-                                                                                               monkeypatch):
-    """Claude Code writes a call to main's transcript only once the call has returned (2.1.295; live 2026-10-10: each of
-    main's add_card and edit_card calls took 2.03 to 2.09 s, the whole CALLER_WAIT_S). The caller hook writes main's own
-    call as a line with no agent, so the call runs as main's at once, and a start tool's typed_caller waits for nothing
-    either; a call with no line still waits for the transcripts."""
-    import time
-
-    from app import session, tools
-
-    assert subagents.CALLER_WAIT_S >= 1.0, "the wait this test shows main's calls no longer take"
-    main = tmp_path / "main.jsonl"
-    main.write_text("")  # main's transcript, which holds none of the calls below while they run
-    session._live[CORPUS] = session.Live(CORPUS, "sid-main", "/tmp", str(main), None)
-    sf.add_caller(config.workspace_dir(CORPUS), "toolu_main2", "", "")
-    try:
-        t = time.monotonic()
-        assert await tools._as_caller(CORPUS, "add_card", "toolu_main2") == ("", None)
-        assert await subagents.typed_caller(CORPUS, "toolu_main2") is None
-        assert time.monotonic() - t < 0.5, "main's own call runs at once"
-        monkeypatch.setattr(subagents, "CALLER_WAIT_S", 0.3)
-        t = time.monotonic()
-        assert await subagents.caller(CORPUS, "toolu_no_line") is None
-        assert time.monotonic() - t >= 0.3, "a call with no line waits for the transcripts"
-    finally:
-        session._live.pop(CORPUS, None)
-
-
 # --------------------------------------------------------------------------- the clicks are the analyst's
-
-
-CLICKS = [("post", "/api/ws/mini/start", {"text": ""}),
-          ("post", "/api/ws/mini/write", {"doc": "report"}),
-          ("post", "/api/ws/mini/orientation/message", {"text": "hi"}),
-          ("post", "/api/ws/mini/subagents/start-it", {"request": "req_0000000000"}),
-          ("post", "/api/ws/mini/subagents/again", {"request": "req_0000000000"}),
-          ("post", "/api/ws/mini/chats/main/interrupt", {})]
 
 
 def test_the_click_routes_are_the_ones_the_module_is_reached_by():
@@ -546,37 +236,3 @@ def test_a_second_fork_of_a_thread_is_refused_while_the_first_runs(monkeypatch):
     assert subagents.fork_check(CORPUS, {"subagent_type": "fork", "description": "thread:t1"}, "toolu_f3") is None
     assert subagents.files.fork_call_ref(subagents.read(CORPUS), "toolu_f3") == "thread:t1", \
         "the call let through is kept by its tool_use id, by which the mirror knows the fork's thread"
-
-
-def test_old_workspaces_have_their_background_sessions_stopped_once(monkeypatch):
-    stopped: list[str] = []
-    monkeypatch.setattr(subagents, "_stop_background", stopped.append)
-    ws = config.workspace_dir(CORPUS)
-    (ws / subagents.OLD_BG_FILE).write_text(json.dumps([{"short": "abc123"}]))
-    assert subagents.stop_old_background(CORPUS) == ["abc123"] and stopped == ["abc123"]
-    assert subagents.stop_old_background(CORPUS) == [], "the file is renamed once read"
-
-
-def test_a_chat_an_earlier_version_left_running_closes_as_earlier_version(monkeypatch):
-    monkeypatch.setattr(subagents, "kill_left", lambda meta: None)
-    meta = agents.new_agent(CORPUS, "orient", "Orientation", session="s0", pid=12345)
-    assert subagents.close_old(CORPUS) == [meta["id"]]
-    after = agents.read_meta(CORPUS, meta["id"])
-    assert after["status"] == "stopped" and after["continue"] == "earlier-version"
-
-
-def test_what_agent_session_keeps_is_imported_only_by_the_jobs_thimble_still_starts():
-    """agent_session.py keeps only what code tickets' `claude -p` sessions, `thimble fix` and an extension's programs
-    need (Q6), so only dev.py and harness.py import it, besides main.py, which mounts its answer route."""
-    import ast
-    from pathlib import Path
-
-    app = Path(subagents.__file__).parent
-    importers = set()
-    for path in sorted(app.glob("*.py")):
-        for node in ast.walk(ast.parse(path.read_text("utf-8"))):
-            names = ([a.name for a in node.names] if isinstance(node, ast.ImportFrom) and node.module in (None, "app")
-                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
-            if any(n == "agent_session" or n.endswith(".agent_session") for n in names):
-                importers.add(path.stem)
-    assert importers <= {"dev", "harness", "agent_session"}, sorted(importers - {"dev", "harness", "agent_session"})

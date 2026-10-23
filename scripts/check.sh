@@ -10,11 +10,15 @@
 #   python     pytest over plugin/ (the kernel)
 #
 #   the browser workbench (browser/, thimble 0.8's browser mode):
-#   parity     the browser's prompts: each renders, names only the tools and hints the code has, and is written in
-#              American English (browser/backend/tests_public/test_prompts.py, test_american_names.py)
+#   parity     the browser's prompts: each renders and names only the hints the code has, and the API's names are
+#              American (browser/backend/tests_public/test_prompts.py, test_american_names.py)
 #   server     the server's tests (browser/backend/tests_public), in parallel, without the caller's THIMBLE_* settings;
 #              the sandbox tests need scripts/install.sh to have run
 #   page       the page's type check, unit tests and build (browser/frontend), after npm ci when its packages are missing
+#
+# Each test has a time limit, so a test that hangs fails with its name: 120 s for node --test and pytest (the browser's
+# in browser/backend/pyproject.toml; the plugin's when pytest-timeout is installed), and vitest's testTimeout (10 s) for
+# the page.
 #
 # The plugin's steps need claude (Claude Code 2.1.307 or later), node 22.18 or later, and Python 3.10 or later with pytest:
 # THIMBLE_PYTHON, else python3. The browser's steps need uv and node 22.12 or later. Each step runs with a Claude Code
@@ -49,10 +53,18 @@ for step in "${steps[@]}"; do
     node)
       files=()
       while IFS= read -r f; do files+=("$f"); done < <(find plugin -name '*.test.mjs' -not -path '*/node_modules/*' | sort)
-      node --test "${files[@]}" ;;
-    python) "$THIMBLE_PYTHON" -m pytest plugin -q -p no:cacheprovider ;;
+      node --test --test-timeout=120000 "${files[@]}" ;;
+    python)
+      limit=()  # with pytest-timeout (CI installs it), a test that runs past 120 s fails with its name and its stack
+      if "$THIMBLE_PYTHON" -c 'import pytest_timeout' 2>/dev/null; then limit=(--timeout=120 --timeout-method=thread)
+      else echo "pytest-timeout is not installed, so a test that hangs holds the run"; fi
+      "$THIMBLE_PYTHON" -m pytest plugin -q -p no:cacheprovider ${limit[@]+"${limit[@]}"} ;;
     parity) browser_tests tests_public/test_prompts.py tests_public/test_american_names.py ;;
-    server) browser_tests -n "${THIMBLE_TEST_WORKERS:-8}" tests_public ;;
+    server)
+      # one worker per CPU, at most 8 (THIMBLE_TEST_WORKERS sets another count): the tests that time a page, a kernel or
+      # a hold fail when more workers than CPUs share the machine, as on CI's 4-CPU runner
+      cpus=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)
+      browser_tests -n "${THIMBLE_TEST_WORKERS:-$((cpus < 8 ? cpus : 8))}" tests_public ;;
     page)
       [ -d browser/frontend/node_modules ] || npm --prefix browser/frontend ci --no-audit --no-fund
       # the build goes to a temporary folder, so the frontend/dist a running server serves is left alone

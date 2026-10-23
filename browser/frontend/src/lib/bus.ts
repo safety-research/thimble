@@ -22,9 +22,8 @@ export type Events = {
   orient: { status: string; [k: string]: unknown }
   report: { slug: string; status: string; span?: string }
   /** `asked`: a view the analyst asked for is built (files/viewReady.ts); `version`: a new version of it passed its checks */
-  /** `held`: the proposal of an orientation from before 0.8.0 before its view first passes, which only its chip follows */
   /** `accepted`: the first build of a view the analyst accepted from a view proposal (files/viewReady.ts) */
-  view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; accepted?: boolean; version?: string; held?: boolean }
+  view: { slug: string; status: string; path?: string; chat?: string; asked?: boolean; accepted?: boolean; version?: string }
   ticket: { id: string; n: number; status: string }
   /** `rows` false: the label's rows stayed as they were (turned on or off, recoloured, a filter set) */
   concepts: { concept: string; what: string; rows?: boolean }

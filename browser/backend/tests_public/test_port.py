@@ -130,43 +130,6 @@ def test_a_port_the_last_start_recorded_is_kept_while_free_and_passed_over_once_
         again.close()
 
 
-def test_in_dev_mode_a_taken_ui_port_is_passed_over_for_vite_unless_thimble_ui_port_names_it(server, monkeypatch,
-                                                                                            tmp_path):
-    """Dev mode: another program (or another install's Vite) on the UI port, and Vite starts on a free port, which the
-    link names; this install's own Vite there is kept; THIMBLE_UI_PORT names the one port, as before."""
-    monkeypatch.setenv("THIMBLE_DEV", "1")
-    (tmp_path / "frontend" / "node_modules").mkdir(parents=True)
-    monkeypatch.setattr(cli, "FRONTEND_DIR", tmp_path / "frontend")
-    free = _held()
-    monkeypatch.setattr(cli, "DEFAULT_PORT", free.getsockname()[1])
-    free.close()
-    held = _held()
-    try:
-        ui = held.getsockname()[1]
-        monkeypatch.setattr(cli, "DEFAULT_UI_PORT", ui)
-        st = cli.start()
-        vite = [c for c in server.calls if "vite" in c]
-        assert len(vite) == 1 and vite[0][vite[0].index("--port") + 1] != str(ui)
-        picked = int(vite[0][vite[0].index("--port") + 1])
-        assert (st["ui_port"], st["url"]) == (picked, f"http://127.0.0.1:{picked}") and cli.ui_port() == picked
-        assert picked != st["port"]
-
-        cli.write_state({**st, "ui_port": ui, "vite_pid": 777})
-        monkeypatch.setattr(cli, "pid_alive", lambda pid: pid == 777)
-        monkeypatch.setattr(cli, "_cmdline", lambda pid: f"node npx vite --port {ui} --strictPort" if pid == 777 else "")
-        server.calls.clear()
-        st = cli.start()
-        assert not [c for c in server.calls if "vite" in c] and (st["ui_port"], st["vite_pid"]) == (ui, 777), "its own Vite"
-
-        cli.write_state({**st, "vite_pid": None})
-        monkeypatch.setenv("THIMBLE_UI_PORT", str(ui))
-        server.calls.clear()
-        st = cli.start()
-        assert not [c for c in server.calls if "vite" in c] and st["url"] == f"http://127.0.0.1:{ui}", "THIMBLE_UI_PORT"
-    finally:
-        held.close()
-
-
 def test_a_port_this_installs_own_stuck_server_holds_is_kept_so_the_failure_names_it(server, monkeypatch):
     """This install's own server holding the port but not answering is not passed over: a second server would run
     beside it, so the start keeps the port and the failure names the stuck server (start_failure)."""

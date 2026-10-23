@@ -9,7 +9,7 @@
 //     when its turn takes its next step.
 // One worker takes the queue in order. When several messages wait (they came while a look ran), it takes them all in
 // one look whose prompt names each of them. Two looks never run at once, and a look never delays a turn. It looks only
-// where a person is (personHere): never in a `-p` run, and in a session Claude Code's background service runs only once
+// where a person is (S.person): never in a `-p` run, and in a session Claude Code's background service runs only once
 // the person's first prompt came; never at a fork's or a subagent's messages.
 //
 // One look, in order:
@@ -84,12 +84,6 @@ const S = {
 
 const cut = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`)
 const wait = ($: Engine, ms: number) => new Promise<void>(done => { $.clock.after(ms, () => done()) })
-
-/** Whether a person is at this session: `now` (an interactive session), `later` (one Claude Code's background service
- *  runs, until the person's first prompt), `never` (a `-p` run, the SDK). The observer looks only `now`. */
-export function personHere(): 'now' | 'later' | 'never' {
-  return S.person
-}
 
 /** Whether the observer runs: one of the features its lenses serve is on. */
 export const observerOn = (): boolean => (LENSES as Lens[]).some(l => featureOn(l.option))

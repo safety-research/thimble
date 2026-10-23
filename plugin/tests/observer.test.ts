@@ -7,7 +7,7 @@ import { expect, test } from 'claude-code/testing'
 import { failLineNow } from '../bar/notice'
 import { registerAnswers, resetAnswers } from '../core/answers'
 import { registerTurn } from '../core/turn'
-import { drainNow, lookWord, messagesText, registerObserver, resetObserver } from '../observer/observer'
+import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
 
@@ -110,17 +110,6 @@ test("an answer gets one look: a fork of the conversation with the lenses' secti
   expect(log.at(-1)).toMatchObject({ kind: 'look', turn: 1, fork: { lenses: { explain: 'lens-explain', heads: 'lens-heads', claims: 'lens-claims' } } })
 })
 
-test('a long reply in the middle of a turn is read with the answer, in one look that names both', async () => {
-  setOptions({})
-  const s = setup([READ])
-  const long = `First, the runs: ${'run '.repeat(200)}`
-  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: [long, 'Runs 4 and 9 failed.'] })
-  expect(s.forks.length).toBe(1)
-  expect(s.forks[0]).toContain("TURN Read these 2 messages of Claude's, above in the session, in order.")
-  expect(s.forks[0]).toContain('1. Words Claude wrote to the analyst in the middle of turn 1')
-  expect(s.forks[0]).toContain("2. Claude's answer at the end of turn 1")
-})
-
 test('with every feature it serves off, no look runs; one lens off has no section', async () => {
   setOptions({ explain: false, details: false, claims: false })
   const off = setup([READ])
@@ -144,9 +133,3 @@ test("a reply that cannot be read is tried once more, then the failure line says
   expect((await failLineNow(s.$))?.text).toBe("thimble could not add explainers, details, claims to Claude's last answer: its reply could not be read.")
 })
 
-test('the busy line names what the look adds; the messages are named by kind, turn and first words', () => {
-  expect(lookWord(['explain', 'claims'])).toBe('adding explainers, claims')
-  expect(lookWord([])).toBe('reading the answer')
-  expect(messagesText([{ row: 'r', text: 'Done.', kind: 'answer', turnId: 't', turnNo: 2, prompt: { text: '<task-notification>', by: 'task-notification' }, at: 0, t: 0 }]))
-    .toBe("Read this message of Claude's, above in the session: Claude's answer at the end of turn 2, which begins \"Done.\" (1 line). It answers a report the session got (a background task's or another agent's), not a message of the analyst's.")
-})

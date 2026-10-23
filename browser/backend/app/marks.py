@@ -47,6 +47,7 @@ import os
 import re
 import secrets
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -172,13 +173,15 @@ def _save(c: str, reply: dict[str, Any]) -> None:
 
 
 async def marks_of(texts: list[str]) -> list[dict[str, Any]]:
-    """Each mark of the texts: {piece, k, words, sentence} (marks_of.mjs)."""
-    proc = await asyncio.create_subprocess_exec("node", str(MARKS_OF), stdin=asyncio.subprocess.PIPE,
-                                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    out, err = await proc.communicate(json.dumps({"texts": texts}).encode())
-    if proc.returncode != 0:
-        raise RuntimeError(err.decode(errors="replace").strip()[-300:] or "marks_of.mjs failed")
-    return json.loads(out.decode())
+    """Each mark of the texts: {piece, k, words, sentence} (marks_of.mjs). Node runs in a worker thread, not as an
+    asyncio subprocess: the check that asks runs in the background, so the loop's close can cancel it while Node starts
+    (a server that stops, a test that ends), and on Python 3.12.3, Ubuntu 24.04's, an asyncio subprocess cancelled
+    before its pipes connect leaves that close waiting for it forever."""
+    done = await asyncio.to_thread(subprocess.run, ["node", str(MARKS_OF)], input=json.dumps({"texts": texts}).encode(),
+                                   capture_output=True)
+    if done.returncode != 0:
+        raise RuntimeError(done.stderr.decode(errors="replace").strip()[-300:] or "marks_of.mjs failed")
+    return json.loads(done.stdout.decode())
 
 
 def split_marks(items: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:

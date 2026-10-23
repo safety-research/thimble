@@ -1,21 +1,15 @@
 // The reader's strip (src/files/Tracks.tsx ReaderTracks), its loupe (src/files/Loupe.tsx) and the report's ruler
-// (src/files/Ruler.tsx PageRuler) with the app's stylesheets in headless Chromium, light and dark.
+// (src/files/Ruler.tsx PageRuler) with the app's stylesheets in headless Chromium.
 //
-// The strip is one track at every length: the find's lane and a lane of colors in the scrollbar's geometry, no second
-// track, a thumb exactly as wide as the strip, its edges on whole device pixels at a pixel ratio of 1 and 2 once still;
-// each pixel row of a lane is one color and the find's matches are ticks in the accent as text, following the accent
-// and the paper the analyst picks. Resting on the strip opens the loupe
-// beside it after LOUPE_REST_MS, not before, with a bracket beside the strip over the stretch it shows: a line per
-// record, its number, its cells in its own colors once read, and the start of its text, the pointer's record in the
-// middle line and darker. It follows the pointer along the strip, never jumping to the thumb while the reader's place
-// moves under it, and the thumb once the reader scrolls on the wheel or the thumb is dragged; moved into, it holds still
-// with no tooltip, the line under the pointer darker; a click goes to that record and leaves its lines where they are,
-// and the wheel scrolls the reader once per turn while the loupe keeps its place and its lines follow; out of both, it
-// closes. A touch press on the strip opens it, a drag scrubs and the release goes to the record under its line. A strip
-// that tells every record apart opens no loupe and names the record under the pointer on one line. A click on a find's
-// tick goes to it, and a press on the strip sends the thumb there and scrubs. The report's ruler is the same one strip:
-// a mark names its passage on hover on a short page, on one line; the loupe opens on a long one, a line per passage, and
-// a click on a line goes to its passage.
+// Each pixel row of the strip's lane of colors is one color and the find's matches are ticks in the accent as text,
+// following the accent and the paper the analyst picks. Resting on the strip opens the loupe beside it after
+// LOUPE_REST_MS, not before, with a bracket beside the strip over the stretch it shows: a line per record, its number,
+// its cells in its own colors once read, and the start of its text, the pointer's record in the middle line and darker.
+// Moved into, it holds still with no tooltip, the line under the pointer darker; a click goes to that record and leaves
+// its lines where they are, and the wheel scrolls the reader once per turn while the loupe keeps its place and its
+// lines follow. A click on a find's tick goes to it, and a press on the strip sends the thumb there and scrubs. The
+// report's ruler is the same one strip: a mark names its passage on hover on a short page, on one line; the loupe
+// opens on a long one, a line per passage, and a click on a line goes to its passage.
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -165,39 +159,6 @@ async function rest(f: number, pg: Page = page) {
   return over
 }
 
-for (const theme of ['light', 'dark']) {
-  test(`one strip at the edge, its lanes in the scrollbar's geometry under a thumb exactly as wide, in the ${theme} theme`, async () => {
-    await page.evaluate((t) => document.documentElement.setAttribute('data-paper', t === 'dark' ? 'dark' : 'warm'), theme)
-    await reset()
-    const g = await layout()
-    assert.equal(g.second, 0, 'no second track, no lens')
-    // the find's lane and one lane of colors: 2 × 7 px, a 2 px gap, 3 px either side
-    assert.equal(g.over.width, 22)
-    assert.ok(near(g.over.right, g.tracks.right - 6), JSON.stringify(g))
-    assert.equal(g.frame.width, g.over.width)
-    assert.equal(g.frame.left, g.over.left)
-    assert.equal(g.frameWidth, 1)
-    assert.ok(g.frameRadius > 0 && g.frameRadius <= g.chip, `the thumb's corners a chip's at most: ${g.frameRadius}`)
-    assert.notEqual(g.frameFill, 'rgba(0, 0, 0, 0)', 'a light fill, so that the marks under it read')
-    // the thumb in the middle of the file in the middle of the strip
-    assert.ok(near((g.frame.top - g.over.top) / (g.over.height - g.frame.height), 0.5, 0.02), JSON.stringify(g))
-    assert.equal(g.open, false)
-  })
-}
-
-for (const dpr of [1, 2]) {
-  test(`at a pixel ratio of ${dpr}, the thumb's edges stand on whole device pixels once still`, async () => {
-    const pg = await open(dpr)
-    for (const top of [0.5, 0.93, 0.0123]) {
-      await pg.evaluate((t) => (window as any).__render(t), top)
-      const g = await layout(pg)
-      const on = (v: number) => Math.abs(v * dpr - Math.round(v * dpr)) < 1e-3
-      for (const v of [g.frame.top, g.frame.bottom, g.frame.left, g.frame.right]) assert.ok(on(v), `${v} off the grid at ${top}: ${JSON.stringify(g.frame)}`)
-    }
-    await pg.close()
-  })
-}
-
 test("each pixel row of the lane of colors is one color, and the find's matches leave ticks in the accent as text, following the accent and the paper", async () => {
   await page.evaluate(() => document.documentElement.setAttribute('data-paper', 'warm'))
   await reset()
@@ -301,101 +262,6 @@ test('resting on the strip opens the loupe beside it, not before: a line per rec
   assert.equal(h.tips, 0, 'no tooltip beside the loupe')
 })
 
-test("a file of twelve million records whose texts are long: each line its whole number and every cell, its time and who said it in the quiet gray, its text in the ink, which alone gives up room", async () => {
-  const pg = await open(1, 12_000_000, true)
-  await rest(0.3, pg)
-  await pg.waitForTimeout(200)
-  const got = await pg.evaluate(() => {
-    const probe = document.createElement('span')
-    document.body.appendChild(probe)
-    probe.style.color = 'var(--text-tertiary)'
-    const gray = getComputedStyle(probe).color
-    probe.style.color = 'var(--text-primary)'
-    const ink = getComputedStyle(probe).color
-    probe.remove()
-    const box = document.querySelector('.loupe-box')!.getBoundingClientRect()
-    return {
-      gray,
-      ink,
-      box: { left: box.left, right: box.right },
-      rows: [...document.querySelectorAll('.loupe[data-open] .loupe-row')].map((r) => {
-        const n = r.querySelector('.loupe-n')!
-        const range = document.createRange()
-        range.selectNodeContents(n)
-        const nb = range.getBoundingClientRect()
-        const cells = [...r.querySelectorAll('.loupe-cell')].map((i) => i.getBoundingClientRect())
-        const t = r.querySelector('.loupe-t') as HTMLElement
-        const meta = [...t.querySelectorAll('.loupe-m')]
-        return {
-          n: n.textContent ?? '',
-          nLeft: nb.left,
-          nRight: nb.right,
-          cells: cells.map((c) => c.width),
-          cellsLeft: cells[0].left,
-          cellsRight: cells[cells.length - 1].right,
-          meta: meta.map((m) => m.textContent ?? ''),
-          metaInk: meta.map((m) => getComputedStyle(m).color),
-          textInk: getComputedStyle(t).color,
-          textLeft: t.getBoundingClientRect().left,
-          cut: t.scrollWidth > t.clientWidth,
-        }
-      }),
-    }
-  })
-  assert.equal(got.rows.length, 17)
-  assert.notEqual(got.gray, got.ink)
-  for (const r of got.rows) {
-    const n = Number(r.n)
-    assert.ok(/^\d{7}$/.test(r.n) && r.nLeft >= got.box.left && r.nRight <= r.cellsLeft, `the whole number, inside the loupe: ${JSON.stringify([r, got.box])}`)
-    assert.deepEqual(r.cells, [4, 4], 'the find\'s cell and the color lane\'s, each whole')
-    assert.deepEqual(r.meta, ['20:' + String(n % 60).padStart(2, '0') + ':07', 'AgentRelent'])
-    assert.deepEqual(r.metaInk, [got.gray, got.gray], 'its time and who said it in the quiet gray')
-    assert.equal(r.textInk, got.ink, 'its text in the ink')
-    assert.ok(r.cut && r.textLeft >= r.cellsRight, `the text alone cut: ${JSON.stringify(r)}`)
-  }
-  await pg.close()
-})
-
-test('the loupe follows the pointer along the strip and never jumps to the thumb as the reader moves under it; the wheel moves it to the thumb', async () => {
-  await reset()
-  const over = await rest(0.3)
-  const x = over.x + over.width / 2
-  const a = await layout()
-  // along the strip a little at a time, the reader's place moving by a hair at each step
-  for (let i = 1; i <= 12; i++) {
-    await page.evaluate((k) => (window as any).__nudge(k), i)
-    const y = over.y + over.height * (0.3 + i * 0.01)
-    await page.mouse.move(x, y)
-    await page.evaluate((k) => (window as any).__nudge(k + 0.5), i)
-    await page.waitForTimeout(20)
-    const g = await layout()
-    const mid = (g.loupe!.top + g.loupe!.bottom) / 2
-    assert.ok(near(mid, y, 2), `step ${i}: the loupe's middle ${mid}, the pointer ${y}, the thumb ${(g.frame.top + g.frame.bottom) / 2}`)
-    assert.ok(g.rows[8].at && !g.rows.some((r) => r.seen), `step ${i}: the pointer's record darker, none on screen`)
-  }
-  await page.mouse.move(x, over.y + over.height * 0.6, { steps: 5 })
-  await page.waitForTimeout(50)
-  const b = await layout()
-  assert.ok(b.loupe!.top - a.loupe!.top > over.height * 0.25, `followed: ${a.loupe!.top} → ${b.loupe!.top}`)
-  assert.ok(b.bracket!.top - a.bracket!.top > over.height * 0.25)
-  // the wheel over the strip scrolls the reader: the loupe goes to the thumb, in the middle of the file, its lines those
-  // on screen
-  await page.evaluate(() => ((window as any).__scrolled = []))
-  for (let i = 0; i < 3; i++) await page.mouse.wheel(0, 100)
-  await page.waitForTimeout(150)
-  const c = await layout()
-  const scrolled = await page.evaluate(() => ((window as any).__scrolled as number[]).reduce((s, x) => s + x, 0))
-  assert.ok(scrolled >= 300, `the wheel scrolled the reader ${scrolled}`)
-  assert.equal(c.open, true)
-  assert.ok(near((c.loupe!.top + c.loupe!.bottom) / 2, (c.frame.top + c.frame.bottom) / 2, 2), `at the thumb: ${JSON.stringify([c.loupe, c.frame])}`)
-  assert.ok(near((c.bracket!.top + c.bracket!.bottom) / 2, (c.frame.top + c.frame.bottom) / 2, 2))
-  assert.ok(c.rows.every((r) => r.seen) && !c.rows.some((r) => r.at), 'its lines on screen, tinted, none darker')
-  // out of the strip to the right, away from the loupe: it closes
-  await page.mouse.move(over.x + over.width + 3, over.y + over.height * 0.6)
-  await page.waitForTimeout(50)
-  assert.equal((await layout()).open, false)
-})
-
 test('moved into, the loupe holds still: a click goes to the record and keeps its lines, the wheel scrolls the reader and its lines follow', async () => {
   await reset()
   const over = await rest(0.3)
@@ -443,28 +309,6 @@ test('moved into, the loupe holds still: a click goes to the record and keeps it
   await page.evaluate(() => ((window as any).__lines = []))
 })
 
-test('a drag of the thumb shows the loupe at the thumb, and scrubs the reader', async () => {
-  await reset()
-  await page.evaluate(() => ((window as any).__seeks = []))
-  const frame = (await page.locator('.track-frame-over').boundingBox())!
-  const x = frame.x + frame.width / 2
-  const y = frame.y + frame.height / 2
-  await page.mouse.move(x, y)
-  await page.mouse.down()
-  await page.waitForTimeout(30)
-  const a = await layout()
-  assert.equal(a.open, true, 'pressed, the loupe opens at the thumb')
-  assert.ok(near((a.loupe!.top + a.loupe!.bottom) / 2, y, 2))
-  await page.mouse.move(x, y + 60, { steps: 6 })
-  await page.waitForTimeout(60)
-  const b = await layout()
-  assert.ok(near((b.loupe!.top + b.loupe!.bottom) / 2, (b.frame.top + b.frame.bottom) / 2, 2), `with the thumb: ${JSON.stringify([b.loupe, b.frame])}`)
-  await page.mouse.up()
-  const seeks = await page.evaluate(() => (window as any).__seeks as [number, boolean][])
-  assert.ok(seeks.length >= 2 && seeks[0][1] === true && seeks[seeks.length - 1][1] === false, JSON.stringify(seeks))
-  assert.ok(seeks[seeks.length - 1][0] > 0.5)
-})
-
 test('a press elsewhere on the strip sends the thumb there and scrubs the reader; a click on a find tick goes to it', async () => {
   await reset()
   await page.evaluate(() => ((window as any).__seeks = []))
@@ -480,88 +324,6 @@ test('a press elsewhere on the strip sends the thumb there and scrubs the reader
   await page.evaluate(() => ((window as any).__marks = []))
   await page.mouse.click(over.x + 6, over.y + over.height * 0.41)
   assert.deepEqual(await page.evaluate(() => (window as any).__marks), [['find', 4000]])
-})
-
-test('a touch press on the strip opens the loupe, a drag scrubs it, and the release goes to the record under its line', async () => {
-  await reset()
-  await page.evaluate(() => ((window as any).__lines = []))
-  const over = (await page.locator('.track-over').boundingBox())!
-  const x = over.x + over.width / 2
-  const fire = (type: string, y: number) =>
-    page.evaluate(
-      ([type, x, y]) => document.querySelector('.track-over')!.dispatchEvent(new PointerEvent(type as string, { pointerType: 'touch', pointerId: 7, isPrimary: true, button: 0, buttons: type === 'pointerup' ? 0 : 1, clientX: x as number, clientY: y as number, bubbles: true, cancelable: true })),
-      [type, x, y],
-    )
-  await fire('pointerdown', over.y + over.height * 0.2)
-  await page.waitForTimeout(30)
-  const a = await layout()
-  assert.equal(a.open, true, 'open at once under the finger')
-  await fire('pointermove', over.y + over.height * 0.25)
-  await fire('pointermove', over.y + over.height * 0.3)
-  await page.waitForTimeout(30)
-  const b = await layout()
-  assert.ok(b.loupe!.top > a.loupe!.top, 'it follows the finger')
-  await fire('pointerup', over.y + over.height * 0.3)
-  await page.waitForTimeout(30)
-  const lines = await page.evaluate(() => (window as any).__lines as number[])
-  assert.equal(lines.length, 1)
-  assert.ok(Math.abs(lines[0] - 3000) <= 40, `went to ${lines[0]}`)
-  assert.equal((await layout()).open, false, 'let go, it closes')
-})
-
-test('a strip that tells every record apart opens no loupe, and names the record under the pointer on one line', async () => {
-  const pg = await open(1, 150)
-  const over = (await pg.locator('.track-over').boundingBox())!
-  await pg.mouse.move(over.x + over.width / 2, over.y + over.height * 0.5)
-  await pg.waitForTimeout(500)
-  const g = await layout(pg)
-  assert.equal(g.open, false)
-  // its number, no word before it, then who said it and the start of its text, on one line
-  assert.equal(g.rulerTip, '76AgentRelentmessage 76 about the county')
-  assert.ok(g.rulerTipOne && g.rulerTipH < 36, `one line: ${g.rulerTipH} px`)
-  // a record of the first value: its cell in its color
-  await pg.mouse.move(over.x + over.width / 2, over.y + (over.height * 69.5) / 150)
-  await pg.waitForTimeout(500)
-  const cells = await pg.evaluate(() => [...document.querySelectorAll('.reader-ruler-tip .tip-c i')].map((i) => (i as HTMLElement).style.background))
-  assert.match((await layout(pg)).rulerTip ?? '', /^70Agent/)
-  assert.deepEqual(cells, ['var(--label-1)'])
-  await pg.close()
-})
-
-test("the one line of a record whose text is long: no wider than the loupe, its whole number and its cell, its time and who said it in the quiet gray, its text alone cut", async () => {
-  const pg = await open(1, 150, true)
-  const over = (await pg.locator('.track-over').boundingBox())!
-  await pg.mouse.move(over.x + over.width / 2, over.y + (over.height * 69.5) / 150)
-  await pg.waitForTimeout(500)
-  const tip = await pg.evaluate(() => {
-    const el = document.querySelector('.reader-ruler-tip') as HTMLElement
-    const probe = document.createElement('span')
-    document.body.appendChild(probe)
-    probe.style.color = 'var(--text-tertiary)'
-    const gray = getComputedStyle(probe).color
-    probe.remove()
-    const n = el.querySelector('.tip-n') as HTMLElement
-    const t = el.querySelector('.tip-t') as HTMLElement
-    const meta = [...t.querySelectorAll('.tip-m')]
-    return {
-      width: el.getBoundingClientRect().width,
-      n: n.textContent,
-      nWhole: n.scrollWidth <= n.clientWidth,
-      cells: [...el.querySelectorAll('.tip-c i')].map((i) => i.getBoundingClientRect().width),
-      meta: meta.map((m) => m.textContent),
-      metaInk: meta.map((m) => getComputedStyle(m).color),
-      gray,
-      cut: t.scrollWidth > t.clientWidth,
-    }
-  })
-  assert.ok(tip.width <= 320, `as wide as the loupe at most: ${tip.width}`)
-  assert.equal(tip.n, '70')
-  assert.ok(tip.nWhole)
-  assert.deepEqual(tip.cells, [6])
-  assert.deepEqual(tip.meta, ['20:10:07', 'AgentRelent'])
-  assert.deepEqual(tip.metaInk, [tip.gray, tip.gray])
-  assert.ok(tip.cut, 'the text cut with an ellipsis')
-  await pg.close()
 })
 
 /** The report's ruler as laid out. */

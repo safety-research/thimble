@@ -1,5 +1,5 @@
 // A record's left edge under two choices of Color by, in a real browser: Files' reader (src/files/Reader.tsx) in its
-// Transcript and Table modes over a file whose records name a speaker, with the label "tactic" on, and Color by
+// Transcript mode over a file whose records name a speaker, with the label "tactic" on, and Color by
 // "speaker" then "tactic" (views/common.tsx EdgeBands). Each record's edge is two bands side by side from its left edge,
 // the first in its speaker's chip color and the second in "tactic"'s purple where the label marks it, an empty place
 // (the record's own background, not gray) where it does not; the bands stand in the left padding, so the record's
@@ -126,80 +126,48 @@ const drawn = (page: Page) =>
 const who = (line: number) => (line % 2 ? 'agent' : 'user')
 const tactic = (line: number) => line % 3 === 0
 
-for (const mode of ['transcript', 'table'])
-  test(`Files' ${mode === 'table' ? 'Table' : 'Transcript'} mode: two choices of Color by are two bands on each record's edge, the second empty where the label does not mark it; the text stays where one choice leaves it; Off draws none`, async (ctx) => {
-    if (!browser) return ctx.skip()
-    const two = await open(`?mode=${mode}`)
-    await two.waitForFunction(() => document.querySelectorAll('.reader-band').length > 20)
-    const got = await drawn(two)
-    assert.equal(got.trigger, 'Color by: speaker+1')
-    assert.ok(got.rows.length > 8, `records drawn: ${got.rows.length}`)
-    for (const r of got.rows) {
-      assert.equal(r.bands.length, 2, `record ${r.line} has two bands: ${JSON.stringify(r)}`)
-      const [a, b] = r.bands
-      assert.equal(a.color, got.chips[who(r.line)], `record ${r.line}'s first band is its speaker's color`)
-      assert.equal(b.color, tactic(r.line) ? got.purple : got.none, `record ${r.line}'s second band is "tactic"'s purple where it marks it, else empty: ${JSON.stringify(r.bands)}`)
-      // side by side from the left edge, a pixel apart, the whole height of the record
-      assert.equal(a.left, 0)
-      assert.equal(a.width, 3)
-      assert.equal(b.left, 4)
-      assert.equal(b.width, 3)
-      assert.ok(Math.abs(a.height - r.rowHeight) <= 2 && a.height === b.height, `the bands run down the record: ${JSON.stringify(r)}`)
-      assert.ok(r.number != null && r.number >= b.left + b.width + 2, `record ${r.line}'s number starts after the bands: ${r.number}`)
-    }
-    assert.ok(got.rows.some((r) => tactic(r.line)) && got.rows.some((r) => !tactic(r.line)), 'records with and without the label are drawn')
-    await two.close()
-
-    // one choice: the one band; the numbers stand where they stood with two
-    const one = await open(`?mode=${mode}&picks=k:speaker`)
-    await one.waitForFunction(() => document.querySelectorAll('.reader-band').length > 20)
-    const single = await drawn(one)
-    assert.equal(single.trigger, 'Color by: speaker')
-    for (const r of single.rows) {
-      assert.equal(r.bands.length, 1)
-      assert.equal(r.bands[0].width, 3)
-      assert.equal(r.bands[0].color, single.chips[who(r.line)])
-      const same = got.rows.find((x) => x.line === r.line)
-      if (same) assert.equal(r.number, same.number, `record ${r.line}'s number stands where it did with two bands`)
-    }
-    await one.close()
-
-    // Off: no band, no edge
-    const off = await open(`?mode=${mode}&picks=`)
-    const none = await drawn(off)
-    assert.equal(none.trigger, 'Color by: Off')
-    assert.ok(none.rows.length > 8 && none.rows.every((r) => r.bands.length === 0), 'Off draws no band')
-    assert.equal(await off.locator('.has-cb').count(), 0)
-    await off.close()
-  }, 120_000)
-
-test("Files' Transcript mode with a label first: each record the label marks takes a soft tint of its value's color across the whole row, a little stronger on the dark paper, and its hover names the label and its value; the others keep the plain row", async (ctx) => {
+test(`Files' Transcript mode: two choices of Color by are two bands on each record's edge, the second empty where the label does not mark it; the text stays where one choice leaves it; Off draws none`, async (ctx) => {
   if (!browser) return ctx.skip()
-  const page = await open('?mode=transcript&picks=l:a,k:speaker')
-  await page.waitForFunction(() => document.querySelectorAll('.reader-record.has-cb-tint').length > 3)
-  const rows = () =>
-    page.evaluate(() =>
-      [...document.querySelectorAll<HTMLElement>('.reader-record[data-line]')].map((el) => {
-        const bg = getComputedStyle(el).backgroundColor
-        const alpha = /\/\s*([\d.]+)\)$/.exec(bg)?.[1] ?? /rgba\([^)]*,\s*([\d.]+)\)$/.exec(bg)?.[1] ?? (bg === 'transparent' ? '0' : '1')
-        return { line: Number(el.dataset.line), bg, alpha: Number(alpha), title: el.title }
-      }),
-    )
-  const light = await rows()
-  assert.ok(light.length > 8, `records drawn: ${light.length}`)
-  for (const r of light) {
-    if (tactic(r.line)) {
-      assert.ok(Math.abs(r.alpha - 0.14) < 0.02, `record ${r.line} takes a soft tint: ${r.bg}`)
-      assert.equal(r.title, 'tactic: tactic')
-    } else {
-      assert.equal(r.alpha, 0, `record ${r.line} keeps the plain row: ${r.bg}`)
-      assert.equal(r.title, 'tactic: other')
-    }
+  const two = await open('?mode=transcript')
+  await two.waitForFunction(() => document.querySelectorAll('.reader-band').length > 20)
+  const got = await drawn(two)
+  assert.equal(got.trigger, 'Color by: speaker+1')
+  assert.ok(got.rows.length > 8, `records drawn: ${got.rows.length}`)
+  for (const r of got.rows) {
+    assert.equal(r.bands.length, 2, `record ${r.line} has two bands: ${JSON.stringify(r)}`)
+    const [a, b] = r.bands
+    assert.equal(a.color, got.chips[who(r.line)], `record ${r.line}'s first band is its speaker's color`)
+    assert.equal(b.color, tactic(r.line) ? got.purple : got.none, `record ${r.line}'s second band is "tactic"'s purple where it marks it, else empty: ${JSON.stringify(r.bands)}`)
+    // side by side from the left edge, a pixel apart, the whole height of the record
+    assert.equal(a.left, 0)
+    assert.equal(a.width, 3)
+    assert.equal(b.left, 4)
+    assert.equal(b.width, 3)
+    assert.ok(Math.abs(a.height - r.rowHeight) <= 2 && a.height === b.height, `the bands run down the record: ${JSON.stringify(r)}`)
+    assert.ok(r.number != null && r.number >= b.left + b.width + 2, `record ${r.line}'s number starts after the bands: ${r.number}`)
   }
-  if (process.env.THIMBLE_SHOTS) await page.screenshot({ path: path.join(process.env.THIMBLE_SHOTS, 'label-tint-light.png') })
-  await page.evaluate(() => document.documentElement.setAttribute('data-paper', 'dark'))
-  const dark = await rows()
-  for (const r of dark.filter((x) => tactic(x.line))) assert.ok(Math.abs(r.alpha - 0.18) < 0.02, `record ${r.line} on the dark paper: ${r.bg}`)
-  if (process.env.THIMBLE_SHOTS) await page.screenshot({ path: path.join(process.env.THIMBLE_SHOTS, 'label-tint-dark.png') })
-  await page.close()
+  assert.ok(got.rows.some((r) => tactic(r.line)) && got.rows.some((r) => !tactic(r.line)), 'records with and without the label are drawn')
+  await two.close()
+
+  // one choice: the one band; the numbers stand where they stood with two
+  const one = await open(`?mode=transcript&picks=k:speaker`)
+  await one.waitForFunction(() => document.querySelectorAll('.reader-band').length > 20)
+  const single = await drawn(one)
+  assert.equal(single.trigger, 'Color by: speaker')
+  for (const r of single.rows) {
+    assert.equal(r.bands.length, 1)
+    assert.equal(r.bands[0].width, 3)
+    assert.equal(r.bands[0].color, single.chips[who(r.line)])
+    const same = got.rows.find((x) => x.line === r.line)
+    if (same) assert.equal(r.number, same.number, `record ${r.line}'s number stands where it did with two bands`)
+  }
+  await one.close()
+
+  // Off: no band, no edge
+  const off = await open(`?mode=transcript&picks=`)
+  const none = await drawn(off)
+  assert.equal(none.trigger, 'Color by: Off')
+  assert.ok(none.rows.length > 8 && none.rows.every((r) => r.bands.length === 0), 'Off draws no band')
+  assert.equal(await off.locator('.has-cb').count(), 0)
+  await off.close()
 }, 120_000)

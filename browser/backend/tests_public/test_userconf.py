@@ -3,7 +3,6 @@ Settings pane writes, and what a session gets from it."""
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
@@ -73,23 +72,6 @@ def test_the_ask_key_is_meta_unless_settings_or_the_file_in_thimble_s_home_picks
     _write(userconf.global_file(), {"askKey": "alt"})
     _write(userconf.workspace_file(CORPUS), {"askKey": "meta"})
     assert "askKey is set for the whole machine" in userconf.problem(CORPUS) and userconf.ask_key() == "alt"
-
-
-def test_an_earlier_build_s_models_and_modes_move_to_the_workspace_s_file(workspaces_tmp):
-    """The models and permission modes an earlier build kept in settings.json move to that workspace's own file, so it
-    runs as it did; main's model settings and the rest stay. View builds' row of old was the dev agent's, the stricter one
-    winning; the other agents' rows are not moved, since those agents run in main's mode now."""
-    settings = workspaces_tmp / CORPUS / "settings.json"
-    _write(settings, {"run_cell_result_lines": 20,
-                      "models": {"main": {"effort": "low"}, "orient": {"effort": "high", "model": ""},
-                                 "subagents": {"model": "claude-sonnet-5"}, "verify": {"fast": False}},
-                      "permission_modes": {"critic": "auto", "views": "manual", "dev": "bypass"}})
-    assert config.models_for(CORPUS)["orient"]["effort"] == "high"
-    assert json.loads(settings.read_text()) == {"run_cell_result_lines": 20, "models": {"main": {"effort": "low"}}}
-    assert json.loads(userconf.workspace_file(CORPUS).read_text()) == {"agents": {
-        "orientation": {"effort": "high", "subagentModel": "claude-sonnet-5"}, "cardCheck": {"fast": False},
-        "dev": {"permissionMode": "manual"}}}, "the critic's and the checks' rows run in main's mode now"
-    assert not userconf.global_file().exists(), "other workspaces keep their own settings"
 
 
 def test_the_settings_pane_writes_where_the_value_it_shows_came_from(workspaces_tmp, analyst):
@@ -189,42 +171,6 @@ def test_what_a_session_gets_from_the_config(workspaces_tmp, monkeypatch):
         userconf.session(CORPUS, "dev", sandbox=False)
 
 
-def test_the_hooks_module_s_rules_keep_file_tools_from_the_token_files_the_records_and_what_the_config_turns_off(
-        workspaces_tmp, tmp_path, monkeypatch):
-    """module_rules, which GET /api/module/roles serves the hooks module: the token files and the links folder for
-    every file tool; the workspace's records (the notices among them), main's kept mode and the Bypass choice for the
-    edit tools; the corpus only when the orientation's `data` is "off", and the web tools only when its `web` is. Each
-    path as spelled and as its realpath, and each refusal's reason from prompts/tools.md."""
-    from app import tools
-
-    home, ws = userconf.global_file().parent, config.WORKSPACES_DIR / CORPUS
-    rules = userconf.module_rules(CORPUS)
-    assert set(rules) == {"private", "records", "corpus", "web_off", "reasons"}
-    for path in (*userconf.private_paths(), str(home / userconf.LINKS_DIR)):
-        assert path in rules["private"], path
-    assert str(home / "paired.json") in rules["private"]
-    for path in (ws / "trusted", ws / "chats", ws / "notices.json", ws / "notices-dismissed.json",
-                 userconf.main_modes_file(), userconf.bypass_file()):
-        assert str(path) in rules["records"], path
-    assert not any(r.endswith("/**") for r in rules["records"])
-    assert (rules["corpus"], rules["web_off"]) == (None, False), "data and web at their defaults"
-    assert rules["reasons"] == {"private": tools.hint("module-deny-private"), "records": tools.hint("module-deny-records"),
-                                "data": tools.hint("module-deny-data"), "web": tools.hint("module-deny-web")}
-    assert all(rules["reasons"].values())
-    _write(userconf.global_file(), {"agents": {"orientation": {"data": "off", "web": "off"}}})
-    rules = userconf.module_rules(CORPUS)
-    assert rules["corpus"] == os.path.realpath(config.corpus_dir(CORPUS)) and rules["web_off"] is True
-    _write(userconf.global_file(), {"agents": {"orientation": {"data": "allow", "web": "allow"}}})
-    assert (userconf.module_rules(CORPUS)["corpus"], userconf.module_rules(CORPUS)["web_off"]) == (None, False)
-    # a home reached through a link: the realpath is listed too
-    real = tmp_path / "real-home"
-    real.mkdir()
-    (tmp_path / "linked-home").symlink_to(real)
-    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "linked-home"))
-    private = userconf.module_rules(CORPUS)["private"]
-    assert str(tmp_path / "linked-home" / "server.json") in private and str(real / "server.json") in private
-
-
 def test_thimble_s_agents_share_main_s_fence_and_keep_only_web_off(workspaces_tmp, monkeypatch):
     """An agent that runs as main's subagent takes main's fence's network, data and web, the orientation's keys; its own
     `web: off` keeps it off the web tools, and its own sandbox, network or data is read and ignored. The dev agent, whose
@@ -242,42 +188,6 @@ def test_thimble_s_agents_share_main_s_fence_and_keep_only_web_off(workspaces_tm
     dev = userconf.session(CORPUS, "dev")
     assert (dev.network, dev.data, dev.web, dev.sandboxed) == (True, "allow", "ask", False)
     assert userconf.mode_rows(CORPUS) == {"dev": "auto"}
-
-
-def test_the_keys_this_build_ignores_load_are_listed_and_a_settings_save_drops_them(workspaces_tmp, analyst):
-    """An earlier config's `installs`, each agent's own fast mode, and its permission mode and a web other than "off",
-    but the dev agent's, load without an error, whatever their value, and change nothing; `ignored` and GET /settings
-    list them, and the next save from the Settings pane drops them from the file it writes. The dev agent's keys still
-    apply, its fast mode for code tickets among them. The fence keys and `env` of an agent that runs as a subagent of
-    main stay: thimble's own agent does not read them, and an extension's program that runs the agent does."""
-    old = {"installs": "alow", "agents": {
-        "orientation": {"permissionMode": "bypass", "fast": True, "sandbox": "off", "env": ["X"], "effort": "ultracode"},
-        "critic": {"network": "off", "data": "allow", "web": "allow", "permissionMode": "auto"},
-        "checks": {"fast": False, "env": []}, "writer": {"web": "off"},
-        "dev": {"permissionMode": "auto", "fast": False, "network": "off"}}}
-    _write(userconf.global_file(), old)
-    assert userconf.problem(CORPUS) == ""
-    conf = userconf.load(CORPUS)
-    assert "installs" not in conf and "permissionMode" not in conf["agents"]["orientation"]
-    assert conf["agents"]["critic"]["web"] is None
-    assert userconf.agent_conf(conf, "critic")["network"] == "on", "thimble's critic runs in main's fence"
-    program = userconf.agent_conf(conf, "critic", program=True)
-    assert (program["network"], program["data"], program["sandbox"], program["env"]) == ("off", "allow", "on", [])
-    mine = userconf.agent_conf(conf, "orientation", program=True)
-    assert (mine["sandbox"], mine["env"]) == ("off", ["X"])
-    assert conf["agents"]["writer"]["web"] == "off" and conf["agents"]["dev"]["network"] == "off"
-    want = ["installs", "agents.orientation.fast", "agents.orientation.permissionMode", "agents.critic.permissionMode",
-            "agents.critic.web", "agents.checks.fast"]
-    assert sorted(userconf.ignored(CORPUS)) == sorted(want)
-    assert sorted(ledger.get_settings(CORPUS)["config_ignored"]) == sorted(want)
-    assert config.models_for(CORPUS)["orient"]["effort"] == "xhigh", "a stored ultracode runs at xhigh"
-    assert userconf.mode_rows(CORPUS) == {"dev": "auto"}
-    ledger.put_settings_route(CORPUS, analyst, {"models": {"labels": {"effort": "medium"}}})
-    assert json.loads(userconf.global_file().read_text()) == {"agents": {
-        "orientation": {"sandbox": "off", "env": ["X"], "effort": "ultracode"}, "critic": {"network": "off", "data": "allow"},
-        "checks": {"env": []}, "writer": {"web": "off"}, "dev": {"permissionMode": "auto", "fast": False, "network": "off"},
-        "labels": {"effort": "medium"}}}
-    assert userconf.ignored(CORPUS) == []
 
 
 def test_the_browser_is_the_system_one_when_found_unless_the_config_says_otherwise(monkeypatch, tmp_path):

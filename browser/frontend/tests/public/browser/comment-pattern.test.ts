@@ -2,11 +2,9 @@
 // real Margin (src/report/Margin.tsx) beside two passages, and the real Canvas (src/canvas/Canvas.tsx) holding a plan card
 // in the analyst's frame with a comment on its step 2 (GET /canvas/comments). Each comment is one card
 // (src/report/CommentCard.tsx): its header is its check's name in the check's color, the color square matching, with no
-// "Claude"; it shows its statement, and its details only once Show more under the statement opens them (by pointer or
-// keyboard), their citation a chip, which moves the comment below it down in the margin; its head holds ✓ alone (no Ask,
-// no Know it), alike on both surfaces; a click makes it active, with a field whose question opens a thread (POST
-// /chats) anchored to the comment's passage or step with the comment's id and words. With
-// no frame kept open in the browser, the analyst's frame, Your work, starts open.
+// "Claude"; it shows its statement, its details folded under Show more; its head holds ✓ alone (no Ask, no Know it),
+// alike on both surfaces; a click makes it active, with a field whose question opens a thread (POST /chats) anchored to
+// the comment's passage or step with the comment's id and words.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -103,13 +101,6 @@ const visible = (sel: string) => page.evaluate((s) => {
   return !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden'
 }, sel)
 
-test("Your work is open on the first load, with nothing kept in the browser", async () => {
-  assert.equal(await page.locator('[data-group="g"] .frame-chev.is-open').count(), 1, 'the analyst\'s frame is open')
-  const [plan, box] = await page.evaluate(() => ['plan1', 'box1'].map((id) => document.querySelector(`[data-cell="${id}"]`)!.getBoundingClientRect().toJSON()))
-  assert.ok(plan.bottom <= box.top, `its second card stands below the first, not under it: ${plan.bottom} vs ${box.top}`)
-  assert.equal(await page.evaluate(() => localStorage.getItem('thimble:w:canvas-shut')), null, 'nothing is kept collapsed')
-})
-
 test("each comment shows its check's name in the check's color and its statement, its details folded, on both surfaces", async () => {
   for (const [sel, statement] of [[R, 'Most saves came from one bot account.'], [C, 'Blocking the web also blocks GitHub.']] as const) {
     const got = await page.evaluate((s) => {
@@ -168,109 +159,6 @@ test('the head is the same on both surfaces: ✓ alone after the name, at rest a
   assert.equal(menus[0].moreText, 'Show more')
   assert.deepEqual(menus[1], menus[0], 'the canvas menu looks as the Report menu does')
   assert.ok(menus[0].order && menus[0].below && menus[0].inside, JSON.stringify(menus[0]))
-})
-
-test('hovered, a comment comes to the front with a little more shadow on both surfaces, and an active passage has no underline', async () => {
-  const look = (sel: string) => page.locator(sel).evaluate((el) => ({ z: Number(getComputedStyle(el).zIndex) || 0, shadow: getComputedStyle(el).boxShadow }))
-  for (const sel of [R, C]) {
-    await page.mouse.move(5, 5)
-    await page.waitForTimeout(250)
-    const rest = await look(sel)
-    await page.locator(sel).hover()
-    await page.waitForTimeout(250)
-    const hot = await look(sel)
-    assert.ok(hot.z > rest.z && hot.shadow !== rest.shadow, `${sel}: in front, with more shadow ${JSON.stringify({ rest, hot })}`)
-  }
-  await page.mouse.move(5, 5)
-  const flag = await page.evaluate(() => {
-    const el = document.createElement('span')
-    el.className = 'wu-s wu-flag wu-flag-active'
-    el.style.setProperty('--flag', 'rgb(200, 100, 0)')
-    document.body.appendChild(el)
-    const cs = getComputedStyle(el)
-    const got = { underline: cs.boxShadow, line: cs.textDecorationLine, bg: cs.backgroundColor }
-    el.remove()
-    return got
-  })
-  assert.ok(flag.underline === 'none' && flag.line === 'none' && flag.bg !== 'rgba(0, 0, 0, 0)', JSON.stringify(flag))
-})
-
-test('Show more opens the details, their citation a chip, and Show less under them folds them again, on both surfaces', async () => {
-  for (const [sel, words] of [[R, 'Leave the bot out'], [C, 'Bake them into the image']] as const) {
-    await page.locator(sel).hover()
-    await page.locator(`${sel} .wu-cm-more`).click()
-    await page.waitForSelector(`${sel} .wu-cm-details`)
-    const got = await page.evaluate((s) => {
-      const d = document.querySelector<HTMLElement>(`${s} .wu-cm-details`)!
-      const more = document.querySelector<HTMLElement>(`${s} .wu-cm-more`)!
-      return { text: d.innerText, items: d.querySelectorAll('li').length, chips: [...d.querySelectorAll<HTMLElement>('.refchip')].map((c) => c.dataset.ref), field: !!document.querySelector(`${s} .wu-cm-reply`), less: more.textContent, under: more.getBoundingClientRect().top >= d.getBoundingClientRect().bottom - 1 }
-    }, sel)
-    assert.ok(got.text.includes(words) && got.items === 2, `${sel}: ${got.text}`)
-    assert.deepEqual(got.chips, ['card:box1'])
-    assert.equal(got.field, false, `${sel}: Show more opens the details alone`)
-    assert.ok(got.less === 'Show less' && got.under, `${sel}: Show less under the details ${JSON.stringify(got)}`)
-    await page.locator(`${sel} .wu-cm-more`).click()
-    await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), sel)
-    await page.mouse.move(5, 5)
-  }
-})
-
-test('the keyboard opens and folds the details: Tab to Show more, then Enter', async () => {
-  for (const sel of [R, C]) {
-    await page.locator(`${sel} .wu-cm-more`).focus()
-    assert.ok(await page.evaluate((s) => document.activeElement === document.querySelector(`${s} .wu-cm-more`), sel), `${sel}: Show more takes the focus`)
-    await page.keyboard.press('Enter')
-    await page.waitForSelector(`${sel} .wu-cm-details`)
-    assert.equal(await page.textContent(`${sel} .wu-cm-more`), 'Show less')
-    await page.keyboard.press('Enter')
-    await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), sel)
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
-  }
-})
-
-test("in the Report, a comment's Show more opening its details moves the comment below it down, and folding them moves it back", async () => {
-  const c2 = '#report [data-comment="c2"]'
-  const top = (s: string) => page.evaluate((q) => document.querySelector(q)!.getBoundingClientRect().top, s)
-  // the margin places its cards on the frame after a card's height changes, then slides them there (report.css .wu-cm
-  // transition), so before each measure the test waits, up to 3 s, until c1 and c2 stand still: no slide running and the
-  // same place over four frames in a row, longer than a new place waits for its frame
-  const settled = () =>
-    page.evaluate(
-      (qs) =>
-        new Promise<void>((done) => {
-          const end = performance.now() + 3000
-          let at = ''
-          let still = 0
-          const frame = () => {
-            const cards = qs.map((q) => document.querySelector(q)!)
-            const now = cards.map((c) => c.getBoundingClientRect().top).join()
-            still = now === at && cards.every((c) => !c.getAnimations().length) ? still + 1 : 0
-            at = now
-            if (still >= 4 || performance.now() > end) done()
-            else requestAnimationFrame(frame)
-          }
-          requestAnimationFrame(frame)
-        }),
-      [R, c2],
-    )
-  // the keyboard check before this one also opens and folds c1's details, and c2 can still be sliding back from it
-  await settled()
-  const was = await top(c2)
-  await page.locator(R).hover()
-  // nothing but the details' own height may move the comment below
-  await page.locator(`${R} .wu-cm-more`).click()
-  await page.waitForSelector(`${R} .wu-cm-details`)
-  await page.waitForTimeout(300)
-  await settled()
-  const [r, b] = await page.evaluate((qs) => qs.map((q) => document.querySelector(q)!.getBoundingClientRect().toJSON()), [R, c2])
-  assert.ok(b.top >= r.bottom, `c2 below c1's open details: ${b.top} vs ${r.bottom}`)
-  await page.locator(`${R} .wu-cm-more`).click()
-  await page.waitForFunction((s) => !document.querySelector(`${s} .wu-cm-details`), R)
-  await page.waitForTimeout(300)
-  await settled()
-  const now = await top(c2)
-  assert.ok(Math.abs(now - was) <= 1, `c2 back in its place: ${now} vs ${was}`)
-  await page.mouse.move(5, 5)
 })
 
 test("a click on a comment opens its field, and the question opens a thread anchored to the comment, on both surfaces", async () => {

@@ -35,7 +35,7 @@ import { partOf } from '../core/answers'
 import { tellAsked } from '../core/engaged'
 import { readKept, rootHere, startDir, writeKept, keptDir } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
-import { openPane, paneNow } from '../core/pane'
+import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { checkAnswer } from '../marks/checker'
 import { rowMarks } from '../marks/store'
@@ -502,12 +502,6 @@ export const registerThreads: Register = on => {
     }
     return r
   }).catch(($, e, next) => next(e))
-}
-
-/** Whether the side pane shows this thread now (the input bar's pane, or the pane `thread`). */
-export async function paneShowsThread($: Engine, key: string): Promise<boolean> {
-  const now = await paneNow($)
-  return !!now && now.kind === 'thread' && (now.args as Any)?.key === key
 }
 
 /** For tests: the module's memory, cleared. */
