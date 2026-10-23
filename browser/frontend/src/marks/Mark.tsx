@@ -1,6 +1,6 @@
 // A mark on the words of a claim in Claude's reply (marks.ts), drawn as a card's citation is (components/RefChip): the
-// words keep the text's color over a thin accent underline, and hovering or opening one gives it the citation's
-// highlight. A mark the check could not confirm has a dashed underline in the warning color and `?` after the words.
+// words keep the text's color, underlined in it, on the citations' purple tint, and hovering or opening one deepens the
+// tint. A mark the check could not confirm is red and underlined, with no tint, and `×` after the words.
 // Hovering opens its evidence in the citation's label (RefChip's .refchip-pop), and a click keeps it open:
 //
 //   computed   the head names the code that ran; the lines of its real output around the marked words, the words
@@ -126,7 +126,7 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
       >
         {corrected ? plain(item.shown!) : children}
       </span>
-      {look === 'failed' && <span className="mark-glyph">?</span>}
+      {look === 'failed' && <span className="mark-glyph">×</span>}
       {look === 'checking' && <Spinner size={9} className="mark-spin" label="checking" />}
       {pop &&
         createPortal(

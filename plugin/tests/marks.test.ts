@@ -10,7 +10,7 @@ import { failLineNow } from '../bar/notice'
 import { awaitsCheck, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { marksIn } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
-import { footerEl, messageEl } from '../marks/view'
+import { citeLook, footerEl, messageEl } from '../marks/view'
 import { tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -117,7 +117,7 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   expect(JSON.parse(seen.stdin[0]!).calls[0]).toEqual({ command: "python3 - <<'PY'\nprint('12 of 40')\nPY", output: '12 of 40', by: 'checker' })
   const settled = await drawn($)
   expect(settled).toContain('merged 12 of 40.')
-  expect(settled).toContain('"ship it" ?')
+  expect(settled).toContain('"ship it" ×')
   // once settled no footer counts the marks: each shows its own status where it stands
   expect(settled).not.toContain('citation wrong')
   expect(settled).not.toContain('1 corrected')
@@ -149,11 +149,11 @@ test('a refused check leaves the marks failed, says so once, and nothing spins',
   await endCheck($, { agentId: FORK, reason: 'refusal', answer: '' })
   const out = await drawn($)
   // the marks draw failed, each with its reason; the failure line, not a footer, says why
-  expect(out).toContain('"ship it" ?')
-  expect(out.match(/ \?/g)?.length).toBe(3)
+  expect(out).toContain('"ship it" ×')
+  expect(out.match(/ ×/g)?.length).toBe(3)
   expect(out).not.toContain('not checked')
   expect(out).not.toContain('checking')
-  expect(out).not.toContain('×')
+  expect(out).not.toContain('?')
   const items = (await rowMarks($, 'row-1'))!.items
   expect(items.map(m => [m.status, m.failedBy, m.reason])).toEqual(Array(3).fill(['failed', 'none', "The check did not run. The model's safeguards refused it."]))
   // a check that did not run is no finding of the check's: main is not told of it
@@ -194,7 +194,7 @@ test("an interrupted reply's citations fail at once: their check did not run, an
   const reply = await rowMarks($, 'row-1')
   expect(reply!.items.map(m => [m.status, m.failedBy, m.reason])).toEqual(Array(3).fill(['failed', 'none', 'The check did not run. The reply was interrupted.']))
   expect([reply!.failed, reply!.checking, reply!.verified]).toEqual([3, 0, 0])
-  expect(await drawn($)).toContain('15 of 40 ?')
+  expect(await drawn($)).toContain('15 of 40 ×')
   // x: the check itself, of that one citation
   const r = await repairOf($, 'row-1', 2)
   expect(typeof r).toBe('object')
@@ -275,19 +275,22 @@ test('a resumed session draws the marks as their check left them; a check the se
   expect((await rowMarks(again, 'row-2'))!.items[0]).toMatchObject({ status: 'failed', failedBy: 'none', reason: 'The check did not run.' })
 })
 
-test('a corrected citation draws as a settled one (purple, underlined); a failed one in the warning color with ?, whatever failed it; each underlined', () => {
+test('a corrected citation draws as a settled one (underlined on the purple tint); a failed one red with ×, whatever failed it; each underlined', () => {
   const text = 'Merged [15 of 40](#), opened [7](#), closed [3](#).'
   const marks = marksIn(text)
   const looks = [{ n: 1, status: 'corrected', shown: '12 of 40' }, { n: 2, status: 'failed' }, { n: 3, status: 'failed' }] as Any
   const els = all(messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: true, spin: '', onMark: () => undefined }))
   const look = (words: string) => els.find(n => n.type === 'Text' && n.props.children === words)?.props
-  expect(look('12 of 40')).toMatchObject({ color: 'merged', underline: true })
-  expect(look('7')).toMatchObject({ color: 'warning', underline: true })
-  expect(els.some(n => n.type === 'Text' && /×/.test(String(n.props.children)))).toBe(false)
-  expect(look('3')).toMatchObject({ color: 'warning', underline: true })
-  expect(els.filter(n => n.type === 'Text' && n.props.children === ' ?').length).toBe(2)
-  expect(look(' ?')?.underline).toBeUndefined()
-  expect(look(' ?')).toMatchObject({ color: 'warning' })
+  expect(look('12 of 40')).toEqual({ children: '12 of 40', ...citeLook() })
+  expect(look('7')).toEqual({ children: '7', color: 'error', underline: true })
+  expect(look('3')).toEqual({ children: '3', color: 'error', underline: true })
+  expect(els.filter(n => n.type === 'Text' && n.props.children === ' ×').length).toBe(2)
+  expect(look(' ×')?.underline).toBeUndefined()
+  expect(look(' ×')?.backgroundColor).toBeUndefined()
+  expect(look(' ×')).toMatchObject({ color: 'error' })
+  // the tint of each theme set
+  expect(citeLook('dark')).toEqual({ underline: true, backgroundColor: '#423054' })
+  expect(citeLook('light')).toEqual({ underline: true, backgroundColor: '#f3e6ff' })
   // without a gutter (a reply inside the tray's frame) no margin cell stands before its rows: they start at the left
   const rowsOf = (gutter?: boolean) => messageEl(ELS, { text, marks, looks, key: 'k', cols: 100, first: false, spin: '', gutter, onMark: () => undefined }).props.children
   expect(rowsOf()[0].props.children[0].props.width).toBe(2)
@@ -305,7 +308,7 @@ test("a narrowed citation: only the part the check cited is the mark; Claude's o
   const els = all(messageEl(ELS, { text, marks, looks, key: 'k', cols: 200, first: true, spin: '', onMark: () => undefined }))
   const texts = els.filter(n => n.type === 'Text' && typeof n.props.children === 'string')
   const cited = texts.find(n => n.props.children === 'one user, "Kalmbot", with the summary "Seite gelöscht."')
-  expect(cited?.props).toMatchObject({ color: 'merged', underline: true })
+  expect(cited?.props).toMatchObject(citeLook())
   const rest = texts.find(n => String(n.props.children).includes('("page deleted")'))
   expect(rest).toBeDefined()
   expect(rest!.props.underline).toBeUndefined()

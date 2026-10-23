@@ -11,22 +11,22 @@
 // (checker.ts tellText), and a detail the person must see is a heads-up's.
 //
 // A mark's look by its status. Every mark is underlined, whatever its status, so a citation reads as one; the status
-// shows as its color and the sign after it:
-//   pending      the turn still runs: purple, underlined
-//   checking     purple, underlined, and a turning glyph right after it
-//   verified     purple, underlined
-//   corrected    the corrected words in place of the marked ones, purple, underlined: once corrected it holds, so it
+// shows as its look (citeLook) and the sign after it:
+//   pending      the turn still runs: the text's own color, underlined, on the citations' light purple tint
+//   checking     as pending, and a turning glyph right after it
+//   verified     as pending
+//   corrected    the corrected words in place of the marked ones, as pending: once corrected it holds, so it
 //                looks as a verified one does (its tray card says it was corrected). A narrowed one (`narrowed`) keeps
 //                its words: only the part the check cited is the mark, the rest reads as the reply's plain words
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
-//                did not show them), or it did not run or gave no answer: the warning color, underlined, with ` ?`
-//                after it. One look whatever the cause
-//   unchecked    underlined in the text's color: words no check is for (a side thread's citations, or new ones in a
-//                version shown in place of Claude's words)
+//                did not show them), or it did not run or gave no answer: red (`error`), underlined, no tint, with
+//                ` ×` after it. One look whatever the cause
+//   unchecked    underlined in the text's color, no tint: words no check is for (a side thread's citations, or new
+//                ones in a version shown in place of Claude's words)
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
-// explainer in teal, underlined; a span inside a mark's words keeps the mark's press and look and adds its `tint` behind
-// them. While the tray shows
+// explainer in teal, underlined; a span inside a mark's words keeps the mark's press and look, its `tint` behind them
+// in place of the citation's. While the tray shows
 // a mark (`focus`), it is drawn bold on the selection's background. `dim` draws the words dim (a rewrite of them runs),
 // and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
 //
@@ -35,6 +35,7 @@
 // blue ↳ once a thread was asked about it.
 import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
+import { themeLast, type Theme } from '../core/theme'
 import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -79,8 +80,29 @@ export type MessageOpts = {
 /** A passage of a reply: its words, and a few of them that name it. */
 export type Passage = { text: string; label: string }
 
-/** A purple that follows the person's theme (Claude Code's color for a merged pull request). */
+/** A purple that follows the person's theme (Claude Code's color for a merged pull request): the turning glyph. */
 const PURPLE = 'merged'
+
+/** The citations' tint, behind their words. A background takes no theme key, so it is one hex per theme set
+ *  (core/theme.ts): the light purple rgba(179,107,255,.24) over a dark terminal's #1e1e1e, rgba(135,0,255,.10) over a
+ *  light one's #ffffff. */
+export const CITE_TINT: Record<Theme, string> = { dark: '#423054', light: '#f3e6ff' }
+
+/** A citation's words wherever they show (the reply, the tray, the evidence, the claims and threads panes): the text's
+ *  own color, underlined (Claude Code's underline takes the text's color), on the citations' tint, so they stand apart
+ *  from an explainer's teal and a heads-up's orange, which are colored words. The theme set is the one the drawing hook
+ *  read last (themeNow). */
+export function citeLook(theme: Theme = themeLast()): { underline: true; backgroundColor: string } {
+  return { underline: true, backgroundColor: CITE_TINT[theme] }
+}
+
+/** A citation's words by its status, as the header comment says: failed red and underlined, unchecked underlined in
+ *  the text's color, every other status citeLook. */
+export function wordsLook(status: MarkStatus): { underline: true; color?: string; backgroundColor?: string } {
+  if (status === 'failed') return { underline: true, color: 'error' }
+  if (status === 'unchecked') return { underline: true }
+  return citeLook()
+}
 
 /** A narrowed mark's runs: the part of its words the check cited (`shown`) stays the mark's, the words before and after
  *  it are plain words. White space compares loosely and every quote mark as one; the runs as they are when the part is
@@ -128,7 +150,7 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     if (look?.status === 'corrected' && look.shown) out.push(...(look.narrowed ? narrowRuns(own, look.shown) : inline(look.shown, 0, look.shown.length).map((x: Run) => ({ ...x, mark: r.mark }))))
     else out.push(...own)
     if (look?.status === 'checking') out.push({ s: ` ${o.spin}`, mark: r.mark, tag: 'spin' })
-    if (look?.status === 'failed') out.push({ s: ' ?', mark: r.mark, tag: 'x' })
+    if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
     k = e
   }
   return out
@@ -163,12 +185,11 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const p: Any = { children: r.s }
   if (r.b) p.bold = true
   if (r.it) p.italic = true
-  // the words underlined in every status; the turning glyph and the sign after them are not words
-  if (!r.tag) p.underline = true
+  // the words underlined in every status; the turning glyph (purple) and the sign after them (failed: red) are not words
   if (r.tag === 'spin') p.color = PURPLE
-  else if (look.status === 'failed') p.color = 'warning'
-  else if (look.status !== 'unchecked') p.color = PURPLE
-  // a span inside the mark's words: its tint under the mark's color
+  else if (r.tag) p.color = 'error'
+  else Object.assign(p, wordsLook(look.status))
+  // a span inside the mark's words: its tint in place of the citation's
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
   if (bg) p.backgroundColor = bg

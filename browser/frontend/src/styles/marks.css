@@ -1,7 +1,10 @@
 /* A mark on the words of a claim (marks/Mark.tsx), drawn as a card's citation is (refchip.css .refchip-value): the
-   words in the text's color over a thin accent underline, the accent on hover and while its label is open. A mark the
-   check could not confirm: a dashed underline in the warning color and ? after the words. Back-to-back marks keep a
-   small gap, so their underlines read as two. Its label is RefChip's (.refchip-pop), at most 560 px wide. */
+   words in the text's own color, underlined in that color, on the citations' light purple tint (--cite-tint), the tint
+   stronger on hover and while its label is open. A mark the check could not confirm: red words, underlined, no tint,
+   and × after them. Back-to-back marks keep a small gap, so they read as two. Its label is RefChip's (.refchip-pop), at
+   most 560 px wide. */
+:root { --cite-tint: rgba(135, 0, 255, 0.1); --cite-tint-strong: rgba(135, 0, 255, 0.18); }
+:root[data-paper='dark'] { --cite-tint: rgba(179, 107, 255, 0.24); --cite-tint-strong: rgba(179, 107, 255, 0.36); }
 .mark { position: relative; }
 /* a claim's mark is words of the sentence: inline in the text's own face, so it wraps with the line and its underline
    sits under the words, never the small inline-block of the status marks (components.css .mark) */
@@ -10,35 +13,34 @@
   display: inline;
   margin: 0 1.5px;
   color: inherit;
+  background: var(--cite-tint);
   text-decoration-line: underline;
   text-decoration-style: solid;
   text-decoration-thickness: 1px;
-  text-decoration-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  text-decoration-color: currentColor;
   text-underline-offset: 3px;
   cursor: pointer;
-  transition: var(--transition-color), text-decoration-color var(--dur-fast) var(--ease-out);
+  transition: var(--transition-color), background-color var(--dur-fast) var(--ease-out);
 }
 .mark-words:hover,
 .mark-words:focus-visible,
 .mark.is-open .mark-words {
-  color: var(--text-accent);
-  text-decoration-color: var(--accent);
+  background: var(--cite-tint-strong);
   outline: none;
 }
 .mark.is-failed .mark-words,
 .mark.is-failed .mark-words:hover,
 .mark.is-failed.is-open .mark-words {
-  text-decoration-style: dashed;
-  text-decoration-color: var(--status-warning);
+  color: var(--status-negative);
+  background: none;
 }
-.mark.is-failed .mark-words:hover,
-.mark.is-failed.is-open .mark-words { color: var(--status-warning); }
-.mark-glyph { margin-left: -1px; margin-right: 1.5px; color: var(--status-warning); }
+.mark-glyph { margin-left: 0.3em; margin-right: 1.5px; color: var(--status-negative); }
 .mark-spin { margin-left: 2px; vertical-align: -1px; color: var(--text-tertiary); }
 /* the links toggle is off (lib/links): a mark reads as plain text, as a cited number does */
 :root[data-links='off'] .mark-words,
 :root[data-links='off'] .mark-words:hover {
   color: inherit;
+  background: none;
   text-decoration-line: none;
 }
 

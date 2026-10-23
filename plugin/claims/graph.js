@@ -554,7 +554,8 @@ function wholeRows(ev, W) {
 }
 
 /**
- * A citation as its card in the reply draws it, as rows of runs W wide: the cited words bold in the citation color and
+ * A citation as its card in the reply draws it, as rows of runs W wide: the cited words bold in the citations' look
+ * (tinted; a failed one's red and underlined) and
  * its check beside them (`✓ verified · cite`); what it was, when the check corrected it, or why it failed, dim; then
  * its evidence (snippetOf): the code line in the code's color or the file's place dim, then the line after a dim │, the
  * cited words tinted (the rest dim where the line was cut), and `+ N more lines` under it when the output has more.
@@ -565,7 +566,8 @@ export function cardOf(s, W, { whole = false } = {}) {
   const [word, tone] = STATUS[key]
   const right = [{ s: '   ' }, { s: word, tone }, { s: ' · cite', tone: 'dim' }]
   const words = one(s.shown || s.label)
-  const rows = [[{ s: cut(words, Math.max(8, W - 3 - len(word) - 7)), tone: 'cite', bold: true }, ...right]]
+  const look = key === 'failed' ? { tone: 'bad', underline: true } : { tint: true }
+  const rows = [[{ s: cut(words, Math.max(8, W - 3 - len(word) - 7)), ...look, bold: true }, ...right]]
   const dim = t => wrap(t, W).forEach(l => rows.push([{ s: l, tone: 'dim' }]))
   if (s.status === 'corrected' && s.was) dim(`${s.narrowed ? 'narrowed' : 'corrected'}; was ${one(s.was)}`)
   else if (s.status === 'failed' && s.reason) dim(firstSentence(s.reason))

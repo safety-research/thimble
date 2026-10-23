@@ -40,7 +40,7 @@ import { claimsThreadScope } from '../claims/seam'
 import { cut, textWidth } from '../core/text.js'
 import { blocks, inline, marksIn, tableOf } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
-import { messageEl } from '../marks/view'
+import { citeLook, messageEl } from '../marks/view'
 import type { ThreadScope } from './seam'
 import { askThread, cardsOfTurn, isSending, listThreads, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
 import { aboutOf, askWords, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
@@ -305,7 +305,7 @@ export function passageRuns(text: string, max = 600): PassageRun[] {
   return kept
 }
 
-/** A passage's runs as one wrapped text: a citation's words purple and underlined, as the reply draws them. */
+/** A passage's runs as one wrapped text: a citation's words in the citations' look, as the reply draws them. */
 function passageEl(els: Any, runs: PassageRun[]): Any {
   const { Text } = els
   return Text({ key: 'passage', children: runs.map((r, k) => {
@@ -313,7 +313,7 @@ function passageEl(els: Any, runs: PassageRun[]): Any {
     if (r.b) p.bold = true
     if (r.it) p.italic = true
     if (r.code) p.color = 'permission'
-    if (r.mark !== undefined) { p.color = 'merged'; p.underline = true }
+    if (r.mark !== undefined) Object.assign(p, citeLook())
     return Text(p)
   }) })
 }
