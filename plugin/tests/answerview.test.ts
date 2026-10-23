@@ -9,7 +9,7 @@ import { checkSpans, restoredKeys, type Span } from '../core/answerview'
 import { ownKeys } from '../hooks/keys'
 import { looksByWords } from '../marks/register'
 import { marksIn } from '../marks/message.js'
-import { citeTint, messageEl } from '../marks/view'
+import { citeTint, messageEl, spanScope } from '../marks/view'
 import type { MarkItem } from '../marks/store'
 import { promptStub } from './stubs'
 
@@ -87,6 +87,34 @@ test('a span is a press of its own, highlighted; inside a citation it keeps the 
   const dim = messageEl(ELS, { text: 'Two runs failed.', marks: [], looks: [], key: 'd', cols: 100, first: true, spin: '⠋', onMark: () => undefined, dim: true, lead: '▸' })
   expect(textOf(dim)).toContain('▸Two runs failed.')
   expect(all(dim).some(n => n.type === 'Text' && n.props.dimColor && n.props.children === 'Two runs failed.')).toBe(true)
+})
+
+test('a heads-up or an explainer lights as one under the pointer, across its inline code, bold words and lines: one hover group per span, its stronger fill, no inverse', () => {
+  const text = 'I found no `thimble/` label folders in **your data** folders across the whole disk. The only copies are old, see `hydrate`.'
+  const ORANGE = { backgroundColor: '#ffe0b8', hoverBg: '#ffc98a' }
+  const heads = { start: 0, end: text.indexOf(' across the whole disk.') + ' across the whole disk'.length, look: ORANGE, label: 'heads up', onPress: () => undefined }
+  const gloss = { start: text.indexOf('`hydrate`'), end: text.length - 1, look: { ...TEAL, hoverBg: '#2b7068' }, label: 'explain hydrate', onPress: () => undefined }
+  const drawn = messageEl(ELS, { text, marks: [], looks: [], key: 'row-3', cols: 30, first: true, spin: '', onMark: () => undefined, spans: [heads, gloss] })
+  const pieces = all(drawn).filter(n => n.type === 'Button' && n.props.label === 'heads up')
+  // plain words, inline code, bold words, and the lines the span wraps to: a press each, all of one group
+  // (the spaces where a line wraps are not drawn)
+  expect(pieces.map(textOf).join('').replace(/ /g, '')).toBe('I found no thimble/ label folders in your data folders across the whole disk'.replace(/ /g, ''))
+  expect(new Set(pieces.map(b => all(b).find(n => n.type === 'Text').props.color)).size).toBe(2)
+  expect(pieces.length).toBeGreaterThanOrEqual(4)
+  const scope = spanScope('row-3', 0)
+  for (const b of pieces) {
+    expect(b.props.hover).toEqual({ scope, backgroundColor: '#ffc98a', inverse: false })
+    const words = all(b).find(n => n.type === 'Text')!
+    expect(words.props).toMatchObject({ backgroundColor: '#ffe0b8', hover: { scope, backgroundColor: '#ffc98a' } })
+    expect(words.props.underline).toBeUndefined()
+    expect(words.props.hoverBg).toBeUndefined()
+  }
+  // the code piece keeps the code color on the fill; the explainer is a group of its own
+  expect(all(pieces.find(b => textOf(b) === 'thimble/')).find(n => n.type === 'Text').props.color).toBe('permission')
+  const glossed = all(drawn).filter(n => n.type === 'Button' && n.props.label === 'explain hydrate')
+  expect(glossed.length).toBeGreaterThan(0)
+  for (const b of glossed) expect(b.props.hover).toEqual({ scope: spanScope('row-3', 1), backgroundColor: '#2b7068', inverse: false })
+  expect(spanScope('row-3', 1)).not.toBe(scope)
 })
 
 test('each passage of a reply drawn here has a margin that asks a side thread about it: ? under the pointer, ↳ once asked', () => {
