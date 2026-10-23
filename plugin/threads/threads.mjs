@@ -8,9 +8,10 @@
 //   scope        {about, mark?: {row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}, passage?: {row, text},
 //                card?, part?, pane?: {kind, args}}; `part` is the line of a card that was selected when `a` asked
 //                about it (cardPart), which the pane shows in place of the whole card
-//   threadKey(scope)              one thread per mark, per passage, per card, or per pane: 'mark-<row>-<kind>-<n|id>',
-//                                 'passage-<row>-<its words, hashed>', 'card-<id>', 'pane-<kind>-<its arguments>' (a pane
-//                                 of one citation's evidence is that citation's)
+//   threadKey(scope)              one thread per mark, per passage, per part of a card, or per pane:
+//                                 'mark-<row>-<kind>-<n|id>', 'passage-<row>-<its words, hashed>', 'card-<id>' (nothing
+//                                 selected) or 'card-<id>-<the selected line's words, hashed>', 'pane-<kind>-<its
+//                                 arguments>' (a pane of one citation's evidence is that citation's)
 //   aboutOf(scope)                the words "about …" the thread shows under a question
 //   shownAbout(scope)             what the person reads it is about, under a question: a few words, never a model's
 //   askWords(scope)               what the input bar's placeholder names: `Ask about <this>`, in a few words
@@ -26,6 +27,9 @@
 //   rowsOf(list, now)             the thread list's rows: key, name, status, questions, last question, how long ago
 //   ago(at, now)                  how long ago, in a word: `now`, `4m`, `2h`, `3d`
 //   cardPart(copy)                the part of a card a question is about: its selected line, from its text copy
+//   partWords(part)               that line's words, without the marker, the bars' glyphs or runs of spaces: the same
+//                                 at every width the card draws at
+//   partAbout(about, part)        what a thread on a part of a card is about: `"Cherbourg 168" in the card "…"`
 //   answerRow(thread, i)          the name of the answer at turn i in the store of citations, which checks and draws it
 
 const safe = s => String(s ?? '').replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'x'
@@ -51,6 +55,18 @@ export function cardPart(copy = '') {
   return line ? line.slice(line.indexOf('▸')).replace(/\s{3,}/g, '  ').trim() : ''
 }
 
+/** A part's words, the same at every width the card draws at: no `▸`, no box-drawing or block glyphs (a bar's
+ *  length changes with the width), single spaces. */
+export function partWords(part = '') {
+  return String(part).replace(/[▸\u2500-\u259F…]/gu, ' ').replace(/\s+/g, ' ').trim()
+}
+
+/** What a thread on a part of a card is about: the part's words, then the card's `about`. */
+export function partAbout(about, part = '') {
+  const w = partWords(part)
+  return w ? `"${cutTo(w, 40)}" in ${about}` : String(about)
+}
+
 /** The mark a pane stands for: the evidence pane of a citation is that citation. */
 function markOf(scope = {}) {
   if (scope.mark) return scope.mark
@@ -63,7 +79,11 @@ export function threadKey(scope = {}) {
   const m = markOf(scope)
   if (m) return `mark-${safe(m.row)}-${safe(m.kind)}-${safe(m.kind === 'citation' ? m.n : m.id)}`
   if (scope.passage) return `passage-${safe(scope.passage.row)}-${hashOf(String(scope.passage.text ?? '').trim())}`
-  if (scope.card) return `card-${safe(scope.card)}`
+  if (scope.card) {
+    // a thread for each part of a card a click selected (a bar, a row), and one for the card as a whole
+    const w = partWords(scope.part)
+    return w ? `card-${safe(scope.card)}-${hashOf(w)}` : `card-${safe(scope.card)}`
+  }
   if (scope.pane) return `pane-${safe(scope.pane.kind)}-${argsKey(scope.pane.args)}`
   return `about-${safe(scope.about)}`
 }

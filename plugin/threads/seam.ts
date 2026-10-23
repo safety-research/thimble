@@ -19,7 +19,9 @@
 //   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
 //   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
 //                                      subject; `has` once a question was asked of it, `ask` opens it (openThread)
-//   threadOnCard($, id, title)         what a card's margin asks about (cards/draw.ts): the card, as the tray's `a` asks
+//   threadOnCard($, id, title, line)   what a card's margin asks about (cards/draw.ts): the part of the card its
+//                                      selected `line` shows (a bar, a row a click selected), else the whole card, as
+//                                      the tray's `a` asks; each part has a thread of its own
 //   threadCardAnchor($, agentId, id)   where a card a thread's fork drew stands: `thread:<key>`, drawn under its answer
 //                                      in the thread's pane; null for any other agent (cards/tool.ts)
 //   registerThreads                    its own hooks (/threads, the forks' ends, ...)
@@ -30,6 +32,7 @@ import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
 import { drawThreads, rowsUnder as roomUnder, threadUnder as under } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadsBright } from './thread'
+import { cardPart, partAbout } from './threads.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -103,10 +106,12 @@ export async function threadPassages($: Engine, row: string): Promise<{ has: (p:
 }
 
 /** A card as its frame's margin asks about it: the thread the tray's `a` opens on it. */
-export async function threadOnCard($: Engine, id: string, title: string): Promise<{ label: string; has: boolean; press: () => unknown }> {
+export async function threadOnCard($: Engine, id: string, title: string, line = ''): Promise<{ label: string; has: boolean; press: () => unknown }> {
   await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
   await restoreThreads($)
-  const scope: ThreadScope = { about: `the card "${title || id}"`, card: id }
+  const about = `the card "${title || id}"`
+  const part = cardPart(line)
+  const scope: ThreadScope = part ? { about: partAbout(about, part), card: id, part } : { about, card: id }
   return { label: scope.about, has: asked(scope), press: () => { void openThreadOn($, scope).catch(() => undefined) } }
 }
 

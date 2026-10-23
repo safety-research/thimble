@@ -15,6 +15,8 @@ const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal',
 const TOOL = 'mcp__thimble__card'
 const TREE = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: ['ada 3'] }, { t: 'Text', p: {}, c: ['bram 5'] }] }
 const SORTED = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: ['bram 5'] }, { t: 'Text', p: {}, c: ['ada 3'] }] }
+// a bar chart whose second bar a click selected, marked with ▸ as the card guide asks
+const PICKED = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: ['  ada  ███ 3'] }, { t: 'Text', p: {}, c: ['▸ bram █████ 5'] }] }
 const VIEW = 'const keys = "o"\nfunction onKey(k, s) { s.setState({ sorted: true }) }\nfunction view(p, s) { return s.elements.Text({ children: "x" }) }'
 
 function elements(n: Any, out: Any[] = []): Any[] {
@@ -100,7 +102,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     if (o.wide && op === 'key' && body.key === 'o') sorted = true
     if (o.wide && op !== 'load' && op !== 'copy' && op !== 'ping') return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, handled: body.key === 'o', tree: laidOut(), state: 'null', seq: ++seq }) } }
     // a view whose tree the terminal refuses: a Text whose bold is not a boolean
-    const tree = String(body.view ?? '').includes('BOLD') ? { t: 'Text', p: { bold: 'yes' }, c: ['ada 3'] } : TREE
+    const tree = String(body.view ?? '').includes('BOLD') ? { t: 'Text', p: { bold: 'yes' }, c: ['ada 3'] } : String(body.view ?? '').includes('SELECTED') ? PICKED : TREE
     const answers: Record<string, unknown> = {
       ping: { ok: true },
       load: {
@@ -183,6 +185,24 @@ test('a card call keeps the card and answers what it read and what it draws; its
   // a new card needs a title
   const r5 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1e', data: 'runs.json', view: VIEW } as never)) as Any
   expect(String(r5.result)).toContain('`title` is empty')
+})
+
+test('a bar a click selected: the ? that asks a side thread stands beside it and asks about that bar', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const plain = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p0', ...plain } as never)
+  const picked = { title: 'Scores', data: 'runs.json', view: `${VIEW}\n// SELECTED` }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p1', ...picked } as never)
+  const margin = async (row: Any) => elements(row).find(n => n.type === 'Box' && n.props?.width === 2 && typeof n.props?.paddingTop === 'number')
+  // nothing selected: beside the title (the frame's top border, then the title), about the card
+  const whole = await margin(await $.ui.render(callRow('toolu_made_up_p0', plain)))
+  expect(whole.props.paddingTop).toBe(1)
+  expect(elements(whole).find(n => n.type === 'Button')?.props.label).toBe('ask about the card "Scores"')
+  // the second bar selected: beside it (the border, the title, the first bar), about that bar
+  const bar = await margin(await $.ui.render(callRow('toolu_made_up_p1', picked)))
+  expect(bar.props.paddingTop).toBe(3)
+  expect(elements(bar).find(n => n.type === 'Button')?.props.label).toBe('ask about "bram 5" in the card "Scores"')
 })
 
 test("on the main screen a later turn's version stands at its own call, since rows in the scrollback stay as printed", async ($, on) => {

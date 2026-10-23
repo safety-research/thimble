@@ -203,6 +203,15 @@ test('the margin of a passage or a card opens its thread; it says asked (↳) on
   card.press()
   await settle()
   expect(threadOf('card-c00000000000b1')!.scope).toEqual({ about: 'the card "Runs per day"', card: 'c00000000000b1' })
+  // a bar a click selected: the margin asks about that bar, in a thread of its own
+  const bar = await threadOnCard(s.$, 'c00000000000b1', 'Runs per day', '  ▸ Tuesday  ██████ 41')
+  expect(bar.label).toBe('"Tuesday 41" in the card "Runs per day"')
+  expect(bar.has).toBe(false)
+  bar.press()
+  await settle()
+  const key = threadKey({ about: '', card: 'c00000000000b1', part: '▸ Tuesday  ██ 41' })
+  expect(key).not.toBe('card-c00000000000b1')
+  expect(threadOf(key)!.scope).toEqual({ about: '"Tuesday 41" in the card "Runs per day"', card: 'c00000000000b1', part: '▸ Tuesday  ██████ 41' })
 })
 
 test('the thread pane: its steps without the folders they ran in, and m drawn once as Claude Code draws a key', async () => {
@@ -250,9 +259,11 @@ test("a card's thread shows the card collapsed, its title and the line asked abo
   s.$.ui.resolve = () => els
   const id = 'c00000000000b3'
   await s.$.state.set({ plugin: 'thimble', key: 'card', id }, { id, version: 1, gen: 1, title: 'Merges per run', keys: [], calls: {}, at: 1 })
-  const opened = await openThread(s.$, { about: 'the card "Merges per run"', card: id, part: '▸ r1 made-up  2 merged  +12' })
+  const scope = { about: 'the card "Merges per run"', card: id, part: '▸ r1 made-up  2 merged  +12' }
+  const opened = await openThread(s.$, scope)
   expect(opened).toBe(true)
-  const draw = async () => drawThreads(s.$, { props: { bodyColumns: 60, scroll: { bodyRows: 40 } }, viewport: { columns: 60 } }, 'thread', { key: `card-${id}` }, els)
+  // the thread of the line asked about
+  const draw = async () => drawThreads(s.$, { props: { bodyColumns: 60, scroll: { bodyRows: 40 } }, viewport: { columns: 60 } }, 'thread', { key: threadKey(scope) }, els)
   let all = nodes(await draw())
   expect(textOf(all.find(n => n.props?.key === 'subject-t'))).toBe('▎ Merges per run')
   const part = all.find(n => n.props?.key === 'subject-m0')
