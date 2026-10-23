@@ -2,6 +2,8 @@
 //
 //   the failure line  only while there is one (bar/notice.ts failLineNow): a failure in red, or a notice. It wraps, so
 //                  the whole failure shows
+//   the fix line   only while there is one (fix/line.ts): a fix that is ready (y apply · d diff · n not now), on (u
+//                  undo), off, failed, or a request with no code
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), `v card` while
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
@@ -15,6 +17,7 @@ import type { EngineInterface } from 'claude-code'
 import { barLeft, barRight } from '../core/answerview'
 import { textWidth } from '../core/text.js'
 import { vReady } from '../designer/v'
+import { fixLineRows } from '../fix/line'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow } from './counts'
@@ -102,7 +105,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
     ...(right.length ? [Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: joined(right, left.length) })] : []),
   ] })
-  return [...(preview ? [] : await lineRows($, els, width)), bar]
+  return [...(preview ? [] : await lineRows($, els, width)), ...(preview ? [] : await fixLineRows($, els, width).catch(() => [])), bar]
 }
 
 /** The failure line: what failed, whole, in red, or a notice. */

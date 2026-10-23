@@ -23,7 +23,7 @@ function sources(dir = ROOT) {
 }
 
 test("the texts are the guidance, the card tool, the checker, the designer, the label classifier, and the texts of the features that act on answers", () => {
-  assert.deepEqual(Object.keys(TEXTS), ['guidance', 'card-tool', 'checker', 'designer', 'labels', 'observer', 'observer-turn', 'lens-explain', 'lens-heads', 'lens-claims', 'explain-expand', 'squeeze', 'thread'])
+  assert.deepEqual(Object.keys(TEXTS), ['guidance', 'card-tool', 'checker', 'designer', 'labels', 'observer', 'observer-turn', 'lens-explain', 'lens-heads', 'lens-claims', 'explain-expand', 'squeeze', 'thread', 'fixer', 'fix-draft'])
   assert.equal(fileOf('checker'), 'prompts/checker.md')
 })
 

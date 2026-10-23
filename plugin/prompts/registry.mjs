@@ -72,6 +72,16 @@ export const TEXTS = {
     reader: 'threads/thread.ts',
     use: "the prompt of the fork that answers a side thread's question",
   },
+  fixer: {
+    about: 'make the change the person asked for to their thimble, in a scratch copy, test it, and say what it does',
+    reader: 'fix/fixer.ts',
+    use: 'the system prompt of the thimble:fixer subagent that /thimble-fix starts',
+  },
+  'fix-draft': {
+    about: "a pull request's title and summary for one of the person's fixes, before the privacy scan",
+    reader: 'fix/submit.ts',
+    use: 'one model call per fix the person submits',
+  },
 }
 
 /** A text's file, as a path from the plugin's root. */

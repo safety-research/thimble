@@ -3,8 +3,9 @@
 // has main's conversation as its context, its model and its tools, so it works as main would, and its calls go through
 // the same permission checks as main's.
 //
-//   spawnFork($, {kind, prompt, description, type?})  $.agent.spawn with subagentType 'fork' (or `type`: a side
-//                                thread's own agent type, where no fork starts), in the background: {agentId}, or
+//   spawnFork($, {kind, prompt, description, type?, cwd?})  $.agent.spawn with subagentType 'fork' (or `type`: a side
+//                                thread's own agent type, where no fork starts; the fixer's, thimble:fixer, in its
+//                                copy of thimble, `cwd`), in the background: {agentId}, or
 //                                {deny} with the reason. Call it inside a hook, never from a timer: Claude Code skips
 //                                only the hook that spawned the fork for the fork's own events, so this plugin's other
 //                                hooks serve it (its tool calls, its steps, its end); a fork spawned from a timer has
@@ -24,7 +25,7 @@ import { claimAgent } from '../telemetry/telemetry'
 
 type Engine = EngineInterface
 
-export type ForkKind = 'checker' | 'designer' | 'thread'
+export type ForkKind = 'checker' | 'designer' | 'thread' | 'fixer'
 
 const FORKS = { plugin: 'thimble', key: 'forks' } as const
 const KEPT = 64
@@ -41,10 +42,10 @@ export function forkOf(agentId: string | undefined): { kind: ForkKind; agentId: 
   return kind && agentId ? { kind, agentId } : null
 }
 
-export async function spawnFork($: Engine, o: { kind: ForkKind; prompt: string; description: string; type?: string }): Promise<{ agentId?: string; deny?: string }> {
+export async function spawnFork($: Engine, o: { kind: ForkKind; prompt: string; description: string; type?: string; cwd?: string }): Promise<{ agentId?: string; deny?: string }> {
   let r: { agentId?: string; deny?: string } | undefined
   try {
-    r = await $.agent.spawn({ subagentType: o.type ?? 'fork', prompt: o.prompt, description: o.description })
+    r = await $.agent.spawn({ subagentType: o.type ?? 'fork', prompt: o.prompt, description: o.description, ...(o.cwd ? { cwd: o.cwd } : {}) })
   } catch (err) {
     return { deny: String((err as Error)?.message || err) }
   }
