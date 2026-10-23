@@ -170,12 +170,14 @@ export async function keyOwner($: Engine, key: string): Promise<CardMeta | null>
 }
 
 /** The card's frame: title, the Client that draws its tree, a failure, and the keys that reach it now; under it, what
- *  the features put under a card. */
-export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
+ *  the features put under a card. `o.layout`: the width the card is laid out at when that is wider than the frame
+ *  (a copy in the side pane is the conversation's drawing, cut at the frame's edge, so no row of it wraps). */
+export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: number } = {}): Promise<Any> {
   const E = $.ui.resolve(e) as Any
   // a card the version of its answer shown now leaves out (a squeeze's): nothing in its place
   if (await cardHidden($, meta.id)) return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', children: [] })
-  const width = cardWidth(e.viewport?.columns)
+  const inside = cardWidth(e.viewport?.columns)
+  const width = Math.max(inside, Math.floor(o.layout ?? 0))
   const t = await treeOf($, meta.id)
   const focused = (await focusNow($)) === meta.id
   // only a drawing laid out at this width (for this theme, else the other's until this one's comes): until one comes,
@@ -188,24 +190,26 @@ export async function frame($: Engine, e: Any, meta: CardMeta): Promise<Any> {
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
   const need = needOf(meta, current, width, theme)
   // the title on a line of its own, then the card
+  const client = E.Client({
+    key: clientKey(meta), module: './client.tsx', width: current?.width ?? width,
+    props: { tree: current?.tree ?? null, width: current?.width ?? width, need },
+  })
   const rows: Any[] = [
     E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title }),
-    ...(fault ? [] : [E.Client({
-      key: clientKey(meta), module: './client.tsx', width: current?.width ?? width,
-      props: { tree: current?.tree ?? null, width: current?.width ?? width, need },
-    })]),
+    // a drawing wider than the frame: its columns past the frame's edge are cut
+    ...(fault ? [] : [width > inside ? E.Box({ key: 'cut', flexDirection: 'column', width: inside, overflow: 'hidden', children: [client] }) : client]),
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
   const ask = await cardAsk($, meta.id, meta.title)
-  const box = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: ask ? 0 : 2, width: width + 4, children: rows })
+  const box = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: ask ? 0 : 2, width: inside + 4, children: rows })
   // the margin left of the frame, in the 2 columns of its indent, beside its title: asks a side thread about the card
   // (its title and what it shows); the row's keyed Box scopes the ?'s hover, so it shows while the pointer is on the card
   const framed = ask
     ? E.Box({ key: `ask-row-${meta.id}`, flexDirection: 'row', children: [E.Box({ width: 2, flexShrink: 0, paddingTop: 1, children: [askCell(E, { key: `card-ask-${meta.id}`, ...ask })] }), box] })
     : box
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
-  const under = await underCard($, E, meta.id, width)
+  const under = await underCard($, E, meta.id, inside)
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
 }
 

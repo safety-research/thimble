@@ -4,7 +4,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ago, askWords, display, shownAbout, firstMessage, forkDirective, nameOf, nextMessage, rowsOf, sentNote, stepWords, threadKey, turnsOf } from '../threads.mjs'
+import { ago, askWords, cardPart, display, shownAbout, firstMessage, forkDirective, nameOf, nextMessage, rowsOf, sentNote, stepWords, threadKey, turnsOf } from '../threads.mjs'
 
 test('one thread per citation, explainer, card or pane; a citation\'s evidence pane is that citation\'s thread', () => {
   const cite = threadKey({ about: '41 of the 44', mark: { row: 'row-1', kind: 'citation', n: 2 } })
@@ -100,4 +100,12 @@ test('the input bar names its thing in a few words: never the sentence a model r
   // under a question: the same few words, but a card keeps its title
   assert.equal(shownAbout({ about, pane: { kind: 'claims', args: { claim: 'k1' } } }), 'this claim')
   assert.equal(shownAbout({ about: 'Runs', card: 'c1' }), 'Runs')
+})
+
+test("a card's part: the line its text copy marks selected with ▸, from the mark on, its runs of spaces shortened", () => {
+  const copy = 'Merges per run\n  r0 made-up      1        +3\n▸ r1 made-up        2 merged        +12\n▸ r1 made-up  details'
+  assert.equal(cardPart(copy), '▸ r1 made-up  2 merged  +12')
+  assert.equal(cardPart('│ ▸ r2 made-up   +4 │'), '▸ r2 made-up  +4 │')
+  assert.equal(cardPart('no selection here'), '')
+  assert.equal(cardPart(), '')
 })

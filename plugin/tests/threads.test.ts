@@ -8,7 +8,7 @@ import { registerForks } from '../core/forks'
 import { registerTell } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
 import { askHere, drawThreads, passageRuns } from '../threads/pane'
-import { threadCardAnchor, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
+import { openThread, threadCardAnchor, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { threadKey } from '../threads/threads.mjs'
 import { promptStub } from './stubs'
@@ -223,11 +223,42 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   const steps = all.find(n => String(n.props?.key ?? '').endsWith('-steps'))
   expect(textOf(steps)).toBe('● 1 step · python3 count.py')
   expect(all.some(n => typeof n.props?.children === 'string' && n.props.children.includes('/made-up'))).toBe(false)
-  // the Button draws its key and label itself (`m: send this answer to Claude`): no second key or label inside it
-  const m = all.find(n => n.type === 'Button' && n.props?.key === 'conv-m')
+  // m in the keys' row above the input bar, dim at rest as a key's hint; the Button draws its key and label itself
+  // (`m: send this answer to Claude`): no second key or label inside it
+  const m = all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-m')
   expect(m.props.hotkey).toBe('m')
   expect(m.props.label).toBe('send this answer to Claude')
+  expect(m.props.dimColor).toBe(true)
   expect(m.props.children).toBe(undefined)
+  const kids = tree.props.children as Any[]
+  expect(kids.indexOf(all.find(n => n.props?.key === 'thread-keys'))).toBe(kids.findIndex((n: Any) => n.props?.key === 'entry-gap') - 1)
+})
+
+test("a card's thread shows the card collapsed, its title and the line asked about; e draws it whole", async () => {
+  const s = setup()
+  s.$.ui.resolve = () => els
+  const id = 'c00000000000b3'
+  await s.$.state.set({ plugin: 'thimble', key: 'card', id }, { id, version: 1, gen: 1, title: 'Merges per run', keys: [], calls: {}, at: 1 })
+  const opened = await openThread(s.$, { about: 'the card "Merges per run"', card: id, part: '▸ r1 made-up  2 merged  +12' })
+  expect(opened).toBe(true)
+  const draw = async () => drawThreads(s.$, { props: { bodyColumns: 60, scroll: { bodyRows: 40 } }, viewport: { columns: 60 } }, 'thread', { key: `card-${id}` }, els)
+  let all = nodes(await draw())
+  expect(textOf(all.find(n => n.props?.key === 'subject-t'))).toBe('▎ Merges per run')
+  const part = all.find(n => n.props?.key === 'subject-m0')
+  expect(textOf(part)).toBe('▎ ▸ r1 made-up  2 merged  +12')
+  expect(part.props.wrap).toBe('truncate-end')
+  expect(all.some(n => n.type === 'Client')).toBe(false)
+  const e = all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-e')
+  expect(e.props.label).toBe('show the card')
+  e.props.onPress()
+  all = nodes(await draw())
+  expect(all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-e').props.label).toBe('hide the card')
+  // whole: the conversation's drawing (as wide as main's), cut at the pane's edge, so no row of it wraps
+  const cut = all.find(n => n.props?.key === 'cut')
+  const client = all.find(n => n.type === 'Client')
+  expect(cut.props.overflow).toBe('hidden')
+  expect(cut.props.width).toBe(54)
+  expect(client.props.width).toBeGreaterThan(54)
 })
 
 test("a passage's thread shows the passage as the reply reads, under one label: no citation markup, no quoted title", async () => {
