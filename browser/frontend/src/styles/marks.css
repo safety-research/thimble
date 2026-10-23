@@ -61,6 +61,8 @@
   color: var(--status-negative);
 }
 .mark-pop-state { color: var(--text-tertiary); }
+/* a card that changed after the check: said over what the label shows */
+.mark-ev-changed { margin: 2px 0 4px; }
 /* a failed mark's reason beside Repair; a corrected mark's earlier words under nothing but its evidence */
 .mark-pop-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .mark-pop-head .mark-pop-why { flex: 1 1 auto; min-width: 0; }

@@ -155,3 +155,30 @@ test('words with two values cite two cells: one table, both cells marked', async
   await settle()
   expect([...document.querySelectorAll('.mark-pop .cite-cell')].map((c) => c.textContent)).toEqual(['243', '104'])
 })
+
+test("a card's evidence shows the card as it is now when it changed after the check, or says the place is gone", async () => {
+  const { api } = await import('../../src/lib/api.ts')
+  const table = { corner: 'run', cols: ['of_40_open'], rows: [{ label: 'run-a', values: ['12'] }], at: { r: 0, c: 0 } }
+  const ev = { kind: 'card' as const, card: 'c1a2b3', title: 'Old title', ref: 'card:c1a2b3#of_40_open/run-a', value: '12', table }
+  const was = api.resolveRef
+  const html = (col: string, v: string) => ({ excerpt: '', meta: { title: 'New title', table_html: `<table><thead><tr><th>run</th><th>${col}</th></tr></thead><tbody><tr><th>run-a</th><td>${v}</td></tr></tbody></table>` } })
+  const open = async (answer: unknown) => {
+    api.resolveRef = (async () => answer) as unknown as typeof api.resolveRef
+    unmountAll()
+    const el = await mount(<ChatMarkdown text="[12](#) open" checks={[item(0, '12', { evidence: ev })]} />)
+    await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    await settle()
+    expect(document.querySelector('.mark-pop .refchip-pop-chip')?.textContent).toBe('New title')
+    return { note: document.querySelector('.mark-pop .mark-ev-changed')?.textContent ?? '', cell: document.querySelector('.mark-pop .cite-cell')?.textContent }
+  }
+  try {
+    // the card still shows the same: the check's copy, no note
+    expect(await open(html('of_40_open', '12'))).toEqual({ note: '', cell: '12' })
+    // the card was run again and shows another value there: the card now, with a note
+    expect(await open(html('of_40_open', '14'))).toEqual({ note: 'The card changed after the check. It shows this now:', cell: '14' })
+    // the card was rewritten and the place is gone: what the check read, with a note
+    expect(await open(html('still_open', '12'))).toEqual({ note: 'The card changed after the check. The check read this:', cell: '12' })
+  } finally {
+    api.resolveRef = was
+  }
+})
