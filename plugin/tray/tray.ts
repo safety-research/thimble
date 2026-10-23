@@ -93,6 +93,11 @@ async function standNow($: Engine): Promise<Stand> {
   return ((await $.state.get(STAND)).value ?? null) as Stand
 }
 
+/** Whether the tray holds the keys: it is open, or a card ] reached stands. */
+export async function trayHolds($: Engine): Promise<boolean> {
+  return !!(await trayNow($)) || !!(await standNow($))
+}
+
 /** The tray as it stands now: what a question asked with it open carries for Claude follows its top (core/tell.ts),
  *  and nothing once it closed. */
 async function setTray($: Engine, tray: Tray): Promise<void> {
