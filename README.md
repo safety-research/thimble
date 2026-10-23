@@ -14,11 +14,11 @@ https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
 
 - **Cards**: interactive graphs of your data, drawn in the terminal, that you can click and ask about. `v` draws one for the last answer.
 - **Citations**: every claim points to the code output or file line that shows it, and a second Claude checks each one against your files.
-- **Labels**: records sorted into categories by a rule or a model's reading, which you can open and correct.
+- **Labels** (`l`): records sorted into categories by a rule or a model's reading, which you can open and correct.
 - **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
 - **Claims** (`c`): everything the session has concluded, as a map, with what was corrected and why.
 - **Squeeze** (`s`): the last answer, shorter or longer, or with its interpretation and background.
-- **Side threads**: ask about a passage or part of a card without derailing the session.
+- **Side threads** (`t`): ask about a passage or part of a card without derailing the session.
 
 ## Installation
 
