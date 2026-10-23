@@ -473,6 +473,8 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
   const items = parseClaims(out?.claims)
   const local = new Map()
   const links = []
+  // a cluster named as #N: the cluster of the Nth claim of this list, which may come later, so it is placed after
+  const inClaimsCluster = []
   for (const it of items) {
     // #N: the Nth claim of this same list, which has no id yet
     if (it.revises && /^#\d+$/.test(it.revises)) it.revises = local.get(Number(it.revises.slice(1))) || null
@@ -499,7 +501,9 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
       continue
     }
     const id = nextId(store.claims, 'c')
-    const claim = { id, text: it.text, by: it.by, cluster: clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources }
+    const ofClaim = /^\s*#(\d+)\s*$/.exec(it.cluster)
+    const claim = { id, text: it.text, by: it.by, cluster: ofClaim ? null : clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources }
+    if (ofClaim) inClaimsCluster.push({ id, of: Number(ofClaim[1]) })
     const old = it.revises ? store.claims.find(c => c.id === it.revises) : null
     if (old) {
       claim.revises = old.id
@@ -512,6 +516,12 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     res.added.push(id)
     local.set(it.at, id)
     for (const l of it.links) links.push({ from: id, ...l })
+  }
+  for (const { id, of } of inClaimsCluster) {
+    const claim = store.claims.find(c => c.id === id)
+    if (!claim || claim.cluster) continue
+    const other = store.claims.find(c => c.id === local.get(of))
+    claim.cluster = other && other.id !== id ? other.cluster ?? null : null
   }
   // the links each claim names to another (an id so far, or #N of this turn), kept on the claim that names them
   res.linked = 0

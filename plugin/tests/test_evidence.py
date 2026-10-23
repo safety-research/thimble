@@ -921,3 +921,19 @@ def test_a_case_the_check_can_repair_is_corrected_by_the_first_check(tmp_path):
     # the place told as a note keeps the citation verified, the note under it
     r = check_mark(place, {**item, "status": "verified", "correction": None, "note": "The words are on line 27, not line 29."}, [], str(tmp_path))
     assert (r["status"], r["note"]) == ("verified", "The words are on line 27, not line 29.")
+
+
+def test_a_quote_with_a_markdown_escape_reads_as_the_record_writes_it(tmp_path: Path):
+    rec = {"pr": 66047, "reason": "Closing per review: the linked issue GH#65915 is labeled 'Needs Discussion' and no consensus exists on it."}
+    (tmp_path / "events.jsonl").write_text(json.dumps(rec) + "\n")
+    words = "\"the linked issue GH\\#65915 is labeled 'Needs Discussion' and no consensus exists\""
+    r = check_mark(mark(words), quote("events.jsonl", 1, "the linked issue GH#65915 is labeled 'Needs Discussion' and no consensus exists"), [], str(tmp_path))
+    assert r["status"] == "verified" and r["shown"] == words
+    # a quote that leaves out a word of the record is still not shown by it
+    miss = check_mark(mark('"the linked issue GH\\#65915 is labeled \'Needs Discussion\' and consensus exists"'),
+                      quote("events.jsonl", 1, "the linked issue GH#65915 is labeled 'Needs Discussion' and no consensus exists"), [], str(tmp_path))
+    assert miss["status"] == "failed"
+    # inside a code span a backslash is the code's own
+    (tmp_path / "a.py").write_text('parts = re.split(r"\\.", name)\n')
+    code = check_mark(mark('`re.split(r"\\.", name)`'), quote("a.py", 1, 're.split(r"\\.", name)', kind="code"), [], str(tmp_path))
+    assert code["status"] == "verified"

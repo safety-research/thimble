@@ -334,9 +334,10 @@ export function hopCluster(orderOrData, key, dir) {
 /** The rows of a cell of the map: seven, down to four when the detail needs the rows. */
 export const CELL_ROWS = 7
 export const CELL_MIN = 4
-/** The rows the map leaves the detail under it when it counts how many clusters it can draw: a cluster's name and a
- *  few of its claims (the list pages past them). */
-const DETAIL_MIN = 10
+/** The rows the map leaves the detail under it when it counts how many clusters it can draw: a claim picked with its
+ *  evidence open (the rule, the cluster's name, a claim of three lines and its chips, a citation's card and the steps
+ *  between citations), or a cluster's name and a few of its claims (the list pages past them). */
+const DETAIL_MIN = 14
 /** The rows above the map: the head and a blank row. */
 const TOP_ROWS = 2
 /** A pane this wide or wider has three columns of cells. */
@@ -362,11 +363,12 @@ const JOINED_MAX = 80
 /**
  * The data with at most `cap` groups where it can: while there are more, the smallest cluster (one-claim clusters
  * first; of two alike, the later listed) that is near another (NEAR_LINKS, NEAR_WORDS) joins the near one its claims
- * are linked to most, else whose name and claims share the most words with its own, a larger one first. Clusters near
- * no other stay apart, and the map draws more than `cap` (its cells shorter, then the pane scrolls). The claims between
- * clusters may join one too; none joins them. Its claims take that cluster's id, its name says what it holds (both
- * names joined, or the larger's and `+ N other claims`), and the groups keep their order, numbered again for their
- * colors. The store is not changed: a larger pane shows the clusters apart again.
+ * are linked to most, else whose name and claims share the most words with its own, a larger one first. When no two
+ * are near and there are still more than `cap`, the largest keep their cells and the rest share the last one, named
+ * for its largest and `+ N other clusters`: the map never draws more than it holds. The claims between clusters may
+ * join one too; none joins them. Its claims take that cluster's id, its name says what it holds (both names joined,
+ * or the larger's and `+ N other claims`), and the groups keep their order, numbered again for their colors. The
+ * store is not changed: a larger pane shows the clusters apart again.
  */
 export function fitClusters(data, cap) {
   const claims = data.claims || []
@@ -405,6 +407,18 @@ export function fitClusters(data, cap) {
     if (!joined) break
     now = live()
   }
+  // still more than the map holds: the largest keep their cells and the rest share the last one, so the map fits the
+  // pane however far apart the clusters are (the claims between clusters keep a cell of their own)
+  const rest = new Set()
+  if (now.length > Math.max(1, cap)) {
+    const size = k => claims.filter(c => home(c) === k).length
+    const apart = now.filter(g => g.key !== '-').sort((p, q) => size(q.key) - size(p.key) || p.i - q.i)
+    const cells = Math.max(1, cap - (now.length - apart.length))
+    const host = apart[cells - 1]
+    for (const g of apart.slice(cells)) into.set(g.key, host.key)
+    rest.add(host.key)
+    now = live()
+  }
   if (!into.size) return data
   const keep = new Map(now.map(g => [g.key, g]))
   // a merged cluster's name: both names joined when short enough, else the larger's and how many claims joined it
@@ -414,6 +428,8 @@ export function fitClusters(data, cap) {
     const sized = parts.map(g => ({ name: nameOf(g.key), n: claims.filter(c => claimGroup(data, c) === g.key).length })).sort((p, q) => q.n - p.n)
     const both = sized.map(x => x.name).join(' + ')
     if (sized.length === 2 && len(both) <= JOINED_MAX) return both
+    // clusters that share a cell only for room are said to be clusters, not claims of the larger one's question
+    if (rest.has(k)) return `${sized[0].name} + ${sized.length - 1} other cluster${sized.length === 2 ? '' : 's'}`
     const others = sized.slice(1).reduce((a, x) => a + x.n, 0)
     return `${sized[0].name} + ${others} other claim${others === 1 ? '' : 's'}`
   }
@@ -1023,10 +1039,24 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false } = {})
     ch--
     panel = detail(H - top - ch * cellRowsOf - KEYS_ROWS)
   }
+  // a detail still taller than its room under the shortest cells keeps to it, so the pane never scrolls: the rows that
+  // do not fit go from the middle, the steps between citations stay; c (all code and output) and h (the whole
+  // history) show it all
+  const room = H - top - ch * cellRowsOf - KEYS_ROWS
+  if (panel && panel.rows.length > room && !st.whole && !st.all) panel = clipped(panel, Math.max(3, room), !!st.open)
   const graph = graphOf({ data, claims, groups: mapped, edges: data.edges || [], W, h: ch * cellRowsOf, cols, group, tone, chosen, fresh }).rows()
   // the clusters as the map draws them, row by row and left to right: the order p n walk
   const drawn = layOf(claims, mapped, data.edges || [], W, ch * cellRowsOf, cols).names.slice().sort((a, b) => a.cell.y - b.cell.y || a.cell.x - b.cell.x)
   return { head, graph, ...result(panel), claim, group, chosen, narrow, cellRows: ch, data, order: drawn.map(nm => (nm.id === '' ? '-' : nm.id)) }
+}
+
+/** A detail cut to `room` rows: its head and, with the evidence open, its last two rows (the steps between citations)
+ *  kept, and `… N more rows` dim where rows went. Cut, so c offers the whole. */
+function clipped(panel, room, open) {
+  const tail = open ? panel.rows.slice(-2) : []
+  const keep = Math.max(1, room - tail.length - 1)
+  const gone = panel.rows.length - keep - tail.length
+  return { ...panel, rows: [...panel.rows.slice(0, keep), [{ s: `  … ${gone} more row${gone === 1 ? '' : 's'}`, tone: 'dim' }], ...tail], cut: true }
 }
 
 /** What the detail gives the view. */
