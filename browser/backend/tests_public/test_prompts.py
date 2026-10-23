@@ -477,3 +477,38 @@ def _skill(name: str) -> "tuple[dict, str]":
     return yaml.safe_load(head), body
 
 
+
+
+# The browser's Heads up and Explainers checks and the terminal's lenses they share their text with.
+LENS_TEXTS = {"heads-up": "lens-heads", "explainers": "lens-explain"}
+OUTPUT_FORM = ('"heads"', '"glosses"', "add_comment")  # what only the paragraphs on a mode's output form name
+
+
+def _shared(text: str) -> list[str]:
+    """The paragraphs a check's text shares with its lens, each with its whitespace collapsed: the text without its front
+    matter, heading, digest and the paragraphs on its output form, and of the example only what it checks, the lines
+    before Good."""
+    if text.startswith("---\n"):
+        text = text.split("\n---\n", 1)[1]
+    out = []
+    for para in text.split("<!-- digest -->")[0].split("\n\n"):
+        lines = [ln for ln in para.strip("\n").split("\n") if ln.strip() and not ln.startswith(("## ", "```"))]
+        if not lines:
+            continue
+        if para.lstrip("\n").startswith(("```", "    ")):  # the example
+            lines = [ln.strip() for ln in lines]
+            lines = lines[:next((i for i, ln in enumerate(lines) if ln.startswith("Good")), len(lines))]
+        elif any(w in para for w in OUTPUT_FORM):
+            continue
+        out.append(" ".join(" ".join(lines).split()))
+    return out
+
+
+@pytest.mark.parametrize("check", sorted(LENS_TEXTS))
+def test_the_lens_checks_say_what_the_terminal_lenses_say(check):
+    """Heads up and Explainers say what the terminal's heads-up and explainer lenses say, word for word: the definition,
+    what to look for, the limit, the example's answer and why the good example is good. Only the output form differs,
+    the lens's JSON and the check's add_comment, each in its own example and paragraph."""
+    browser = _shared((REPO / "prompts" / "checks" / f"{check}.md").read_text("utf-8"))
+    terminal = _shared((REPO.parent / "plugin" / "prompts" / f"{LENS_TEXTS[check]}.md").read_text("utf-8"))
+    assert len(browser) >= 3 and browser == terminal

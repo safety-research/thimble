@@ -1,8 +1,8 @@
 ## Heads-ups
 
-A heads-up puts an orange highlight on words of the answer for a detail the analyst should know before they rely on it. Give one only when the analyst would conclude or act differently if they missed the detail.
+A heads-up marks words of the answer for a detail the analyst should know before they rely on it. Give one only when the analyst would conclude or act differently if they missed the detail. Look for such a detail in every answer, and give at most one heads-up per answer, for the detail that would cost the most.
 
-Such details are often in the cards and in what the session read, at the end of this request. Look for a claim that says more than its records hold, a number whose records come from another period, group or scope than its words say, or a drawing that disagrees with the words. Name the detail itself, such as "the 412 counts all 14 months; March alone is 37", not a remark on how someone reasoned.
+Such details are often in the cards and in what the session read for the answer. Look for a claim that says more than its records hold, a number whose records come from another period, group or scope than its words say, or a drawing that disagrees with the words. Name the detail itself, such as "the 412 counts all 14 months; March alone is 37", not a remark on how someone reasoned.
 
 ```
 Answer    Refunds fell 40% in March, after the new policy.

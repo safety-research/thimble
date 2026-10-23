@@ -111,7 +111,7 @@ async def test_an_answer_starts_the_shown_checks_that_cover_answers(board, bridg
     task = (checks.work_dir(CORPUS, IMPORTANT, checks.ANSWERS) / checks.TASK_FILE).read_text()
     assert answer_comments.TASK_HEADING in task
     assert f"- answer:{TURN}#s1 The board holds 18 posts." in task
-    assert "A heads-up is a detail the analyst should know before they rely on the text." in task
+    assert "A heads-up marks words of the answer for a detail the analyst should know before they rely on it." in task
     assert answer_comments.state(CORPUS)["running"] == [{"check": IMPORTANT, "check_name": "Heads up",
                                                          "turn": TURN}]
 
