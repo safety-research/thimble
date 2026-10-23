@@ -109,7 +109,9 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
     Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
     ...(right.length ? [Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: joined(right, left.length) })] : []),
   ] })
-  return [...(preview ? [] : await lineRows($, els, width)), ...(preview ? [] : await fixLineRows($, els, width).catch(() => [])), bar]
+  // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's
+  const fixRows = preview ? [] : await fixLineRows($, els, width).catch(() => [])
+  return [...(preview ? [] : await lineRows($, els, width)), ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), bar]
 }
 
 /** The failure line: what failed, whole, in red, or a notice. */
