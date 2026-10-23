@@ -2080,13 +2080,18 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     iw = max(1, *(len(str(r["id"])) for r in fixes))
     sw = max(6, *(len(w) for w in words.values()))
     tw = min(40, max(3, *(len(t) for t in titles.values())))
-    out.append(c("dim", f"  {'#':>{iw}}  {'state':<{sw}}  {'fix':<{tw}}   made    you asked"))
+    # a fix made in thimble's browser workbench says so after its date, in a small tag
+    tag = " browser"
+    mw = 5 + (len(tag) if any(r.get("made_in") == "browser" for r in fixes) else 0)
+    out.append(c("dim", f"  {'#':>{iw}}  {'state':<{sw}}  {'fix':<{tw}}   {'made':<{mw}}   you asked"))
     for r in fixes:
-        row = f"  {r['id']:>{iw}}  {words[r['id']]:<{sw}}  {short(titles[r['id']], tw):<{tw}}   {_date(r.get('created')):<5}   "
+        made = f"{_date(r.get('created')):<5}"
+        where = tag if r.get("made_in") == "browser" else ""
+        row = f"  {r['id']:>{iw}}  {words[r['id']]:<{sw}}  {short(titles[r['id']], tw):<{tw}}   {made + where:<{mw}}   "
         room = max(16, width - len(row) - 1)
         asked = f'"{short(_first_line(r), room - 2)}"' if _first_line(r) else ""
         out.append(f"  {r['id']:>{iw}}  {_state_paint(c, r, d['on'], sw)}  {short(titles[r['id']], tw):<{tw}}   "
-                   f"{_date(r.get('created')):<5}   {asked}".rstrip())
+                   f"{made}{c('dim', where)}{' ' * (mw - len(made) - len(where))}   {asked}".rstrip())
     prs = [r for r in fixes if r.get("pr")]
     if prs:
         out += ["", *[c("dim", f"  fix {r['id']} has a pull request: {r['pr']}") for r in prs]]

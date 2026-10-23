@@ -994,6 +994,27 @@ def test_the_list_shows_a_fix_being_changed_as_its_own_row_never_as_another_fix(
     assert not any("→" in x or "fix 1" in x.split('"')[0] for x in lines[3:5])
 
 
+def test_the_list_tags_a_fix_made_in_the_browser_after_its_date(world):
+    a = FX.new("the bar should say read")
+    b = FX.new("the card should count its rows", made_in="browser")
+    lines = FX.list_lines(160)
+    head = lines[2]
+    rows = {x.split()[0]: x for x in lines[3:5]}
+    date = FX._date(b["created"])
+    assert f"{date} browser   \"the card should count its rows\"" in rows[str(b["id"])]
+    assert "browser" not in rows[str(a["id"])]
+    # the words start in one column, under the header's
+    col = head.index("you asked")
+    assert rows[str(a["id"])].index('"the bar') == col == rows[str(b["id"])].index('"the card')
+    # on a terminal the tag is dim, and only the tag
+    painted = FX.list_lines(160, FX.Paint(True))
+    row = next(x for x in painted if "the card should count" in x)
+    assert f"{date}\x1b[90m browser\x1b[0m   " in row
+    # with no fix from the browser, the column is as narrow as before
+    FX.remove(b["id"])
+    assert FX.list_lines(160)[2].endswith("made    you asked")
+
+
 def test_merge_makes_one_fix_of_several_with_the_persons_key_and_keeps_the_old_refs(world):
     a = on_fix(world)
     b = FX.new("a note")
