@@ -39,15 +39,16 @@
   text-decoration-line: none;
   cursor: text;
 }
-/* a ref as its target's glyph alone (a citation of a card, any citation inside a card), its name in the hover: a
-   square chip */
+/* a ref as its target's glyph alone (a citation of a part of a card, any citation inside a card), its name in the
+   hover: a square chip */
 .chip.refchip-icon {
   justify-content: center;
   min-width: var(--h-chip);
   padding: 0 4px;
 }
-/* in a chat reply, a ref as its glyph alone (a card pointed at after a claim) is a small mark in the line, not a boxed
-   chip, so the sentence reads on as in the terminal; its hover and its click are the chip's */
+/* in a chat reply, a ref as its glyph alone (a file pointed at after a claim) is a small mark in the line, not a boxed
+   chip, so the sentence reads on as in the terminal; its hover and its click are the chip's. A card pointed at keeps
+   its chip with its name (components/RefChip) */
 .chat-text .chip.refchip-icon {
   height: auto;
   min-height: 0;

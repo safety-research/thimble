@@ -275,8 +275,8 @@ const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { 
 
 /** Assistant markdown with chips and marks. `streaming`: the text is still growing and renders per completed block.
  * `checks`: what the check found of each of its marks, by their order in the text. `marks`: the passages the checks
- * commented on, tinted (rehypeAnswerMarks). A bare citation in it is its
- * target's glyph alone, its name in the hover, as in a card (components/RefChip GlyphCites). */
+ * commented on, tinted (rehypeAnswerMarks). A bare citation in it is its target's glyph alone, its name in the hover,
+ * as in a card, and a card's its chip with the card's name (components/RefChip GlyphCites). */
 export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, marks }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; marks?: readonly AnswerMark[] }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
