@@ -55,7 +55,7 @@ import { squeezeBar, squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
-  moreLines, open, pageOf, printLine, push, refOf, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  moreLines, open, pageOf, printLine, push, refOf, restStop, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -316,8 +316,8 @@ async function standOn($: Engine, row: string, card: string): Promise<void> {
   await reveal($, { row, card })
 }
 
-/** ] and [: the next mark or card in reading order, and the one before. From rest, the answer the keys act on: ] its
- *  first, [ its last (else the newest answer's). At the newest reply's last stop, ] stays. */
+/** ] and [: the next mark or card in reading order, and the one before. From rest, the answer the keys act on (else
+ *  the newest answer's): ] its first mark, [ its last stop (restStop). At the newest reply's last stop, ] stays. */
 export async function stepMark($: Engine, dir: number): Promise<void> {
   const { list, at } = await stepPlace($)
   let next: Stop | null = null
@@ -327,7 +327,7 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
     const turn = row ? await turnOfRow($, row) : null
     const here = list.filter(p => (turn ? turn.rows.includes(p.row) : p.row === row))
     const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
-    next = (dir > 0 ? pool[0] : pool[pool.length - 1]) ?? null
+    next = restStop(pool, dir) as Stop | null
   }
   if (!next) { noticeLine($, 'Nothing to step to yet.', 'tray'); return }
   if (next.card) await standOn($, next.row, next.card)

@@ -306,25 +306,25 @@ test('a verified citation offers no repair', async ($, on) => {
   expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'repair this citation')).toBe(false)
 })
 
-test('] stops on a card Claude drew inline, where it stands in the answer: here before the words, so first; a asks about it', async ($, on) => {
+test('] from rest opens the first citation, past a card Claude drew above the words; [ from it stands on the card; a asks about it', async ($, on) => {
   const id = 'c0123456789ab'
   const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_1', turn: 't1', agentId: null, anchorRow: null, keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_1: { version: 1 } }, at: 1 }
   await resumed($, on, QUOTED, 's-tray-3', {
     cards: [{ id, toolUseId: 'toolu_made_up_1', seq: 1, after: 0 }],
     kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) },
   })
-  // ]: the card above the words, which takes the keys (a ask, 0 back); no tray
+  // ]: the citation in the words, though the card stands above them
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let band = textOf(await $.ui.render(above()))
+  expect(band).toContain('failed: 12')
+  expect(band).toContain('[ previous card')
+  // [: the card above the words, which takes the keys (a ask, 0 back); no tray
+  expect(await $.prompt.edit(key('['))).toEqual({ text: '', cursor: 0 })
+  band = textOf(await $.ui.render(above()))
   expect(band).toContain('a ask')
   expect(band).toContain('0 back')
   expect(band).toContain('] next citation')
   expect(band).not.toContain('failed: 12')
-  // ] again: the citation in the words under it
-  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  band = textOf(await $.ui.render(above()))
-  expect(band).toContain('failed: 12')
-  expect(band).toContain('[ previous card')
 })
 
 // a heads-up on the citation's words, with long bullets, and an explainer after it

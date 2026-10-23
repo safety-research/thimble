@@ -911,9 +911,46 @@ def scripts(command: str) -> list[str]:
     return out or [command]
 
 
-def shown_code(command: str) -> str:
+ABS_PATH = re.compile(r"(?<![\w./~$-])/[^\s'\"`;&|()<>,]*")
+
+
+def from_folder(command: str, folder: str | None) -> str:
+    """The command as it ran from the session's folder: a leading `cd` to that folder left out, one to a folder inside
+    it written relative to it, and each other path inside it written relative to where the command ran. The person
+    sees what the command did, never where the session's folder is."""
+    f = os.path.normpath(os.path.abspath(folder)) if folder else ""
+    if not f or f == "/":
+        return command
+
+    def within(p: str) -> bool:
+        return p == f or p.startswith(f + "/")
+
+    base = f
+    m = LEADING_CD.match(command)
+    d = os.path.normpath(m.group(1).strip("'\"")) if m else ""
+    if m and os.path.isabs(d) and within(d):
+        base = d
+        r = os.path.relpath(d, f)
+        command = command[m.end():].lstrip(" \t") if r == "." else command[:m.start(1)] + r + command[m.end(1):]
+        head = "" if r == "." else command[:m.start(1) + len(r)]
+    else:
+        head = ""
+
+    def rel(x: re.Match[str]) -> str:
+        p = os.path.normpath(x.group(0))
+        if not within(p):
+            return x.group(0)
+        r = os.path.relpath(p, base)
+        return r + "/" if x.group(0).endswith("/") and r != "." else r
+
+    return head + ABS_PATH.sub(rel, command[len(head):])
+
+
+def shown_code(command: str, folder: str | None = None) -> str:
     """The code the pane shows for a call: the script alone when the call only runs one (`python3 - <<'PY'`, the
-    script, `PY`, after a `cd` at most), else the whole command, since its other parts printed into the same output."""
+    script, `PY`, after a `cd` at most), else the whole command, since its other parts printed into the same output.
+    Paths inside the session's folder are relative to it (from_folder)."""
+    command = from_folder(command, folder)
     m = HEREDOC.search(command)
     if not m or command[m.end():].strip():
         return command
@@ -954,7 +991,7 @@ def window(text: str, spans: list[list[int]], size: int) -> tuple[str, list[list
     return lead + text[a:b] + ("…" if b < len(text) else ""), [[x - a + len(lead), y - a + len(lead)] for x, y in spans if x >= a and y <= b]
 
 
-def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx: bool = False, was: str = "") -> tuple[list[str], dict[str, Any] | None]:
+def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx: bool = False, was: str = "", folder: str | None = None) -> tuple[list[str], dict[str, Any] | None]:
     """The problems of computed evidence, and the evidence to show. The check names a call by the output it printed;
     the calls of the session whose real output holds that text are the candidates, and the first whose output shows
     the words, and whose code types none of them in, is the evidence: its code and its whole output, the words
@@ -966,7 +1003,7 @@ def check_computed(target: str, given: Any, calls: list[dict[str, Any]], approx:
 
     def shown(c: dict[str, Any], spans: list[list[int]]) -> dict[str, Any]:
         text, hl = window(str(c.get("output") or ""), spans, OUTPUT_MAX)
-        out = {"kind": "computed", "code": shown_code(str(c.get("command") or "")).strip("\n"), "output": text, "highlight": hl, "by": c.get("by") or "checker"}
+        out = {"kind": "computed", "code": shown_code(str(c.get("command") or ""), folder).strip("\n"), "output": text, "highlight": hl, "by": c.get("by") or "checker"}
         table = text_table(text, hl)
         return {**out, "table": table} if table else out
 
@@ -1569,7 +1606,7 @@ def check_evidence(target: str, kind: Any, ev: Any, calls: list[dict[str, Any]],
     if kind == "card":
         return check_card(target, ev, cards, approx, was)
     if kind == "computed":
-        return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was)
+        return check_computed(target, ev.get("output") if isinstance(ev, dict) else None, calls, approx, was, root or cwd)
     if kind in ("quote", "code"):
         evs = [e for e in (ev if isinstance(ev, list) else [ev]) if isinstance(e, dict)]
         return check_quote(target, kind, evs, cwd, root, tmp, calls, was) if evs else (["the check named no place in a file"], None)

@@ -15,7 +15,7 @@
 //   stopsOfRow(row, cites, spans, cards)   one row's stops: its citations and spans by where they stand, then its cards
 //   stopsOfTurn(rows, stopsOf, inline)     a turn's stops: its rows' and the cards Claude drew between them
 //   pageOf(heights, room, from), rowsOf(line, width)   what of a tall tray body fits above the bar, and `m` for more
-//   indexOf(list, at), stepFrom(list, k, dir)
+//   indexOf(list, at), stepFrom(list, k, dir), restStop(pool, dir)   where ] and [ go next, and from rest
 //   stopWhat(stop), stepWords(ends), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
 //   scopeText(frame, info)                 what a question asked with the tray open carries for Claude
@@ -135,6 +135,14 @@ export function indexOf(list, at) {
 export function stepFrom(list, k, dir = 1) {
   const j = k + (dir > 0 ? 1 : -1)
   return list && j >= 0 && j < list.length ? list[j] : null
+}
+
+/** Where ] and [ go from rest in an answer's stops (`pool`): ] to its first mark (a citation, explainer or heads-up),
+ *  so a card Claude drew above the text is not in the way, [ to its last stop. A card before the first mark is one [
+ *  from it; an answer with cards alone starts at its first card. */
+export function restStop(pool, dir = 1) {
+  const list = Array.isArray(pool) ? pool : []
+  return (dir > 0 ? list.find(p => p && !p.card) ?? list[0] : list[list.length - 1]) ?? null
 }
 
 /** What a stop is, in the bar's words. */
