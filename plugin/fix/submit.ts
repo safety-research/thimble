@@ -16,7 +16,7 @@ import { modelWhy } from '../core/why.js'
 import { jsonIn } from '../observer/reply.mjs'
 import { promptText } from '../prompts/prompts'
 import { tracked } from '../telemetry/telemetry'
-import { diffText, fixesDir, fixOf, jsonOf, kernelFix, pressKey, refreshFixes } from './fixes'
+import { diffText, fixesDir, fixOf, jsonOf, kernelFix, pressKey, refreshFixes, shownPath } from './fixes'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -108,7 +108,7 @@ export async function submitAction($: Engine, what: 'pr' | 'file' | 'keep', hit?
   const r = await kernelFix($, ['send', String(id), '--answer', what, '--ask', '-'], { stdin: secret, timeoutMs: 300000, doing: what === 'pr' ? `sending fix ${id}` : `saving fix ${id}` })
   if (!r.ok) return `× Nothing was ${what === 'pr' ? 'sent' : 'saved'}: ${cut(r.err || 'thimble fix send gave nothing', 200)}`
   const out = jsonOf<Any>(r.out) ?? {}
-  const done = what === 'pr' ? `Sent: draft pull request ${out.pr || ''}` : `Saved as files, nothing sent: ${out.saved || ''}`
+  const done = what === 'pr' ? `Sent: ${out.pr || ''}` : `Saved as files, nothing sent: ${await shownPath($, String(out.saved || ''))}`
   const d = await draftNow($, id)
   if (d) await $.state.set({ ...DRAFT, id: String(id) }, { ...d, done } as never)
   await tellAtNextPrompt($, `fix-${id}-sent`, `The person ${what === 'pr' ? `sent thimble fix ${id} as a pull request (${out.pr || ''})` : `saved thimble fix ${id} as files`}.`)

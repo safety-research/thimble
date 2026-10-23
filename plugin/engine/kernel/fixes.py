@@ -1231,7 +1231,8 @@ def _write_share(rec: dict[str, Any], d: Path, parts: dict[str, str], hits: list
     held_parts, held = _protect(parts, _repo_paths(release().get("base") or "HEAD", parts.get("diff", "")))
     out = _unprotect(P.apply(held_parts, hits), held)
     removed = sum(not h["kept"] for h in hits)
-    foot = (f"\n---\nthimble {release().get('version') or '?'} · {platform.system() or 'unknown OS'} · a "
+    rel = release()
+    foot = (f"\n---\nthimble {rel.get('version') or str(rel.get('base') or '?')[:7]} · {platform.system() or 'unknown OS'} · a "
             f"{'change' if 'diff' in out else 'request'} from a person who uses thimble. The privacy scan removed "
             f"{removed} detail{'' if removed == 1 else 's'}, and they read this text before it was sent.\n")
     (d / "pr.md").write_text(out["pr"].rstrip() + "\n" + foot)

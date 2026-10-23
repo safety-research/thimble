@@ -19,7 +19,7 @@ import { busyWhile } from '../bar/busy'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { fixerCall, fixerCheck, fixerEnded, fixOfAgent, FIXER, recoverFixers } from './fixer'
-import { fixesDir, fixesNow, refreshFixes, reloadIfDue, updateFixes } from './fixes'
+import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloadIfDue, setFixLine, updateFixes } from './fixes'
 import { lineSeen } from './line'
 import { openFixes } from './pane'
 import { requestFix } from './request'
@@ -66,6 +66,10 @@ export const registerFix: Register = on => {
     void (async () => {
       await knowFixers($)
       const list = await refreshFixes($)
+      // a fix's line that no longer holds (the shell turned the fixes off, or the fix went off): it goes
+      const l = await fixLineNow($)
+      const lf = l ? list?.fixes.find(f => f.id === l.id) : null
+      if (l?.kind === 'applied' && (list?.on === false || (lf && lf.state !== 'on'))) await setFixLine($, null)
       const working = (list?.fixes ?? []).filter(f => f.state === 'working')
       for (const f of working) void busyWhile($, `fixing: ${cut(f.title, 36)} · in a copy`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
       await recoverFixers($, working)
