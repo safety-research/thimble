@@ -327,6 +327,7 @@ def test_a_new_release_carries_the_fixes_that_fit_and_marks_the_rest(world, monk
     out = FX.update()
     assert out["said"] == f"thimble {new[:7]} · 1 fix carried · 1 in the release" or out["said"].endswith("1 fix carried · 1 in the release")
     assert FX.get(a["id"])["state"] == "on" and FX.get(b["id"])["state"] == "released"
+    assert FX.get(a["id"])["commit"] == sh("git", "rev-parse", "mine", cwd=FX.live_dir())
     assert FX.release()["base"] == new and new in (FX.home() / "off.sh").read_text()
     log = sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines()
     assert log[:2] == ["Bar says read", "another change"]

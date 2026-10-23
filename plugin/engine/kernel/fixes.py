@@ -859,6 +859,10 @@ def update(tests: bool = True) -> dict[str, Any]:
             r = recs[fid]
             r.update(state="released", note=f"in {version}")
             put(r)
+        for fid in carried:
+            r = recs[fid]
+            r.update(commit=git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live_dir()))
+            put(r)
         synced = _sync()
     parts = [f"thimble {version}"]
     if carried:
