@@ -39,7 +39,8 @@
 // strings and Text (anything else is the view's error, said to Claude, as Claude Code would refuse to draw it), and a
 // string holds no control character but a line break (the others are taken out; a tab is a space). A Button around
 // lines (a Box, or several) becomes a column Box with the Button's onPress number, and a click on its cells presses it.
-// A dense card gets blank rows between its parts (space.js), unless the view reads clicks by cell (surface.onPointer).
+// A dense card gets blank rows between its parts (space.js), unless the view reads clicks by cell (surface.onPointer);
+// each version keeps the places its first drawing gave them, so a key never moves the card's rows.
 import fs from 'node:fs'
 import http from 'node:http'
 import { types } from 'node:util'
@@ -134,7 +135,7 @@ const PRELUDE = new vm.Script(String.raw`
 Object.defineProperty(this, '__thimble', { writable: false, configurable: false, value: (function () {
   'use strict'
   const parse = JSON.parse, stringify = JSON.stringify, isArray = Array.isArray, keysOf = Object.keys, freeze = Object.freeze
-  const Str = String
+  const Str = String, toNumber = Number, finite = isFinite
   const PROPS = {
     Box: ['flexDirection', 'flexGrow', 'flexShrink', 'flexWrap', 'alignItems', 'alignSelf', 'justifyContent', 'gap',
       'columnGap', 'rowGap', 'width', 'height', 'minWidth', 'minHeight', 'margin', 'marginX', 'marginY', 'marginTop',
@@ -205,9 +206,22 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
     get good() { return PALETTES[theme].good },
     get bad() { return PALETTES[theme].bad },
   })
+  // a number as a card writes it: thousands separated by commas (2,327), at most the digits given as decimals (2 when not given,
+  // trailing zeros dropped), so the view does not write the digits of a count by hand
+  function num(n, digits) {
+    const v = typeof n === 'number' ? n : typeof n === 'string' && n.trim() !== '' ? toNumber(n) : NaN
+    if (!finite(v)) return Str(n)
+    const d = typeof digits === 'number' && digits >= 0 ? Math.min(20, Math.trunc(digits)) : 2
+    let t = Math.abs(v).toFixed(d)
+    if (typeof digits !== 'number' && t.indexOf('.') >= 0) t = t.replace(/\.?0+$/, '')
+    const dot = t.indexOf('.'), whole = dot < 0 ? t : t.slice(0, dot)
+    const out = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (dot < 0 ? '' : t.slice(dot))
+    return (v < 0 && /[1-9]/.test(t) ? '-' : '') + out
+  }
   const surface = freeze({
     elements,
     colors,
+    num,
     get state() { return state },
     setState(next) { state = next; dirty = true },
     get columns() { return columns },
@@ -486,8 +500,9 @@ function inContext(card, op, args, ms) {
     return { ok: false, phase: op, error: 'the view gave no drawing thimble can read' }
   }
   const r = JSON.parse(out)
-  // blank rows between the card's parts (space.js); a view that reads clicks by cell keeps its rows where it drew them
-  if (r.ok && r.tree && !r.cells) r.tree = spaced(r.tree, Number(args.width) || card.width || 80)
+  // blank rows between the card's parts (space.js), in the places the version's first drawing gave them, so no key moves
+  // them; a view that reads clicks by cell keeps its rows where it drew them
+  if (r.ok && r.tree && !r.cells) r.tree = spaced(r.tree, Number(args.width) || card.width || 80, card.plan)
   delete r.cells
   if (r.ok && drawnSize(r.tree) > MAX_TREE) {
     drop(card)
@@ -544,7 +559,7 @@ function load(a) {
     const line = /view\.js:(\d+)/.exec(String(e.stack))?.[1]
     return { ok: false, phase: 'view', error: `the view does not parse${line ? ` (line ${line})` : ''}: ${e.message}` }
   }
-  const card = { id: a.id, ctx, version: a.version, width: a.width, tree: null, view }
+  const card = { id: a.id, ctx, version: a.version, width: a.width, tree: null, view, plan: new Map() }
   const r = inContext(card, 'init', { title: a.title, state: a.state ?? null, width: a.width }, LOAD_MS)
   if (!r.ok) return r
   card.tree = r.tree

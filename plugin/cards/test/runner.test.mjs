@@ -83,6 +83,38 @@ test('a dense card gets a blank row under its takeaway; a view that reads clicks
   assert.deepEqual(kept.lines.slice(0, 2), ['Bram scored highest of all three.', 'row 0'])
 })
 
+test('a key never moves the blank rows the runner put in: each version keeps the places of its first drawing', async () => {
+  // the selected row bold through, which reads as a heading under the note in any one state
+  const view = `const keys = "jk"
+function onKey(k, s, p) { const i = (s.state && s.state.i) || 0; s.setState({ i: k === 'j' ? Math.min(p.rows.length - 1, i + 1) : Math.max(0, i - 1) }) }
+function view(p, s) { const { Box, Text } = s.elements
+  const sel = (s.state && s.state.i) || 0
+  const names = ['ada', 'bram', 'cleo', 'dov', 'eli', 'fay', 'gus', 'hal']
+  return Box({ flexDirection: 'column', children: [
+    Text({ children: 'Edits per agent over the run, one mark per hour' }),
+    Text({ children: '              ▼ peak 41 edits' }),
+    ...names.map((n, i) => Text({ bold: i === sel, children: [Text({ children: n.padEnd(8) }), Text({ children: '──·──•──●──' }), Text({ children: String(10 * (8 - i)).padStart(5) })] })),
+    Text({ children: 'Ada made the most edits of the eight agents, most of them in one hour.' }),
+  ] }) }`
+  const { id, r } = await load(view)
+  const rowOf = (lines, n) => lines.findIndex(l => l.startsWith(n + ' '))
+  const where = lines => ['ada', 'bram', 'cleo', 'hal'].map(n => rowOf(lines, n))
+  const first = where(r.lines)
+  for (const k of ['j', 'j', 'k', 'j']) {
+    assert.equal((await ask('key', { id, key: k })).ok, true)
+    assert.deepEqual(where((await ask('copy', { id, width: 40 })).lines), first, "after " + k)
+  }
+})
+
+test('surface.num writes a number with thousands separators', async () => {
+  const view = `function view(p, s) { const { Box, Text } = s.elements
+  return Box({ flexDirection: 'column', children: [2327, 14591, 1234567.891, -2327, 999, 0, 0.456, 2.8, -0.001, NaN, '2327', 'n/a'].map(n => Text({ children: s.num(n) }))
+    .concat([Text({ children: [s.num(2327.46, 1), s.num(0.5, 0), s.num(1e21), s.num(12, 2)].join(' ') })]) }) }`
+  const { r } = await load(view)
+  assert.equal(r.ok, true, r.error)
+  assert.deepEqual(r.lines, ['2,327', '14,591', '1,234,567.89', '-2,327', '999', '0', '0.46', '2.8', '0', 'NaN', '2,327', 'n/a', '2,327.5 1 1e+21 12.00'])
+})
+
 test("the view gets the palette of the request's theme as surface.colors, and draws in the other set when it changes", async () => {
   const view = `function view(p, s) { const { Box, Text } = s.elements, c = s.colors
   return Box({ flexDirection: 'column', children: [
