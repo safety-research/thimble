@@ -683,13 +683,11 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert rows[3].endswith('"the bar should say read, not coverage"') and "like the untouched" not in "\n".join(rows)
     assert rows[8:] == [
         "What next",
-        f"  thimble fix show {a}       what fix {a} does, in a few lines",
-        f"  thimble fix merge {a} {c}    make them one fix (it asks y/N first)",
-        f"  thimble fix off {a}        turn a fix off; thimble fix on {a} turns it back on",
-        f"  thimble file issue {a}     post fix {a} as a GitHub issue (you check it before it goes)",
-        f"  thimble file pr {a}        open a pull request with fix {a}'s code (asks first)",
-        "  thimble update           get the newest thimble and keep your fixes",
-        "  New fix: in Claude Code or the browser, /thimble-fix <what should work differently>"]
+        f"  thimble fix show {a}      what fix {a} does, in a few lines",
+        f"  thimble fix off {a}       turn a fix off; thimble fix on {a} turns it back on",
+        f"  thimble file issue {a}    post fix {a} as a GitHub issue (you check it before it goes)",
+        f"  thimble file pr {a}       open a pull request with fix {a}'s code (asks first)",
+        "  thimble update          get the newest thimble and keep your fixes"]
     assert "fix diff" not in "\n".join(rows)
     assert cli.main(["fix", "show", str(c)]) == 0
     shown = capsys.readouterr().out.splitlines()

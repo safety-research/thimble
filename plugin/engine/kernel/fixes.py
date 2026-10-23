@@ -1905,9 +1905,8 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     d = listing()
     width = width or shutil.get_terminal_size((100, 24)).columns
     fixes = d["fixes"]
-    new_fix = c("dim", "New fix: in Claude Code or the browser, /thimble-fix <what should work differently>")
     if not fixes:
-        return [f"{c('title', 'Your thimble fixes')} · thimble {d['version']} with no fixes of yours", "", f"  {new_fix}"]
+        return [f"{c('title', 'Your thimble fixes')} · thimble {d['version']} with no fixes of yours"]
     words = {r["id"]: (state_word(r) if d["on"] or r.get("state") != "on" else "off") for r in fixes}
     titles = {r["id"]: r["title"] for r in fixes}
     counts: dict[str, int] = {}
@@ -1938,9 +1937,6 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
         k = len(d["aside"])
         nxt.append(("thimble reapply", f"Claude brings back the {k} fix{'' if k == 1 else 'es'} thimble update set aside"))
     nxt.append((f"thimble fix show {first}", f"what fix {first} does, in a few lines"))
-    can_merge = [r["id"] for r in fixes if r.get("state") in (*REFINABLE, "request")]
-    if len(can_merge) >= 2:
-        nxt.append((f"thimble fix merge {can_merge[0]} {can_merge[1]}", "make them one fix (it asks y/N first)"))
     if on_ids:
         n = on_ids[0]
         nxt.append((f"thimble fix off {n}", f"turn a fix off; {c('cmd', f'thimble fix on {n}')} turns it back on"))
@@ -1956,7 +1952,6 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     cw = max(len(k) for k, _ in nxt) + 4
     out += ["", c("title", "What next")]
     out += [f"  {c('cmd', k)}{' ' * (cw - len(k))}{v}" for k, v in nxt]
-    out.append(f"  {new_fix}")
     return out
 
 
