@@ -15,9 +15,10 @@
 //                   dots and name bold, and the other rows stay round it, folded to `↑ N more clusters` and `↓ N more
 //                   clusters` only when they do not fit (a press on one chooses the next cluster folded). A press on
 //                   the open row's name closes it. A press on a dot, or on a claim of an open row, picks that claim
-//   an open row     its name whole, then its claims, each after a dim – (two lines at most, then …), each a press that
-//                   picks it; a window round the claim picked when they do not fit (`↑ N earlier`, `↓ N more · claims
-//                   a–b of N`, each a press that pages by a screen). A claim picked is ▸ and bold in purple, whole, the
+//   an open row     its name whole, then its claims, each after a dim – (whole when they all fit, else two lines at
+//                   most, then …), each a press that picks it; a window round the claim picked when they do not fit
+//                   (`↑ N earlier`, `↓ N more · claims a–b of N`, each a press that pages by a screen). A claim picked
+//                   is ▸ and bold in purple, whole, the
 //                   other claims dim, and under it one line of chips (its citations' checks, `corrected ×N`, its turn).
 //                   e keeps the claim alone and opens under it, for a corrected claim, its History (one word-level diff
 //                   per correction and its reason; the newest two of more, h all), then its citations one at a time,
@@ -510,13 +511,13 @@ export function groupOf(data, key) {
 }
 
 /** A claim in an open row, as rows W wide from column `at`, each a press on `part`: `–` and its sentence, wrapped under
- *  its first word, two lines at most (then …). The claim picked: `▸` and the whole sentence bold in MARK; `dim` (another
- *  claim is picked, or another cluster chosen) dim; a new claim (`fresh`) bold. */
-function itemRows(c, W, { at = 0, picked = false, dim = false, fresh = false, part = null }) {
+ *  its first word, whole when `whole`, else two lines at most (then …). The claim picked: `▸` and the whole sentence
+ *  bold in MARK; `dim` (another claim is picked, or another cluster chosen) dim; a new claim (`fresh`) bold. */
+function itemRows(c, W, { at = 0, picked = false, dim = false, fresh = false, part = null, whole = false }) {
   const look = picked ? { tone: MARK, bold: true } : fresh ? { bold: true } : dim ? { tone: 'dim' } : {}
   const room = Math.max(8, W - at - 2)
   let lines = wrap(sentenceOf(c.text), room)
-  if (!picked && lines.length > 2) {
+  if (!picked && !whole && lines.length > 2) {
     const words = lines[1].split(' ')
     while (words.length > 1 && len(words.join(' ')) + 2 > room) words.pop()
     lines = [lines[0], `${words.join(' ')} …`]
@@ -588,12 +589,13 @@ function foldedRow(g, cs, dw, W, { lit = false, fresh } = {}) {
  * it chooses the cluster, `g:<key>`), then its claims under the name (itemRows; a press picks one, `n:<id>`). A claim
  * picked: ▸ and bold in MARK, whole, the others dim, and under it one line of chips (chipRuns); with `st.open` only
  * that claim, its evidence under it (evidenceRows). `lit`: the cluster chosen (its dots and name bold); `dim`: another
- * cluster is chosen, so its claims are dim. `room`: the rows it may take; past them its claims keep a window round the
+ * cluster is chosen, so its claims are dim. `whole`: every claim whole (true), two lines at most (false), or whole when
+ * all of them fit its room (undefined). `room`: the rows it may take; past them its claims keep a window round the
  * claim picked (or from `st.from`, the first claim it shows once the person paged), `↑ N earlier` above and `↓ N more
  * · claims a–b of N` under, each a press that pages by a screen (`pg:<first claim of that screen>`), and an evidence
  * keeps its head and its steps (clipped). {rows, shown, cut, windowed}
  */
-function openRows({ g, cs, claim, dw, W, byId, st, fresh, narrow, lit = false, dim = false, room = Infinity }) {
+function openRows({ g, cs, claim, dw, W, byId, st, fresh, narrow, lit = false, dim = false, room = Infinity, whole }) {
   const at = dw + 1
   const part = `g:${g.key}`
   const rows = wrapName(g.name, Math.max(4, W - at)).map((l, i) => (i
@@ -608,11 +610,15 @@ function openRows({ g, cs, claim, dw, W, byId, st, fresh, narrow, lit = false, d
     // and output) and h (the whole history) show it all, and the pane scrolls
     return out.rows.length > room && !st.whole && !st.all ? clipped(out, Math.max(OPEN_MIN, room), ev.cites ? 2 : 0, at + 2) : out
   }
-  const items = cs.map(c => (claim?.id === c.id ? pickedRows(c) : itemRows(c, W, { at, dim: dim || !!claim, fresh: fresh.has(c.id), part: `n:${c.id}` })))
+  const itemsOf = w => cs.map(c => (claim?.id === c.id ? pickedRows(c) : itemRows(c, W, { at, dim: dim || !!claim, fresh: fresh.has(c.id), part: `n:${c.id}`, whole: w })))
+  const budget = Math.max(3, room - rows.length)
+  const height = its => its.reduce((a, r) => a + r.length, 0)
+  // each claim whole when they all fit the room, else two lines at most, so a claim is cut only when the room is short
+  const full = whole === false ? null : itemsOf(true)
+  const items = full && (whole || height(full) <= budget) ? full : itemsOf(false)
   // the window of claims the list shows: all when they fit, else round the claim picked (or from the first), or from
   // the claim the person paged to
-  const all = items.reduce((a, r) => a + r.length, 0)
-  const budget = Math.max(3, room - rows.length)
+  const all = height(items)
   const fitIn = budget - 2
   // the claims a screen shows from claim `a` down
   const downFrom = a => { let b = a, used = 0; while (b < items.length && (b === a || used + items[b].length <= fitIn)) { used += items[b].length; b++ } return b }
@@ -674,11 +680,14 @@ function clusterRows({ data, groups, claim, group, chosen, st, fresh, W, byId, n
   const csOf = new Map(groups.map(g => [g.key, groupOf(data, g.key).cs]))
   const dw = dotColumn(groups.map(g => g.n), W)
   const mine = g => chosen && g.key === group
-  const open = (g, r) => openRows({ g, cs: csOf.get(g.key), claim: mine(g) ? claim : null, dw, W, byId, st, fresh, narrow, lit: mine(g), dim: chosen && !mine(g), room: r })
+  const open = (g, r, whole) => openRows({ g, cs: csOf.get(g.key), claim: mine(g) ? claim : null, dw, W, byId, st, fresh, narrow, lit: mine(g), dim: chosen && !mine(g), room: r, whole })
   if (!(claim && st.open)) {
-    const all = groups.map(g => open(g))
-    if (all.reduce((a, o) => a + o.rows.length, 0) + groups.length - 1 <= room) {
-      return { rows: all.flatMap((o, i) => (i ? [[], ...o.rows] : o.rows)), shown: null, cut: false, windowed: false, every: true }
+    // every row open, its claims whole when all of that fits, else two lines at most
+    for (const whole of [true, false]) {
+      const all = groups.map(g => open(g, Infinity, whole))
+      if (all.reduce((a, o) => a + o.rows.length, 0) + groups.length - 1 <= room) {
+        return { rows: all.flatMap((o, i) => (i ? [[], ...o.rows] : o.rows)), shown: null, cut: false, windowed: false, every: true }
+      }
     }
   }
   const at = chosen ? groups.findIndex(mine) : -1

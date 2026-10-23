@@ -174,6 +174,22 @@ test('a cluster chosen: its row opens in place, its dots and name bold, its clai
   assert.equal(hopCluster(v.order, null, -1), v.order.at(-1))
 })
 
+test('an open cluster shows each claim whole when its claims fit the pane, two lines and … only when they do not', () => {
+  const st = emptyStore('s')
+  const quotes = [1, 2, 3].map(n => `Run ${n} of the sample sweep ended with 17 of its 1,617 checks failing, all of them in the parser step that reads the nightly logs before the summary`)
+  applyTurn(st, { places: [{ row: 'r1', by: 'claude', turn: 1, text: quotes.map(q => q + '.').join(' ') }], turn: 1, out: { claims: quotes.map(q => ({ quote: q, cluster: 'sweep' })) } })
+  const data = paneData(st)
+  const key = String(data.groups[0].id)
+  // room below: every claim whole, none cut in its words
+  const roomy = body(graphView(data, { group: key }, { w: 70, h: 40 }))
+  assert.equal((roomy.match(/logs before the summary\./g) || []).length, 3)
+  assert.doesNotMatch(roomy, / …/)
+  // too short for them whole: two lines each, then …
+  const tight = body(graphView(data, { group: key }, { w: 70, h: 12 }))
+  assert.equal((tight.match(/ …$/gm) || []).length, 3)
+  assert.doesNotMatch(tight, /before the summary/)
+})
+
 function linkedClaims() {
   const st = emptyStore('s')
   const quotes = ['The keys (v, s, ], 1, { }) need a reply to act on, and the bar finder returns null when there is no reply yet',
