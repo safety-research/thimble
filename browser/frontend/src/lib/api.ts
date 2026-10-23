@@ -660,7 +660,10 @@ export const api = {
     }),
 
   // ---- thimble fix: the person's changes to their own thimble (backend fixes.py) ----
-  fixes: () => j<FixStatus>(`${apiBase()}/fixes`),
+  /** `every`: every fix, for Your fixes; else the ones the page shows now */
+  fixes: (every = false) => j<FixStatus>(`${apiBase()}/fixes${every ? '?every=true' : ''}`),
+  /** Use it now, or Use it in Your fixes: the person's click puts the fix on, and the server starts again with it */
+  applyFix: (id: number) => j<{ restart: boolean }>(`${apiBase()}/fixes/${enc(String(id))}/apply`, { method: 'POST' }),
   /** `/thimble-fix <words>` in the chat, with a text copy of what the page shows */
   requestFix: (ws: string, words: string, page: string) =>
     j<{ fix: { id: number; title: string; state: string } }>(`${apiBase()}/ws/${enc(ws)}/fixes`, { method: 'POST', body: JSON.stringify({ words, page }) }),

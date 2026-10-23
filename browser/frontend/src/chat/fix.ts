@@ -1,7 +1,8 @@
 // thimble fix in the page (backend fixes.py): `/thimble-fix <words>` in the chat asks Claude to change the person's own
 // thimble. The words go with a text copy of what the page shows now (pageText), so "this card" can name what is open.
-// The server answers at once; the row above the composer (FixStrip) says how the fix goes, from GET /api/fixes and the
-// stream's `fix` events.
+// The server answers at once; the row above the composer says how the work goes, and one notice at the top of the chat
+// says how it ended (FixStrip), from GET /api/fixes and the stream's `fix` events. `/thimble-fix` alone opens Your
+// fixes.
 
 export const FIX_COMMAND = '/thimble-fix'
 
@@ -19,12 +20,18 @@ export interface FixRow {
   state: string
   /** what this server does with it now; null once it ended */
   phase: 'fixing' | 'testing' | 'applying' | 'restarting' | null
-  /** how it ended, until dismissed: fixed, failed, request, undone, problem */
-  kind: 'fixed' | 'failed' | 'request' | 'undone' | 'problem' | null
+  /** how it ended, until dismissed: ready (it asks the person), fixed (on), failed, request, undone, problem */
+  kind: 'ready' | 'fixed' | 'failed' | 'request' | 'undone' | 'problem' | null
   said: string | null
+  /** the person's words (the last round's) */
   words: string
+  /** what the fixer says it did */
+  summary?: string
+  /** how many files it changed */
+  files?: number
   tests: string | null
   error: string | null
+  created?: number
   at: number
 }
 
@@ -33,25 +40,54 @@ export interface FixStatus {
   fixes: FixRow[]
 }
 
-const PHASE_WORDS: Record<NonNullable<FixRow['phase']>, (r: FixRow) => string> = {
-  fixing: (r) => `Fixing: ${r.title || r.words} · Claude works in a copy of thimble`,
-  testing: (r) => `Testing fix ${r.id}: ${r.title}`,
-  applying: (r) => `Putting fix ${r.id} on: ${r.title}`,
-  restarting: (r) => `thimble restarts with fix ${r.id}: ${r.title}`,
+/** Whether the fix is in the work before the person's notice: Claude fixes it, or the kernel checks it. */
+export const working = (r: FixRow): boolean => r.phase === 'fixing' || r.phase === 'testing'
+
+/** Whether the fix goes on now, after the person's click (or comes off after Undo): the server starts again. */
+export const reloading = (r: FixRow): boolean => r.phase === 'applying' || r.phase === 'restarting'
+
+/** The row above the composer while Claude works: what it fixes, and for how long so far. Pure. */
+export function workingText(r: FixRow, now: number = Date.now() / 1000): string {
+  const secs = r.created ? Math.max(0, Math.round(now - r.created)) : null
+  const took = secs === null ? '' : ` · ${secs < 90 ? `${secs}s` : `${Math.round(secs / 60)} min`}`
+  return `${r.phase === 'testing' ? 'Testing the fix' : 'Fixing thimble'}: ${r.title || r.words}${took}`
 }
 
-/** The row's words for a fix. Pure. */
+/** The notice's words for a fix. Pure. */
 export function fixText(r: FixRow): string {
-  if (r.phase) return PHASE_WORDS[r.phase](r)
+  if (reloading(r)) return 'Reloading thimble…'
+  if (working(r)) return workingText(r)
   return r.said || r.title
 }
 
-/** The buttons a fix's row offers: Undo on a fix that is on, Redo on one that did not pass. Pure. */
-export function fixActions(r: FixRow): ('undo' | 'redo')[] {
+export type FixAction = 'use' | 'what' | 'later' | 'undo' | 'redo'
+
+/** The buttons a fix's notice offers: Use it now, What changed and Later on a ready fix, Undo on a fix that is on,
+ * Redo on one that did not pass. Pure. */
+export function fixActions(r: FixRow): FixAction[] {
   if (r.phase) return []
+  if (r.kind === 'ready' && r.state === 'ready') return ['use', 'what', 'later']
   if (r.kind === 'fixed' && r.state === 'on') return ['undo']
   if ((r.kind === 'failed' || r.kind === 'problem') && ['failed', 'off', 'redo', 'ready', 'request'].includes(r.state)) return ['redo']
   return []
+}
+
+/** What changed, in a few lines and not a diff: the person's words, what Claude did, how many files and the tests.
+ * Pure. */
+export function changedLines(r: FixRow): { label: string; text: string }[] {
+  const n = r.files ?? 0
+  const tests = r.tests === 'passed' ? 'tests pass' : r.tests === 'failed' ? 'tests failed' : 'tests not run'
+  return [
+    ...(r.words ? [{ label: 'You asked', text: r.words }] : []),
+    ...(r.summary ? [{ label: 'Claude did', text: r.summary }] : []),
+    { label: 'Changed', text: `${n} file${n === 1 ? '' : 's'} · ${tests}` },
+  ]
+}
+
+/** How Your fixes names a fix's state. */
+export const STATE_WORDS: Record<string, string> = {
+  working: 'Claude works on it', ready: 'ready', on: 'on', off: 'off', failed: 'did not pass', redo: 'needs a redo',
+  request: 'request, no code', sent: 'sent', saved: 'saved as files', released: 'in the release',
 }
 
 const PAGE_PART = 3000

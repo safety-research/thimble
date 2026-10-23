@@ -1,8 +1,8 @@
 """thimble fix in the browser workbench: the person asks for a change to their own thimble in their own words
 (`/thimble-fix <words>` in the chat, Report a problem's File a code ticket, or main's file_dev_ticket), Claude makes it in
-a copy of thimble, and when the kernel's checks pass, the fix is on and thimble-browser starts again from it. The same
-records and verbs as the terminal's /thimble-fix (plugin/engine/kernel/fixes.py), so a fix made in one is on in the
-other once it starts again.
+a copy of thimble, and when the kernel's checks pass, a notice asks the person to use it; their click puts it on and
+thimble-browser starts again from it. The same records and verbs as the terminal's /thimble-fix
+(plugin/engine/kernel/fixes.py), so a fix made in one is on in the other once it starts again.
 
 The kernel holds every record and makes every change, in the terminal plugin's home ($THIMBLE_PLUGIN_HOME, else
 ~/.thimble), never in the browser's own home:
@@ -18,14 +18,16 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home.
                              the page shows. It runs with main's tools and Edit and Write, in the runtime's usual
                              sandbox, which writes only its copy and its temp folder (runtime.spec_of)
     its end (settle)         the kernel commits the change, refuses a safety file or a binary file, and runs the tests
-                             of what the change touched (`fix done`); a fix that passes goes on (`fix apply`, with a
-                             secret made here as the terminal's key press makes one), the page of live's browser/ is
-                             built, and the server starts again from live (dev._do_restart). A page that does not build
-                             takes the fix off again (`fix undo`)
-    the person's clicks      Undo (`fix undo`, then a restart), Redo (`fix redo`, a new fixer with the earlier change)
-                             and Dismiss, on the one row above the composer that says how each fix went (FixStrip.tsx)
+                             of what the change touched (`fix done`); a fix that passes is ready, and one notice at the
+                             top of the chat asks the person: Use it now, What changed, Later. Nothing goes on by itself
+    the person's clicks      Use it now, or Use it in Your fixes (`fix apply`, with a secret made at the click as the
+                             terminal's key press makes one; then the page of live's browser/ is built and the server
+                             starts again from live, dev._do_restart; a page that does not build takes the fix off
+                             again), Later (the notice goes, the fix stays ready in Your fixes), Undo (`fix undo`, then
+                             a restart), Redo (`fix redo`, a new fixer with the earlier change) and Dismiss
+                             (FixStrip.tsx)
 
-What each row says lives in the browser's home (fixes.json, by fix id), so the row is still there after the restart.
+What each notice says lives in the browser's home (fixes.json, by fix id), so it is still there after the restart.
 THIMBLE_FIXES=off turns fixes off on this server (the code tickets then take their entry points again).
 """
 from __future__ import annotations
@@ -158,8 +160,9 @@ def records() -> list[dict[str, Any]]:
 
 
 def press(fid: int) -> str:
-    """The analyst's click, or a check that passed, for `fix apply`: a secret held only here, its sha256 in
-    asks/<id>.json, which the kernel checks and uses once (the terminal's key press, plugin/fix/fixes.ts pressKey)."""
+    """The analyst's click for `fix apply` (Use it now, or Use it in Your fixes): a secret held only here, its sha256 in
+    asks/<id>.json, which the kernel checks and uses once (the terminal's key press, plugin/fix/fixes.ts pressKey).
+    Only the click routes call it."""
     secret = secrets.token_hex(32)
     p = fixes_home() / "asks" / f"{int(fid)}.json"
     p.parent.mkdir(parents=True, exist_ok=True)
@@ -181,7 +184,8 @@ def _notes() -> dict[str, dict[str, Any]]:
 
 
 def note(fid: int, kind: str, said: str, **more: Any) -> None:
-    """What fix `fid`'s row says now (fixed, failed, request, undone, problem), until the analyst dismisses it."""
+    """What fix `fid`'s notice says now (ready, fixed, failed, request, undone, problem), until the analyst dismisses
+    it."""
     notes = _notes()
     notes[str(fid)] = {"kind": kind, "said": said, "at": time.time(), **more}
     p = notes_path()
@@ -216,9 +220,10 @@ def _phase_set(fid: int, phase: str | None) -> None:
     _event(fid, phase or "idle")
 
 
-def status() -> dict[str, Any]:
-    """Each fix the row can show: the ones this server works on (their phase), and the ones whose end is not
-    dismissed yet. Newest first."""
+def status(every: bool = False) -> dict[str, Any]:
+    """Each fix the page can show: the ones this server works on (their phase), and the ones whose end is not
+    dismissed yet. A ready notice shows only while the fix is still ready (the terminal can apply it too). `every`:
+    every fix but the removed ones, for Your fixes. Newest first."""
     _recover_soon()
     why = problem()
     notes = _notes()
@@ -226,15 +231,21 @@ def status() -> dict[str, Any]:
     for r in ([] if why else records()):
         fid = int(r["id"])
         n = notes.get(str(fid)) or {}
+        if n.get("kind") == "ready" and r.get("state") != "ready":
+            n = {}
         phase = _phase.get(fid)
-        if not phase and (not n or n.get("dismissed")):
+        if r.get("state") == "removed" or (not every and not phase and (not n or n.get("dismissed"))):
             continue
+        shown = bool(n) and not n.get("dismissed") and not phase
         conv = _fixers.get(fid)
+        files = r.get("files") or []
         rows.append({"id": fid, "title": r.get("title") or "", "state": r.get("state"), "phase": phase,
-                     "kind": n.get("kind") if not phase else None, "said": n.get("said") if not phase else None,
+                     "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
                      "tests": r.get("tests"), "error": r.get("error"), "words": (r.get("words") or [""])[-1],
+                     "summary": r.get("summary") or "", "files": len(files),
                      "workspace": conv.c if conv is not None else n.get("workspace"),
                      "agent": conv.agent_id if conv is not None else n.get("agent"),
+                     "created": float(r.get("created") or 0),
                      "at": max(float(r.get("updated") or 0), float(n.get("at") or 0))})
     rows.sort(key=lambda x: -x["at"])
     return {"problem": why, "fixes": rows}
@@ -425,8 +436,8 @@ def srt_ready() -> str:
 
 
 async def settle(fid: int, answer: str) -> None:
-    """The fixer ended: the kernel's checks, then the fix goes on and the server starts again from it, or the row says
-    why not."""
+    """The fixer ended: the kernel's checks, then one notice: the fix is ready and asks the person, or why not. The fix
+    does not go on by itself: only the person's click (Use it now) applies it."""
     _fixers.pop(fid, None)
     _phase_set(fid, "testing")
     try:
@@ -461,26 +472,42 @@ async def settle(fid: int, answer: str) -> None:
         _phase_set(fid, None)
         note(fid, "failed", f"Fix {fid} did not pass: {title} · {done.get('error') or 'its tests failed'}")
     else:
-        await apply(fid, title, str(done.get("tests") or ""))
+        _phase_set(fid, None)
+        tests = str(done.get("tests") or "")
+        note(fid, "ready", f"thimble fixed: {title}" + (" · tests pass" if tests == "passed" else ""))
 
 
-async def apply(fid: int, title: str, tests: str) -> None:
-    """A fix whose checks passed goes on; live's page is built; the server starts again from live."""
+async def apply(fid: int) -> None:
+    """The person's click on a ready fix (Use it now, or Use it in Your fixes): the secret of this click to
+    `fix apply`, then live's page is built and the server starts again from live. Raises when the kernel refuses."""
     _phase_set(fid, "applying")
-    secret = press(fid)
-    r = await asyncio.to_thread(kernel, ["apply", str(fid), "--ask", "-"], stdin=secret, timeout=300)
+    try:
+        secret = await asyncio.to_thread(press, fid)
+        r = await asyncio.to_thread(kernel, ["apply", str(fid), "--ask", "-"], stdin=secret, timeout=300)
+    except Exception:
+        _phase_set(fid, None)
+        raise
     if not r.ok:
         _phase_set(fid, None)
-        note(fid, "failed", f"Fix {fid} did not go on: {title} · {r.err or 'thimble fix apply gave nothing'}")
-        return
+        raise HTTPException(409, r.err or "thimble fix apply gave nothing")
+    title = str((json.loads(r.out) if r.out.strip().startswith("{") else {}).get("title") or f"fix {fid}")
+    runtime_task(_go_on(fid, title), f"fix-apply:{fid}")
+
+
+async def _go_on(fid: int, title: str) -> None:
     why = await asyncio.to_thread(prepare, target_root())
     if why:
         await asyncio.to_thread(kernel, ["undo", str(fid)], timeout=300)
         _phase_set(fid, None)
-        note(fid, "failed", f"Fix {fid} did not pass: {title} · {why}; it is off again")
+        note(fid, "failed", f"Fix {fid} did not go on: {title} · {why}; it is off again")
         return
-    said = f"thimble fixed: {title}" + (" · tests pass" if tests == "passed" else "")
-    await restart(fid, said, "fixed", f"fix {fid}: {title}")
+    await restart(fid, f"{title} is on", "fixed", f"fix {fid}: {title}")
+
+
+def runtime_task(coro: Any, name: str) -> None:
+    from . import runtime  # noqa: PLC0415
+
+    runtime._spawn_task(coro, name)
 
 
 async def restart(fid: int, said: str, kind: str, why: str) -> None:
@@ -492,6 +519,7 @@ async def restart(fid: int, said: str, kind: str, why: str) -> None:
         _phase_set(fid, None)
         note(fid, kind, f"{said} · {RESTART_BY_HAND}")
         return
+    _phase[fid] = "restarting"  # the notice keeps "Reloading thimble…" until the server is back
     note(fid, kind, said)
     _phase_set(fid, "restarting")
     t0 = time.monotonic()
@@ -606,8 +634,8 @@ def _clicked(http: Request) -> None:
 
 
 @router.get("/fixes")
-async def status_route() -> dict[str, Any]:
-    return await asyncio.to_thread(status)
+async def status_route(every: bool = False) -> dict[str, Any]:
+    return await asyncio.to_thread(status, every)
 
 
 @router.post("/ws/{c}/fixes", status_code=202)
@@ -616,6 +644,15 @@ async def request_route(c: str, body: Asked, http: Request) -> dict[str, Any]:
     _clicked(http)
     config.workspace_dir(c)
     return await request(c, body.words, body.page)
+
+
+@router.post("/fixes/{fid}/apply", status_code=202)
+async def apply_route(fid: int, http: Request) -> dict[str, Any]:
+    """Use it now on the notice, or Use it in Your fixes: the person's click puts the fix on, and the server starts
+    again with it."""
+    _clicked(http)
+    await apply(fid)
+    return {"restart": True}
 
 
 @router.post("/fixes/{fid}/undo")

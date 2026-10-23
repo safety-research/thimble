@@ -27,6 +27,8 @@ export type Events = {
   ticket: { id: string; n: number; status: string }
   /** a fix of the person's thimble moved on (backend fixes._event): its phase or how it ended */
   fix: { id: number; state: string }
+  /** `/thimble-fix` alone: Your fixes opens (chat/FixStrip.tsx) */
+  fixList: { open: boolean }
   /** `rows` false: the label's rows stayed as they were (turned on or off, recoloured, a filter set) */
   concepts: { concept: string; what: string; rows?: boolean }
   filter: { scope: FilterScope; concept?: string; value?: string }

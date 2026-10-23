@@ -871,7 +871,7 @@ Filed {label}: {title}. {start}
 
 ## file_dev_ticket-fix
 
-thimble's fixer works on this change as fix {id}, "{title}", in a copy of thimble, with this conversation as its context. When the change passes thimble's checks, thimble puts it on and starts again with it; the row above the composer shows how it goes. Tell the analyst in one line.
+thimble's fixer works on this change as fix {id}, "{title}", in a copy of thimble, with this conversation as its context. The row above the composer shows how it goes. When the change passes thimble's checks, a notice at the top of the chat asks the analyst to use it, and thimble starts again with it after their click. Tell the analyst in one line.
 
 ## file_dev_ticket-fix-failed
 

@@ -1,17 +1,19 @@
 // @vitest-environment jsdom
 // thimble fix in the page (src/chat/fix.ts, src/chat/FixStrip.tsx, backend fixes.py): `/thimble-fix <words>` goes to
-// the server with a text copy of what the page shows, and one row above the composer says how the newest fix goes:
-// what Claude does now while it works, then "✓ thimble fixed: <title> · tests pass" with Undo, or why it did not pass
-// with Redo and Dismiss.
+// the server with a text copy of what the page shows. While Claude works, one row above the composer says what it
+// fixes. When the fix passes its checks, one notice at the top of the chat asks: Use it now (the person's click puts it
+// on), What changed (a few lines, not a diff) and Later. After Use it now: "Reloading thimble…", then "<title> is on"
+// with Undo. A fix that did not pass says why, with Redo and Dismiss.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { fixActions, fixText, fixWords, pageText, type FixRow } from '../../src/chat/fix.ts'
-import { FixStrip } from '../../src/chat/FixStrip.tsx'
+import { changedLines, fixActions, fixText, fixWords, pageText, workingText, type FixRow } from '../../src/chat/fix.ts'
+import { FixNotice, FixWorking } from '../../src/chat/FixStrip.tsx'
 import { bus } from '../../src/lib/bus.ts'
 import { dispatch } from '../../src/lib/events.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const row = (over: Partial<FixRow> = {}): FixRow => ({ id: 3, title: 'Card says how many rows', state: 'on', phase: null, kind: 'fixed', said: 'thimble fixed: Card says how many rows · tests pass', words: "make this card's title say how many rows", tests: 'passed', error: null, at: 1, ...over })
+const row = (over: Partial<FixRow> = {}): FixRow => ({ id: 3, title: 'Card says how many rows', state: 'on', phase: null, kind: 'fixed', said: 'Card says how many rows is on', words: "make this card's title say how many rows", summary: "The card's title ends with its row count.", files: 2, tests: 'passed', error: null, created: 100, at: 1, ...over })
+const ready = (over: Partial<FixRow> = {}) => row({ state: 'ready', kind: 'ready', said: 'thimble fixed: Card says how many rows · tests pass', ...over })
 
 describe('the command and the page', () => {
   test('the words after /thimble-fix; anything else is no fix', () => {
@@ -36,31 +38,45 @@ describe('the command and the page', () => {
   })
 })
 
-describe('the row', () => {
-  test('its words: the step while Claude works, how it went after', () => {
-    expect(fixText(row({ phase: 'fixing', kind: null, said: null }))).toBe('Fixing: Card says how many rows · Claude works in a copy of thimble')
-    expect(fixText(row({ phase: 'testing' }))).toBe('Testing fix 3: Card says how many rows')
-    expect(fixText(row({ phase: 'restarting' }))).toBe('thimble restarts with fix 3: Card says how many rows')
-    expect(fixText(row())).toBe('thimble fixed: Card says how many rows · tests pass')
+describe('the row and the notice', () => {
+  test('its words: what Claude fixes and for how long, then how it went', () => {
+    expect(workingText(row({ phase: 'fixing', kind: null, said: null }), 152)).toBe('Fixing thimble: Card says how many rows · 52s')
+    expect(workingText(row({ phase: 'testing' }), 400)).toBe('Testing the fix: Card says how many rows · 5 min')
+    expect(fixText(row({ phase: 'applying' }))).toBe('Reloading thimble…')
+    expect(fixText(row({ phase: 'restarting' }))).toBe('Reloading thimble…')
+    expect(fixText(ready())).toBe('thimble fixed: Card says how many rows · tests pass')
+    expect(fixText(row())).toBe('Card says how many rows is on')
   })
 
-  test('Undo on a fix that is on, Redo on one that did not pass, nothing while it works', () => {
+  test('a ready fix asks; Undo on a fix that is on, Redo on one that did not pass, nothing while it works', () => {
+    expect(fixActions(ready())).toEqual(['use', 'what', 'later'])
     expect(fixActions(row())).toEqual(['undo'])
     expect(fixActions(row({ state: 'failed', kind: 'failed' }))).toEqual(['redo'])
     expect(fixActions(row({ state: 'off', kind: 'undone' }))).toEqual([])
     expect(fixActions(row({ phase: 'testing' }))).toEqual([])
   })
 
+  test('What changed is a few lines, not a diff', () => {
+    expect(changedLines(ready())).toEqual([
+      { label: 'You asked', text: "make this card's title say how many rows" },
+      { label: 'Claude did', text: "The card's title ends with its row count." },
+      { label: 'Changed', text: '2 files · tests pass' },
+    ])
+  })
+
   let fixes: FixRow[] = []
+  let every: FixRow[] = []
   let sent: string[] = []
   beforeEach(() => {
     fixes = []
+    every = []
     sent = []
     vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
       const method = init.method ?? 'GET'
       const u = String(url)
       if (method !== 'GET') sent.push(`${method} ${u.replace(/^.*\/api/, '')}`)
       const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
+      if (u.endsWith('/fixes?every=true') && method === 'GET') return json({ problem: '', fixes: every })
       if (u.endsWith('/fixes') && method === 'GET') return json({ problem: '', fixes })
       return json({ ok: true, restart: true })
     })
@@ -70,38 +86,76 @@ describe('the row', () => {
     vi.unstubAllGlobals()
   })
   const click = (el: Element | null | undefined) => act(async () => (el as HTMLButtonElement).click())
+  const button = (el: Element, name: string) => [...el.querySelectorAll('button')].find((b) => b.textContent === name)
 
-  test('nothing to say, no row; a fix that works shows its step and follows the stream', async () => {
-    const el = await mount(<FixStrip ws="mini" />)
+  test('nothing to say, nothing shown; a fix that works shows its row above the composer, not the notice', async () => {
+    const foot = await mount(<FixWorking />)
+    const top = await mount(<FixNotice ws="mini" />)
     await settle()
-    expect(el.querySelector('.chat-fix')).toBeNull()
+    expect(foot.querySelector('.chat-fix')).toBeNull()
     fixes = [row({ phase: 'fixing', kind: null, said: null, state: 'working' })]
     await act(async () => dispatch({ type: 'fix', id: 3, state: 'fixing' } as never))
     await settle()
-    expect(el.querySelector('.chat-fix')?.getAttribute('data-phase')).toBe('fixing')
-    expect(el.querySelector('.chat-fix .spinner')).not.toBeNull()
-    expect(el.querySelectorAll('.chat-fix button')).toHaveLength(0)
+    expect(foot.querySelector('.chat-fix')?.getAttribute('data-phase')).toBe('fixing')
+    expect(foot.querySelector('.chat-fix .spinner')).not.toBeNull()
+    expect(foot.querySelector('.chat-fix-text')?.textContent).toMatch(/^Fixing thimble: Card says how many rows · /)
+    expect(top.querySelector('.chat-fix')).toBeNull()
   })
 
-  test('the fixed row offers Undo, which takes the fix off; × dismisses it', async () => {
-    fixes = [row()]
-    const el = await mount(<FixStrip ws="mini" />)
+  test('a fix that passed asks: Use it now puts it on, and the notice says Reloading thimble…', async () => {
+    fixes = [ready()]
+    const el = await mount(<FixNotice ws="mini" />)
     await settle()
-    expect(el.querySelector('.chat-fix-text')?.textContent).toBe('thimble fixed: Card says how many rows · tests pass')
+    expect(el.querySelector('.chat-fix')?.getAttribute('data-kind')).toBe('ready')
+    expect(el.querySelector('.chat-fix-lead')?.textContent).toBe('thimble fixed:')
+    expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Use it now', 'What changed', 'Later'])
+    expect(sent).toEqual([])
+    await click(button(el, 'What changed'))
+    expect(el.querySelector('.chat-fix-what')?.textContent).toContain('Changed:2 files · tests pass')
+    fixes = [ready({ phase: 'applying', kind: null, said: null })]
+    await click(button(el, 'Use it now'))
+    await settle()
+    expect(sent).toEqual(['POST /fixes/3/apply'])
+    expect(el.querySelector('.chat-fix')?.getAttribute('data-kind')).toBe('reloading')
+    expect(el.querySelector('.chat-fix-text')?.textContent).toBe('Reloading thimble…')
+  })
+
+  test('Later dismisses the notice; Your fixes still offers Use it', async () => {
+    fixes = [ready()]
+    const el = await mount(<FixNotice ws="mini" />)
+    await settle()
+    fixes = []
+    await click(button(el, 'Later'))
+    await settle()
+    expect(sent).toEqual(['POST /fixes/3/dismiss'])
+    expect(el.querySelector('.chat-fix')).toBeNull()
+    every = [ready({ kind: null, said: null }), row({ id: 2, title: 'Wider pane', kind: null })]
+    await act(async () => bus.emit('fixList', { open: true }))
+    await settle()
+    const items = [...el.querySelectorAll('.chat-fixes-list li')].map((li) => li.textContent)
+    expect(items).toEqual(['Card says how many rowsreadyUse it', 'Wider paneonUndo'])
+    await click(button(el, 'Use it'))
+    expect(sent).toEqual(['POST /fixes/3/dismiss', 'POST /fixes/3/apply'])
+  })
+
+  test('the fix that is on offers Undo, which takes it off; × dismisses it', async () => {
+    fixes = [row()]
+    const el = await mount(<FixNotice ws="mini" />)
+    await settle()
+    expect(el.querySelector('.chat-fix-text')?.textContent).toBe('Card says how many rows is on')
     expect(el.querySelector('.chat-fix')?.getAttribute('data-kind')).toBe('fixed')
-    await click([...el.querySelectorAll('button')].find((b) => b.textContent === 'Undo'))
+    await click(button(el, 'Undo'))
     await click(el.querySelector('.chat-fix-x'))
     expect(sent).toEqual(['POST /fixes/3/undo', 'POST /fixes/3/dismiss'])
   })
 
   test('a fix that did not pass says why, with Redo and Dismiss', async () => {
     fixes = [row({ state: 'failed', kind: 'failed', said: 'Fix 3 did not pass: Card says how many rows · its tests failed in the sandbox' })]
-    const el = await mount(<FixStrip ws="mini" />)
+    const el = await mount(<FixNotice ws="mini" />)
     await settle()
     expect(el.querySelector('.chat-fix-text')?.textContent).toContain('its tests failed in the sandbox')
-    const names = [...el.querySelectorAll('button')].map((b) => b.textContent)
-    expect(names).toEqual(['Redo', 'Dismiss'])
-    await click([...el.querySelectorAll('button')].find((b) => b.textContent === 'Redo'))
+    expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Redo', 'Dismiss'])
+    await click(button(el, 'Redo'))
     expect(sent).toEqual(['POST /ws/mini/fixes/3/redo'])
   })
 
