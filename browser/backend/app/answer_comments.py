@@ -217,10 +217,22 @@ def passage_of(c: str, ref: str, ps: list[dict[str, Any]] | None = None) -> dict
 # --------------------------------------------------------------------------- the comments
 
 
+def _current_checks(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`items` with each comment's check under its id now, in place (checks.current_id): a comment of a built-in's
+    former id, such as Important details, reads as the built-in's now, Heads up, and is written so on the store's next
+    write."""
+    from . import checks  # noqa: PLC0415 — checks imports this module
+
+    for x in items:
+        if x.get("check"):
+            x["check"] = checks.current_id(x["check"])
+    return items
+
+
 def _read(c: str) -> list[dict[str, Any]]:
     data = read_json(_ws_file(c, FILE), {})
     items = data.get("comments") if isinstance(data, dict) else None
-    return [x for x in items or [] if isinstance(x, dict) and x.get("id")]
+    return _current_checks([x for x in items or [] if isinstance(x, dict) and x.get("id")])
 
 
 def _change(c: str, fn: Any) -> Any:
@@ -228,7 +240,7 @@ def _change(c: str, fn: Any) -> Any:
 
     def change(data: Any) -> Any:
         items = data.get("comments") if isinstance(data, dict) else None
-        items = [x for x in items or [] if isinstance(x, dict) and x.get("id")]
+        items = _current_checks([x for x in items or [] if isinstance(x, dict) and x.get("id")])
         out["value"] = fn(items)
         return {"comments": items}
 

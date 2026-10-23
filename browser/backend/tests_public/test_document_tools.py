@@ -306,7 +306,7 @@ async def test_a_number_or_a_span_of_time_in_the_title_or_a_heading_that_no_link
 
 
 async def test_the_report_checks_read_the_title_as_a_passage_and_its_comment_stays_while_its_words_do(cells):
-    """The report checks (Judgment calls, Unverifiable, Important details) read the title as a passage at report:<slug>#title,
+    """The report checks (Heads up, Explainers, Judgment calls) read the title as a passage at report:<slug>#title,
     first, and a comment on it carries to the next generation while the title's words stay; a new title settles a
     check's comment on the old one."""
     from app import checks
@@ -319,7 +319,7 @@ async def test_the_report_checks_read_the_title_as_a_passage_and_its_comment_sta
     first = checks.passages("report", doc)[0]
     assert (first["ref"], first["kind"], first["anchor"], first["ids"]) == ("report:report#title", "title", "title", ["title"])
     assert checks.passage_of("report", doc, "report:report#title") == first
-    doc["comments"] = [{"id": "c1", "sentence_id": "title", "text": "No card shows seven weeks.", "check": "unverified",
+    doc["comments"] = [{"id": "c1", "sentence_id": "title", "text": "No card shows seven weeks.", "check": "judgment",
                         "status": "open", "generation": 1}]
     report_types.write_doc(CORPUS, MAIN, "report", doc)
     assert [cm["id"] for cm in report_types.anchored_open_comments(doc)] == ["c1"]

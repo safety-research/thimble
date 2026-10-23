@@ -1,6 +1,6 @@
 // The Labels and Comments sidebar, at the right of the page: the one place where the analyst sees, turns on and off,
-// and opens the workspace's labels and its comment categories (the checks: the built-in Judgment calls, Unverifiable
-// and Important details, and the analyst's own), as release 0.10's Labels and Checks sidebar had them in one list. The
+// and opens the workspace's labels and its comment categories (the checks: the built-in Heads up, Explainers and
+// Judgment calls, and the analyst's own), as release 0.10's Labels and Checks sidebar had them in one list. The
 // top bar's "Labels N · Comments N", just above it, opens and closes it.
 //
 // A label's row: its color, name, question, values with their counts, Show in (Files · Cards · Report, where it shows,

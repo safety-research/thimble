@@ -76,13 +76,13 @@ def call(name: str, args: dict[str, Any], tid: str = "toolu_1") -> list[Block]:
 
 @pytest.fixture()
 def on(monkeypatch, workspaces_tmp):
-    """The runtime on, in workspace `mini`, with the Important details check off (it would start at main's turn end)."""
+    """The runtime on, in workspace `mini`, with the checks off (Heads up and Explainers would start at main's turn end)."""
     monkeypatch.setenv("THIMBLE_RUNTIME", "on")
     monkeypatch.setenv("THIMBLE_SANDBOX", "0")
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
     from app import checks
 
-    for cid in ("important-details", "judgment", "unverified"):
+    for cid in ("heads-up", "explainers", "judgment"):
         checks.edit(CORPUS, cid, shown=False)
     runtime._spaces.clear()
     yield

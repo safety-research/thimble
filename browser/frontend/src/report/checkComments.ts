@@ -9,7 +9,8 @@ import type { Check, CheckCover, CheckRun, WriteupComment, WriteupSentence } fro
 
 /** the analyst's own comments: the no-match grey, since they judge nothing */
 export const NOTE_COLOR = 'var(--label-none)'
-/** The built-in check the citation check's unverified tag belongs to (prompts/checks/unverified.md). */
+/** The check the citation check's unverified tag belongs to: Unverifiable, a former built-in (backend checks.RETIRED)
+ * that a workspace lists only where it stored it. */
 export const UNVERIFIED = 'unverified'
 /** The prefix of a tag's id, so it never collides with a stored comment's. */
 export const TAG_PREFIX = 'tag:'
