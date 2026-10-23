@@ -708,6 +708,9 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
   // a send that fails hands its text back to the composer (Composer), so nothing typed is lost
   const send = (text: string): Promise<boolean> => {
     if (demoStop()) return Promise.resolve(false)
+    // what the analyst sends shows at the list's end, also when they had scrolled up to read: the list follows it
+    nearEnd.current = true
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight
     if (target.to === 'orient') {
       // the latest orientation takes the analyst's message itself: it resumes the finished session, or waits for the run
       // going on to end; from one of its steps, its thread opens, where the message and the reply show
