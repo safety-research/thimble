@@ -34,7 +34,7 @@ function useFixes(onBack?: () => void): [FixRow[], () => void] {
   const load = useCallback(() => {
     api
       .fixes()
-      .then((s) => setRows(s.fixes))
+      .then((s) => setRows(Array.isArray(s?.fixes) ? s.fixes : []))
       .catch(() => undefined)
   }, [])
   const back = useRef(onBack)
@@ -212,8 +212,8 @@ function YourFixes({ onClose, onUse, busy }: { onClose: () => void; onUse: (r: F
     api
       .fixes(true)
       .then((s) => {
-        setWhy(s.problem)
-        setRows(s.fixes)
+        setWhy(s?.problem ?? '')
+        setRows(Array.isArray(s?.fixes) ? s.fixes : [])
       })
       .catch((e: Error) => setWhy(e.message.replace(/^\d{3}\s+/, '')))
   }, [])
