@@ -2086,15 +2086,23 @@ def check_all(marks: list[dict[str, Any]], answer: str, calls: list[dict[str, An
         except Exception as e:  # noqa: BLE001 — one mark's failure never takes the others' results with it
             results.append({"n": m.get("n"), "status": "failed", "failedBy": "none", "shown": str(m.get("words", "")),
                             "reason": f"{NOT_RUN} thimble could not validate this citation ({type(e).__name__}: {str(e)[:120]})."})
-    # a sentence is rewritten once: the rewrite of a second citation of it would undo the first one's
-    rewritten: set[str] = set()
+    # a sentence is rewritten once: the rewrite of a second citation of it would undo the first one's. The same new
+    # sentence for a second citation undoes nothing: a rewrite keeps the other citations' words, so the second
+    # citation's words stand in it as written, and the first rewrite places them
+    rewritten: dict[str, str] = {}
     for m, r in zip(marks, results):
         if not r.get("rewrite"):
             continue
         key = norm_ws(m.get("sentence") or "")
         if key in rewritten:
-            r.update(status="failed", failedBy="evidence", shown=str(m.get("words", "")), reason="The check reworded this sentence for another of its citations too, so this change was left out.")
+            words = str(m.get("words", ""))
+            same = norm_ws(str(r["rewrite"])) == rewritten[key]
+            if same:
+                r.update(status="verified", shown=words)
+            else:
+                r.update(status="failed", failedBy="evidence", shown=words, reason="The check reworded this sentence for another of its citations too, so this change was left out.")
             for k in ("rewrite", "was", "narrowed"):
                 r.pop(k, None)
-        rewritten.add(key)
+            continue
+        rewritten[key] = norm_ws(str(r["rewrite"]))
     return {"parsed": items is not None, "results": results}

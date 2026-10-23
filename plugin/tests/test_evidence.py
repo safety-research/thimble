@@ -873,6 +873,20 @@ def test_a_sentence_is_rewritten_once():
     assert (two["status"], two["shown"]) == ("failed", "13") and "rewrite" not in two
 
 
+def test_the_same_rewrite_for_two_citations_of_a_sentence_keeps_both():
+    """The check gives each citation of a sentence the same new sentence, which keeps both citations' words: the
+    first citation places it, and the second one holds as written, verified, not failed as a rewrite left out."""
+    sentence = "An administrator deleted [5,217] pages, [4,773] of them after Jun 22."
+    marks = [{"n": 1, "words": "5,217", "sentence": sentence}, {"n": 2, "words": "4,773", "sentence": sentence}]
+    out = "5,217 deletions, 4,773 after Jun 22"
+    calls = [call(CODE, out + "\n")]
+    new = "An administrator made [5,217] page deletions, [4,773] of them after Jun 22."
+    item = lambda k: {"mark": k, **computed(out, status="corrected", correction={"sentence": new})}  # noqa: E731
+    one, two = validated("/data", marks, [item(1), item(2)], calls)
+    assert (one["status"], one["rewrite"]) == ("corrected", new)
+    assert (two["status"], two["shown"]) == ("verified", "4,773") and "rewrite" not in two and "was" not in two
+
+
 # ------------------------------------------------------------------------------------------------ why a citation failed
 
 def one_sentence(s: str) -> bool:
