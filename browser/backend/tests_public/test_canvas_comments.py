@@ -94,15 +94,16 @@ async def _comment(act: checks._Active, ref: str, text: str, tid: str, details: 
 def test_the_built_ins_are_three_checks_over_the_documents_and_the_cards_and_only_important_details_is_on(
         workspaces_tmp):
     """0.7.0: Judgment calls, Unverifiable and Important details, in that order, each covering the documents and the
-    cards; Verified is no built-in any more, so a new workspace does not list it. Only Important details is on until the
-    analyst turns a check on or off."""
+    cards, and Important details Claude's answers in the chat too; Verified is no built-in any more, so a new workspace
+    does not list it. Only Important details is on until the analyst turns a check on or off."""
     config.workspace_dir(CORPUS).mkdir(parents=True, exist_ok=True)
     listed = checks.list_checks(CORPUS)
     assert [(c["id"], c["name"]) for c in listed] == [("judgment", "Judgment calls"), ("unverified", "Unverifiable"),
                                                       (IMPORTANT, "Important details")]
     assert [(c["id"], c["shown"]) for c in listed] == [("judgment", False), ("unverified", False), (IMPORTANT, True)]
     for c in listed:
-        assert c["builtin"] is True and c["covers"] == ["documents", "cards"], c
+        want_covers = ["documents", "cards", "answers"] if c["id"] == IMPORTANT else ["documents", "cards"]
+        assert c["builtin"] is True and c["covers"] == want_covers, c
         want = open(config.REPO_ROOT / "prompts" / "checks" / f"{c['id']}.md", encoding="utf-8").read()
         assert c["prompt"] == want.split("\n---\n", 1)[1].strip() and c["prompt"].endswith("If you are unsure, leave no comment.")
     assert checks.read(CORPUS, IMPORTANT)["prompt"].startswith("Comment on a passage only when the reader would likely miss")
@@ -213,7 +214,7 @@ async def test_a_workspace_s_check_and_comments_stored_under_important_details_f
     assert [x["id"] for x in listed] == ["judgment", "unverified", IMPORTANT]
     got = listed[2]
     assert (got["name"], got["colour"], got["shown"], got["covers"]) == ("Important details", 2, True,
-                                                                         ["documents", "cards"])
+                                                                         ["documents", "cards", "answers"])
     assert got["runs"]["report"] == run, "its runs stay"
     assert sorted(p.name for p in (ws / checks.DIR).iterdir()) == [f"{IMPORTANT}.json"], "its file is renamed"
     assert json.loads((ws / checks.DIR / f"{IMPORTANT}.json").read_text())["id"] == IMPORTANT

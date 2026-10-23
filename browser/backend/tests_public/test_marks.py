@@ -136,9 +136,14 @@ def test_the_fork_resumes_main_at_the_turn_s_end_and_may_only_read_and_run_pytho
 
 
 def test_main_s_turn_end_names_its_turn_and_starts_the_check(tmp_path, monkeypatch):
-    """The mirror keeps main's texts of the turn; `done` names the turn, and the check gets those texts and the cut."""
+    """The mirror keeps main's texts of the turn; `done` names the turn, and the check gets those texts and the cut. The
+    checks on Claude's answers get the same turn and texts (checks.answer_ended)."""
+    from app import checks
+
     started: list[tuple] = []
+    answered: list[dict] = []
     monkeypatch.setattr(marks, "turn_ended", lambda c, main, turn, texts, cut: started.append((turn, texts, cut, main["sid"])))
+    monkeypatch.setattr(checks, "answer_ended", lambda c, turn: answered.append(turn))
     cwd = str(config.corpus_dir(CORPUS))
     p = tmp_path / f"{SID}.jsonl"
     p.write_text("")
@@ -156,6 +161,7 @@ def test_main_s_turn_end_names_its_turn_and_starts_the_check(tmp_path, monkeypat
     done = [r for r in _log() if r["type"] == "done"][-1]
     ((turn, texts, cut, sid),) = started
     assert done["turn"] == turn and texts == ["[3 of 8](#) runs failed."] and cut == "u-cut" and sid == SID
+    assert answered == [{"sid": SID, "turn": turn, "rows": [{"uuid": "0", "text": "[3 of 8](#) runs failed."}]}]
 
 
 def test_main_still_reads_the_check_s_notes_which_the_analyst_does_not_see():

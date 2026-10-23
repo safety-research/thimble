@@ -1333,7 +1333,8 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
         _stopped(lv, SAFETY_STOP_TEXT)
     # the turn's id, which its `done` record and its marks' records name (marks.py)
     turn = marks.new_turn()
-    if lv.wrote:
+    wrote = lv.wrote  # the turn's `done` record names `turn`, which the chat's rows of its answer go by
+    if wrote:
         agents.mirror(lv.c, "done", by=TERMINAL, session_id=lv.sid, turn=turn)
     was_open = lv.turn_open
     lv.turn_open = lv.fresh = lv.wrote = False
@@ -1344,6 +1345,8 @@ def _end_turn(lv: Live, cut: str | None = None) -> None:
         if not lv.api_failed:  # the turn answered: an earlier failure of main's requests is over
             _main_api_cleared(lv)
             _marks_turn(lv, turn, cut)
+            if wrote:
+                _answer_checked(lv, turn)
         _proposer_turn(lv, cut)
     lv.turn_texts = []
 
@@ -1357,6 +1360,21 @@ def _marks_turn(lv: Live, turn: str, cut: str | None) -> None:
         marks.turn_ended(lv.c, main, turn, list(lv.turn_texts), cut)
     except Exception:  # noqa: BLE001 — a check that does not start is no reason to fail the mirror
         log.exception("%s: the check of the citations did not start at main's turn end", lv.c)
+
+
+def _answer_checked(lv: Live, turn: str) -> None:
+    """The turn's answer, its texts as the chat shows them, is kept for the checks, and the shown checks that cover
+    Claude's answers run on it (checks.answer_ended). `turn` is the id the turn's `done` record names."""
+    from . import checks  # noqa: PLC0415 — checks reads the session's mode lazily
+
+    texts = [t for t in lv.turn_texts if t.strip()]
+    if not texts:
+        return
+    try:
+        checks.answer_ended(lv.c, {"sid": lv.sid, "turn": turn, "rows": [{"uuid": str(i), "text": t}
+                                                                        for i, t in enumerate(texts)]})
+    except Exception:  # noqa: BLE001 — a check that does not run is no reason to fail the mirror
+        log.exception("%s: the checks over Claude's answer did not start at main's turn end", lv.c)
 
 
 def _cards_checked(lv: Live) -> None:

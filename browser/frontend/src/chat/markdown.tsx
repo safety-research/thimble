@@ -1,5 +1,7 @@
 // Assistant markdown: react-markdown with remark-gfm, the `[[value|ref]]` tokens turned into chips, and each mark,
-// `[words](#)`, drawn as its check says (marks/Mark.tsx). The tokens are
+// `[words](#)`, drawn as its check says (marks/Mark.tsx). In main's chat a rehype pass wraps the words of each passage
+// a check commented on in <mark>, tinted in the check's color, which opens its comment on a click (AnswerMarksContext,
+// chat/answerComments.ts). The tokens are
 // hidden from the markdown parser first (protectTokens) so nothing inside a ref reads as markup, then a rehype pass turns
 // the markers back into spans that render as RefChip. A streaming text renders per completed block, so a delta
 // re-parses only the tail.
@@ -8,6 +10,8 @@ import Markdown, { type Components, type ExtraProps, type Options } from 'react-
 import remarkGfm from 'remark-gfm'
 import type { Element, Properties, Root, Text } from 'hast'
 import { MarkdownCode } from '../components/Code'
+import { findQuote } from '../lib/quoteFind'
+import { plainQuote, type AnswerMark } from './answerComments'
 import { MdImage } from '../components/MdImage'
 import { GlyphCites, RefChip } from '../components/RefChip'
 import { rehypeNumericCells } from '../lib/markdownCells'
@@ -144,6 +148,106 @@ function MdSpan(props: JSX.IntrinsicElements['span'] & ExtraProps) {
   return <span {...rest} />
 }
 
+/** The blocks a passage is looked for in, each alone. */
+const MARK_BLOCKS = new Set(['p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'td', 'th'])
+
+interface Piece {
+  /** a text node, or null for a citation chip, whose shown value counts but is not wrapped */
+  node: Text | null
+  parent: Root | Element
+  text: string
+}
+
+function piecesOf(node: Root | Element, out: Piece[] = []): Piece[] {
+  for (const child of node.children) {
+    if (child.type === 'text') out.push({ node: child, parent: node, text: child.value })
+    else if (child.type === 'element') {
+      const ref = child.properties?.dataRef
+      if (typeof ref === 'string') out.push({ node: null, parent: node, text: typeof child.properties?.dataValue === 'string' ? child.properties.dataValue : '' })
+      else piecesOf(child, out)
+    }
+  }
+  return out
+}
+
+function blocksOf(node: Root | Element, out: Element[] = []): Element[] {
+  for (const child of node.children) {
+    if (child.type !== 'element' || child.tagName === 'pre') continue
+    if (MARK_BLOCKS.has(child.tagName)) out.push(child)
+    blocksOf(child, out)
+  }
+  return out
+}
+
+/** Wrap the text of `pieces` in [at, end) in <mark> elements of `m`, the first carrying the passage's anchor. */
+function wrapPieces(pieces: Piece[], at: number, end: number, m: AnswerMark): void {
+  let offset = 0
+  let first = true
+  for (const p of pieces) {
+    const from = offset
+    offset += p.text.length
+    if (!p.node || offset <= at || from >= end) continue
+    const s = Math.max(0, at - from)
+    const e = Math.min(p.text.length, end - from)
+    const props: Properties = { className: ['answer-tint', ...(m.active ? ['answer-tint-open'] : [])], dataAnswerComment: m.id, style: `--tint: ${m.colour}` }
+    if (first) props.dataAnchor = m.ref
+    first = false
+    const parts: (Element | Text)[] = []
+    if (s > 0) parts.push({ type: 'text', value: p.text.slice(0, s) })
+    parts.push({ type: 'element', tagName: 'mark', properties: props, children: [{ type: 'text', value: p.text.slice(s, e) }] })
+    if (e < p.text.length) parts.push({ type: 'text', value: p.text.slice(e) })
+    const i = p.parent.children.indexOf(p.node)
+    if (i >= 0) p.parent.children.splice(i, 1, ...(parts as typeof p.parent.children))
+  }
+}
+
+/** rehype plugin: each passage of `marks` (a check's comment on this answer) found in the drawn words of one block is
+ * wrapped in <mark class="answer-tint"> in its check's color; a passage not found draws nothing. */
+export function rehypeAnswerMarks(options: { marks?: readonly AnswerMark[] } = {}) {
+  return (tree: Root) => {
+    const marks = options.marks ?? []
+    if (!marks.length) return
+    for (const m of marks) {
+      const q = plainQuote(m.quote)
+      if (!q) continue
+      for (const b of blocksOf(tree)) {
+        const pieces = piecesOf(b)
+        const at = findQuote(pieces.map((p) => p.text).join(''), q)
+        if (!at) continue
+        wrapPieces(pieces, at[0], at[1], m)
+        break
+      }
+    }
+  }
+}
+
+/** What a tinted passage's click does: open its comment under the answer (chat/Rows). */
+export const AnswerMarksContext = createContext<{ open: (id: string) => void } | null>(null)
+
+function MdMark(props: JSX.IntrinsicElements['mark'] & ExtraProps) {
+  const ctx = useContext(AnswerMarksContext)
+  const { node: _node, ...rest } = props
+  const id = (props as Record<string, unknown>)['data-answer-comment']
+  if (typeof id !== 'string' || !ctx) return <mark {...rest} />
+  return (
+    <mark
+      {...rest}
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        e.stopPropagation()
+        ctx.open(id)
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          ctx.open(id)
+        }
+      }}
+    />
+  )
+}
+
 function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
   const mark = MARK_HREF.exec(props.href ?? '')
   if (mark) return <Mark k={Number(mark[1])}>{props.children}</Mark>
@@ -153,23 +257,27 @@ function MdLink(props: JSX.IntrinsicElements['a'] & ExtraProps) {
 
 // a fenced block in the language it names takes the syntax colours code has everywhere (components/Code.tsx); an image
 // loads only from the machine (components/MdImage)
-const components: Components = { span: MdSpan, a: MdLink, code: MarkdownCode, img: MdImage }
+const components: Components = { span: MdSpan, a: MdLink, code: MarkdownCode, img: MdImage, mark: MdMark }
 // a single ~ is no strikethrough: page and file names hold it (`dse~Agent`, live check L21); ~~two~~ still is
 const remarkPlugins: Options['remarkPlugins'] = [[remarkGfm, { singleTilde: false }]]
 const rehypePlugins = [rehypeRefChips, rehypeNumericCells]
 
-const MarkdownBlock = memo(function MarkdownBlock({ text }: { text: string }) {
+const NO_MARKS: readonly AnswerMark[] = []
+
+const MarkdownBlock = memo(function MarkdownBlock({ text, marks = NO_MARKS }: { text: string; marks?: readonly AnswerMark[] }) {
+  const plugins: Options['rehypePlugins'] = marks.length ? [rehypeRefChips, [rehypeAnswerMarks, { marks }], rehypeNumericCells] : rehypePlugins
   return (
-    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+    <Markdown remarkPlugins={remarkPlugins} rehypePlugins={plugins} components={components}>
       {protectTokens(text)}
     </Markdown>
   )
 })
 
 /** Assistant markdown with chips and marks. `streaming`: the text is still growing and renders per completed block.
- * `checks`: what the check found of each of its marks, by their order in the text. A bare citation in it is its
+ * `checks`: what the check found of each of its marks, by their order in the text. `marks`: the passages the checks
+ * commented on, tinted (rehypeAnswerMarks). A bare citation in it is its
  * target's glyph alone, its name in the hover, as in a card (components/RefChip GlyphCites). */
-export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[] }) {
+export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks, marks }: { text: string; streaming?: boolean; checks?: readonly (MarkItem | undefined)[]; marks?: readonly AnswerMark[] }) {
   const [chunked, setChunked] = useState(!!streaming)
   if (streaming && !chunked) setChunked(true)
   // each mark's href names its order in the whole text, so a block cut from it still finds its check
@@ -178,12 +286,12 @@ export const ChatMarkdown = memo(function ChatMarkdown({ text, streaming, checks
     <MarkItems.Provider value={{ items: checks ?? [], streaming: !!streaming }}>
       <GlyphCites.Provider value={true}>
         {!chunked && !streaming ? (
-          <MarkdownBlock text={marked} />
+          <MarkdownBlock text={marked} marks={marks} />
         ) : (
           splitMarkdownBlocks(marked).map((chunk, i) => (
             <Fragment key={i}>
               {i > 0 && '\n'}
-              <MarkdownBlock text={chunk} />
+              <MarkdownBlock text={chunk} marks={marks} />
             </Fragment>
           ))
         )}

@@ -214,7 +214,7 @@ export function Shell({ ws }: { ws: string }) {
         open()
       }),
       bus.on('openRef', (e) => {
-        if (chatOpen.current || !e.ref.startsWith('call:')) return
+        if (chatOpen.current || !(e.ref.startsWith('call:') || e.ref.startsWith('answer:'))) return
         holdForChat({ event: 'openRef', payload: e })
         open()
       }),
