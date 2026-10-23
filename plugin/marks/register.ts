@@ -11,8 +11,11 @@
 //   session.append   main's text rows, as they are stored
 //   turn.complete    main's turn ended: start the check (inside this hook, so the fork's events reach the others)
 //   turn.complete    the checker's turn ended: validate, write the statuses
+//   turn.complete    around that one: a reply's check that failed citations repairs them at once (checker.ts
+//                    autoRepair), as x does
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script
 //   agent.spawn      a repair's fork (x in the tray): waits out the key's word window, refused when a word came
+//                    (a repair thimble starts itself has no word window)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
@@ -28,7 +31,7 @@ import { openPane } from '../core/pane'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
-import { awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
+import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { marksIn, rewritesIn, withCorrections, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
@@ -120,6 +123,17 @@ export const registerMarks: Register = on => {
     const r = await next(e)
     if (e.agentId === undefined) {
       try { await startCheck($, e) } catch { /* the reply stands; its marks stay drawn as written */ }
+    }
+    return r
+  }).catch(($, e, next) => next(e))
+
+  // a reply's check ended (the hook under this one): the citations it failed are repaired at once, as x repairs them.
+  // A hook of its own, around endCheck's: a fork skips the hooks its spawn was made in, so the repair's end still
+  // reaches endCheck below
+  on('turn.complete', { agentId: /./ }, async ($, e, next) => {
+    const r = await next(e)
+    if (forkOf(e.agentId)?.kind === 'checker') {
+      try { await autoRepair($, e.agentId!) } catch { /* the citations stay failed, and x repairs them */ }
     }
     return r
   }).catch(($, e, next) => next(e))
