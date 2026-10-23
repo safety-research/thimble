@@ -35,7 +35,9 @@ Kinds that tell of the setup rather than a failure:
   manual-mode  key `manual-mode`: main runs in Claude Code's Manual mode (modes.manual_notice; session.note_mode in
                browser mode, local_hooks' mode-notice in terminal mode), shown in red; it goes when main reports
                another mode
-  sandbox      key `no-box:<extension>`: an extension's program runs without a sandbox (harness.py)
+  sandbox      key `no-box:<extension>`: an extension's program runs without a sandbox (harness.py); key
+               `cc-sandbox`: Claude Code's Bash sandbox could not start in a session of the Claude Code sign-in, so
+               its Bash calls were refused (runtime_cc.py), cleared by a later Bash call that ran
   setup        keys `env:<NAME>` and `proxy`: what /thimble found in the shell (events.session_route), in words this
                module writes from the key (setup_text), never words from the request
   sign-in      key `sign-in:<id>`: a browser signed in to thimble (main.signed_in), with Sign it out

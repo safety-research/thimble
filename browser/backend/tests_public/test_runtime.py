@@ -5,6 +5,7 @@ Messages API is a fake client and the Agent SDK a fake ClaudeSDKClient: no model
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -250,6 +251,89 @@ async def test_claude_code_sign_in_runs_a_headless_session_with_the_same_records
     api_key(monkeypatch, [text("Two incidents happened.")])
     await main_turn("What happened?")
     assert shape(main_records()) == cc
+
+
+async def test_a_headless_session_s_bash_sandbox_gets_a_short_tmpdir_and_fails_closed(data_tmp, on, monkeypatch,
+                                                                                       tmp_path):
+    """Claude Code's sandbox puts its sockets in TMPDIR, and did not start with one of 76 characters or more, which the
+    workspace's runtime/tmp/<conv> is with a long user or workspace name: the session gets a short private TMPDIR of
+    its own, removed after the turn, its sandbox is required, a refused Bash call tells the person, and the empty
+    .claude/.cc-writes/ the sandbox makes in the corpus goes when the turn ends."""
+    import os
+    import stat
+
+    import claude_agent_sdk as sdk_mod
+    from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolResultBlock, ToolUseBlock, UserMessage
+
+    from app import notices
+
+    monkeypatch.setenv("THIMBLE_SANDBOX", "1")
+    monkeypatch.setattr(config, "WORKSPACES_DIR", tmp_path / "home" / ("a-rather-long-user-name-" * 2)
+                        / ".thimble-browser" / "workspaces-of-a-long-workspace-name")
+    config.workspace_dir(CORPUS)
+    runtime._spaces.clear()
+
+    def turn_with(result: str, is_error: bool) -> list[Any]:
+        return [AssistantMessage(content=[ToolUseBlock(id="toolu_b", name="Bash", input={"command": "ls"})],
+                                 model="claude-opus-5-5"),
+                UserMessage(content=[ToolResultBlock(tool_use_id="toolu_b", content=result, is_error=is_error)]),
+                AssistantMessage(content=[TextBlock(text="Done.")], model="claude-opus-5-5"),
+                ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False, num_turns=1,
+                              session_id="sess-1")]
+
+    seen: dict[str, Any] = {}
+    during: dict[str, Any] = {}
+
+    def fake(script: list[Any]) -> None:
+        fake_sdk(monkeypatch, script, seen)
+        entered = sdk_mod.ClaudeSDKClient.__aenter__
+
+        async def aenter(self: Any) -> Any:
+            tmp = seen["options"].env["TMPDIR"]
+            during.update(tmp=tmp, mode=stat.S_IMODE(os.stat(tmp).st_mode))
+            (Path(seen["options"].cwd) / ".claude" / ".cc-writes").mkdir(parents=True, exist_ok=True)  # as CC's does
+            return await entered(self)
+
+        monkeypatch.setattr(sdk_mod.ClaudeSDKClient, "__aenter__", aenter)
+
+    fake(turn_with("Sandbox is required but failed to initialize: Failed to create bridge sockets after 5 attempts. "
+                   "Restart to retry.", True))
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    await main_turn("What is in the folder?")
+    opts = seen["options"]
+    home = runtime._spaces[CORPUS].main.spec().home
+    assert len(str(home)) >= 76, "the workspace's tmp is as long as the one that broke the sandbox"
+    assert len(during["tmp"]) <= runtime_cc.TMP_MAX and during["mode"] == 0o700
+    assert not Path(during["tmp"]).exists(), "the TMPDIR goes when the turn ends"
+    box = json.loads(opts.settings)["sandbox"]
+    assert box["failIfUnavailable"] is True and box["allowUnsandboxedCommands"] is False
+    assert during["tmp"] in box["filesystem"]["allowWrite"] and str(home) in box["filesystem"]["allowWrite"]
+    assert not (Path(opts.cwd) / ".claude").exists(), "the sandbox's empty .claude/.cc-writes/ goes too"
+    told = [n for n in notices.open_notices(CORPUS) if n["key"] == runtime_cc.SANDBOX_KEY]
+    assert len(told) == 1 and "Failed to create bridge sockets" in told[0]["text"] and "Main" in told[0]["text"]
+
+    # a later Bash call that runs takes the notice away, and a .claude/ that was there before stays
+    fake(turn_with("a.txt", False))
+    (Path(opts.cwd) / ".claude").mkdir()
+    await main_turn("And now?")
+    assert not [n for n in notices.open_notices(CORPUS) if n["key"] == runtime_cc.SANDBOX_KEY]
+    assert (Path(opts.cwd) / ".claude").is_dir() and not (Path(opts.cwd) / ".claude" / ".cc-writes").exists()
+    assert Path(opts.cwd).is_relative_to(data_tmp), "the test's own copy of the corpus"
+
+
+def test_short_tmp_stays_short_where_the_temp_folder_is_long(monkeypatch, tmp_path):
+    """macOS's temp folder is /var/folders/<..>/T, about 49 characters; short_tmp keeps to /tmp where it exists, and
+    never makes a folder longer than TMP_MAX."""
+    import tempfile
+
+    long_root = tmp_path / ("x" * 60)
+    long_root.mkdir()
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(long_root))
+    got = runtime_cc.short_tmp()
+    assert got is not None and len(str(got)) <= runtime_cc.TMP_MAX and str(got).startswith("/tmp/")
+    got.rmdir()
+    monkeypatch.setattr(runtime_cc, "TMP_ROOT", str(long_root))
+    assert runtime_cc.short_tmp() is None, "no folder rather than one too long for the sandbox's sockets"
 
 
 async def test_a_thimble_call_in_a_headless_session_runs_as_its_caller(on, monkeypatch):
