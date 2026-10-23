@@ -816,12 +816,22 @@ async def _structured(
         return finish(CallResult(status="error", detail=f"unexpected failure ({type(e).__name__}: {str(e)[:300]})"))
 
 
+API_MAX_TOKENS = 32000  # a structured call's reply on the Messages API, at most
+
+
+def _replayed(msg: Any) -> list[dict[str, Any]]:
+    """A reply's blocks as the next request sends them back: every block unchanged, its thinking included, since the
+    current models refuse a history whose thinking was edited."""
+    return [b.model_dump(mode="json", exclude_none=True) for b in msg.content
+            if getattr(b, "type", "") in ("text", "tool_use", "thinking", "redacted_thinking")]
+
+
 async def _structured_api(prompt: str, *, tool: ToolSpec, model: str, effort: str, fast: bool, system: str,
                           corrective_retries: int, images: Sequence[tuple[bytes, str]]) -> CallResult:
     """structured() on the Messages API (an API key or Workload Identity Federation, runtime.uses_api): the output
-    tool forced (tool_choice), its input validated as the SDK path validates it, one corrective turn when it does not
-    match, a refusal as `refused`, a cut reply as `truncated`, Claude unreachable as `error` in claude_access's words.
-    Never raises."""
+    tool named in the system prompt (the current models take no forced tool_choice), its input validated as the SDK
+    path validates it, one corrective turn when it does not match or is not called, a refusal as `refused`, a cut
+    reply as `truncated`, Claude unreachable as `error` in claude_access's words. Never raises."""
     import anthropic  # noqa: PLC0415
 
     from . import llm  # noqa: PLC0415
@@ -841,10 +851,12 @@ async def _structured_api(prompt: str, *, tool: ToolSpec, model: str, effort: st
     for _ in range(1 + max(0, corrective_retries)):
         attempts += 1
         try:
-            msg = await client.beta.messages.create(
-                max_tokens=32000, system=sys_text, messages=messages,
-                tools=[{"name": tool.name, "description": tool.description, "input_schema": tool.input_schema}],
-                tool_choice={"type": "tool", "name": tool.name}, **args)
+            # streamed: the SDK refuses a call that is not streamed when its max_tokens could take longer than 10 minutes
+            async with client.beta.messages.stream(
+                    max_tokens=API_MAX_TOKENS, system=sys_text, messages=messages,
+                    tools=[{"name": tool.name, "description": tool.description, "input_schema": tool.input_schema}],
+                    tool_choice={"type": "auto"}, **args) as stream:
+                msg = await stream.get_final_message()
         except anthropic.RateLimitError as e:
             return CallResult(status="rate_limited", detail=llm.failure(e), attempts=attempts)
         except Exception as e:  # noqa: BLE001 — every failure is the call's result
@@ -860,13 +872,17 @@ async def _structured_api(prompt: str, *, tool: ToolSpec, model: str, effort: st
             return CallResult(status="truncated", detail="the reply hit its length limit", model_used=used,
                               usage=usage, attempts=attempts)
         if not calls:
-            return CallResult(status="no_tool_call", detail="the model did not call the output tool", model_used=used,
-                              usage=usage, text=text, attempts=attempts)
+            if attempts > max(0, corrective_retries):
+                return CallResult(status="no_tool_call", detail="the model did not call the output tool",
+                                  model_used=used, usage=usage, text=text, attempts=attempts)
+            # the current models refuse a forced tool_choice, so a reply without the call is asked for it once more
+            messages += [{"role": "assistant", "content": _replayed(msg) or "(no reply)"},
+                         {"role": "user", "content": _instruction(tool)}]
+            continue
         verdict = await state.offer_async(calls[-1].input)
         if verdict == "recorded":
             return CallResult(status="ok", output=state.captured, model_used=used, usage=usage, attempts=attempts)
-        messages += [{"role": "assistant", "content": [b.model_dump(mode="json", exclude_none=True) for b in msg.content
-                                                        if getattr(b, "type", "") in ("text", "tool_use")]},
+        messages += [{"role": "assistant", "content": _replayed(msg)},
                      {"role": "user", "content": [{"type": "tool_result", "tool_use_id": calls[-1].id, "is_error": True,
                                                    "content": verdict}]}]
     return CallResult(status="no_tool_call", detail="; ".join(state.violations[-1:]) or "the output did not match its "

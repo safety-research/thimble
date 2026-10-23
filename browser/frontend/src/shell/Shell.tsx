@@ -23,7 +23,7 @@ import { onDemoNote, useDemo } from '../lib/demo'
 import { loadSettings, onSettingsChange } from '../lib/models'
 import { setAskKey } from '../lib/platform'
 import { isReplay, useWorkspaceEvents } from '../lib/events'
-import { showsCanvas, watchInput } from '../lib/follow'
+import { reportHeld, showsCanvas, watchInput } from '../lib/follow'
 import { track } from '../lib/telemetry'
 import { notePress, pressedPane, renewPress, setShownSurfaces, setSurfaceDrag } from '../lib/surfaces'
 import { refFromUrl, teleport } from '../lib/teleport'
@@ -272,10 +272,19 @@ export function Shell({ ws }: { ws: string }) {
   // the canvas then goes to the card (Canvas.tsx, its landing)
   const shownNow = useRef(shown)
   shownNow.current = shown
+  // a writer writing, and when the last one ended: a Report the person has open stays open meanwhile (lib/follow.ts)
+  const metas = useChatMetas(ws)
+  const isWriting = writing(metas)
+  const writer = useRef<{ now: boolean; ended: number | null }>({ now: false, ended: null })
+  useEffect(() => {
+    if (writer.current.now && !isWriting) writer.current.ended = performance.now()
+    writer.current.now = isWriting
+  }, [isWriting])
   useEffect(() => {
     watchInput()
     return bus.on('wsEvent', (ev) => {
-      if (!showsCanvas(ev as Record<string, unknown>, shownNow.current)) return
+      const held = reportHeld(shownNow.current, writer.current.now, writer.current.ended, performance.now())
+      if (!showsCanvas(ev as Record<string, unknown>, shownNow.current, held)) return
       track('tab-activate', { target: 'panel:canvas', detail: { via: 'card-made' } })
       setPanes((p) => show(p, 'canvas', null, recent.current))
     })
@@ -317,8 +326,7 @@ export function Shell({ ws }: { ws: string }) {
   )
 
   const dots = useTabDots(shown.filter((s): s is Tab => (BASE_SURFACES as readonly string[]).includes(s)))
-  const metas = useChatMetas(ws)
-  const signals = tabSignals(dots, writing(metas))
+  const signals = tabSignals(dots, isWriting)
 
   return (
     <div className="shell" data-chat={layout.chatOpen ? 'open' : 'closed'} data-session={gone ? 'gone' : demo ? 'static' : undefined} inert={!!gone} style={{ '--pane-x': `${paneX}px` } as React.CSSProperties}>

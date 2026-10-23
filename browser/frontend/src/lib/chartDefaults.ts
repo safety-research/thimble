@@ -2,13 +2,13 @@
 // defaults reads well at a card's width. Pure.
 //
 // It fixes legends that squeeze the plot or repeat facet groups, rotated x labels, titles that repeat the card's
-// question, repeated facet y titles, merged layer axis titles, layers that give one axis two formats, and y titles that
-// overprint labels (Vega measures labels narrower than it draws them). Legends past FOLD_GROUPS colours fold the rest
-// into a grey "other (n)" without summing. Long bar categories turn horizontal; whole-number axes step by whole numbers;
-// discrete y axes get ROW_STEP per row, as do the ticks a continuous y axis names (a ridgeline's), and dots set side by
-// side by group get GROUP_STEP a group, the groups folded into "other" on one line; panels one under another get
-// PANEL_HEIGHT each unless the chart sizes them. A colour channel over a label's classes takes the label's colours
-// (labelColours).
+// question, repeated facet y titles, merged layer axis titles, layers that give one axis two formats, y titles that
+// overprint labels (Vega measures labels narrower than it draws them), and an offset scale shared by panels whose axes
+// are their own (offsetsLikeAxes). Legends past FOLD_GROUPS colours fold the rest into a grey "other (n)" without
+// summing. Long bar categories turn horizontal; whole-number axes step by whole numbers; discrete y axes get ROW_STEP
+// per row, as do the ticks a continuous y axis names (a ridgeline's), and dots set side by side by group get GROUP_STEP
+// a group, the groups folded into "other" on one line; panels one under another get PANEL_HEIGHT each unless the chart
+// sizes them. A colour channel over a label's classes takes the label's colours (labelColours).
 
 type Spec = Record<string, unknown>
 const obj = (v: unknown): Spec | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Spec) : null)
@@ -625,10 +625,32 @@ function titledLayer(l: unknown, titles: Partial<Record<'x' | 'y', string | null
   return out
 }
 
+/** Whether a view or any view inside it (a facet's, a layer's, a concat's) encodes channel `ch`. */
+function encodes(s: Spec, ch: string): boolean {
+  if (obj(obj(s.encoding)?.[ch])) return true
+  const inner = obj(s.spec)
+  if (inner && encodes(inner, ch)) return true
+  return ['layer', 'hconcat', 'vconcat', 'concat'].some((k) => Array.isArray(s[k]) && (s[k] as unknown[]).some((c) => !!obj(c) && encodes(obj(c)!, ch)))
+}
+
+/** A view that resolves its x (y) scale apart in each panel resolves its xOffset (yOffset) scale apart too. Vega-Lite
+ * (6.4.3) otherwise keeps one offset scale for the whole chart, whose range reads the band of an x scale that exists
+ * only inside each panel: the band is 0 there, and every bar is drawn a quarter of a pixel wide, so the panels look
+ * empty (bars side by side by group, in panels with their own categories). */
+function offsetsLikeAxes(s: Spec): Spec {
+  const resolve = obj(s.resolve)
+  const scale = obj(resolve?.scale)
+  if (!scale) return s
+  let next = scale
+  for (const [axis, offset] of [['x', 'xOffset'], ['y', 'yOffset']] as const)
+    if (scale[axis] === 'independent' && !(offset in scale) && encodes(s, offset)) next = { ...next, [offset]: 'independent' }
+  return next === scale ? s : { ...s, resolve: { ...resolve, scale: next } }
+}
+
 /** `shared`: what the layers `s` is one of share on their axes (layerShared); null for a view that is no layer's. */
 function walk(s: Spec, root: Spec, facetFields: ReadonlySet<string>, inherited: unknown[] | null, opts: ChartOptions = {}, shared: Shared | null = null): Spec {
   const rows = rowsOf(s, root, inherited)
-  let out: Spec = { ...s }
+  let out: Spec = offsetsLikeAxes({ ...s })
   // a facet operator: its fields name the panels; a row facet takes the y title
   const facet = obj(s.facet)
   const inner = obj(s.spec)

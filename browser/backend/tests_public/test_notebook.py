@@ -142,3 +142,19 @@ async def test_a_card_made_is_announced_with_who_made_it_and_an_edit_is_not(corp
     assert made[mine["id"]]["by"] == "user" and made[claude["id"]]["by"] == "main"
     later = [e for e in sent if e.get("cell") == claude["id"] and e.get("op") != "created"]
     assert later and all("by" not in e for e in later)
+
+
+async def test_a_card_a_chat_made_is_announced_with_that_chat_s_role(corpus, monkeypatch):
+    """A card made by a chat (`chat:<id>`) carries the chat's role (`by_role`), so the page does not follow a card that a
+    chat working in the background made, such as a writer's figure (frontend lib/follow.ts)."""
+    from app import agents, investigation
+
+    sent: list[dict] = []
+    monkeypatch.setattr(investigation, "emit", lambda c, inv, ev: sent.append(ev))
+    writer = agents.new_agent(corpus, "writer", "Report", announce=False)
+    figure = notebook.insert_cell(corpus, "main", notebook.new_cell("code", f"chat:{writer['id']}", code="1"))
+    plain = notebook.insert_cell(corpus, "main", notebook.new_cell("code", "main", code="2"))
+    gone = notebook.insert_cell(corpus, "main", notebook.new_cell("code", "chat:abcd1234", code="3"))
+    made = {e["cell"]: e for e in sent if e.get("op") == "created"}
+    assert made[figure["id"]]["by_role"] == "writer"
+    assert "by_role" not in made[plain["id"]] and "by_role" not in made[gone["id"]]

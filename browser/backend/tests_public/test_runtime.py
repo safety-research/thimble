@@ -330,9 +330,9 @@ async def test_structured_calls_go_to_the_messages_api(on, monkeypatch):
             self.beta = self
             self.messages = self
 
-        async def create(self, **body: Any) -> Any:
+        def stream(self, **body: Any) -> FakeStream:
             self.calls.append(body)
-            return Final([Block(type="tool_use", id="t", name="answer", input={"value": "yes"})], "tool_use")
+            return FakeStream(Final([Block(type="tool_use", id="t", name="answer", input={"value": "yes"})], "tool_use"))
 
     out = Out()
     monkeypatch.setattr(llm, "client", lambda: out)
@@ -341,7 +341,81 @@ async def test_structured_calls_go_to_the_messages_api(on, monkeypatch):
     res = await model.structured("Is it?", tool=spec, model="claude-opus-5-5", effort="low", speed="standard",
                                  refusal=None, cwd=".")
     assert res.status == "ok" and res.output == {"value": "yes"}
-    assert out.calls[0]["tool_choice"] == {"type": "tool", "name": "answer"}
+    # the current models refuse a forced tool_choice ("tool" or "any"): the system prompt names the tool
+    assert out.calls[0]["tool_choice"] == {"type": "auto"} and "`answer` tool" in out.calls[0]["system"]
+
+
+async def test_a_structured_reply_without_its_tool_call_is_asked_for_it_once_more(on, monkeypatch):
+    from app import model
+
+    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
+    replies = [Final([Block(type="thinking", thinking="", signature="s"), Block(type="text", text="Yes.")], "end_turn"),
+               Final([Block(type="tool_use", id="t", name="answer", input={"value": "yes"})], "tool_use")]
+
+    class Out:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+            self.beta = self
+            self.messages = self
+
+        def stream(self, **body: Any) -> FakeStream:
+            self.calls.append(json.loads(json.dumps(body)))
+            return FakeStream(replies.pop(0))
+
+    out = Out()
+    monkeypatch.setattr(llm, "client", lambda: out)
+    spec = model.ToolSpec("answer", "the answer", {"type": "object", "properties": {"value": {"type": "string"}},
+                                                   "required": ["value"]})
+    res = await model.structured("Is it?", tool=spec, model="claude-opus-5-5", effort="low", speed="standard",
+                                 refusal=None, cwd=".")
+    assert res.status == "ok" and res.output == {"value": "yes"} and res.attempts == 2
+    again = out.calls[1]["messages"]
+    # the reply goes back as it came, its thinking included, then the ask for the tool
+    assert [b["type"] for b in again[1]["content"]] == ["thinking", "text"] and "`answer` tool" in again[2]["content"]
+
+
+async def test_a_structured_call_streams_so_the_sdk_takes_its_long_reply(on, monkeypatch):
+    """The SDK refuses a call that is not streamed when its max_tokens could take longer than 10 minutes ("Streaming is
+    required ..."), as a card check's reply can: structured() streams it. The real SDK client over a fake transport (httpx2, the SDK's own HTTP package)."""
+    import anthropic
+    import httpx2 as httpx
+
+    from app import model
+
+    def sse(*events: dict[str, Any]) -> bytes:
+        return "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
+
+    sent: list[dict[str, Any]] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        usage = {"input_tokens": 5, "output_tokens": 3}
+        body = sse(
+            {"type": "message_start", "message": {"id": "msg_1", "type": "message", "role": "assistant", "content": [],
+                                                  "model": "claude-opus-5-5", "stop_reason": None, "usage": usage}},
+            {"type": "content_block_start", "index": 0,
+             "content_block": {"type": "tool_use", "id": "toolu_1", "name": "answer", "input": {}}},
+            {"type": "content_block_delta", "index": 0,
+             "delta": {"type": "input_json_delta", "partial_json": json.dumps({"value": "yes"})}},
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 3}},
+            {"type": "message_stop"})
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    real = anthropic.AsyncAnthropic(api_key="sk-ant-test-key", base_url="http://api.test",
+                                    http_client=httpx.AsyncClient(transport=httpx.MockTransport(reply)))
+    # the same call not streamed is what the SDK refuses
+    with pytest.raises(ValueError, match="Streaming is required"):
+        await real.beta.messages.create(model="claude-opus-5-5", max_tokens=model.API_MAX_TOKENS,
+                                        messages=[{"role": "user", "content": "Is it?"}])
+    claude_access.save(claude_access.API_KEY, key="sk-ant-test-key")
+    monkeypatch.setattr(llm, "client", lambda: real)
+    spec = model.ToolSpec("answer", "the answer", {"type": "object", "properties": {"value": {"type": "string"}},
+                                                   "required": ["value"]})
+    res = await model.structured("Is it?", tool=spec, model="claude-opus-5-5", effort="low", speed="standard",
+                                 refusal=None, cwd=".")
+    assert res.status == "ok" and res.output == {"value": "yes"}, res.detail
+    assert sent[0]["stream"] is True and sent[0]["max_tokens"] == model.API_MAX_TOKENS
 
 
 async def test_extension_programs_start_no_claude_code_with_an_api_key(on):

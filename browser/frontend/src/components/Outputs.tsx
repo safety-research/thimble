@@ -21,7 +21,7 @@ import { FRAME_MIME, asFrame } from '../lib/dataFrame'
 import { inlineSvg } from '../lib/svg'
 import { purifyHtml } from '../lib/sanitize'
 import { specObject } from '../lib/vegaLoader'
-import { drawChart, refitChart, type DrawnChart } from '../lib/vegaDraw'
+import { drawChart, NOTHING_DRAWN, refitChart, type DrawnChart, type NothingDrawn } from '../lib/vegaDraw'
 import { failureText, loadChunk } from '../lib/chunkRecovery'
 import { MdImage } from './MdImage'
 
@@ -369,6 +369,8 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
   // the labels' classes as a string, so a new list of the same labels embeds nothing again and a changed colour does
   const colours = JSON.stringify((labels ?? []).map((k) => classesOf(k).map((c) => [c.name, c.color ?? 0])))
   const [error, setError] = useState<string | null>(null)
+  // why the chart drew nothing, said under it so empty panels are never taken for the chart (lib/vegaDraw nothingDrawn)
+  const [nothing, setNothing] = useState<NothingDrawn | null>(null)
   // drawn: the embed and its refits are done, for the card harness (module note)
   const [drawn, setDrawn] = useState(false)
   const { width } = useVisibleSize(ref)
@@ -386,6 +388,7 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
     }
     let alive = true
     setError(null)
+    setNothing(null)
     setDrawn(false)
     // the label colours are read per theme
     const classes = (JSON.parse(colours) as [string, number][][]).map((k): LabelClassColour[] => k.map(([name, n]) => ({ name, colour: token(colourToken(n)), none: !n })))
@@ -400,6 +403,7 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
       },
       drawn: (d) => {
         live.current = { ...d, spec, fitWidth, theme, colours }
+        setNothing(d.nothing)
       },
     })
       .then(() => alive && setDrawn(true))
@@ -424,6 +428,7 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
       <div className="outputs-vega" ref={ref} />
       {!plain && <pre className="outputs-text outputs-error">Chart failed: the chart spec is not a JSON object</pre>}
       {plain && error && <pre className="outputs-text outputs-error">Chart failed: {error}</pre>}
+      {plain && !error && nothing && <pre className="outputs-text outputs-error">{NOTHING_DRAWN[nothing]}</pre>}
     </div>
   )
 }
