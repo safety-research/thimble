@@ -799,7 +799,7 @@ Each passage carries its id. Cite or edit a sentence or a heading as report:{slu
 
 ## read_ref-frame
 
-The analyst's frame, the sections they want, the figures they pinned and the points to make. Write a cited passage for each point rather than copying it.
+The analyst's frame, the sections they want, the figures they pinned and the points to make. Keep each heading and point as the analyst wrote it, and write a cited passage under it.
 
 ## read_ref-new
 
