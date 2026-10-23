@@ -114,7 +114,7 @@ export async function recount($: Engine): Promise<void> {
     const files = Number(got.total?.files) || 0
     coverage = files ? shareOfFiles(Number(got.total?.touched_files) || 0, files) : null
   } catch (err) {
-    error = `Coverage could not be counted: ${why(err)}.`
+    error = `Coverage could not be counted: ${why(err)}. It is counted again after Claude's next reply.`
   }
   try {
     labels = await countLabels($, root)
@@ -130,7 +130,7 @@ export async function recount($: Engine): Promise<void> {
 }
 
 /** A /clear or a /resume (hooks/turnover.ts): the bar and the coverage pane show nothing of the earlier conversation,
- *  and the new one is counted once, a moment after. */
+ *  and the new one is counted once, a moment after (from the hook that noticed it). */
 export async function turnCounts($: Engine): Promise<void> {
   last = null
   asked = false
@@ -138,8 +138,11 @@ export async function turnCounts($: Engine): Promise<void> {
   needCounts($)
 }
 
-/** The bar found nothing counted in this load of the plugin (a new session, a reload, the switch just turned on):
- *  count once, a moment after the drawing. */
+/** Nothing is counted yet in this load of the plugin (a new or resumed session, a reload, the switch just turned on,
+ *  which loads the plugin again): count once, a moment after. Asked from a hook (register.ts at session.start,
+ *  turnCounts), never from a drawing: Claude Code stops every call a drawing's hook made that still runs when a newer
+ *  drawing replaces it, as at a resume (the marks and claims read back, a light theme read for the first time), and
+ *  a count asked from there ended `aborted`. */
 export function needCounts($: Engine): void {
   if (asked || !featureOn('counts')) return
   asked = true

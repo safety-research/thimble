@@ -13,6 +13,7 @@ import type { EngineInterface } from 'claude-code'
 import { sessionKey } from '../hooks/conversation'
 import { thimbleHome } from './home'
 import { conversationDir, labelsDirOf } from './layout.mjs'
+import { runWhy } from './why.js'
 
 type Engine = EngineInterface
 
@@ -83,7 +84,7 @@ export type Ran = { code: number; stdout: string; stderr: string }
 
 /** `thimble …` in `root`, as the person's own command, over this conversation's labels. `stdin`: what it reads (the
  *  secret of a key press, the model's answers); `session`: the session its records go under (coverage counts Claude's
- *  own session). */
+ *  own session). A run that gives no result (stopped, past its time, not started) throws why in words (core/why.js). */
 export async function runThimble($: Engine, root: string, args: string[], o: { stdin?: string; session?: string; timeoutMs?: number } = {}): Promise<Ran> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   const key = await sessionKey($)
@@ -91,6 +92,6 @@ export async function runThimble($: Engine, root: string, args: string[], o: { s
   const r = await $.process.run([`${dir}/bin/thimble`, ...args], {
     cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: session, THIMBLE_CONVERSATION: key }, timeoutMs: o.timeoutMs ?? 120000,
     ...(o.stdin != null ? { stdin: o.stdin } : {}),
-  })
+  }).catch((err: unknown) => { throw new Error(runWhy(err)) })
   return { code: r.exitCode ?? 1, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') }
 }

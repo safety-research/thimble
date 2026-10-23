@@ -1,5 +1,5 @@
-// why.js: why a call to the model gave no answer, in the person's words. No `$`, no Node, no DOM: the hooks module, the
-// verbs' Node children and the tests import it.
+// why.js: why a call to the model gave no answer, and why a run of the thimble command gave no result, in the person's
+// words. No `$`, no Node, no DOM: the hooks module, the verbs' Node children and the tests import it.
 //
 // A failed `$.model.complete` or `$.model.fork` says only a reason (`api-error` with an HTTP status and Claude Code's
 // kind of error, `empty-reply`, `aborted`, `nothing-to-fork`). A notice says what failed in plain words and the easy
@@ -24,6 +24,29 @@ export function apiWhy(status, kind) {
   if (k === 'server_error' || (s !== null && s >= 500)) return 'the API had an error of its own'
   if (s === null) return `no reply came from the API. Check the connection, or ${SIGN_IN_AGAIN.toLowerCase()}`
   return `the API answered with an error (HTTP ${s})`
+}
+
+/** A time in the person's words: `10 minutes`, `90 seconds`. */
+function timeWords(ms) {
+  const s = Math.round(Number(ms) / 1000)
+  if (s >= 120 && s % 60 === 0) return `${s / 60} minutes`
+  return s === 1 ? '1 second' : `${s} seconds`
+}
+
+/** Why a `$.process.run` of thimble's gave no result, as words. Claude Code's error names its own call and the
+ *  command's path (`thimble: $.process.run(/…/bin/thimble) aborted`), which tells the person nothing: it is said as
+ *  what happened. An error that is not one of these comes back as it was. */
+export function runWhy(err) {
+  const said = String(err?.message ?? err ?? '')
+  const m = /\$\.process\.run\([^)]*\)\s*([\s\S]*)$/.exec(said)
+  if (!m) return said
+  const rest = m[1].trim()
+  const late = /^aborted: still running after (\d+)\s*ms/.exec(rest)
+  if (late) return `it ran longer than ${timeWords(late[1])}, the most it may take, and was stopped`
+  if (/^aborted\b/.test(rest)) return 'Claude Code stopped it before it finished, as it does when thimble reloads or the session ends'
+  const start = /^failed to start:\s*([\s\S]*)$/.exec(rest)
+  if (start) return `the thimble command could not start (${start[1].trim()})`
+  return rest || said
 }
 
 /** Why a model call gave no answer, as words; '' when it answered. Takes the call's result as it came (or null). */

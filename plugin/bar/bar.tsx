@@ -17,7 +17,7 @@ import { textWidth } from '../core/text.js'
 import { vReady } from '../designer/v'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
-import { countsNow, needCounts } from './counts'
+import { countsNow } from './counts'
 import { failLineNow } from './notice'
 
 type Engine = EngineInterface
@@ -78,7 +78,6 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const on = o.on ?? featureOn
   const preview = !!o.preview
   const presses = preview ? null : o.presses ?? null
-  if (!preview) needCounts($)
   const left = await leftItems($, on, preview)
   let right = [...(await barRight($, on, preview)), ...(await countItems($, on, presses, preview))]
   // a narrow bar: the labels' count goes first, then coverage's file counts, then coverage. The preview shows every
