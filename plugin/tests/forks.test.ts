@@ -28,11 +28,12 @@ test("a turn's line that waits only on thimble's forks reads as a finished turn,
       set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true, version: 1 } },
     },
     clock: { now: async () => now },
-    ui: { resolve: () => ({ Text: (p: Any) => ({ type: 'Text', props: p }) }) },
+    ui: { resolve: () => ({ Text: (p: Any) => ({ type: 'Text', props: p }), Box: (p: Any) => ({ type: 'Box', props: p }) }) },
   }
   const set = (key: string, value: unknown, id?: string) => state.set(JSON.stringify({ plugin: 'thimble', key, ...(id ? { id } : {}) }), value)
   const draw = (e: Any) => hooks['ui.render']($, e, async (x: Any) => ({ type: 'engine', props: { children: `engine ${x.props.durationMs}${x.props.waitingFor ? ' waiting' : ''}` } }))
-  const text = async (e: Any) => String((await draw(e)).props.children)
+  const textOf = (n: Any): string => (typeof n === 'string' ? n : Array.isArray(n) ? n.map(textOf).join('') : n?.props ? textOf(n.props.children) : '')
+  const text = async (e: Any) => textOf(await draw(e))
   expect(turnLine('Brewed', 23_400)).toBe('✻ Brewed for 23s')
   expect(turnLine('Cooked', 371_000)).toBe('✻ Cooked for 6m 11s')
   // a fork thimble started (a citation check)

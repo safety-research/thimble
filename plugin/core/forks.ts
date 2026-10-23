@@ -99,7 +99,9 @@ export const registerForks: Register = on => {
       if (w.workflows || !w.agents.length || !w.agents.every(a => forkOf(a.id))) return next(e)
       waited = true
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return ($.ui.resolve(e) as any).Text({ dimColor: true, children: turnLine(p.word, p.durationMs) })
+      const els = $.ui.resolve(e) as any
+      // with the blank row above it that Claude Code's line has
+      return els.Box({ marginTop: 1, children: [els.Text({ dimColor: true, children: turnLine(p.word, p.durationMs) })] })
     }
     let ms = ownTime.get(e.requestId)
     if (ms === undefined && waited && !lines.has(e.requestId)) {
