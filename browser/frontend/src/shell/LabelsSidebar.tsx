@@ -1,7 +1,7 @@
 // The Labels and Comments sidebar, at the right of the page: the one place where the analyst sees, turns on and off,
 // and opens the workspace's labels and its comment categories (the checks: the built-in Judgment calls, Unverifiable
-// and Important details, and the analyst's own), as release 0.10's Labels and Checks sidebar had them in one list. The
-// top bar's "Labels N · Comments N", just above it, opens and closes it.
+// and Important details, and the analyst's own). It shows one section at a time: the top bar's Labels button, just
+// above it, opens it on the labels, and its Comments button on the comment categories; a second click closes it.
 //
 // A label's row: its color, name, question, values with their counts, Show in (Files · Cards · Report, where it shows,
 // with what it found there) and its switch. It opens its detail in the sidebar: the label's definition (a model label's
@@ -83,7 +83,10 @@ export function withCover(check: Pick<Check, 'covers'>, cover: CheckCover, on: b
 
 type Detail = { kind: 'label' | 'comments'; id: string }
 
-export function LabelsSidebar({ ws, onClose }: { ws: string; onClose: () => void }) {
+/** The sidebar's two sections: the labels, and the comment categories. */
+export type SideSection = 'labels' | 'comments'
+
+export function LabelsSidebar({ ws, section, onClose }: { ws: string; section: SideSection; onClose: () => void }) {
   const concepts = useConcepts(ws)
   const labels = useMemo(() => listedLabels(concepts), [concepts])
   const checks = useChecks(ws)
@@ -92,8 +95,9 @@ export function LabelsSidebar({ ws, onClose }: { ws: string; onClose: () => void
   const [detail, setDetail] = useState<Detail | null>(null)
   // a request from elsewhere to open one label's detail (a label's chip or tag)
   useEffect(() => bus.on('openLabels', (e) => setDetail(e.id ? { kind: 'label', id: e.id } : null)), [])
-  const label = detail?.kind === 'label' ? concepts.get(detail.id) : undefined
-  const category = detail?.kind === 'comments' ? categories.find((c) => c.key === detail.id) : undefined
+  // a detail belongs to its section: the other section opens on its list
+  const label = section === 'labels' && detail?.kind === 'label' ? concepts.get(detail.id) : undefined
+  const category = section === 'comments' && detail?.kind === 'comments' ? categories.find((c) => c.key === detail.id) : undefined
   const open = !!(label || category)
   // Escape goes back from a detail to the list, then closes the sidebar. It is heard on the window, after the
   // document's own listeners: a menu or popover open over the page and a field with words typed in it keep their Escape.
@@ -110,7 +114,7 @@ export function LabelsSidebar({ ws, onClose }: { ws: string; onClose: () => void
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
   return (
-    <aside className="lside" aria-label="Labels and comments">
+    <aside className="lside" aria-label={section === 'labels' ? 'Labels' : 'Comments'} data-section={section}>
       <header className="lside-head">
         {open ? (
           <button type="button" className="lside-back" onClick={() => setDetail(null)}>
@@ -118,7 +122,9 @@ export function LabelsSidebar({ ws, onClose }: { ws: string; onClose: () => void
             {label ? 'Labels' : 'Comments'}
           </button>
         ) : (
-          <h2 className="lside-heading">Labels and comments</h2>
+          <h2 className="lside-heading">
+            {section === 'labels' ? 'Labels' : 'Comments'} <span className="lside-n">{section === 'labels' ? labels.length : comments.items.length}</span>
+          </h2>
         )}
         <Button variant="icon" size="sm" icon="x" title="Close" aria-label="Close" onClick={onClose} />
       </header>
@@ -127,28 +133,21 @@ export function LabelsSidebar({ ws, onClose }: { ws: string; onClose: () => void
           <LabelDetail ws={ws} label={label} onGone={() => setDetail(null)} />
         ) : category ? (
           <CategoryDetail ws={ws} category={category} checks={checks} onDone={comments.done} />
+        ) : section === 'labels' ? (
+          <section className="lside-section" data-section="labels">
+            {labels.map((k) => (
+              <LabelRow key={k.id} ws={ws} label={k} onOpen={() => setDetail({ kind: 'label', id: k.id })} />
+            ))}
+            {!labels.length && <p className="lside-none lside-section-none">No labels yet.</p>}
+            <NewLabel />
+          </section>
         ) : (
-          <>
-            <section className="lside-section" data-section="labels">
-              <h3 className="lside-section-head">
-                Labels <span className="lside-n">{labels.length}</span>
-              </h3>
-              {labels.map((k) => (
-                <LabelRow key={k.id} ws={ws} label={k} onOpen={() => setDetail({ kind: 'label', id: k.id })} />
-              ))}
-              {!labels.length && <p className="lside-none lside-section-none">No labels yet.</p>}
-              <NewLabel />
-            </section>
-            <section className="lside-section" data-section="comments">
-              <h3 className="lside-section-head">
-                Comments <span className="lside-n">{comments.items.length}</span>
-              </h3>
-              {categories.map((c) => (
-                <CategoryRow key={c.key} ws={ws} category={c} checks={checks} onOpen={() => setDetail({ kind: 'comments', id: c.key })} />
-              ))}
-              {!categories.length && <p className="lside-none lside-section-none">No comments yet.</p>}
-            </section>
-          </>
+          <section className="lside-section" data-section="comments">
+            {categories.map((c) => (
+              <CategoryRow key={c.key} ws={ws} category={c} checks={checks} onOpen={() => setDetail({ kind: 'comments', id: c.key })} />
+            ))}
+            {!categories.length && <p className="lside-none lside-section-none">No comments yet.</p>}
+          </section>
         )}
       </div>
     </aside>

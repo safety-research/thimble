@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // A reply's marks drawn by what the check found (marks/Mark.tsx), as a card's citations are drawn: two looks, verified
 // (a correction shows its new words and looks verified) and failed (a wrong mark, one the check could not confirm, one
-// no check could run: ? after the words), and a click opens the evidence in the citation's label.
+// no check could run: a red × after the words, as the terminal draws it), and a click opens the evidence in the citation's label.
 import { act } from 'react'
 import { afterEach, expect, test } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
@@ -28,7 +28,7 @@ test('each mark draws as its check says, verified or failed, and a click opens i
   ]
   const el = await mount(<ChatMarkdown text="[12](#) runs; [15 of 40](#) merged; [all](#) passed; [3](#) failed; [7](#) more." checks={checks} />)
   const looks = [...el.querySelectorAll('.mark')].map((m) => [m.getAttribute('data-mark-look'), m.textContent])
-  expect(looks).toEqual([['verified', '12'], ['verified', '12 of 40'], ['failed', 'all?'], ['failed', '3?'], ['checking', '7']])
+  expect(looks).toEqual([['verified', '12'], ['verified', '12 of 40'], ['failed', 'all×'], ['failed', '3×'], ['checking', '7']])
   // a failed mark's label says why in one line
   const failed = el.querySelectorAll<HTMLElement>('.mark .mark-words')[3]
   await act(async () => failed.dispatchEvent(new MouseEvent('click', { bubbles: true })))
@@ -84,9 +84,9 @@ test("the check's notes on the sentences around the marks are not shown: neither
   // a footer with nothing but notes is no footer
   const none = await mount(<MarksFooter items={[item(0, '12', { note })]} />)
   expect(none.textContent).toBe('')
-  // the failed citation has its ?, and its label says nothing of the note
+  // the failed citation has its ×, and its label says nothing of the note
   const el = await mount(<ChatMarkdown text="[12](#) runs; [all](#) passed." checks={checks} />)
-  expect([...el.querySelectorAll('.mark')].map((m) => m.textContent)).toEqual(['12', 'all?'])
+  expect([...el.querySelectorAll('.mark')].map((m) => m.textContent)).toEqual(['12', 'all×'])
   await act(async () => el.querySelectorAll<HTMLElement>('.mark .mark-words')[1].dispatchEvent(new MouseEvent('click', { bubbles: true })))
   await settle()
   const pop = document.querySelector('.mark-pop')

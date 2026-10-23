@@ -126,7 +126,7 @@ export function Mark({ k, item: given, children }: { k: number; item?: MarkItem;
       >
         {corrected ? plain(item.shown!) : children}
       </span>
-      {look === 'failed' && <span className="mark-glyph">?</span>}
+      {look === 'failed' && <span className="mark-glyph">×</span>}
       {look === 'checking' && <Spinner size={9} className="mark-spin" label="checking" />}
       {pop &&
         createPortal(

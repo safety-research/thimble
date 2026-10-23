@@ -19,7 +19,7 @@ import { ThemePopover } from './ThemePopover'
 import { undoTip, useUndo } from './undo'
 import { WorkspaceList } from './WorkspaceList'
 import { useCommentItems } from './CommentsList'
-import { listedLabels } from './LabelsSidebar'
+import { listedLabels, type SideSection } from './LabelsSidebar'
 import { useConcepts } from '../canvas/concepts'
 
 export interface SurfaceTab extends TabOption<Tab> {
@@ -32,30 +32,32 @@ export interface TopBarProps {
   tabs: readonly SurfaceTab[]
   onTab: (tab: Tab) => void
   onTabDrag: (e: ReactPointerEvent, tab: Tab) => void
-  /** whether the Labels and Comments sidebar is open (shell/LabelsSidebar.tsx), and how to open or close it */
-  side?: boolean
-  onSide?: (open: boolean) => void
+  /** the section the right sidebar shows (shell/LabelsSidebar.tsx), null while it is closed, and how to open or close it */
+  side?: SideSection | null
+  onSide?: (section: SideSection | null) => void
 }
 
-/** The top bar's quiet button that opens and closes the right sidebar on the labels and the comments, with their counts. */
-function SideButtons({ ws, side, onSide }: { ws: string; side: boolean; onSide: (open: boolean) => void }) {
+/** The top bar's two quiet buttons, Labels and Comments, each with its icon and count: a click opens the right sidebar
+ * on its section, or closes it when that section is open. */
+function SideButtons({ ws, side, onSide }: { ws: string; side: SideSection | null; onSide: (section: SideSection | null) => void }) {
   const n = listedLabels(useConcepts(ws)).length
   const m = useCommentItems(ws).items.length
+  const button = (section: SideSection, icon: 'label' | 'comment', name: string, count: number) => (
+    <button type="button" className={`shell-side-btn${side === section ? ' on' : ''}`} aria-pressed={side === section} data-side={section} onClick={() => onSide(side === section ? null : section)}>
+      <Icon name={icon} size={14} />
+      {name}
+      <span className="shell-side-n">{count}</span>
+    </button>
+  )
   return (
     <span className="shell-side-btns">
-      <button type="button" className={`shell-side-btn${side ? ' on' : ''}`} aria-pressed={side} data-side="labels" onClick={() => onSide(!side)}>
-        <Icon name="label" size={14} />
-        Labels
-        <span className="shell-side-n">{n}</span>
-        <span className="shell-side-sep" aria-hidden="true">·</span>
-        Comments
-        <span className="shell-side-n">{m}</span>
-      </button>
+      {button('labels', 'label', 'Labels', n)}
+      {button('comments', 'comment', 'Comments', m)}
     </span>
   )
 }
 
-export function TopBar({ ws, tabs, onTab, onTabDrag, side = false, onSide }: TopBarProps) {
+export function TopBar({ ws, tabs, onTab, onTabDrag, side = null, onSide }: TopBarProps) {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [gear, setGear] = useState<HTMLButtonElement | null>(null)
   const [themeOpen, setThemeOpen] = useState(false)

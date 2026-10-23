@@ -1,7 +1,8 @@
 /* A mark on the words of a claim (marks/Mark.tsx), drawn as a card's citation is (refchip.css .refchip-value): the
    words in the text's color over a thin accent underline, the accent on hover and while its label is open. A mark the
-   check could not confirm: a dashed underline in the warning color and ? after the words. Back-to-back marks keep a
-   small gap, so their underlines read as two. Its label is RefChip's (.refchip-pop), at most 560 px wide. */
+   check could not confirm: a dashed red underline and a red × after the words, as the terminal draws it (the warning
+   color is for heads-ups). Back-to-back marks keep a small gap, so their underlines read as two. Its label is
+   RefChip's (.refchip-pop), at most 560 px wide. */
 .mark { position: relative; }
 /* a claim's mark is words of the sentence: inline in the text's own face, so it wraps with the line and its underline
    sits under the words, never the small inline-block of the status marks (components.css .mark) */
@@ -29,11 +30,11 @@
 .mark.is-failed .mark-words:hover,
 .mark.is-failed.is-open .mark-words {
   text-decoration-style: dashed;
-  text-decoration-color: var(--status-warning);
+  text-decoration-color: var(--status-negative);
 }
 .mark.is-failed .mark-words:hover,
-.mark.is-failed.is-open .mark-words { color: var(--status-warning); }
-.mark-glyph { margin-left: -1px; margin-right: 1.5px; color: var(--status-warning); }
+.mark.is-failed.is-open .mark-words { color: var(--status-negative); }
+.mark-glyph { margin-left: -1px; margin-right: 1.5px; color: var(--status-negative); }
 .mark-spin { margin-left: 2px; vertical-align: -1px; color: var(--text-tertiary); }
 /* the links toggle is off (lib/links): a mark reads as plain text, as a cited number does */
 :root[data-links='off'] .mark-words,
@@ -57,7 +58,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--status-warning);
+  color: var(--status-negative);
 }
 .mark-pop-state { color: var(--text-tertiary); }
 .mark-ev { display: flex; flex-direction: column; min-width: 0; }
@@ -79,4 +80,4 @@
 /* the line under a reply some of whose marks failed: how many */
 .marks-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font: var(--type-body-sm); }
 .marks-foot-counts { display: flex; gap: 10px; color: var(--text-tertiary); }
-.marks-foot-n.is-failed { color: var(--status-warning); }
+.marks-foot-n.is-failed { color: var(--status-negative); }

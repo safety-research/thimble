@@ -1,6 +1,6 @@
-/* The Labels and Comments sidebar (shell/LabelsSidebar.tsx) and the top bar's button that opens it. The sidebar is a
-   pane of its own at the right of the main area: it pushes the panes, or the chat when it is the only thing open,
-   rather than covering them. */
+/* The Labels and Comments sidebar (shell/LabelsSidebar.tsx) and the top bar's two buttons that open it, Labels and
+   Comments, each on its own section. The sidebar is a pane of its own at the right of the main area: it pushes the
+   panes, or the chat when it is the only thing open, rather than covering them. */
 .shell-side-btns {
   display: inline-flex;
   align-items: center;
@@ -25,7 +25,6 @@
 .shell-side-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
 .shell-side-btn.on { background: var(--surface-selected); color: var(--text-primary); }
 .shell-side-n { font: var(--type-mono-sm); color: var(--text-tertiary); }
-.shell-side-sep { color: var(--text-tertiary); }
 
 .lside {
   flex: none;
@@ -222,15 +221,8 @@
 }
 .lside-add:hover { color: var(--text-primary); }
 
-/* the sidebar's two sections, Labels and Comments, each a heading over its rows */
-.lside-section + .lside-section { border-top: 1px solid var(--border-strong); }
-.lside-section-head {
-  margin: 0;
-  padding: 12px 16px 4px;
-  font: 600 var(--text-ui-sm) / 1.4 var(--font-body);
-  color: var(--text-secondary);
-}
-.lside-section-none { padding: 0 16px 8px; }
+/* the section the sidebar shows, Labels or Comments, its name and count in the head */
+.lside-section-none { padding: 12px 16px 8px; }
 .lside-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* a comment in a category's list (CommentsList): where it is as a link, its passage, statement, details and

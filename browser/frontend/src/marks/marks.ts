@@ -5,8 +5,8 @@
 // A mark draws as a card's citation does (components/RefChip): the words in the text's color over a thin accent
 // underline. Once its check settled it has one of two looks:
 //   verified   the plain look; a corrected mark shows its corrected words and looks verified too
-//   failed     the check could not confirm it (wrong, not confirmed, or no check could run): a dashed underline in the
-//              warning color and `?` after the words
+//   failed     the check could not confirm it (wrong, not confirmed, or no check could run): a dashed underline in red
+//              and `×` after the words, as the terminal draws it
 // While the reply streams (`pending`) and while its check runs (`checking`) it has the plain look.
 import { marksIn } from '../../../../plugin/marks/message.js'
 
