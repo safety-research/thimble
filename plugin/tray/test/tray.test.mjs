@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
-  moreLines, open, pageOf, printLine, push, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  moreLines, open, pageOf, printLine, push, restStop, rowsOf, saidOf, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
@@ -46,6 +46,14 @@ test('a turn\'s stops: the cards Claude drew inline stand between the text rows 
   const stops = stopsOfTurn(['a', 'b'], row => own[row], [{ id: 'c0', after: 0 }, { id: 'c1', after: 1 }, { id: 'c9', after: 5 }])
   assert.deepEqual(stops.map(s => s.card ?? (s.kind === 'citation' ? `c${s.n}` : s.id)), ['c0', 'c1', 'c1', 'g1', 'c9', 'cv'])
   assert.deepEqual(stops.filter(s => s.card).map(s => `${s.card}@${s.row}`), ['c0@a', 'c1@a', 'c9@b', 'cv@b'])
+})
+
+test('] from rest goes to the answer\'s first mark, past a card above the words; [ to its last stop', () => {
+  const stops = [{ row: 'a', card: 'c0' }, { row: 'a', kind: 'citation', n: 1 }, { row: 'b', kind: 'explain', id: 'g1' }, { row: 'b', card: 'c9' }]
+  assert.deepEqual(restStop(stops, 1), stops[1])
+  assert.deepEqual(restStop(stops, -1), stops[3])
+  assert.deepEqual(restStop([{ row: 'a', card: 'c0' }], 1), { row: 'a', card: 'c0' })
+  assert.equal(restStop([], 1), null)
 })
 
 test('a tall tray body: the lines that fit and a row for m, which goes on and then back to the top', () => {

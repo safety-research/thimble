@@ -56,6 +56,18 @@ def test_main_calls_count_and_a_call_that_runs_more_than_a_script_shows_whole():
     assert r["status"] == "verified" and r["evidence"]["code"] == piped["command"]
 
 
+def test_a_shown_command_is_relative_to_the_session_folder():
+    whole = {"command": "cd /work/study && grep -c ok /work/study/runs/a.log /work/study/runs/b.log | sort", "output": "12 of 40", "by": "main"}
+    r = check_mark(mark("12 of 40"), computed("12 of 40"), [whole], "/work/study")
+    assert r["evidence"]["code"] == "grep -c ok runs/a.log runs/b.log | sort"
+    sub = {"command": "cd /work/study/runs && wc -l /work/study/runs/a.log /work/studyx/c.log", "output": "12 of 40", "by": "main"}
+    r = check_mark(mark("12 of 40"), computed("12 of 40"), [sub], "/work/study")
+    assert r["evidence"]["code"] == "cd runs && wc -l a.log /work/studyx/c.log"
+    script = {"command": "cd /work/study && python3 - <<'PY'\nprint(open('/work/study/n.txt').read())\nPY", "output": "12 of 40"}
+    r = check_mark(mark("12 of 40"), computed("12 of 40"), [script], "/work/study")
+    assert r["evidence"]["code"] == "print(open('n.txt').read())"
+
+
 def test_a_number_inside_a_longer_number_does_not_show_it():
     r = check_mark(mark("12 of 40"), computed("of 400"), [call(CODE, "112 of 400")], "/data")
     assert r["status"] == "failed"
