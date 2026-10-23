@@ -22,7 +22,7 @@ import os from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { runnerArgv } from '../cards/argv.mjs'
+import { SOCKET_MAX, runnerArgv } from '../cards/argv.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN = dirname(HERE)
@@ -150,9 +150,20 @@ async function needs() {
   return { why: `this machine lacks what the sandbox needs: ${errors.join('; ')}`, fix: packages.length ? `Install ${packages.length > 1 ? 'them' : 'it'}: ${installCommand(packages)}` : '' }
 }
 
+/** A new folder (mode 700) for the probe's runner whose socket's path fits a Unix socket (SOCKET_MAX): in the temp
+ *  folder, else in /tmp, as a long TMPDIR would keep the runner from listening; null when neither can hold one. */
+function probeDir() {
+  for (const root of new Set([os.tmpdir(), '/tmp'])) {
+    if (join(root, 'thimble-probe-XXXXXX', 'run', 'cards.sock').length > SOCKET_MAX) continue
+    try { return fs.mkdtempSync(join(root, 'thimble-probe-')) } catch { /* the next */ }
+  }
+  return null
+}
+
 /** Start the card runner in the sandbox, as the hooks do, and wait for its answer: '' and the time it took, or why not. */
 async function probe() {
-  const dir = fs.mkdtempSync(join(os.tmpdir(), 'thimble-probe-'))
+  const dir = probeDir()
+  if (!dir) return { error: `no temp folder has a path short enough for the card runner's socket (tried ${[...new Set([os.tmpdir(), '/tmp'])].join(', ')})` }
   const [cards, run] = [join(dir, 'cards'), join(dir, 'run')]
   for (const d of [cards, run]) fs.mkdirSync(d, { mode: 0o700 })
   const sock = join(run, 'cards.sock')

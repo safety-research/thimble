@@ -33,8 +33,8 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; refused?: boolean; wide?: boolean } = {}) {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
   const asked: string[] = []
@@ -516,6 +516,20 @@ test('a card called while the session start still installs the sandbox draws: it
   expect(String(r.result)).not.toContain('did not draw')
   expect(w.asked).toContain('load')
   expect(w.runs.filter(a => String(a[1] ?? '').endsWith('/sandbox/setup.mjs')).length).toBe(2)
+})
+
+test('with long user and folder names the runner\'s socket still fits a Unix socket\'s path, in a folder of its own', async ($, on) => {
+  // a Unix socket's path holds at most 108 bytes (104 on macOS): every folder named after the user or a home is too long
+  const user = 'a-rather-long-user-name-'.repeat(3)
+  const w = world(on, { env: { USER: user, HOME: `/made-up/home/${user}`, THIMBLE_HOME: `/made-up/home/${user}/.thimble`, TMPDIR: `/made-up/tmp/${user}` } })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_14', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
+  expect(String(r.result)).not.toContain('did not draw')
+  // the runner's folder, made before it starts: the socket is `cards.sock` in it
+  const made = w.runs.filter(a => a[0] === 'sh' && /\/cards-[0-9a-f]+$/.test(String(a[a.length - 1]))).map(a => String(a[a.length - 1]))
+  expect(made.at(-1)).toMatch(/^\/tmp\/thimble-[0-9a-f]{12}\/cards-[0-9a-f]+$/)
+  expect(`${made.at(-1)}/cards.sock`.length).toBeLessThanOrEqual(100)
+  expect(w.asked).toContain('load')
 })
 
 test('the session ends: the runner stops and its folder goes', async ($, on) => {
