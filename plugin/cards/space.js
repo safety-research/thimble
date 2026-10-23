@@ -7,13 +7,18 @@
 //     a run of 3 or more row Boxes (a chart drawn a row per Box)
 //   - before and after a legend: a line of 2 or more keys, each a symbol and a word ("● managed  ● leaderless")
 //   - before a heading: a line that starts at its left edge with a bold word, under a line that is not one (a list of
-//     bold-led rows stays together)
+//     bold-led rows stays together), and not a row among rows like it (a list or a chart's lane whose selected row is
+//     bold: the bold there is the selection, not a heading)
 //
 // Nothing changes where the parts are already apart (a blank line), or when the view spaced its column itself (a gap,
 // a part's margin above or below it). A card gets at most MAX_ROWS more rows, and a card of fewer than MIN_ROWS rows
-// stays as it is. A line that starts with a selection marker (▸) is never a heading, so the rows stay where they are
-// when the selection moves. The runner leaves a view that listens to clicks by cell (surface.onPointer) as it drew it,
-// since its cells are the view's own. Pure: no Node.
+// stays as it is. A line that starts with a selection marker (▸) is never a heading.
+//
+// The blank rows never move while the person uses the card: what the rules read (bold, words, a moved note) can change
+// from one state to the next, so the caller keeps a `plan` for each card version, and the places the first drawing of
+// a column of that many parts at that width got are kept for every later drawing of it. Only a view that draws more
+// or fewer parts gets places of its own. The runner leaves a view that listens to clicks by cell (surface.onPointer)
+// as it drew it, since its cells are the view's own. Pure: no Node.
 
 import { layoutLines } from './layout.js'
 
@@ -77,6 +82,23 @@ function boldLed(n, marked) {
   return /^[\p{L}\p{N}]/u.test(text)
 }
 
+/** A row of a list or a chart: a line that starts at its left edge with a letter or digit (a selection marker taken
+ *  off) and goes on past a gap of two or more spaces, or in runs of more than one style. */
+function rowLike(n) {
+  if (!line(n)) return false
+  const text = textOf(n).replace(MARKER, '')
+  return /^[\p{L}\p{N}]/u.test(text) && (/\S {2,}\S/.test(text.trimEnd()) || runsOf(n).filter(r => r.text.trim()).length > 1)
+}
+
+/** A bold-led line that is a row among rows like it, with some of its words not bold: the selected row of a list,
+ *  which the next key moves to another row. A line bold all through (a table's header) is still a heading. */
+function selectedRow(K, i) {
+  const n = K[i]
+  if (!rowLike(n) || !runsOf(n).some(r => r.text.trim() && !r.bold)) return false
+  const like = m => !!m && m.t === n.t && rowLike(m)
+  return like(K[i - 1]) || like(K[i + 1])
+}
+
 /** The column the blank rows go in: the tree's, or that of the one column Box it wraps. */
 function topColumn(tree) {
   let n = tree
@@ -90,12 +112,27 @@ const margined = n => isNode(n) && ['margin', 'marginY', 'marginTop', 'marginBot
 const num = v => (typeof v === 'number' ? v : typeof v === 'string' && v !== '' ? 1 : 0)
 
 /** The tree with blank rows between its top column's parts; the tree itself when none goes in, or when it takes fewer
- *  than MIN_ROWS rows at `width` (a small card reads well as it is). */
-export function spaced(tree, width) {
+ *  than MIN_ROWS rows at `width` (a small card reads well as it is). `plan`, a Map the caller keeps for one card
+ *  version, holds the places each column of a number of parts got at a width the first time, and keeps them. */
+export function spaced(tree, width, plan) {
   const col = topColumn(tree)
   if (!col || col.p.flexDirection === 'column-reverse' || num(col.p.gap) || num(col.p.rowGap)) return tree
   const K = col.c || []
-  if (K.length < 2 || K.some(margined) || layoutLines(tree, width).lines.length < MIN_ROWS) return tree
+  const key = `${width}:${K.length}`
+  let put = plan?.get(key)
+  if (!put) {
+    put = places(tree, width, K)
+    plan?.set(key, put)
+  }
+  if (!put.size) return tree
+  const c = K.flatMap((k, i) => (put.has(i) ? [{ t: 'Text', p: {}, c: [' '] }, k] : [k]))
+  const swap = n => (n === col ? { ...n, c } : { ...n, c: n.c.map(swap) })
+  return swap(tree)
+}
+
+/** The places of the blank rows in the column K: the indexes of the parts each goes above. */
+function places(tree, width, K) {
+  if (K.length < 2 || K.some(margined) || layoutLines(tree, width).lines.length < MIN_ROWS) return new Set()
   const at = []
   const add = i => { if (i > 0 && i < K.length && !at.includes(i)) at.push(i) }
   if (sentence(K[0])) add(1)
@@ -104,7 +141,7 @@ export function spaced(tree, width) {
     if (panel(K[i]) && !panel(K[i - 1])) add(i)
     if (panel(K[i]) && !panel(K[i + 1])) add(i + 1)
     if (legend(K[i])) { add(i); add(i + 1) }
-    if (i > 0 && boldLed(K[i], false) && !boldLed(K[i - 1], true)) add(i)
+    if (i > 0 && boldLed(K[i], false) && !boldLed(K[i - 1], true) && !selectedRow(K, i)) add(i)
   }
   // a run of 3 or more row Boxes: a chart
   for (let i = 0; i < K.length;) {
@@ -113,9 +150,5 @@ export function spaced(tree, width) {
     if (j - i >= 3) { add(i); add(j) }
     i = Math.max(j, i + 1)
   }
-  const put = new Set(at.filter(i => !blank(K[i]) && !blank(K[i - 1])).sort((a, b) => a - b).slice(0, MAX_ROWS))
-  if (!put.size) return tree
-  const c = K.flatMap((k, i) => (put.has(i) ? [{ t: 'Text', p: {}, c: [' '] }, k] : [k]))
-  const swap = n => (n === col ? { ...n, c } : { ...n, c: n.c.map(swap) })
-  return swap(tree)
+  return new Set(at.filter(i => !blank(K[i]) && !blank(K[i - 1])).sort((a, b) => a - b).slice(0, MAX_ROWS))
 }
