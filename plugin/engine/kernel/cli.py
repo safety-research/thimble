@@ -9,11 +9,14 @@ In a shell:
                                    release still needs, once
     thimble fixes                  your fixes that are not in the release: on, off or ready (also: thimble fix list)
     thimble fix show N             what fix N does, in a few lines
+    thimble fix diff N             fix N's change to thimble's code
     thimble fix apply N            use a ready fix now (it asks y/N first)
     thimble fix share N [--open]   a link that posts fix N as a GitHub issue; you check it on GitHub first
     thimble fix off [N]            one fix off, or all of them (the plain release)
     thimble fix on [N]             one fix on, or all of them again (asks y/N first)
     thimble fix merge A B C        fixes B and C become part of fix A: one change, one title (asks y/N first)
+    thimble fix remove N           fix N leaves your list (off first, when it is on)
+    thimble fix export N [--to D]  save fix N as files: its patch (git am applies it) and its record
 
 In Claude Code, /thimble-fix <what should work differently> asks Claude for a new fix.
 
@@ -453,14 +456,18 @@ FIX_HELP = """Your changes to thimble (fixes), kept in $THIMBLE_HOME/fixes (engi
     thimble fixes                    your fixes that are not in the release, one row each: number, state (on, off,
                                      ready), title, date and the start of your words (also: thimble fix list)
     thimble fix show N               what fix N does, in a few lines
+    thimble fix diff N               fix N's change to thimble's code
     thimble fix apply N              use a ready fix now (it asks y/N first)
     thimble fix share N [--open]     a link that posts fix N as a GitHub issue; you check it on GitHub first
     thimble fix off N | on N         turn fix N off, or on (on asks for your key in the terminal)
     thimble fix off | on             all your fixes off (the plain release), or on again
     thimble fix merge A B C          fixes B and C become part of fix A: one change, one title (asks y/N first)
+    thimble fix remove N             fix N leaves your list (off first, when it is on)
+    thimble fix export N [--to DIR]  save fix N as files: its patch (git am applies it) and its record
 
-Ask for a fix in Claude Code or the browser: /thimble-fix <what should work differently>. A fix goes on only by your
-key: y on the fix in thimble, or thimble fix apply N in your own terminal."""
+Fixes act across your sessions, so they are listed and managed here, in a shell. Ask for a fix in Claude Code or the
+browser: /thimble-fix <what should work differently>. A fix goes on only by your key: y on the fix's line in thimble,
+or thimble fix apply N in your own terminal."""
 
 
 UPDATE_HELP = """thimble update: the newest thimble release (its newest vX.Y.Z tag on GitHub), for the terminal plugin and the

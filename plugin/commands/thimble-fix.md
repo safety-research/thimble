@@ -1,5 +1,5 @@
 ---
-description: "Change thimble for yourself: say what should work differently. N and words change fix N; new and words make a new fix. Alone: your fixes."
+description: "Change thimble for yourself: say what should work differently. N and words change fix N; new and words make a new fix. Alone: how to ask, and where to manage your fixes."
 argument-hint: "[N | new] [what should work differently]"
 disable-model-invocation: true
 ---

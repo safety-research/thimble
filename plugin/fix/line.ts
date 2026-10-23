@@ -16,7 +16,7 @@
 //   off       ○ <title> is off · thimble reloaded           (until the next prompt)
 //   failed    × Fix 7 did not pass: <title> · <why>         d what changed · r redo · n later
 //             (a <why> too long for the row, such as a refusal that names files, gets a row of its own)
-//   request   ◇ Saved as a request with no code: <title>    n ok · /thimble-fix lists it
+//   request   ◇ Saved as a request with no code: <title>    n ok · thimble fix list, in a shell, lists it
 //   update    ↑ thimble 0.10.3 · 3 fixes carried · 1 needs redo   (until the next prompt)
 //   release   ↑ thimble 0.10.3 is out (you have 0.10.2) · thimble update in a shell   (at session start)
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
@@ -24,7 +24,7 @@
 //               1 <title> · 3 <title> · 0 a new fix · n never mind   (a number makes the words a change to that fix)
 //
 // y applies: from then on the fix's code runs as thimble, so only the person's key does it (fixes.ts). n leaves a ready
-// fix ready in Your fixes, where y turns it on later.
+// fix ready in the person's list (thimble fix list, in a shell), where thimble fix apply N turns it on later.
 import type { EngineInterface } from 'claude-code'
 
 import { thimbleHome } from '../core/home'
@@ -61,10 +61,11 @@ async function pressLine($: Engine, id: number, kind: string, k: string): Promis
     if (l?.id === id) await setFixLine($, { ...l, open: !l.open })
   } else if (k === 'r') said = await redoFix($, id)
   else if (k === 'n') {
-    // a ready fix stays ready in the list, where y turns it on later; a failed one stays failed there, for r
+    // a ready fix stays ready in the person's list (thimble fix list), where thimble fix apply turns it on later; a failed
+    // one stays failed there
     await setFixLine($, null)
     if (kind === 'failed') said = await notNow($, id)
-    if (!said && kind === 'ready') $.ui.toast(`Fix ${id} waits in Your fixes, ready: /thimble-fix lists it, and y there turns it on.`)
+    if (!said && kind === 'ready') $.ui.toast(`Fix ${id} waits, ready: in a shell, thimble fix apply ${id} turns it on, and thimble fix list lists your fixes.`)
   }
   if (said) await setFixLine($, { id, kind: 'problem', said })
 }
@@ -159,9 +160,9 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     second = keysRow(els, [['d', 'what changed'], ['r', 'redo'], ['n', 'later']])
   } else if (l.kind === 'request') {
     first = [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
-    second = [...keysRow(els, [['n', 'ok']]), dim('m', ' · /thimble-fix lists it, and s submits it')]
+    second = [...keysRow(els, [['n', 'ok']]), dim('m', ' · thimble fix list, in a shell, lists it')]
   } else if (l.kind === 'update') {
-    first = [Text({ key: 'g', color: accent(), children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · /thimble-fix lists your fixes')]
+    first = [Text({ key: 'g', color: accent(), children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · thimble fix list, in a shell, lists your fixes')]
   } else if (l.kind === 'release') {
     first = [Text({ key: 'g', color: accent(), children: '↑ ' }), Text({ key: 't', children: l.said || 'a new thimble release is out' })]
   } else if (l.kind === 'ask') {

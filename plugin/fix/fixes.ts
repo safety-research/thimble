@@ -1,14 +1,14 @@
 // fixes.ts: the person's fixes as the hooks module knows them, and what the person's keys do to them. The kernel
 // (`thimble fix …`, engine/kernel/fixes.py) holds the records and makes every change to live; this module calls it as
-// the person's own command and keeps what the bar, the line and the pane draw.
+// the person's own command and keeps what the bar and the line draw.
 //
 //   refreshFixes($)          the kernel's list, into $.state fixes
 //   fixLineNow($), setFixLine  the one line above the bar for one fix (line.ts draws it)
-//   applyFix($, id)          y, on the line or in the list: a secret made at this press, its sha256 in
+//   applyFix($, id)          y, on the line: a secret made at this press, its sha256 in
 //                            asks/<id>.json, the secret to `thimble fix apply` on stdin; then /reload-plugins, at
 //                            once, or at the end of Claude's turn when it is mid-reply; in a session that loads
 //                            thimble with --plugin-dir, the line names the restart instead
-//   undoFix, notNow, removeFix, allOff, allOn   the other keys
+//   undoFix, notNow           the line's other keys
 //   reloadPlugins($)         /reload-plugins, once the session is idle, so the person never types it
 //
 //   state: fixes (the list), fixLine (the line)
@@ -118,14 +118,6 @@ export async function setFixLine($: Engine, l: FixLine | null): Promise<void> {
   await $.state.set(LINE, l as never)
 }
 
-/** The files a fix changed, in a few words: `3 files +29 −2`. */
-export function sizeOf(f: Pick<Fix, 'files'>): string {
-  const files = f.files || []
-  const add = files.reduce((n, x) => n + (x.add || 0), 0)
-  const del = files.reduce((n, x) => n + (x.del || 0), 0)
-  return `${files.length} file${files.length === 1 ? '' : 's'} +${add} −${del}`
-}
-
 /** A load of the plugins asked for and not run yet: Claude Code refuses one asked inside a hook a turn waits on, so it
  *  stays due until the next look outside one. */
 let reloadDue = false
@@ -184,7 +176,7 @@ async function load($: Engine, d: Any): Promise<void> {
   })
 }
 
-/** y on a ready fix, or u on an off one in the list: the fix goes on, and the session loads it. */
+/** y on a ready fix: the fix goes on, and the session loads it. */
 export async function applyFix($: Engine, id: number): Promise<string | null> {
   const secret = await pressKey($, id)
   const r = await kernelFix($, ['apply', String(id), '--ask', '-'], { stdin: secret, timeoutMs: 300000, doing: `applying fix ${id}` })
@@ -234,30 +226,11 @@ export async function notNow($: Engine, id: number): Promise<string | null> {
   return r.ok ? null : `× ${cut(r.err || 'thimble fix notnow gave nothing', 220)}`
 }
 
-/** x in the list: the fix leaves the list (off first when it was on). */
-export async function removeFix($: Engine, id: number): Promise<string | null> {
-  const r = await kernelFix($, ['remove', String(id)], { timeoutMs: 300000, doing: `removing fix ${id}` })
-  if (!r.ok) return `× ${cut(r.err || 'thimble fix remove gave nothing', 220)}`
-  await refreshFixes($)
-  if ((await fixLineNow($))?.id === id) await setFixLine($, null)
-  await load($, jsonOf<Any>(r.out))
-  return null
-}
-
-/** Turn every fix off (the plain release), or on again. */
-export async function allOffOn($: Engine, on: boolean): Promise<string | null> {
-  const r = await kernelFix($, [on ? 'on' : 'off'], { timeoutMs: 300000, doing: on ? 'turning your fixes on' : 'turning your fixes off' })
-  if (!r.ok) return `× ${cut(r.err || 'thimble fix gave nothing', 220)}`
-  await refreshFixes($)
-  if (/reload-plugins/.test(r.out)) await load($, { reload: true })
-  return null
-}
-
-/** A fix's change, as `git show` gives it. */
-export async function diffText($: Engine, id: number): Promise<string> {
-  const r = await kernelFix($, ['diff', String(id)], { timeoutMs: 30000 }).catch(() => null)
-  return r?.ok ? r.out : ''
-}
+/** /thimble-fix alone: how to ask, and where the fixes are listed and managed (a shell: they act across sessions). */
+export const FIX_ALONE = [
+  'Ask for a change to thimble with /thimble-fix <what should work differently>.',
+  'Your fixes are listed and managed in a shell: thimble fix list (thimble fix --help shows the rest).',
+].join('\n')
 
 /** /thimble-fix update: thimble update runs in a shell, not in this session, because it changes the thimble the session
  *  runs. The reply says so, with the commands. */

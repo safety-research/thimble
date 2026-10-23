@@ -888,7 +888,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
 
 
 def merge(ids: list[int | str], secret: str | None, title: str | None = None, summary: str | None = None) -> dict[str, Any]:
-    """The person's key (merge in Your fixes, or thimble fix merge A B C in a shell): the fixes become one, under the
+    """The person's key (thimble fix merge A B C in a shell): the fixes become one, under the
     first one's id: one commit, on the commit the first fix with code sits on, with each fix's change in the order
     given; one title and summary (the first fix's, when none is given); every fix's words. A request with no code
     gives its words only. The others' records say merged; their refs stay, and each merged commit is kept under
@@ -975,7 +975,7 @@ def merge_typed(ids: list[int | str], title: str | None = None, summary: str | N
     names = ", ".join(f'{r["id"]} "{r["title"]}"' for r in recs)
     secret = key_in_terminal(f"Merge fixes {names} into fix {recs[0]['id']}?")
     if secret is None:
-        raise FixError("only your key merges fixes: run thimble fix merge in your own terminal, or press g in Your fixes")
+        raise FixError("only your key merges fixes: run thimble fix merge in your own terminal")
     if not secret:
         return {"said": "Nothing merged.", "reload": False}
     write_json(home() / "asks" / f"{recs[0]['id']}.json", {"key": key_hash(secret)})
@@ -2139,7 +2139,7 @@ def send(fid: int | str, answer: str, secret: str | None) -> dict[str, Any]:
     check_ask(rec["id"], secret)
     d = home() / "drafts" / str(rec["id"])
     if not (d / "pr.md").exists():
-        raise FixError(f"fix {rec['id']} has no draft; press s on it in Your fixes")
+        raise FixError(f"fix {rec['id']} has no draft; thimble fix share {rec['id']} shares it")
     out_dir = home() / "sent" / str(rec["id"])
     out_dir.mkdir(parents=True, exist_ok=True)
     for name in ("pr.md", "fix.patch", "title"):

@@ -11,7 +11,8 @@
 //                          changes fix N, new <words> always makes a new fix. The person asked for it after their
 //                          /thimble-fix <words>; else Claude did, when it saw thimble misbehave (skills/fix-thimble/
 //                          SKILL.md). Claude reads what came of it in the skill's place, and is told when the fix ends
-//   /thimble-fix           Your fixes (pane.tsx), at once, without a turn of Claude's
+//   /thimble-fix           how to ask for a fix, and that fixes are listed and managed in a shell (thimble fix), at
+//                          once, without a turn of Claude's
 //   the fixer's calls      its shell runs in the sandbox runtime (no network, reads only the system, its tools and
 //                          the copy, writes only the copy), at most 5 minutes a command, with no dialog unless the
 //                          person's rules deny the command; Write and Edit only in its copy; its other calls go
@@ -35,9 +36,8 @@ import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes, recoverFixers } from './fixer'
-import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, UPDATE_IN_SHELL, updateRan } from './fixes'
+import { fixesDir, fixesNow, fixLineNow, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
-import { openFixes } from './pane'
 import { request } from './request'
 
 type Engine = EngineInterface
@@ -79,7 +79,7 @@ async function startFromSkill($: Engine, words: string): Promise<string> {
 }
 
 /** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), never Claude's. */
-const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|done|apply|merge|notnow|redo|undo|remove|sandbox|draft|keep|send)\b/
+const OWN_VERBS = /\bthimble\s+fix\s+(?:new|round|again|done|apply|merge|notnow|redo|undo|remove|sandbox|draft|keep|send)\b/
 
 /** The fixers this load knows, so a guard that fails can still refuse their calls. */
 /** Whether this session looked for a newer release already (kept across a reload of the module). */
@@ -159,10 +159,7 @@ export const registerFix: Register = on => {
   on('command.run', { command: /^(?:thimble:)?thimble-fix$/ }, async ($, e, next) => {
     const words = String(e.args || '').trim()
     if (/^update$/i.test(words)) return { text: UPDATE_IN_SHELL }
-    if (!words) {
-      const placed = await openFixes($)
-      return placed ? {} : { text: 'Your fixes open in a pane in a wider terminal. In a shell: thimble fix list' }
-    }
+    if (!words) return { text: FIX_ALONE }
     await $.state.set(ASKED, 2 as never)
     if (e.command !== 'thimble-fix') return next(e)
     $.clock.after(0, () => {

@@ -79,13 +79,8 @@ export const TEXTS = {
   },
   'fix-draft': {
     about: "a public GitHub issue's title, what was wrong and how it was fixed, for one of the person's fixes, before the privacy scan",
-    reader: 'fix/share.ts',
-    use: 'one model call per fix the person shares',
-  },
-  'fix-merge': {
-    about: "one title and summary for several of the person's fixes that become one",
-    reader: 'fix/merge.ts',
-    use: 'one model call when the person merges fixes in Your fixes',
+    reader: 'browser/backend/app/fix_share.py',
+    use: 'one model call per fix the person shares from the browser',
   },
   reapply: {
     about: 'bring back the fixes thimble update set aside, each one the new release still needs, once',

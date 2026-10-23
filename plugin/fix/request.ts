@@ -85,7 +85,7 @@ export async function request($: Engine, said: string, by: Asker = 'person', tel
   if (bad) {
     await kernelFix($, ['done', String(fix.id), '--request', '--no-tests', '--summary', '-'], { stdin: bad })
     await refreshFixes($)
-    return { text: `× ${bad} The words are kept as a request: /thimble-fix lists it.`, fix, failed: true, round }
+    return { text: `× ${bad} The words are kept as a request: thimble fix list, in a shell, lists it.`, fix, failed: true, round }
   }
   if (by === 'person' && tell) await tellAtNextPrompt($, `fix-${fix.id}`, `The person asked thimble's fixer for a change to thimble itself (fix ${fix.id}); it works in the background in a copy, and thimble shows the person the result. Nothing for you to do.`)
   return round

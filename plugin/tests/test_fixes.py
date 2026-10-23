@@ -713,7 +713,8 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert cli.main(["--help"]) == 0
     help_ = capsys.readouterr().out
     for line in ("thimble update ", "thimble reapply ", "thimble fixes ", "thimble fix show N", "thimble fix apply N",
-                 "thimble fix share N", "thimble fix off [N]", "thimble fix on [N]", "thimble fix merge A B C"):
+                 "thimble fix share N", "thimble fix off [N]", "thimble fix on [N]", "thimble fix merge A B C",
+                 "thimble fix diff N", "thimble fix remove N", "thimble fix export N"):
         assert f"\n    {line}" in help_, line
     assert all(f"thimble {w}" not in help_ for w in ("doctor", "demo", "browser"))
     assert help_.index("thimble fix on [N]") < help_.index("Claude runs these in a session") < help_.index("thimble label [NAME]")

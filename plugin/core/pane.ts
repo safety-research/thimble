@@ -8,8 +8,6 @@
 //   claims     ../claims/seam.ts        the conversation's claims (c)
 //   threads    ../threads/seam.ts       the side threads (t)
 //   thread     ../threads/seam.ts       one side thread: what it is about, its turns, its input
-//   fixes      ../fix/pane.tsx          Your fixes: the person's changes to their thimble (/thimble-fix)
-//   fixsubmit  ../fix/pane.tsx          a fix's submit preview: what the scan removed, the exact text that leaves
 //
 // Under the evidence, labels, coverage and claims panes stands the pane's side thread (threads/seam.ts threadUnder):
 // its conversation and an input bar that asks it about what the pane shows, as 0.10's side panel had under each pane.
@@ -20,7 +18,6 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { failCleared, failLineNow } from '../bar/notice'
 import { drawClaimsPane } from '../claims/seam'
-import { drawFixes, drawFixSubmit } from '../fix/pane'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
@@ -76,10 +73,10 @@ export async function paneNow($: Engine): Promise<PaneNow | null> {
 }
 
 /** A /clear or a /resume (hooks/turnover.ts): a pane on the earlier conversation's records closes (thimble's settings
- *  and the person's fixes are no conversation's). */
+ *  are no conversation's). */
 export async function turnPane($: Engine): Promise<void> {
   const now = await paneNow($)
-  if (now && !['settings', 'fixes', 'fixsubmit'].includes(now.kind)) await closePane($)
+  if (now && now.kind !== 'settings') await closePane($)
 }
 
 /** A pane's drawing with its side thread under it (threads/seam.ts threadUnder); the drawing alone when the thread
@@ -103,8 +100,6 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     if (now?.kind === 'settings') return await drawSettings($, e, now.args, els)
     if (now?.kind === 'claims') return withThread($, e, now, els, await drawClaimsPane($, e, now.args, els))
     if (now?.kind === 'threads' || now?.kind === 'thread') return await drawThreadsPane($, e, now.kind, now.args, els)
-    if (now?.kind === 'fixes') return await drawFixes($, e, now.args, els)
-    if (now?.kind === 'fixsubmit') return await drawFixSubmit($, e, now.args, els)
     return els.Text({ dimColor: true, children: now ? `thimble has no pane ${now.kind}.` : 'Nothing is open here.' })
   } catch (err) {
     return els.Text({ color: 'error', wrap: 'wrap', children: `This pane could not be drawn (${String((err as Error)?.message || err).slice(0, 160)}). Press esc, then open it again.` })

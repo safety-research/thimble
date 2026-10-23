@@ -117,14 +117,6 @@ declare module 'claude-code' {
       fixerBox: Record<string, string[]>
       /** the fixes Claude started with the fix-thimble skill, by the fix's id (fixer.ts) */
       fixBy: Record<string, 'claude'>
-      /** what Your fixes shows (pane.tsx): the selected fix, the marked ones, whether the diff shows, or what s shared */
-      fixView: { sel: number | null; marked: number[]; diff: boolean; share?: boolean } | null
-      /** the fixes the last s shared, each with what `thimble fix share` said or why it did not (share.ts Shared) */
-      fixShare: { ids: number[]; items: unknown[]; pending: boolean } | null
-      /** the submit preview: the fixes it walks, the one it shows, and why a draft could not be made */
-      fixSubmit: { ids: number[]; at: number; problem?: string } | null
-      /** a fix's draft as the preview reads it, by the fix's id (pane.tsx) */
-      fixDraft: StateFamily<unknown>
 
       // ---- squeeze (squeeze/): its records are each message's part `squeeze` (core/answers.ts)
       /** a record's state beside its text, by its id (a row, or `<host row>#cu` for a catch-up): { running, want,

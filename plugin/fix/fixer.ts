@@ -292,7 +292,7 @@ export async function fixerEnded($: Engine, e: Any, id: number): Promise<void> {
   try {
     again = await ended($, e, id)
   } catch (err) {
-    await setFixLine($, { id, kind: 'problem', said: `Fix ${id} could not be checked: ${cut(String((err as Error)?.message || err), 200)}. /thimble-fix lists it.` }).catch(() => undefined)
+    await setFixLine($, { id, kind: 'problem', said: `Fix ${id} could not be checked: ${cut(String((err as Error)?.message || err), 200)}. thimble fix list, in a shell, lists it.` }).catch(() => undefined)
   } finally {
     ending.delete(id)
   }
