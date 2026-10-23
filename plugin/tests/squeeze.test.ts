@@ -363,3 +363,33 @@ test('a squeezed version that words its citations anew: each citation its own ho
   expect(band).toContain('3 failed')
   expect(band).not.toContain('12 runs')
 })
+
+// A catch-up words the replies' citations anew, and each reply numbers its citations from 1. Each citation of the
+// catch-up stands for the reply's citation that states the same claim: a press on a reworded one acts on that citation
+// (the tray stands on it), and citations of two replies light apart, each in its own hover group
+test("a catch-up's reworded citations: a press acts on the reply's citation with the same claim, and two replies' citations light apart", async ($, on) => {
+  const t = await setup($, on, ['Of all [12 nightly runs](#), [3 of them failed](#); the retry then passed on [the slow package mirror](#).'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'Of the [12 runs](#), [3 failed](#).', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed on the [slow mirror](#).', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.press('s')
+  await t.press('4')
+  await t.clock.advance(5000)
+  const host = answer('row-t3', 'The retry passed on the [slow mirror](#).')
+  const all = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : [n, ...[n.props?.children, n.children].flat(Infinity).flatMap(all)])
+  const cites = all(await $.ui.render(host)).filter(n => n.type === 'Button' && /^citation /.test(String(n.props.label)))
+  const labels = [...new Set(cites.map(b => String(b.props.label)))]
+  expect(labels.length).toBe(3)
+  // three hover groups: the mirror (the second reply's citation 1) does not light with the 12 runs (the first's 1)
+  const scopes = labels.map(l => [...new Set(cites.filter(b => b.props.label === l).map(b => b.hover.scope))])
+  expect(scopes.every(s => s.length === 1)).toBe(true)
+  expect(new Set(scopes.flat()).size).toBe(3)
+  // a press on the reworded mirror: the tray stands on the second reply's citation
+  await t.press('s')
+  const ui = await $.ui.mount(host)
+  await ui.press({ key: cites.find(b => /package mirror/.test(b.props.label))!.props.key })
+  await ui.unmount()
+  const band = await t.bar()
+  expect(band).toContain('slow mirror')
+  expect(band).not.toContain('12 runs')
+})
