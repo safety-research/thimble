@@ -4,6 +4,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
+import { busyWhile } from '../bar/busy'
 import { failNotice, noticeLine, promptTyped } from '../bar/notice'
 import { promptStub } from './stubs'
 
@@ -182,3 +183,23 @@ test('a failure is a line above the bar in red, a notice one not in red; the nex
   expect((await barRows($, ELS, 100, { on: () => true })).length).toBe(1)
 })
 
+
+test('a long busy step keeps the bar to one row: its other steps go, then its words are cut', async () => {
+  let now = 0
+  const state: Record<string, unknown> = {}
+  const $ = { ...stateOnly(state), clock: { now: async () => now, after: () => ({ cancel() {} }) } } as Any
+  let alive = true
+  await busyWhile($, 'checking 3 citations', async () => alive)
+  await busyWhile($, 'fixing fix 6 with a made-up long step name', async () => alive)
+  now = 5000
+  const wide = textOf(await barRows($, ELS, 160, { on: () => false }))
+  expect(wide).toContain('checking 3 citations')
+  expect(wide).toContain('fixing fix 6 with a made-up long step name')
+  const narrow = textOf(await barRows($, ELS, 50, { on: () => false }))
+  expect(narrow).not.toContain(' · ')
+  expect(narrow.length).toBeLessThanOrEqual(50)
+  const narrower = textOf(await barRows($, ELS, 26, { on: () => false }))
+  expect(narrower).toContain('…')
+  expect(narrower.length).toBeLessThanOrEqual(26)
+  alive = false
+})

@@ -3,7 +3,7 @@
 // ("this" means something in it); prompts/fixer.md opens its first message.
 //
 //   startFixer($, fix, words)   forks the session into the copy, with the words and a text copy of what thimble shows
-//                               now (screen.ts); the bar shows `fixing: <title>` with its time
+//                               now (screen.ts); the bar shows `fixing fix N` with its time
 //   fixerCall($, e, id)         each of its tool calls: Bash runs in the sandbox runtime (the kernel's `fix sandbox`
 //                               gives the command's start: no network, reads only the system, its tools and the copy,
 //                               writes only the copy and its temp folder), in the foreground, for at most 5 minutes;
@@ -148,10 +148,10 @@ async function start($: Engine, fix: Fix, earlier: boolean, screen: string): Pro
   const refines = fix.refines != null ? await fixOf($, fix.refines) : null
   // the person's other fixes that are on, newest first: the words may be about one of them
   const others = ((await fixesNow($))?.fixes ?? []).filter(f => f.state === 'on' && f.commit).sort((a, b) => (b.on_at ?? 0) - (a.on_at ?? 0)).slice(0, 8)
-  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier ? `${fixesDir(await thimbleHome($))}/tmp/${fix.id}/earlier.patch` : null, task, await askerOf($, fix.id), screen, refines, others), description: `fix ${fix.id}: ${cut(fix.title, 40)}`, cwd: fix.work || undefined })
+  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier ? `${fixesDir(await thimbleHome($))}/tmp/${fix.id}/earlier.patch` : null, task, await askerOf($, fix.id), screen, refines, others), description: `fix ${fix.id}: ${cut(fix.title, 40)}`, cwd: fix.work || undefined, name: `fix-${fix.id}` })
   if (r.deny !== undefined || !r.agentId) return `The fixer did not start (${cut(String(r.deny || 'no agent started'), 200)}).`
   await $.state.set(FIXERS, { ...(await fixers($)), [r.agentId]: fix.id } as never)
-  const word = `fixing: ${cut(fix.title, 36)} · in a copy`
+  const word = `fixing fix ${fix.id}`
   void busyWhile($, word, async () => !ending.has(fix.id) && (await fixOf($, fix.id))?.state === 'working')
   watch($, fix.id)
   return null

@@ -47,10 +47,10 @@ export function forkOf(agentId: string | undefined): { kind: ForkKind; agentId: 
   return kind && agentId ? { kind, agentId } : null
 }
 
-export async function spawnFork($: Engine, o: { kind: ForkKind; prompt: string; description: string; type?: string; cwd?: string }): Promise<{ agentId?: string; deny?: string }> {
+export async function spawnFork($: Engine, o: { kind: ForkKind; prompt: string; description: string; type?: string; cwd?: string; name?: string }): Promise<{ agentId?: string; deny?: string }> {
   let r: { agentId?: string; deny?: string } | undefined
   try {
-    r = await $.agent.spawn({ subagentType: o.type ?? 'fork', prompt: o.prompt, description: o.description, ...(o.cwd ? { cwd: o.cwd } : {}) })
+    r = await $.agent.spawn({ subagentType: o.type ?? 'fork', prompt: o.prompt, description: o.description, ...(o.cwd ? { cwd: o.cwd } : {}), ...(o.name ? { name: o.name } : {}) })
   } catch (err) {
     return { deny: String((err as Error)?.message || err) }
   }

@@ -226,7 +226,7 @@ test("a request forks the session into its copy with a text copy of the screen; 
   expect(String(r.text)).toContain('in a copy (fix 1, "make the bar say read")')
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("make the bar's coverage item say read")
   // a fork (no agent type of its own), in the copy, whose first message opens with the fixer's task
-  expect(s.spawns[0]).toMatchObject({ subagentType: 'fork', cwd: WORK })
+  expect(s.spawns[0]).toMatchObject({ subagentType: 'fork', cwd: WORK, name: 'fix-1' })
   const first = String(s.spawns[0].prompt)
   expect(first.startsWith('PROMPT fixer')).toBe(true)
   expect(first).toContain("The person asked for this change to their thimble (fix 1):\n\nmake the bar's coverage item say read")

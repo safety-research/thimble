@@ -15,7 +15,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
-import { textWidth } from '../core/text.js'
+import { cut, textWidth } from '../core/text.js'
 import { ACCENT } from '../core/theme'
 import { vReady } from '../designer/v'
 import { fixLineRows } from '../fix/line'
@@ -93,6 +93,10 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   if (!preview && room() < 0) right = right.filter(x => x.id !== 'labels')
   if (!preview && room() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
   if (!preview && room() < 0) right = []
+  // then the busy item's other steps go, and its words are cut, so the bar keeps to one row
+  const b = left.findIndex(x => x.id === 'busy')
+  if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: left[b]!.words.split(' · ')[0]! }
+  if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: cut(left[b]!.words, Math.max(8, len(left[b]!.words) + room())) }
 
   const words = (x: Item, i: number): Any[] => [
     ...(x.glyph ? [Text({ key: `g${i}`, color: NAME_COLOR, children: `${x.glyph} ` })] : []),

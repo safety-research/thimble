@@ -142,7 +142,7 @@ export const registerFix: Register = on => {
       // a reload the line waited for: this is it
       else await reloaded($)
       const working = await ownFixes($, (list?.fixes ?? []).filter(f => f.state === 'working'))
-      for (const f of working) void busyWhile($, `fixing: ${cut(f.title, 36)} · in a copy`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
+      for (const f of working) void busyWhile($, `fixing fix ${f.id}`, async () => ((await refreshFixes($))?.fixes.find(x => x.id === f.id)?.state === 'working'))
       await recoverFixers($, working)
       // a newer release: one line says so, once per session (a reload starts the module again)
       if (list?.pointed && !(await $.state.get(UPDATED)).value) {
