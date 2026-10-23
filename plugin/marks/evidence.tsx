@@ -11,14 +11,16 @@
 // Printed output that is a table (a printed DataFrame) shows as its header over the row that holds the words.
 //
 // Two outcomes, as in the reply and the tray: verified (a corrected mark is verified too, and says what it was) and
-// failed, which says why in the warning color, with the evidence the check gave when it is real. The cited value is bold in the citations' purple (CITE_LOOK). What the check found wrong in the rest of the
+// failed, which says why in the warning color, with the evidence the check gave when it is real. The cited value is bold in the citations' look (citeWords). What the check found wrong in the rest of the
 // sentence follows. The mark's sentence shows as the person read it. Code is cut between tokens to fit the pane. The
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
 
+import { themeNow } from '../core/theme'
 import { plainSentence } from './message.js'
 import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
 import { tableLines } from './table.mjs'
+import { citeLook, wordsLook } from './view'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -33,20 +35,18 @@ const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = 
   failed: { word: 'failed', color: 'warning' },
 }
 
-/** The cited words' look wherever their evidence shows (this pane, the tray, the claims pane): bold in the citations'
- *  purple, the theme key Claude Code shades for the theme it draws in (auto too), so they read on a light and on a dark
- *  background and stand apart from a heads-up's orange. A color behind them did not: a theme's soft band is faint on a
- *  light background, and some terminals draw it yellow. */
-export const CITE_LOOK = { color: 'merged', bold: true } as const
+/** The cited words' look wherever their evidence shows (this pane, the tray, the claims pane): bold, in a citation's
+ *  look in the reply (view.ts citeLook: the text's color, underlined, on the citations' purple tint). */
+export const citeWords = () => ({ ...citeLook(), bold: true })
 
-/** A line of text with spans of it highlighted (the cited words in CITE_LOOK), as Text runs. */
+/** A line of text with spans of it highlighted (the cited words in citeWords), as Text runs. */
 export function highlighted(els: Any, text: string, spans: [number, number][], key: string): Any {
   const parts: Any[] = []
   let at = 0
   spans.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]).forEach(([a, b], k) => {
     if (a < at) return
     if (a > at) parts.push(text.slice(at, a))
-    parts.push(els.Text({ key: `h${k}`, ...CITE_LOOK, children: text.slice(a, b) }))
+    parts.push(els.Text({ key: `h${k}`, ...citeWords(), children: text.slice(a, b) }))
     at = b
   })
   if (at < text.length) parts.push(text.slice(at))
@@ -157,13 +157,15 @@ function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
 export async function drawEvidence($: EngineInterface, e: Any, args: unknown, els: Any): Promise<unknown> {
   const { Box, Text } = els
   const { row, n } = (args ?? {}) as { row?: string; n?: number }
+  await themeNow($)
   const reply = row ? await rowMarks($, row) : null
   const m: MarkItem | undefined = reply?.items.find(x => x.n === n)
   if (!m) return Text({ dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' })
   const st = STATUS[m.status] ?? STATUS.failed!
   const head = Text({ key: 'head', wrap: 'wrap', children: [
     Text({ key: 's', bold: true, ...(st.color ? { color: st.color } : {}), ...(st.dim ? { dimColor: true } : {}), children: st.word }),
-    Text({ key: 'w', children: `  ${m.shown.replace(/\*\*|`/g, '')}` }),
+    '  ',
+    Text({ key: 'w', ...wordsLook(m.status), children: m.shown.replace(/\*\*|`/g, '') }),
   ] })
   const rows: Any[] = [head]
   if (m.status === 'corrected' && m.was) rows.push(Text({ key: 'was', dimColor: true, wrap: 'wrap', children: `${m.rewrite ? 'sentence rewritten' : m.narrowed ? 'narrowed' : 'corrected'}; was ${(m.rewrite ? plainSentence(m.sentence) : m.was).replace(/\*\*|`/g, '')}` }))

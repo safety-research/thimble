@@ -229,7 +229,7 @@ test("a claim picked: its whole sentence wrapped under its first word, its chips
   assert.doesNotMatch(panel(second), /said in/)
   assert.ok(!repairable(second.shown))
   const runs = second.panel.flat()
-  assert.ok(runs.some(x => x.bold && x.tone === 'cite' && x.s === '3,752 saves' && x.part === 'ev-2'))
+  assert.ok(runs.some(x => x.bold && x.tint && x.s === '3,752 saves' && x.part === 'ev-2'))
   assert.ok(runs.some(x => x.tint && x.s === '3,752 saves'))
   assert.ok(runs.some(x => x.tone === 'code' && x.s.startsWith('print(')))
   // the chips count every check; a citation the check corrected says what it was; a long output line is cut round the

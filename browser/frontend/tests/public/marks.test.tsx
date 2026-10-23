@@ -28,7 +28,7 @@ test('each mark draws as its check says, verified or failed, and a click opens i
   ]
   const el = await mount(<ChatMarkdown text="[12](#) runs; [15 of 40](#) merged; [all](#) passed; [3](#) failed; [7](#) more." checks={checks} />)
   const looks = [...el.querySelectorAll('.mark')].map((m) => [m.getAttribute('data-mark-look'), m.textContent])
-  expect(looks).toEqual([['verified', '12'], ['verified', '12 of 40'], ['failed', 'all?'], ['failed', '3?'], ['checking', '7']])
+  expect(looks).toEqual([['verified', '12'], ['verified', '12 of 40'], ['failed', 'all×'], ['failed', '3×'], ['checking', '7']])
   // a failed mark's label says why in one line
   const failed = el.querySelectorAll<HTMLElement>('.mark .mark-words')[3]
   await act(async () => failed.dispatchEvent(new MouseEvent('click', { bubbles: true })))
@@ -84,9 +84,9 @@ test("the check's notes on the sentences around the marks are not shown: neither
   // a footer with nothing but notes is no footer
   const none = await mount(<MarksFooter items={[item(0, '12', { note })]} />)
   expect(none.textContent).toBe('')
-  // the failed citation has its ?, and its label says nothing of the note
+  // the failed citation has its ×, and its label says nothing of the note
   const el = await mount(<ChatMarkdown text="[12](#) runs; [all](#) passed." checks={checks} />)
-  expect([...el.querySelectorAll('.mark')].map((m) => m.textContent)).toEqual(['12', 'all?'])
+  expect([...el.querySelectorAll('.mark')].map((m) => m.textContent)).toEqual(['12', 'all×'])
   await act(async () => el.querySelectorAll<HTMLElement>('.mark .mark-words')[1].dispatchEvent(new MouseEvent('click', { bubbles: true })))
   await settle()
   const pop = document.querySelector('.mark-pop')

@@ -27,8 +27,9 @@ import { messageOf } from '../core/answers'
 import { tellOpened } from '../core/engaged'
 import { failNotice } from '../bar/notice'
 import { openPane, paneNow } from '../core/pane'
+import { themeNow } from '../core/theme'
 import { launchRepair, repairOf } from '../marks/checker'
-import { CITE_LOOK } from '../marks/evidence'
+import { citeWords } from '../marks/evidence'
 import { plainSentence } from '../marks/message.js'
 import { NOT_RUN, rowMarks, type MarkItem } from '../marks/store'
 import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
@@ -59,12 +60,12 @@ function look(tone: string | null | undefined): Record<string, unknown> {
 
 /** One row of runs: plain Text, with one Button for each stretch of runs that share a part (a press on it). Each
  *  Button's key is the row's key and its part, so no two in the pane share one: a dot is `<row>:n:<id>`. Cited words
- *  are underlined, and the cited words in evidence look as in the citations' card (CITE_LOOK). */
+ *  are underlined, and the cited words in evidence look as in the citations' card (citeWords). */
 function rowEl(els: Any, runs: Run[], key: string, press: (part: string) => unknown): unknown {
   const { Box, Button, Text } = els
   const span = (r: Run, i: number) => Text({
     key: `t${i}`, ...look(r.tone), ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}),
-    ...(r.tint ? CITE_LOOK : {}), children: r.s,
+    ...(r.tint ? citeWords() : {}), children: r.s,
   })
   if (!runs.length) return Text({ key, children: ' ' })
   if (!runs.some(r => r.part)) return Text({ key, wrap: 'truncate-end', children: runs.map(span) })
@@ -175,6 +176,8 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const W = Math.max(24, Number(e?.props?.bodyColumns) || 90)
   const H = Math.max(14, Number(e?.props?.scroll?.bodyRows) || 36)
   const { Box } = els
+  // the cited words' tint is the theme set's (marks/view.ts citeLook)
+  await themeNow($)
   const raw = await withMarks($, paneData(await claimsStore($)))
   const keys: Key[] = []
   const key = (k: string, label: string, onPress: () => unknown, id?: string) => keys.push({ k, label, onPress, ...(id ? { id } : {}) })

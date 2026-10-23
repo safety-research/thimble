@@ -40,6 +40,7 @@ import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { revealCard } from '../cards/draw'
+import { themeNow } from '../core/theme'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
 import { launchRepair, repairOf } from '../marks/checker'
@@ -48,7 +49,7 @@ import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
-import { messageEl } from '../marks/view'
+import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeView } from '../squeeze/seam'
 import { openThread, threadAsked } from '../threads/seam'
@@ -528,7 +529,7 @@ const CODE_INK = 'permission'
 type Unit = { h: number; el?: Any; code?: string }
 
 /** A line of evidence in the ruled block under the code or the file's place: a dim rule on the left, so code and
- *  output read apart, and the line, the cited words bold in the citation purple (CITE_LOOK). */
+ *  output read apart, and the line, the cited words bold in the citations' look (marks/evidence.tsx citeWords). */
 function ruled(els: Any, text: string, spans: [number, number][], w: number, key: string): Unit {
   const { Box, Text } = els
   const h = rowsOf(text, w - 2)
@@ -545,7 +546,7 @@ function ruled(els: Any, text: string, spans: [number, number][], w: number, key
  *  block, ended by a dim count of the output lines it leaves out; with c, all the code (as code), then all the output
  *  in the ruled block. For a file: its place (`place`, a click opens the side pane), then the cited line in the ruled
  *  block. For a card's value: the card's title, then the header over the cited row in the ruled block; printed output
- *  that is a table shows so too. The cited words bold in the citation purple. */
+ *  that is a table shows so too. The cited words bold in the citations' look. */
 function citationBody(els: Any, f: Frame, m: MarkItem | null, w: number, place: Any | null): Unit[] {
   const { Text } = els
   if (!m) return [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This citation is no longer in the session.' }) }]
@@ -666,8 +667,11 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   let units: Unit[] = []
   let words: { text: string; start: number; end: number } | null = null
   let status: ReturnType<typeof statusOf> | null = null
+  let citeStatus: MarkStatus | null = null
   if (f.kind === 'citation') {
     const m = await itemOf($, f.row, f.n)
+    citeStatus = m?.status ?? null
+    await themeNow($)
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
     units = citationBody(els, f, m, inner, await fileLinkEl($, els, f, m))
@@ -724,8 +728,10 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const avail = inner - 2
   const roomT = title.length + right.length + 3 <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
   const tone = TONES[f.kind]
+  // a citation's title is its words, drawn as the reply draws them (marks/view.ts wordsLook); the frame keeps its tone
+  const titleLook = f.kind === 'citation' ? wordsLook(citeStatus ?? 'failed') : { color: tone }
   const head = Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [
-    Text({ key: 't', bold: true, color: tone, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
+    Text({ key: 't', bold: true, ...titleLook, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
     status
       ? Text({ key: 'r', children: [Text({ key: 's', ...(status.color ? { color: status.color } : { dimColor: true }), children: status.word }), Text({ key: 'k', dimColor: true, children: ` · ${kind}` })] })
       : Text({ key: 'r', dimColor: true, children: right }),

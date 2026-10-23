@@ -12,6 +12,7 @@
 //                      When COLORFGBG says nothing, auto is the light set: its colors read on a light and on a dark
 //                      background (contrast 3.2 or more on both), and the dark set's do not on a light one.
 //   themeNow($)        the set now, from the `theme` row of /config, read again when the last read is a second old
+//   themeLast()        the set as the last themeNow read it, for a drawing that has no `$` (marks/view.ts citeLook)
 //
 // No hook tells a plugin that the person picked another theme (/theme and /config write it themselves), so the drawing
 // hooks ask: the screen draws again when the theme changes, and the first drawing after it reads the new one. A card
@@ -79,6 +80,10 @@ export async function themeNow($: Engine): Promise<Theme> {
   } catch {
     // the set as last read
   }
+  return current
+}
+
+export function themeLast(): Theme {
   return current
 }
 

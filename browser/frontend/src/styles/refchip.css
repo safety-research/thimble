@@ -7,7 +7,8 @@
   padding: 0;
   border: 0;
   border-radius: 0;
-  background: none;
+  /* a citation's look (marks.css .mark-words): the text's color, underlined in it, on the citations' purple tint */
+  background: var(--cite-tint);
   color: inherit;
   font: inherit;
   font-variant-numeric: tabular-nums;
@@ -16,15 +17,14 @@
   text-decoration-line: underline;
   text-decoration-style: solid;
   text-decoration-thickness: 1px;
-  text-decoration-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  text-decoration-color: currentColor;
   text-underline-offset: 3px;
   cursor: pointer;
-  transition: var(--transition-color), text-decoration-color var(--dur-fast) var(--ease-out);
+  transition: var(--transition-color), background-color var(--dur-fast) var(--ease-out);
 }
 .refchip.refchip-value:hover,
 .refchip.refchip-value:focus-visible {
-  color: var(--text-accent);
-  text-decoration-color: var(--accent);
+  background: var(--cite-tint-strong);
   outline: none;
 }
 /* the links toggle is off (lib/links): a citation chip goes, a cited number stays as plain text, and the space before
@@ -36,6 +36,7 @@
 :root[data-links='off'] .refchip-citation.refchip-value,
 :root[data-links='off'] .refchip-citation.refchip-value:hover {
   color: inherit;
+  background: none;
   text-decoration-line: none;
   cursor: text;
 }
@@ -70,18 +71,23 @@
 .refedit-token .chip-ico {
   stroke-width: 2px;
 }
-/* states: unable to verify, a dashed underline in the negative; not linked and unknown, dotted and quiet */
+/* states: unable to verify, red words underlined, no tint, × after them; not linked and unknown, dotted and quiet */
 .refchip.refchip-value.broken,
 .refchip.refchip-value.broken:hover {
-  color: inherit;
-  text-decoration-style: dashed;
-  text-decoration-color: var(--status-negative);
+  color: var(--status-negative);
+  background: none;
+}
+.refchip.refchip-value.broken::after {
+  content: '\00a0×';
+  display: inline-block;
+  text-decoration: none;
 }
 .refchip.refchip-value.refchip-quiet,
 .refchip.refchip-value.refchip-unresolved,
 .refchip.refchip-value.refchip-quiet:hover,
 .refchip.refchip-value.refchip-unresolved:hover {
   color: inherit;
+  background: none;
   text-decoration-style: dotted;
   text-decoration-color: var(--text-tertiary);
 }
