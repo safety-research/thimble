@@ -30,7 +30,7 @@ import { labelAskBand, labelAskBar, labelAskKey, labelsUnderAnswer, labelsUnderC
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
-import { answerStepKey, pickedBar, pickedRow } from './answers'
+import { answerStepKey, pickedRow } from './answers'
 import { askOnce } from './rowhook'
 
 type Engine = EngineInterface
@@ -169,13 +169,11 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
   .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}) } : x))
 
-/** The features' items at the bar's left, after v: the answer the keys act on when the person picked an earlier one
- *  ({ }), the ask's choices, the tray's steps, s, then c. While an item of what holds the keys shows (`focus`: the open
- *  tray's keys, the open chips'), the left names only those. */
+/** The features' items at the bar's left, after v: the ask's choices, the tray's steps, s, then c. While an item of
+ *  what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
   return [
-    ...items(await safe(pickedBar($, preview), []), preview),
     ...items(await safe(labelAskBar($, on, preview), []), preview),
     ...tray,
     // while the tray holds the keys, the chips' keys (0 [ ]) wait: the bar names each key once
