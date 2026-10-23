@@ -338,6 +338,9 @@ async def tool_set_filter(ctx: Any, args: dict[str, Any]) -> Any:
         now = concepts.card_parts(concepts.read_filters(ws).get("canvas"))
         concepts.set_card_filter(ctx.c, {**now, **parts})
     entry = concepts.read_filters(ws).get(scope)
+    from . import local  # noqa: PLC0415
+
+    local.ui_note(ctx.c, "filter", {"scope": scope, "filter": entry or None})
     if not entry:
         return tools.ok(tools.hint("clear_filter-cleared", scope=scope))
     text = tools.hint("set_filter-set", scope=scope, filter=describe(ctx.c, entry))
@@ -354,4 +357,7 @@ async def tool_clear_filter(ctx: Any, args: dict[str, Any]) -> Any:
     if scope not in concepts.SCOPES:
         return tools.err(f"clear_filter: `scope` must be one of {', '.join(concepts.SCOPES)}")
     concepts.clear_filter(ctx.c, scope, whole=True)
+    from . import local  # noqa: PLC0415
+
+    local.ui_note(ctx.c, "filter", {"scope": scope, "filter": None})
     return tools.ok(tools.hint("clear_filter-cleared", scope=scope))
