@@ -188,7 +188,7 @@ async function ended($: Engine, e: Any, id: number): Promise<void> {
   const end = endOf(String(e.answer ?? ''))
   const fix = await fixOf($, id)
   const args = ['done', String(id), '--summary', '-', ...(end.title ? ['--title', end.title] : []), ...(end.request ? ['--request'] : [])]
-  const r = await kernelFix($, args, { stdin: end.summary || ' ', timeoutMs: 1500000, doing: `testing fix ${id}${fix ? `: ${cut(end.title || fix.title, 28)}` : ''}` })
+  const r = await kernelFix($, args, { stdin: end.summary || ' ', timeoutMs: 600000, doing: `testing fix ${id}${fix ? `: ${cut(end.title || fix.title, 28)}` : ''}` })
   await refreshFixes($)
   if (!r.ok) {
     await setFixLine($, { id, kind: 'problem', said: `Fix ${id} could not be checked: ${cut(r.err || 'thimble fix done gave nothing', 200)}` })

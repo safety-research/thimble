@@ -483,7 +483,10 @@ def run_tests(fid: int) -> tuple[bool, str]:
         argv = sandbox_argv(fid) + [cmd]
     except FixError as e:
         return False, str(e)
-    p = subprocess.run(argv, cwd=work_dir(fid), capture_output=True, text=True, timeout=1200)
+    try:
+        p = subprocess.run(argv, cwd=work_dir(fid), capture_output=True, text=True, timeout=540)
+    except subprocess.TimeoutExpired:
+        return False, "the tests ran longer than 9 minutes"
     log = (p.stdout + p.stderr).strip()
     (tmp_dir(fid) / "tests.log").write_text(log + "\n")
     return p.returncode == 0, "\n".join(log.splitlines()[-12:])
