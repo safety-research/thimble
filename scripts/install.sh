@@ -6,9 +6,11 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: scripts/install.sh [--no-browser] [--no-plugin] [--local] [--bin-dir DIR] [--no-setup]
+Usage: scripts/install.sh [--no-browser] [--no-plugin] [--local] [--bin-dir DIR] [--no-setup] [--remove-0.9]
 
-Installs thimble's two products. It checks Node, Python and uv first, and says what is missing, one line each.
+Installs thimble's two products. It checks Node, Python and uv first, and says what is missing, one line each. Before
+it installs the plugin, it looks for thimble 0.9, and stops while 0.9 is here: it says what it found, how to keep 0.9's
+workspaces (0.10 cannot open them), and the commands that remove 0.9.
   The terminal plugin: adds the marketplace safety-research/thimble to Claude Code and installs thimble@thimble, then
     the sandbox its cards run in (Anthropic's sandbox runtime, pinned by the plugin, in ~/.thimble/srt); on Linux it
     says which system packages the sandbox lacks, with the one command that installs them (it never runs sudo).
@@ -26,12 +28,14 @@ Running it again is safe, and updates both.
   --local        use this checkout as the plugin's marketplace, in place of GitHub (to try a branch)
   --bin-dir DIR  put the thimble-browser launcher in DIR
   --no-setup     do not ask how the browser workbench reaches Claude (the page asks at its first start)
+  --remove-0.9   when thimble 0.9 is here, remove it, then install: it shows the steps and runs them only after you
+                 answer y, in a terminal (without one, it removes nothing)
 EOF
 }
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 browser="$root/browser"
-plugin=1 web=1 local=0 setup=1
+plugin=1 web=1 local=0 setup=1 remove09=0
 bin_dir="$HOME/.local/bin"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -40,6 +44,7 @@ while [ $# -gt 0 ]; do
     --no-plugin) plugin=0 ;;
     --local) local=1 ;;
     --no-setup) setup=0 ;;
+    --remove-0.9) remove09=1 ;;
     --bin-dir)
       [ $# -ge 2 ] || { echo "install.sh: --bin-dir needs a folder" >&2; exit 2; }
       bin_dir="$2"; shift ;;
@@ -124,6 +129,59 @@ if [ ${#missing[@]} -gt 0 ]; then
   for m in "${missing[@]}"; do say "  - $m"; done
   say "Then run scripts/install.sh again. Nothing was installed."
   exit 1
+fi
+
+# ---- thimble 0.9, which must go first (scripts/thimble09.py says why and how)
+
+if [ "$plugin" = 1 ]; then
+  old09() { (cd / && "$py" -I "$root/scripts/thimble09.py" "$@"); }
+  found="$(old09 report)"
+  if [ -n "$found" ]; then
+    say "$found"
+    if [ "$remove09" = 0 ]; then
+      say "Or run scripts/install.sh --remove-0.9 in a terminal: it shows these steps, runs them after you answer y,"
+      say "then installs 0.10."
+      exit 1
+    fi
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+      say ""
+      say "--remove-0.9 asks you before it deletes anything, so it runs only in a terminal. Run it in your own terminal,"
+      say "or run the commands above. Nothing was removed."
+      exit 1
+    fi
+    say ""
+    workspaces="$(old09 workspaces)"
+    if [ -n "$workspaces" ]; then
+      keep="$HOME/thimble-0.9-workspaces"
+      [ -e "$keep" ] && keep="$keep-$(date +%Y%m%d-%H%M%S)"
+      printf "Move 0.9's workspaces to %s first, to keep them? [Y/n]: " "$keep"
+      read -r answer || { say ""; say "Nothing was removed."; exit 1; }
+      case "$answer" in
+        n | N | no | No) say "They stay where they are, and removing 0.9 deletes them." ;;
+        *) mv "$workspaces" "$keep" || { say "They could not be moved, so nothing was removed."; exit 1; }
+           say "Moved: $keep" ;;
+      esac
+    fi
+    say "Removing 0.9 runs:"
+    while IFS=$'\t' read -r shown _; do say "  $shown"; done < <(old09 commands)
+    printf 'Remove thimble 0.9 now? This cannot be undone. [y/N]: '
+    read -r answer || answer=""
+    case "$answer" in
+      y | Y | yes | Yes) ;;
+      *) say "Nothing was removed or installed."; exit 1 ;;
+    esac
+    while IFS=$'\t' read -r -u 3 shown run; do
+      say "+ $shown"
+      eval "$run" </dev/null || { say "That step failed, so the install stopped. Do it by hand, then run scripts/install.sh again."; exit 1; }
+    done 3< <(old09 commands)
+    if [ -n "$(old09 report)" ]; then
+      say "thimble 0.9 is still here:"
+      old09 report
+      exit 1
+    fi
+    say "thimble 0.9 is removed."
+    notes+=("restart the claude sessions that were open during the upgrade, or run /reload-plugins in them: until then they report \"Plugin directory does not exist\" after each tool call")
+  fi
 fi
 say "thimble: what the install needs is here."
 

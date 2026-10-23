@@ -27,28 +27,49 @@ For the browser workbench:
 
 - **[uv](https://docs.astral.sh/uv/)** 0.8 or later, which installs the server's Python packages, and a Python 3.11
   or later when you have none.
-- **Credentials for the Claude API**: an API key, or Workload Identity Federation. You give them when it runs; see
-  [browser/README.md](browser/README.md#credentials). The browser workbench does not use your Claude Code login.
+- **A way to reach Claude**: an Anthropic API key, Workload Identity Federation, or your Claude Code sign-in, which it
+  uses only after you confirm (it then launches headless Claude Code sessions in the background). The install asks;
+  see [browser/README.md](browser/README.md).
 - **About 1 GB of disk** in the checkout: the page's packages, the server's Python packages, the sandbox runtime and
   the built page.
 
 ## If you tried an earlier 0.10 build
 
 thimble 0.10 no longer runs Claude's queries itself, so it needs no pandas: you can delete the Python an earlier build
-made in `~/.thimble/python`, and `~/.thimble/lean`. The `thimble/` folder in a data folder keeps only labels now.
+made in `~/.thimble/python`, and `~/.thimble/lean`. thimble no longer writes in your data folders: you can delete the
+`thimble/` folder an earlier build made in each. It keeps its labels in `~/.thimble`.
 
 ## If you used thimble 0.9
 
-thimble 0.10 replaces 0.9, whose browser workbench worked beside a Claude Code session and had its own `thimble`
-launcher. Remove 0.9 first:
+thimble 0.10 replaces 0.9. Remove 0.9 before you install 0.10: while 0.9's plugin is installed, Claude Code loads it
+and skips 0.10's, without an error. `scripts/install.sh` stops when it finds 0.9, and prints the commands for your
+install. `thimble update` does not reach 0.10; don't use it.
+
+0.10 does not open 0.9's workspaces (its cards, notebooks, labels and reports). To keep them as an archive, move them
+first: `mv ~/.thimble/app/workspaces ~/thimble-0.9-workspaces` (with a 0.9 clone, they are in its `workspaces/`
+folder, which uninstalling leaves alone). Then:
 
 ```
 thimble uninstall
 ```
 
-If that command is gone already, remove the old launcher by hand (`rm ~/.local/bin/thimble`), and remove the old
-plugin with `/plugin` in Claude Code. An old launcher left on your `PATH` would answer in place of the new `thimble`
-command. The 0.10 browser workbench has a launcher of another name, `thimble-browser`.
+It removes 0.9's plugin, `~/.local/bin/thimble` and all of `~/.thimble`, workspaces included. If `thimble` is not
+found, or it fails with `can't open file ... engine/thimble.py` (a 0.9 clone you pulled), remove 0.9 by hand:
+
+```
+claude plugin uninstall thimble@thimble-local; claude plugin marketplace remove thimble-local   # 0.9 from a release
+claude plugin uninstall thimble@thimble; claude plugin marketplace remove thimble               # 0.9 from a clone
+rm -f ~/.local/bin/thimble; rm -rf ~/.thimble
+```
+
+`scripts/install.sh --remove-0.9` does the same in a terminal: it shows the steps, offers to move the workspaces, and
+runs the steps only after you answer y.
+
+Restart the `claude` sessions that were open, or run `/reload-plugins` in them: until then they report "Plugin
+directory does not exist" after each tool call. 0.9 also left a headless Chromium in `~/.cache/ms-playwright` (about
+650 MB): delete it if nothing else uses it. In 0.10, `thimble-browser` replaces `/thimble browser`, and
+`scripts/install.sh` or `claude plugin update thimble@thimble` replaces `thimble update`; 0.10 has no `thimble`
+command in your shell.
 
 ## Install
 
@@ -95,6 +116,7 @@ Options:
   Workload Identity Federation config files in `~/.anthropic`, `~/.config/anthropic` and `~/.thimble-browser`.
 - `--local`: the plugin from this checkout in place of GitHub, to try a branch. Claude Code then loads the plugin from
   the checkout's `plugin/` folder.
+- `--remove-0.9`: remove thimble 0.9 first, after you answer y, in a terminal (see "If you used thimble 0.9").
 
 You can run it again at any time. It installs again what it installed, and updates the plugin and the browser
 workbench to what the checkout and the marketplace hold now.
@@ -159,8 +181,8 @@ claude plugin uninstall thimble@thimble
 ```
 
 To remove the browser workbench, delete `~/.local/bin/thimble-browser` and the checkout. Uninstalling leaves your data
-alone. To remove what thimble wrote, delete the `thimble/` folder in each data folder you used the plugin in,
-`~/.thimble`, and `~/.thimble-browser`.
+alone. To remove what thimble wrote, delete `~/.thimble` and `~/.thimble-browser` (and a `thimble/` folder that a build
+before 0.10.0 made in a data folder).
 
 ## When something does not work
 
