@@ -230,7 +230,7 @@ if [ "$web" = 1 ]; then
     fi
   elif ! access status >/dev/null 2>&1; then
     # no terminal to ask in (an agent runs this script, or --no-setup): whoever runs it asks the person
-    notes+=("Claude access is not set up yet. Ask the person which way the workbench reaches Claude, then set it: their Claude Code sign-in (only after they accept: \"This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in the background.\"): thimble-browser --setup --how claude-code --yes; Workload Identity Federation: thimble-browser --setup --how wif --wif-file FILE; an Anthropic API key: the page asks for it at its first start, so never take a key in a chat")
+    notes+=("Claude access is not set up yet. Ask the person which way the workbench reaches Claude, then set it with thimble-browser --setup, which checks that Claude answers. Their Claude Code sign-in, only after they accept \"This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in the background.\": --how claude-code --yes. An Anthropic API key: --key-file FILE, a file they write themselves from the clipboard (never take a key in a chat, and never read that file). Workload Identity Federation: --how wif --wif-file FILE (--find-wif lists the config files it finds). Skipped, the page asks at its first start")
   fi
 
   kb() { du -sk "$1" 2>/dev/null | awk '{print $1}' || echo 0; }

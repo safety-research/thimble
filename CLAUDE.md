@@ -21,11 +21,21 @@ https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) 
    nothing until all of it is there. Tell the user what is missing and the command that fixes it, run that command
    only when the user agrees, then run the script again.
 4. When the workbench was installed, set up how it reaches Claude before you reply. Ask with your question tool:
-   an Anthropic API key, the user's Claude Code sign-in, or Workload Identity Federation. For the Claude Code
-   sign-in, show this text and get a yes first: "This uses your Claude subscription through Claude Code and will
-   launch headless Claude Code sessions in the background." Then run `thimble-browser --setup --how claude-code
-   --yes`. For WIF, ask for the path of its config file and run `thimble-browser --setup --how wif --wif-file
-   <path>`. Never ask for an API key or let one pass through you: say the page asks for it at its first start.
+   their Claude Code sign-in, an Anthropic API key, or Workload Identity Federation (WIF). Then:
+   - **Claude Code sign-in**: show this text and get a yes: "This uses your Claude subscription through Claude Code
+     and will launch headless Claude Code sessions in the background." Run `thimble-browser --setup --how claude-code
+     --yes`.
+   - **API key**: never see the key. Give the user one command for their system that writes it from the clipboard to
+     a file only they can read, such as `(umask 077; pbpaste > ~/.thimble-api-key)` on macOS (Linux: `wl-paste` or
+     `xclip -selection clipboard -o`). When they say it is done, run `thimble-browser --setup --key-file
+     ~/.thimble-api-key`. Never read, print or copy that file. Offer to delete it, and delete it only on a yes.
+   - **WIF**: ask for the path of its config file, or offer to look for one; on a yes, run `thimble-browser --setup
+     --find-wif`, which lists the files it can use, by path only. Run `thimble-browser --setup --how wif --wif-file
+     <path>`. Never print the file.
+
+   Each command ends with a check that Claude answers. When the check fails, tell the user what failed and the next
+   step, and run the command again after the fix. Say that the page asks at its first start only when the user
+   chooses to skip this step.
 5. End with a short reply on how to use what was installed:
    - The plugin: open `claude` in a folder of data files. Claude cites each claim, and a second Claude checks it
      against the files; a click on the underlined words opens the evidence. The line above the prompt shows the keys:
