@@ -725,7 +725,8 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   if (page.next !== null) {
     const n = units.length
     body = [
-      Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1) + gap, overflow: 'hidden', children: body }),
+      // the body keeps its own height inside the page (no shrinking), so the page cuts a unit it shows only the top of
+      Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1) + gap, overflow: 'hidden', children: [Box({ key: 'tray-page-body', flexDirection: 'column', flexShrink: 0, children: body })] }),
       Text({ key: 'tray-more', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 ? 'm from the top' : 'm more'} · lines ${page.start + 1}–${page.end} of ${n}` }),
     ]
   }

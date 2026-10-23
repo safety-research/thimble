@@ -422,6 +422,30 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
+test('a heads-up page with rows left under its title shows the top of the bullet that wraps past them, not empty rows', async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-4b', { parts: HEADS })
+  await $.prompt.edit(key(']'))
+  // the room where the page holds the blank row, the title, the blank line under it and one row more: the first
+  // bullet takes two rows at this width, so it does not fit whole
+  const pageAt = async (rows: number) => {
+    const drawn = await $.ui.render(above(rows))
+    return { drawn, page: all(drawn).find(n => n.props?.key === 'tray-page') }
+  }
+  let rows = 8
+  while (rows < 20 && (await pageAt(rows)).page?.props.height !== 4) rows++
+  const { drawn, page } = await pageAt(rows)
+  expect(page?.props.height).toBe(4)
+  expect(textOf(page)).toContain('Retried runs count twice')
+  expect(textOf(page)).toContain('Four of the runs were retried')
+  expect(textOf(drawn)).toContain('m more · lines 1–3 of')
+  // m starts at that bullet, whole
+  await clock.advance(2000)
+  await $.prompt.edit(key('m'))
+  const next = (await pageAt(rows)).page
+  expect(textOf(next)).toContain('Four of the runs were retried')
+  expect(textOf(next)).not.toContain('Retried runs count twice')
+})
+
 // a heads-up on the words of a citation the check corrected: it stays on the new words while they hold its term, and
 // when they do not, a line under the reply names it and opens it
 const CORRECTED = { n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11.' }

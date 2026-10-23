@@ -97,7 +97,8 @@ export function stopsOfTurn(rows, stopsOf, inline) {
 /**
  * Which units of a body fit in `room` rows (`heights`: each unit's rows), from unit `from`: {start, end, more} where
  * units start..end-1 show and `more` is how many are left out. When all fit, all show. Else one row is kept for the
- * line that says there is more, and at least one unit shows. `next`: where `m` goes, the start again after the end.
+ * line that says there is more, and at least one unit shows; the rows left after the units that fit show the next unit's
+ * first rows. `next`: where `m` goes (that cut unit, whole), the start again after the end.
  */
 export function pageOf(heights, room, from = 0) {
   const hs = (heights || []).map(h => Math.max(1, h | 0))
@@ -107,6 +108,9 @@ export function pageOf(heights, room, from = 0) {
   let end = start
   let used = 0
   while (end < hs.length && (end === start || used + hs[end] <= room - 1)) { used += hs[end]; end++ }
+  // a unit too tall for the rows left shows its first rows there (the page cuts it) and m starts at it, so the rows
+  // under a short unit are not left empty when the next one wraps to more of them
+  if (end < hs.length && used < room - 1) return { start, end: end + 1, more: hs.length - end - 1 + start, next: end }
   return { start, end, more: hs.length - end + start, next: end < hs.length ? end : 0 }
 }
 

@@ -62,6 +62,9 @@ test('a tall tray body: the lines that fit and a row for m, which goes on and th
   const hs = [1, 2, 1, 1, 3, 1]
   assert.deepEqual(pageOf(hs, 5), { start: 0, end: 3, more: 3, next: 3 })
   assert.deepEqual(pageOf(hs, 5, 3), { start: 3, end: 5, more: 4, next: 5 })
+  // the 3-row unit does not fit whole in the 2 rows left: its top shows there, and m starts at it
+  assert.deepEqual(pageOf([1, 1, 3, 1], 5), { start: 0, end: 3, more: 1, next: 2 })
+  assert.deepEqual(pageOf([1, 1, 3, 1], 5, 2), { start: 2, end: 4, more: 2, next: 0 })
   assert.deepEqual(pageOf(hs, 5, 5), { start: 5, end: 6, more: 5, next: 0 })
   // a unit taller than the room still shows
   assert.equal(pageOf([9, 1], 4).end, 1)
