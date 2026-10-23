@@ -110,6 +110,13 @@ function setup() {
       Object.assign(id === 1 ? fix : others.find(f => f.id === id), { state: 'on', work: null })
       return ok({ id, reload: true, version: '0.10.2+fix.c0ffee1' })
     }
+    if (verb === 'remove') { if (argv.includes('1')) fix.state = 'removed'; return ok({ id: 1, reload: false }) }
+    if (verb === 'merge') {
+      const ids = argv.slice(argv.indexOf('merge') + 1, argv.indexOf('--ask')).map(Number)
+      if (!JSON.parse(files.get(`${HOME}/fixes/asks/${ids[0]}.json`) ?? '{}').key || !stdin) return { exitCode: 1, stdout: '', stderr: "thimble fix merge: only the person's key press in thimble does that" }
+      const t = argv.indexOf('--title')
+      return ok({ id: ids[0], title: t > 0 ? argv[t + 1] : 'first', merged: ids.slice(1), redo: [], reload: true })
+    }
     if (verb === 'redo') { Object.assign(fix, { state: 'working', refused: null }); return ok(fix) }
     if (verb === 'undo') { fix.state = 'off'; return ok({ id: 1, reload: true }) }
     if (verb === 'notnow') { fix.state = 'off'; return ok(fix) }
@@ -491,8 +498,8 @@ test('words while the fix applied last is on: the fixer hears of it, and its end
   expect(String(r.text)).toBe('A fork of this session is fixing it in the background (fix 1). Keep going.')
   expect(s.verbs()).toContain('new --made-in terminal --refines 5')
   const first = String(s.spawns[0].prompt)
-  expect(first).toContain('The person applied fix 5 ("Bar says read": The bar says read.; asked in the words "say read, not coverage")')
-  expect(first).toContain('end with the line `Changes fix 5` in place of the Title line')
+  expect(first).toContain('The person applied fix 5 ("Bar says read": The bar says read.; asked in the words "say read, not coverage") last')
+  expect(first).toContain('end with the line `Changes fix N` (its number) in place of the Title line')
   await s.end('Done.\n\nChanges fix 5\nWhat it does: The bar says read and keeps the percent.')
   expect(s.verbs()).toContain('done 1 --summary - --changes 5')
   let rows = await fixLineRows(s.$, ELS, 110)
@@ -547,4 +554,44 @@ test('/thimble-fix 5 <words> always changes fix 5; /thimble-fix new <words> is a
   await u.end('Changes fix 5\nWhat it does: The bar keeps the percent.')
   expect(textOf((await fixLineRows(u.$, ELS, 160))[0])).toBe("  ✓ thimble fixed: make the bar say read · tests pass · a new fix: it did not fit fix 5")
   expect(u.others[0].state).toBe('on')
+})
+
+test('when the fixer cannot tell which fix the words are for, the line asks; a number makes them a change to that fix', async () => {
+  const s = setup()
+  s.others.push(onFix(), { ...onFix(), id: 3, title: 'Labels pane', words: ['a pane for labels'], on_at: 1761100200, summary: 'A labels pane.' })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.call('command.run', { command: 'thimble-fix', args: 'make it bigger' })
+  const first = String(s.spawns[0].prompt)
+  expect(s.verbs()).toContain('new --made-in terminal --refines 3')
+  expect(first).toContain('Their other fixes that are on, also in your copy: fix 5 ("Bar says read"')
+  expect(first).toContain('end with one line `Which fix: <one short question>`')
+  await s.end('Which fix: The bar item, or the labels pane?')
+  expect(s.verbs()).toContain('remove 1')
+  let rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows[0])).toBe('  ? The bar item, or the labels pane?')
+  expect(textOf(rows[1])).toBe('    3 Labels pane · 5 Bar says read · 0 a new fix · n never mind')
+  expect(await fixKey(s.$, '7')).toBe(null)
+  await (await fixKey(s.$, '5'))!.later()
+  expect(s.verbs()).toContain('new --made-in terminal --refines 5 --always')
+  expect(s.ran.filter(x => x.argv.includes('new')).at(-1)?.stdin).toBe('make it bigger')
+  expect(String(s.spawns[1].prompt)).toContain('The person asked to change their fix 5')
+  rows = await fixLineRows(s.$, ELS, 110)
+  expect(rows).toEqual([])
+})
+
+test('g in Your fixes merges the marked fixes into the one marked first, with Claude\'s title and the person\'s key, and reloads', async () => {
+  const s = setup()
+  s.others.push(onFix(), { ...onFix(), id: 2, title: 'Explain terms', state: 'request', commit: null, files: [] })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await s.call('command.run', { command: 'thimble-fix', args: '' })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixView' }, { sel: 5, marked: [5, 2], diff: false, share: false })
+  const drawn = await drawFixes(s.$, { props: { bodyColumns: 100 } }, {}, ELS)
+  expect(buttons(drawn)['key-g']!.label).toBe('merge 2 into fix 5')
+  await buttons(drawn)['key-g']!.onPress()
+  expect(s.asked.at(-1).system[0].text).toBe('PROMPT fix-merge')
+  const m = s.ran.find(x => x.argv.includes('merge'))
+  expect(m?.argv.slice(m.argv.indexOf('merge'))).toEqual(['merge', '5', '2', '--ask', '-', '--title', 'Bar says coverage, not read', '--summary', ''])
+  expect(String(m?.stdin)).toMatch(/^[0-9a-f]{64}$/)
+  expect(s.commands).toEqual(['reload-plugins'])
+  expect(s.toasts.join('\n')).toContain('Fixes 5, 2 are now fix 5: Bar says coverage, not read')
 })

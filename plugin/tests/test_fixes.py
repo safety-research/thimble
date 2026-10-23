@@ -758,3 +758,58 @@ def test_a_change_that_does_not_fit_its_fix_becomes_a_new_fix(world):
     r = FX.done(b["id"], None, "The bar says covered.", changes=a["id"])
     assert r["id"] == b["id"] and r["state"] == "ready" and r["fold_failed"] == a["id"]
     assert FX.get(a["id"])["state"] == "on" and "covered" in sh("git", "show", f"{r['commit']}:plugin/bar/bar.tsx", cwd=FX.live_dir())
+
+
+def test_merge_makes_one_fix_of_several_with_the_persons_key_and_keeps_the_old_refs(world):
+    a = on_fix(world)
+    b = FX.new("a note")
+    (Path(b["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    FX.done(b["id"], "A note", "Adds a note.")
+    FX.apply(b["id"], press(b["id"]))
+    c = FX.new("explain the terms of my field")
+    c = FX.done(c["id"], "Explain terms", "Needs words only the person knows.", request=True)
+    old = {i: sh("git", "rev-parse", f"refs/thimble/fixes/{i}", cwd=FX.live_dir()) for i in (a["id"], b["id"])}
+    # only the person's key merges
+    with pytest.raises(FX.FixError, match="person's key"):
+        FX.merge([a["id"], b["id"], c["id"]], "a-guess")
+    out = FX.merge([a["id"], b["id"], c["id"]], press(a["id"]), "Bar says read, with a note", "The bar says read; a note.")
+    assert out["merged"] == [b["id"], c["id"]] and out["reload"] is True
+    m = FX.get(a["id"])
+    assert m["state"] == "on" and m["title"] == "Bar says read, with a note" and m["rounds"] == 3
+    assert m["words"] == ["say read, not coverage", "a note", "explain the terms of my field"]
+    assert sorted(f["path"] for f in m["files"]) == ["plugin/bar/bar.tsx", "plugin/notes.md"]
+    assert FX.get(b["id"])["state"] == "merged" and FX.get(c["id"])["merged_into"] == a["id"]
+    assert [r["id"] for r in FX.listing()["fixes"]] == [a["id"]]
+    # mine: the release and one commit, which holds both changes
+    assert sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines() == ["Bar says read, with a note", "thimble 0.10.2"]
+    assert "read ${n}" in live_file("plugin/bar/bar.tsx") and (FX.live_dir() / "plugin" / "notes.md").exists()
+    # the old commits stay, for an undo by hand
+    assert sh("git", "rev-parse", f"refs/thimble/fixes/{b['id']}", cwd=FX.live_dir()) == old[b["id"]]
+    for i, sha in old.items():
+        assert sh("git", "rev-parse", f"refs/thimble/merged/{a['id']}/{i}", cwd=FX.live_dir()) == sha
+    # undo takes the merged fix off as one
+    FX.undo(a["id"])
+    assert "coverage ${n}" in live_file("plugin/bar/bar.tsx") and not (FX.live_dir() / "plugin" / "notes.md").exists()
+
+
+def test_merge_in_a_shell_asks_first_and_a_request_alone_does_not_merge(world, monkeypatch):
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "The bar says read.")
+    b = FX.new("a note")
+    (Path(b["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    FX.done(b["id"], "A note", "Adds a note.")
+    monkeypatch.setattr(FX, "key_in_terminal", lambda q: None)
+    with pytest.raises(FX.FixError, match="only your key"):
+        FX.merge_typed([a["id"], b["id"]])
+    monkeypatch.setattr(FX, "key_in_terminal", lambda q: "")
+    assert FX.merge_typed([a["id"], b["id"]])["said"] == "Nothing merged."
+    monkeypatch.setattr(FX, "key_in_terminal", lambda q: "s3cret-made-up")
+    out = FX.merge_typed([a["id"], b["id"]])
+    m = FX.get(a["id"])
+    # no title given: the first fix's; both were ready, so the merged fix is ready, for y
+    assert m["title"] == "Bar says read" and m["state"] == "ready" and out["said"].startswith("Fixes 1 and 2 are now fix 1")
+    assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == world["base"]
+    q = FX.done(FX.new("x")["id"], "X", "", request=True)
+    r = FX.done(FX.new("y")["id"], "Y", "", request=True)
+    with pytest.raises(FX.FixError, match="none of these fixes changes code"):
+        FX.merge([q["id"], r["id"]], press(q["id"]))

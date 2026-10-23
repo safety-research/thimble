@@ -59,14 +59,16 @@ from . import privacy as P
 from .store import Store, thimble_home
 
 PLUGIN = Path(__file__).resolve().parents[2]
-STATES = ("working", "ready", "failed", "on", "off", "redo", "pending", "request", "sent", "saved", "released", "removed")
+STATES = ("working", "ready", "failed", "on", "off", "redo", "pending", "request", "sent", "saved", "released", "removed",
+          "merged")
 PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 
 # the files a fix may not change, by what each one is: what keeps undo, off, the sandbox and the scan working (fnmatch
 # patterns over the repository's paths). The refusal names each file with what it is.
 PROTECTED_KINDS = {
     "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/engine/kernel/share.py", "plugin/fix/*",
-                     "plugin/prompts/fixer.md", "plugin/prompts/fix-draft.md", "browser/backend/app/dev.py",
+                     "plugin/prompts/fixer.md", "plugin/prompts/fix-draft.md", "plugin/prompts/fix-merge.md",
+                     "browser/backend/app/dev.py",
                      "browser/backend/app/fixes.py", "browser/backend/app/fix_share.py", "browser/frontend/src/fixes/share*",
                      "browser/frontend/src/chat/FixStrip.tsx", "browser/frontend/src/chat/fix.ts"),
     "the privacy scan": ("plugin/engine/kernel/privacy.py",),
@@ -822,6 +824,102 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     return _move(change)
 
 
+def merge(ids: list[int | str], secret: str | None, title: str | None = None, summary: str | None = None) -> dict[str, Any]:
+    """The person's key (merge in Your fixes, or thimble fix merge A B C in a shell): the fixes become one, under the
+    first one's id: one commit, on the commit the first fix with code sits on, with each fix's change in the order
+    given; one title and summary (the first fix's, when none is given); every fix's words. A request with no code
+    gives its words only. The others' records say merged; their refs stay, and each merged commit is kept under
+    refs/thimble/merged/<id>/, for an undo by hand. A merged fix that was on is on in its place in mine."""
+    recs = [get(i) for i in ids]
+    first = recs[0]
+    check_ask(first["id"], secret)
+    if len({r["id"] for r in recs}) != len(recs) or len(recs) < 2:
+        raise FixError("name two fixes or more, each once: thimble fix merge 1 3 4")
+    for r in recs:
+        if r.get("state") not in (*REFINABLE, "request"):
+            raise FixError(f"fix {r['id']} is {state_word(r)}; only fixes that are on, off or ready, and requests, merge")
+    code = [r for r in recs if r.get("state") != "request" and r.get("commit")]
+    if not code:
+        raise FixError("none of these fixes changes code; a request merges into a fix that does")
+
+    def change():
+        live = live_dir()
+        refs = {r["id"]: git("rev-parse", f"refs/thimble/fixes/{r['id']}", cwd=live) for r in code}
+        parent = git("rev-parse", f"{refs[code[0]['id']]}^", cwd=live)
+        wt = tmp_dir(first["id"]) / "merge"
+        run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
+        shutil.rmtree(wt, ignore_errors=True)
+        git("worktree", "add", "-q", "--detach", str(wt), parent, cwd=live)
+        try:
+            for r in code:
+                p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", "--allow-empty", refs[r["id"]]], cwd=wt,
+                        check=False, env=as_thimble())
+                if p.returncode != 0:
+                    run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+                    raise FixError(f"fix {r['id']} does not fit the fixes before it in the list; nothing was merged")
+            tree = git("write-tree", cwd=wt)
+        finally:
+            run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
+            run(["git", "worktree", "prune"], cwd=live, check=False)
+        name = short(title or first["title"], 60)
+        text = (summary if summary is not None else " ".join(str(r.get("summary") or "").strip() for r in recs)).strip()
+        commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", parent, "-m",
+                     f"{name}\n\n{text}\n\nthimble fix {first['id']}".strip(), cwd=live, env=as_thimble())
+        for i, old in refs.items():
+            git("update-ref", f"refs/thimble/merged/{first['id']}/{i}", old, cwd=live)
+        git("update-ref", f"refs/thimble/fixes/{first['id']}", commit, cwd=live)
+        all_recs = records()
+        on_order = _on_ids(all_recs)
+        merged_ids = {r["id"] for r in recs}
+        was_on = [i for i in on_order if i in merged_ids]
+        for r in recs[1:]:
+            x = get(r["id"])
+            _drop_work(x)
+            x.update(state="merged", merged_into=first["id"])
+            put(x)
+        f = get(first["id"])
+        _drop_work(f)
+        f.update(title=name, summary=text, commit=commit, base=parent, files=_numstat(live, parent, commit),
+                 words=[w for r in recs for w in (r.get("words") or [])], error=None, note=None,
+                 rounds=sum(int(r.get("rounds") or 1) for r in recs), merged=[r["id"] for r in recs[1:]],
+                 tests=next((r.get("tests") for r in code), None),
+                 state="on" if was_on else "ready" if first.get("state") in ("ready", "request") else first.get("state"))
+        if was_on:
+            f["on_at"] = min(float(all_recs[i].get("on_at") or 0) for i in was_on)
+        put(f)
+        failed: list[int] = []
+        if was_on:
+            # mine again: the merged fix in the place of the first of them that was on, the others gone
+            order = [i for i in on_order if i not in merged_ids or i == was_on[0]]
+            order = [first["id"] if i == was_on[0] else i for i in order]
+            failed = _rebuild(order)
+            for i in failed:
+                x = get(i)
+                x.update(state="redo", error=f"it did not fit once fixes {_and([str(r['id']) for r in recs])} merged")
+                put(x)
+            if is_on():
+                git("checkout", "-q", "mine", cwd=live)
+            else:
+                git("checkout", "-q", "--detach", release()["base"], cwd=live)
+        return {"id": first["id"], "title": name, "merged": [r["id"] for r in recs[1:]], "redo": failed}
+
+    return _move(change)
+
+
+def merge_typed(ids: list[int | str], title: str | None = None, summary: str | None = None) -> dict[str, Any]:
+    """thimble fix merge A B C in a shell: after the person's y in their terminal."""
+    recs = [get(i) for i in ids]
+    names = ", ".join(f'{r["id"]} "{r["title"]}"' for r in recs)
+    secret = key_in_terminal(f"Merge fixes {names} into fix {recs[0]['id']}?")
+    if secret is None:
+        raise FixError("only your key merges fixes: run thimble fix merge in your own terminal, or press g in Your fixes")
+    if not secret:
+        return {"said": "Nothing merged.", "reload": False}
+    write_json(home() / "asks" / f"{recs[0]['id']}.json", {"key": key_hash(secret)})
+    out = merge(ids, secret, title, summary)
+    return {**out, "said": f"Fixes {_and([str(r['id']) for r in recs])} are now fix {recs[0]['id']}: {out['title']}."}
+
+
 def not_now(fid: int | str) -> dict[str, Any]:
     """n: a ready fix stays in the list, off, its commit kept for u; its copy goes. A fix that failed stays failed,
     for r."""
@@ -1415,7 +1513,7 @@ def state_word(r: dict[str, Any]) -> str:
 
 
 def listing() -> dict[str, Any]:
-    recs = [r for r in records().values() if r.get("state") not in ("removed", "released")]
+    recs = [r for r in records().values() if r.get("state") not in ("removed", "released", "merged")]
     recs.sort(key=lambda r: (ORDER.get(str(r.get("state")), 6), r["id"]))
     rel = release()
     on = is_on()
@@ -2043,6 +2141,16 @@ def cmd(a) -> int:
                 r = apply_typed(a.id)
                 print(f"✓ {r['title']} is on. In Claude Code, type /reload-plugins; restart thimble-browser." if r
                       else "Not applied; thimble fix apply asks again whenever you want.")
+        elif verb == "merge":
+            ids = [x for x in (a.id, a.hit, *(a.more or [])) if x]
+            summary = None if a.summary is None else a.summary
+            if a.ask == "-":
+                out_json(merge(ids, stdin_text(), a.title, summary))
+            else:
+                r = merge_typed(ids, a.title, summary)
+                print(r.get("said", ""))
+                if r.get("reload"):
+                    print(RELOAD)
         elif verb == "notnow":
             out_json(not_now(a.id))
         elif verb == "redo":

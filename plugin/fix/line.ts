@@ -20,6 +20,8 @@
 //   update    ↑ thimble 0.10.3 · 3 fixes carried · 1 needs redo   (until the next prompt)
 //   release   ↑ thimble 0.10.3 is out (you have 0.10.2) · thimble update in a shell   (at session start)
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
+//   ask       ? <the fixer's question: which fix the words are for>
+//               1 <title> · 3 <title> · 0 a new fix · n never mind   (a number makes the words a change to that fix)
 //
 // y applies: from then on the fix's code runs as thimble, so only the person's key does it (fixes.ts). n leaves a ready
 // fix ready in Your fixes, where y turns it on later.
@@ -29,8 +31,8 @@ import { thimbleHome } from '../core/home'
 import { cut, textWidth } from '../core/text.js'
 import { ACCENT } from '../core/theme'
 import { testsWord } from './fixer'
-import { applyFix, type Fix, fixesDir, fixesNow, fixLineNow, fixOf, notNow, setFixLine, shownPath, undoFix } from './fixes'
-import { redoFix } from './request'
+import { applyFix, type Fix, fixesDir, fixesNow, type FixLine, fixLineNow, fixOf, notNow, setFixLine, shownPath, undoFix } from './fixes'
+import { redoFix, request } from './request'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,7 +42,7 @@ type Any = any
 const KEY_COLOR = ACCENT
 
 /** The keys the line takes now, by its kind. */
-const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['d', 'r', 'n'], request: ['n'] }
+const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['d', 'r', 'n'], request: ['n'], ask: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'n'] }
 
 /** What a key on the line does, once the word window closed (it cannot be undone). */
 export async function fixKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
@@ -48,6 +50,7 @@ export async function fixKey($: Engine, k: string): Promise<{ later: () => Promi
   if (!Object.values(KEYS).some(ks => ks.includes(k))) return null
   const l = await fixLineNow($)
   if (!l || !(KEYS[l.kind] ?? []).includes(k)) return null
+  if (l.kind === 'ask') return /^\d$/.test(k) && k !== '0' && !(l.choices ?? []).includes(Number(k)) ? null : { later: () => pressAsk($, l, k) }
   return { later: () => pressLine($, l.id, l.kind, k) }
 }
 
@@ -67,6 +70,15 @@ async function pressLine($: Engine, id: number, kind: string, k: string): Promis
     if (!said && kind === 'ready') $.ui.toast(`Fix ${id} waits in Your fixes, ready: /thimble-fix lists it, and y there turns it on.`)
   }
   if (said) await setFixLine($, { id, kind: 'problem', said })
+}
+
+/** A key on the line that asks which fix the words are for: a fix's number, 0 a new fix, n never mind. */
+async function pressAsk($: Engine, l: FixLine, k: string): Promise<void> {
+  await setFixLine($, null)
+  if (k === 'n' || !l.words) return
+  const r = await request($, k === '0' ? `new ${l.words}` : `${k} ${l.words}`, l.by === 'claude' ? 'claude' : 'person')
+  if (r.failed) await setFixLine($, { id: r.fix?.id ?? l.id, kind: 'problem', said: r.text.replace(/^×\s*/, '') })
+  else $.ui.toast(r.text)
 }
 
 /** The person's next prompt: a line that only told something goes. A fix that waits for y stays. */
@@ -155,6 +167,10 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     first = [Text({ key: 'g', color: KEY_COLOR, children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · /thimble-fix lists your fixes')]
   } else if (l.kind === 'release') {
     first = [Text({ key: 'g', color: KEY_COLOR, children: '↑ ' }), Text({ key: 't', children: l.said || 'a new thimble release is out' })]
+  } else if (l.kind === 'ask') {
+    first = [Text({ key: 'g', color: KEY_COLOR, children: '? ' }), Text({ key: 't', wrap: 'wrap', children: l.said || 'Which fix are these words for?' })]
+    const fixes = (await fixesNow($))?.fixes ?? []
+    second = keysRow(els, [...(l.choices ?? []).map(id => [String(id), cut(fixes.find(f => f.id === id)?.title || `fix ${id}`, 28)] as [string, string]), ['0', 'a new fix'], ['n', 'never mind']])
   } else if (l.kind === 'problem') {
     first = [Text({ key: 't', color: 'error', wrap: 'wrap', children: `× ${l.said || `fix ${l.id} did not go through`}` })]
   } else return []
