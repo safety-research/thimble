@@ -3,7 +3,7 @@
 //   /thimble-fix <words>   a request: the kernel makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer
 //                          (fixer.ts) works in it in the background; while a fixer works, the words go to it, and
 //                          while the line of a fix with a copy shows, they are a new round of that fix (request.ts)
-//   the thimble-fix skill  the same request, by Claude, when it sees thimble misbehave (skills/thimble-fix/SKILL.md);
+//   the fix-thimble skill  the same request, by Claude, when it sees thimble misbehave (skills/fix-thimble/SKILL.md);
 //                          Claude reads what came of it in the skill's place, and is told when the fix ends
 //   /thimble-fix           Your fixes (pane.tsx)
 //   the fixer's calls      Claude Code's own permission handling, in the person's mode, as any subagent's
@@ -33,10 +33,10 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** The lead before the words in the skill's text (skills/thimble-fix/SKILL.md), as Claude Code filled in its argument. */
+/** The lead before the words in the skill's text (skills/fix-thimble/SKILL.md), as Claude Code filled in its argument. */
 const SKILL_LEAD = 'What thimble does wrong, and what it should do:'
 
-/** The words Claude gave the thimble-fix skill, or '' when it gave none. */
+/** The words Claude gave the fix-thimble skill, or '' when it gave none. */
 export function wordsOfSkill(text: string): string {
   const i = text.indexOf(SKILL_LEAD)
   const words = i < 0 ? '' : text.slice(i + SKILL_LEAD.length).split(/\n\s*\n/)[0]!.trim()
@@ -103,9 +103,9 @@ export const registerFix: Register = on => {
     return { text: await requestFix($, words) }
   })
 
-  // the thimble-fix skill: Claude asks for the same fix, in the words after the skill's lead (SKILL.md), and reads
+  // the fix-thimble skill: Claude asks for the same fix, in the words after the skill's lead (SKILL.md), and reads
   // what came of it in the skill's place. A hook that fails leaves the skill's own text, which says how to ask
-  on('skill.prompt', { skill: /^(?:thimble:)?thimble-fix$/ }, async ($, e, next) => {
+  on('skill.prompt', { skill: /^(?:thimble:)?fix-thimble$/ }, async ($, e, next) => {
     const words = wordsOfSkill(String(e.text ?? ''))
     if (!words) return { text: 'thimble started no fix: the skill needs, as its argument, what thimble does wrong and what it should do. Call it again with those words.' }
     const r = await request($, words, 'claude')

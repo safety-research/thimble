@@ -109,7 +109,7 @@ declare module 'claude-code' {
       fixLine: { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update'; said?: string; open?: boolean; reload?: 'pending' | 'restart' } | null
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
       fixers: Record<string, number>
-      /** the fixes Claude started with the thimble-fix skill, by the fix's id (fixer.ts) */
+      /** the fixes Claude started with the fix-thimble skill, by the fix's id (fixer.ts) */
       fixBy: Record<string, 'claude'>
       /** what Your fixes shows (pane.tsx): the selected fix, the marked ones, whether the submit preview shows the diff */
       fixView: { sel: number | null; marked: number[]; diff: boolean } | null

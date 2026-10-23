@@ -30,7 +30,7 @@ type Any = any
 const FIXERS = { plugin: 'thimble', key: 'fixers' } as const
 const BY = { plugin: 'thimble', key: 'fixBy' } as const
 
-/** Who asked for a fix: the person (/thimble-fix), or Claude (the thimble-fix skill). */
+/** Who asked for a fix: the person (/thimble-fix), or Claude (the fix-thimble skill). */
 export type Asker = 'person' | 'claude'
 
 export async function askerOf($: Engine, id: number): Promise<Asker> {

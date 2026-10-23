@@ -1,4 +1,4 @@
-// request.ts: a request for a change, as /thimble-fix <words> makes it (or Claude, with the thimble-fix skill), a round
+// request.ts: a request for a change, as /thimble-fix <words> makes it (or Claude, with the fix-thimble skill), a round
 // of a fix whose copy is still there, and r (redo) on a fix that failed or no longer fits. Each makes the copy with the
 // kernel, then starts the fixer in it. Words for a fix whose fixer still works go to that fixer, as a round of its fix.
 import type { EngineInterface } from 'claude-code'
@@ -14,7 +14,7 @@ type Engine = EngineInterface
  *  fix, and whether something went wrong. */
 export type Requested = { text: string; fix: Fix | null; failed: boolean; round: boolean }
 
-/** /thimble-fix <words>, or the thimble-fix skill: words for the fixer that still works (a round of its fix), a round of
+/** /thimble-fix <words>, or the fix-thimble skill: words for the fixer that still works (a round of its fix), a round of
  *  the fix the line shows while its copy is still there, or a new fix. */
 export async function requestFix($: Engine, words: string, by: Asker = 'person'): Promise<string> {
   return (await request($, words, by)).text

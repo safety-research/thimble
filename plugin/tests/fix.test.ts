@@ -1,5 +1,5 @@
 // thimble fix in the hooks module (fix/), on a plain engine whose kernel is faked (the kernel's own tests are
-// test_fixes.py): /thimble-fix, or Claude's thimble-fix skill, starts the fixer as a fork of the session in its copy,
+// test_fixes.py): /thimble-fix, or Claude's fix-thimble skill, starts the fixer as a fork of the session in its copy,
 // with a text copy of what thimble shows; more words while it works go to the same fixer; Claude can neither apply nor
 // send a fix, the fixer included; the fixer's end puts the fix's line above the bar and sends a notification; d shows
 // what changed; y applies it with a secret only that press holds and reloads the plugins (at the turn's end when Claude
@@ -336,13 +336,13 @@ test('/thimble-fix alone lists the fixes but those in the release; the selected 
   expect(textOf(drawn)).not.toContain('Bar says read')
 })
 
-test("Claude starts a fix with the thimble-fix skill: the same fork starts, Claude reads what came of it, and is told when it ends", async () => {
+test("Claude starts a fix with the fix-thimble skill: the same fork starts, Claude reads what came of it, and is told when it ends", async () => {
   expect(wordsOfSkill("What thimble does wrong, and what it should do: the explainer's links show as raw text\n\nthimble starts its fix…")).toBe("the explainer's links show as raw text")
   expect(wordsOfSkill('What thimble does wrong, and what it should do: \n\nthimble starts its fix…')).toBe('')
   expect(wordsOfSkill('What thimble does wrong, and what it should do: $ARGUMENTS\n\nthimble starts…\n\nARGUMENTS: the bar is cut')).toBe('the bar is cut')
   const s = setup()
   await s.call('session.start', { cwd: '/made-up/data' })
-  const skill = { skill: 'thimble:thimble-fix', text: "What thimble does wrong, and what it should do: the card's legend hides its last row\n\nthimble starts its fix…", frontmatter: {}, source: 'plugin' }
+  const skill = { skill: 'thimble:fix-thimble', text: "What thimble does wrong, and what it should do: the card's legend hides its last row\n\nthimble starts its fix…", frontmatter: {}, source: 'plugin' }
   const r = await s.call('skill.prompt', skill, async (e: Any) => ({ text: e.text }))
   expect(String(r.text)).toContain('thimble started a fork of this conversation that fixes thimble in the background, in a copy (fix 1')
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("the card's legend hides its last row")
