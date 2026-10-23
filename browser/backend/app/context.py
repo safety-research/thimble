@@ -1,15 +1,22 @@
 """The context engine: what the workspace holds, rendered for an agent that needs it. The writer, a report check and
 the card check build what they send with render(), so each gets the full history rather than a brief.
 
-render(c, task, *, budget, focus, parts, chat). prompts/context.md holds one `## ` section per part (heading,
-description, slot); render sends each part asked for, in the file's order, and the task last. Parts: conversation
-(main's transcript with tool calls), threads, session (one chat thimble
-started), canvas, views and documents.
+render(c, task, *, budget, focus, parts, chat, answers, given). prompts/context.md holds one `## ` section per part
+(heading, description, slot); render sends each part asked for, in the file's order, and the task last. Parts:
+conversation (main's transcript with tool calls), threads, session (one chat thimble started), canvas, views and
+documents; and, asked for by name, brief, evidence, heads and glossed.
 
-The budget is in characters. Never cut: the task, the canvas, the views, the documents, and every entry that touches a
-ref in `focus`. The rest is cut in order until it fits (STEPS, then DROP_ORDER): results shortened, then calls, then the
-oldest entries. A cut result ends with a `## context-cut` line naming the ref read_ref reads it whole by. What is left
-past every cut is sent over the budget.
+The brief (brief_part) is main's conversation turn by turn without its calls: what the analyst said, the answers they
+read, and the cards each turn made or changed as their question and takeaway, the terminal observer's view of a
+session at a fraction of the transcript's size. The evidence (evidence_part) is what the turns of `answers` (the
+answers a check run covers, answer_comments' records) rest on: each call of those turns with its arguments and the
+start of its result, then the refs the answer cites. heads and glossed are digests the caller gives in `given`
+(checks.digest): what the Heads up and Explainers checks already said, so a run does not say it again.
+
+The budget is in characters. Never cut: the task, the canvas, the views, the documents, the digests, every entry that
+touches a ref in `focus`, and the brief's turns of `answers`. The rest is cut in order until it fits (STEPS, then
+DROP_ORDER): results shortened, then calls, then the oldest entries. A cut result ends with a `## context-cut` line
+naming the ref read_ref reads it whole by. What is left past every cut is sent over the budget.
 """
 from __future__ import annotations
 
@@ -26,10 +33,18 @@ from . import agents, cite, config, events, investigation, prompts, report_types
 PROMPT = "context"  # prompts/context.md
 PARTS = ("conversation", "threads", "canvas", "views", "documents")  # every part render gives by default
 # each part's `## ` heading in prompts/context.md, in the order render sends them; `session` is asked for by name
-HEADINGS = {"conversation": "The conversation", "threads": "The threads",
-            "session": "The session", "canvas": "The cards", "views": "The views", "documents": "The documents"}
+HEADINGS = {"conversation": "The conversation", "brief": "The conversation in brief", "threads": "The threads",
+            "session": "The session", "canvas": "The cards", "views": "The views", "documents": "The documents",
+            "evidence": "What the answer rests on", "heads": "Heads-ups already given",
+            "glossed": "Terms already explained"}
 TASK_HEADING = "Your task"
-ALWAYS = ("conversation", "canvas")  # the parts that say they are empty rather than being left out
+ALWAYS = ("conversation", "brief", "canvas")  # the parts that say they are empty rather than being left out
+GIVEN = ("heads", "glossed")  # the parts whose text the caller gives (`given`), sent whole
+# the brief's caps: what started a turn and its answer, each whole and shortened, and a card's takeaway shortened
+BRIEF_SAID = (2_000, 400)
+BRIEF_REPLY = (8_000, 600)
+BRIEF_TAKEAWAY = 200
+BRIEF_RECENT = 5  # the last turns, which the brief shortens only after every older one (brief_part)
 OUTPUT_CHARS = 6_000  # of one tool result
 INPUT_CHARS = 8_000  # of one argument of a call
 TIERS = ((OUTPUT_CHARS, INPUT_CHARS), (2_000, 3_000), (600, 1_000), (0, 300))  # (result, argument) caps, tried in order
@@ -39,8 +54,9 @@ INDENT = "    "
 PASTED = "(pasted)"  # the line over what the analyst pasted into a message, which is indented under it (_said)
 # the cut steps, (part, level) in order, then the parts whose oldest entries go, in order
 STEPS = (("threads", 1), ("threads", 2), ("conversation", 1),
-         ("conversation", 2), ("conversation", 3), ("session", 1), ("session", 2), ("session", 3))
-DROP_ORDER = ("threads", "session", "conversation")
+         ("conversation", 2), ("conversation", 3), ("session", 1), ("session", 2), ("session", 3),
+         ("brief", 1), ("evidence", 1), ("brief", 2), ("evidence", 2))
+DROP_ORDER = ("threads", "session", "conversation", "brief", "evidence")
 _memo = threading.local()  # the hint lines of prompts/tools.md, read once per render (_hints)
 
 
@@ -481,6 +497,166 @@ def session_part(c: str, chat: str | None, focus: tuple[str, ...] = ()) -> _Part
     return _Part("session", _items(([_entry_text(e, o, i) for o, i in TIERS] for e in entries), focus))
 
 
+# --------------------------------------------------------------------------- the brief and the evidence
+
+
+@dataclass
+class _Turn:
+    """One turn of main: what started it (the analyst's messages, events, notifications), its replies and its calls."""
+
+    said: list[_Entry] = field(default_factory=list)
+    replies: list[_Entry] = field(default_factory=list)
+    calls: list[_Entry] = field(default_factory=list)
+
+
+def _turns(entries: list[_Entry]) -> list[_Turn]:
+    """Main's entries as turns: a message, an event or a notification after a reply or a call starts the next."""
+    out: list[_Turn] = []
+    for e in entries:
+        asks = not e.name and e.head != "[session]"
+        if not out or (asks and (out[-1].replies or out[-1].calls)):
+            out.append(_Turn())
+        (out[-1].calls if e.name else out[-1].replies if e.head == "[session]" else out[-1].said).append(e)
+    return out
+
+
+def _words(text: Any) -> str:
+    return " ".join(str(text or "").split())
+
+
+def _of_answers(turns: list[_Turn], answers: list[dict[str, Any]]) -> set[int]:
+    """The places in `turns` of the turns whose replies hold an answer of `answers` (answer_comments' records, {turn,
+    rows: [{text}]}), found by the start of the answer's first text; the last turn with a reply when one is not found."""
+    out: set[int] = set()
+    for a in answers:
+        first = next((_words(r.get("text"))[:200] for r in a.get("rows") or [] if _words(r.get("text"))), "")
+        found = next((i for i in range(len(turns) - 1, -1, -1)
+                      if first and any(first in _words(e.body) for e in turns[i].replies)), None)
+        if found is None:
+            found = next((i for i in range(len(turns) - 1, -1, -1) if turns[i].replies), None)
+        if found is not None:
+            out.add(found)
+    return out
+
+
+def _cards_by_id(c: str) -> dict[str, dict[str, Any]]:
+    """{id: card} of every card of the workspace, as the canvas part reads them."""
+    from . import notebook  # noqa: PLC0415
+
+    ws = config.workspace_dir(c)
+    out: dict[str, dict[str, Any]] = {}
+    for row in notebook.list_notebooks(ws, figures=False):
+        for cell in (notebook.read_notebook(ws, row["id"]) or {}).get("cells") or []:
+            if isinstance(cell, dict) and cell.get("id"):
+                out[str(cell["id"])] = cell
+    return out
+
+
+def _card_line(cell: dict[str, Any] | None, ref: str, takeaway_cap: int | None) -> str:
+    """A card as the brief shows it: its ref, kind and question, and its takeaway under it (cut to `takeaway_cap`)."""
+    if cell is None:
+        return f"- {ref} (gone)"
+    title = _words(cell.get("title")) or "(untitled)"
+    line = f"- {ref} · {cell.get('kind') or 'code'} · {title}"
+    takeaway = _words(cite.canon_text(str(cell.get("takeaway") or "")))
+    if takeaway:
+        if takeaway_cap is not None and len(takeaway) > takeaway_cap:
+            takeaway = takeaway[: takeaway_cap - 1] + "…"
+        line += f"\n  takeaway: {takeaway}"
+    return line
+
+
+_MADE_RE = re.compile(r"(?<![\w:])(?:card|cell):([A-Za-z0-9_-]+)")  # the first card a card call's result names
+
+
+def _turn_cards(t: _Turn) -> list[str]:
+    """The refs of the cards a turn made or changed, in order: by _ref_of, else the first card the call's result names
+    (add_card's says `thimble shows it as [[card:<id>]]`)."""
+    out = []
+    for e in t.calls:
+        if e.name not in CARD_CALLS or e.error:
+            continue
+        r = _ref_of(e)
+        if not (r and r.startswith(cite.CARD)) and (m := _MADE_RE.search(e.result or "")):
+            r = f"{cite.CARD}{m.group(1)}"
+        if r and r.startswith(cite.CARD):
+            out.append(r.split("#", 1)[0])
+    return list(dict.fromkeys(out))
+
+
+def _brief_levels(t: _Turn, n: int, mark: str, cards: dict[str, dict[str, Any]]) -> list[str]:
+    """One turn as the brief shows it at each level: whole, then shortened (BRIEF_SAID, BRIEF_REPLY, BRIEF_TAKEAWAY)."""
+    out = []
+    for level in (0, 1):
+        lines = [f"### Turn {n}{mark}"]
+        lines += [_cut(cite.canon_text(f"{e.head}\n{e.body}" if e.body else e.head), BRIEF_SAID[level], None)
+                  for e in t.said]
+        reply = "\n\n".join(e.body.strip() for e in t.replies if e.body.strip())
+        if reply:
+            lines.append("[session]\n" + _cut(cite.canon_text(reply), BRIEF_REPLY[level], None))
+        refs = _turn_cards(t)
+        if refs:
+            cap = None if level == 0 else BRIEF_TAKEAWAY
+            lines.append("cards:\n" + "\n".join(_card_line(cards.get(r.split(":", 1)[1]), r, cap) for r in refs))
+        out.append("\n\n".join(lines))
+    return out
+
+
+def _main_turns(c: str) -> list[_Turn]:
+    path = transcript_path(c)
+    return _turns(_entries(path, forks=False)) if path is not None else []
+
+
+def brief_part(c: str, answers: list[dict[str, Any]] | None = None, turns: list[_Turn] | None = None) -> _Part | None:
+    """Main's conversation turn by turn without its calls (module note), oldest first; the turns of `answers` marked and
+    never cut. Its cut levels: 1 shortens every turn but the last BRIEF_RECENT, 2 those too; then the oldest go. None
+    when it has no turn."""
+    turns = _main_turns(c) if turns is None else turns
+    if not turns:
+        return None
+    mine = _of_answers(turns, answers or [])
+    cards = _cards_by_id(c)
+    items = []
+    for i, t in enumerate(turns):
+        whole, short = _brief_levels(t, i + 1, " " + _hint("context-brief-checked") if i in mine else "", cards)
+        recent = i >= len(turns) - BRIEF_RECENT
+        items.append(_Item([whole, whole if recent else short, short], focus=i in mine))
+    return _Part("brief", items, oldest=lambda n: _hint("context-brief-oldest", n=n))
+
+
+# a citation in an answer: `[[ref]]` or `[[shown|ref]]` (cite._SPAN_RE), or a markdown link to a file or a card
+_CITED_RE = re.compile(r"\[\[([^\[\]\n]+?)\]\]|(?<!!)\[[^\[\]\n]+\]\((?!https?:|#|mailto:)([^()\s]+)\)")
+
+
+def _cited(text: str) -> list[str]:
+    """The refs `text` cites, in order, once each."""
+    out = (m.group(1).rsplit("|", 1)[-1] if m.group(1) is not None else m.group(2) for m in _CITED_RE.finditer(text))
+    return list(dict.fromkeys(cite.canon(r.strip()) for r in out if r.strip()))
+
+
+def evidence_part(c: str, answers: list[dict[str, Any]], turns: list[_Turn] | None = None) -> _Part | None:
+    """What the turns of `answers` rest on (module note): each of their calls at TIERS[1:], then the refs the answers
+    cite, a card with its question and takeaway. None when there is nothing."""
+    turns = _main_turns(c) if turns is None else turns
+    if not answers:
+        return None
+    items: list[_Item] = []
+    for i in sorted(_of_answers(turns, answers)):
+        items += [_Item([_entry_text(e, o, n) for o, n in TIERS[1:]]) for e in turns[i].calls]
+    text = "\n".join(str(r.get("text") or "") for a in answers for r in a.get("rows") or [])
+    refs = _cited(text)
+    if refs:
+        cards, lines, shown = _cards_by_id(c), [], set()
+        for r in refs:
+            card = r.split("#", 1)[0].split("@", 1)[0] if r.startswith(cite.CARD) else ""
+            if card in shown:
+                continue
+            shown.add(card or r)
+            lines.append(_card_line(cards.get(card[len(cite.CARD):]), card, None) if card else f"- {r}")
+        items.append(_Item([_hint("context-evidence-cites", refs="\n".join(lines))], focus=True))
+    return _Part("evidence", items) if items else None
+
+
 # --------------------------------------------------------------------------- the parts never cut
 
 
@@ -643,16 +819,25 @@ def _section(heading: str, value: str) -> str:
 
 
 def render(c: str, task: str = "", *, budget: int, focus: Iterable[str] = (), parts: Iterable[str] = PARTS,
-           chat: str | None = None) -> str:
-    """The parts `parts` asks for (PARTS, and `session` for the chat `chat`), each under its heading, then `task` under
+           chat: str | None = None, answers: list[dict[str, Any]] | None = None,
+           given: dict[str, str] | None = None) -> str:
+    """The parts `parts` asks for (PARTS, and by name `session` for the chat `chat`, `brief` and `evidence` for the
+    answers `answers`, and the digests GIVEN, whose text `given` holds), each under its heading, then `task` under
     `## Your task` when it is given, cut to `budget` characters around the refs in `focus`."""
     with _hints():
         want = [k for k in HEADINGS if k in set(parts)]
         focus_refs = tuple(dict.fromkeys(cite.canon(str(f).strip()) for f in focus if str(f).strip()))
         cuttable: dict[str, _Part | None] = {}
         fixed: dict[str, str] = {}
+        turns = _main_turns(c) if {"brief", "evidence"} & set(want) else []
         for key in want:
-            if key == "conversation":
+            if key == "brief":
+                cuttable[key] = brief_part(c, answers, turns)
+            elif key == "evidence":
+                cuttable[key] = evidence_part(c, answers or [], turns)
+            elif key in GIVEN:
+                fixed[key] = str((given or {}).get(key) or "").strip() or _hint("context-none-given")
+            elif key == "conversation":
                 cuttable[key] = conversation_part(c, focus_refs, forks="threads" not in want)
             elif key == "threads":
                 cuttable[key] = threads_part(c, focus_refs)
@@ -664,7 +849,7 @@ def render(c: str, task: str = "", *, budget: int, focus: Iterable[str] = (), pa
                 fixed[key] = views(c)
             elif key == "documents":
                 fixed[key] = documents(c)
-        empty = {"conversation": "context-no-conversation"}
+        empty = {"conversation": "context-no-conversation", "brief": "context-no-conversation"}
         frames = {k: _section(HEADINGS[k], "") for k in want}  # each section's own text, counted against the budget
         live = [p for p in cuttable.values() if p is not None]
         size = sum(len(frames[k]) + 2 for k in want) + sum(len(v) for v in fixed.values())

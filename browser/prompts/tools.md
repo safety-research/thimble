@@ -1364,6 +1364,24 @@ There are no cards yet.
 
 [{shown} of {total} characters shown.]
 
+## context-brief-checked
+
+· the answer you check
+
+## context-brief-oldest
+
+[The {n} oldest turns are left out here, since the whole conversation is too long.]
+
+## context-evidence-cites
+
+The answer cites these:
+
+{refs}
+
+## context-none-given
+
+None yet.
+
 ## context-cut-oldest
 
 [The {n} oldest entries are left out here, since the whole conversation is too long.]
