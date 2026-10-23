@@ -1,8 +1,8 @@
 // Squeeze and catch-up in the terminal (squeeze/): s at an empty prompt opens the chips under the answer, ] asks one
 // rewrite and the new text shows in place of Claude's words, Claude hears the version with the next prompt, 0 brings
-// the original back with no call; with two replies since the person's last prompt, s writes one catch-up of them,
-// drawn last under the newest message it covers, which keeps its look at every chip level, and 0 dismisses it. All
-// data is made up. `claude plugin test plugin`.
+// the original back with no call; with two replies since the person's last prompt, s opens the same chips under the
+// newest, and they offer a catch-up as one more chip, which writes one catch-up of them, drawn last under the newest
+// message it covers, which keeps its look at every chip level, and 0 dismisses it. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { resetSqueeze } from '../squeeze/term'
@@ -105,13 +105,21 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(back).not.toContain('fresh fetch')
 })
 
-test('with two replies since the last prompt, s writes one catch-up of them under the newest; 0 brings the replies back', async ($, on) => {
+test('with two replies since the last prompt, s opens the chips with a catch-up chip; picked, it writes one catch-up under the newest; 0 brings the replies back', async ($, on) => {
   const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
   await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
-  expect(await t.bar()).toContain('s catch up')
+  expect(await t.bar()).toContain('s squeeze or catch up')
+  // s opens the chips under the newest reply, with no call; the catch-up is the chip after the three
   await t.press('s')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(0)
+  expect(await t.bar()).toContain('1–4 chip')
+  const { client, tree } = await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')
+  expect(client?.props.props.catchup).toEqual({ n: 4, replies: 2 })
+  expect(textOf(tree)).toContain('4 Catch up on 2 replies')
+  await t.press('4')
   await t.clock.advance(5000)
   expect(String(t.asked[0].prompt)).toContain("Claude's messages since the analyst's last prompt")
   expect(String(t.asked[0].prompt)).toContain('The analyst asked: why did it fail?')
@@ -122,8 +130,38 @@ test('with two replies since the last prompt, s writes one catch-up of them unde
   expect(host).toContain('Both: the build failed, and the retry passed.')
   await t.press('0')
   expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
-  // a catch-up the person read counts: s now opens the chips on the newest reply
+  // a catch-up the person read counts: s opens the chips on the newest reply, with no catch-up chip
   expect(await t.bar()).not.toContain('catch up')
+  await t.press('s')
+  expect((await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).client?.props.props.catchup).toBe(null)
+})
+
+test('with two replies since the last prompt, the chips squeeze the newest reply alone; a press on the catch-up chip catches up', async ($, on) => {
+  const t = await setup($, on, ['The retry passed on [all 12](#) runs after the fix.', 'Both: the build failed, and the retry passed.'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.press('s')
+  await t.press(']')
+  await t.clock.advance(5000)
+  // one rewrite of the newest reply, not a catch-up (its citation draws, so the version shows here); the reply before
+  // it draws as it was
+  expect(t.asked.length).toBe(1)
+  expect(String(t.asked[0].prompt)).not.toContain("Claude's messages since the analyst's last prompt")
+  expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('runs after the fix')
+  expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
+  // the catch-up chip still stands in the row; a press on it writes the catch-up
+  const { tree, posts } = await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')
+  const btn = nodes(tree).find(n => n.type === 'Button' && n.props.label === 'catch up on 2 replies')
+  btn.props.onPress()
+  const ui = await $.ui.mount(answer('row-t3', 'The retry passed on all runs.')) as Any
+  await ui.post(posts.at(-1), { element: 'sqchips-row-t3' })
+  await ui.unmount()
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(2)
+  expect(String(t.asked[1].prompt)).toContain("Claude's messages since the analyst's last prompt")
+  expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('catch-up of the 2 replies since your last message')
+  expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('')
 })
 
 /** The chips' Client under a row, as the terminal would draw it: its props from the row, its elements as plain nodes. */
@@ -191,7 +229,7 @@ test("after one reply to the newest prompt s is plain squeeze, whoever's turns c
   expect(await t.bar()).toContain('s squeeze')
   expect(await t.bar()).not.toContain('catch up')
   await t.turn('t4', 'The second job ended.', null)
-  expect(await t.bar()).toContain('s catch up')
+  expect(await t.bar()).toContain('s squeeze or catch up')
 })
 
 test('the catch-up draws last, under the newest message it covers, and the replies it covers draw nothing while it shows', async ($, on) => {
@@ -202,6 +240,7 @@ test('the catch-up draws last, under the newest message it covers, and the repli
   // a text row of the newest turn kept after its answer: the newest message the catch-up covers
   await t.say('row-t3-last', 'The retry passed on all runs.')
   await t.press('s')
+  await t.press('4')
   await t.clock.advance(5000)
   const at = (row: string, text: string) => $.ui.render(answer(row, text)).then(textOf)
   expect(await at('row-t2', 'The build failed on three runs.')).toBe('')
@@ -228,6 +267,7 @@ test('a catch-up keeps its look at every chip: Length, Interpretation, Backgroun
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
   await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
   await t.press('s')
+  await t.press('4')
   await t.clock.advance(5000)
   const host = () => $.ui.render(answer('row-t3', 'The retry passed on all runs.')).then(textOf)
   const framed = async (words: string) => {
