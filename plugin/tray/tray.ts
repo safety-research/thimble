@@ -638,11 +638,12 @@ function drawUnits(els: Any, units: Unit[]): Any[] {
 /** The press on a citation's file place: the citation's evidence in the side pane. The open is awaited inside the
  *  handler, so it is made while the person's press runs: Claude Code places a pane at any width only for such an open,
  *  and one left to run after the handler returned (`void openPane(...)`) is unasked and waits undrawn below 144
- *  columns (110 for a pane the person opened before), which the notice then reports. */
+ *  columns (110 for a pane the person opened before). When Claude Code still places none (no surface here draws
+ *  panes), the notice says so; the tray keeps showing the cited line. */
 export function evidenceOpener($: Engine, f: { row: string; n: number }): () => Promise<void> {
   return async () => {
     const placed = await openPane($, 'evidence', { row: f.row, n: f.n }, `citation ${f.n}`).catch(() => true)
-    if (!placed) noticeLine($, 'Claude Code did not open the side pane here. Click the citation in the reply to see its evidence.', 'tray')
+    if (!placed) noticeLine($, 'Claude Code did not open the side pane here. The tray above still shows the cited line.', 'tray')
   }
 }
 

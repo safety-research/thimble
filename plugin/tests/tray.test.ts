@@ -338,6 +338,23 @@ test("the tray's file place makes its pane open inside the press, before its han
   expect(state.get('pane')).toMatchObject({ kind: 'evidence', args: { row: 'row-t1', n: 1 } })
 })
 
+// A press on the file's place opens the pane at any width; where Claude Code still places none (no surface here draws
+// panes), the notice says so and sends the person to what shows the evidence: not to the reply's citation, whose press
+// opens the tray they already have
+test("the tray's file place where no pane can open: the notice does not send the person to the reply's citation", async () => {
+  const state = new Map<string, unknown>()
+  const $: Any = {
+    state: { get: async (k: Any) => ({ value: state.get(k.key) ?? null }), set: async (k: Any, v: unknown) => void state.set(k.key, v) },
+    ui: { open: async () => ({ isPlaced: false, reason: 'no attached surface places panes' }), panes: async () => [], close: async () => undefined },
+  }
+  await evidenceOpener($, { row: 'row-t1', n: 1 })()
+  await new Promise(r => setTimeout(r, 1))
+  const line = state.get('failLine') as Any
+  expect(line?.kind).toBe('notice')
+  expect(String(line?.text)).toContain('did not open the side pane')
+  expect(String(line?.text)).not.toContain('citation in the reply')
+})
+
 test('a verified citation offers no repair', async ($, on) => {
   await resumed($, on, QUOTED, 's-tray-7')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
