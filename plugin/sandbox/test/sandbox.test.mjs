@@ -72,10 +72,13 @@ before(() => {
 
 after(() => rmSync(dir, { recursive: true, force: true }))
 
+/** The runner's rules on this machine, for the test's card copies and run folder. */
+const rulesHere = () => runnerRules({ platform: s.platform, plugin: PLUGIN, node: s.node, srt: s.srt, cards, run, home: homedir(), thimbleHome: process.env.THIMBLE_HOME })
+
 /** What `code` prints when Node runs it under the runner's rules, with the environment the runner gets (and `path`,
  *  the PATH srt is started with). */
 function inSandbox(code, path = process.env.PATH) {
-  const rules = runnerRules({ platform: s.platform, plugin: PLUGIN, node: s.node, srt: s.srt, cards, run, home: homedir(), thimbleHome: process.env.THIMBLE_HOME })
+  const rules = rulesHere()
   const r = spawnSync(s.node, [join(PLUGIN, 'sandbox', 'run.mjs'), '--srt', s.srt, JSON.stringify(rules), '--', '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', s.node, '-e', code],
     { encoding: 'utf8', timeout: 60000, env: { PATH: path, HOME: run, TMPDIR: run, CLAUDE_CODE_TMPDIR: run, MADE_UP_TOKEN: 'x' } })
   assert.equal(r.status, 0, r.stderr)
@@ -91,7 +94,13 @@ test('in the sandbox: the card copies read, nothing else of the files; writes on
   const fs = 'const fs = require("fs"); const t = f => { try { return f() } catch (e) { return e.code } }'
   assert.equal(inSandbox(`${fs}; console.log(t(() => fs.readFileSync(${JSON.stringify(join(cards, 'rows.json'))}, "utf8")))`), '[]')
   assert.equal(inSandbox(`${fs}; console.log(t(() => fs.readFileSync(${JSON.stringify(join(secret, 'key.txt'))}, "utf8")))`), 'ENOENT')
-  assert.equal(inSandbox(`${fs}; console.log(t(() => fs.readdirSync(${JSON.stringify(homedir())}).length))`), s.platform === 'linux' ? 'ENOENT' : 'EPERM')
+  // on Linux bwrap makes the folders that lead to a shown path, empty but for that path: a checkout in the home folder
+  // (as on a CI runner) shows the home folder with the one folder that leads to it, and nothing else of it
+  const home = homedir()
+  const shown = paths(rulesHere().filesystem.allowRead).filter(p => p.startsWith(`${home}/`))
+  const leading = [...new Set(shown.map(p => p.slice(home.length + 1).split('/')[0]))].sort()
+  const homeSeen = s.platform !== 'linux' ? 'EPERM' : leading.length ? JSON.stringify(leading) : 'ENOENT'
+  assert.equal(inSandbox(`${fs}; console.log(t(() => JSON.stringify(fs.readdirSync(${JSON.stringify(home)}).sort())))`), homeSeen)
   assert.match(inSandbox(`${fs}; console.log(t(() => fs.writeFileSync(${JSON.stringify(join(cards, 'new.json'))}, "x")))`), /EROFS|EPERM|EACCES/)
   assert.equal(inSandbox(`${fs}; console.log(t(() => fs.writeFileSync(${JSON.stringify(join(run, 'new.txt'))}, "x")) ?? "wrote")`), 'wrote')
 })
