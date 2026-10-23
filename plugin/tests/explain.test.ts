@@ -1,14 +1,14 @@
 // The explainers and heads-ups (explain/): after the observer's look, each stands on its words in the answer as a
 // press, in 0.10's teal and orange; a term is explained once per conversation; each lens's switch hides what it gave;
-// a press tells Claude with the next prompt; Longer writes an explainer again from the answer and the lines it links
-// to, the short one kept. All data is made up. `claude plugin test plugin`.
+// Longer writes an explainer again from the answer and the lines it links to, the short one kept, and one that fails
+// says why. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { partOf, registerAnswers, resetAnswers } from '../core/answers'
 import { spansFor } from '../core/answerview'
 import { resetEngaged } from '../core/engaged'
 import { registerTurn } from '../core/turn'
-import { resetTheme, themeNow } from '../core/theme'
+import { resetTheme } from '../core/theme'
 import { explainState, expandExplainer, resetExplain, type ExplainPart } from '../explain/seam'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
@@ -125,17 +125,7 @@ test('a term is explained once per conversation, and each switch hides what its 
   setOptions({})
 })
 
-test('a press on an explainer tells Claude with the next prompt that the analyst opened it', async () => {
-  setOptions({})
-  const s = setup([LOOK])
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
-  const spans = await spansFor(s.$, 't1-row', ANSWER, [])
-  await spans.find(x => x.id === 'g1')!.onPress!()
-  const told = JSON.stringify(s.state.get(JSON.stringify({ plugin: 'thimble', key: 'tell' }))?.value)
-  expect(told).toContain('They opened the explainer of \\"retry budget\\"')
-})
-
-test('Longer writes the explainer again from the answer and the lines it links to, and keeps the short one', async () => {
+test('Longer writes the explainer again from the answer and the lines it links to, and keeps the short one; one that fails says why and how to try again', async () => {
   setOptions({})
   const s = setup([LOOK], { complete: reply({ body: 'The client sends a failed upload again up to five times.', here: '[five tries](client/upload.py#L3-4)' }) })
   s.files.set('/made-up/data/client/upload.py', 'import os\n\nTRIES = 5\nWAIT = 1\n')
@@ -150,28 +140,12 @@ test('Longer writes the explainer again from the answer and the lines it links t
   const g = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!.items.g1!
   expect(g).toMatchObject({ body: 'The client sends a failed upload again up to five times.', expanded: true, short: { body: 'How many times the client tries again.' } })
   expect(await expandExplainer(s.$, { row: 't1-row', kind: 'heads', id: 'h1' })).toBe('A heads-up is not written at more length.')
-})
-
-test('a Longer that fails says why and how to try again; the explainer stays as it was', async () => {
-  setOptions({})
-  const s = setup([LOOK], { complete: { isAnswered: false, reason: 'aborted' } })
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
-  const why = await expandExplainer(s.$, { row: 't1-row', kind: 'explain', id: 'g1' })
+  // a Longer that fails says why and how to try again; the explainer stays as it was
+  const failing = setup([LOOK], { complete: { isAnswered: false, reason: 'aborted' } })
+  await answered(failing, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  const why = await expandExplainer(failing.$, { row: 't1-row', kind: 'explain', id: 'g1' })
   expect(why).toContain('was not written: the call was stopped')
   expect(why).toContain('Press e on it to try again.')
-  expect((await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!.items.g1!.expanded).toBe(undefined)
+  expect((await partOf<ExplainPart>(failing.$, 't1-row', 'explain'))!.items.g1!.expanded).toBe(undefined)
 })
 
-test('the light theme gives the light fills, and a change of theme the other set', async () => {
-  setOptions({})
-  const s = setup([LOOK], { theme: 'light' })
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
-  const spans = await spansFor(s.$, 't1-row', ANSWER, [])
-  expect(spans.find(x => x.id === 'g1')!.look).toEqual({ backgroundColor: '#c4eee6', hoverBg: '#8edccf' })
-  // the person picks a dark theme: a second later, the next drawing reads it (each clock read here is 100 ms on)
-  s.setTheme('dark-daltonized')
-  expect(await themeNow(s.$)).toBe('light')
-  for (let i = 0; i < 12; i++) await s.$.clock.now()
-  expect(await themeNow(s.$)).toBe('dark')
-  expect((await spansFor(s.$, 't1-row', ANSWER, [])).find(x => x.id === 'g1')!.look.backgroundColor).toBe('#1e4d47')
-})

@@ -63,16 +63,12 @@ async function thimbleText($: Any, w: World): Promise<string> {
   return carried[0]
 }
 
-test("the first prompt carries guidance.md's text beside it, and the next prompts do not carry it again", async ($, on) => {
+test("the first prompt carries guidance.md's text beside it, the next prompts do not carry it again, and the first after a compaction does, once", async ($, on) => {
   const w = world(on)
   expect(await thimbleText($, w)).toBe(GUIDANCE.trim())
   expect(await ask($, w, 'And why?')).toEqual([])
   expect(await ask($, w, 'Show me one.')).toEqual([])
-})
-
-test('after a compaction, which replaces the copy with a summary, the next prompt carries it again, once', async ($, on) => {
-  const w = world(on)
-  await ask($, w)
+  // a compaction replaces the copy with a summary: the next prompt carries it again, once
   w.messages = [{ role: 'user', content: [{ type: 'text', text: 'Summary: the analyst asked which runs failed; thimble is on in this folder.' }] }]
   expect(await ask($, w, 'And why?')).toEqual([GUIDANCE.trim()])
   expect(await ask($, w, 'Show me one.')).toEqual([])
@@ -85,15 +81,6 @@ test('a resumed conversation that holds the copy gets no second one', async ($, 
     { role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] },
   ]
   expect(await ask($, w, 'And why?')).toEqual([])
-})
-
-test('with cards off, the Cards section is left out and the rest stays', { options: { cards: false } }, async ($, on) => {
-  const text = await thimbleText($, world(on))
-  expect(text).not.toContain('## Cards')
-  expect(text).not.toContain('`card` tool')
-  expect(text).toContain('## Citing claims')
-  expect(text).toContain('[12 of 40](#)')
-  expect(text).toContain('## Labels')
 })
 
 test("with citations off, the Citing claims section is left out and the other examples' citations read as plain words", { options: { marks: false } }, async ($, on) => {

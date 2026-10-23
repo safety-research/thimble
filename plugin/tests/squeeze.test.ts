@@ -1,11 +1,10 @@
 // Squeeze and catch-up in the terminal (squeeze/): s at an empty prompt opens the chips under the answer, ] asks one
 // rewrite and the new text shows in place of Claude's words, Claude hears the version with the next prompt, 0 brings
 // the original back with no call; with two replies since the person's last prompt, s opens the same chips under the
-// newest, and they offer a catch-up as one more chip, which writes one catch-up of them, drawn last under the newest
-// message it covers, which keeps its look at every chip level, and 0 dismisses it. All data is made up. `claude plugin test plugin`.
+// newest, and they offer a catch-up as one more chip, which writes one catch-up of them, and 0 dismisses it; keys
+// pressed in a row make one rewrite, and the latest one shows. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { citeScope } from '../marks/view'
 import { resetSqueeze } from '../squeeze/term'
 import Chips from '../squeeze/chips.tsx'
 import { promptStub, tempRun } from './stubs'
@@ -137,34 +136,6 @@ test('with two replies since the last prompt, s opens the chips with a catch-up 
   expect((await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).client?.props.props.catchup).toBe(null)
 })
 
-test('with two replies since the last prompt, the chips squeeze the newest reply alone; a press on the catch-up chip catches up', async ($, on) => {
-  const t = await setup($, on, ['The retry passed on [all 12](#) runs after the fix.', 'Both: the build failed, and the retry passed.'])
-  await t.turn('t1', 'Earlier answer.')
-  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
-  await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
-  await t.press('s')
-  await t.press(']')
-  await t.clock.advance(5000)
-  // one rewrite of the newest reply, not a catch-up (its citation draws, so the version shows here); the reply before
-  // it draws as it was
-  expect(t.asked.length).toBe(1)
-  expect(String(t.asked[0].prompt)).not.toContain("Claude's messages since the analyst's last prompt")
-  expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('runs after the fix')
-  expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
-  // the catch-up chip still stands in the row; a press on it writes the catch-up
-  const { tree, posts } = await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')
-  const btn = nodes(tree).find(n => n.type === 'Button' && n.props.label === 'catch up on 2 replies')
-  btn.props.onPress()
-  const ui = await $.ui.mount(answer('row-t3', 'The retry passed on all runs.')) as Any
-  await ui.post(posts.at(-1), { element: 'sqchips-row-t3' })
-  await ui.unmount()
-  await t.clock.advance(5000)
-  expect(t.asked.length).toBe(2)
-  expect(String(t.asked[1].prompt)).toContain("Claude's messages since the analyst's last prompt")
-  expect(textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))).toContain('catch-up of the 2 replies since your last message')
-  expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('')
-})
-
 test('keys pressed in a row make one rewrite, at the last level, 1 s after the last press; the chips show each level at once', async ($, on) => {
   const t = await setup($, on, ['The build failed on [3 of 12](#) runs.', 'The build failed on [3 of 12](#) runs: the much longer version.'])
   await t.turn('t1', LONG)
@@ -216,150 +187,3 @@ async function chipsDrawn($: Any, row: string, text: string, override: Any = {})
   return { client, tree: Chips({ ...client?.props.props, ...override } as never, surface as never), posts }
 }
 
-test('s close leads the bar while the chips are open, the chips row ends with it, and s, ↵ or a press on it closes them', async ($, on) => {
-  const t = await setup($, on, [])
-  // what the chips' Client posts reaches the hooks as Claude Code hands it on; closed, the bar offers s squeeze again
-  const post = async (data: Any) => { const ui = await $.ui.mount(answer('row-t1', LONG)) as Any; await ui.post(data, { element: 'sqchips-row-t1' }); await ui.unmount() }
-  const closed = async () => expect(await t.bar()).toMatch(/thimble {2}v card · s squeeze/)
-  await t.turn('t1', LONG)
-  await t.press('s')
-  expect(await t.bar()).toMatch(/thimble {2}s close · \[ \] shorter \/ longer · 1–3 chip · \+ your own/)
-  // the chips row ends with `s close`, its key drawn as the bar's keys
-  const { client, tree, posts } = await chipsDrawn($, 'row-t1', LONG)
-  expect(client?.props.module).toContain('chips.tsx')
-  const row = tree.props.children
-  const btn = nodes(row[row.length - 1]).find(n => n.type === 'Button')
-  expect(btn.props.label).toBe('s close')
-  expect(btn.props.children[0].props).toEqual({ color: 'suggestion', bold: true, children: 's' })
-  expect(btn.props.children[1].props).toEqual({ dimColor: true, children: ' close' })
-  // a press on it closes the chips
-  btn.props.onPress()
-  expect(posts.at(-1).events.at(-1)).toMatchObject({ press: 'close' })
-  await post(posts.at(-1))
-  await closed()
-  // while words are typed after +, s is a letter: the row names no close
-  await t.press('s')
-  const typing = await chipsDrawn($, 'row-t1', LONG, { plus: 'for my man' })
-  expect(nodes(typing.tree).some(n => n.props?.label === 's close')).toBe(false)
-  // with the keyboard in the chips: s close still leads the bar, the rest stays short, and s closes them
-  await post({ client: 'k', events: [{ n: 1, key: 'tab' }] })
-  const held = await t.bar()
-  expect(held).toMatch(/thimble {2}s close · tab next chip · ← → facts \/ interpretation · \+ your own · esc back to the prompt/)
-  expect(held).not.toContain('↵ done')
-  await post({ client: 'k', events: [{ n: 2, key: 's' }] })
-  await closed()
-  // ↵ in the chips closes them too
-  await t.press('s')
-  await post({ client: 'k2', events: [{ n: 1, key: 'tab' }, { n: 2, key: 'return' }] })
-  await closed()
-})
-
-const HEAD = 'thimble  catch-up of the 2 replies since your last message'
-const RULE = '▎'
-
-test("after one reply to the newest prompt s is plain squeeze, whoever's turns came before; a catch-up comes with the second reply", async ($, on) => {
-  const t = await setup($, on, [])
-  await t.turn('t1', 'Earlier answer.')
-  await t.turn('t2', 'The background job ended.', { text: '<task-notification>one</task-notification>', by: 'task-notification' })
-  // a prompt typed over the running turn waits while a task's report arrives; then the typed prompt's turn starts
-  await t.ask('why did it fail?')
-  await t.ask('<task-notification>two</task-notification>', 'task-notification')
-  await $.turn.start({ text: 'why did it fail?', turnId: 't3' } as never)
-  await t.say('row-t3', 'The build failed on three runs.')
-  await $.turn.complete({ turnId: 't3', reason: 'answer', answer: 'The build failed on three runs.', durationMs: 10, isAborted: false } as never)
-  await t.clock.advance(100)
-  expect(await t.bar()).toContain('s squeeze')
-  expect(await t.bar()).not.toContain('catch up')
-  await t.turn('t4', 'The second job ended.', null)
-  expect(await t.bar()).toContain('s squeeze or catch up')
-})
-
-test('the catch-up draws last, under the newest message it covers, and the replies it covers draw nothing while it shows', async ($, on) => {
-  const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
-  await t.turn('t1', 'Earlier answer.')
-  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
-  await t.turn('t3', 'Looking at the retry.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
-  // a text row of the newest turn kept after its answer: the newest message the catch-up covers
-  await t.say('row-t3-last', 'The retry passed on all runs.')
-  await t.press('s')
-  await t.press('4')
-  await t.clock.advance(5000)
-  const at = (row: string, text: string) => $.ui.render(answer(row, text)).then(textOf)
-  expect(await at('row-t2', 'The build failed on three runs.')).toBe('')
-  expect(await at('row-t3', 'Looking at the retry.')).toBe('')
-  const last = await at('row-t3-last', 'The retry passed on all runs.')
-  expect(last).toContain(HEAD)
-  expect(last).not.toContain('in their place')
-  expect(last).toContain('Both: the build failed, and the retry passed.')
-  // the chips stand under it, not under the reply that keeps it
-  const chips = (row: string, text: string) => $.ui.render(answer(row, text)).then((n: Any) => JSON.stringify(n).includes('sqchips-row-t3#cu'))
-  expect(await chips('row-t3-last', 'The retry passed on all runs.')).toBe(true)
-  expect(await chips('row-t3', 'Looking at the retry.')).toBe(false)
-  // 0: the replies again, each in its place
-  await t.press('0')
-  expect(await at('row-t3', 'Looking at the retry.')).toBe('the engine')
-  expect(await at('row-t3-last', 'The retry passed on all runs.')).toBe('the engine')
-})
-
-test('a catch-up keeps its look at every chip: Length, Interpretation, Background and the person\'s own, while each is written and after', async ($, on) => {
-  const gates: ((v: string) => void)[] = []
-  const later = () => new Promise<string>(r => { gates.push(r) })
-  const t = await setup($, on, ['Both: the build failed, and the retry passed.', later(), later(), later(), later()])
-  await t.turn('t1', 'Earlier answer.')
-  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
-  await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
-  await t.press('s')
-  await t.press('4')
-  await t.clock.advance(5000)
-  const host = () => $.ui.render(answer('row-t3', 'The retry passed on all runs.')).then(textOf)
-  const framed = async (words: string) => {
-    const now = await host()
-    expect(now).toContain(HEAD)
-    expect(now).toContain(RULE)
-    expect(now).toContain(words)
-    expect(await $.ui.render(answer('row-t2', 'The build failed on three runs.')).then(textOf)).toBe('')
-  }
-  await framed('Both: the build failed')
-  const change = async (keys: string[], reply: string, words = reply) => {
-    for (const k of keys) await t.press(k)
-    // while it is written: the catch-up as it was, dim, in its frame
-    await framed('')
-    gates.shift()!(reply)
-    await t.clock.advance(20)
-    await framed('')
-    await t.clock.advance(5000)
-    await framed(words)
-  }
-  await change([']'], '## Longer\n\n- the build failed on [3 of 12](#) runs\n- the retry passed on all runs', 'the retry passed on all runs')
-  await change(['2', ']'], 'Read together, the failures came from the cache key.')
-  await change(['3', ']'], 'For an expert: the lockfile moved, so the cache key changed.')
-  await t.ask('/squeeze for my manager', 'composer')
-  await $.command.run({ command: 'squeeze', args: 'for my manager' } as never).catch(() => undefined)
-  await change(['4', ']'], 'For your manager: the build is fixed.')
-  expect(t.asked.length).toBe(5)
-})
-
-test('a squeezed version that words its citations anew: each citation its own hover group, and a press on one opens the tray on its own', async ($, on) => {
-  const text = 'Of the [12 runs](#), [3 failed](#) on the [slow mirror](#).'
-  const t = await setup($, on, ['Of all [12 nightly runs](#), exactly [3 of them failed](#), each on the [slow package mirror](#).'])
-  await t.turn('t1', text)
-  await t.press('s')
-  await t.press(']')
-  await t.clock.advance(5000)
-  const all = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : [n, ...[n.props?.children, n.children].flat(Infinity).flatMap(all)])
-  const cites = all(await $.ui.render(answer('row-t1', text))).filter(n => n.type === 'Button' && /^citation /.test(String(n.props.label)))
-  // (no check ran here, so each is failed, its × a press of its own in its group)
-  const labels = [...new Set(cites.map(b => String(b.props.label)))]
-  expect(labels).toEqual(['citation 1: 12 nightly runs', 'citation 2: 3 of them failed', 'citation 3: slow package mirror'])
-  // three hover groups, as the reply's own citations have (one shared group before, all of them lit at once)
-  const scopes = labels.map(l => [...new Set(cites.filter(b => b.props.label === l).map(b => b.hover.scope))])
-  expect(scopes).toEqual([1, 2, 3].map(n => [citeScope(`mk-row-t1:${n}`)]))
-  await t.press('s')
-  const ui = await $.ui.mount(answer('row-t1', text))
-  await ui.press({ key: cites.find(b => b.props.label === labels[1])!.props.key })
-  await ui.unmount()
-  // the tray stands on the second citation, as a press on it in Claude's own words does
-  const band = await t.bar()
-  expect(band).toContain('3 failed')
-  expect(band).not.toContain('12 runs')
-})

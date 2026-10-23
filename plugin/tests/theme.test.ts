@@ -8,7 +8,7 @@ import { resetTheme, themeNow, themeOf, themeOfFgbg } from '../core/theme'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-test('the named themes, a custom theme by its base, and auto by COLORFGBG', () => {
+test('the named themes, a custom theme by its base, and auto by COLORFGBG; themeNow reads the /config row, COLORFGBG for auto, and a custom theme\'s file', async () => {
   for (const t of ['light', 'light-daltonized', 'light-ansi']) expect(themeOf(t)).toBe('light')
   for (const t of ['dark', 'dark-daltonized', 'dark-ansi', undefined]) expect(themeOf(t)).toBe('dark')
   expect(themeOf('custom:paper', { base: 'light-daltonized' })).toBe('light')
@@ -23,9 +23,6 @@ test('the named themes, a custom theme by its base, and auto by COLORFGBG', () =
   expect(themeOf('auto', { fgbg: '15;0' })).toBe('dark')
   // auto, the terminal says nothing: the light set, whose colors read on both backgrounds
   expect(themeOf('auto')).toBe('light')
-})
-
-test('themeNow reads the /config row, COLORFGBG for auto, and a custom theme\'s file', async () => {
   resetTheme()
   let now = 10_000
   let theme = 'auto'
