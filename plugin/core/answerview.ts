@@ -43,9 +43,10 @@ type Any = any
 export type TextView = { text?: string | null; hidden?: boolean; dim?: boolean }
 
 /** How a span of a row's words is drawn: the props of its Text. */
-/** A span's look: Text's props, and `tint`, the background it takes inside a citation's words (which keep the
- *  citation's color and underline). */
-export type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean; tint?: string }
+/** A span's look: Text's props, `tint`, the background it takes inside a citation's words (which keep the
+ *  citation's color and underline), and `hoverBg`, the fill behind all of it while the pointer is over any piece of it
+ *  (marks/view.ts spanEl: one hover group per span). */
+export type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean; tint?: string; hoverBg?: string }
 
 /** Words of a row drawn as a press of a feature's (explain/seam.ts explainSpans): [start, end) are offsets into the
  *  text the row shows, on plain words (a span inside a citation's words is drawn with the citation, whose press it

@@ -86,7 +86,7 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
       id: p.id,
       start: p.start,
       end: p.end,
-      look: { backgroundColor: heads ? c.headsBg : c.glossBg },
+      look: { backgroundColor: heads ? c.headsBg : c.glossBg, hoverBg: heads ? c.headsFocus : c.glossFocus },
       focus: { bold: true, backgroundColor: heads ? c.headsFocus : c.glossFocus },
       label: `${heads ? 'heads up' : 'explain'} ${text.slice(p.start, p.end).replace(/`/g, '')}`.slice(0, 120),
       onPress: async () => {

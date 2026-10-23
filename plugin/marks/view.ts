@@ -29,7 +29,9 @@
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
 // explainer highlighted teal or a heads-up orange (a fill behind the words); a span inside a mark's words keeps the
-// mark's press and look, its fill behind them in place of the citation's tint. While the tray shows
+// mark's press and look, its fill behind them in place of the citation's tint. A span's own words are one hover group
+// (spanScope), as a citation's are: the pointer over any piece of it (its inline code, its bold words, a line it wraps
+// to) puts its slightly stronger fill (`hoverBg`) behind all of it, never Claude Code's inverse. While the tray shows
 // a mark (`focus`), it is drawn bold on its tint, so the open one is easy to find. `dim` draws the words dim (a rewrite of them runs),
 // and `lead` stands in place of the reply's ● (▸: the answer the person picked for the keys).
 //
@@ -44,7 +46,7 @@ import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './mess
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Run = { s: string; b?: boolean; it?: boolean; code?: boolean; link?: boolean; dim?: boolean; mark?: number; span?: number; tag?: string }
-type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean; tint?: string }
+type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean; tint?: string; hoverBg?: string }
 /** Words a feature draws as a press of its own (core/answerview.ts Span). */
 export type ViewSpan = { start: number; end: number; look: SpanLook; label: string; onPress?: () => unknown }
 type Mark = { start: number; end: number; words: string }
@@ -201,16 +203,25 @@ function runText(els: Any, r: Run, wrap?: string, dim = false) {
   return els.Text(p)
 }
 
-/** A span's run as a press of the feature's, drawn in the span's look. */
+/** A hover group's name for a span of a reply's words (`<reply key>:s<index>`), as citeScope names a citation's. */
+export function spanScope(replyKey: string, k: number): string {
+  return citeScope(`${replyKey}:s${k}`).replace(/^cite-/, 'span-')
+}
+
+/** A span's run as a press of the feature's, drawn in the span's look. A span split into runs (inline code, bold, the
+ *  lines it wraps to) is a press per run, every one in the span's hover group, so the pointer over any piece lights the
+ *  whole span with its `hoverBg` (no inverse: Claude Code draws a plain Button inverse under the pointer). */
 function spanEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const sp = o.spans?.[r.span as number]
-  const { tint: _tint, ...look } = sp?.look ?? {}
-  const p: Any = { children: r.s, ...look }
+  const { tint: _tint, hoverBg, ...look } = sp?.look ?? {}
+  const scope = spanScope(o.key, r.span as number)
+  const hover = hoverBg ? { scope, backgroundColor: hoverBg } : { scope }
+  const p: Any = { children: r.s, ...look, hover }
   if (r.b) p.bold = true
   if (r.it) p.italic = true
   if (r.code && !p.color) p.color = 'permission'
   const text = els.Text(p)
-  return sp?.onPress ? els.Button({ key, plain: true, label: String(sp.label || r.s).slice(0, 120), hover: { bold: true }, children: [text], onPress: () => sp.onPress!() }) : els.Text({ key, children: [text] })
+  return sp?.onPress ? els.Button({ key, plain: true, label: String(sp.label || r.s).slice(0, 120), hover: { ...hover, inverse: false }, children: [text], onPress: () => sp.onPress!() }) : els.Text({ key, hover: { scope }, children: [text] })
 }
 
 /** A mark's run as a press that opens its evidence, drawn by its status. */
@@ -392,10 +403,13 @@ export function lostSpansEl(els: Any, lost: LostSpan[], key: string): Any | null
   if (!lost.length) return null
   const { Box, Button, Text } = els
   return Box({ key, marginLeft: 2, flexDirection: 'column', children: lost.map((l, i) => {
-    const { tint: _tint, ...look } = l.look
-    const words = [Text({ key: 'w', ...look, children: l.words }), Text({ key: 'd', dimColor: true, children: ` ${l.kind} · the check of the citations changed these words` })]
+    const { tint: _tint, hoverBg, ...look } = l.look
+    // the pointer over the line: the words' stronger fill, as on the reply (spanEl), no inverse; the press heats the
+    // group, the words (a Text in its Text) take the fill
+    const hover = { scope: spanScope(key, i), ...(hoverBg ? { backgroundColor: hoverBg } : {}) }
+    const words = [Text({ key: 'w', ...look, hover, children: l.words }), Text({ key: 'd', dimColor: true, children: ` ${l.kind} · the check of the citations changed these words` })]
     return l.onPress
-      ? Button({ key: `${key}-${i}`, plain: true, label: `${l.label} (the check changed its words)`.slice(0, 120), hover: { bold: true }, onPress: () => l.onPress!(), children: [Text({ key: 't', children: words })] })
+      ? Button({ key: `${key}-${i}`, plain: true, label: `${l.label} (the check changed its words)`.slice(0, 120), hover: { scope: hover.scope, inverse: false }, onPress: () => l.onPress!(), children: [Text({ key: 't', children: words })] })
       : Text({ key: `${key}-${i}`, children: words })
   }) })
 }
