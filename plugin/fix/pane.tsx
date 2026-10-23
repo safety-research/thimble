@@ -67,7 +67,7 @@ export async function openFixes($: Engine, o: { sel?: number; diff?: boolean } =
 /** A note for the list: what the person may want to know of the fix's state. */
 function noteOf(f: Fix): string {
   if (f.state === 'on' && (f.rounds || 1) > 1) return `${f.rounds} rounds`
-  if (f.state === 'ready') return 'waits for y'
+  if (f.state === 'ready') return (f.rounds || 1) > 1 ? `waits for y · ${f.rounds} rounds` : 'waits for y'
   if (f.state === 'working') return 'Claude works on it'
   if (f.state === 'pending') return `${f.note || 'set aside at an update'} · thimble reapply in a shell`
   if (f.state === 'failed' || f.state === 'redo') return f.error || ''

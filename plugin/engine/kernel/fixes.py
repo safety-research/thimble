@@ -512,13 +512,25 @@ def run_tests(fid: int | str) -> tuple[bool, str]:
 # ------------------------------------------------------------------ a request
 
 
-def new(words: str, made_in: str = "terminal", title: str | None = None) -> dict[str, Any]:
+REFINABLE = ("on", "off", "ready")
+
+
+def new(words: str, made_in: str = "terminal", title: str | None = None, refines: int | str | None = None,
+        always: bool = False) -> dict[str, Any]:
+    """A request: a copy cut from mine. `refines`: a fix that is on, off or ready, which these words may change (the
+    fixer's end says so, and done folds the change into it; `always`: they change it whatever the end says). Its
+    change is in the copy: mine holds it when it is on, else thimble puts it on the copy first."""
     words = (words or "").strip()
     if not words:
         raise FixError("say what should work differently: /thimble-fix make the bar say how many citations failed")
     with Lock():
         ensure_live()
         recs = records()
+        tgt = None
+        if refines is not None:
+            tgt = get(refines)
+            if tgt.get("state") not in REFINABLE or not tgt.get("commit"):
+                raise FixError(f"fix {tgt['id']} is {state_word(tgt)}; only a fix that is on, off or ready can change")
         fid = max(recs, default=0) + 1
         wt = work_dir(fid)
         if wt.exists():
@@ -526,10 +538,20 @@ def new(words: str, made_in: str = "terminal", title: str | None = None) -> dict
         base = head()
         wt.parent.mkdir(parents=True, exist_ok=True)
         git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+        if tgt and tgt.get("state") != "on":
+            p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{tgt['id']}"],
+                    cwd=wt, check=False, env=as_thimble())
+            if p.returncode != 0:
+                run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+                _drop_work({"work": str(wt)})
+                raise FixError(f"fix {tgt['id']} does not fit your thimble as it is now; /thimble-fix new <words> makes "
+                               "a new fix")
+            base = git("rev-parse", "HEAD", cwd=wt)
         tmp_dir(fid).mkdir(parents=True, exist_ok=True)
         rec = {"id": fid, "title": (title or short(words)).strip(), "words": [words], "rounds": 1, "made_in": made_in,
                "created": time.time(), "state": "working", "work": str(wt), "base": base, "commit": None, "files": [],
-               "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None}
+               "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
+               **({"refines": tgt["id"], "refines_always": bool(always)} if tgt else {})}
         return put(rec)
 
 
@@ -570,9 +592,76 @@ def protected_why(paths: list[str]) -> str:
 
 
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
-         tests: bool = True) -> dict[str, Any]:
+         tests: bool = True, changes: int | str | None = None) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the quick tests in
-    the sandbox. ready, failed (with the reason), or a request with no code."""
+    the sandbox. ready, failed (with the reason), or a request with no code. `changes`: the fixer's end said its
+    change refines that fix (or the person asked to change it, refines_always): a ready change goes into it (fold)."""
+    rec = _done(fid, title, summary, request, tests)
+    target = changes if changes not in (None, "") else rec.get("refines") if rec.get("refines_always") else None
+    if target is not None and rec.get("state") == "ready":
+        return fold(rec, target)
+    return rec
+
+
+def fold(rec: dict[str, Any], target: int | str) -> dict[str, Any]:
+    """A round's ready change goes into fix `target`: its new commit is the target's change plus this change, both on
+    the commit the target's change sits on; its record gains the round's words and summary and is ready again (only
+    the person's key puts it on). A target that is on comes out of mine until then. When the change does not apply
+    to the target, the round stays a fix of its own, with fold_failed naming the target."""
+    try:
+        tgt = get(target)
+    except FixError:
+        return put({**rec, "fold_failed": str(target)})
+    wt = Path(rec["work"])
+    if tgt["id"] == rec["id"] or tgt.get("state") not in REFINABLE or not tgt.get("commit"):
+        return put({**rec, "fold_failed": tgt["id"]})
+    with Lock():
+        old = git("rev-parse", f"refs/thimble/fixes/{tgt['id']}", cwd=wt)
+        parent = git("rev-parse", f"{old}^", cwd=wt)
+        git("checkout", "-q", "--detach", old, cwd=wt)
+        p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", rec["commit"]], cwd=wt, check=False, env=as_thimble())
+        if p.returncode != 0:
+            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+            run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
+            git("checkout", "-q", "--detach", rec["commit"], cwd=wt)
+            return put({**rec, "fold_failed": tgt["id"]})
+        tree = git("write-tree", cwd=wt)
+        summary = rec.get("summary") or tgt.get("summary") or ""
+        commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", parent, "-m",
+                     f"{tgt['title']}\n\n{summary}\n\nthimble fix {tgt['id']}".strip(), cwd=wt, env=as_thimble())
+        git("update-ref", f"refs/thimble/fixes/{tgt['id']}", commit, cwd=wt)
+        git("update-ref", "-d", f"refs/thimble/fixes/{rec['id']}", cwd=wt)
+        files = _numstat(wt, parent, commit)
+        was_on = tgt.get("state") == "on"
+        _drop_work(rec)
+        put({**rec, "state": "removed", "folded_into": tgt["id"]})
+        words = [*(tgt.get("words") or []), *(rec.get("words") or [])]
+        tgt.update(commit=commit, base=parent, files=files, words=words, summary=summary, state="ready", error=None,
+                   note=None, tests=rec.get("tests"), tests_tail=rec.get("tests_tail"), work=None,
+                   rounds=int(tgt.get("rounds") or 1) + int(rec.get("rounds") or 1))
+        put(tgt)
+    if was_on:
+        # mine without the old commit until the person's y puts the new one on
+        _move(lambda: _take_out(tgt["id"], f"it did not fit once fix {tgt['id']} changed"))
+    return {**get(tgt["id"]), "folded": rec["id"]}
+
+
+def _take_out(fid: int, why: str) -> dict[str, Any]:
+    """mine again without fix `fid`; the fixes that no longer apply without it need a redo."""
+    recs = records()
+    failed = _rebuild([i for i in _on_ids(recs) if i != fid])
+    for i in failed:
+        x = recs[i]
+        x.update(state="redo", error=why)
+        put(x)
+    if is_on():
+        git("checkout", "-q", "mine", cwd=live_dir())
+    else:
+        git("checkout", "-q", "--detach", release()["base"], cwd=live_dir())
+    return {"redo": failed}
+
+
+def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool) -> dict[str, Any]:
     rec = get(fid)
     wt = Path(rec.get("work") or "")
     if not wt.is_dir():
@@ -775,21 +864,11 @@ def undo(fid: int | str) -> dict[str, Any]:
         raise FixError(f"fix {rec['id']} is not on")
 
     def change():
-        recs = records()
-        order = [i for i in _on_ids(recs) if i != rec["id"]]
-        failed = _rebuild(order)
         r = get(rec["id"])
         r.update(state="off", note="undone")
         put(r)
-        for i in failed:
-            x = recs[i]
-            x.update(state="redo", error=f"it did not fit once fix {rec['id']} was undone")
-            put(x)
-        if is_on():
-            git("checkout", "-q", "mine", cwd=live_dir())
-        else:
-            git("checkout", "-q", "--detach", release()["base"], cwd=live_dir())
-        return {"id": rec["id"], "title": rec["title"], "redo": failed}
+        out = _take_out(rec["id"], f"it did not fit once fix {rec['id']} was undone")
+        return {"id": rec["id"], "title": rec["title"], **out}
 
     return _move(change)
 
@@ -1457,8 +1536,10 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
         out += _wrapped("Why", str(r["error"]), width)
     tests = {"passed": "tests pass", "failed": "tests fail", "skipped": "tests not run"}.get(str(r.get("tests") or ""), "")
     n = len(files) or len(p.get("files") or [])
+    rounds = int(r.get("rounds") or 1)
     if n:
-        out += _wrapped("Changed", " · ".join(x for x in (f"{n} file{'' if n == 1 else 's'}", tests) if x), width)
+        out += _wrapped("Changed", " · ".join(x for x in (f"{n} file{'' if n == 1 else 's'}", tests,
+                                                          f"{rounds} rounds" if rounds > 1 else "") if x), width)
     acts: list[tuple[str, str]] = []
     s = r.get("state")
     if s == "pending":
@@ -1487,7 +1568,8 @@ def note_of(r: dict[str, Any]) -> str:
     if s == "working":
         return "Claude works on it"
     if s == "ready":
-        return "waits for y" if r.get("tests") != "failed" else ""
+        rounds = int(r.get("rounds") or 1)
+        return ("waits for y" + (f" · {rounds} rounds" if rounds > 1 else "")) if r.get("tests") != "failed" else ""
     if s == "failed":
         return str(r.get("error") or "")
     if s in ("redo", "pending"):
@@ -1948,12 +2030,12 @@ def cmd(a) -> int:
             if r.get("reload"):
                 print(RELOAD)
         elif verb == "new":
-            out_json(new(stdin_text() or a.words or "", a.made_in, a.title))
+            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.refines, a.always))
         elif verb == "round":
             out_json(round_(a.id, stdin_text() or a.words or ""))
         elif verb == "done":
             summary = stdin_text() if a.summary == "-" else (a.summary or "")
-            out_json(done(a.id, a.title, summary, a.request, not a.no_tests))
+            out_json(done(a.id, a.title, summary, a.request, not a.no_tests, a.changes))
         elif verb == "apply":
             if a.ask == "-":
                 out_json(apply(a.id, stdin_text()))

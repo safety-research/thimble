@@ -2,7 +2,9 @@
 //
 //   /thimble-fix <words>   a request: the kernel makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer
 //                          (fixer.ts) works in it in the background; while a fixer works, the words go to it, and
-//                          while the line of a fix with a copy shows, they are a new round of that fix (request.ts)
+//                          while the line of a fix with a copy shows, they are a new round of that fix (request.ts);
+//                          while the fix applied last is on, the fixer may fold its change into it. N <words> always
+//                          changes fix N, new <words> always makes a new fix
 //   the fix-thimble skill  the same request, by Claude, when it sees thimble misbehave (skills/fix-thimble/SKILL.md);
 //                          Claude reads what came of it in the skill's place, and is told when the fix ends
 //   /thimble-fix           Your fixes (pane.tsx)
@@ -91,7 +93,7 @@ export const registerFix: Register = on => {
   on('session.start', { cwd: /^\/.*$/ }, async ($, e, next) => {
     const r = await next(e)
     try {
-      await $.command.register({ name: 'thimble-fix', description: 'Change thimble for yourself: say what should work differently. Alone: your fixes.', argumentHint: '[what should work differently]', immediate: true })
+      await $.command.register({ name: 'thimble-fix', description: 'Change thimble for yourself: say what should work differently. N <words> changes fix N; new <words> makes a new fix. Alone: your fixes.', argumentHint: '[N | new] [what should work differently]', immediate: true })
     } catch {
       // the command is missing in this session; the shell's `thimble fix list` still works
     }

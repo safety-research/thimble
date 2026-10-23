@@ -35,13 +35,19 @@ export type Fix = {
   work: string | null; commit: string | null; files: FixFile[]; tests: string | null; summary: string; error: string | null
   note?: string; pr?: string; saved?: string; tests_tail?: string; released_in?: string
   pending?: { why: string; version: string; files?: string[]; tests?: string; old?: string } | null
+  /** a fix that is on, off or ready which this request may change (refines_always: it changes it) */
+  refines?: number; refines_always?: boolean; on_at?: number
+  /** done's answer: the round whose change went into this fix, or the fix it did not fit */
+  folded?: number; fold_failed?: number | string
 }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
  *  u), failed (d what changed · r redo · n later), request (no code), a new release with the fixes replayed on it
  *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
- *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
-export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release'; said?: string; open?: boolean; reload?: 'pending' | 'restart' }
+ *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. `changed`
+ *  (ready): a round changed this fix, which was on, off or ready; `notFolded` (ready): the fix a round was to change,
+ *  which its change did not fit, so it is a new fix. */
+export type FixLine = { id: number; kind: 'ready' | 'applied' | 'off' | 'failed' | 'request' | 'problem' | 'update' | 'release'; said?: string; open?: boolean; reload?: 'pending' | 'restart'; changed?: boolean; notFolded?: number | string }
 
 export const fixesDir = (home: string) => `${home.replace(/\/+$/, '')}/fixes`
 

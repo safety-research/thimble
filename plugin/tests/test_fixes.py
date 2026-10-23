@@ -683,3 +683,78 @@ def test_a_data_file_named_like_one_of_thimbles_goes_from_the_words_and_stays_in
     patch = (FX.home() / "drafts" / "1" / "fix.patch").read_text()
     assert "package.json" not in pr and "after Claude read ‹data file›" in pr
     assert "+// a test reads a made-up package.json" in patch
+
+
+def on_fix(w) -> dict:
+    """Fix 1, on: the bar says read."""
+    r = made(w)
+    FX.done(r["id"], "Bar says read", "The bar's coverage item says read.")
+    FX.apply(r["id"], press(r["id"]))
+    return FX.get(r["id"])
+
+
+def test_a_change_to_an_on_fix_folds_into_it_and_waits_for_y(world):
+    a = on_fix(world)
+    old = a["commit"]
+    b = FX.new("and keep the count", refines=a["id"])
+    assert b["refines"] == a["id"] and b["refines_always"] is False
+    # the copy is cut from mine, which holds fix 1
+    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    assert "read ${n}" in p.read_text()
+    p.write_text(p.read_text().replace("${n}", "${n} files"))
+    r = FX.done(b["id"], None, "The bar says read and the file count.", changes=str(a["id"]))
+    assert r["id"] == a["id"] and r["folded"] == b["id"] and r["state"] == "ready"
+    assert r["words"] == ["say read, not coverage", "and keep the count"] and r["rounds"] == 2
+    assert r["summary"] == "The bar says read and the file count." and r["title"] == "Bar says read"
+    assert r["files"] == [{"path": "plugin/bar/bar.tsx", "add": 1, "del": 1}] and r["commit"] != old
+    # one commit on the release: both rounds' change
+    assert sh("git", "rev-parse", f"{r['commit']}^", cwd=FX.live_dir()) == world["base"]
+    assert "read ${n} files" in sh("git", "show", f"{r['commit']}:plugin/bar/bar.tsx", cwd=FX.live_dir())
+    # the round leaves the list; mine no longer holds the old commit until y
+    assert FX.get(b["id"])["state"] == "removed" and not Path(b["work"]).exists()
+    assert [x["id"] for x in FX.listing()["fixes"]] == [a["id"]]
+    assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == world["base"]
+    with pytest.raises(FX.FixError):
+        FX.apply(a["id"], "a-guess")
+    FX.apply(a["id"], press(a["id"]))
+    assert FX.get(a["id"])["state"] == "on" and "read ${n} files" in live_file("plugin/bar/bar.tsx")
+    assert len(sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines()) == 2
+    shown = "\n".join(FX.show_lines(a["id"]))
+    assert 'You asked     "say read, not coverage"' in shown and 'Then          "and keep the count"' in shown
+    assert "2 rounds" in shown
+
+
+def test_the_explicit_form_changes_an_off_fix_and_a_new_title_keeps_its_own_fix(world):
+    a = on_fix(world)
+    FX.undo(a["id"])
+    # always: the change goes into fix 1 whatever the end says; its change is put on the copy first
+    b = FX.new("say files too", refines=a["id"], always=True)
+    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    assert "read ${n}" in p.read_text()
+    p.write_text(p.read_text().replace("${n}", "${n} files"))
+    r = FX.done(b["id"], "Bar names files", "The bar says files.")
+    assert r["id"] == a["id"] and r["state"] == "ready" and r["rounds"] == 2
+    assert sh("git", "rev-parse", "mine", cwd=FX.live_dir()) == world["base"]
+    # a fix that refines nothing, or whose end gives a title of its own, stays a fix of its own
+    c = FX.new("a note", refines=a["id"])
+    (Path(c["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    c = FX.done(c["id"], "A note", "Adds a note.")
+    assert c["id"] != a["id"] and c["state"] == "ready" and "folded" not in c
+    with pytest.raises(FX.FixError, match="only a fix that is on, off or ready"):
+        FX.new("more", refines=FX.new("x")["id"])
+
+
+def test_a_change_that_does_not_fit_its_fix_becomes_a_new_fix(world):
+    a = on_fix(world)
+    b = FX.new("say coverage again", refines=a["id"])
+    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text("const words = `covered ${n}`\n")
+    # fix 1's commit moves on meanwhile (made up: its ref points at another change of the same line)
+    other = FX.new("x")
+    q = Path(other["work"]) / "plugin" / "bar" / "bar.tsx"
+    q.write_text("const words = `seen ${n}`\n")
+    other = FX.done(other["id"], "Seen", "")
+    sh("git", "update-ref", f"refs/thimble/fixes/{a['id']}", other["commit"], cwd=FX.live_dir())
+    r = FX.done(b["id"], None, "The bar says covered.", changes=a["id"])
+    assert r["id"] == b["id"] and r["state"] == "ready" and r["fold_failed"] == a["id"]
+    assert FX.get(a["id"])["state"] == "on" and "covered" in sh("git", "show", f"{r['commit']}:plugin/bar/bar.tsx", cwd=FX.live_dir())

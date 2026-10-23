@@ -3,6 +3,8 @@
 //
 //   ready     ✓ thimble fixed: <title> · tests pass
 //               y use it now · d what changed · n later
+//             (a round that changed fix 3, which the person had: ✓ thimble changed fix 3: <title> · tests pass, and d
+//             shows each round's words; one whose change did not fit fix 3: … · a new fix: it did not fit fix 3)
 //             d shows what changed in its place, in a few lines, not a diff:
 //             <title> · fix 3
 //               You asked   <the words>
@@ -124,7 +126,9 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   let second: Any[] = []
   let why: Any[] = []
   if (l.kind === 'ready' && f) {
-    first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${testsWord(f)}`)]
+    // a round that changed a fix the person had names that fix; one that did not fit it says it is a new fix
+    first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: l.changed ? `thimble changed fix ${f.id}: ` : 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${testsWord(f)}`),
+      ...(l.notFolded != null ? [dim('f', ` · a new fix: it did not fit fix ${l.notFolded}`)] : [])]
     second = keysRow(els, [['y', 'use it now'], ['d', 'what changed'], ['n', 'later']])
   } else if (l.kind === 'applied') {
     const off = await shownPath($, `${fixesDir(await thimbleHome($))}/off.sh`)

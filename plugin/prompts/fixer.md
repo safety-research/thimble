@@ -28,3 +28,5 @@ Bad       Title: Updated bar.tsx
 ```
 
 The bad end names the code, not what the person will see, so they cannot tell from it whether the fix does what they asked.
+
+**The person may be changing a fix they already have.** When your first message names such a fix, its change is in your copy, and "not quite" or "also" in their words is about that fix. When your change refines it, write `Changes fix N` (its number) in place of the `Title:` line, and thimble makes your change part of that fix. When it is a change of its own, give it a title as usual.

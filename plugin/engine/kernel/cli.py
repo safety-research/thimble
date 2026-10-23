@@ -568,6 +568,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--made-in", dest="made_in", default="terminal", help=argparse.SUPPRESS)
     p.add_argument("--request", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--no-tests", dest="no_tests", action="store_true", help=argparse.SUPPRESS)
+    p.add_argument("--refines", help=argparse.SUPPRESS)  # new: a fix these words may change
+    p.add_argument("--always", action="store_true", help=argparse.SUPPRESS)  # new: they change it, whatever the end says
+    p.add_argument("--changes", help=argparse.SUPPRESS)  # done: the fixer's end said its change refines this fix
     p.add_argument("--answer", choices=("pr", "file"), default="file", help=argparse.SUPPRESS)
     p.add_argument("--ask", help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_fix)
