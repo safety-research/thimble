@@ -8,6 +8,6 @@ State: `surface.state` (undefined at first) and `surface.setState(next)` hold pl
 
 Input: `const keys = "jk"` names the letters the card takes at an empty prompt, and `function onKey(key, surface, props)` gets each. Only letters reach a card (a digit types into the prompt), and {{KEPT}} are thimble's own; j and k suit next and previous. `surface.onPointer(fn)`, in view, gets clicks as {type: "down"|"up", x, y} in cells.
 
-The call returns a text copy of the card or the view's error. Try each key and Button with `actions` and read each copy as the analyst will; if they would misread it, fix that in one new version before you reply. For a change, also one the analyst asks for, call card with the `id` and `edits`, since a whole view takes half a minute to write. The new version still answers the card's first question, with the change beside it. A new question gets a new card.
+The call returns a text copy of the card or the view's error. Try each key and Button with `actions`, and read each copy as the analyst will. Before you reply, fix in one new version what they would misread, a plot that came out mangled, and any change that makes the card easier to read or use. For a change, also one the analyst asks for, call card with the `id` and `edits`, since a whole view takes half a minute to write. The new version still answers the card's first question, with the change beside it. A new question gets a new card.
 
 The guidance's Cards section says what makes a good card.
