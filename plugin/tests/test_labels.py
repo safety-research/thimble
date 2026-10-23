@@ -113,6 +113,31 @@ def test_the_viewer_marks_the_part_a_label_matched(root: Path):
     assert [f[0] for f in r["fields"]] == ["text"]
 
 
+def test_the_viewer_marks_what_a_code_label_matched_or_says_why_not(root: Path):
+    # the match the code made, placed in the record's own words, though it searched a changed copy; the words around
+    # it cut at a word's edge, with … only where cut
+    long = "word " * 80 + "a merge conflict in whatsnew, then " + "more " * 80
+    (root / "posts.jsonl").write_text("".join(json.dumps({"who": w, "body": b}) + "\n" for w, b in [
+        ("a", long), ("b", "Nothing to see here."), ("c", "No claim conflict, a merge conflict.")]))
+    code = ("import re\nNOT = re.compile(r'claim conflict', re.I)\nANY = re.compile(r'\\bconflict\\b', re.I)\n"
+            "def label(u):\n    rest = NOT.sub(' ', u.get('body') or '').lower()\n    return 'yes' if ANY.search(rest) else 'no'\n")
+    assert run(root, "label", "mc", "--in", "posts.jsonl", "--code", stdin=code).returncode == 0
+    st = Store(root)
+    a, c = LB.page(st, "mc", "yes")["records"]
+    assert a["hit"]["match"] == "conflict" and a["hit"]["before"].startswith("…word ") and a["hit"]["after"].endswith("more…")
+    assert len(a["hit"]["before"] + a["hit"]["match"] + a["hit"]["after"]) <= LB.HIT_ROOM
+    # the second "conflict": the first one is the claim conflict the code took out
+    assert c["hit"] == {"before": "No claim conflict, a merge ", "match": "conflict", "after": "."}
+    assert LB.page(st, "mc", "no")["records"][0]["unmarked"] == "no pattern of the code matches it"
+    # code with no pattern says so, and shows the fields it read
+    assert run(root, "label", "n", "--in", "posts.jsonl", "--code", stdin="def label(x):\n    return len(x['who'])\n").returncode == 0
+    r = LB.page(st, "n")["records"][0]
+    assert r["unmarked"] == "the code uses no pattern, so no words are marked" and r["fields"] == [["who", "a"]]
+    # a path outside the folder shows with … in its middle, inside it relative
+    assert LB.shown_path("/tmp/x/y/run/thimble/prs.jsonl", root) == "/tmp/…/thimble/prs.jsonl"
+    assert LB.shown_path(str(root / "runs" / "a.jsonl"), root) == "runs/a.jsonl"
+
+
 def test_code_labels_take_a_value_a_confidence_or_none_and_say_what_failed(root: Path):
     code = ("def label(unit):\n"
             "    if unit['n'] == 5:\n"
