@@ -1,14 +1,13 @@
 // ShareFix.tsx: Share on a fix, wherever the page shows one (its row in Your fixes, its notice). A click opens a new tab
-// at once (so no pop-up blocker stops it), asks the server for the share page (share.ts), and shows the page in that
-// tab. The line under the actions then says what the privacy check took out, with the share page and GitHub's
-// new-issue page to open again. Nothing is sent from thimble.
+// at once (so no pop-up blocker stops it), asks the server for the text (share.ts), and shows GitHub's new-issue page
+// with it in that tab. The line under the actions then says what the privacy check took out, with GitHub's page to open
+// again. Nothing is sent from thimble.
 //
 //   useShare(id, ws)   { share, busy, line }: the click, whether it runs, and the line (null before a share), for a
 //                      row of actions that places the button and the line itself
 //   ShareFix           the Share button with its line under it
 import { type ReactNode, useState } from 'react'
 import { Button } from '../components/Button'
-import { apiUrl } from '../lib/browserKey'
 import { type Shared, shareFix, sharedLine } from './share'
 
 const LINE = { margin: '6px 0 0', fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' } as const
@@ -45,12 +44,8 @@ export function useShare(id: number, ws: string | null): { share: () => Promise<
   ) : done ? (
     <p style={LINE} data-testid="fix-share-line">
       {sharedLine(done.s, done.opened)}{' '}
-      <a href={apiUrl(done.s.page)} target="_blank" rel="noopener">
-        Share page
-      </a>
-      {' · '}
       <a href={done.s.url} target="_blank" rel="noopener noreferrer">
-        Open a GitHub issue directly
+        Open the GitHub issue
       </a>
     </p>
   ) : null
