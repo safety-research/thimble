@@ -71,6 +71,8 @@ function setup() {
     if (verb === 'done') {
       const t = argv.indexOf('--title')
       Object.assign(fix, { state: argv.includes('--request') ? 'request' : 'ready', title: t > 0 ? argv[t + 1] : fix.title, summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }] })
+      // the kernel's check after the fixer's end refused it (fix.refused is the reason a test gives)
+      if (fix.refused) Object.assign(fix, { state: 'failed', tests: null, error: fix.refused })
       return ok(fix)
     }
     if (verb === 'apply') {
@@ -208,6 +210,23 @@ test('n leaves the fix off in the list; a fixer that changed nothing leaves a re
   await requested(t, 'Title: Explain terms of my field\nRequest: It needs words only the person knows.')
   expect(t.verbs()).toContain('done 1 --summary - --title Explain terms of my field --request')
   expect(textOf(await fixLineRows(t.$, ELS, 110))).toContain('Saved as a request with no code: Explain terms of my field')
+})
+
+test('a refused fix shows its whole reason: a long one on a row of its own, a short one after the title', async () => {
+  const s = setup()
+  s.fix.refused = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files'
+  await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  let rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows)).toContain('× Fix 1 did not pass: Skip the scan for my notes')
+  expect(rows.map((r: Any) => r.props.key)).toEqual(['fix-rule-a', 'fix-line-1', 'fix-line-why', 'fix-line-2', 'fix-rule-b'])
+  expect(textOf(rows[2])).toBe(`  ${s.fix.refused}`)
+  expect(textOf(rows[3])).toContain('d diff · r redo · n not now')
+  const t = setup()
+  t.fix.refused = 'its tests failed in the sandbox'
+  await requested(t, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
+  rows = await fixLineRows(t.$, ELS, 110)
+  expect(textOf(rows[1])).toBe('× Fix 1 did not pass: Skip the scan for my notes · its tests failed in the sandbox')
+  expect(rows.map((r: Any) => r.props.key)).not.toContain('fix-line-why')
 })
 
 test("/thimble-fix alone lists the fixes; d shows the selected fix's diff; u on a ready fix applies it", async () => {

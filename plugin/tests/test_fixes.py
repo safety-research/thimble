@@ -175,7 +175,9 @@ def test_a_fix_may_not_touch_what_keeps_the_person_safe(world):
     (Path(r["work"]) / "plugin" / "engine" / "kernel").mkdir(parents=True)
     (Path(r["work"]) / "plugin" / "engine" / "kernel" / "privacy.py").write_text("def scan(*a): return [], []\n")
     r = FX.done(r["id"], "Skip the scan", "")
-    assert r["state"] == "failed" and "privacy.py" in r["error"]
+    # the refusal names each file with what it is, and why
+    assert r["state"] == "failed" and r["error"] == (
+        "it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files")
     with pytest.raises(FX.FixError):
         FX.apply(r["id"], press(r["id"]))
     b = FX.new("an image")
@@ -184,6 +186,9 @@ def test_a_fix_may_not_touch_what_keeps_the_person_safe(world):
     c = FX.new("a new lock file")
     (Path(c["work"]) / "plugin" / "sandbox" / "package-lock.json").write_text("{}\n")
     assert "package-lock.json" in FX.done(c["id"], "Lock", "")["error"]
+    assert FX.protected_why(["plugin/fix/line.ts", "plugin/fix/pane.tsx", "scripts/install.sh"]) == (
+        "it changes plugin/fix/line.ts and plugin/fix/pane.tsx (the fix flow) and scripts/install.sh (thimble's scripts); "
+        "thimble does not apply changes to its safety files")
 
 
 def test_failed_tests_no_change_and_not_now(world, monkeypatch):

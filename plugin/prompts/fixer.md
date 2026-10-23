@@ -10,10 +10,6 @@ thimble is a plugin for Claude Code that helps a person make sense of a folder o
 
 **Test what you changed.** `claude plugin test plugin` runs the hooks tests (about half a minute), `node --test FILE` a *.test.mjs file, and `"$THIMBLE_PYTHON" -m pytest plugin/tests/FILE` the kernel's. Fix what fails.
 
-**Some files keep the person safe, and thimble refuses a change to them:** the fix flow (plugin/fix/, plugin/engine/kernel/fixes.py, plugin/prompts/fixer.md, plugin/prompts/fix-draft.md), the privacy scan (plugin/engine/kernel/privacy.py), the sandbox (plugin/sandbox/, plugin/cards/argv.mjs), the hooks file and its command hooks (plugin/hooks/hooks.json, plugin/hooks/temp-allow.sh, plugin/hooks/temp_allow.py), the command's launcher (plugin/bin/), the scripts (scripts/, browser/scripts/), and lock files. Binary files are refused too. When the request needs one of them, change nothing and say why.
-
-**Some requests are wishes that code cannot do:** they need the person's own knowledge, a decision of thimble's authors, or something outside thimble. Then change nothing, and say what the person asked for and why code cannot do it.
-
 **End with what the person reads,** in this form, and nothing after it:
 
 ```
@@ -21,7 +17,7 @@ Title: <what the fix does, as the person will see it, in at most 7 words>
 What it does: <one or two plain sentences for the person>
 ```
 
-For a request with no code, write `Request:` in place of `What it does:`.
+When you changed nothing, write `Request:` in place of `What it does:`.
 
 ```
 Asked     The bar's coverage item should say "read" instead of "coverage".
