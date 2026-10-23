@@ -1,6 +1,12 @@
 <p align="center"><img src="docs/assets/thimble-banner.svg" alt="thimble" width="100%"></p>
 
-**thimble is a Claude Code plugin that gives Claude tools to cite, visualize and label your data. It gives you tools to check Claude's work.**
+**thimble is a Claude Code plugin for making sense of large volumes of agent outputs. It gives Claude tools to cite, visualize and label your data, and gives you tools to check Claude's work.**
+
+> [!CAUTION]
+> - **thimble is in alpha.** It changes daily, so expect bugs and rough edges.
+> - **thimble is not an official Anthropic product.**
+
+For feedback, bug reports, or anything else, please reach out to [@mjoerke](https://github.com/mjoerke). I would love to hear from you!
 
 https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
 
@@ -16,13 +22,15 @@ https://github.com/user-attachments/assets/e8b0c9d8-1bc0-4ccb-a5ac-4c311cea02d4
 
 ## Installation
 
+### With Claude (recommended)
+
 ```
 claude "install thimble from https://github.com/safety-research/thimble"
 ```
 
 Claude asks whether you want the terminal plugin, the browser workbench, or both, and helps with anything missing. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
 
-Or by hand:
+### Manual installation
 
 ```
 git clone https://github.com/safety-research/thimble
@@ -32,15 +40,13 @@ scripts/install.sh
 
 `scripts/install.sh --no-browser` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
 
-> [!CAUTION]
-> - **thimble is in alpha.** It changes daily, so expect bugs and rough edges.
-> - **thimble is not an official Anthropic product.**
-
-For feedback, bug reports, or anything else, please reach out to [@mjoerke](https://github.com/mjoerke). I would love to hear from you!
-
 ## Usage
 
-Run `claude` in a folder with files you'd like to analyze. thimble is on in every session; click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off, and `/plugin` to turn it off.
+### Terminal plugin
+
+Run `claude` in a folder with files you'd like to analyze. thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off; `/plugin` turns thimble off.
+
+### Browser workbench
 
 Run `thimble-browser` in a folder of files to open the browser workbench.
 
