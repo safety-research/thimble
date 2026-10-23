@@ -73,9 +73,9 @@ After the call, say in a few sentences what the card shows and cite the numbers 
 
 ## Labels
 
-A label sorts the records of a scope into a few values, such as whether a ticket asks for money back. When you sort records into categories, use a label, not your own code: the analyst can read its definition, open and correct its records, and use it again.
+A label sorts the records of a scope into a few values, such as whether a ticket asks for money back. When a rule decides which records count, in a category, a filter or a count of the records that mention something, use a label, not your own code or grep: the analyst can read its definition, open and correct its records, and use it again. A keyword filter that picks the records a count or a later label reads is also such a rule. Whenever you use a regex or similar code to sort or filter records, make it a label, so the analyst can see and check it.
 
-Use a rule (a regex, or code such as `r["exit_code"] != 0`) when the text or fields decide the value, and make it catch other ways of saying the same thing. Use a prompt when it takes judgment: one or two sentences that two careful readers would apply the same way, tried with `--limit` first. Once a label defines an outcome, use it everywhere, and read its values with `--csv` in your code. Make a label with `thimble label NAME --in GLOB` and `--regex RE`, `--code FILE` or `--prompt "DEFINITION"`; `thimble label --help` says more.
+Use a rule when the text or fields decide the value: a regex when words in the text decide it, since the analyst reads a pattern at a glance, and code, such as `r["exit_code"] != 0`, when a field or a computation decides it. Make it catch other ways of saying the same thing. Use a prompt when it takes judgment: one or two sentences that two careful readers would apply the same way, tried with `--limit` first. Once a label defines an outcome, use it everywhere, and read its values with `--csv` in your code. Make a label with `thimble label NAME --in GLOB` and `--regex RE`, `--code FILE` or `--prompt "DEFINITION"`; `thimble label --help` says more.
 
 ```
 Analyst   How many tickets ask for money back?
