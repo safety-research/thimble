@@ -52,7 +52,7 @@ Run `claude` in a folder with files you'd like to analyze. thimble is on in ever
 
 Run `thimble-browser` in a folder of files to open the browser workbench.
 
-![the browser workbench: a chat with a citation open on its table cell, and cards on the canvas](docs/assets/thimble-browser.png)
+![the browser workbench answering whether agents reviewed before approving: a chat answer with citations, an agent transcript colored by an activity label, a timeline of every agent's labeled work and approvals, and a table of what each approver ran](docs/assets/thimble-browser.png)
 
 ## Requirements
 
