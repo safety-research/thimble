@@ -62,7 +62,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Frame = MarkRef & { open?: 'code' | null; page?: number }
+export type Frame = MarkRef & { open?: 'code' | null; page?: number; skip?: number }
 export type Tray = { stack: Frame[] } | null
 type Stop = { row: string; kind?: 'citation' | 'explain' | 'heads'; n?: number; id?: string; at?: number; card?: string }
 type Stand = { row: string; card: string } | null
@@ -78,7 +78,7 @@ const TONES = { citation: 'merged', explain: 'planMode', heads: 'claude' } as co
 // the question the person typed with the tray open, until main's turn for it starts (then kept by its turn)
 let pendingAbout: string | null = null
 // the tray as last drawn, when its body was taller than the room above the bar: the frame and where m goes next
-let paged: { f: Frame; next: number | null } | null = null
+let paged: { f: Frame; next: number | null; skip: number } | null = null
 
 const quietly = (p: Promise<unknown> | unknown) => Promise.resolve(p).catch(() => undefined)
 
@@ -300,15 +300,16 @@ async function toggleCode($: Engine): Promise<void> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) return
-  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, open: f.open === 'code' ? null : 'code', page: 0 }] } as never)
+  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, open: f.open === 'code' ? null : 'code', page: 0, skip: 0 }] } as never)
 }
 
-/** m on a tray taller than the room above the bar: its next rows, and from the top again after the last. */
-async function setPage($: Engine, page: number): Promise<void> {
+/** m on a tray taller than the room above the bar: its next rows, and from the top again after the last. `skip`: the
+ *  rows of unit `page` already shown, when it is taller than the room (tray.mjs pageOf). */
+async function setPage($: Engine, page: number, skip = 0): Promise<void> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
   if (!tray || !f) return
-  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, page }] } as never)
+  await $.state.set(TRAY, { stack: [...tray.stack.slice(0, -1), { ...f, page, skip }] } as never)
 }
 
 /** A card ] reached takes the keys, its own first, and shows framed in focus. */
@@ -398,8 +399,10 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   if (key === '0') return { now: () => goBack($) }
   if (key === 'm' && paged && sameRef(paged.f, f) && (paged.f.open ?? null) === (f.open ?? null) && paged.next !== null) {
     const was = f.page ?? 0
+    const wasSkip = f.skip ?? 0
     const to = paged.next
-    return { now: () => setPage($, to), undo: () => setPage($, was) }
+    const skip = paged.skip
+    return { now: () => setPage($, to, skip), undo: () => setPage($, was, wasSkip) }
   }
   if (key === 'a') return { later: () => askAbout($, f) }
   if (key === '1') return { now: () => askAbout($, f) }
@@ -710,8 +713,8 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   // one more, the blank row messageEl draws above them (marks/view.ts)
   const gap = words && words.text.trim() ? 1 : 0
   const fit = room > 0 ? Math.max(3, room - 3 - gap) : 0
-  const page = pageOf(units.map(u => u.h), fit, f.page ?? 0)
-  paged = page.next === null ? null : { f, next: page.next }
+  const page = pageOf(units.map(u => u.h), fit, f.page ?? 0, f.skip ?? 0)
+  paged = page.next === null ? null : { f, next: page.next, skip: page.nextSkip ?? 0 }
   const shown = units.slice(page.start, page.end)
   let body: Any[]
   if (words) {
@@ -731,8 +734,9 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     const n = units.length
     body = [
       // the body keeps its own height inside the page (no shrinking), so the page cuts a unit it shows only the top of
-      Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1) + gap, overflow: 'hidden', children: [Box({ key: 'tray-page-body', flexDirection: 'column', flexShrink: 0, children: body })] }),
-      Text({ key: 'tray-more', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 ? 'm from the top' : 'm more'} · lines ${page.start + 1}–${page.end} of ${n}` }),
+      // (a unit taller than the page shows from the rows it already showed: the body moves up by them)
+      Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1) + gap, overflow: 'hidden', children: [Box({ key: 'tray-page-body', flexDirection: 'column', flexShrink: 0, ...(page.skip ? { marginTop: -page.skip } : {}), children: body })] }),
+      Text({ key: 'tray-more', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 && !page.nextSkip ? 'm from the top' : 'm more'} · lines ${page.start + 1}–${page.end} of ${n}` }),
     ]
   }
   // the right of the title says what kind of mark it is, and a citation's status before it

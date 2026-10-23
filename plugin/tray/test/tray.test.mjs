@@ -66,8 +66,11 @@ test('a tall tray body: the lines that fit and a row for m, which goes on and th
   assert.deepEqual(pageOf([1, 1, 3, 1], 5), { start: 0, end: 3, more: 1, next: 2 })
   assert.deepEqual(pageOf([1, 1, 3, 1], 5, 2), { start: 2, end: 4, more: 2, next: 0 })
   assert.deepEqual(pageOf(hs, 5, 5), { start: 5, end: 6, more: 5, next: 0 })
-  // a unit taller than the room still shows
+  // a unit taller than the room still shows, a room of its rows at a time: m goes on in it, then to the next unit
   assert.equal(pageOf([9, 1], 4).end, 1)
+  assert.deepEqual(pageOf([9, 1], 4), { start: 0, end: 1, more: 1, next: 0, nextSkip: 3 })
+  assert.deepEqual(pageOf([9, 1], 4, 0, 3), { start: 0, end: 1, more: 1, next: 0, skip: 3, nextSkip: 6 })
+  assert.deepEqual(pageOf([9, 1], 4, 0, 6), { start: 0, end: 1, more: 1, next: 1, skip: 6 })
   assert.equal(rowsOf('', 40), 1)
   assert.equal(rowsOf('aaaa bbbb cccc', 9), 2)
   assert.equal(rowsOf('x'.repeat(20), 8), 3)

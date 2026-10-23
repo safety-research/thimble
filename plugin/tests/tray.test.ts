@@ -422,6 +422,37 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
+test('an explainer paragraph taller than the room shows a room of its rows at a time: m goes on inside it, then from the top', async ($, on) => {
+  const long = `${Array.from({ length: 60 }, (_, i) => `word${i} of a long explainer`).join(' ')}.`
+  const { clock } = await resumed($, on, QUOTED, 's-tray-15', { parts: { explain: { order: ['g1'], items: { g1: { id: 'g1', term: 'p95', body: long } } } } })
+  // ] to the citation, ] to the explainer
+  await $.prompt.edit(key(']'))
+  await clock.advance(2000)
+  await $.prompt.edit(key(']'))
+  const pageNow = async () => {
+    const drawn = await $.ui.render(above(12))
+    return { body: all(drawn).find(n => n.props?.key === 'tray-page-body'), more: /m (more|from the top) · lines/.exec(textOf(drawn))?.[0] ?? '' }
+  }
+  let p = await pageNow()
+  expect(p.more).toContain('m more')
+  expect(p.body.props.marginTop ?? 0).toBe(0)
+  // each m moves the paragraph up by the rows already shown, until the page says m from the top
+  const tops: number[] = []
+  for (let i = 0; i < 20 && !p.more.startsWith('m from the top'); i++) {
+    await clock.advance(2000)
+    await $.prompt.edit(key('m'))
+    p = await pageNow()
+    tops.push(p.body.props.marginTop ?? 0)
+  }
+  expect(p.more).toContain('m from the top')
+  expect(tops.length).toBeGreaterThan(1)
+  for (let i = 1; i < tops.length; i++) expect(tops[i]).toBeLessThan(tops[i - 1])
+  // and m from the top starts it again
+  await clock.advance(2000)
+  await $.prompt.edit(key('m'))
+  expect((await pageNow()).body.props.marginTop ?? 0).toBe(0)
+})
+
 test('a heads-up page with rows left under its title shows the top of the bullet that wraps past them, not empty rows', async ($, on) => {
   const { clock } = await resumed($, on, QUOTED, 's-tray-4b', { parts: HEADS })
   await $.prompt.edit(key(']'))

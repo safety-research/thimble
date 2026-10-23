@@ -98,20 +98,26 @@ export function stopsOfTurn(rows, stopsOf, inline) {
  * Which units of a body fit in `room` rows (`heights`: each unit's rows), from unit `from`: {start, end, more} where
  * units start..end-1 show and `more` is how many are left out. When all fit, all show. Else one row is kept for the
  * line that says there is more, and at least one unit shows; the rows left after the units that fit show the next unit's
- * first rows. `next`: where `m` goes (that cut unit, whole), the start again after the end.
+ * first rows. `next`: where `m` goes (that cut unit, whole), the start again after the end. A unit taller than the room
+ * shows a room of its rows at a time: `skip` (from `skip`, its rows already shown) is how many of its first rows the
+ * page leaves out, and `nextSkip` where `m` goes on in it.
  */
-export function pageOf(heights, room, from = 0) {
+export function pageOf(heights, room, from = 0, skip = 0) {
   const hs = (heights || []).map(h => Math.max(1, h | 0))
   const total = hs.reduce((a, b) => a + b, 0)
   if (!(room > 0) || total <= room) return { start: 0, end: hs.length, more: 0, next: null }
   const start = from > 0 && from < hs.length ? from : 0
-  let end = start
-  let used = 0
-  while (end < hs.length && (end === start || used + hs[end] <= room - 1)) { used += hs[end]; end++ }
+  const cut = start === from && skip > 0 && skip < hs[start] ? skip : 0
+  const shown = cut ? { skip: cut } : {}
+  let end = start + 1
+  let used = hs[start] - cut
+  // the rest of the first unit is taller than the room: its next rows, and m goes on in it
+  if (used > room - 1) return { start, end, more: hs.length - end + start, next: start, ...shown, nextSkip: cut + room - 1 }
+  while (end < hs.length && used + hs[end] <= room - 1) { used += hs[end]; end++ }
   // a unit too tall for the rows left shows its first rows there (the page cuts it) and m starts at it, so the rows
   // under a short unit are not left empty when the next one wraps to more of them
-  if (end < hs.length && used < room - 1) return { start, end: end + 1, more: hs.length - end - 1 + start, next: end }
-  return { start, end, more: hs.length - end + start, next: end < hs.length ? end : 0 }
+  if (end < hs.length && used < room - 1) return { start, end: end + 1, more: hs.length - end - 1 + start, next: end, ...shown }
+  return { start, end, more: hs.length - end + start, next: end < hs.length ? end : 0, ...shown }
 }
 
 /** The rows a line of `width` cells takes when it wraps at words (a line is at least one row). */
