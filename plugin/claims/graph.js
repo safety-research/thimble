@@ -36,6 +36,7 @@
 // A canvas (canvas()) is a grid of cells: text and dots that are parts (a press on the part; the blank cells beside a
 // dot or a name are part of it). canvas.rows() gives each row as runs of {s, tone, bold, part}.
 import { blocks } from '../marks/message.js'
+import { tableLines } from '../marks/table.mjs'
 import { evidenceLine, firstSentence, hiddenOutput, lineWindow, moreLines, printLine } from '../tray/tray.mjs'
 import { cutWords, edgesOf, findQuote, likeness, plainOf, viewOf } from './store.js'
 
@@ -533,9 +534,10 @@ function pieces(text, spans, n) {
 /**
  * A citation's evidence as its card in the reply draws it (tray/tray.ts citationBody), in `room` characters: for a
  * value code computed, the one line of the code that printed it, cut in the middle, and the output line that holds it,
- * cut around the cited words, with how many output lines it leaves out; for a file, its place and the cited line. The
- * cited words' spans in the line. Null without evidence. {code?, place?, text, spans, more, cut}: cut when the code or
- * the line was cut.
+ * cut around the cited words, with how many output lines it leaves out; for a card's value, the card's title and the
+ * header over the cited row when the value is a table's cell (`table`: the header and the row, tableLines), else the
+ * line that holds it; for a file, its place and the cited line. The cited words' spans in the line. Null without
+ * evidence. {code?, card?, table?, place?, text, spans, more, cut}: cut when the code or the line was cut.
  */
 export function snippetOf(ev, room) {
   const line = evidenceLine(ev)
@@ -546,6 +548,10 @@ export function snippetOf(ev, room) {
     const code = printLine(ev.code, line.text)
     const shown = midCut(code, room)
     return { code: shown, text: fit.text, spans: fit.spans, more: hiddenOutput(ev), cut: cutLine || shown !== code }
+  }
+  if (ev.kind === 'card') {
+    const table = ev.table ? tableLines(ev.table, Math.max(9, room)) : null
+    return { card: one(ev.title || ev.card), ...(table ? { table } : {}), text: fit.text, spans: fit.spans, more: 0, cut: cutLine }
   }
   return { place: `${ev.file}:${line.n ?? ev.line}`, text: fit.text, spans: fit.spans, more: 0, cut: cutLine }
 }
@@ -566,10 +572,31 @@ function wholeRows(ev, W) {
     }
     return rows
   }
+  if (ev.kind === 'card') {
+    // a card's value: the card, then the cited cell's header and row (the columns round it that fit, as the reply's
+    // card shows them: a table wrapped reads worse), else what its code printed, else the value
+    rows.push(cardLine(ev, W))
+    const table = ev.table ? tableLines(ev.table, W - 2) : null
+    const lines = table || (ev.output != null ? [] : [evidenceLine(ev)].filter(Boolean))
+    for (const l of lines) for (const p of pieces(l.text, l.spans, W - 2)) rows.push(bar(p))
+    if (!table && ev.output != null) {
+      const hit = evidenceLine(ev)
+      let found = false
+      for (const l of String(ev.output).replace(/\n+$/, '').split('\n')) {
+        const mine = !found && hit && l === hit.text
+        if (mine) found = true
+        for (const p of pieces(l, mine ? hit.spans : [], W - 2)) rows.push(bar(p))
+      }
+    }
+    return rows
+  }
   rows.push([{ s: cut(`${ev.file}:${ev.line}`, W), tone: 'dim' }])
   for (const l of Array.isArray(ev.lines) ? ev.lines : []) for (const p of pieces(String(l.text ?? ''), l.highlight ? [l.highlight] : [], W - 2)) rows.push(bar(p))
   return rows
 }
+
+/** A card's value's first row, as the citation's card in the reply has it: `card` dim, then the card's title bold. */
+const cardLine = (ev, W) => fit([{ s: 'card ', tone: 'dim' }, { s: one(ev.title || ev.card), bold: true }], W)
 
 /**
  * A citation as its card in the reply draws it, as rows of runs W wide: the cited words bold in the citations' look
@@ -595,6 +622,12 @@ export function cardOf(s, W, { whole = false } = {}) {
   if (!sn) return { rows, cut: false }
   if (sn.code) rows.push([{ s: sn.code, tone: 'code' }])
   if (sn.place) rows.push([{ s: cut(sn.place, W), tone: 'dim' }])
+  if (sn.card != null) rows.push(cardLine(s.evidence, W))
+  if (sn.table) {
+    // a table's cell: the header over the cited row (and any other cited row), the cited cells tinted
+    for (const l of sn.table) rows.push([{ s: '│', tone: 'dim-faint' }, { s: ' ' }, ...tinted(l.text || ' ', l.spans)])
+    return { rows, cut: sn.cut }
+  }
   const clipped = /^…|…$/.test(sn.text)
   rows.push([{ s: '│', tone: 'dim-faint' }, { s: ' ' }, ...tinted(sn.text, sn.spans, clipped ? { tone: 'dim' } : {})])
   if (sn.more) rows.push([{ s: '│', tone: 'dim-faint' }, { s: ' ' }, { s: moreLines(sn.more), tone: 'dim' }])

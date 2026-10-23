@@ -258,6 +258,19 @@ test("a claim picked: its whole sentence wrapped under its first word, its chips
   assert.equal(rowText(card.rows.at(-1)), '│ + 41 more lines')
   const whole = cardOf({ label: '6,543', status: 'verified', evidence: huge }, 56, { whole: true })
   assert.ok(whole.rows.length > 40 && whole.rows.every(r => rowText(r).length <= 56))
+  // a card's value: the card's title, then the header over the cited row, the cited cell tinted; never a file's place
+  const table = { corner: 'run', cols: ['model', 'merged', 'backlog'], rows: [{ label: 'r1', values: ['opus', '143', '176'] }], at: { r: 0, c: 1 } }
+  const ofCard = { kind: 'card', card: 'c1', title: 'Merges by run', ref: 'card:c1#merged/r1', value: '143', table }
+  for (const whole of [false, true]) {
+    const rows = cardOf({ label: '143', status: 'verified', evidence: ofCard }, 56, { whole }).rows
+    assert.deepEqual(rows.map(rowText), ['143   ✓ verified · cite', 'card Merges by run', '│ run  model  merged  backlog', '│ r1    opus     143      176'])
+    assert.ok(rows[1][0].tone === 'dim' && rows[1][1].bold)
+    assert.ok(rows[3].some(x => x.tint && x.s === '143'))
+  }
+  // without a table: the card's value, or the line its code printed
+  assert.deepEqual(citationRows({ label: '9', status: 'verified', evidence: { kind: 'card', card: 'c2', title: 'Counts', value: '9 runs' } }, 40).map(rowText), ['9   ✓ verified · cite', 'card Counts', '│ 9 runs'])
+  assert.deepEqual(citationRows({ label: '9', status: 'verified', evidence: { kind: 'card', card: 'c2', title: 'Counts', value: '9', output: 'runs\n9 runs\n', highlight: [[5, 6]] } }, 40).map(rowText), ['9   ✓ verified · cite', 'card Counts', '│ 9 runs'])
+  assert.doesNotMatch(JSON.stringify(cardOf({ label: '9', status: 'verified', evidence: ofCard }, 40, { whole: true }).rows), /undefined/)
 })
 
 /** A claim corrected n times, each in its own turn, with a reason each time. */
