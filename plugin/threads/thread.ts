@@ -37,6 +37,7 @@ import { openPane, paneNow } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
+import { fieldSettled, fieldShown } from './pane'
 import type { ThreadScope } from './seam'
 import { aboutOf, cardPart, display, firstMessage, forkDirective, nextMessage, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
 
@@ -152,8 +153,11 @@ export function threadsBright(): boolean {
 async function keep($: Engine, t: Thread): Promise<void> {
   if (retired.has(t)) return
   t.at = new Date().toISOString()
+  const was = threads.get(t.key)
   threads.set(t.key, t)
   if (t.agentId) byAgent.set(t.agentId, t.key)
+  // the drawing of the answer keeps the focus ring on the input bar (pane.tsx)
+  if (was?.status === 'running' && t.status !== 'running') fieldSettled($, t.key)
   try { await $.state.set({ ...THREAD, id: t.key }, { ...t }) } catch { /* drawn from the module's memory */ }
   await writeKept($, `threads/${t.id}.json`, t).catch(() => undefined)
   await bump($)
@@ -364,6 +368,7 @@ export async function showThread($: Engine, key: string, o: { from?: string; ask
   const t = threads.get(key)
   if (!t) return false
   if (o.ask) askNext = key
+  fieldShown($, key)
   const p = t.scope.pane
   if (p && p.kind !== 'thread' && p.kind !== 'threads') return openPane($, p.kind, p.args, paneTitle(p.kind, p.args, t), { focus: true })
   // a citation's thread stands under its evidence

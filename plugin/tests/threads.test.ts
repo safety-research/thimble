@@ -217,9 +217,20 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
     { role: 'user', content: [{ type: 'tool_result', content: '41' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'Most stopped early (runs.jsonl).' }] },
   ]
+  // the words typed in the input bar while the thread answered
+  const before = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)).find(n => n.type === 'Input')
+  before.props.onInput('and then')
+  const focus: Any[] = []
+  s.$.ui.focus = async (a: Any) => { focus.push(a); return {} }
   await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
   const tree = await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY }, els)
   const all = nodes(tree)
+  // the answer's drawing brings a new field, with those words, and the focus ring is asked onto it before: m, drawn
+  // above the field, does not take the ring's place (Claude Code draws a Button the ring is on inverted)
+  const field = all.find(n => n.type === 'Input')
+  expect(field.props.key).not.toBe(before.props.key)
+  expect(field.props.value).toBe('and then')
+  expect(focus).toEqual([{ requestId: 'thimble', key: field.props.key }])
   const steps = all.find(n => String(n.props?.key ?? '').endsWith('-steps'))
   expect(textOf(steps)).toBe('● 1 step · python3 count.py')
   expect(all.some(n => typeof n.props?.children === 'string' && n.props.children.includes('/made-up'))).toBe(false)
