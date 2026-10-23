@@ -10,6 +10,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from '../../src/App.tsx'
 import { bus } from '../../src/lib/bus.ts'
+import { DEMO_START_LINE } from '../../src/shell/StartPage.tsx'
 import { CODE_GONE_TEXT, showCodeGone } from '../../src/lib/notices.ts'
 import type { CorpusInfo, WorkspaceRow } from '../../src/lib/types.ts'
 import { groupWorkspaces, openingRef, renamedTo, storageKey, withWorkspace, workspaceHref, workspaceLabel } from '../../src/lib/workspace.ts'
@@ -102,8 +103,26 @@ test('a URL with no workspace is the start page: a title and the rows, each a li
   expect(logs.textContent).toContain('~/data/logs')
   expect(el.querySelector('[aria-current]')).toBeNull()
   expect(el.querySelector('.start-missing')).toBeNull()
-  // no paragraph explains anything: the title, the group titles and the rows
-  expect(el.querySelectorAll('p').length).toBe(0)
+  // no paragraph explains anything: the title, the line that says the demo datasets are example data, the group titles
+  // and the rows
+  expect([...el.querySelectorAll('p')].map((p) => p.className)).toEqual(['start-demo'])
+})
+
+test('while a demo dataset is listed, the line under the title says it is example data, not your files, and how to open your own folder', async () => {
+  const el = await mount(<App />)
+  await settle()
+  const line = el.querySelector('.start-title + .start-demo') as HTMLElement
+  expect(DEMO_START_LINE).toBe('The demo datasets are example data, not your files. To open your own folder, run `thimble-browser` in it.')
+  expect(line.textContent).toBe('The demo datasets are example data, not your files. To open your own folder, run thimble-browser in it.')
+  expect([...line.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['thimble-browser'])
+  // with no demo dataset, no line, and no other paragraph
+  unmountAll()
+  served = ROWS.filter((r) => r.kind !== 'demo')
+  const mine = await mount(<App />)
+  await settle()
+  expect(mine.querySelectorAll('a.ws-row').length).toBe(2)
+  expect(mine.querySelector('.start-demo')).toBeNull()
+  expect(mine.querySelectorAll('p').length).toBe(0)
 })
 
 test("a link's sign-in code that is gone shows under the title, and its × takes it away with no request", async () => {

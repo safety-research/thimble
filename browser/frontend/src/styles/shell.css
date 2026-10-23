@@ -990,6 +990,15 @@ button.settings-ext-name:hover .settings-ext-caret {
   letter-spacing: var(--tracking-title);
   color: var(--text-primary);
 }
+/* the line under the title while a demo dataset is listed (StartPage DEMO_START_LINE) */
+.start-demo {
+  margin: -12px 0 24px;
+  color: var(--text-secondary);
+  font: var(--type-body);
+}
+.start-demo code {
+  font: var(--type-mono-sm);
+}
 /* a link's sign-in code that was used or expired (chat/Notice PageNoticeStrip), under the title */
 .start-notices {
   margin: -12px 0 24px;

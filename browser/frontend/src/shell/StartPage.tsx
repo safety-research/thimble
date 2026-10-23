@@ -1,13 +1,28 @@
-// thimble's start page: the page whose URL names no workspace, or names one this server does not hold (a tab kept from
-// another run or another server). A title and the server's workspaces in groups (WorkspaceList), each row opening its
-// workspace, and a link's sign-in code that was used or expired.
-import { useEffect, useState } from 'react'
+// thimble's start page: the page whose URL names no workspace, which `thimble demo` opens, or names one this server does
+// not hold (a tab kept from another run or another server). A title and the server's workspaces in groups
+// (WorkspaceList), each row opening its workspace; above them, while a demo dataset is listed, one line that says the
+// demo datasets are example data, not the analyst's files, and how to open a folder of their own (DEMO_START_LINE),
+// and a link's sign-in code that was used or expired.
+import { Fragment, useEffect, useState } from 'react'
 import { PageNoticeStrip } from '../chat/Notice'
 import { Icon } from '../components/Icon'
 import { Spinner } from '../components/Spinner'
 import { api } from '../lib/api'
 import type { WorkspaceRow } from '../lib/types'
 import { WorkspaceList } from './WorkspaceList'
+
+/** The start page's line under its title while it lists a demo dataset: example data, not the analyst's files, and how
+ * to open a folder of their own. A span in backticks is drawn as code (DemoWords). */
+export const DEMO_START_LINE = 'The demo datasets are example data, not your files. To open your own folder, run `thimble-browser` in it.'
+
+/** A line's words, a span in backticks drawn as code. Pure but for the elements. */
+function DemoWords({ text }: { text: string }) {
+  return (
+    <>
+      {text.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : <Fragment key={i}>{part}</Fragment>))}
+    </>
+  )
+}
 
 export function StartPage({ missing }: { missing?: string | null }) {
   const [rows, setRows] = useState<WorkspaceRow[] | null>(null)
@@ -30,6 +45,11 @@ export function StartPage({ missing }: { missing?: string | null }) {
       </header>
       <main className="start-main">
         <h1 className="start-title">Workspaces</h1>
+        {rows?.some((r) => r.kind === 'demo') && (
+          <p className="start-demo" data-demo-line="">
+            <DemoWords text={DEMO_START_LINE} />
+          </p>
+        )}
         <PageNoticeStrip />
         {missing && <p className="start-missing">No workspace “{missing}” on this server.</p>}
         {error ? (
