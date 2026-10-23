@@ -1,10 +1,11 @@
 // thimble fix in the page (backend fixes.py): `/thimble-fix <words>` in the chat asks Claude to change the person's own
 // thimble. The words go with a text copy of what the page shows now (pageText), so "this card" can name what is open.
-// The server answers at once; the fixer works in the background in a thread of its own (`fixing <name>` in the tree),
-// main's chat shows the message and one line that points there, the row above the composer says how the work goes, and
-// one notice at the top of the chat says how it ended (FixStrip), from GET /api/fixes and the stream's `fix` events.
-// `/thimble-fix N <words>`, or a message in the fix's thread, changes fix N (a round of it, never a new fix).
-// `/thimble-fix` alone opens Your fixes.
+// As in the terminal, main reads the words with the person's fixes beside it and starts the fix with its fix_thimble
+// tool: a round of the fix the words follow up on, or a new fix, or first one short question. The fixer works in the
+// background in a thread of its own (`fixing <name>` in the tree), main's chat shows the message, main's line and one
+// line that points there, the row above the composer says how the work goes, and one notice at the top of the chat
+// says how it ended (FixStrip), from GET /api/fixes and the stream's `fix` events. A message in a fix's own thread
+// changes that fix (a round of it, never a new fix). `/thimble-fix` alone opens Your fixes.
 
 export const FIX_COMMAND = '/thimble-fix'
 

@@ -470,6 +470,20 @@ File a ticket for thimble's developer agent when thimble itself should change, s
 }
 ```
 
+## fix_thimble
+
+Start the fix of thimble itself that the person asked for with /thimble-fix. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "words": {"type": "string", "description": "`N <words>` to change the person's fix N, or `new <words>` for a new fix: what thimble does wrong, and what it should do."}
+  },
+  "required": ["words"]
+}
+```
+
 ## view_check
 
 Check the view you build or review, as often as you want: the checks thimble runs on every view, which say what failed and what they noted. Pass as `locators` the refs that sampling may miss, such as a key of each unit the view gives, and `picture` to get {{if:browser}}a picture of the page as it opens, whose path Read opens{{end}}{{if:terminal}}the view as it opens, drawn as text as the panel shows it{{end}}.
@@ -875,11 +889,31 @@ Filed {label}: {title}. {start}
 
 ## file_dev_ticket-fix
 
-thimble's fixer works on this change as fix {id}, "{title}", in a copy of thimble, with this conversation as its context. The row above the composer shows how it goes. When the change passes thimble's checks, a notice at the top of the chat asks the analyst to use it, and thimble starts again with it after their click. Tell the analyst in one line.
+thimble's fixer works on this change, "{title}", in a copy of thimble, with this conversation as its context. The row above the composer shows how it goes. When the change passes thimble's checks, a notice at the top of the chat asks the analyst to use it, and thimble starts again with it after their click. Tell the analyst in one line.
 
 ## file_dev_ticket-fix-failed
 
 The fixer did not start on this change: {why} Tell the analyst in one line.
+
+## fix_thimble-new
+
+thimble started a fork of this conversation that fixes thimble in the background, in a copy ("{fix}"). The person follows its steps in its own thread and decides with a click whether to use the fix. Tell the person in one short line, then go on with their request.
+
+## fix_thimble-round
+
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy. The person follows its steps in the fix's thread and decides with a click whether to use the changed fix. Tell the person in one short line, then go on with their request.
+
+## fix_thimble-round-on
+
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy; the version they have stays until they click Use it now. The person follows its steps in the fix's thread and decides with a click whether to use the changed fix. Tell the person in one short line, then go on with their request.
+
+## fix_thimble-live
+
+thimble gave these words to the fork that is already fixing "{fix}". Tell the person in one short line, then go on with their request.
+
+## fix_thimble-failed
+
+thimble started no fix: {why} Tell the person in one short line.
 
 ## ticket-terminal
 

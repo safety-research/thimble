@@ -215,6 +215,9 @@ REGISTRY: dict[str, Spec] = {
         # a report check turned off, as the Checks pane's switch does, its runs stopped; main's, as run_check is
         Spec("stop_check", (ANALYST,), "app.comments:tool_stop_check", sessions=MAIN_ONLY),
         Spec("file_dev_ticket", (ANALYST,), _H + "file_dev_ticket"),
+        # the person's /thimble-fix, which main reads with their fixes beside it (fixes.ask): a round of a fix of theirs
+        # or a new fix, as the terminal's fix-thimble skill starts it
+        Spec("fix_thimble", (ANALYST,), _H + "fix_thimble"),
         # a view's builder and reviewer check the view as often as they want, and finish once, where the server runs the
         # gates of record (view_tools.py); a gate stops when its caller drops the call (the agent was stopped)
         Spec("view_check", (ANALYST,), "app.view_tools:tool_view_check", sessions=(VIEW_SESSION, REVIEW_SESSION),
@@ -2978,10 +2981,10 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     if not fixes.problem():
         # a change to thimble's code is a fix of the person's thimble (fixes.py), as /thimble-fix makes one
         try:
-            got = await fixes.request(ctx.c, f"{title}\n\n{body}", title=title)
+            got = await fixes.request(ctx.c, f"{title}\n\n{body}", title=title, tell=False)
         except HTTPException as e:
             return ok(hint("file_dev_ticket-fix-failed", why=_detail_text(e.detail)))
-        return ok(hint("file_dev_ticket-fix", id=str(got["fix"]["id"]), title=str(got["fix"].get("title") or title)))
+        return ok(hint("file_dev_ticket-fix", title=str(got["fix"].get("title") or title)))
     fn = _optional("dev", "file_ticket")
     if fn is None:
         return _not_available("file_dev_ticket", "dev", "file_ticket")
@@ -3002,6 +3005,28 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         return await _ask_main(ctx, ans, what=f"{label}: {title}", thread=fork)
     return ok(hint("file_dev_ticket-start", label=label, title=title,
                    start=hint("start_job-subagent", input=json.dumps(ans["input"], ensure_ascii=False))))
+
+
+
+async def _h_fix_thimble(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
+    """The fix the person asked for with /thimble-fix (fixes.from_tool), and what came of it in main's words, by the
+    fix's name (plugin/fix/register.ts startFromSkill)."""
+    from . import fixes  # noqa: PLC0415
+
+    words = str(args.get("words") or "").strip()
+    if not words:
+        return err("fix_thimble: `words` is required: what thimble does wrong and what it should do")
+    try:
+        got = await fixes.from_tool(ctx.c, words)
+    except HTTPException as e:
+        return ok(hint("fix_thimble-failed", why=_detail_text(e.detail)))
+    rec = got["fix"]
+    name = fixes.fix_name(rec)
+    if got["kind"] == "live":
+        return ok(hint("fix_thimble-live", fix=name))
+    if got["kind"] == "round":
+        return ok(hint("fix_thimble-round" + ("-on" if rec.get("change") else ""), fix=name))
+    return ok(hint("fix_thimble-new", fix=name))
 
 # --------------------------------------------------------------------------- HTTP
 

@@ -709,11 +709,18 @@ export function ChatPanel({ ws, onCollapse }: { ws: string; onCollapse?: () => v
       return Promise.resolve(true)
     }
     if (fixing !== null || target.to === 'fix') {
-      // the fix runs in the background in a thread of its own (backend fixes.fixer_chat); main's chat shows the message
-      // and one line that it started there. Typed in a fix's thread, the words are a round of that fix
-      track('ui-click', { target: target.to === 'fix' && fixing === null ? `fix:${target.fix}` : 'fix:new' })
+      // `/thimble-fix <words>` goes to main, which reads it with the person's fixes beside it and starts the fix (a round
+      // of one of theirs, or a new one) or first asks one short question, as in the terminal (backend fixes.ask). The fix
+      // runs in the background in a thread of its own (fixes.fixer_chat); main's chat shows the message, main's line and
+      // one line that opens the fix's thread. Typed in a fix's thread, the words are a round of that fix
+      const inFix = target.to === 'fix'
+      track('ui-click', { target: inFix ? `fix:${target.fix}` : 'fix:ask' })
+      if (!inFix) {
+        if (current !== 'main') setCurrent('main')
+        nearEnd.current = true
+      }
       return api
-        .requestFix(ws, fixing ?? text, pageText(), fixing === null && target.to === 'fix' ? target.fix : undefined)
+        .requestFix(ws, fixing ?? text, pageText(), inFix ? target.fix : undefined)
         .then(() => true)
         .catch((e: Error) => {
           bus.emit('toast', { text: `thimble fix did not start: ${e.message.replace(/^\d{3}\s+/, '')}`, kind: 'error' })
