@@ -27,7 +27,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
 import { failNotice, noticeLine } from '../bar/notice'
-import { cardText } from '../cards/draw'
+import { cardText, revealCard } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { partOf } from '../core/answers'
 import { tellAsked } from '../core/engaged'
@@ -413,6 +413,10 @@ export async function openThreadOn($: Engine, scope: ThreadScope): Promise<boole
     // kept in memory only until its first question
     threads.set(key, { id: key, key, agentId: null, scope, subject: aboutOf(scope), root: await rootOf($), status: 'done', asks: [], turns: [], at: now })
   }
+  // a card: its row to the window's top before the pane narrows the chat, so the card stays in view (cards/draw.ts
+  // revealCard). Claude Code moves the chat when a press opened the thread (the bar's `a ask`, the card's margin), not
+  // for the a key
+  if (scope.card) await revealCard($, scope.card, 'start')
   const placed = await showThread($, key, { ask: true })
   if (!placed) {
     pendingKey = key

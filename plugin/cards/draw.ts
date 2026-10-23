@@ -18,13 +18,17 @@
 //                 the person was typing a word
 //   cardPost      what a card's Client sends: Button presses and clicks
 //   cardText      a card's text copy as it draws now (for v)
+//   revealCard    the card's row brought into view in the conversation
 //
 // The width a card is drawn at is the screen's columns less its frame. A drawing hook may not write the session's
 // state, so when the frame has no drawing at its width (a resumed session, a resize, a side pane that opens or closes)
 // or for the theme (core/theme.ts: the view's surface.colors give one set for each), its Client asks for one
 // (client.tsx), and that request draws it; the Client also says when the card is first on screen. A card keeps a
 // drawing for each width and theme it shows at (the conversation, its copy in a side pane: store.ts withDrawing), and a
-// frame draws only the one laid out at its own width.
+// frame draws only the one laid out at its own width. So is the answer to a Client's post: the drawing at the width the
+// Client's frame draws at now (siteWidth), never at the width the post named. A post the Client sent before its frame
+// narrowed (a side pane opened) can be answered after the frame's new drawing came, and the wider drawing it named
+// would then stay in the narrower frame, each row's last column wrapped onto a line of its own.
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
@@ -62,6 +66,10 @@ const shown = new Map<string, boolean>()
 // from, and why. The frame says why in the card's place until the card has a newer tree or a new version, which is
 // drawn again.
 const faulted = new Map<string, { gen: number; seq: number; reason: string }>()
+// the width each frame of a card draws at now, by the drawing it stands in (the `requestId` of its row or pane, which
+// a Client's ui.message names too) and the card: what the answer to that Client's post is laid out at
+const siteWidth = new Map<string, number>()
+const siteOf = (site: unknown, id: string) => `${String(site ?? '')}\u0000${id}`
 
 /** The screen's size and layout, as the last drawing of a message or a card saw it. */
 export function noteViewport(v: { columns?: number; rows?: number; isFullscreen?: boolean } | undefined): void {
@@ -183,17 +191,14 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // only a drawing laid out at this width (for this theme, else the other's until this one's comes): until one comes,
   // the Client says it is drawing
   const theme = await themeNow($)
+  siteWidth.set(siteOf(e.requestId, meta.id), width)
   const current = drawingAt(t, meta.gen, width, theme)
   const f = faulted.get(meta.id)
   const fault = f && current && f.gen === current.gen && f.seq === current.seq ? f.reason : null
   // a drawing that failed at another width: the card draws again at this one
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
-  const need = needOf(meta, current, width, theme)
   // the title on a line of its own, then the card
-  const client = E.Client({
-    key: clientKey(meta), module: './client.tsx', width: current?.width ?? width,
-    props: { tree: current?.tree ?? null, width: current?.width ?? width, need },
-  })
+  const client = E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) })
   const rows: Any[] = [
     E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title }),
     // a drawing wider than the frame: its columns past the frame's edge are cut
@@ -233,6 +238,21 @@ export async function cardText($: Engine, id: string): Promise<string> {
   const t = await treeOf($, id)
   const r = await askCard($, meta, 'copy', { width: t?.width ?? cardWidth() })
   return r?.ok ? (r.lines as string[]).join('\n') : `(the card did not draw: ${r?.error ?? 'no answer'})`
+}
+
+/** Bring a card into view in the conversation: the row it is drawn in (main's call of it, or the answer a designer
+ *  fork drew it under), its top at the window's top (`start`), or the answer's end where the card stands. Claude Code
+ *  moves a conversation row only while a hook answers the person's press, pick, prompt or command; a key at the prompt
+ *  (hooks/keys.ts) is none of these, and the call then moves nothing. The move is not waited for (a key's hook, ]'s,
+ *  has a short budget). It also takes the conversation off its bottom, so a side pane that opens next, which narrows
+ *  the conversation and makes the rows under the card taller, leaves the card where it is. */
+export async function revealCard($: Engine, id: string, block: 'start' | 'nearest' = 'nearest'): Promise<void> {
+  const meta = await metaOf($, id)
+  if (!meta || meta.version < 1) return
+  const row = meta.anchorRow ?? meta.toolUseId
+  try {
+    void Promise.resolve($.ui.scroll({ to: { requestId: row }, block: meta.anchorRow && block === 'start' ? 'end' : block })).catch(() => undefined)
+  } catch { /* nothing moves */ }
 }
 
 /** The cards an answer row holds, framed, under it: those still anchored there (on the main screen, a version main
@@ -311,15 +331,17 @@ function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: The
   return (d.theme ?? 'dark') !== theme ? `${meta.gen}:${width}:${theme}` : ''
 }
 
-/** A Client's next props at its width: the drawing laid out at that width, or none and the drawing it needs. */
-function clientProps(meta: CardMeta, t: CardTree | null, width: number, theme: Theme): Any {
-  const d = drawingAt(t, meta.gen, width, theme)
-  return { tree: d?.tree ?? null, width, need: needOf(meta, d, width, theme) }
+/** A Client's props in a frame `room` columns wide: the drawing laid out at that width, or none and the drawing it
+ *  needs. */
+function propsAt(meta: CardMeta, t: CardTree | null | undefined, room: number, theme: Theme): Any {
+  const d = drawingAt(t, meta.gen, room, theme)
+  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme) }
 }
 
 /** A Client's post: the events it has not had an answer for, each handled once, in order. After a press or a click,
- *  the card takes the keys at an empty prompt first. Answers the Client's next props, with the last event handled. */
-export async function cardPost($: Engine, id: string, data: Any): Promise<Any> {
+ *  the card takes the keys at an empty prompt first. Answers the Client's next props, with the last event handled, at
+ *  the width its frame in `site` (the drawing the Client stands in) draws at now. */
+export async function cardPost($: Engine, id: string, data: Any, site?: string): Promise<Any> {
   const meta = await metaOf($, id)
   if (!meta || meta.version < 1 || !data || typeof data !== 'object' || !Array.isArray(data.events)) return {}
   const client = String(data.client ?? '')
@@ -335,8 +357,10 @@ export async function cardPost($: Engine, id: string, data: Any): Promise<Any> {
     if (r?.r) await applyAnswer($, meta, r.r, r.width, true)
     else if (r) await applyAnswer($, meta, r)
   }
-  // the props at the Client's own width: two Clients of a card (the conversation's, a side pane's) post at their widths
+  // the props at the width the Client's frame draws at now: two Clients of a card (the conversation's, a side pane's)
+  // stand in two frames; a frame not drawn since the plugin loaded answers at the width the Client drew at
   const t = await treeOf($, id)
   const now = (await metaOf($, id)) ?? meta
-  return t ? { props: { ...clientProps(now, t, Number(data.width) || t.width, await themeNow($)), ack: { [client]: last } } } : {}
+  const room = siteWidth.get(siteOf(site, id)) || Number(data.width) || t?.width || cardWidth()
+  return t ? { props: { ...propsAt(now, t, room, await themeNow($)), ack: { [client]: last } } } : {}
 }

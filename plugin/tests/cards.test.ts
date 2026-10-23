@@ -291,6 +291,27 @@ test('a side pane opens: the card in the conversation and its copy in the pane e
   await pane.unmount()
 })
 
+test('a post the Client sent before its frame narrowed is answered with the drawing at the frame\'s width now, so no row of the wider one wraps', async ($, on) => {
+  world(on, { wide: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_16', ...input } as never)
+  const at = (columns: number) => ({ ...(callRow('toolu_made_up_16', input) as Any), viewport: { columns, rows: 40, isFullscreen: true } })
+  const keyOf = async () => elements(await $.ui.render(at(70))).find(n => n.type === 'Client')?.props?.key
+  // the card at the screen's width, then a side pane narrows the chat: the frame draws at 62 columns
+  await (await shown($, at(100))).unmount()
+  const main = await shown($, at(70))
+  const key = await keyOf()
+  const drawnIn = async () => textOf(await main.drawn({ in: key }))
+  expect(await drawnIn()).toContain('rows at 62')
+  // a post the Client sent while it still drew at 92 columns (its rows changed as the region narrowed) is answered
+  // now: with the drawing at 62, not the one at 92 its post named
+  await main.post({ client: 'made-up', width: 92, events: [{ n: 1, rows: 4 }] }, { in: key })
+  expect(await drawnIn()).toContain('rows at 62')
+  expect(await drawnIn()).not.toContain('rows at 92')
+  await main.unmount()
+})
+
 test('the person picks a light theme: the card asks for a drawing in its colors, shows the dark one until it comes, and keeps both', async ($, on) => {
   resetTheme()
   const w = world(on, { wide: true })
