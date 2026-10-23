@@ -347,18 +347,10 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   expect(asked).toMatch(/"key":"[0-9a-f]{64}"/)
   expect(asked).not.toContain(String(apply?.stdin))
   expect(s.commands).toEqual(['reload-plugins'])
-  rows = await fixLineRows(s.$, ELS, 110)
-  expect(textOf(rows[0])).toBe('  ✓ Bar says read for coverage is on · thimble reloaded · u undo')
-  expect(textOf(rows[1])).toBe(`    If thimble stops loading: sh ${HOME}/fixes/off.sh`)
-  // only u acts now
-  expect(await fixKey(s.$, 'y')).toBe(null)
-  await (await fixKey(s.$, 'u'))!.later()
-  expect(s.verbs()).toContain('undo 1')
-  expect(s.commands).toEqual(['reload-plugins', 'reload-plugins'])
-  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('is off · thimble reloaded')
-  // the person's next prompt takes the line
-  await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
+  // once the fix is on and loaded, its line goes; the transcript keeps one line that says so
   expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(await fixKey(s.$, 'y')).toBe(null)
+  expect(await fixKey(s.$, 'u')).toBe(null)
 })
 
 test("y while Claude is mid-reply: the reload waits for the turn's end, and the line says so; a --plugin-dir session is told to restart", async () => {
@@ -375,10 +367,10 @@ test("y while Claude is mid-reply: the reload waits for the turn's end, and the 
   await s.call('turn.complete', { turnId: 't-main', reason: 'answer', answer: 'Runs 3 and 9.', durationMs: 9, isAborted: false }, async () => ({}))
   await s.tick()
   expect(s.commands).toEqual(['reload-plugins'])
-  // the new load of the plugin: the line says it reloaded
+  // the new load of the plugin: the fix is on, and its line goes
   await s.call('session.start', { cwd: '/made-up/data' })
   await s.tick()
-  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ Bar says read for coverage is on · thimble reloaded · u undo')
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
 
   const t = setup()
   t.config.push({ key: 'thimble@inline.cards', value: true })
@@ -633,12 +625,7 @@ test('the live sequence: apply a fix, follow up on it, and the follow-up is a ro
   expect(s.notes.at(-1)).toEqual({ text: 'thimble changed: Bar says read for coverage · tests pass', title: 'thimble' })
   await (await fixKey(s.$, 'y'))!.later()
   expect(s.verbs().filter(v => v.startsWith('apply'))).toEqual(['apply 1 --ask -', 'apply 1 --ask -'])
-  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ Bar says read for coverage is on · thimble reloaded · u undo')
-  // u: the version before comes back
-  await (await fixKey(s.$, 'u'))!.later()
-  expect(s.verbs()).toContain('undo 1')
-  rows = await fixLineRows(s.$, ELS, 110)
-  expect(textOf(rows[0])).toBe('  ↺ Bar says read for coverage is back to its version before · thimble reloaded')
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
   expect(s.fix.state).toBe('on')
 })
 

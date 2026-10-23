@@ -169,7 +169,12 @@ export async function reloadIfDue($: Engine): Promise<void> {
 /** The reload a line waited for came (this module is a new load of the plugin): the line says thimble reloaded. */
 export async function reloaded($: Engine): Promise<void> {
   const l = await fixLineNow($)
-  if (l?.kind === 'applied' && l.reload === 'pending') await setFixLine($, { id: l.id, kind: 'applied' })
+  if (l?.kind === 'applied' && l.reload === 'pending') {
+    // the fix is on: the line goes, and the transcript keeps one line that says so
+    await setFixLine($, null)
+    const f = await fixOf($, l.id)
+    $.ui.log(`thimble reloaded its plugins: ${f ? `“${f.title}”` : `fix ${l.id}`} is on.`)
+  }
 }
 
 /** Whether this session loads thimble with --plugin-dir: then Claude Code's copy of the fixes is not what it loads, and
@@ -220,14 +225,15 @@ export async function applyFix($: Engine, id: number): Promise<string | null> {
   // a --plugin-dir session loads its own folder: the line names the restart. Mid-reply, the reload waits for the turn's
   // end (turn.complete runs reloadIfDue), and the line says so until the new load (reloaded)
   const reload = (await pluginDirSession($)) ? 'restart' : d.reload && (await mainRuns($)) ? 'pending' : undefined
-  await setFixLine($, { id, kind: 'applied', ...(reload ? { reload } : {}) })
+  // once the fix is on and loaded, its line goes (the transcript's line says so); it stays only while a reload waits
+  await setFixLine($, reload ? { id, kind: 'applied', reload } : null)
   if (d.reload && !reload) $.ui.log(`thimble reloaded its plugins: ${f ? `“${f.title}”` : `fix ${id}`} is on${d.changed ? ', in its new version' : ''}.`)
   await tellAtNextPrompt($, `fix-${id}`, `The person applied their thimble fix "${f?.title ?? id}"${d.changed ? ' in its new version' : ''}: it is now part of their thimble${d?.version ? ` (${d.version})` : ''}.`)
   if (reload === 'pending') {
     reloadDue = true
     // the turn ended while the fix went on: its end found nothing due, so the reload runs now
     if (!(await mainRuns($))) {
-      await setFixLine($, { id, kind: 'applied' })
+      await setFixLine($, null)
       await load($, d)
     }
   } else if (!reload) await load($, d)

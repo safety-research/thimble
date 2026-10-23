@@ -23,7 +23,7 @@ and the privacy check, and asks y/N (--yes skips the question, for scripts). The
 the title and the text; a detail of theirs in the code cannot be taken out without changing the code, so it refuses
 and names each one. It forks the repository when the person cannot push to it, makes one commit with the fix's change
 on the release commit in a temporary repository under $THIMBLE_HOME/fixes/pr/ (removed after), pushes it as the
-branch thimble-fix/<id>-<slug>, opens the pull request against main, and keeps its link on the fix's record and in
+branch thimble-fix-<id>-<slug> (a free name), opens the pull request against main, and keeps its link on the fix's record and in
 share/<id>/pr.json. THIMBLE_GH, THIMBLE_GIT and THIMBLE_FIX_PUSH_URL (fixes.py) replace gh, the git that pushes, and
 where it pushes ({owner}, {login}, {name}), for tests.
 """
@@ -369,7 +369,7 @@ def pr_preview(fid: int | str, st: Store | None = None) -> dict[str, Any]:
     files = FX._numstat(FX.live_dir(), f"{rec['commit']}^", rec["commit"])
     return {"id": n, "title": title, "body": body.lstrip("\n"), "took": took_words(hits), "files": files,
             "code": _scan_code(diff, st), "diff": diff, "base": base, "version": version, "repo": FX.upstream(),
-            "branch": f"thimble-fix/{n}-{slug(title)}"}
+            "branch": f"thimble-fix-{n}-{slug(title)}"}
 
 
 def _commit(r: dict[str, Any], user: dict[str, Any], tmp: Path) -> str:
@@ -410,6 +410,14 @@ def open_pr(r: dict[str, Any], user: dict[str, Any]) -> str:
     tmp = Path(tempfile.mkdtemp(prefix=f"{r['id']}-", dir=FX.home() / "pr"))
     try:
         sha = _commit(r, user, tmp)
+        # a name no branch there has, nor holds as a folder of branches (a branch thimble-fix-1-x/y would block it)
+        taken = FX.run([FX.push_git(), "-c", "credential.helper=", "-c",
+                        f"credential.https://github.com.helper=!{FX.gh()} auth git-credential", "ls-remote", "--heads", url],
+                       cwd=tmp / "repo", check=False).stdout
+        heads = {x.split("refs/heads/", 1)[1] for x in taken.splitlines() if "refs/heads/" in x}
+        base_name, k = r["branch"], 2
+        while any(h == r["branch"] or h.startswith(r["branch"] + "/") for h in heads):
+            r["branch"], k = f"{base_name}-{k}", k + 1
         push = [FX.push_git(), "-c", "credential.helper=", "-c",
                 f"credential.https://github.com.helper=!{FX.gh()} auth git-credential",
                 "push", url, f"{sha}:refs/heads/{r['branch']}"]

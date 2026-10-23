@@ -93,7 +93,7 @@ def test_it_warns_shows_what_would_go_and_no_sends_nothing(world, gh, monkeypatc
     assert warning == ("This posts fix 1's code change publicly: as a pull request on the public repository "
                        "safety-research/thimble, from your GitHub account (made-up). Anyone can read the code and the text.")
     assert "  Title    Bar says read for coverage" in lines
-    assert f"  Branch   thimble-fix/1-bar-says-read-for-coverage, on thimble 0.10.2 ({world['base'][:7]})" in lines
+    assert f"  Branch   thimble-fix-1-bar-says-read-for-coverage, on thimble 0.10.2 ({world['base'][:7]})" in lines
     assert "  Files    plugin/bar/bar.tsx  +1 −1" in lines
     # the body: share's text, the person's data file taken out, with the line that says how it was opened
     assert "    ### What was wrong" in lines and "    After Claude read ‹data file›, the bar's item still said coverage." in lines
@@ -126,10 +126,10 @@ def test_yes_forks_pushes_and_opens_the_pr_then_records_its_link(world, gh, monk
     assert "repo view safety-research/thimble --json viewerPermission -q .viewerPermission" in log
     assert "repo fork safety-research/thimble --clone=false" in log
     create = next(x for x in log if x.startswith("pr create"))
-    assert "--repo safety-research/thimble --base main --head made-up:thimble-fix/1-bar-says-read-for-coverage" in create
+    assert "--repo safety-research/thimble --base main --head made-up:thimble-fix-1-bar-says-read-for-coverage" in create
     assert branches(gh, "safety-research") == []
     (ref,) = branches(gh, "made-up")
-    assert ref == "refs/heads/thimble-fix/1-bar-says-read-for-coverage"
+    assert ref == "refs/heads/thimble-fix-1-bar-says-read-for-coverage"
     fork = gh["remotes"] / "made-up.git"
     # one commit on the release commit, by the person's GitHub noreply address, holding the fix's change
     assert sh("git", "rev-parse", f"{ref}^", cwd=fork) == world["base"]
@@ -161,8 +161,8 @@ def test_with_push_access_the_branch_goes_on_the_repository_with_no_fork(world, 
     assert capsys.readouterr().out.splitlines()[-1] == f"✓ Opened the pull request: {PR_URL}"
     log = calls(gh)
     assert not any(x.startswith("repo fork") for x in log)
-    assert "--head thimble-fix/1-bar-says-read-for-coverage --title" in next(x for x in log if x.startswith("pr create"))
-    assert branches(gh, "safety-research") == ["refs/heads/thimble-fix/1-bar-says-read-for-coverage"]
+    assert "--head thimble-fix-1-bar-says-read-for-coverage --title" in next(x for x in log if x.startswith("pr create"))
+    assert branches(gh, "safety-research") == ["refs/heads/thimble-fix-1-bar-says-read-for-coverage"]
     assert branches(gh, "made-up") == []
 
 
