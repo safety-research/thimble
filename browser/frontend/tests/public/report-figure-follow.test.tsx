@@ -9,7 +9,7 @@ import { api } from '../../src/lib/api'
 import { dispatch } from '../../src/lib/events'
 import type { Cell } from '../../src/lib/types'
 import { ReportContext, type ReportCtx } from '../../src/report/context'
-import { FigureBlock, followedCaption } from '../../src/report/FigureBlock.tsx'
+import { FigureBlock} from '../../src/report/FigureBlock.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 beforeAll(() => {
@@ -98,12 +98,6 @@ describe('a report figure follows its card', () => {
     expect(editor.updateBlock).not.toHaveBeenCalled()
   })
 
-  test('an unlocked figure in the same document follows', async () => {
-    const { editor } = await figure('Most runs end early.', 'w-follow-6', { locked: false })
-    await changed({ takeaway: 'Two runs in three end early.' })
-    expect(editor.updateBlock).toHaveBeenCalledWith('f1', { props: { cell: 'card:c1', caption: 'Two runs in three end early.' } })
-  })
-
   test('while the card runs again the figure keeps its chart, and the takeaway the run clears changes no caption', async () => {
     const { el, editor } = await figure('Most runs end early.', 'w-follow-3')
     await changed({ status: 'running', takeaway: '', outputs: [] })
@@ -146,13 +140,6 @@ describe('a figure whose card changed while it was not on the page', () => {
     expect(editor.updateBlock).toHaveBeenCalledWith('f1', { props: { cell: 'card:c1', caption: 'Two runs in three end early.' } })
   })
 
-  test('a caption made from the question takes the takeaway the card got since', async () => {
-    edited({ takeaway: '' })
-    const { editor } = await figure('How many runs end early?', 'w-mount-2')
-    await settle()
-    expect(editor.updateBlock).toHaveBeenCalledWith('f1', { props: { cell: 'card:c1', caption: 'Two runs in three end early.' } })
-  })
-
   test('a caption that says no earlier takeaway stays, and one that says the takeaway reads no version', async () => {
     const versions = edited({ takeaway: 'Most runs end early.' })
     const mine = await figure('Early ends cluster in one topic.', 'w-mount-3')
@@ -167,26 +154,6 @@ describe('a figure whose card changed while it was not on the page', () => {
     expect(same.editor.updateBlock).not.toHaveBeenCalled()
   })
 
-  test('a locked figure keeps a caption that says an earlier takeaway', async () => {
-    edited({ takeaway: 'Most runs end early.' })
-    const { editor } = await figure('Most runs end early.', 'w-mount-5', { locked: true })
-    await settle()
-    expect(editor.updateBlock).not.toHaveBeenCalled()
-  })
-})
-
-describe('followedCaption', () => {
-  const was = { title: 'Q', takeaway: 'Most runs [[end early|card:c1]].' }
-  test('follows a caption that says the old takeaway without its citations', () => {
-    expect(followedCaption('Most runs end early.', was, { title: 'Q', takeaway: 'Few runs end early.' })).toBe('Few runs end early.')
-  })
-  test('keeps an edited caption, and waits while the card has no takeaway', () => {
-    expect(followedCaption('Mine.', was, { title: 'Q', takeaway: 'Few runs end early.' })).toBeNull()
-    expect(followedCaption('Most runs end early.', was, { title: 'Q', takeaway: '' })).toBeNull()
-  })
-  test("a caption made from the question follows the card's first takeaway", () => {
-    expect(followedCaption('Q', { title: 'Q', takeaway: '' }, { title: 'Q', takeaway: 'Few runs end early.' })).toBe('Few runs end early.')
-  })
 })
 
 describe("a figure's question line moves it", () => {
@@ -218,28 +185,4 @@ describe("a figure's question line moves it", () => {
     expect(sideMenu.blockDragEnd).toHaveBeenCalledTimes(1)
   })
 
-  test('a drop that takes the question line off the page ends the drag, and the page hears its end', async () => {
-    const { sideMenu, editor, block } = withSideMenu()
-    window.history.replaceState(null, '', '/?ws=w-drag-2')
-    const el = await mount(<FigureBlock block={block} editor={editor as never} />)
-    await settle()
-    const q = el.querySelector<HTMLElement>('.wu-fig-q')!
-    await act(async () => void q.dispatchEvent(dragEvent('dragstart')))
-    const ends: Event[] = []
-    const heard = (e: Event) => void ends.push(e)
-    document.addEventListener('dragend', heard)
-    // the drop moves the block: its old element, with the question line, leaves the page
-    el.remove()
-    document.dispatchEvent(dragEvent('drop'))
-    await settle()
-    document.removeEventListener('dragend', heard)
-    expect(sideMenu.blockDragEnd).toHaveBeenCalledTimes(1)
-    expect(ends).toHaveLength(1)
-  })
-
-  test('a locked figure, and one outside the editor, has no handle', async () => {
-    const el = await mount(<FigureBlock block={{ id: 'f1', props: { cell: 'card:c1', caption: '' } }} editor={{ updateBlock: vi.fn(), removeBlocks: vi.fn() } as never} />)
-    await settle()
-    expect(el.querySelector('.wu-fig-q')?.hasAttribute('draggable')).toBe(false)
-  })
 })

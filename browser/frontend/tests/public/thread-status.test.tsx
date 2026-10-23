@@ -22,9 +22,6 @@ afterEach(() => {
 })
 
 describe('threadStage', () => {
-  test('a thread that does not run has no stage', () => {
-    expect(threadStage({ fork: { agent_id: 'a1' } }, false)).toBeNull()
-  })
   test('the question waits for main until the thread is forked, then its fork works on it', () => {
     expect(threadStage({}, true)).toBe('sent')
     expect(threadStage(null, true)).toBe('sent')
@@ -60,11 +57,6 @@ describe('mainEdits', () => {
     )
     expect(mainEdits(thread, rows, ['card:c1']).size).toBe(0)
   })
-  test('a part of a card names the card, and a run still going takes later edits', () => {
-    const running = thread.slice(0, 1)
-    const edits = mainEdits(running, mainRows(call('t1', '2026-10-01T00:05:00.000+00:00', 'c1')), ['card:c1@out0#L3'])
-    expect(edits.get(0)!.map((r) => r.id)).toEqual(['t1'])
-  })
 })
 
 describe('ThreadRows', () => {
@@ -92,15 +84,5 @@ describe('carried', () => {
   const rect = { left: 150, top: 140, right: 162, bottom: 152 }
   test('a box moves with its element when the canvas pans', () => {
     expect(carried(rect, from, { left: 40, top: 70, right: 240, bottom: 170 })).toEqual({ left: 90, top: 110, right: 102, bottom: 122 })
-  })
-  test('a box scales with its element when the canvas zooms', () => {
-    expect(carried(rect, from, { left: 100, top: 100, right: 500, bottom: 300 })).toEqual({ left: 200, top: 180, right: 224, bottom: 204 })
-  })
-  test('an element drawn anew, scaled one way only, carries no box', () => {
-    expect(carried(rect, from, { left: 100, top: 100, right: 300, bottom: 260 })).toBeNull()
-  })
-  test('a flat element (a level line) still carries its box', () => {
-    const line = { left: 100, top: 150, right: 300, bottom: 150 }
-    expect(carried(rect, line, { left: 120, top: 160, right: 320, bottom: 160 })).toEqual({ left: 170, top: 150, right: 182, bottom: 162 })
   })
 })

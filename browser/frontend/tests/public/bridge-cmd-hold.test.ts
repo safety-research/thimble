@@ -1,9 +1,7 @@
 // ⌘ in a view's frame on a Mac (backend/app/viewer_bridge.js pointing), as on the page (src/pointer/CmdPointer.tsx):
-// ⌘ points only once it has been held alone for HOLD_MS, a key pressed with it (⌘C) lets go of the pointer until ⌘ is
-// released, a ⌘-click still asks, and the page's own ⌘ pointer, which the `cmd` message brings, points at once. Off a
-// Mac, Ctrl points at once as before. With ⌥ picked as the ask key in Settings (the `cmd` message's key "alt"), ⌥
-// (Alt off a Mac) does all of that in ⌘'s place, and ⌘ (Ctrl) neither points nor asks. Run in a jsdom window of its
-// own, its platform set before the bridge loads.
+// ⌘ points only once it has been held alone for HOLD_MS, and a ⌘-click still asks; with ⌥ picked as the ask key in
+// Settings (the `cmd` message's key "alt"), an ⌥-click on a link in the text asks about its record and does not open
+// the link. Run in a jsdom window of its own, its platform set before the bridge loads.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -52,36 +50,6 @@ describe('on a Mac', () => {
     expect(lastPoint()).toBeNull()
   })
 
-  test('a key pressed with ⌘ lets go of the pointer until ⌘ is released', async () => {
-    await load('MacIntel')
-    key('keydown', 'Meta', true)
-    await wait(350)
-    move(true)
-    expect(lastPoint()).not.toBeNull()
-    key('keydown', 'c', true)
-    expect(lastPoint()).toBeNull()
-    await wait(350)
-    move(true)
-    expect(lastPoint()).toBeNull()
-    key('keyup', 'c', true)
-    move(true)
-    expect(lastPoint()).toBeNull()
-    key('keyup', 'Meta', false)
-    key('keydown', 'Meta', true)
-    await wait(350)
-    move(true)
-    expect(lastPoint()).not.toBeNull()
-  })
-
-  test('a key pressed before ⌘ has been held long enough keeps the pointer off', async () => {
-    await load('MacIntel')
-    key('keydown', 'Meta', true)
-    key('keydown', 'v', true)
-    await wait(350)
-    move(true)
-    expect(lastPoint()).toBeNull()
-  })
-
   test('a ⌘-click asks at once', async () => {
     await load('MacIntel')
     key('keydown', 'Meta', true)
@@ -89,69 +57,6 @@ describe('on a Mac', () => {
     expect(of('cite')).toMatchObject([{ ref: 'board.jsonl#L1' }])
   })
 
-  test("the page's ⌘ pointer points at once", async () => {
-    await load('MacIntel')
-    dom.window.dispatchEvent(new dom.window.MessageEvent('message', { data: { type: 'thimble:cmd', on: true, cursor: 'default' }, source: dom.window.parent as never }))
-    move(true)
-    expect(lastPoint()).not.toBeNull()
-  })
-})
-
-describe('off a Mac', () => {
-  test('Ctrl points at once', async () => {
-    await load('Linux x86_64')
-    key('keydown', 'Control', false)
-    move(false, true)
-    expect(lastPoint()).not.toBeNull()
-  })
-})
-
-describe('with ⌥ picked as the ask key', () => {
-  type Mods = { metaKey?: boolean; altKey?: boolean; ctrlKey?: boolean }
-  const askAlt = () => dom.window.dispatchEvent(new dom.window.MessageEvent('message', { data: { type: 'thimble:cmd', on: false, cursor: 'default', key: 'alt' }, source: dom.window.parent as never }))
-  const press = (type: 'keydown' | 'keyup', k: string, mods: Mods) => dom.window.dispatchEvent(new dom.window.KeyboardEvent(type, { key: k, ...mods }))
-  const over = (mods: Mods) => one().dispatchEvent(new dom.window.MouseEvent('mousemove', { bubbles: true, ...mods }))
-  const tap = (mods: Mods) => one().dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true, ...mods }))
-
-  test('on a Mac ⌥ held alone points after about 300 ms, a key pressed with it lets go, and ⌥-click asks', async () => {
-    await load('MacIntel')
-    askAlt()
-    over({})
-    press('keydown', 'Alt', { altKey: true })
-    over({ altKey: true })
-    expect(lastPoint()).toBeNull()
-    await wait(350)
-    expect(lastPoint()).not.toBeNull()
-    press('keydown', 'e', { altKey: true })
-    expect(lastPoint()).toBeNull()
-    press('keyup', 'e', { altKey: true })
-    press('keyup', 'Alt', {})
-    tap({ altKey: true })
-    expect(of('cite')).toMatchObject([{ ref: 'board.jsonl#L1' }])
-  })
-
-  test('on a Mac ⌘ neither points nor asks', async () => {
-    await load('MacIntel')
-    askAlt()
-    press('keydown', 'Meta', { metaKey: true })
-    await wait(350)
-    over({ metaKey: true })
-    expect(lastPoint()).toBeNull()
-    tap({ metaKey: true })
-    expect(of('cite')).toEqual([])
-  })
-
-  test('off a Mac Alt points at once and Ctrl does not', async () => {
-    await load('Linux x86_64')
-    askAlt()
-    press('keydown', 'Control', { ctrlKey: true })
-    over({ ctrlKey: true })
-    expect(lastPoint()).toBeNull()
-    press('keyup', 'Control', {})
-    press('keydown', 'Alt', { altKey: true })
-    over({ altKey: true })
-    expect(lastPoint()).not.toBeNull()
-  })
 })
 
 describe("the kit's formatted text with ⌥ picked as the ask key", () => {

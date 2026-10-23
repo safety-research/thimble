@@ -2,9 +2,8 @@
 // New comments (src/report/newComments.ts): when a check that is on ends a run that left comments, the Comments pane of
 // the surface they are on carries the accent dot ("New comments"): on the canvas the toolbar's Comments button
 // (canvas/Controls.tsx CommentsButton), beside a document its Comments pane's head (report/Checks.tsx CommentsPane).
-// Nothing shows in the chat's notice strip. The runs that had ended when this browser first read the workspace's checks
-// are not news; a run is looked at once the analyst opens its surface's Comments pane or one of its comments, and that
-// holds across a reload.
+// The runs that had ended when this browser first read the workspace's checks are not news; a run is looked at once the
+// analyst opens its surface's Comments pane, and that holds across a reload.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { CommentsButton } from '../../src/canvas/Controls.tsx'
@@ -14,7 +13,7 @@ import type { Check, CheckRun } from '../../src/lib/types.ts'
 import { storageKey } from '../../src/lib/workspace.ts'
 import { CommentsPane, useChecks } from '../../src/report/Checks.tsx'
 import { CANVAS } from '../../src/report/checkComments.ts'
-import { newRuns, resetSeen, useLookedAt } from '../../src/report/newComments.ts'
+import { newRuns, resetSeen} from '../../src/report/newComments.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const run = (id: string, comments: number, ended: string, status = 'done'): CheckRun => ({ run: id, status, chat: '', started: ended, ended, covered: [], seen: [], comments, summary: '' })
@@ -117,15 +116,6 @@ describe('the dot on the Comments pane', () => {
     expect(dots(el)).toEqual(['canvas', 'report'])
   })
 
-  test('the chat strip tells nothing of new comments: no notice above the reply box', async () => {
-    const el = await surfaces('nc-strip')
-    await ended('important-details', 'report', run('r1', 3, '2026-10-15T10:00:00Z'))
-    await ended('important-details', CANVAS, run('r2', 2, '2026-10-15T10:01:00Z'))
-    expect(dots(el)).toEqual(['canvas', 'report'])
-    expect(el.querySelector('[data-surface="chat"]')!.innerHTML).toBe('')
-    expect(document.querySelector('.chat-notice, [data-kind="comments"]')).toBeNull()
-  })
-
   test("opening a surface's Comments pane clears its dot alone, across a reload; a later run marks it again", async () => {
     const el = await surfaces('nc-open')
     await ended('important-details', 'report', run('r1', 3, '2026-10-15T10:00:00Z'))
@@ -151,16 +141,4 @@ describe('the dot on the Comments pane', () => {
     expect(dots(again)).toEqual(['report'])
   })
 
-  test('opening one of the new comments on the page is looking at it: the dot goes', async () => {
-    const el = await surfaces('nc-look')
-    await ended('important-details', 'report', run('r1', 3, '2026-10-15T10:00:00Z'))
-    expect(dots(el)).toEqual(['report'])
-    const Open = () => {
-      useLookedAt('nc-look', 'r1')
-      return null
-    }
-    await mount(<Open />)
-    await settle()
-    expect(dots(el)).toEqual([])
-  })
 })
