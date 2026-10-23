@@ -548,11 +548,23 @@ async def _check_share(c: str, main: dict[str, Any], turn: str, cut: str, share:
         await give_up("the check ended before it judged this citation")
     # after give_up, which would leave unchecked a mark whose repair already runs
     for m in found:
+        if m.get("card") and not _takeaway_now(c, m):
+            continue  # the card's takeaway was written again meanwhile: its own check judges the new words
         why = await repair(c, turn=None if m.get("card") else turn, n=None if m.get("card") else m["n"],
                            card=m.get("card"), k=m.get("k"), fork=fork, auto=True)
         # a mark that is not failed now has nothing to repair: a takeaway written again meanwhile is under its own check
         if why and why != NOT_FAILED:
             _notice(c, f"The repair of a failed citation did not start ({why[:100]}). Press Repair on it to try again.")
+
+
+def _takeaway_now(c: str, m: dict[str, Any]) -> bool:
+    """Whether the card of takeaway mark `m` still has the takeaway this check read."""
+    from . import notebook  # noqa: PLC0415
+
+    try:
+        return str((notebook.get_cell(c, m["card"]) or {}).get("takeaway") or "") == m["takeaway"]
+    except Exception:  # noqa: BLE001 — a card that cannot be read has no takeaway to repair
+        return False
 
 
 def _found_failed(res: dict[str, Any] | None) -> bool:

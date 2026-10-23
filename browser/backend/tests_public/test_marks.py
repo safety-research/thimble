@@ -658,3 +658,38 @@ def test_a_repair_that_cannot_start_says_why_and_a_mark_no_longer_failed_is_left
     notices = [t for _, t in _fresh if t.startswith("notice")]
     assert notices == ["notice: The repair of a failed citation did not start (main has no finished turn to check from "
                        "yet). Press Repair on it to try again."], notices
+
+
+def test_a_takeaway_s_failed_mark_is_repaired_unless_the_takeaway_was_written_again(_fresh, monkeypatch):
+    """A card takeaway's mark that its check failed is repaired at the check's end, as a reply's is. When the card's
+    takeaway was written again while the check ran, the new words have a check of their own, so nothing is repaired."""
+    from app import notebook
+
+    calls: list[dict] = []
+
+    async def repair(c, **kw):
+        calls.append(kw)
+        return ""
+
+    monkeypatch.setattr(marks, "repair", repair)
+    _main_at(monkeypatch, "cut-1")
+    for again in (False, True):
+        cid = _seed_card("agent-07 merged [15](#) pull requests.", [TABLE])
+        new = "agent-07 merged [12](#) pull requests."
+
+        async def fork(c, main, cut, prompt, cid=cid, again=again):
+            if again:  # the card's takeaway is written again while its check runs
+                ws = notebook._ws(CORPUS)
+                nb, cell = notebook._locate(ws, cid)
+                cell["takeaway"] = new
+                notebook.write_notebook(ws, nb)
+            out = [{"mark": 1, "kind": "card", "evidence": {"ref": f"card:{cid}#merged/agent-07"}, "status": "wrong",
+                    "correction": None, "reason": "The card shows 12."}]
+            return {"answer": _answer(out), "calls": [], "error": None}
+
+        main = {"sid": SID, "cwd": str(config.corpus_dir(CORPUS)), "transcript_path": None}
+        asyncio.run(marks.start_check(CORPUS, main, marks.new_turn(), [], "cut-1", fork=fork, cards={cid}))
+        if not again:
+            (kept,) = notebook.get_cell(CORPUS, cid)["takeaway_marks"]["items"]
+            assert kept["status"] == "failed", kept
+    assert [(kw["card"], kw["k"], kw["auto"]) for kw in calls] == [(calls[0]["card"], 0, True)], calls
