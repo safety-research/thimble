@@ -40,7 +40,10 @@
 // Each event answers the plain tree (`{t, p, c}`: Box, Text and Button nodes, a Button's onPress a number), and the state
 // to keep. A card the runner does not hold answers {ok: false, missing: true}: the hooks load it again from its copy.
 // Every answer carries `seq`, which grows with each request, so the hooks keep the newest drawing when two answers come
-// back out of order.
+// back out of order. It grows across runners too: a runner started again (the hooks module reloaded, which stops the
+// runner it started; the last runner stopped) starts from the time it started, so its answers are newer than any the
+// hooks keep from the runner before. Else the hooks would drop each answer of the new runner as older than the card's
+// drawing, and a card on screen would take no keys or clicks until the new runner had answered as many requests.
 //
 // The tree holds only what Claude Code's Client draws: a Button's children are strings and Text, and a Text's are
 // strings and Text (anything else is the view's error, said to Claude, as Claude Code would refuse to draw it), and a
@@ -537,8 +540,9 @@ export function drawnSize(tree) {
 // ------------------------------------------------------------------------------------------------- the cards
 
 const cards = new Map()
-// the requests answered, for each answer's `seq`
-let answered = 0
+// the requests answered, for each answer's `seq`: it starts at the runner's start time in milliseconds times a thousand,
+// so a later runner's first answer is newer unless this one answered a thousand requests in each millisecond it ran
+let answered = Date.now() * 1000
 
 /** The text copy of a tree at a width. */
 function copy(tree, width) {

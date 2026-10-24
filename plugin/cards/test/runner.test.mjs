@@ -118,6 +118,24 @@ test('a file that is an object gives its rows as props.rows and the whole object
   assert.deepEqual([r2.ok, r2.lines, r2.summary.other, r2.summary.hasRows, r2.summary.read], [true, ['0 2 1'], ['hist', 'growth'], false, 'an object with hist (2), growth (1)'])
 })
 
+test('a runner started again answers with a newer seq than the runner before it, so the hooks keep its drawings', async () => {
+  // the hooks keep a card's drawing from the newest answer (store.ts withDrawing): a runner started again after a reload
+  // of the plugin must not answer with seqs the earlier runner already gave
+  const { id } = await load(COUNTER)
+  let last = 0
+  for (let i = 0; i < 5; i++) last = (await ask('key', { id, key: '+' })).seq
+  const again = await startRunner(dir)
+  try {
+    const r = await again.ask('load', { id, version: 1, title: 'Scores', view: COUNTER, rows: join(dir, 'rows.json'), width: 40, state: { n: 5 } })
+    assert.equal(r.ok, true)
+    assert.ok(r.seq > last, `the new runner's seq ${r.seq} is not newer than ${last}`)
+    const k = await again.ask('key', { id, key: '+' })
+    assert.deepEqual([JSON.parse(k.state), k.seq > r.seq], [{ n: 6 }, true])
+  } finally {
+    again.stop()
+  }
+})
+
 test('a card loads again with the state it kept', async () => {
   const { r } = await load(COUNTER, { state: { n: 7 } })
   assert.deepEqual(r.lines.slice(0, 2), ['count 7', 'cleo 1'])
