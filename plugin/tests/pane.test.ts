@@ -5,7 +5,6 @@ import { expect, test } from 'claude-code/testing'
 
 import { keyedWords } from '../bar/bar'
 import { drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
-import { askOf } from '../labels/use.mjs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -106,20 +105,6 @@ test("the top row says what main does: working, waiting for the person's yes, re
   expect(await said()).toBe('Claude is working…')
   await s.call('turn.complete', { turnId: 't1' })
   expect(await said()).toBe('Claude replied')
-})
-
-test("while a label run's ask waits at the pane's top, the top row says Claude waits on the person, in the ask's words", async () => {
-  const s = setup()
-  await openPane(s.$, 'threads', {}, 'Threads', { focus: true })
-  await s.call('turn.start', { turnId: 't1', text: 'label them' })
-  const said = async () => textOf(nodes(await draw(s)).find(n => n.props?.key === 'main-state'))
-  expect(await said()).toBe('Claude is working…')
-  await s.$.state.set({ plugin: 'thimble', key: 'labelAsk' }, askOf({ kind: 'label_ask', name: 'spam', root: '/made-up/data', ask: 'a1', units: 420, calls: 9, sample: 300, text: 'Read 420 records of chat.jsonl with Claude' }))
-  const tree = nodes(await draw(s))
-  expect(textOf(tree.find(n => n.props?.key === 'pane-ask'))).toContain('Claude is waiting on you')
-  expect(await said()).toBe('Claude is waiting on you')
-  await s.$.state.set({ plugin: 'thimble', key: 'labelAsk' }, null)
-  expect(await said()).toBe('Claude is working…')
 })
 
 test('docked, the frame takes the pane\'s rows and a row past it, never shown; inline the drawing alone', async () => {

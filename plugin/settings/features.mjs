@@ -2,21 +2,24 @@
 // and the tests import it.
 //
 // Each feature is one switch, named by what the person gets (Citations, Cards), never by the part of thimble that makes
-// it. Each is a field of the plugin's userConfig (.claude-plugin/plugin.json, with the same key, title and default),
-// so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again with the
-// new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key) when it acts.
+// it; a feature with `choices` is one of a few modes (Citation checks: auto, on demand, off). Each is a field of the
+// plugin's userConfig (.claude-plugin/plugin.json, with the same key, title and default: a boolean, or a string with its
+// `options`), so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again
+// with the new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key), or
+// choiceOf(key) for a mode, when it acts.
 
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `does`:
- *  one line on what the person gets and what it costs, the field's description (a test checks). `lenses`: the lenses of
- *  the observer's look it needs (observer/lenses.mjs): the look runs while one such feature is on. */
+ *  one line on what the person gets and what it costs, the field's description (a test checks). `choices`: the modes of
+ *  a feature that has more than on and off, its default one of them. `lenses`: the lenses of the observer's look it
+ *  needs (observer/lenses.mjs): the look runs while one such feature is on. */
 export const SWITCHES = [
   {
     key: 'marks', title: 'Citations', default: true,
-    does: 'Claude adds a citation to each claim you would check, and a second Claude checks each one after the reply.',
+    does: 'Claude adds a citation to each claim you would check, and a second Claude checks it against the files, as Citation checks says.',
   },
   {
-    key: 'checkOnOpen', title: 'Check citations only when I open one', default: false,
-    does: 'Off: a second Claude checks every citation after each reply. On: it checks a citation when you open it, which spends fewer tokens.',
+    key: 'citationChecks', title: 'Citation checks', default: 'on demand', choices: ['auto', 'on demand', 'off'],
+    does: 'auto: a second Claude checks every citation after each reply. on demand: it checks a citation when you open it, which spends fewer tokens. off: no checks.',
   },
   {
     key: 'cards', title: 'Cards', default: true,
@@ -57,20 +60,35 @@ export function setOptions(options) {
   current = options && typeof options === 'object' ? { ...options } : {}
 }
 
-/** The features as `values` holds them (a field missing, or not a boolean: its default), as a function of a key. The
- *  settings pane asks it with the values Claude Code holds now; featureOn is it with the plugin's options. */
+/** A feature's value as `values` holds it: a boolean, or for a feature with modes one of its choices; a field missing,
+ *  or not of its kind, has its default. */
+function valueIn(values, key) {
+  const s = BY_KEY.get(key)
+  const v = values ? values[key] : undefined
+  if (s?.choices) return s.choices.includes(v) ? v : s.default
+  return typeof v === 'boolean' ? v : s ? s.default : true
+}
+
+/** The features as `values` holds them, as a function of a key: whether each is on (a feature with modes is on unless
+ *  its mode is `off`). The settings pane asks it with the values Claude Code holds now; featureOn is it with the plugin's
+ *  options. */
 export function switchesFrom(values) {
   return key => {
-    const s = BY_KEY.get(key)
-    const v = values ? values[key] : undefined
-    return typeof v === 'boolean' ? v : s ? s.default : true
+    const v = valueIn(values, key)
+    return typeof v === 'string' ? v !== 'off' : v
   }
+}
+
+/** A feature's mode, for a feature with `choices` (`on demand`); its value as a boolean for any other. */
+export function choiceOf(key) {
+  return valueIn(current, key)
 }
 
 /** A change the settings pane just made through Claude Code: this activation acts on it at once, while Claude Code
  *  loads the plugin again with the same value. */
 export function noteChange(key, value) {
-  if (BY_KEY.has(key) && typeof value === 'boolean') current = { ...current, [key]: value }
+  const s = BY_KEY.get(key)
+  if (s && (s.choices ? s.choices.includes(value) : typeof value === 'boolean')) current = { ...current, [key]: value }
 }
 
 /** Whether thimble is off in this session (/thimble-off, settings/term.ts): every feature is then off, whatever its

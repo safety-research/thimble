@@ -34,3 +34,32 @@ test('/thimble-settings opens the switches; a press turns one off through Claude
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeUndefined()
   await pane.unmount()
 })
+
+test('Citation checks has three modes: on demand by default, a press on auto sets it, and ↵ on the row goes to the next', async ($, on) => {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
+  mock.clock(on, { now: 0 })
+  const rows: Record<string, boolean | string> = { marks: true, citationChecks: 'on demand' }
+  const set: Any[] = []
+  on('config.list', () => ({ value: Object.entries(rows).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })) }))
+  on('config.set', (_$: unknown, e: Any) => { set.push(e); rows[String(e.key).split('.').pop()!] = e.value; return { value: e.value } })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('fs.exists', () => ({ value: false }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  expect((await pane.find({ key: 'switch-citationChecks' }))?.text).toContain('Citation checks')
+  expect(await pane.find({ key: 'mode-citationChecks-auto' })).toBeDefined()
+  expect(await pane.find({ key: 'mode-citationChecks-off' })).toBeDefined()
+  await pane.press({ key: 'mode-citationChecks-auto' })
+  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citationChecks', value: 'auto' })])
+  await pane.press({ key: 'switch-citationChecks' })
+  expect(set[1]).toMatchObject({ key: 'thimble@inline.citationChecks', value: 'on demand' })
+  await pane.press({ key: 'switch-citationChecks' })
+  expect(set[2]).toMatchObject({ value: 'off' })
+  expect(rows.citationChecks).toBe('off')
+  await pane.unmount()
+})

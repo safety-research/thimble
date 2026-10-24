@@ -10,20 +10,20 @@
 //   askOf(ev)                     -> the ask a `label_ask` line of the change feed carries, or null
 //   sampleOffered(ask)            -> whether the ask offers a sample: not after the person chose one (an ask for the
 //                                    rest), nor when all fit in one
-//   askChoices(ask)               -> [{key, words, choice, time}]: 1 run all (or run the rest), 2 run on a sample of N,
-//                                    0 cancel; `time`, about how long the reads take ('' for cancel)
+//   askChoices(ask)               -> [{label, choice, cost}]: Run all (or Run the rest), Run on a sample of N, Cancel;
+//                                    `cost`, its model calls and about how long they take ('reads none' for cancel)
 //   askTime(calls)                -> about how long `calls` model calls take, in words ('about 2 min')
 //   askQuestion(ask)              -> the ask as the question the person answers
-//   choiceEcho(ask, choice)       -> what the band says for a moment after the person chose
-//   ASK_KEYS                      -> {'1': 'all', '2': 'sample', '0': 'cancel'}
-//   answerNote(ask, choice, got)  -> what Claude hears with the next prompt after the person's choice
+//   askInput(ask)                 -> the ask as Claude Code's question tool (AskUserQuestion) takes it
+//   askContext(ask)               -> what Claude reads after the command that made the ask: ask the analyst with it
+//   answerChoice(ask, input, result) -> the person's choice in the question tool's result: 'all', 'sample', 'cancel',
+//                                    or null
+//   answerNote(ask, choice, got)  -> what Claude reads after the person's choice
 
 import { SETTINGS } from './labelreads.mjs'
 
 /** A label's name, as the kernel takes it (engine/kernel/labels.py). */
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
-
-export const ASK_KEYS = { 1: 'all', 2: 'sample', 0: 'cancel' }
 
 export function howMade(kind) {
   if (kind === 'prompt') return 'read by Claude'
@@ -147,26 +147,55 @@ const callsFor = (a, units) => (a.units > 0 && a.calls > 0 ? Math.max(1, Math.ce
 /** An ask's first choice in words: "run all", or "run the rest" after a sample. */
 const allWords = a => (a.rest ? 'run the rest' : 'run all')
 
+/** What a run of `units` records costs: its model calls and about how long they take. */
+function costOf(a, units) {
+  const calls = callsFor(a, units)
+  return calls ? `${n(calls)} model ${calls === 1 ? 'call' : 'calls'}, ${askTime(calls)}` : ''
+}
+
 export function askChoices(a) {
+  const cap = w => w[0].toUpperCase() + w.slice(1)
   return [
-    { key: '1', words: allWords(a), choice: 'all', time: askTime(callsFor(a, a.units)) },
-    ...(sampleOffered(a) ? [{ key: '2', words: `run on a sample of ${a.sample.toLocaleString('en-US')}`, choice: 'sample', time: askTime(callsFor(a, a.sample)) }] : []),
-    { key: '0', words: 'cancel', choice: 'cancel', time: '' },
+    { label: cap(allWords(a)), choice: 'all', cost: costOf(a, a.units) },
+    ...(sampleOffered(a) ? [{ label: `Run on a sample of ${n(a.sample)}`, choice: 'sample', cost: costOf(a, a.sample) }] : []),
+    { label: 'Cancel', choice: 'cancel', cost: 'reads none' },
   ]
 }
 
 /** The ask as a question: what the run reads, for which label (the kernel's sentence, `Read 2,933 records of
- *  orders.jsonl with Claude`), and that Claude waits for the answer. */
+ *  orders.jsonl with Claude`). */
 export function askQuestion(a) {
   const text = String(a.text || '').trim()
   return `${text}${a.name ? ` for the label ${a.name}` : ''}?`
 }
 
-/** The echo of a choice, in the band for a moment: what runs now. */
-export function choiceEcho(a, choice) {
-  if (choice === 'cancel') return `canceled: the label ${a.name} reads none of its ${n(a.units)} records`
-  if (choice === 'sample') return `labeling a sample of ${n(a.sample)} records for ${a.name}…`
-  return `labeling ${a.rest ? 'the other' : 'all'} ${n(a.units)} records for ${a.name}…`
+/** The ask as the input of Claude Code's question tool: one question, its choices with what each costs. */
+export function askInput(a) {
+  return { questions: [{
+    question: askQuestion(a), header: 'Label run', multiSelect: false,
+    options: askChoices(a).map(c => ({ label: c.label, description: c.cost })),
+  }] }
+}
+
+/** What Claude reads after the command that made the ask: the run waits for the analyst's choice, which Claude asks
+ *  with its question tool; thimble reads the answer and starts the run. */
+export function askContext(a) {
+  return `The label ${a.name} waits for the analyst's choice before the model reads its records. Ask them now with AskUserQuestion, with this input as written; thimble reads their answer and starts the run:\n${JSON.stringify(askInput(a))}`
+}
+
+/** The person's choice in the question tool's result (`answers`: question → the option's label), for the question of
+ *  the tool's `input` that is the ask's (its words, or else its choices): 'all', 'sample', 'cancel', or null when none
+ *  is, or they answered in their own words, or not at all. */
+export function answerChoice(a, input, result) {
+  const choices = askChoices(a)
+  const low = x => String(x ?? '').trim().toLowerCase()
+  const qs = Array.isArray(input?.questions) ? input.questions : []
+  const q = qs.find(x => x?.question === askQuestion(a))
+    ?? qs.find(x => Array.isArray(x?.options) && choices.every(c => x.options.some(o => low(o?.label) === low(c.label))))
+  const answers = result && typeof result === 'object' && result.answers && typeof result.answers === 'object' ? result.answers : {}
+  const said = q ? answers[q.question] : undefined
+  if (typeof said !== 'string') return null
+  return choices.find(c => low(c.label) === low(said))?.choice ?? null
 }
 
 const n = x => Number(x || 0).toLocaleString('en-US')
@@ -176,8 +205,8 @@ export function answerNote(a, choice, got) {
   // the reads run now: Claude waits for their counts, and counts it had before the choice (a trial) are not the label's
   const wait = `\`thimble label ${a.name} --wait\` waits for them and prints the label's counts; counts from before this choice (a trial) are not the label's.`
   if (choice === 'all') return `The analyst chose to run the label ${a.name} on ${a.rest ? 'the other' : 'all'} ${n(a.units)} records. The model is reading them beside the session now; ${wait}`
-  // a sample: the ask has left the screen, so Claude must not point at a key; the rest needs a new ask
+  // a sample: the rest needs a new ask
   const reads = Number((got && got.reads) || a.sample)
   const other = Math.max(0, (Number(got && got.of) || a.units) - reads)
-  return `The analyst chose a random sample of ${n(reads)} of the label ${a.name}'s ${n(a.units)} records, not all of them. The model is reading the sample beside the session now; ${wait} The choices have left the screen, and the other ${n(other)} records stay without a value. To label them, run the same \`thimble label\` command again without --limit: the terminal then asks the analyst again, to run them or cancel.`
+  return `The analyst chose a random sample of ${n(reads)} of the label ${a.name}'s ${n(a.units)} records, not all of them. The model is reading the sample beside the session now; ${wait} The other ${n(other)} records stay without a value. To label them, run the same \`thimble label\` command again without --limit: the analyst is then asked again, to run them or cancel.`
 }

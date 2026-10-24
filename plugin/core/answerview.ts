@@ -11,7 +11,7 @@
 //   registerAnswerView AssistantMessage   underAll: lines under a row after the cards drawn under it (the chips)
 //   cards/draw.ts      a card's frame     underCard: lines under one card (its label row); cardAsk (what its
 //                                         margin asks: a side thread about it)
-//   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray, the label ask), in the rows the
+//   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the
 //                                         band has left over the bar
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
@@ -26,8 +26,7 @@ import type { BarItem } from '../bar/bar'
 import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
 import { explainKey, explainSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
-import { labelAskBand, labelAskBar, labelAskKey, labelsUnderAnswer, labelsUnderCard } from '../labels/use'
-import { cardFlagLine } from '../marks/checker'
+import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
@@ -151,20 +150,17 @@ export async function cardHidden($: Engine, id: string): Promise<boolean> {
   return safe(squeezeHidesCard($, id), false)
 }
 
-/** The lines under one card's frame: a figure its answer's check corrected that it still shows, what a squeeze changed
- *  of it, the labels it used. */
+/** The lines under one card's frame: what a squeeze changed of it, the labels it used. */
 export async function underCard($: Engine, els: Any, id: string, cols: number): Promise<Any[]> {
-  return [...els0(await safe(cardFlagLine($, els, id), [])), ...els0(await safe(squeezeUnderCard($, els, id, cols), [])), ...els0(await safe(labelsUnderCard($, els, id, cols), []))]
+  return [...els0(await safe(squeezeUnderCard($, els, id, cols), [])), ...els0(await safe(labelsUnderCard($, els, id, cols), []))]
 }
 
 // ------------------------------------------------------------------------------------------------ above the prompt
 
-/** What stands above the bar: the tray while it is open, then a large label run's ask while it waits. `room`: the rows
- *  they may take, so the bar under them stays on screen (0: no limit); the tray fits in what the ask leaves. */
+/** What stands above the bar: the tray while it is open. `room`: the rows it may take, so the bar under it stays on
+ *  screen (0: no limit). */
 export async function aboveBar($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
-  const ask = els0(await safe(labelAskBand($, els, width), []))
-  const left = room > 0 ? Math.max(1, room - ask.length) : 0
-  return [...els0(await safe(trayBand($, els, width, left), [])), ...ask]
+  return els0(await safe(trayBand($, els, width, room > 0 ? Math.max(1, room) : 0), []))
 }
 
 /** A seam's bar items, checked; in the settings pane's preview none is a press. */
@@ -172,12 +168,11 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
   .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}) } : x))
 
-/** The features' items at the bar's left, after v: the ask's choices, the tray's steps, s, then c. While an item of
+/** The features' items at the bar's left, after v: the tray's steps, s, then c. While an item of
  *  what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
   return [
-    ...items(await safe(labelAskBar($, on, preview), []), preview),
     ...tray,
     // while the tray holds the keys, the chips' keys (0 [ ]) wait: the bar names each key once
     ...(tray.length ? [] : items(await safe(squeezeBar($, on, preview), []), preview)),
@@ -192,7 +187,7 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
  *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
- *  tray's ] [ at rest, a large label run's ask while it waits, s, { } over the answers, the explainers' keys, c, then
+ *  tray's ] [ at rest, s, { } over the answers, the explainers' keys, c, then
  *  t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   const tray = await safe(trayHolds($), false)
@@ -200,7 +195,6 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
   return (tray ? await safe(trayKey($, key, until), null) : null)
     ?? (chips ? await safe(squeezeKey($, key, until), null) : null)
     ?? (tray ? null : await safe(trayKey($, key, until), null))
-    ?? (await safe(labelAskKey($, key, until), null))
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))

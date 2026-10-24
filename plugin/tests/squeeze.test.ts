@@ -104,8 +104,8 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   await t.clock.advance(1000)
   expect(t.asked.length).toBe(1)
   const back = textOf(await $.ui.render(answer('row-t1', LONG)))
-  // (no check of the reply ran here, so its citation draws failed, ? after it)
-  expect(back).toContain('The nightly build failed on 3 of 12 × runs')
+  // (citations are checked when opened, by default, so its citation draws as written)
+  expect(back).toContain('The nightly build failed on 3 of 12 runs')
   expect(back).not.toContain('fresh fetch')
 })
 
@@ -247,9 +247,8 @@ test("a catch-up's reworded citations: a press acts on the reply's citation with
   expect(band).not.toContain('12 runs')
 })
 
-// A person opened an explainer of an older reply and the chips then opened under it: opening a mark picks that answer for
-// the marks' keys, never for s
-test('s opens the chips under the newest reply after a mark of an older one was opened; { } picks another, and the chips say which', async ($, on) => {
+// A person opened an explainer of an older reply and the chips then opened under it: s squeezes the newest reply alone
+test('s opens the chips under the newest reply, after a mark of an older one was opened or { picked an older one', async ($, on) => {
   const t = await setup($, on, [])
   await t.turn('t1', LONG)
   await t.turn('t2', 'The retry passed on the [slow mirror](#).')
@@ -263,16 +262,12 @@ test('s opens the chips under the newest reply after a mark of an older one was 
   await t.press('s')
   expect((await chipsDrawn($, 'row-t2', 'The retry passed on the [slow mirror](#).')).client).toBeTruthy()
   expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
-  // the newest: no line says which
-  expect((await chipsDrawn($, 'row-t2', 'The retry passed on the [slow mirror](#).')).client.props.props.older).toBe(null)
   await t.press('s')
-  // { picks the older answer for the keys: s opens the chips there, and their row says which reply they squeeze
+  // { picks the older answer for the marks' keys: s still opens the chips under the newest
   await t.press('{')
   await t.press('s')
-  const older = await chipsDrawn($, 'row-t1', LONG)
-  expect(older.client.props.props.older).toMatch(/^squeezing the reply from \d\d:\d\d · \{ \} picks another$/)
-  expect(textOf(older.tree)).toContain('squeezing the reply from')
-  // a new turn gives s back to the newest answer
+  expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
+  expect((await chipsDrawn($, 'row-t2', 'The retry passed on the [slow mirror](#).')).client).toBeTruthy()
   await t.press('s')
   await t.turn('t3', 'Done.')
   await t.press('s')
@@ -301,7 +296,7 @@ test('s pressed twice quickly opens the chips once and types nothing, as two key
   expect(await $.prompt.edit(key('o'))).toEqual({ text: 'so', cursor: 2 })
 })
 
-test('each chip names its ends; while a rewrite is on its way the chips say what it writes and for how long, the text dims, and a version seen before comes back with no call', async ($, on) => {
+test('each chip names its ends; while a rewrite is on its way the text dims and the chips add no line, and a version seen before comes back with no call', async ($, on) => {
   const gates: ((v: string) => void)[] = []
   const t = await setup($, on, [new Promise<string>(r => { gates.push(r) })])
   await t.turn('t1', LONG)
@@ -324,12 +319,10 @@ test('each chip names its ends; while a rewrite is on its way the chips say what
   await t.clock.advance(3200)
   expect(t.asked.length).toBe(1)
   const busy = await chipsDrawn($, 'row-t1', LONG)
-  expect(busy.client.props.props.doing).toMatchObject({ words: 'rewriting: Background new' })
-  expect(busy.client.props.props.doing.secs).toBeGreaterThanOrEqual(3)
-  expect(textOf(busy.tree)).toMatch(/rewriting: Background new… \ds/)
+  expect(textOf(busy.tree)).not.toContain('rewriting')
+  expect(nodes(await $.ui.render(answer('row-t1', LONG))).some(n => n.props?.dimColor && textOf(n).includes('nightly build'))).toBe(true)
   gates.shift()!('The nightly build failed on [3 of 12](#) runs, in plain words.')
   await t.clock.advance(5000)
-  expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.doing).toBe(null)
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('in plain words.')
   // back to the original and to that version again: no call
   await t.press('0')
@@ -349,7 +342,7 @@ test('the rewrite starts from the corrected citations: the request holds the cor
     ] }),
     'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'why did it fail?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: LONG, at: 1 }] }),
   })
-  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('4 of 12 ✎')
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('4 of 12 runs')
   await t.press('s')
   await t.press('[')
   await t.clock.advance(3000)
@@ -359,7 +352,7 @@ test('the rewrite starts from the corrected citations: the request holds the cor
   expect(prompt).not.toContain('Corrections in the original')
 })
 
-test('+ in the chips shows an example of what to ask, and a key at the prompt (esc gave it the keys) or esc esc clearing it lets the words go', async ($, on) => {
+test('+ in the chips types a chip, and a key at the prompt (esc gave it the keys) or esc esc clearing it lets the words go', async ($, on) => {
   const t = await setup($, on, [])
   await t.turn('t1', LONG)
   await t.press('s')
@@ -368,13 +361,13 @@ test('+ in the chips shows an example of what to ask, and a key at the prompt (e
   await ui.unmount()
   const typing = await chipsDrawn($, 'row-t1', LONG)
   expect(typing.client.props.props.plus).toBe('')
-  expect(textOf(typing.tree)).toContain('+ ▏e.g. less jargon, or add an example')
-  expect(await t.bar()).toContain('↵ adds it · tab lets it go')
+  expect(textOf(typing.tree)).toContain('+ ▏')
+  expect(await t.bar()).toContain('+ ▏ ↵ adds it · tab lets it go')
   await $.prompt.edit({ origin: { kind: 'composer' }, text: 'h', cursor: 1, start: 0, end: 0, inputText: 'h', key: { key: 'h' } } as never)
   expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.plus).toBe(null)
   // + at the prompt: /squeeze in the box, and the bar asks what for; esc esc clears the box, and the bar lets it go
   await t.press('+')
-  expect(await t.bar()).toContain('squeeze for… e.g. less jargon, or add an example')
+  expect(await t.bar()).toContain('squeeze for…')
   await $.prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } } as never)
   expect(await t.bar()).not.toContain('squeeze for')
 })

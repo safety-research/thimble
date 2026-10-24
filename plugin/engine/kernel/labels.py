@@ -30,7 +30,7 @@ counted over; `thimble label NAME --csv` prints each record's value for Claude's
 the sessions that applied it (`sessions`), which coverage reads.
 
 A prompt label over more than a sample of records (estimate.py) waits for the person's choice before the model reads
-it (hold_for_ask): run all, run on a random sample, or cancel, which their key in the terminal answers (answer_ask).
+it (hold_for_ask): run all, run on a random sample, or cancel, which their answer in the terminal gives (answer_ask).
 
 Every change bumps `rev`. Writes take a lock (the model's reads, the person's checks and Claude's commands may write
 at once).
@@ -837,7 +837,7 @@ def answer_ask(st: Store, name: str, ask_id: str, choice: str, sample: int, seed
         ask = run.get("ask") or {}
         if run.get("state") != "ask" or ask.get("id") != ask_id:
             raise LabelError("no ask of this label waits with that id (it was answered, or the label changed since): "
-                             "--answer is the analyst's key in the terminal")
+                             "--answer is the analyst's own answer in the terminal")
         if ask.get("scope") != scope_key(lab):
             raise LabelError("the label changed since it asked")
         units = lab.get("units") or {}
