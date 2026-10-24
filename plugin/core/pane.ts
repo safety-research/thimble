@@ -225,7 +225,10 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const pinned = e?.props?.placement === 'dock'
     const keys = new Map<string, () => unknown>()
     const kels = noting(els, keys)
-    const top = topRow($, els, now, W, await mainNow($))
+    // a large label run's ask waits at the pane's top, where the person reads (labels/use.ts), over the top row
+    const ask = await labelAskPaneHead($, els).catch(() => null)
+    const top = [...(ask ? [ask] : []), ...topRow($, els, now, W, await mainNow($))]
+    const T = top.length ? treeRows(top, W) : 0
     // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
     // and input bar (`under`, kept at the bottom)
     let under: Any[] = []
@@ -233,7 +236,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     let drawn: unknown
     if (now.kind === 'thread') {
       // a thread's own key row and input bar stand where a pane's thread's do
-      const p = await threadPaneParts($, { ...e, props: { ...(e?.props ?? {}), scroll: { ...(e?.props?.scroll ?? {}), bodyRows: Math.max(4, H - top.length) } } }, now.args, kels)
+      const p = await threadPaneParts($, { ...e, props: { ...(e?.props ?? {}), scroll: { ...(e?.props?.scroll ?? {}), bodyRows: Math.max(4, H - T) } } }, now.args, kels)
       under = p.bottom as Any[]
       conv = p.body.slice(1) as Any[]
       drawn = p.body[0] ?? null
@@ -241,7 +244,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
       if (THREADED.has(now.kind)) {
         try { ({ conv, bottom: under } = (await threadUnderSplit($, e, now.kind, now.args, kels)) as { conv: Any[]; bottom: Any[] }) } catch { under = []; conv = [] }
       }
-      drawn = await drawKind($, e, now, kels, Math.max(4, H - top.length - (OWN_ROOM.has(now.kind) ? 0 : treeRows(under, W))))
+      drawn = await drawKind($, e, now, kels, Math.max(4, H - T - (OWN_ROOM.has(now.kind) ? 0 : treeRows(under, W))))
     }
     const U = under.length ? treeRows(under, W) : 0
     const id = idOf(now)
@@ -251,7 +254,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
       return parts.length === 1 ? drawn : els.Box({ flexDirection: 'column', children: parts })
     }
     // the rows above the input bar, and how far the drawing and the conversation reach past them
-    const space = Math.max(1, H - top.length - U)
+    const space = Math.max(1, H - T - U)
     const C = conv.length ? treeRows(conv, W) : 0
     const tall = treeRows(drawn, W) + C
     // a drawing taller than the room loses a row of it to the line that says how much more there is
@@ -310,10 +313,7 @@ export const registerPanes: Register = on => {
     const els = $.ui.resolve(e) as Any
     const cols = Number((e as Any).props?.bodyColumns)
     if (cols > 0) paneColumns = cols
-    const drawn = await drawPane($, e, await paneNow($), els)
-    // a large label run's ask waits at the pane's top, where the person reads (labels/use.ts)
-    const ask = await labelAskPaneHead($, els).catch(() => null)
-    return ask ? els.Box({ flexDirection: 'column', children: [ask, drawn] }) : drawn
+    return drawPane($, e, await paneNow($), els)
   })
 
   // esc, or the pane's close mark: back down the trail while it holds a pane, else closed
