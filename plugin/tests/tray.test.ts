@@ -458,6 +458,37 @@ test('a heads-up on a citation\'s words is one ] away; it shows whole, with no p
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
+// a heads-up whose words are a citation's words, or hold them
+const headsOn = (term: string) => ({ explain: { order: ['h1'], items: { h1: { id: 'h1', kind: 'heads', term, title: 'Names are typed in', bullets: ['Anyone who edits types a name.'] } } } })
+const filledOf = (drawn: Any[]) => drawn.filter(n => n.type === 'Text' && n.props?.backgroundColor).map(textOf)
+
+test("a heads-up on a citation's words stays on them when the check corrects them, never on the same word elsewhere in the reply", async ($, on) => {
+  const text = 'The edits came from [3,103 different usernames](#). Each run has a different fake date.'
+  await resumed($, on, {
+    n: 1, row: 'row-t1', words: '3,103 different usernames', start: 20, end: 50, sentence: 'The edits came from [3,103 different usernames].', status: 'corrected', shown: '3,102 different usernames', was: '3,103 different usernames', reason: 'Line 2 says 3102.',
+    evidence: { kind: 'quote', file: 'names.txt', line: '2', lines: [{ n: 2, text: 'names: 3102' }] },
+  }, 's-tray-heads-corrected', { text, parts: headsOn('3,103 different usernames') })
+  const drawn = all(await $.ui.render(answer('row-t1', text)))
+  expect(filledOf(drawn)).toEqual(['3,102 different usernames'])
+  // the words stay the citation's: underlined, and a press on them opens the citation
+  const cite = drawn.find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
+  expect(all(cite).find(n => n.type === 'Text' && textOf(n) === '3,102 different usernames')?.props).toMatchObject({ underline: true })
+  expect(textOf(drawn)).not.toContain('the check of the citations changed')
+})
+
+test('a heads-up whose words hold a citation covers them all: its fill under the citation\'s underline, each one a press of its own', async ($, on) => {
+  const text = 'Answers were shared by [1,212 accounts](#) in June.'
+  await resumed($, on, { ...QUOTED, words: '1,212 accounts', start: 23, end: 42, sentence: 'Answers were shared by [1,212 accounts] in June.', shown: '1,212 accounts' }, 's-tray-heads-over', { text, parts: headsOn('by 1,212 accounts') })
+  const drawn = all(await $.ui.render(answer('row-t1', text)))
+  expect(filledOf(drawn)).toEqual(['by ', '1,212 accounts'])
+  const cite = drawn.find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
+  expect(all(cite).find(n => n.type === 'Text' && textOf(n) === '1,212 accounts')?.props).toMatchObject({ underline: true })
+  // the heads-up's own words open it; ] still reaches it first, then the citation
+  expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'heads up by 1,212 accounts')).toBe(true)
+  await $.prompt.edit(key(']'))
+  expect(textOf(await $.ui.render(above(12)))).toContain('Names are typed in')
+})
+
 test('? ask about this heads-up opens a side thread about it, as a card\'s ? ask does; a prompt typed with it open carries nothing of it', async ($, on) => {
   const opens: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.id); return { value: { isPlaced: true } } as never })

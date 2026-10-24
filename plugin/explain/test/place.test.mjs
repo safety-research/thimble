@@ -17,7 +17,11 @@ test('a term stands on its words outside links and code, then in a citation\'s w
   assert.equal(at(text, findInLink(text, 'five tries')), 'five tries')
   assert.equal(at(text, findTerm(text, 'Network Ranges')), 'network ranges')
   const across = 'So [5](#) of the 13 files in `src/notes` mention citations.'
-  assert.equal(at(across, findRead(across, '5 of the 13 files in src/notes mention citations')), 'of the 13 files in `src/notes` mention citations')
+  // across a citation, the mark covers the citation whole: the person sees both, and a press on its words opens the citation
+  assert.equal(at(across, findRead(across, '5 of the 13 files in src/notes mention citations')), '[5](#) of the 13 files in `src/notes` mention citations')
+  const by = 'Answers were shared by [1,212 accounts](#) in June.'
+  assert.equal(at(by, findRead(by, 'by 1,212 accounts')), 'by [1,212 accounts](#)')
+  assert.equal(at(by, findRead(by, 'shared by 1,212')), 'shared by [1,212 accounts](#)')
 })
 
 test("the look's explainers: a term the text holds, once, none already explained; one heads-up with bullets", () => {

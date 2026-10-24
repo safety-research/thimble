@@ -24,7 +24,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
-import { markFocus, markPressed, passagesFor, rowDrawing, spansFor, textView, underText, type Span } from '../core/answerview'
+import { checkSpans, markFocus, markPressed, passagesFor, rowDrawing, spansFor, textView, underText, type Span } from '../core/answerview'
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
@@ -32,7 +32,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
-import { marksIn, rewritesIn, withCorrections, withoutMarks } from './message.js'
+import { carrier, marksIn, rewritesIn, withCorrections, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 
@@ -88,10 +88,21 @@ function sameClaim(a: string, b: string): boolean {
 export function lostSpans(words: string, was: Span[], now: Span[]): LostSpan[] {
   const kept = new Set(now.map(x => x.id))
   return was.filter(x => !kept.has(x.id)).map(x => ({
-    words: words.slice(x.start, x.end).replace(/`/g, ''),
+    words: withoutMarks(words.slice(x.start, x.end)).replace(/`/g, ''),
     kind: /^heads up\b/.test(x.label) ? 'heads-up' : /^explain\b/.test(x.label) ? 'explainer' : 'mark',
     look: x.look, label: x.label, ...(x.onPress ? { onPress: x.onPress } : {}),
   }))
+}
+
+/** Spans placed on `was` where they stand on `now`, the version of it the checks made (message.js carrier); one with
+ *  no place there is left out. */
+export function carried(was: string, now: string, spans: Span[]): Span[] {
+  const carry = carrier(was, now)
+  const words = (t: string, x: { start: number; end: number }) => withoutMarks(t.slice(x.start, x.end)).replace(/`/g, '')
+  return spans.flatMap(x => {
+    const p = carry(x.start, x.end)
+    return p ? [{ ...x, ...p, label: x.label.replace(words(was, x), words(now, p)) }] : []
+  })
 }
 
 /** Why the checker may not make this call, or null (main's calls and other agents' are not this module's). */
@@ -203,10 +214,13 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const rewrote = own ? rewritesIn(words, reply?.items ?? []) : { text: words, placed: new Set<number>() }
   const text = own ? withCorrections(rewrote.text, reply?.items ?? []) : words
   const marks = marksOn ? marksIn(text) : []
-  const spans = await spansFor($, row, text, marks)
+  // the explainers and heads-ups stand on the words Claude wrote, where the look found them, and follow those words
+  // into the words shown (a correction's words in place of a citation's)
+  const placed = await spansFor($, row, words, marksIn(words))
+  const spans = text === words ? placed : checkSpans(carried(words, text, placed), text, marks, null)
   // a span that stood on words Claude wrote and stands nowhere now, since the check changed those words: a line under
   // the reply says so and opens it
-  const lost = text !== words ? lostSpans(words, await spansFor($, row, words, marksIn(words)), spans) : []
+  const lost = text !== words ? lostSpans(words, placed, spans) : []
   const under = await underText($, els, row, cols)
   if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length) {
     return own ? below() : below({ ...e, props: { ...e.props, text } })

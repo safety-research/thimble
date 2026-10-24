@@ -32,7 +32,7 @@ function all(n: Any, out: Any[] = []): Any[] {
 const TEAL = { backgroundColor: '#1e4d47' }
 const TEXT = 'The page waits on hydrate until [the user query ends](#), then hydrate runs.'
 
-test('spans are kept on plain words or inside one citation, never across one or over another; the focused one looks focused', () => {
+test('spans are kept on plain words, inside one citation or over a whole one, never across part of one or over another; the focused one looks focused', () => {
   const marks = marksIn(TEXT)
   const at = (w: string, from = 0) => TEXT.indexOf(w, from)
   const span = (id: string, start: number, len: number): Span => ({ id, start, end: start + len, look: TEAL, focus: { backgroundColor: '#4fc3b2' }, label: `explain ${id}` })
@@ -42,9 +42,11 @@ test('spans are kept on plain words or inside one citation, never across one or 
     span('c', at('until [the'), 10), // across the citation's link syntax
     span('d', at('hydrate') + 2, 3), // over span a
     span('e', TEXT.length - 2, 9), // past the end
+    span('f', at('until [the'), '[the user query ends](#)'.length + 6), // over the whole citation
   ]
   const kept = checkSpans(given, TEXT, marks, 'b')
   expect(kept.map(s => s.id)).toEqual(['a', 'b'])
+  expect(checkSpans([given[5]], TEXT, marks, null).map(s => TEXT.slice(s.start, s.end))).toEqual(['until [the user query ends](#)'])
   expect(kept[1]!.look.backgroundColor).toBe('#4fc3b2')
   expect(checkSpans('not a list', TEXT, marks, null)).toEqual([])
 })
