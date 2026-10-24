@@ -31,8 +31,8 @@ export const SWITCHES = [
     does: 'Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.',
   },
   {
-    key: 'details', title: 'Important details', default: true, lenses: ['heads'],
-    does: 'Marks the details of an answer that are easy to miss and change what it means. A small part of the call after each reply.',
+    key: 'details', title: 'Heads-ups', default: true, lenses: ['heads'],
+    does: 'Marks a detail of an answer that is easy to miss and changes what it means; ] opens its heads-up. A small part of the call after each reply.',
   },
   {
     key: 'claims', title: 'Claims', default: true, lenses: ['claims'],

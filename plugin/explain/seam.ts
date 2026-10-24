@@ -27,7 +27,7 @@
 //                                      a reply, so typing the words is the way to ask for any of them
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
-// Each lens's switch (settings: Explainers, Important details) also hides what it gave while it is off.
+// Each lens's switch (settings: Explainers, Heads-ups) also hides what it gave while it is off.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
@@ -77,7 +77,7 @@ async function memory($: Engine): Promise<typeof M> {
   return M
 }
 
-/** Whether a lens's switch shows what it gave: Explainers for an explainer, Important details for a heads-up. */
+/** Whether a lens's switch shows what it gave: Explainers for an explainer, Heads-ups for a heads-up. */
 const shown = (g: Gloss) => featureOn(g.kind === 'heads' ? 'details' : 'explain')
 
 export async function explainSpans($: Engine, row: string, text: string, _marks: { start: number; end: number; words: string }[]): Promise<Span[]> {

@@ -50,7 +50,7 @@ export const TEXTS = {
   'lens-heads': {
     about: 'an important detail of the answer: an orange mark that opens a heads-up card',
     reader: 'observer/observer.ts',
-    use: "a section of the look's prompt while Important details is on",
+    use: "a section of the look's prompt while Heads-ups is on",
   },
   'lens-claims': {
     about: "the turn's claims, each placed by a quote, in a cluster",

@@ -15,6 +15,17 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.deepEqual(SWITCHES.map(s => s.key), ['marks', 'checkOnOpen', 'cards', 'squeeze', 'explain', 'details', 'claims', 'counts', 'squeezeCards'])
     for (const s of SWITCHES) assert.deepEqual(manifest.userConfig[s.key], { type: 'boolean', title: s.title, description: s.does, default: s.default })
   }
+  // the heads-ups' switch is named as the tray and the threads name what it gives, and keeps its stored key, so a
+  // setting saved under the old name still applies
+  {
+    const heads = SWITCHES.find(s => s.lenses?.includes('heads'))
+    assert.equal(heads.key, 'details')
+    assert.equal(heads.title, 'Heads-ups')
+    assert.match(heads.does, /heads-up/)
+    setOptions({ details: false })
+    assert.equal(featureOn('details'), false)
+    setOptions({})
+  }
   // a feature is on by default, and an option turns it off
   {
     setOptions({})
