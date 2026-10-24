@@ -105,7 +105,7 @@ def test_the_built_ins_are_heads_up_and_explainers_on_the_documents_and_the_chat
         want = open(config.REPO_ROOT / "prompts" / "checks" / f"{c['id']}.md", encoding="utf-8").read()
         assert c["prompt"] == want.split("\n---\n", 1)[1].strip()
     assert checks.read(CORPUS, IMPORTANT)["prompt"].startswith("A heads-up marks words of the answer for a detail the analyst should know")
-    assert checks.read(CORPUS, "explainers")["prompt"].startswith("An explainer marks a key term")
+    assert checks.read(CORPUS, "explainers")["prompt"].startswith("An explainer marks words of the answer")
     for gone in ("verified", "unverified"):
         assert checks.read(CORPUS, gone) is None
     assert checks.by_name(CORPUS, "Verified") is None and checks.by_name(CORPUS, "Unverifiable") is None
