@@ -1,15 +1,16 @@
 // The explainers and heads-ups (explain/): after the observer's look, each stands on its words in the answer as a
 // press, in 0.10's teal and orange; a term is explained once per conversation; each lens's switch hides what it gave;
-// Longer writes an explainer again from the answer and the lines it links to, the short one kept, and one that fails
-// says why. All data is made up. `claude plugin test plugin`.
+// Claude reads each one shown, with the next prompt; words the analyst picks get an explainer on demand, and one that
+// fails says why. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { partOf, registerAnswers, resetAnswers } from '../core/answers'
 import { spansFor } from '../core/answerview'
 import { resetEngaged } from '../core/engaged'
+import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
-import { explainState, expandExplainer, explaining, explainTerm, glossFor, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { explainState, explaining, explainTerm, glossFor, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { drawEvidence } from '../marks/evidence'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
@@ -31,6 +32,7 @@ function setup(replies: Any[], o: { theme?: string; complete?: Any } = {}) {
     return { catch: () => undefined }
   }
   registerTurn(on, {} as never)
+  registerTell(on, {} as never)
   registerAnswers(on, {} as never)
   registerObserver(on, {} as never)
   const state = new Map<string, { value: unknown; version: number }>()
@@ -92,7 +94,7 @@ const reply = (d: Any) => ({ isAnswered: true, text: JSON.stringify(d), usage: {
 const ANSWER = 'Uploads fail after the retry budget runs out: [41 of the 44](#) failures came 30 seconds after a drop.'
 const LOOK = reply({
   glosses: [{ term: 'retry budget', body: 'How many times the client tries again.', here: '[upload.py allows five tries](client/upload.py#L3-4).' }, { term: 'not in the answer', body: 'x' }],
-  heads: { term: '30 seconds after a drop', title: 'Only one network', bullets: ['[The log covers one office](logs/upload.log).'], offer: 'Count the failures at the other office' },
+  heads: { term: '30 seconds after a drop', title: 'Only one network', bullets: ['[The log covers one office](logs/upload.log).'] },
 })
 
 test("after a look, the answer's explainer and heads-up stand on their words in the theme's teal and orange, and the digest knows them", async () => {
@@ -102,7 +104,7 @@ test("after a look, the answer's explainer and heads-up stand on their words in 
   const part = await partOf<ExplainPart>(s.$, 't1-row', 'explain')
   expect(part!.order).toEqual(['h1', 'g1'])
   expect(part!.items.g1).toMatchObject({ term: 'retry budget', body: 'How many times the client tries again.' })
-  expect(part!.items.h1).toMatchObject({ kind: 'heads', title: 'Only one network', offer: 'Count the failures at the other office' })
+  expect(part!.items.h1).toMatchObject({ kind: 'heads', title: 'Only one network' })
   const spans = await spansFor(s.$, 't1-row', ANSWER, [{ start: 57, end: 75, words: '41 of the 44' }])
   expect(spans.map(x => ANSWER.slice(x.start, x.end))).toEqual(['retry budget', '30 seconds after a drop'])
   // a highlight: a fill behind the words, teal for an explainer, orange for a heads-up, the words in the theme's text color
@@ -126,30 +128,31 @@ test('a term is explained once per conversation, and each switch hides what its 
   setOptions({})
 })
 
-test('Longer writes the explainer again from the answer and the lines it links to, and keeps the short one; one that fails says why and how to try again', async () => {
+test("Claude reads, with the next prompt, every explainer and heads-up shown on its answer, and which ones the analyst opened; a switch that hides one keeps it from Claude too", async () => {
   setOptions({})
-  const s = setup([LOOK], { complete: reply({ body: 'The client sends a failed upload again up to five times.', here: '[five tries](client/upload.py#L3-4)' }) })
-  s.files.set('/made-up/data/client/upload.py', 'import os\n\nTRIES = 5\nWAIT = 1\n')
+  const s = setup([LOOK])
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
-  expect(await expandExplainer(s.$, { row: 't1-row', kind: 'explain', id: 'g1' })).toBe(null)
-  const sent = s.calls[0]
-  expect(sent.system[0].text).toBe('PROMPT explain-expand')
-  expect(sent.prompt).toContain('The term: retry budget')
-  expect(sent.prompt).toContain("The analyst's question: Why do uploads fail?")
-  expect(sent.prompt).toContain('--- client/upload.py (lines 1–5 of 5)')
-  expect(sent.prompt).toContain('    3  TRIES = 5')
-  const g = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!.items.g1!
-  expect(g).toMatchObject({ body: 'The client sends a failed upload again up to five times.', expanded: true, short: { body: 'How many times the client tries again.' } })
-  expect(await expandExplainer(s.$, { row: 't1-row', kind: 'heads', id: 'h1' })).toBe('A heads-up is not written at more length.')
-  // a Longer that fails says why and how to try again; the explainer stays as it was
-  const failing = setup([LOOK], { complete: { isAnswered: false, reason: 'aborted' } })
-  await answered(failing, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
-  const why = await expandExplainer(failing.$, { row: 't1-row', kind: 'explain', id: 'g1' })
-  expect(why).toContain('was not written: the call was stopped')
-  expect(why).toContain('Press e on it to try again.')
-  expect((await partOf<ExplainPart>(failing.$, 't1-row', 'explain'))!.items.g1!.expanded).toBe(undefined)
+  // the analyst opens the heads-up
+  const spans = await spansFor(s.$, 't1-row', ANSWER, [])
+  s.$.ui.open = async () => ({ isPlaced: true })
+  await spans.find(x => x.id === 'h1')!.onPress!()
+  const told = (await s.call('prompt.submit', { text: 'And the other office?', origin: { kind: 'composer' } })).context.join('\n')
+  expect(told).toContain('thimble showed the analyst these comments in your message that begins "Uploads fail after the retry budget')
+  expect(told).toContain('- A heads-up on "30 seconds after a drop": Only one network [The log covers one office](logs/upload.log).')
+  expect(told).toContain('- An explainer on "retry budget": How many times the client tries again. [upload.py allows five tries](client/upload.py#L3-4).')
+  expect(told).toContain('- They opened the heads-up "Only one network" on "30 seconds after a drop"')
+  expect(told).not.toContain('They opened the explainer')
+  // told once: the prompt after carries none of it
+  expect((await s.call('prompt.submit', { text: 'ok', origin: { kind: 'composer' } })).context ?? []).toEqual([])
+  // with Heads-ups off, the heads-up is not shown, so not told
+  setOptions({ details: false })
+  const off = setup([LOOK])
+  await answered(off, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  const said = (await off.call('prompt.submit', { text: 'next', origin: { kind: 'composer' } })).context.join('\n')
+  expect(said).toContain('An explainer on "retry budget"')
+  expect(said).not.toContain('heads-up')
+  setOptions({})
 })
-
 
 const els: Any = new Proxy({}, { get: (_t, type: string) => (props: Any) => ({ type, props }) })
 const textOf = (n: Any): string => (n == null || n === false ? '' : typeof n === 'string' || typeof n === 'number' ? String(n) : Array.isArray(n) ? n.map(textOf).join('') : textOf(n.props?.children))
@@ -166,10 +169,10 @@ test('on demand: words the analyst picked get an explainer from the explain-expa
   const s = setup([LOOK], { complete: reply({ body: 'The thirty seconds the client waits before it gives up on an upload.', here: 'It shows in [upload.log](logs/upload.log#L2).' }) })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
   const got = await explainTerm(s.$, 't1-row', '30 seconds after a drop') as Any
-  expect(got).toMatchObject({ row: 't1-row', term: '30 seconds after a drop', asked: true, expanded: true })
-  // the call is told no explainer stands yet
-  expect(s.calls[0].prompt).toContain('The explainer as it stands: none yet.')
+  expect(got).toMatchObject({ row: 't1-row', term: '30 seconds after a drop', asked: true })
+  expect(s.calls[0].system[0].text).toBe('PROMPT explain-expand')
   expect(s.calls[0].prompt).toContain('The term: 30 seconds after a drop')
+  expect(s.calls[0].prompt).toContain("The analyst's question: Why do uploads fail?")
   const part = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!
   expect(part.order).toEqual(['h1', 'g1', 'a1'])
   expect((await explainState(s.$)).glossed).toEqual(['retry budget', '30 seconds after a drop'])

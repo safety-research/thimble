@@ -2,7 +2,7 @@
 // parts of panes/tray.js, panes/mark.js, shell.tsx stepWords/replyPlace/trayScope and shell/cards.js drawsHyperlinks).
 //
 // The tray is one small panel above the prompt. It shows one mark at a time: a citation with its evidence, or an
-// explainer or an important detail (a heads-up). What it shows is the top of a stack, so a citation inside an explainer
+// explainer or a heads-up. What it shows is the top of a stack, so a citation inside an explainer
 // opens over it, and 0 returns to the one under it; 0 on the first closes the tray.
 //
 //   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}), with `open: 'code'` while
@@ -154,13 +154,15 @@ export function cutTitle(s, n) {
 const plain = s => String(s || '').replace(/\[([^\]]*)\]\(#\)/g, '$1').replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim()
 const cut = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
-/** What a side thread is about, in words: the citation, explainer or important detail, by the words the person read.
- *  `info`: {words} for a citation, {gloss} for an explainer or a heads-up. */
+/** What a side thread is about, in words: the citation, explainer or heads-up, by the words the person read, or the
+ *  lines of a file an explainer cites (`place`, its `id` the place). `info`: {words} for a citation, {gloss} for an
+ *  explainer or a heads-up. */
 export function aboutOf(f, info = {}) {
   if (!f) return 'this mark'
   // words that open with a quote of their own keep it, never two
   const q = s => (/^["\u201c]/.test(s) ? s : `"${s}"`)
   if (f.kind === 'citation') return `the citation ${q(cut(plain(info.words) || `citation ${f.n}`, 80))}`
+  if (f.kind === 'place') return `the lines ${f.id}`
   const g = info.gloss || {}
   if (f.kind === 'heads') return `the heads-up ${q(cut(plain(g.title || g.term), 80))}`
   return `the explainer of ${q(cut(plain(g.term), 80))}`
@@ -170,12 +172,12 @@ export function aboutOf(f, info = {}) {
 export const canRepair = m => !!m && m.status === 'failed'
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where
- *  it mattered here. A heads-up: its title in bold, two to four bullets, and the check Claude offers to make (o). */
+ *  it mattered here. A heads-up: its title in bold, then two to four bullets. */
 export function explainerText(g) {
   if (!g) return ''
   if (g.kind === 'heads') {
     const bullets = (Array.isArray(g.bullets) ? g.bullets : []).filter(x => typeof x === 'string' && x.trim()).slice(0, 4)
-    return [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', bullets.map(x => `- ${x}`).join('\n'), g.offer ? `Claude can do this for you (o): ${String(g.offer).replace(/[.\s]+$/, '')}.` : ''].filter(Boolean).join('\n\n')
+    return [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', bullets.map(x => `- ${x}`).join('\n')].filter(Boolean).join('\n\n')
   }
   return [g.body || g.title || '', g.here || ''].filter(Boolean).join('\n\n')
 }
