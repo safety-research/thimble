@@ -185,10 +185,12 @@ const cut = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
  *  `info`: {words} for a citation, {gloss} for an explainer or a heads-up. */
 export function aboutOf(f, info = {}) {
   if (!f) return 'this mark'
-  if (f.kind === 'citation') return `the citation "${cut(plain(info.words) || `citation ${f.n}`, 80)}"`
+  // words that open with a quote of their own keep it, never two
+  const q = s => (/^["\u201c]/.test(s) ? s : `"${s}"`)
+  if (f.kind === 'citation') return `the citation ${q(cut(plain(info.words) || `citation ${f.n}`, 80))}`
   const g = info.gloss || {}
-  if (f.kind === 'heads') return `the heads-up "${cut(plain(g.title || g.term), 80)}"`
-  return `the explainer of "${cut(plain(g.term), 80)}"`
+  if (f.kind === 'heads') return `the heads-up ${q(cut(plain(g.title || g.term), 80))}`
+  return `the explainer of ${q(cut(plain(g.term), 80))}`
 }
 
 /** Where a citation's evidence is, in words for Claude: the cited place, or the code that computed it. */

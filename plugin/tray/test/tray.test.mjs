@@ -3,7 +3,7 @@
 //   node --test plugin/tray/test/tray.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, pageOf, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
+import { aboutOf, back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, pageOf, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -77,3 +77,9 @@ test('a citation\'s card: why in one sentence, and the one line of evidence that
   assert.equal(lineWindow({ text: said, spans: [[0, 4]] }, 30).text, 'Each open ticket waits for a …')
 })
 
+
+test('what a side thread is about quotes the words once: words that open with a quote keep their own', () => {
+  assert.equal(aboutOf({ kind: 'heads', row: 'r1', id: 'h1' }, { gloss: { title: '"Cheated" is their own word' } }), 'the heads-up "Cheated" is their own word')
+  assert.equal(aboutOf({ kind: 'heads', row: 'r1', id: 'h1' }, { gloss: { title: 'March is half a month' } }), 'the heads-up "March is half a month"')
+  assert.equal(aboutOf({ kind: 'citation', row: 'r1', n: 2 }, { words: '“please post R3”' }), 'the citation “please post R3”')
+})
