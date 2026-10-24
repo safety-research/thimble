@@ -84,3 +84,12 @@ test("a drawing's rows: a column adds its children, a row takes its tallest, tex
   // the plain elements of the tests and the fixer's copy hold their children in their props
   assert.equal(treeRows({ type: 'Box', props: { flexDirection: 'column', children: [{ type: 'Text', props: { children: 'a' } }, { type: 'Input', props: {} }] } }, 40), 2)
 })
+
+test("a wrapping row of items with margins beside them wraps by whole items, their margins counted", () => {
+  const el = (type, props, children) => ({ type, props: { ...props, children } })
+  const choice = (w) => el('Box', { marginRight: 3 }, [el('Text', {}, w)])
+  const row = el('Box', { flexDirection: 'row', flexWrap: 'wrap' }, [choice('1 run all (about 6 min)'), choice('2 run on a sample of 300 (about 30 s)'), choice('0 cancel')])
+  // 26 + 40 + 11 cells: two rows at 70 columns (the words alone, 66 cells, would fit one), one at 80
+  assert.equal(treeRows(row, 70), 2)
+  assert.equal(treeRows(row, 80), 1)
+})

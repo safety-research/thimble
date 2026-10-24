@@ -138,7 +138,20 @@ export function treeRows(el, width) {
       const cs = kids(el)
       if (p.flexDirection === 'column' || p.flexDirection === 'column-reverse') return my + cs.reduce((n, c) => n + treeRows(c, iw), 0)
       // a row: its children side by side, or wrapped as one text when the row wraps
-      if (p.flexWrap === 'wrap') return my + textRows(textIn(cs), iw, true)
+      if (p.flexWrap === 'wrap') {
+        // children that keep a margin beside them (a label ask's choices) wrap as whole items, each with its margins
+        const side = c => pad(c?.props?.marginLeft ?? c?.props?.marginX) + pad(c?.props?.marginRight ?? c?.props?.marginX)
+        if (!cs.some(c => side(c) > 0)) return my + textRows(textIn(cs), iw, true)
+        let rows = 1
+        let used = 0
+        for (const c of cs) {
+          const w = textWidth(textIn(c)) + side(c)
+          if (used && used + w > iw) { rows += 1; used = 0 }
+          if (w > iw) { rows += Math.ceil(w / iw) - 1; used = w % iw; continue }
+          used += w
+        }
+        return my + rows
+      }
       // the children with a width of their own take it; the others share what is left
       const fixed = cs.reduce((n, c) => n + (typeof c?.props?.width === 'number' ? c.props.width : 0), 0)
       const rest = Math.max(1, iw - fixed)
