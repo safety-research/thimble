@@ -1,6 +1,6 @@
 """thimble fix in the browser workbench: the person asks for a change to their own thimble in their own words
-(`/thimble-fix <words>` in the chat, Report a problem's File a code ticket, or main's file_dev_ticket), Claude makes it in
-a copy of thimble, and when the kernel's checks pass, a notice asks the person to use it; their click puts it on and
+(`/thimble-fix <words>` in the chat, or Report a problem's File a code ticket), Claude makes it in a copy of thimble,
+and when the kernel's checks pass, the chat asks the person to use it; their click puts it on and
 thimble-browser starts again from it. The same records and verbs as the terminal's /thimble-fix
 (plugin/engine/kernel/fixes.py), so a fix made in one is on in the other once it starts again.
 
@@ -25,20 +25,23 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home.
                              registry's fixer text (plugin/prompts/fixer.md), the person's words and a text copy of what
                              the page shows. It runs with main's tools and Edit and Write, in the runtime's usual
                              sandbox, which writes only its copy and its temp folder (runtime.spec_of). It runs in the
-                             background, in a chat of its own that the thread tree lists (`fixing <name>`, or
-                             `changing <name>` for a round of a fix the person has): its steps show there, and main's
-                             chat shows the person's message and one line that the fix started there
+                             background, as a subagent of main in a chat of its own that the thread tree lists
+                             (`fixing <name>`, or `changing <name>` for a round of a fix the person has): main's chat
+                             shows it where main started it, as the card of a subagent with its steps (an `agent`
+                             record whose `run` is the round), and its thread shows its whole run
     its end (settle)         the kernel commits the change, refuses a safety file or a binary file, and runs the tests
-                             of what the change touched (`fix done`); a fix that passes is ready, and one notice at the
-                             top of the chat asks the person: Use it now, What changed, Later. Nothing goes on by itself
+                             of what the change touched (`fix done`); a fix that passes is ready. How it ended is a row
+                             in main's chat and in the fix's thread, at the time it ended (note: a `fix` chip): a ready
+                             fix asks the person there, Use it now, What changed, Later. Nothing goes on by itself
     the person's clicks      Use it now, or Use it in Your fixes (`fix apply`, with a secret made at the click as the
                              terminal's key press makes one; then the page of live's browser/ is built and the server
                              starts again from live, dev._do_restart; a page that does not build takes the fix off
-                             again; once it is on, the notice goes and main's chat keeps one line that says so), Later (the notice goes, the fix stays ready in Your fixes), Undo (`fix undo`, then
-                             a restart), Redo (`fix redo`, a new fixer with the earlier change) and Dismiss
-                             (FixStrip.tsx)
+                             again; once it is on, a row says so), Later (the row asks no more, the fix stays ready in
+                             Your fixes), Undo (`fix undo`, then a restart) and Redo (`fix redo`, a new fixer with the
+                             earlier change) (FixStrip.tsx)
 
-What each notice says lives in the browser's home (fixes.json, by fix id), so it is still there after the restart.
+What the last row of each fix says lives in the browser's home (fixes.json, by fix id), so it is still there after the
+restart; the newest row of a fix shows its state now, with the clicks it takes.
 THIMBLE_FIXES=off turns fixes off on this server (the code tickets then take their entry points again).
 """
 from __future__ import annotations
@@ -215,8 +218,9 @@ def _notes() -> dict[str, dict[str, Any]]:
 
 
 def note(fid: int, kind: str, said: str, **more: Any) -> None:
-    """What fix `fid`'s notice says now (ready, fixed, failed, request, undone, problem), until the analyst dismisses
-    it."""
+    """How fix `fid` ended or what came of the person's click (ready, fixed, failed, request, undone, problem): a row in
+    main's chat and in the fix's thread, where it happened (a `fix` chip), and the words the newest row shows with its
+    clicks until the analyst dismisses them."""
     notes = _notes()
     notes[str(fid)] = {"kind": kind, "said": said, "at": time.time(), **more}
     p = notes_path()
@@ -224,7 +228,30 @@ def note(fid: int, kind: str, said: str, **more: Any) -> None:
     tmp = p.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(notes, ensure_ascii=False) + "\n", "utf-8")
     tmp.replace(p)
+    _row(fid, kind, said)
     _event(fid, kind)
+
+
+def _row(fid: int, kind: str, said: str) -> None:
+    """The row of how fix `fid` ended, in main's chat and in the fix's thread (where), at this time."""
+    from . import agents  # noqa: PLC0415
+
+    at = where(fid)
+    if at is None:
+        return
+    rec = {"kind": "fix", "text": said, "ref": f"fix:{fid}", "status": kind}
+    with contextlib.suppress(Exception):
+        agents.chip(at[0], **rec)
+    with contextlib.suppress(Exception):
+        agents.Recorder(at[0], at[1]).record("chip", **rec)
+
+
+def runs_of(c: str, chat: str) -> int:
+    """How many runs the fix's chat holds: each opens with the person's words (fixer_chat), so the next run's card in
+    main (its `run`) shows that run's steps alone."""
+    from . import agents  # noqa: PLC0415
+
+    return sum(1 for e in agents.read_events(agents.paths(c, chat)[1]) if e.get("type") == "user")
 
 
 def dismiss(fid: int) -> None:
@@ -435,7 +462,7 @@ def fixer_chat(c: str, rec: dict[str, Any], agent_id: str, sid: str, *, asked: s
         agents.update_agent(c, chat, title=title, status="running", ts_end=None, result=None, agent_id=agent_id,
                             session=sid)
         if announce:
-            agents.mirror(c, "agent", chat=chat, role=FIXER, title=title, by=agents.BROWSER)
+            agents.mirror(c, "agent", chat=chat, role=FIXER, title=title, by=agents.BROWSER, run=runs_of(c, chat))
     if (asked or "").strip():
         agents.Recorder(c, chat).record("user", text=str(asked).strip(), by=agents.BROWSER)
     elif had is not None:
@@ -619,21 +646,17 @@ def runtime_task(coro: Any, name: str) -> None:
 
 
 async def restart(fid: int, said: str, kind: str, why: str) -> None:
-    """The server starts again from live's browser/ (once main and the agents end their turns), and the row says
-    `said` after it. A fix that went on has no row after it, as the terminal's line goes once the fix is on: main's
-    chat keeps one line that says so."""
-    from . import agents, dev  # noqa: PLC0415
+    """The server starts again from live's browser/ (once main and the agents end their turns), and a row of the fix
+    says `said`. A fix that went on asks nothing more there, as the terminal's line goes once the fix is on: Your fixes
+    has its Undo."""
+    from . import dev  # noqa: PLC0415
 
     if not dev.supervised():
         _phase_set(fid, None)
         note(fid, kind, f"{said} · {RESTART_BY_HAND}")
         return
-    _phase[fid] = "restarting"  # the notice keeps "Reloading thimble…" until the server is back
-    on = kind == "fixed"
-    note(fid, kind, said, **({"dismissed": True} if on else {}))
-    if on and (at := await asyncio.to_thread(where, fid)):
-        with contextlib.suppress(Exception):
-            agents.mirror(at[0], "text", delta=f"\n· thimble starts again with your fix: {said}\n")
+    _phase[fid] = "restarting"  # the fix's row keeps "Reloading thimble…" until the server is back
+    note(fid, kind, said, **({"dismissed": True} if kind == "fixed" else {}))
     _phase_set(fid, "restarting")
     t0 = time.monotonic()
     while _busy() and time.monotonic() - t0 < BUSY_WAIT_S:
@@ -750,9 +773,10 @@ async def change(c: str, fid: int, words: str, page: str = "", *, said: str | No
         if said:
             agents.mirror(c, "user", by=agents.BROWSER, text=said)
         if at is not None:
+            run = runs_of(at[0], at[1])
             agents.Recorder(at[0], at[1]).record("user", text=words, by=agents.BROWSER)
             if announce:
-                agents.mirror(c, "agent", chat=at[1], role=FIXER, title=fixing_word(rec), by=agents.BROWSER)
+                agents.mirror(c, "agent", chat=at[1], role=FIXER, title=fixing_word(rec), by=agents.BROWSER, run=run)
         conv.queue.append(round_text(rec, words))
         live = True
     else:
