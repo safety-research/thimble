@@ -472,7 +472,7 @@ File a ticket for thimble's developer agent when thimble itself should change, s
 
 ## fix_thimble
 
-Start the fix of thimble itself that the person asked for with /thimble-fix. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
+Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is theirs, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, offer the fix in one line and let them decide. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
 
 ```json
 {
