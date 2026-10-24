@@ -7,7 +7,7 @@ import { expect, test } from 'claude-code/testing'
 import { registerForks } from '../core/forks'
 import { registerTell } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
-import { askHere, drawThreads, passageRuns, threadUnder } from '../threads/pane'
+import { askHere, drawThreads, passageRuns, threadUnder, threadUnderParts } from '../threads/pane'
 import { keptDir } from '../core/env'
 import { openThread, threadCardAnchor, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
@@ -453,6 +453,11 @@ test('under the claims pane the input names what it asks about, each question sh
   expect((await input({ claim: 'c1' })).props.placeholder).toBe('Ask about: “Run 4 failed on the p95 check.”')
   expect((await input({ group: 'k1' })).props.placeholder).toBe('Ask about the whole cluster “failures”…')
   expect((await input({})).props.placeholder).toBe('Ask about all the claims…')
+  // no conversation yet: nothing scrolls with the pane's drawing, so the pane opens at its top (core/pane.ts); the
+  // blank row under the drawing stands with the input bar
+  const bare = await threadUnderParts(s.$, e, 'claims', { claim: 'c1' }, els)
+  expect(bare.conv).toEqual([])
+  expect(bare.bottom[0].props.key).toBe('thread-gap')
   // a question about the claim: the claim quoted above it once answered, in place of `about this claim`
   const scope = { about: 'the claim', pane: { kind: 'claims', args: { claim: 'c1' } } }
   const asked = askHere(s.$, scope as Any, 'why the p95?')
@@ -461,6 +466,9 @@ test('under the claims pane the input names what it asks about, each question sh
   await asked
   s.answer('agent-1', 'The p95 check failed because two requests timed out.')
   await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  const parts = await threadUnderParts(s.$, e, 'claims', { claim: 'c1' }, els)
+  expect(parts.conv[0].props.key).toBe('thread-gap')
+  expect(parts.bottom.some((n: Any) => n.props?.key === 'thread-gap')).toBe(false)
   const under = nodes(await threadUnder(s.$, e, 'claims', { claim: 'c1' }, els))
   const t = textOf({ props: { children: under } })
   expect(t).toContain('▎ “Run 4 failed on the p95 check.”❯ why the p95?')

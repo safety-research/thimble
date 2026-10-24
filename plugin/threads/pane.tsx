@@ -543,7 +543,10 @@ export async function threadUnderParts($: Engine, e: Any, kind: string, args: un
   const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4)), claims?.quote ?? '') : []
   ringDrawn($, key)
   const pk = paneKeys($, t)
-  return { conv: [els.Text({ key: 'thread-gap', children: ' ' }), ...conv], bottom: [...keysRow(els, pk), ...entry($, els, scope, W - 1, takeAskNext(key), pk, claims?.ask ?? '')] }
+  // the blank row under the pane's drawing stands with the conversation when there is one, else with the input bar: a
+  // pane with no conversation opens at its top (core/pane.ts scrolls a conversation to its end)
+  const gap = els.Text({ key: 'thread-gap', children: ' ' })
+  return { conv: conv.length ? [gap, ...conv] : [], bottom: [...(conv.length ? [] : [gap]), ...keysRow(els, pk), ...entry($, els, scope, W - 1, takeAskNext(key), pk, claims?.ask ?? '')] }
 }
 
 /** About how many rows threadUnder takes under a pane: the gap and the input bar, and with a conversation its share of
