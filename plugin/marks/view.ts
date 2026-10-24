@@ -15,20 +15,19 @@
 //   pending      the turn still runs: the text's own color, underlined; the citations' light purple tint on hover
 //   checking     as pending, and a turning glyph (purple) right after it, until its own verdict arrives
 //   verified     as pending
-//   corrected    the corrected words in place of the marked ones, as pending, with a purple ✎ after them, so a figure
-//                the check changed is seen as changed (its tray card says what it was). A narrowed one (`narrowed`)
-//                keeps its words and has no ✎: only the part the check cited is the mark, the rest reads as the
-//                reply's plain words
+//   corrected    the corrected words in place of the marked ones, as pending: once corrected it holds, so it
+//                looks as a verified one does (its tray card says it was corrected). A narrowed one (`narrowed`) keeps
+//                its words: only the part the check cited is the mark, the rest reads as the reply's plain words
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
 //                did not show them), or it did not run or gave no answer: red (`error`), underlined, with ` ×`
 //                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
 //                look whatever the cause
-//   deferred     as pending: a citation whose check waits until the person opens it (the setting "Check citations
-//                only when I open one")
+//   deferred     as pending: a citation whose check waits until the person opens it (the setting Citation checks,
+//                on demand), or that no check is for (off)
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //
-// The sign after a mark (the turning glyph, ×, ✎) takes two cells, and every other mark keeps those two cells when the
+// The sign after a mark (the turning glyph, ×) takes two cells, and every other mark keeps those two cells when the
 // lines are cut (withLooks, a `gap` run that is not drawn), so the lines break at the same words whether a glyph shows
 // or not: no line wraps again when a check starts, nor as each verdict arrives.
 //
@@ -89,9 +88,6 @@ export type MessageOpts = {
 
 /** A passage of a reply: its words, and a few of them that name it. */
 export type Passage = { text: string; label: string }
-
-/** The sign after a citation its check corrected: one cell, as the turning glyph is. */
-export const FIXED_SIGN = '✎'
 
 /** The turning glyph's cell when no frame is given: one cell, as every frame is. */
 const SPIN_CELL = '⠋'
@@ -197,7 +193,6 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     else out.push(...own)
     if (look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
     else if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
-    else if (look?.status === 'corrected' && !look.narrowed) out.push({ s: ` ${FIXED_SIGN}`, mark: r.mark, tag: 'fixed' })
     else out.push({ s: '  ', mark: r.mark, tag: 'gap' })
     k = e
   }
@@ -251,7 +246,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   // group of its own by its place, so the pointer over it lights it alone
   const id = look.n > 0 ? `${o.key}:${look.n}` : `${o.key}:at${r.mark as number}`
   const tint = citeHover(id, look.status)
-  if (r.tag === 'spin' || r.tag === 'fixed') p.color = accent()
+  if (r.tag === 'spin') p.color = accent()
   else if (r.tag) p.color = 'error'
   else Object.assign(p, wordsLook(look.status, id))
   // a span inside the mark's words (a heads-up, an explainer): its fill at rest and no underline, as a span never has
@@ -261,7 +256,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   if (bg) { p.backgroundColor = bg; delete p.underline }
   // the one the tray shows: bold, and its tint kept, so the open one is easy to find
   if (o.focus === r.mark) { p.bold = true; if (!r.tag) p.backgroundColor = tint.backgroundColor }
-  const label = `citation ${look.n}${look.status === 'corrected' && !look.narrowed ? ', corrected by its check' : ''}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
+  const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   // no inverse under the pointer (Claude Code inverts a plain Button): the tint shows the hover
   const hover = r.tag ? { scope: tint.scope, inverse: false } : { ...tint, inverse: false }
   return els.Button({ key, plain: true, label, hover, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })

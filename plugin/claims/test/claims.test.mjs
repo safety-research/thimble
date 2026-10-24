@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseAnswer } from '../../observer/reply.mjs'
-import { CAPTION_LIST, CAPTION_MAP, cardOf, checkChips, citationRows, correctionsOf, evidenceOf, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, reasonOf, repairable, rowText, snippetOf, termSpans, wordDiff } from '../graph.js'
+import { CAPTION_LIST, CAPTION_MAP, cardOf, checkChips, citationRows, correctionsOf, evidenceOf, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, reasonOf, repairable, rowText, snippetOf, wordDiff } from '../graph.js'
 import lens from '../lens.mjs'
 import { applyTurn, edgesOf, emptyStore, parseClaims, promptLines, readStore, viewOf } from '../store.js'
 
@@ -471,16 +471,12 @@ function withPassage() {
   return { st, md }
 }
 
-test("a claim picked: why it holds under it, the lens's words, its citations in the reply's look and a press that opens each, the explainers' terms in their fill", () => {
+test("a claim picked: why it holds under it, the lens's words, its citations in the reply's look and a press that opens each; the session's explainers are not marked", () => {
   const { st, md } = withPassage()
   const kept = st.claims.find(c => c.id === 'c2')
   kept.because = 'The copy that finished a round bumped [the counter to 412](#), so the next copy knew it ended.'
   kept.sources.push({ ref: 'a1@0', row: 'a1', at: md.indexOf('[412 on'), label: '412 on the counter' })
   const data = paneData(st)
-  const terms = [{ term: 'public hit counter', key: 'a1|g1' }]
-  // a term is found in another form of its words, never on one small word alone
-  assert.deepEqual(termSpans('Some copies used public hit counters as signals.', terms).map(x => x.key), ['a1|g1'])
-  assert.deepEqual(termSpans('A counter was used.', terms), [])
   const c2 = data.claims.find(c => c.id === 'c2')
   const why = reasonOf(c2, { md, place: c2.said[0] })
   assert.equal(why.text, 'The copy that finished a round bumped the counter to 412, so the next copy knew it ended.')
@@ -490,11 +486,10 @@ test("a claim picked: why it holds under it, the lens's words, its citations in 
   assert.equal(cite.look.part, `cite:${c2.sources.findIndex(x => x.label === 'the counter to 412')}`)
   assert.equal(why.more.text, '412 on the counter')
   // in the pane (a short session's list): the claim, why, the citation the text does not hold, the checks
-  const v = graphView(data, { claim: 'c2' }, { w: 90, h: 40, terms, passage: { md, place: c2.said[0] } })
+  const v = graphView(data, { claim: 'c2' }, { w: 90, h: 40, passage: { md, place: c2.said[0] } })
   assert.match(panel(v), /● signals · 2 claims\n {2}◦ Some copies used public hit counters as signals\.\n {2}▸ A copy bumped the counter to 412 when a round ended\.\n {4}The copy that finished a round bumped the counter to 412, so the next copy knew it\n {4}ended\.\n {4}412 on the counter\n {4}.*turn 1$/)
-  // the claim's list row: its term in the fill, a press on it opens it as in the reply
-  const row = graphView(data, { group: String(data.groups[0].id) }, { w: 90, h: 40, terms }).panel.flat()
-  assert.ok(row.some(x => x.bg === 'gloss' && x.s === 'public hit counters' && x.part === `x:${JSON.stringify(['c1', 'a1|g1'])}`))
+  // the session's explainers are not marked on the claims: the claim's words are its own explainer
+  assert.ok(!v.panel.flat().some(x => x.bg === 'gloss'))
 })
 
 test("with no reason from the lens: the reply's sentences that said it, with their citations; sentences that only say it again put its citations in its own words", () => {

@@ -29,9 +29,9 @@
 //
 // Switches (settings/features.mjs): each lens belongs to a feature (explain, details, claims); the observer runs while
 // one of them is on, and a lens whose feature is off has no section in the prompt, no key in the reply and no merge.
-// A lens with an `auto` switch (the claims: Claims after every reply) joins the look after each reply only while that
-// switch is on; else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims
-// have not read, for a look of that lens alone.
+// A lens whose feature has a mode (the claims: Claims found) joins the look after each reply only in its `auto` mode;
+// else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims have not read,
+// for a look of that lens alone.
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -47,7 +47,7 @@ import { modelWhy } from '../core/why.js'
 import { explainMerge, explainState } from '../explain/seam'
 import { sessionKey } from '../hooks/conversation'
 import { promptText, type PromptName } from '../prompts/prompts'
-import { featureOn } from '../settings/features.mjs'
+import { featureOn, lensesAfterReply } from '../settings/features.mjs'
 import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf, skeletonOf } from './compose.mjs'
 import { LENSES } from './lenses.mjs'
@@ -68,7 +68,7 @@ export type LookMsg = { row: string; text: string; kind: 'answer' | 'reply'; tur
  *  look's own (a feature may note what it placed). */
 export type Look = { msgs: LookMsg[]; out: { glosses: unknown[]; heads: unknown; claims: unknown[]; clusters: unknown[] }; moved: boolean; log: (key: string, value: unknown) => void }
 
-type Lens = { name: string; feature: PromptName; option: string; auto?: string; skeleton: string; read: (r: Any) => Any; raw: (r: Any) => Any; digest: (st: Any) => Any; when: (st: Any) => string[] }
+type Lens = { name: string; feature: PromptName; option: string; skeleton: string; read: (r: Any) => Any; raw: (r: Any) => Any; digest: (st: Any) => Any; when: (st: Any) => string[] }
 type Part = { lens: Lens; text: string; id: string }
 
 const LONG_REPLY = 600 // characters: words Claude wrote before it went on working are a reply worth a look from this long
@@ -91,8 +91,8 @@ const S = {
 const cut = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`)
 const wait = ($: Engine, ms: number) => new Promise<void>(done => { $.clock.after(ms, () => done()) })
 
-/** Whether a lens joins the look after each reply: its feature is on, and its `auto` switch when it has one. */
-const lensAuto = (l: Lens): boolean => featureOn(l.option) && (!l.auto || featureOn(l.auto))
+/** Whether a lens joins the look after each reply: its feature is on, in its `auto` mode when it has one. */
+const lensAuto = (l: Lens): boolean => lensesAfterReply(l.option)
 
 /** Whether the observer looks after each reply: one of its lenses joins that look. */
 export const observerOn = (): boolean => (LENSES as Lens[]).some(lensAuto)

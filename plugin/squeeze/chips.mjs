@@ -124,16 +124,6 @@ export function endsOf(c) {
   return Array.isArray(c?.ends) && c.ends.length === 2 ? [...c.ends] : [lv[0] ?? '', lv[lv.length - 1] ?? '']
 }
 
-/** What a rewrite on its way writes, in words, for the line beside the chips: each chip whose level `want` changes
- *  from the levels `shown`, by its name and the level asked (`Background new · Length short`); `as written` when it
- *  goes back to the original. */
-export function changeWords(rec, want, shown) {
-  const to = chipsOf({ ...rec, squeeze: { ...sq(rec), at: want || {} } })
-  const was = new Map(chipsOf({ ...rec, squeeze: { ...sq(rec), at: shown || {} } }).map(c => [c.id, c.level]))
-  const moved = to.filter(c => c.level !== was.get(c.id)).map(c => `${c.name} ${c.level === c.level0 ? 'as written' : c.levels[c.level]}`)
-  return moved.length ? moved.join(' · ') : isOriginal(to) ? 'as written' : setWords({ ...rec, squeeze: { ...sq(rec), at: want || {} } })
-}
-
 /** A chip's level in words: its name, and `as written` where the original stands. */
 export function levelWords(c) {
   return c.level === c.level0 ? 'as written' : c.levels[c.level] || ''

@@ -1584,7 +1584,7 @@ export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set
           skip.add(i)
         }
         // main's call that starts the orientation's or a writer's session: that session's own note in main stands for it,
-        // as the line that opens a fix's thread stands for the fix_thimble call that started it. Its look at the agent
+        // as the fixer's card stands for the fix_thimble call that started it. Its look at the agent
         // tray is bookkeeping, which the tray itself shows
         if ((name === 'start_orientation' || name === 'start_writing' || name === 'list_agents' || name === 'fix_thimble') && !e.parent_tool_use_id) {
           hidden.add(e.id)
@@ -1657,6 +1657,19 @@ export const isFollowUpRow = (r: Row): r is UserRow => r.kind === 'user' && (r.e
  * orientation starts none. Pure. */
 export function landedTexts(rows: readonly Row[]): Set<string> {
   return new Set(rows.filter((r): r is UserRow => r.kind === 'user' && (r.by === 'browser' || isFollowUpRow(r))).map((r) => r.text.trim()))
+}
+
+/** A subagent's runs: each message to it starts one (a round of a fix opens with the person's words), and what came
+ * before the first message is the first run's. Pure. */
+export function messageRuns(rows: readonly Row[]): Row[][] {
+  const out: Row[][] = [[]]
+  let seen = false
+  for (const r of rows) {
+    if (r.kind === 'user' && seen) out.push([])
+    if (r.kind === 'user') seen = true
+    out[out.length - 1].push(r)
+  }
+  return out
 }
 
 /** The latest time a row of `rows` carries (a message, a call, its result, a step's start); null when none does. Pure. */

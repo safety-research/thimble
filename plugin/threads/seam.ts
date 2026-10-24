@@ -38,7 +38,6 @@ import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
 import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadsBright } from './thread'
-import { featureOn } from '../settings/features.mjs'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
 type Engine = EngineInterface
@@ -61,7 +60,7 @@ const asked = (scope: ThreadScope) => !!threadFor(scope)?.asks.length
 /** t with threads: the list in the side pane, once the word window closed with no letter after it (a letter makes t
  *  the start of a word). With no thread, t types. */
 export async function threadsKey($: Engine, key: string, _until: number): Promise<Take | null> {
-  if (key !== 't' || !featureOn('thimble')) return null
+  if (key !== 't') return null
   await restoreThreads($)
   if (!threadCount()) return null
   return { later: () => listThreads($, { fromKey: true }) }
@@ -116,8 +115,6 @@ export async function askInThread($: Engine, scope: ThreadScope, text: string): 
 
 /** A reply's passages as the margin asks about them; read again when a thread changes. */
 export async function threadPassages($: Engine, row: string): Promise<{ has: (p: Passage) => boolean; ask: (p: Passage) => unknown } | null> {
-  // no side threads while thimble is off in this session (/thimble-off)
-  if (!featureOn('thimble')) return null
   await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
   await restoreThreads($)
   const scope = (p: Passage): ThreadScope => ({ about: p.label, passage: { row, text: p.text.slice(0, 4000) } })
@@ -131,7 +128,6 @@ export async function threadPassages($: Engine, row: string): Promise<{ has: (p:
 /** A card as its frame's margin asks about it: the thread the tray's `a` opens on it. `element`: a run of its words a
  *  click asked about, and the words of its row (client.tsx), in place of the selected line. */
 export async function threadOnCard($: Engine, id: string, title: string, line = '', element?: { text: string; line: string }): Promise<{ label: string; has: boolean; press: () => unknown } | null> {
-  if (!featureOn('thimble')) return null
   await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
   await restoreThreads($)
   const about = `the card "${title || id}"`

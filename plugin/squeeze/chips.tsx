@@ -3,17 +3,13 @@
 // did, and the hooks answer with the chips as they are now.
 //
 //   props: {items: [{id, n, name, levels, level, level0, ends, word, picked}], plus: what is typed after + (null when
-//           nothing is), example: what + may ask, catchup: {n, replies} (null when the row offers no catch-up),
-//           older: which reply the chips stand under when it is not the newest (null), doing: {words, secs, glyph} while
-//           a rewrite is on its way (null), width, ack}
-//   first, dim, which reply they squeeze when it is an older one (`squeezing the reply from 11:33`); then one row of
-//   chips, wrapped to the width: each its digit (a key, drawn as the bar draws its keys), its name, its two ends either
+//           nothing is), catchup: {n, replies} (null when the row offers no catch-up), width, ack}
+//   in a frame in thimble's color, one row of chips, wrapped to the width: each its digit (a key, drawn as the bar draws its keys), its name, its two ends either
 //   side of its dots, each end and dot a press (`1 Length shorter ○●○○ longer`), and its level in words where it
 //   stands away from the original or is picked (` · as written`), the picked chip in the warning color; then the
-//   catch-up, when replies piled up (`4 Catch up on 2 replies`); then `+`, which adds a chip of the person's own (its
-//   example dim until a letter is typed); then `s close`, its key drawn as the bar draws its keys, which closes the
-//   chips (not while words are typed after +, where s is a letter); last, while a rewrite is on its way, what it
-//   writes and its seconds (`⠋ rewriting: Background new… 12s`) in the warning color
+//   catch-up, when replies piled up (`4 Catch up on 2 replies`); then `+`, which adds a chip of the person's own; then
+//   `s close`, its key drawn as the bar draws its keys, which closes the chips (not while words are typed after +,
+//   where s is a letter)
 //
 // It sends {events: [{n, press}] | [{n, key}]}: a press on a chip's name or level words (`chip-<id>`, `word-<id>`), on
 // one of its dots (`lvl-<id>-<i>`), on the catch-up (`catchup`), on + (`add`), on s close (`close`); and each key while a click has given it the
@@ -71,23 +67,15 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   const catchup = cu ? [E.Box({ key: 'c-catchup', flexDirection: 'row', marginRight: 3, children: [
     press('catchup', `catch up on ${cu.replies} replies`, [E.Text({ color: keyColor, bold: true, children: `${cu.n} ` }), E.Text({ children: `Catch up on ${cu.replies} replies` })]),
   ] })] : []
-  const example = typeof props?.example === 'string' ? props.example : ''
-  const add = press('add', 'add a chip of your own', plus == null
-    ? [E.Text({ dimColor: true, children: '+' })]
-    : [E.Text({ color: 'warning', bold: true, children: `+ ${plus}▏` }), ...(plus || !example ? [] : [E.Text({ dimColor: true, children: example })])])
+  const add = press('add', 'add a chip of your own', [E.Text(plus != null ? { color: 'warning', bold: true, children: `+ ${plus}▏` } : { dimColor: true, children: '+' })])
   // s close, its key as the bar draws its keys (props.color: core/theme.ts accent()), so leaving is named where the person looks
   const close = plus == null ? [E.Box({ key: 'c-close', flexDirection: 'row', marginLeft: 3, children: [
     press('close', 's close', [E.Text({ color: keyColor, bold: true, children: 's' }), E.Text({ dimColor: true, children: ' close' })]),
   ] })] : []
   const width = Number(props?.width) || surface.columns || 80
-  const older = typeof props?.older === 'string' && props.older ? props.older : null
-  const doing = props?.doing && typeof props.doing === 'object' ? props.doing : null
-  const row = E.Box({ key: 'chips', flexDirection: 'row', flexWrap: 'wrap', width, children: [...items.map(chip), ...catchup, add, ...close] })
-  if (!older && !doing) return row
-  return E.Box({ flexDirection: 'column', width, children: [
-    ...(older ? [E.Text({ key: 'older', dimColor: true, wrap: 'truncate-end', children: older })] : []),
-    row,
-    ...(doing ? [E.Text({ key: 'doing', color: 'warning', wrap: 'truncate-end', children: `${doing.glyph || '⠋'} ${doing.words}…${Number(doing.secs) >= 1 ? ` ${Math.floor(Number(doing.secs))}s` : ''}` })] : []),
+  // in a frame in thimble's color, so the chips read as a control apart from the answer's text
+  return E.Box({ key: 'frame', borderStyle: 'single', borderColor: keyColor, paddingX: 1, width, children: [
+    E.Box({ key: 'chips', flexDirection: 'row', flexWrap: 'wrap', children: [...items.map(chip), ...catchup, add, ...close] }),
   ] })
 }
 

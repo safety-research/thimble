@@ -116,7 +116,7 @@ const textOf = (node: Any): string => {
 }
 
 test("an answer's claims come in with the citations near their words; c counts them, and lights when a later answer corrects one", async () => {
-  setOptions({ claimsAuto: true })
+  setOptions({ claimsMode: 'auto' })
   const s = setup([
     reply([{ claim: 'Alice made 212 of the edits.', quote: 'Alice made 212 edits', cluster: 'who tilted it' }, { claim: 'The edits after June 18 were biased.', quote: 'the edits after June 18 biased', by: 'analyst', cluster: 'who tilted it' }]),
     reply([{ claim: 'The edits after June 18 were not biased; one editor tilted them.', quote: 'The edits were not biased', revises: 'c2' }]),
@@ -152,7 +152,7 @@ const findKey = (node: Any, key: string): Any => {
 }
 
 test('a look that fails leaves a gap the pane names; c opens the pane, a short session as a list where a press on a name selects a cluster and a press on a claim picks it; the map comes with ten claims, a press on a dot its claim', async () => {
-  setOptions({ claimsAuto: true })
+  setOptions({ claimsMode: 'auto' })
   const more = Array.from({ length: 7 }, (_, i) => ({ claim: `Run ${i + 11} passed.`, quote: `Run ${i + 11} passed`, cluster: 'passes' }))
   const replies = [reply([
     { claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures' },
@@ -319,7 +319,7 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
 })
 
 test("a narrow pane whose keys wrap: the map and the claim's detail keep to the rows the pane gives, keys included", async () => {
-  setOptions({ claimsAuto: true })
+  setOptions({ claimsMode: 'auto' })
   const many = Array.from({ length: 10 }, (_, i) => ({ claim: `Run ${i + 1} failed on a long and slow p95 check of the nightly batch.`, quote: `Run ${i + 1} failed`, cluster: i < 5 ? 'failures' : 'slow runs' }))
   const s = setup([reply(many)])
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
@@ -341,7 +341,7 @@ test("a narrow pane whose keys wrap: the map and the claim's detail keep to the 
 })
 
 test("a picked claim's sentences of the reply read as the reply does: a figure the check corrected stands corrected", async () => {
-  setOptions({ claimsAuto: true })
+  setOptions({ claimsMode: 'auto' })
   const s = setup([reply([
     { claim: 'The admin deleted pages for four weeks.', quote: 'The admin then spent four weeks', cluster: 'cleanup' },
     { claim: 'The admin deleted 5,217 pages.', quote: 'deleted 5,217 pages', cluster: 'cleanup' },
@@ -363,7 +363,7 @@ test("a picked claim's sentences of the reply read as the reply does: a figure t
 })
 
 test('c in a terminal too narrow for the pane says to type /claims; once /claims opens the pane, that line goes', async () => {
-  setOptions({ claimsAuto: true })
+  setOptions({ claimsMode: 'auto' })
   const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
   await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['[Run 4 failed](#).'] })
@@ -381,7 +381,7 @@ test('c in a terminal too narrow for the pane says to type /claims; once /claims
 })
 
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
-  setOptions({ claimsAuto: true })
+  setOptions({ claimsMode: 'auto' })
   const s = setup([reply([{ claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures' }])])
   const spawns: Any[] = []
   s.$.agent = { spawn: async (o: Any) => { spawns.push(o); return { agentId: 'agent-made-up-1' } } }
@@ -459,8 +459,8 @@ test('claims on demand: no look reads them after a reply; c shows the pane with 
   const picked = await draw({ claim: 'c1' })
   expect(textOf(picked)).toContain('Its log ends at the p95 check.')
   expect(buttons(picked).some(b => /:cite:0$/.test(b.key) && textOf(b.children) === 'p95 check')).toBe(true)
-  // Claims after every reply: the look after each reply reads them again
-  setOptions({ explain: false, details: false, claimsAuto: true })
+  // Claims found auto: the look after each reply reads them again
+  setOptions({ explain: false, details: false, claimsMode: 'auto' })
   replies.push(reply([]))
   await answered(s, { id: 't3', prompt: 'And run 5?', rows: ['Run 5 passed.'] })
   expect(s.forks.length).toBe(2)

@@ -7,8 +7,6 @@ export default {
   name: 'claims',
   feature: 'lens-claims',
   option: 'claims',
-  // after each reply only while Claims after every reply is on; else on demand, f in the Claims pane
-  auto: 'claimsAuto',
   skeleton: '"claims": []',
   read: reply => ({ claims: Array.isArray(reply?.claims) ? reply.claims : [], clusters: Array.isArray(reply?.clusters) ? reply.clusters : [] }),
   raw: d => (d ? { claims: d.claims, clusters: d.clusters } : null),

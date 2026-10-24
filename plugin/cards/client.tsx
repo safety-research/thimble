@@ -129,6 +129,13 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
       children: [E.Text({ ...p, hover: { scope, ...look }, children })],
     })
   }
+  /** A Button's children, drawn as in a Text: each run of words shows inverse while the pointer is on the Button
+   *  (`scope`), a run of glyphs without letters or digits keeps its look. */
+  const lit = (c: Array<Node | string> | undefined, scope: string): Any[] => (Array.isArray(c) ? c : []).map(k => {
+    if (typeof k === 'string') return /[\p{L}\p{N}]/u.test(k) ? E.Text({ hover: { scope, inverse: true }, children: k }) : k
+    if (k && typeof k === 'object' && k.t === 'Text') return E.Text({ ...pick(k.p, TEXT), children: lit(k.c, scope) })
+    return null
+  }).filter(x => x != null)
   const kids = (c: Node[] | undefined, inText: boolean, line = '', owned = false, path: number[] = []): Any[] => (Array.isArray(c) ? c : []).map((k, i) => draw(k, inText, line, owned, [...path, i])).filter(x => x != null)
   function draw(n: Node, inText: boolean, line = '', owned = false, path: number[] = []): Any {
     if (typeof n === 'string') return inText ? n : owned || cells ? E.Text({ children: n }) : askable({}, [n], n, line || n, path)
@@ -142,10 +149,14 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     if (n.t === 'Button') {
       const press = n.p?.onPress
       const key = typeof n.p?.key === 'string' ? `k${n.p.key}` : `b${String(press)}`
+      // under the pointer, the Button's words show inverse and its runs of glyphs (a bar) keep their color: Claude
+      // Code's inverse of the whole Button would turn a bar's cells into the background's color
+      const scope = `${me.id}-${key}`
       return E.Button({
         ...pick(n.p, BUTTON), key,
+        hover: { scope, inverse: false },
         onPress: () => { if (typeof press === 'number') send({ press, width }) },
-        children: kids(n.c, true),
+        children: lit(n.c, scope),
       })
     }
     if (n.t === 'Box') {

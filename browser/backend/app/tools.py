@@ -2979,12 +2979,8 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     from . import fixes  # noqa: PLC0415
 
     if not fixes.problem():
-        # a change to thimble's code is a fix of the person's thimble (fixes.py), as /thimble-fix makes one
-        try:
-            got = await fixes.request(ctx.c, f"{title}\n\n{body}", title=title, tell=False)
-        except HTTPException as e:
-            return ok(hint("file_dev_ticket-fix-failed", why=_detail_text(e.detail)))
-        return ok(hint("file_dev_ticket-fix", title=str(got["fix"].get("title") or title)))
+        # a change to thimble's code is a fix of the person's thimble, which fix_thimble starts once they ask for it
+        return ok(hint("file_dev_ticket-fix"))
     fn = _optional("dev", "file_ticket")
     if fn is None:
         return _not_available("file_dev_ticket", "dev", "file_ticket")

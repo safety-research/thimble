@@ -2,22 +2,27 @@
 // and the tests import it.
 //
 // Each feature is one switch, named by what the person gets (Citations, Cards), never by the part of thimble that makes
-// it. Each is a field of the plugin's userConfig (.claude-plugin/plugin.json, with the same key, title and default),
-// so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again with the
-// new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key) when it acts.
+// it; a feature with `choices` is one of a few modes (Citation checks: auto, on demand, off). Each is a field of the
+// plugin's userConfig (.claude-plugin/plugin.json, with the same key, title and default: a boolean, or a string with its
+// `options`), so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again
+// with the new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key), or
+// choiceOf(key) for a mode, when it acts.
 
-/** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `does`:
- *  one line on what the person gets and what it costs, the field's description (a test checks). `lenses`: the lenses of
- *  the observer's look it needs (observer/lenses.mjs): the look runs while one such feature is on. `auto`: the feature
- *  whose lens joins the look after each reply only while this switch is on (else it looks on demand). */
+/** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `group`:
+ *  the heading the pane lists it under, with the others of its group (Comments: the explainers and heads-ups on an
+ *  answer's words; a key keeps its name, so a saved setting still applies); `does`: one line on what the person gets
+ *  and what it costs, the field's description (a test checks). `choices`: the modes of a feature that has more than on
+ *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
+ *  look runs while one such feature is on. `modeOf`: the feature whose lenses join the look after each reply only in
+ *  this one's `auto` mode (in `on demand`, a look of their own runs when the person asks). */
 export const SWITCHES = [
   {
     key: 'marks', title: 'Citations', default: true,
-    does: 'Claude adds a citation to each claim you would check, and a second Claude checks each one after the reply.',
+    does: 'Claude adds a citation to each claim you would check, and a second Claude checks it against the files, as Citation checks says.',
   },
   {
-    key: 'checkOnOpen', title: 'Check citations only when I open one', default: false,
-    does: 'Off: a second Claude checks every citation after each reply. On: it checks a citation when you open it, which spends fewer tokens.',
+    key: 'citationChecks', title: 'Citation checks', default: 'on demand', choices: ['auto', 'on demand', 'off'],
+    does: 'auto: a second Claude checks every citation after each reply. on demand: it checks a citation when you open it, which spends fewer tokens. off: no checks.',
   },
   {
     key: 'cards', title: 'Cards', default: true,
@@ -28,20 +33,20 @@ export const SWITCHES = [
     does: 's makes an answer shorter or longer, and catches you up on replies you missed. One rewrite each time you ask.',
   },
   {
-    key: 'explain', title: 'Explainers', default: true, lenses: ['explain'],
+    key: 'explain', title: 'Explainers', group: 'Comments', default: true, lenses: ['explain'],
     does: 'Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.',
   },
   {
-    key: 'details', title: 'Heads-ups', default: true, lenses: ['heads'],
+    key: 'details', title: 'Heads-ups', group: 'Comments', default: true, lenses: ['heads'],
     does: 'Marks a detail of an answer that is easy to miss and changes what it means; ] opens its heads-up. A small part of the call after each reply.',
   },
   {
     key: 'claims', title: 'Claims', default: true, lenses: ['claims'],
-    does: 'c opens what Claude and you claimed in the session, with sources; the bar counts them. f in that pane finds the claims of the answers it has not read.',
+    does: 'c opens what Claude and you claimed in the session, with why each holds and its sources; the bar counts them. Claims found says when they are found.',
   },
   {
-    key: 'claimsAuto', title: 'Claims after every reply', default: false, auto: 'claims',
-    does: 'Off: claims are found when you ask in the Claims pane, which spends fewer tokens. On: they are found after every reply, the largest part of the call after it.',
+    key: 'claimsMode', title: 'Claims found', default: 'on demand', choices: ['auto', 'on demand'], modeOf: 'claims',
+    does: 'auto: after each reply, the largest part of the call after it. on demand: when you press f in the Claims pane, which spends fewer tokens.',
   },
   {
     key: 'counts', title: 'Labels and coverage on the bar', default: true,
@@ -62,42 +67,48 @@ export function setOptions(options) {
   current = options && typeof options === 'object' ? { ...options } : {}
 }
 
-/** The features as `values` holds them (a field missing, or not a boolean: its default), as a function of a key. The
- *  settings pane asks it with the values Claude Code holds now; featureOn is it with the plugin's options. */
+/** A feature's value as `values` holds it: a boolean, or for a feature with modes one of its choices; a field missing,
+ *  or not of its kind, has its default. */
+function valueIn(values, key) {
+  const s = BY_KEY.get(key)
+  const v = values ? values[key] : undefined
+  if (s?.choices) return s.choices.includes(v) ? v : s.default
+  return typeof v === 'boolean' ? v : s ? s.default : true
+}
+
+/** The features as `values` holds them, as a function of a key: whether each is on (a feature with modes is on unless
+ *  its mode is `off`). The settings pane asks it with the values Claude Code holds now; featureOn is it with the plugin's
+ *  options. */
 export function switchesFrom(values) {
   return key => {
-    const s = BY_KEY.get(key)
-    const v = values ? values[key] : undefined
-    return typeof v === 'boolean' ? v : s ? s.default : true
+    const v = valueIn(values, key)
+    return typeof v === 'string' ? v !== 'off' : v
   }
+}
+
+/** A feature's mode, for a feature with `choices` (`on demand`); its value as a boolean for any other. */
+export function choiceOf(key) {
+  return valueIn(current, key)
 }
 
 /** A change the settings pane just made through Claude Code: this activation acts on it at once, while Claude Code
  *  loads the plugin again with the same value. */
 export function noteChange(key, value) {
-  if (BY_KEY.has(key) && typeof value === 'boolean') current = { ...current, [key]: value }
+  const s = BY_KEY.get(key)
+  if (s && (s.choices ? s.choices.includes(value) : typeof value === 'boolean')) current = { ...current, [key]: value }
 }
 
-/** Whether thimble is off in this session (/thimble-off, settings/term.ts): every feature is then off, whatever its
- *  switch says, and the switches stay as they are. */
-let sessionOff = false
-
-export function setSessionOff(off) {
-  sessionOff = !!off
-}
-
-/** Whether a feature acts now: its option when it is a boolean, else its default; none while thimble is off in this
- *  session. `observer` is whether the look after each reply runs: while a feature one of whose lenses it serves is on
- *  (and its `auto` switch, when it has one).
- *  `thimble` is whether thimble acts at all in this session (its guidance, the bar, the side pane). */
+/** Whether a feature acts now: its option when it is a boolean, else its default. `observer` is whether the look after
+ *  each reply runs: while a feature one of whose lenses it serves is on, and in its mode's `auto` when it has one. */
 export function featureOn(key) {
-  if (sessionOff) return false
-  if (key === 'thimble') return true
-  if (key === 'observer') {
-    const on = switchesFrom(current)
-    return SWITCHES.some(s => (s.lenses ?? []).length > 0 && on(s.key) && SWITCHES.every(a => a.auto !== s.key || on(a.key)))
-  }
+  if (key === 'observer') return SWITCHES.some(s => (s.lenses ?? []).length > 0 && lensesAfterReply(s.key))
   return switchesFrom(current)(key)
+}
+
+/** Whether a feature's lenses join the look after each reply: it is on, and a feature that sets when it acts
+ *  (`modeOf` it) is in its `auto` mode. */
+export function lensesAfterReply(key) {
+  return switchesFrom(current)(key) && SWITCHES.every(m => m.modeOf !== key || valueIn(current, m.key) === 'auto')
 }
 
 /** A feature by its key, or null. */

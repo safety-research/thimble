@@ -150,9 +150,9 @@ every item or key at its level, as in `--in 'chats.json#/*/messages'`. A label o
 record's place in its file as its ref (`chats.json#/3/messages/12`), so the analyst can open the record, and a quote
 from it is checked against the file. A copy of the records in another file loses that place.
 
-A --prompt label over more than 300 records does not start at once: the analyst is asked first, in the terminal, to
-run all, run on a random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks. The
-choices leave the screen once the analyst answers. After a sample, the same command again asks them to run the rest.
+A --prompt label over more than 300 records does not start at once: the analyst chooses first to run all, run on a
+random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks. After a sample, the same
+command again asks them to run the rest.
 
 The same definition again keeps the values it has and labels only records it has not seen. A --prompt label prints how
 many model calls it makes before they run. The analyst can open a value's records and check a sample of them: what
@@ -396,12 +396,11 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         if ask:
             choices = "run them or cancel" if ask["rest"] else f"run all, run on a random sample of {EST.SAMPLE}, or cancel"
             print(f"  Not started: the model would read {'the other ' if ask['rest'] else ''}{ask['units']:,} records in "
-                  f"{EST.calls_line(ask['calls'])}, so the analyst is asked first, in the terminal: {choices}. "
+                  f"{EST.calls_line(ask['calls'])}, so the analyst chooses first: {choices}. "
                   f"`thimble label {name} --wait` waits for their choice, then for the model's reads, and prints the "
                   f"label's counts; run it before you answer from this label. Counts from a trial are not the "
-                  f"label's. The choices leave the screen once they answer, so after that do not point them to a key: "
-                  f"to read more records, run this command again, and the terminal asks again. A trial (--limit N) "
-                  f"never asks.")
+                  f"label's. To read more records later, run this command again, and the analyst is asked again. A "
+                  f"trial (--limit N) never asks.")
         elif s["waiting"]:
             calls = len(LB.batches(LB.waiting(st, name)["units"]))
             print(f"  The model reads them in {EST.calls_line(calls)} of up to {LB.BATCH_ITEMS} records each, which run "
@@ -417,10 +416,10 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             if not s["waiting"] or run.get("state") == "cancelled":
                 break
             if run.get("state") == "ask" and time.time() - t0 > a.wait:
-                # the ask waits in the bar while this waits; once the analyst chooses, the reads start and this waits on
-                print(f"{name}: still waiting for the analyst's choice in the bar after {a.wait:.0f}s; nothing runs "
+                # the ask waits for the analyst while this waits; once they choose, the reads start and this waits on
+                print(f"{name}: still waiting for the analyst's choice after {a.wait:.0f}s; nothing runs "
                       f"until then. {s['waiting']:,} records wait, and the counts so far are not the label's. Their "
-                      f"choice reaches you with their next message.")
+                      f"choice reaches you when they answer.")
                 return 0
             if run.get("state") == "ask":
                 time.sleep(1.0)
@@ -577,7 +576,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--records", nargs="?", const="*", help=argparse.SUPPRESS)
     p.add_argument("--at", type=int, help=argparse.SUPPRESS)
     p.add_argument("--count", type=int, help=argparse.SUPPRESS)
-    # the person's answer to a big label's ask, which their key in the terminal runs (never Claude's to pass)
+    # the person's answer to a big label's ask, which thimble runs from their answer in the terminal (never Claude's to pass)
     p.add_argument("--answer", choices=("all", "sample", "cancel"), help=argparse.SUPPRESS)
     p.add_argument("--ask", help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_label)

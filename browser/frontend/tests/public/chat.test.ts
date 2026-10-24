@@ -154,7 +154,7 @@ describe("main's look at the agent tray", () => {
 })
 
 describe("main's start of a fix", () => {
-  test("main's fix_thimble call is left out of main: the line that opens the fix's thread stands for it", () => {
+  test("main's fix_thimble call is left out of main: the fixer's card stands for it", () => {
     const log = records([
       { type: 'user', ts: '2026-08-30T14:00:00Z', text: '/thimble-fix the card should count its rows' },
       { type: 'tool_use', ts: '2026-08-30T14:00:01Z', id: 'f1', name: `${P}fix_thimble`, input: { words: 'new the card should count its rows' } },

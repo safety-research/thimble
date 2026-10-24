@@ -9,7 +9,7 @@
 //                lit on the bar for the answer only when a claim was corrected (store.js noteFor), as a `claims` part
 //                of that answer (core/answers.ts setPart)
 //   the pane     c (or /claims) opens the Claims pane (core/pane.ts kind `claims`), which takes the keyboard
-//   on demand    unless Claims after every reply is on, no look after a reply reads the claims: f in the pane finds
+//   on demand    unless Claims found is auto, no look after a reply reads the claims: f in the pane finds
 //                those of the answers they have not read (claimsUnread; the store keeps the answers read, `read`), as
 //                a look of the claims lens alone (observer/observer.ts findClaimsNow); claimsToFind says how many
 //                answers wait and how many are being read

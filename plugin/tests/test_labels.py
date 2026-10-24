@@ -291,7 +291,7 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     # all 420: more than a sample, so it waits for the person's choice, and no session starts the reads
     r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "Not started" in r.stdout and "asked first" in r.stdout
+    assert "Not started" in r.stdout and "the analyst chooses first" in r.stdout
     # Claude is told to wait for the choice and the reads, and the trial's counts are said as the trial's only
     assert "`thimble label spam --wait` waits for their choice, then for the model's reads" in r.stdout
     assert "Answer now" not in r.stdout and "Counts from a trial are not the label's" in r.stdout
@@ -303,7 +303,7 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     t0 = time.time()
     r = run(root, "label", "spam", "--wait", "2")
     assert r.returncode == 0 and 2 <= time.time() - t0 < 30
-    assert "still waiting for the analyst's choice in the bar after 2s; nothing runs until then" in r.stdout
+    assert "still waiting for the analyst's choice after 2s; nothing runs until then" in r.stdout
     # Claude cannot answer for the person: a made-up ask id is refused and the label still waits
     r = run(root, "label", "spam", "--answer", "all", "--ask", "a000")
     assert r.returncode == 1 and LB.load(st, "spam")["run"]["state"] == "ask"
@@ -315,7 +315,7 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     # the same label again asks again for the rest (a sample is no yes for all): run them or cancel, no second sample;
     # this time the person runs them
     r = run(root, "label", "spam", "--in", "chat/big.jsonl", "--prompt", "The message is spam.")
-    assert "run them or cancel" in r.stdout and "do not point them to a key" in r.stdout
+    assert "run them or cancel" in r.stdout and "the analyst is asked again" in r.stdout
     ev = feed(root)[-1]
     assert ev["kind"] == "label_ask" and ev["rest"] is True and ev["sample"] == 0
     assert ev["text"] == "Read the other 420 records of chat/big.jsonl with Claude"

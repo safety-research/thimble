@@ -1,13 +1,12 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
 // out: at rest the head (how many claims) and the line that finds the claims of the answers not read yet (f, a press
-// the observer's ui.press hook takes: claims are found on demand unless Claims after every reply is on), the map of
+// the observer's ui.press hook takes: claims are found on demand unless Claims found is auto), the map of
 // clusters (a list in a narrow pane; none in a short session, whose clusters are listed with their claims), the detail
 // under it (the cluster chosen and its claims, or the claim picked and why it holds, and with e its history and
 // evidence), and the keys. A pane taller than Claude Code gives it scrolls. A click is the main way to move: a
 // cluster's name chooses the cluster, a dot or a claim in the list picks that claim (its dot again, the cluster);
-// `↑ N earlier` and `↓ N more` page the list; ‹ › step through the citations. A citation under a claim, and a term
-// with an explainer, open as a press on them in the reply does (the tray); a citation of the evidence opens its
-// evidence pane. Tab and Enter reach the same Buttons.
+// `↑ N earlier` and `↓ N more` page the list; ‹ › step through the citations. A citation under a claim opens as a press
+// on it in the reply does (the tray); a citation of the evidence opens its evidence pane. Tab and Enter reach the same Buttons.
 //
 //   keys while the pane holds the keyboard, each once: p n the previous or next cluster, in reading order of the map
 //   as drawn (row by row, left to right; a list top to bottom; nothing chosen yet: n the first, p the last), while no
@@ -44,8 +43,6 @@ import { citeWords } from '../marks/evidence'
 import { citeHeat, wordsLook, type MarkStatus } from '../marks/view'
 import { plainSentence } from '../marks/message.js'
 import { NOT_RUN, rowMarks, type MarkItem } from '../marks/store'
-import { sessionGlosses, type SessionGloss } from '../explain/seam'
-import { openTray } from '../tray/seam'
 import { markColors } from '../explain/place.mjs'
 import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
 import { claimsBright, claimsStore, claimsToFind, placeText, showClaims, type ClaimsArgs } from './term'
@@ -80,7 +77,7 @@ function look(tone: string | null | undefined): Record<string, unknown> {
 /** A run as a Text: its tone, bold and underline; cited words in evidence look as in the citations' card (citeWords,
  *  in hover group `id`); a citation (`cite`, its status) as citations look in the reply (wordsLook). */
 function spanOf(els: Any, r: Run, i: number, id: string): unknown {
-  // `gloss`: the words of a term that has an explainer, in the explainers' fill as the reply draws them
+  // `gloss`: an explainer's term, in the explainers' fill as the reply draws it
   const bg = r.bg === 'gloss' ? { backgroundColor: markColors(themeLast()).glossBg } : {}
   return els.Text({
     key: `t${i}`, ...look(r.tone), ...bg, ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}),
@@ -273,16 +270,13 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   }
 
   // ---- the map and the detail
-  // the session's explainers: their terms in the explainers' fill wherever a claim or its paragraph says them
-  const glosses = await sessionGlosses($).catch(() => [] as SessionGloss[])
-  const terms = glosses.map(g => ({ term: g.term, key: `${g.row}|${g.id}` }))
   // the claim picked: the reply it came from, whose sentences say why it holds when the lens gave no reason
   const sel = selectedOf(raw, keep).claim as Any
   const said = sel ? ((sel.said || []) as Any[]).find(x => x.row && x.by === 'claude') ?? (sel.said || []).find((x: Any) => x.row) ?? null : null
   const md = said ? await placeText($, said.row, said) : null
   const passage = md ? { md, place: said } : null
   const st = { ...keep, ...(a.from != null ? { from: a.from } : {}) }
-  const opts = { w: W, h: H, bright: await claimsBright($), terms, passage }
+  const opts = { w: W, h: H, bright: await claimsBright($), passage }
   const view = graphView(raw, st, opts)
   // the claims and clusters as the map draws them (graph.js fitClusters)
   const data = view.data as Any
@@ -320,12 +314,6 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     }
     if (part.startsWith('n:')) return pick(part.slice(2))
     if (part.startsWith('c:')) return undefined
-    // a term that has an explainer: the tray opens on it, as a press on it in the reply does
-    if (part.startsWith('x:')) {
-      const [, k] = JSON.parse(part.slice(2)) as [string | null, string]
-      const g = glosses.find(x => `${x.row}|${x.id}` === k)
-      return g ? openTray($, { row: g.row, kind: 'explain', id: g.id }) : undefined
-    }
     const ci = /^cite:(\d+)$/.exec(part)
     if (ci && claim) return openCite((claim.sources || [])[Number(ci[1])])
     const ev = /^ev-(\d+)$/.exec(part)

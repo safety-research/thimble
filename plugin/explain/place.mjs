@@ -18,6 +18,8 @@
 //   headsOf(item, text)                 -> the look's heads-up as a part keeps it (one at most), or null
 //   mergeLook(msgs, out, memory)        -> what one look adds to each message's part, and the terms it explained
 //   markColors(theme)                   -> the explainers' and heads-ups' highlights, a fill per theme, and their frames' keys
+//   citeLinks(text)                     -> its links to a file's lines as citations, so the tray draws them as the answer's
+//   filePlaces(text)                    -> the file places its links point to
 import { codeRanges, marksIn } from '../marks/message.js'
 
 const inside = (ranges, a, b) => ranges.some(([x, y]) => a < y && b > x)
@@ -280,15 +282,13 @@ export function glossesOf(list, text, skip = [], from = 0) {
 }
 
 /** The look's heads-up as a part keeps it, placed on its term like an explainer (one the text does not hold is dropped,
- *  so it never points at nothing), with the check Claude offers to make (`offer`), when it gives one; null when there is
- *  none. */
+ *  so it never points at nothing); null when there is none. */
 export function headsOf(item, text, id = 'h1') {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return null
   const term = str(termOf(item.term))
   const bullets = (Array.isArray(item.bullets) ? item.bullets : []).map(b => str(b)).filter(Boolean)
   if (!term || !bullets.length || !holds(text, term)) return null
-  const offer = str(item.offer)
-  return { id, kind: 'heads', term, title: str(item.title) || term, bullets, ...(offer ? { offer } : {}) }
+  return { id, kind: 'heads', term, title: str(item.title) || term, bullets }
 }
 
 /**
@@ -344,16 +344,42 @@ export function markColors(theme) {
 
 /** The file places a text links to (`[words](path#L12-20)`, `[words](path:12)`), as {path, from, to}; no web link, no
  *  citation `(#)`. */
+/** A file's place a link points to (`path#L12-20`, `path:12-20` or a path), as {path, from, to}; null for a citation
+ *  `#`, a web address or an anchor. */
+function placeOf(target) {
+  if (target === '#' || /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith('#')) return null
+  const hit = /^(.*?)#L(\d+)(?:-L?(\d+))?$/.exec(target) || /^(.*?):(\d+)(?:-(\d+))?$/.exec(target)
+  return hit ? { path: hit[1], from: Number(hit[2]), to: Number(hit[3] || hit[2]) } : { path: target.replace(/#.*$/, ''), from: null, to: null }
+}
+
+/**
+ * An explainer's or a heads-up's words with each link to a file's lines made a citation (`[words](#)`), so they draw
+ * as the answer's citations do: {text, places}, where places[k] is the file place of the text's k-th citation
+ * (marks/message.js marksIn), or null for one that was a citation already. Links inside code stay as they are.
+ */
+export function citeLinks(text) {
+  const s = String(text || '')
+  const code = codeRanges(s)
+  let out = ''
+  let at = 0
+  const starts = new Map()
+  for (const m of s.matchAll(/\[([^\]\n]+)\]\(<?([^()\s<>\n]+)>?\)/g)) {
+    const p = placeOf(m[2])
+    if (!p || inside(code, m.index, m.index + m[0].length)) continue
+    out += s.slice(at, m.index)
+    starts.set(out.length, p)
+    out += `[${m[1]}](#)`
+    at = m.index + m[0].length
+  }
+  out += s.slice(at)
+  return { text: out, places: marksIn(out).map(k => starts.get(k.start) ?? null) }
+}
+
 export function filePlaces(text) {
   const out = []
   for (const m of String(text || '').matchAll(/\[[^\]\n]+\]\(<?([^()\s<>\n]+)>?\)/g)) {
-    const target = m[1]
-    if (target === '#' || /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith('#')) continue
-    const hash = /^(.*?)#L(\d+)(?:-L?(\d+))?$/.exec(target)
-    const colon = /^(.*?):(\d+)(?:-(\d+))?$/.exec(target)
-    const hit = hash || colon
-    if (hit) out.push({ path: hit[1], from: Number(hit[2]), to: Number(hit[3] || hit[2]) })
-    else out.push({ path: target.replace(/#.*$/, ''), from: null, to: null })
+    const p = placeOf(m[1])
+    if (p) out.push(p)
   }
   return out
 }

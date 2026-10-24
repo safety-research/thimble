@@ -34,7 +34,6 @@ import type { EngineInterface, Register } from 'claude-code'
 import { failCleared, failLineNow } from '../bar/notice'
 import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
-import { labelAskPaneHead } from '../labels/use'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
 import { drawSettings } from '../panes/settings'
@@ -42,7 +41,6 @@ import { drawThreadsPane, threadPaneParts, threadUnderSplit } from '../threads/s
 import { quiet } from './askcell.js'
 import { cut } from './text.js'
 import { accent } from './theme'
-import { featureOn } from '../settings/features.mjs'
 import { crumbOf, nextTrail, treeRows } from './trail.mjs'
 
 type Engine = EngineInterface
@@ -170,7 +168,7 @@ function topRow($: Engine, els: Any, now: PaneNow, W: number): Any[] {
   const back = under
     ? Button({ key: 'pane-back', plain: true, label: 'back', hover: quiet('pane-back'), onPress: () => paneBack($), children: [Text({ color: accent(), wrap: 'truncate-end', children: `‹ back to ${cut(crumbOf(under.kind, under.args).words, Math.max(8, W - 22))}` })] })
     : null
-  const close = Button({ key: 'pane-close', plain: true, label: 'close', hover: quiet('pane-close'), onPress: () => closePane($), children: [Text({ color: accent(), bold: true, children: '× close' })] })
+  const close = Button({ key: 'pane-close', plain: true, label: 'close the pane', hover: quiet('pane-close'), onPress: () => closePane($), children: [Text({ color: accent(), bold: true, children: '× close' })] })
   return [Box({ key: 'pane-top', flexDirection: 'row', justifyContent: 'space-between', width: W, children: [
     Box({ key: 'pane-top-left', flexDirection: 'row', flexShrink: 1, children: back ? [back] : [] }),
     Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 0, marginLeft: 2, children: [close] }),
@@ -185,16 +183,13 @@ const idOf = (now: PaneNow) => `${now.kind}:${JSON.stringify(now.args ?? null)}`
 export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any): Promise<unknown> {
   try {
     if (!now) return els.Text({ dimColor: true, children: 'Nothing is open here.' })
-    if (!featureOn('thimble')) return els.Text({ dimColor: true, wrap: 'wrap', children: 'thimble is off in this session. /thimble-on turns it back on.' })
     const W = Math.max(20, Number(e?.props?.bodyColumns) || 80)
     const H = Math.max(8, Number(e?.props?.scroll?.bodyRows) || 40)
     // docked, the frame is the pane's whole height and the input bar stays at its bottom; inline the frame fits the tree
     const pinned = e?.props?.placement === 'dock'
     const keys = new Map<string, () => unknown>()
     const kels = noting(els, keys)
-    // a large label run's ask waits at the pane's top, where the person reads (labels/use.ts), over the top row
-    const ask = await labelAskPaneHead($, els).catch(() => null)
-    const top = [...(ask ? [ask] : []), ...topRow($, els, now, W)]
+    const top = topRow($, els, now, W)
     const T = top.length ? treeRows(top, W) : 0
     // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
     // and input bar (`under`, kept at the bottom)

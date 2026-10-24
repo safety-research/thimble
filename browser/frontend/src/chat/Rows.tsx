@@ -30,6 +30,7 @@ import { AnswerMarksContext, ChatMarkdown, ChipContext, RefText } from './markdo
 import { AnswerCommentPop } from './AnswerComment'
 import { answeredAsk, askedAnswer, commentsOfRow, marksOf, useAnswerComments, type AnswerComment, type AnswerMark } from './answerComments'
 import { MarksFooter } from '../marks/MarksFooter'
+import { FixResult } from './FixStrip'
 import { API_ERROR_KIND, callLineText, callPieces, callToolName, capacityNote, corpusRelative, durationText, groupState, groupTools, isRawCall, labelRunName, leadText, madeBy, QUIET_RE, runTools, stripHarness, toolDisplayName, toolMeta, toolSteps, toolSummary, underCorpus, type AgentRow as AgentRowT, type BranchRow, type CallsRow, type ChipRow as ChipRowT, type ErrorRow as ErrorRowT, type Row, type ToolGroup, type ToolRow as ToolRowT, waitText } from './model'
 import { Note, ShotCard, ThreadChip, ThreadsContext } from './Notes'
 import { AgentCard, OrientLanding, openLabel } from './AgentCard'
@@ -152,6 +153,12 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
   const toolPending = lastRow?.kind === 'tool' && !lastRow.result
   const anchorOf = (index: number) => (chat ? `chat:${chat}#${index}` : undefined)
   const shown = shownRows(rows, !!calls)
+  // the newest row of each fix's end, which shows the fix's state now (FixResult)
+  const lastFix = useMemo(() => {
+    const out = new Map<string, number>()
+    for (const r of shown) if (r.kind === 'chip' && r.chip === 'fix' && r.ref) out.set(r.ref, r.index)
+    return out
+  }, [shown])
   const answers = useAnswerComments(ws, chat === 'main' && !nested)
   const [opened, setOpened] = useState<string | null>(null)
   const [asked, setAsked] = useState<string | null>(() => (chat === 'main' && !nested ? askedAnswer() : null))
@@ -217,6 +224,7 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
           case 'calls':
             return <CallLines key={r.index} tools={r.tools} ws={ws} pending={live || (streaming && i === shown.length - 1)} calls={calls} />
           case 'chip':
+            if (r.chip === 'fix' && r.ref) return <FixResult key={r.index} ws={ws} fid={Number(r.ref.slice(4))} text={r.text} kind={r.status} latest={lastFix.get(r.ref) === r.index} />
             return <ChipRow key={r.index} item={r} ws={ws} />
           case 'views':
             return <ViewsNote key={r.index} chips={r.chips} ws={ws} />
@@ -228,8 +236,9 @@ export function Rows({ rows, ws, chat, streaming = false, nested = false, calls,
             if (r.role === 'orient') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Orientation started in" chips={<ThreadChip id={r.chat} />} />
             if (r.role === 'writer') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text="Writing started in" chips={<ThreadChip id={r.chat} />} />
             if (r.role === 'dev') return <Note key={r.index} className="chat-agent-note" data-chat={r.chat} text={devStarted(r)} chips={<ThreadChip id={r.chat} />} />
-            // a fix of the person's thimble runs in the background, in its own thread (backend fixes.fixer_chat)
-            if (r.role === 'fixer') return <Note key={r.index} className="chat-agent-note chat-fix-started" data-chat={r.chat} text={fixStarted(r.title)} chips={<ThreadChip id={r.chat} />} />
+            // a fix of the person's thimble: main's subagent, which runs in the background in its own thread (backend
+            // fixes.fixer_chat); a round of the fix is the card of that run alone
+            if (r.role === 'fixer') return <AgentCard key={r.index} ws={ws} chat={r.chat} role={r.role} title={r.title} ts={r.ts} run={r.run ?? 0} thread />
             return <AgentCard key={r.index} ws={ws} chat={r.chat} role={r.role} title={r.title} ts={r.ts} />
           case 'branch':
             return (
@@ -276,12 +285,6 @@ export const ACCESS_KIND = 'claude-access'
 export function devStarted(r: { view?: string; title?: string | null }): string {
   // the agent row's `view`; a row an earlier build wrote names a view build only by its title
   return r.view || (r.title ?? '').startsWith('view: ') ? 'View build started in' : 'Dev ticket started'
-}
-
-/** Main's note for a fix that started in its own thread: `Fixing it in the background in` for a new fix, `Changing it
- * in the background in` for a round of a fix the person has (the chat's title starts `changing`). Pure. */
-export function fixStarted(title: string | null | undefined): string {
-  return /^changing\b/i.test(title ?? '') ? 'Changing it in the background in' : 'Fixing it in the background in'
 }
 
 /** Where a message to one of thimble's agents came from, in its thread: typed in Claude Code's agent tray (`terminal`

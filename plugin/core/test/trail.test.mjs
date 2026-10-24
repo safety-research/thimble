@@ -45,7 +45,7 @@ test("another side thread goes on top of the thread shown: the earlier conversat
   // the same thread drawn again (a key in it) keeps its place
   p = go(p, 'thread', { key: 'card-c1', from: 'pane' })
   assert.deepEqual(p.trail, [])
-  // a heads-up's offer asked from the tray while the card's thread shows
+  // a heads-up asked about from the tray while the card's thread shows
   p = go(p, 'thread', { key: 'mark-r2-heads-h1' })
   assert.deepEqual(words(p), ['thread', 'thread'])
   assert.deepEqual(p.trail.at(-1).args, { key: 'card-c1', from: 'pane' })
