@@ -137,15 +137,17 @@ async function usedOf($: Engine, names: string[]): Promise<UsedLabel[] | null> {
 // ------------------------------------------------------------------------------------------------ the rows
 
 /** The row under a card or an answer: `label has-link · regex · 412 records  ● yes  ● no`, each name and value a
- *  press. Each label is one group, so a row too long for the width wraps between labels, never inside one. */
+ *  press. Each label is one group, so a row too long for the width wraps between labels, never inside one; the word
+ *  `label` (`labels`) is one item with the first name, so a wrap never leaves it alone on its row. */
 export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen: (name: string, value: string | null) => unknown }): Any | null {
   if (!used.length) return null
   const { Box, Button, Text } = els
-  const row: Any[] = [Text({ key: `${o.key}-w`, dimColor: true, children: used.length === 1 ? 'label ' : 'labels ' })]
+  const row: Any[] = []
   used.forEach((l, i) => {
     if (i) row.push(Text({ key: `${o.key}-s${i}`, dimColor: true, children: '   ' }))
     const kids: Any[] = []
-    kids.push(Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ key: 'n', bold: true, children: l.name })] }))
+    const name = Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ key: 'n', bold: true, children: l.name })] })
+    kids.push(i ? name : Box({ key: `${o.key}-w`, flexDirection: 'row', flexShrink: 0, children: [Text({ key: 'w', dimColor: true, children: used.length === 1 ? 'label ' : 'labels ' }), name] }))
     const how = howMade(l.kind)
     if (how) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${how}` }))
     if (typeof l.records === 'number') kids.push(Text({ key: `${o.key}-d${i}`, dimColor: true, children: ` · ${l.records.toLocaleString('en-US')} ${l.records === 1 ? 'record' : 'records'}` }))

@@ -77,12 +77,24 @@ function engine(kernel: (args: string[]) => { code?: number; out: unknown } = ()
   return { $, ran, flush, set, state }
 }
 
-test('a row of several labels wraps between labels: each label, with its values, is one group', () => {
+test('a row of several labels wraps between labels: each label, with its values, is one group, the word labels with the first', () => {
   const used = ['sabotage_candidate', 'sabotage', 'sabotage2'].map(name => ({ name, kind: 'regex', values: ['yes', 'no'], records: 20764 }))
   const row = labelRowEl(ELS, used, { key: 'k', onOpen: () => undefined })
   const groups = (row.props.children as Any[]).filter(n => n.type === 'Box')
-  expect(groups.map(textOf)).toEqual(used.map(l => `${l.name} · regex · 20,764 records  ● yes  ● no`))
-  expect(textOf(row)).toBe(`labels ${groups.map(textOf).join('   ')}`)
+  expect(groups.map(textOf)).toEqual(used.map((l, i) => `${i ? '' : 'labels '}${l.name} · regex · 20,764 records  ● yes  ● no`))
+  expect(textOf(row)).toBe(groups.map(textOf).join('   '))
+})
+
+test('the word label never sits alone on its row: it is one item with the name it names, which does not shrink', () => {
+  const row = labelRowEl(ELS, [{ name: 'colluding', kind: 'prompt', values: ['yes', 'no'], records: 1286 }], { key: 'k', onOpen: () => undefined })
+  // the row's first item is the label's group, not the word alone
+  const first = (row.props.children as Any[])[0]
+  expect(first.type).toBe('Box')
+  // inside the group, the word and the name are one item that keeps them on one row
+  const word = first.props.children[0]
+  expect(word.props).toMatchObject({ flexDirection: 'row', flexShrink: 0 })
+  expect(word.props.flexWrap).toBeUndefined()
+  expect(textOf(word)).toBe('label colluding')
 })
 
 test('a card shows the labels its turn ran before it; the answer only those no card of it shows; a press opens the label', async () => {
