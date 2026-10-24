@@ -194,11 +194,12 @@ export async function sessionGlosses($: Engine): Promise<SessionGloss[]> {
   return out
 }
 
-/** The session's explainer of these words: the same words, or another form of them ("hit counters" finds "public
- *  hit counter" only when the words say all of it). */
+/** The session's explainer of these words: the same words, or another form of them ("retry budgets" finds "retry
+ *  budget"); never one whose term only stands inside longer words. */
 export function glossFor(list: SessionGloss[], term: string): SessionGloss | null {
   const t = normTerm(term)
-  return list.find(g => normTerm(g.term) === t) ?? list.find(g => { const at = anchorTerm(t, g.term); return !!at && at.how !== 'word' }) ?? null
+  // another form of the same words: the term found over the whole of them, not inside longer words
+  return list.find(g => normTerm(g.term) === t) ?? list.find(g => { const at = anchorTerm(t, g.term); return !!at && at.how !== 'word' && at.start === 0 && at.end >= t.length - 1 }) ?? null
 }
 
 // the words being explained on demand now, and why the last try of each failed

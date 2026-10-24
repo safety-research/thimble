@@ -179,6 +179,8 @@ test('on demand: words the analyst picked get an explainer from the explain-expa
   const all = await sessionGlosses(s.$)
   expect(all.map(g => g.term).sort()).toEqual(['30 seconds after a drop', 'retry budget'])
   expect(glossFor(all, 'retry budgets')?.term).toBe('retry budget')
+  // longer words that hold a term are not that term
+  expect(glossFor(all, 'the retry budget runs out')).toBe(null)
   // a call that fails says why, and the words can be asked for again
   const failing = setup([LOOK], { complete: { isAnswered: false, reason: 'aborted' } })
   await answered(failing, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
