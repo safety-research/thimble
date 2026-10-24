@@ -226,7 +226,7 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   // under it which claim of how many, its checks and turn; the paragraph of the reply it came from, and its first
   // citation
   expect(pt).toContain('  ▸ Run 4 failed on the p95 check.    claim 1 of 2  × 1 citation failed  turn 1    ▎ ')
-  expect(pt).toContain('p95 check   × failed · cite')
+  expect(pt).toContain('p95 check   × failed · citation')
   expect(pt).toContain('◦ Run 9 failed on a timeout.')
   expect(pt).toContain('◦ The cache was cold.')
   expect(keysOf(picked)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['p', 'previous cluster'], ['n', 'next cluster'], ['e', 'evidence']])
@@ -258,7 +258,7 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   expect(paneNow(s).args).toMatchObject({ claim: 'c1', open: true, cite: 0 })
   const open = await draw(paneNow(s).args)
   // its reply has no check in the store: it did not run, so the citation is failed
-  expect(textOf(open)).toContain('p95 check   × failed · cite')
+  expect(textOf(open)).toContain('p95 check   × failed · citation')
   expect(textOf(open)).toContain('The check did not run.')
   expect(textOf(open)).toContain('‹ 1 of 1 ›')
   expect(textOf(open)).not.toContain('Run 9 failed')
@@ -376,7 +376,7 @@ test("x on a failed citation in the pane checks it again in the background, star
   const pane = await drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, args, els)
   const t = textOf(pane)
   expect(t).toContain('× 1 citation failed')
-  expect(t).toContain('p95 check   × failed · cite')
+  expect(t).toContain('p95 check   × failed · citation')
   expect(t).toContain('‹ 1 of 1 ›')
   expect(t).not.toMatch(/\?|wrong/)
   const x = buttons(pane).find(b => b.hotkey === 'x')
