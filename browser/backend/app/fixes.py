@@ -82,6 +82,7 @@ PAGE_CHARS = 8000  # of the text copy of the page
 PROMPT = "thimble-fix"  # what main reads of the person's /thimble-fix (prompts/thimble-fix.md)
 _phase: dict[int, str] = {}  # fix id → fixing | testing | applying | restarting, while this server works on it
 _pages: dict[str, str] = {}  # workspace → the text copy of the page when the person last typed /thimble-fix there
+_since: dict[int, float] = {}  # fix id → when this server's work on it began (a new fix, a round, a redo)
 _fixers: dict[int, Any] = {}  # fix id → its fixer's conversation (runtime.Conv)
 _where: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its fixer's chat (fixer_chat)
 _recovered = False
@@ -244,9 +245,12 @@ def _event(fid: int, state: str) -> None:
 
 def _phase_set(fid: int, phase: str | None) -> None:
     if phase:
+        if fid not in _phase:
+            _since[fid] = time.time()
         _phase[fid] = phase
     else:
         _phase.pop(fid, None)
+        _since.pop(fid, None)
     _event(fid, phase or "idle")
 
 
@@ -275,7 +279,9 @@ def status(every: bool = False) -> dict[str, Any]:
                      "summary": r.get("summary") or "", "files": len(files), "change": bool(r.get("prev")),
                      "workspace": conv.c if conv is not None else n.get("workspace"),
                      "agent": conv.agent_id if conv is not None else n.get("agent"),
-                     "created": float(r.get("created") or 0),
+                     # the row's timer: since this server began the work it shows (a round of a fix made long ago
+                     # starts at 0), else since the fix was made
+                     "created": _since.get(fid) or float(r.get("created") or 0),
                      "at": max(float(r.get("updated") or 0), float(n.get("at") or 0))})
     rows.sort(key=lambda x: -x["at"])
     return {"problem": why, "fixes": rows}
@@ -774,8 +780,8 @@ def fixes_context(recs: list[dict[str, Any]]) -> str:
         return f"on, being changed ({r.get('state')})" if prev.get("state") == "on" and r.get("state") != "on" else \
             str(r.get("state"))
 
-    lines = ["The person's thimble fixes (start `fix_thimble` with `N <words>` to change fix N, `new <words>` for a new "
-             "fix):"]
+    lines = ["The person's thimble fixes, which they know by name; the number is the handle `fix_thimble` takes "
+             "(`N <words>` to change fix N, `new <words>` for a new fix):"]
     for r in shown:
         summary = _cut(str(r.get("summary") or ""), 160)
         lines.append(f'{r["id"]}  "{fix_name(r, 80)}" ({word(r)})' + (f": {summary}" if summary else ""))
@@ -824,20 +830,25 @@ async def from_tool(c: str, words: str) -> dict[str, Any]:
 
 
 def _recover_soon() -> None:
-    """Once per server: a fix made in the browser whose fixer this server does not run (the server stopped while it
-    worked) is taken as it stands, as at its fixer's end."""
+    """Once per server, on the server's loop: a fix made in the browser whose fixer this server does not run (the
+    server stopped while it worked) is taken as it stands, as at its fixer's end. Called on the loop (status_route),
+    since status() itself runs in a worker thread, which has no loop to start the recovery on."""
     global _recovered
     if _recovered or problem():
         return
-    _recovered = True
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
         return
-    for r in records():
+    _recovered = True
+    loop.create_task(_recover(), name="fix-recover")
+
+
+async def _recover() -> None:
+    for r in await asyncio.to_thread(records):
         fid = int(r["id"])
         if r.get("made_in") == "browser" and r.get("state") == "working" and fid not in _fixers and fid not in _phase:
-            loop.create_task(settle(fid, ""), name=f"fix-recover:{fid}")
+            asyncio.get_running_loop().create_task(settle(fid, ""), name=f"fix-recover:{fid}")
 
 
 # ------------------------------------------------------------------ routes
@@ -858,6 +869,7 @@ def _clicked(http: Request) -> None:
 
 @router.get("/fixes")
 async def status_route(every: bool = False) -> dict[str, Any]:
+    _recover_soon()
     return await asyncio.to_thread(status, every)
 
 

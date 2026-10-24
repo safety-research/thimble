@@ -897,15 +897,15 @@ The fixer did not start on this change: {why} Tell the analyst in one line.
 
 ## fix_thimble-new
 
-thimble started a fork of this conversation that fixes thimble in the background, in a copy ("{fix}"). The person follows its steps in its own thread and decides with a click whether to use the fix. Tell the person in one short line, then go on with their request.
+thimble started a fork of this conversation that fixes thimble in the background, in a copy ("{fix}"). The chat shows the line that opens its thread just above your reply, and thimble asks the person to use the fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
 
 ## fix_thimble-round
 
-thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy. The person follows its steps in the fix's thread and decides with a click whether to use the changed fix. Tell the person in one short line, then go on with their request.
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy. The chat shows the line that opens the fix's thread just above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
 
 ## fix_thimble-round-on
 
-thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy; the version they have stays until they click Use it now. The person follows its steps in the fix's thread and decides with a click whether to use the changed fix. Tell the person in one short line, then go on with their request.
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy; the version they have stays until they use the changed one. The chat shows the line that opens the fix's thread just above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
 
 ## fix_thimble-live
 

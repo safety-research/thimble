@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -315,12 +316,36 @@ async def test_main_may_ask_first_and_starts_the_fix_with_the_answer(fixing, mon
     assert "Incidents by week" in json.dumps(fixer[0]["messages"])
 
 
+async def test_the_row_times_a_round_from_its_start_not_from_when_the_fix_was_made(fixing):
+    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "state": "working", "words": ["a"], "created": time.time() - 3600}
+    fixes._phase_set(1, "fixing")
+    assert time.time() - fixes.status()["fixes"][0]["created"] < 60
+    fixes._phase_set(1, "testing")  # the same work goes on: the same start
+    assert time.time() - fixes.status()["fixes"][0]["created"] < 60
+    fixes._phase_set(1, None)
+    assert 1 not in fixes._since
+
+
+async def test_a_fix_whose_server_stopped_while_it_worked_is_taken_as_it_stands_at_the_page_s_first_look(fixing,
+                                                                                                       monkeypatch):
+    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "state": "working", "words": ["a"], "made_in": "browser",
+                      "work": str(fixing.home / "fixes" / "work" / "1"), "base": "HEAD"}
+    monkeypatch.setattr(fixes, "_recovered", False)
+    await fixes.status_route()  # the route reads the records in a worker thread; the recovery starts on the loop
+    for _ in range(50):
+        if fixing.recs[1]["state"] != "working":
+            break
+        await asyncio.sleep(0.1)
+    assert ("done" in [c[0] for c in fixing.calls]) and fixing.recs[1]["state"] == "ready"
+
+
 def test_main_reads_each_fix_the_words_may_change_by_its_number_name_and_state():
     recs = [{"id": 1, "title": "Card counts rows", "state": "on", "summary": "The card counts\nits rows."},
             {"id": 2, "title": "", "state": "working", "prev": {"state": "on"}},
             {"id": 3, "title": "Old one", "state": "removed"}]
     assert fixes.fixes_context(recs).splitlines() == [
-        "The person's thimble fixes (start `fix_thimble` with `N <words>` to change fix N, `new <words>` for a new fix):",
+        "The person's thimble fixes, which they know by name; the number is the handle `fix_thimble` takes (`N <words>` "
+        "to change fix N, `new <words>` for a new fix):",
         '1  "Card counts rows" (on): The card counts its rows.',
         '2  "fix 2" (on, being changed (working))']
     assert fixes.fixes_context(recs[2:]) == "The person has no thimble fixes yet."
