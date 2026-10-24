@@ -12,7 +12,6 @@ import type { EngineInterface, Register } from 'claude-code'
 import { aboveBar } from '../core/answerview'
 import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
-import { syncOff } from '../settings/term'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
 import { noticeLine, promptTyped } from './notice'
@@ -93,8 +92,7 @@ export const registerBar: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     try {
-      // nothing of thimble's while it is off in this session (/thimble-off)
-      if (e.props.hasSurvey || (await syncOff($))) return next(e)
+      if (e.props.hasSurvey) return next(e)
       const els = $.ui.resolve(e) as Any
       const presses: BarPresses = { settings: () => openSettings($), pane: kind => togglePane($, kind) }
       const width = Math.max(20, e.props.bodyColumns)

@@ -70,8 +70,6 @@ declare module 'claude-code' {
       /** what main does, for the side pane's top row: working, waiting for the person, or replied while the pane was
        *  open (core/pane.ts) */
       paneMain: { s: 'working' | 'asks' | 'replied'; at?: number } | null
-      /** whether thimble is off in this session (/thimble-off, settings/term.ts) */
-      sessionOff: boolean
       /** the id of main's turn that runs, null when none runs (core/turn.ts) */
       mainTurn: string | null
       /** which agents are thimble's forks, and their kind (core/forks.ts) */
@@ -103,8 +101,6 @@ declare module 'claude-code' {
       tray: { stack: unknown[] } | null
       /** the card ] reached, which holds the keys: { row, card } */
       trayCard: { row: string; card: string } | null
-      /** by main's turn: what its prompt was about when the person asked it with the tray open (`the citation "…"`) */
-      trayAsked: StateFamily<string>
 
       // ---- side threads (threads/)
       /** a side thread, by its key (threads/thread.ts Thread): { id, key, agentId, scope, subject, root, status, asks,

@@ -75,20 +75,9 @@ export function noteChange(key, value) {
   if (BY_KEY.has(key) && typeof value === 'boolean') current = { ...current, [key]: value }
 }
 
-/** Whether thimble is off in this session (/thimble-off, settings/term.ts): every feature is then off, whatever its
- *  switch says, and the switches stay as they are. */
-let sessionOff = false
-
-export function setSessionOff(off) {
-  sessionOff = !!off
-}
-
-/** Whether a feature acts now: its option when it is a boolean, else its default; none while thimble is off in this
- *  session. `observer` is whether the look after each reply runs: while a feature one of whose lenses it serves is on.
- *  `thimble` is whether thimble acts at all in this session (its guidance, the bar, the side pane). */
+/** Whether a feature acts now: its option when it is a boolean, else its default. `observer` is whether the look after
+ *  each reply runs: while a feature one of whose lenses it serves is on. */
 export function featureOn(key) {
-  if (sessionOff) return false
-  if (key === 'thimble') return true
   if (key === 'observer') return SWITCHES.some(s => (s.lenses ?? []).length > 0 && switchesFrom(current)(s.key))
   return switchesFrom(current)(key)
 }

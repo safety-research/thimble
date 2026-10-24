@@ -2,7 +2,7 @@
 
 The claims graph beside the chat shows each statement of the work that could be true or false, grouped by the question it is about, so the analyst can check one claim at a time with the records it cites. Each cluster opens with one plain sentence that tells a reader new to the data what its question is and why it matters. Give the claims of the answer and of the analyst's message it answers, and none for a plan, a step or a question.
 
-Write each claim as a full sentence that reads alone, in the message's own words, with its numbers and qualifiers. A claim said again, in any words, is the same claim, and one that says an earlier claim is wrong revises it. A claim that revises another also gives "why": one sentence, in the message's words, on why the earlier claim was wrong. Link a claim to one it supports or that is about the same thing, name each cluster by the one question it looks into, and give it that sentence when it has none or no longer fits.
+Write each claim as a full sentence that reads alone, in the message's own words, with its numbers and qualifiers. A claim said again, in any words, is the same claim, and one that says an earlier claim is wrong revises it. A claim that revises another also gives "why": one sentence, in the message's words, on why the earlier claim was wrong. Link a claim to one it supports or that is about the same thing, and name each cluster by the one question it looks into.
 
 ```
 So far    c2 · k2 · The edits after June 18 favor one side.

@@ -1,7 +1,6 @@
 // The cite and explain tray (tray/): ] at an empty prompt opens it on the acting answer's first citation, which draws in
 // focus; its card shows the check and the evidence, its keys show in the bar; a press on a citation opens it too; a
-// question typed with it open carries the citation's scope to Claude, shows `▸ about …` under the prompt, and closes
-// the tray; 0 closes it. All data is made up. `claude plugin test plugin`.
+// question typed with it open carries nothing of it and closes the tray; 0 closes it. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { citeTint } from '../marks/view'
@@ -82,16 +81,17 @@ const QUOTED = {
   evidence: { kind: 'quote', file: 'runs/summary.txt', line: '4', lines: [{ n: 3, text: 'runs: 40' }, { n: 4, text: 'failed: 12', highlight: [8, 10] }, { n: 5, text: 'passed: 28' }] },
 }
 
-test('] opens the tray on a citation with its evidence; a question asked with it open is about it; 0 closes it', async ($, on) => {
+test('] opens the tray on a citation with its evidence; a question asked with it open carries nothing of it; 0 closes it', async ($, on) => {
   const { submitted, clock } = await resumed($, on, QUOTED)
   // a resumed session: the answer and its checked citation are read back
   // ]: the tray above the bar, on the citation, its keys in the bar
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('12 of 40')
-  // the header's right: the status beside the kind; verified says no reason; then the file's place, dim, and the one
-  // line that holds the value, after a rule
-  expect(band).toContain('✓ verified · citation')
+  // the header's right: the status, then a bold purple × close (no kind word); verified says no reason; then the
+  // file's place, dim, and the one line that holds the value, after a rule
+  expect(band).toContain('✓ verified  × close')
+  expect(band).not.toContain('· citation')
   expect(band).not.toContain('Line 4 says')
   expect(band).toContain('runs/summary.txt:4│failed: 12')
   expect(band).not.toContain('4 │')
@@ -109,17 +109,17 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   const cite = all(drawn).find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
   expect(all(cite).some(n => n.type === 'Text' && n.props?.backgroundColor === citeTint() && n.props?.bold === true && textOf(n) === '12 of 40')).toBe(true)
 
-  // a question typed with the tray open: its scope goes with it, the tray closes, and the prompt shows what it was about
+  // a question typed with the tray open is not about the citation: no scope goes with it (only that the person opened
+  // it, core/engaged.ts), the tray closes, and the prompt shows nothing under it
   await $.prompt.submit({ text: 'why so many?', origin: { kind: 'composer' } } as never)
   const told = (submitted.at(-1).context ?? []).join('\n')
-  expect(told).toContain('citation of your reply open in the tray: "12 of 40"')
-  expect(told).toContain('Its evidence is runs/summary.txt:4.')
+  expect(told).not.toContain('open in the tray')
   expect(told).toContain('They opened the citation "12 of 40"')
   expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
   await $.turn.start({ text: 'why so many?', turnId: 't2' } as never)
   await $.session.append({ message: { type: 'user', role: 'user', content: [{ type: 'text', text: 'why so many?' }] }, door: 'prompt', origin: { kind: 'composer' }, uuid: 'row-q2' } as never)
   const asked = textOf(await $.ui.render({ plugin: 'thimble', component: 'UserMessage', surface: 'terminal', requestId: 'row-q2', viewport: view, props: { text: 'why so many?', origin: { kind: 'composer' } } } as never))
-  expect(asked).toContain('▸ about the citation "12 of 40"')
+  expect(asked).not.toContain('▸ about')
   await $.turn.complete({ turnId: 't2', reason: 'answer', answer: '', durationMs: 10, isAborted: false } as never)
   await clock.advance(100)
 
@@ -134,7 +134,7 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   expect(band).not.toContain('a ask')
 })
 
-test('a corrected value computed by code: purple in the reply; the line that printed it, then its output; c shows all the code and output; c again goes back', async ($, on) => {
+test('a corrected value computed by code: purple in the reply; the line that printed it, then its output; + shows all the code and output; - goes back', async ($, on) => {
   const { clock } = await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11. One run was retried.',
     evidence: { kind: 'computed', by: 'checker', code: 'import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)', output: 'runs: 40\nfailed: 11\npassed: 29', highlight: [[17, 19]] },
@@ -150,75 +150,68 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   let drawnBand = all(await $.ui.render(above()))
   let band = textOf(drawnBand)
   // the header's status, what it was under it (no reason), the code line that printed the value, its output line
-  expect(band).toContain('✓ verified · citation')
+  expect(band).toContain('✓ verified')
   expect(band).toContain('corrected; was 12 of 40')
   expect(band).not.toContain('The output says 11')
   expect(band).toContain('print(f"failed: {bad}")│failed: 11')
-  // the two output lines the one line leaves out, counted at the end of the ruled block, dim
-  expect(band).toContain('│failed: 11│+ 2 more lines')
-  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '+ 2 more lines')?.props?.dimColor).toBe(true)
+  // + expand all at the end of the ruled block, dim
+  expect(band).toContain('│failed: 11│+ expand all')
+  expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === '+ expand all')?.props?.dimColor).toBe(true)
   expect(band).not.toContain('runs: 40')
   expect(band).not.toContain('print("runs:", n)')
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'print(f"failed: {bad}")')?.props?.color).toBe('permission')
   expect(drawnBand.some(n => n.type === 'Code')).toBe(false)
-  expect(band).toContain('c all code and output')
+  expect(band).toContain('+ expand all')
   // (keys apart, so they are not a word typed)
   await clock.advance(2000)
-  // c: all the code (as code), then all the output after the rule, its value still in the tint; no headings
-  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  // +: all the code (as code), then all the output after the rule, its value still in the tint; no headings
+  expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
   const open = await $.ui.render(above())
   const code = all(open).find(n => n.type === 'Code')
   expect(code?.props?.source).toBe('import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)')
   band = textOf(open)
   expect(band).toContain('│runs: 40│failed: 11│passed: 29')
-  expect(band).not.toContain('more line')
-  expect(band).toContain('c one line')
+  expect(band).not.toContain('expand all')
+  expect(band).toContain('- collapse')
+  expect(band).toContain('− collapse')
   expect(band).not.toContain('Output of the code')
   expect(band).not.toContain('The code')
   expect(all(open).some(n => n.type === 'Text' && n.props?.backgroundColor === undefined && (n.hover ?? n.props?.hover)?.backgroundColor === citeTint() && n.props?.underline === true && n.props?.bold === true && textOf(n) === '11')).toBe(true)
-  // c again: back to the one line
+  // -: back to the one line
   await clock.advance(2000)
-  await $.prompt.edit(key('c'))
+  expect(await $.prompt.edit(key('-'))).toEqual({ text: '', cursor: 0 })
   band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('runs: 40')
   expect(band).toContain('failed: 11')
 })
 
-test('each key of the tray is a click too: + N more lines and − one line as c, the last line leaves the mark out of the next prompt, a second click on the open citation closes it, and × closes it', async ($, on) => {
-  const { submitted, clock } = await resumed($, on, {
+test('each key of the tray is a click too: + expand all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and × close closes it', async ($, on) => {
+  await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
     evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nprint(f"failed: {bad}")', output: 'runs: 40\nfailed: 12\npassed: 28', highlight: [[17, 19]] },
   }, 's-tray-clicks')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let band = textOf(await $.ui.render(above()))
-  expect(band).toContain('✓ verified · citation')
-  expect(band).toContain('+ 2 more lines')
-  expect(band).toContain('Your next prompt asks about this citation.')
-  // + 2 more lines: all the output, as c; − one line: back
+  expect(band).toContain('✓ verified')
+  expect(band).toContain('+ expand all')
+  expect(band).not.toContain('next prompt')
+  // + expand all: all the output, as +; − collapse: back
   let tray = await $.ui.mount(above())
   await tray.press({ key: 'more-press' })
   await tray.unmount()
   band = textOf(await $.ui.render(above()))
   expect(band).toContain('│runs: 40│failed: 12│passed: 28')
-  expect(band).toContain('− one line')
+  expect(band).toContain('− collapse')
   tray = await $.ui.mount(above())
   await tray.press({ key: 'more-press' })
   await tray.unmount()
   band = textOf(await $.ui.render(above()))
   expect(band).not.toContain('runs: 40')
-  expect(band).toContain('+ 2 more lines')
-  // leave it out: the line says so, and a prompt sent now carries nothing of the citation
+  expect(band).toContain('+ expand all')
+  // a click on the citation's words in the tray's title closes it, as in the reply
   tray = await $.ui.mount(above())
-  await tray.press({ key: 'tray-loose' })
+  await tray.press({ key: 'tray-title' })
   await tray.unmount()
-  band = textOf(await $.ui.render(above()))
-  expect(band).toContain('Your next prompt is not about it.')
-  expect(band).toContain('ask about it')
-  await $.prompt.submit({ text: 'and the rest?', origin: { kind: 'composer' } } as never)
-  expect((submitted.at(-1).context ?? []).join('\n')).not.toContain('open in the tray')
-  await $.turn.start({ text: 'and the rest?', turnId: 't2' } as never)
-  await $.turn.complete({ turnId: 't2', reason: 'answer', answer: '', durationMs: 10, isAborted: false } as never)
-  await clock.advance(100)
   expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
   // a click on the citation opens the tray; a second click on it closes it
   const cite = all(await $.ui.render(answer('row-t1', TEXT))).find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
@@ -230,10 +223,13 @@ test('each key of the tray is a click too: + N more lines and − one line as c,
   await reply.press({ key: cite.props.key })
   await reply.unmount()
   expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
-  // again open; the × in its header closes it
+  // again open; × close in its header closes it, bold in thimble's purple
   reply = await $.ui.mount(answer('row-t1', TEXT))
   await reply.press({ key: cite.props.key })
   await reply.unmount()
+  const x = all(await $.ui.render(above())).find(n => n.type === 'Text' && textOf(n) === '× close')
+  expect(x?.props).toMatchObject({ bold: true })
+  expect(typeof x?.props?.color).toBe('string')
   tray = await $.ui.mount(above())
   await tray.press({ key: 'tray-close' })
   await tray.unmount()
@@ -245,7 +241,7 @@ test('a citation the check found false: × failed in the header, as any failed o
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
-  expect(band).toContain('× failed · citation')
+  expect(band).toContain('× failed  × close')
   expect(band).not.toContain('wrong')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === '× failed')?.props?.color).toBe('error')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'Line 4 counts 12 failed, but 3 were retried.')?.props).toMatchObject({ dimColor: true })
@@ -309,7 +305,7 @@ test('a citation whose check did not run is failed: × in the reply, × failed i
   await $.prompt.edit(key(']'))
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
-  expect(band).toContain('× failed · citation')
+  expect(band).toContain('× failed  × close')
   expect(band).not.toContain('not checked')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'The check did not run.')?.props).toMatchObject({ dimColor: true })
   expect(band).not.toContain('gave no evidence')
@@ -320,7 +316,7 @@ test('a citation whose check did not run is failed: × in the reply, × failed i
   await $.prompt.edit(key(']'))
   const ended = textOf(await $.ui.render(above()))
   expect(ended).toContain('p95 check')
-  expect(ended).toContain('× failed · citation')
+  expect(ended).toContain('× failed  × close')
   expect(ended).toContain('The check did not run.')
   expect(ended).not.toContain('session ended')
   expect(ended).toContain('x repair')
@@ -452,6 +448,7 @@ test('a heads-up on a citation\'s words is one ] away; it shows whole, with no p
   expect(band).toContain('? ask about this heads-up')
   expect(band).toContain('] next citation')
   for (const gone of ['m more', 'lines 1–', 'Your next prompt', 'leave it out', 'Claude can do this', 'o ask']) expect(band).not.toContain(gone)
+  expect(all(await $.ui.render(above(12))).some(n => n.props?.key === 'tray-page')).toBe(false)
   // ] goes on to the citation, then the explainer after it
   await clock.advance(2000)
   await $.prompt.edit(key(']'))

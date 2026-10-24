@@ -4,8 +4,8 @@
 // call, since the old place is in the terminal's scrollback: canRedraw). Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
-//   frame         the card's frame: its title (a click asks about the card) and, at its right, `? ask`, which asks about
-//                 the card or the item selected (`? ask about Cherbourg`), the Client (a click on an item selects it as
+//   frame         the card's frame: its title (a click asks about the card) and, at its right, `ask about this card`,
+//                 or about the item selected (`ask about Cherbourg`), the Client (a click on an item selects it as
 //                 its key does; on other words, asks about them: client.tsx, runner.mjs pick), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
 //                 asked), beside the line a click selected (`▸`), about that part, else beside the title; nothing for a card the version of its answer shown now leaves out (core/answerview.ts
@@ -232,6 +232,63 @@ export async function keyOwner($: Engine, key: string): Promise<CardMeta | null>
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
 }
 
+/** What j and k do on a card, found once per version by pressing them in the runner, which leaves the card as it was
+ *  (act): by its ▸ (the card guide's marker), the way each moves it, down or up; else `step` when each changes the card
+ *  and the other takes it back (a card of steps). Null while that is not known, or for keys that do neither. */
+type Steps = Record<string, 'down' | 'up' | 'step'>
+const stepsKnown = new Map<string, { gen: number; dir: Steps | null }>()
+const stepsAsked = new Set<string>()
+
+async function stepsOf($: Engine, meta: CardMeta): Promise<Steps | null> {
+  const known = stepsKnown.get(meta.id)
+  if (known && known.gen === meta.gen) return known.dir
+  const once = `${meta.id}:${meta.gen}`
+  if (stepsAsked.has(once)) return null
+  stepsAsked.add(once)
+  void (async () => {
+    const width = (await treeOf($, meta.id))?.width ?? cardWidth()
+    const at = (c: Any) => (Array.isArray(c?.lines) ? (c.lines as string[]).findIndex(l => l.includes('▸')) : -1)
+    const start = await askCard($, meta, 'copy', { width })
+    const order = ['j', 'k', 'k', 'j'].filter(k => meta.keys.includes(k))
+    const r = order.length ? await askCard($, meta, 'act', { width, actions: order.map(key => ({ key })) }) : null
+    const copies = [start, ...((r?.copies ?? []) as Any[])]
+    const rows = copies.map(at)
+    const texts = copies.map(c => (Array.isArray(c?.lines) ? (c.lines as string[]).join('\n') : null))
+    const dir: Steps = {}
+    order.forEach((k, i) => {
+      const a = rows[i]!
+      const b = rows[i + 1]!
+      if (!dir[k] && a >= 0 && b >= 0 && a !== b) dir[k] = b > a ? 'down' : 'up'
+    })
+    // j then k: the card changed and came back, so the two step it one way and back
+    if (!dir.j && !dir.k && order.join('') === 'jkkj' && texts[0] !== null && texts[1] !== texts[0] && texts[2] === texts[0]) { dir.j = 'step'; dir.k = 'step' }
+    stepsKnown.set(meta.id, { gen: meta.gen, dir: Object.keys(dir).length ? dir : null })
+    $.ui.invalidate('ui.render')
+  })().catch(() => stepsKnown.set(meta.id, { gen: meta.gen, dir: null }))
+  return null
+}
+
+/** The keys of the card that takes them now (keyOwner), for the bar: j and k by the way they move the ▸ (`j down`,
+ *  `k up`) or through steps (`j k step`), and the card's other letters together (`f g card keys`). None when no card on screen takes a key. */
+export async function cardKeyWords($: Engine): Promise<{ key: string; words: string }[]> {
+  const metas: CardMeta[] = []
+  for (const id of await keptSeen($)) {
+    if (shown.get(id) === false) continue
+    const m = await keptMeta($, id)
+    if (m && m.version > 0 && m.keys.length) metas.push(m)
+  }
+  if (!metas.length) return []
+  const focus = await keptFocus($)
+  const meta = metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0]!
+  const dir = await stepsOf($, meta)
+  const steps = meta.keys.filter(k => dir?.[k] === 'step')
+  const out = steps.length ? [{ key: steps.join(' '), words: 'step' }] : []
+  out.push(...meta.keys.filter(k => dir?.[k] && dir[k] !== 'step').map(k => ({ key: k, words: dir![k]! as string })))
+  const rest = meta.keys.filter(k => !dir?.[k])
+  if (rest.length) out.push({ key: rest.join(' '), words: 'card keys' })
+  return out
+}
+
 /** The card's frame: title, the Client that draws its tree, a failure, and the keys that reach it now; under it, what
  *  the features put under a card. `o.layout`: the width the card is laid out at when that is wider than the frame
  *  (a copy in the side pane is the conversation's drawing, cut at the frame's edge, so no row of it wraps). */
@@ -284,12 +341,12 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
 }
 
-/** The words of the card's visible ask: `? ask about` the item selected (its words, cut), else `? ask`. */
+/** The words of the card's visible ask: `ask about` the item selected (its words, cut), else `ask about this card`. */
 export function askLabel(selected: string): string {
   const words = partWords(cardPart(selected))
-  if (!words) return '? ask'
+  if (!words) return 'ask about this card'
   const cut = Array.from(words).length > 28 ? `${Array.from(words).slice(0, 27).join('')}…` : words
-  return `? ask about ${cut}`
+  return `ask about ${cut}`
 }
 
 // the selected line of each drawing, worked out once for each tree
