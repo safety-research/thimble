@@ -318,6 +318,28 @@ test("a narrow pane whose keys wrap: the map and the claim's detail keep to the 
   }
 })
 
+test("a picked claim's paragraph reads as the reply does: a figure the check corrected stands corrected", async () => {
+  setOptions({})
+  const s = setup([reply([
+    { claim: 'The admin deleted pages for four weeks.', quote: 'The admin then spent four weeks', cluster: 'cleanup' },
+    { claim: 'The admin deleted 5,217 pages.', quote: 'deleted 5,217 pages', cluster: 'cleanup' },
+  ])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  const text = 'The admin then spent four weeks cleaning up and [deleted 5,217 pages](#), each marked deleted.'
+  await answered(s, { id: 't1', prompt: 'What did the admin do?', rows: [text] })
+  const row = 't1-row-0'
+  const at = text.indexOf('[deleted')
+  await s.$.state.set({ plugin: 'thimble', key: 'marksRow', id: row }, 'reply-1')
+  await s.$.state.set({ plugin: 'thimble', key: 'marks', id: 'reply-1' }, { key: 'reply-1', turnId: 't1', rows: [row], startedAt: 0, settledAt: 1, items: [
+    { n: 1, row, words: 'deleted 5,217 pages', start: at, end: at + 22, sentence: text, status: 'corrected', shown: 'deleted 5,144 pages', was: 'deleted 5,217 pages' },
+  ] })
+  const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 40 } } }, args, els)
+  const other = textOf(await draw({ claim: 'c1' }))
+  expect(other).toContain('▎ The admin then spent four weeks cleaning up and deleted 5,144 pages, each marked deleted.')
+  // a claim whose own words the check changed is found in the words Claude wrote
+  expect(textOf(await draw({ claim: 'c2' }))).toContain('▎ The admin then spent four weeks')
+})
+
 test('c in a terminal too narrow for the pane says to type /claims; once /claims opens the pane, that line goes', async () => {
   setOptions({})
   const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])

@@ -20,6 +20,9 @@ import { readKept, writeKept } from '../core/env'
 import { openPane } from '../core/pane'
 import { sessionKey } from '../hooks/conversation'
 import type { Look } from '../observer/observer'
+import { rewritesIn, withCorrections } from '../marks/message.js'
+import { rowMarks } from '../marks/store'
+import { spanOf } from './graph.js'
 import { applyTurn, clearGap, emptyStore, grownClusters, grownLines, noteFor, noteGap, promptLines, readStore } from './store.js'
 
 type Engine = EngineInterface
@@ -142,9 +145,16 @@ async function lookPlaces($: Engine, look: Look): Promise<Place[]> {
 const promptRow = (turnId: string) => `prompt-${turnId}`
 
 /** The words of the message a claim was said in: one of Claude's text rows, or a turn's prompt. */
-export async function placeText($: Engine, row: string): Promise<string | null> {
+export async function placeText($: Engine, row: string, place?: { start?: number; end?: number; quote?: string; sentence?: string }): Promise<string | null> {
   const m = await messageOf($, row)
-  if (m?.text) return m.text
+  if (m?.text) {
+    // the reply as the person reads it: each corrected citation's words in place of Claude's (marks/register.ts draws
+    // it so), unless the claim's own words are among those the check changed
+    const items = (await rowMarks($, row).catch(() => null))?.items ?? []
+    if (!items.some(it => it.status === 'corrected')) return m.text
+    const read = withCorrections(rewritesIn(m.text, items).text, items) as string
+    return !place || spanOf(read, place) ? read : m.text
+  }
   const t = (await turnsNow($)).find(x => x.prompt.row === row || promptRow(x.turnId) === row)
   return t?.prompt.text ?? null
 }

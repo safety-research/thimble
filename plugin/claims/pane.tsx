@@ -270,7 +270,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   // the claim picked: the paragraph of the reply it came from, and the explainer asked for under it
   const sel = selectedOf(raw, keep).claim as Any
   const said = sel ? ((sel.said || []) as Any[]).find(x => x.row && x.by === 'claude') ?? (sel.said || []).find((x: Any) => x.row) ?? null : null
-  const md = said ? await placeText($, said.row) : null
+  const md = said ? await placeText($, said.row, said) : null
   const passage = md ? { md, place: said } : null
   const st = { ...keep, ...(a.from != null ? { from: a.from } : {}) }
   const opts = { w: W, h: H, bright: await claimsBright($), terms, passage, explainer: a.term ? explainerOf(glosses, a.term) : null }
