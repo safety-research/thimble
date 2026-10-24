@@ -49,8 +49,8 @@ export type TextView = { text?: string | null; hidden?: boolean; dim?: boolean }
 export type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean; tint?: string; hoverBg?: string }
 
 /** Words of a row drawn as a press of a feature's (explain/seam.ts explainSpans): [start, end) are offsets into the
- *  text the row shows, on plain words (a span inside a citation's words is drawn with the citation, whose press it
- *  keeps). `id` names it to the tray (MarkRef); `focus`: how it looks while the tray shows it. */
+ *  text the row shows, on plain words (a citation's words inside it, or around it, are drawn with the citation, whose
+ *  press they keep). `id` names it to the tray (MarkRef); `focus`: how it looks while the tray shows it. */
 export type Span = { id: string; start: number; end: number; look: SpanLook; focus?: SpanLook; label: string; onPress?: () => unknown }
 
 /** A mark of a row, as the tray and the explainers name it: a citation by its number in the reply (marks/store.ts
@@ -80,16 +80,16 @@ export async function textView($: Engine, row: string, text: string): Promise<{ 
 }
 
 /**
- * Spans as drawn: each inside the text, on words that are not a citation's link syntax, either inside one citation's
- * words or outside every citation; one that overlaps an earlier one is left out. The span the tray shows (`focus`, its
- * id) has its focus look. In order of their start.
+ * Spans as drawn: each inside the text, inside one citation's words or over whole citations, never over part of a
+ * citation's link syntax; one that overlaps an earlier one is left out. The span the tray shows (`focus`, its id) has
+ * its focus look. In order of their start.
  */
 export function checkSpans(given: unknown, text: string, marks: { start: number; end: number; words: string }[], focus: string | null): Span[] {
   const out: Span[] = []
   for (const s of Array.isArray(given) ? (given as Span[]) : []) {
     if (!s || typeof s.id !== 'string' || !(s.start >= 0) || !(s.end > s.start) || s.end > text.length) continue
     const inside = marks.find(m => s.start >= m.start + 1 && s.end <= m.start + 1 + m.words.length)
-    const crosses = !inside && marks.some(m => s.start < m.end && s.end > m.start)
+    const crosses = !inside && marks.some(m => s.start < m.end && s.end > m.start && !(s.start <= m.start && s.end >= m.end))
     if (crosses || out.some(o => s.start < o.end && s.end > o.start)) continue
     out.push(focus === s.id && s.focus ? { ...s, look: { ...s.look, ...s.focus } } : s)
   }

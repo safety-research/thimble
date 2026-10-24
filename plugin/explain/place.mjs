@@ -4,7 +4,7 @@
 //
 // A term stands where it first stands outside links and code (findTerm), else in a link's words (findInLink, drawn
 // inside the link: a citation's words keep its press and take the fill), else in the words as the person reads them
-// (findRead: across a link or a code span, on the longest part outside them). A text shown in place of Claude's words
+// (findRead: across a link or a code span, each one whole: a mark may cover a citation, which keeps its press). A text shown in place of Claude's words
 // (a squeezed version) may say a term in another form, so it is found again there (anchorTerm). The heads-up is placed
 // first: its words are often a longer phrase that holds an explainer's term, and the explainer then stands where its
 // term is said again.
@@ -145,8 +145,9 @@ export function readable(md) {
 /**
  * Where a term stands in the words as the person reads them, when the markdown says them with a link in between ("5 of
  * the 13 files in plugin/prompts" is `[5](#) of the 13 files in \`plugin/prompts\``): the term is found in
- * readable(text) and mapped back. A mark never stands on a link or on another mark, so it takes the longest part of the
- * match outside them, with each code span it touches whole. Null when no such part holds a word.
+ * readable(text) and mapped back, with each link and code span it touches whole, so a mark may cover a citation (the
+ * citation keeps its press inside it). A mark never stands on another mark, so it takes the longest part of the match
+ * outside them. Null when no such part holds a word.
  */
 export function findRead(text, term, taken = []) {
   const t = termOf(term)
@@ -155,7 +156,7 @@ export function findRead(text, term, taken = []) {
   const r = readable(s)
   const code = codeRanges(s)
   const blocked = taken.map(m => [m.start, m.end])
-  for (const l of linksOf(s)) blocked.push([l.start, l.end])
+  const whole = [...code, ...linksOf(s).map(l => [l.start, l.end])]
   const body = t.split(/\s+/).map(escapeRe).join('\\s+')
   for (const flags of ['gu', 'giu']) {
     const re = new RegExp('(?<![\\p{L}\\p{N}_])' + body + '(?![\\p{L}\\p{N}_])', flags)
@@ -171,9 +172,9 @@ export function findRead(text, term, taken = []) {
       const spans = parts.map(p => {
         let a = p.a
         let b = p.b
-        for (const [x, y] of code) if (a < y && b > x) { a = Math.min(a, x); b = Math.max(b, y) }
         while (a < b && /[\s,.;:!?()\-–—]/.test(s[a])) a++
         while (b > a && /[\s,.;:!?()\-–—]/.test(s[b - 1])) b--
+        for (const [x, y] of whole) if (a < y && b > x) { a = Math.min(a, x); b = Math.max(b, y) }
         return { start: a, end: b, n: p.n }
       }).filter(p => p.end > p.start && /[\p{L}\p{N}]/u.test(s.slice(p.start, p.end)) && !inside(blocked, p.start, p.end))
       if (spans.length) {

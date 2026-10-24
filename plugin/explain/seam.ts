@@ -96,7 +96,7 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
       end: p.end,
       look: { backgroundColor: heads ? c.headsBg : c.glossBg, hoverBg: heads ? c.headsFocus : c.glossFocus },
       focus: { bold: true, backgroundColor: heads ? c.headsFocus : c.glossFocus },
-      label: `${heads ? 'heads up' : 'explain'} ${text.slice(p.start, p.end).replace(/`/g, '')}`.slice(0, 120),
+      label: `${heads ? 'heads up' : 'explain'} ${withoutMarks(text.slice(p.start, p.end)).replace(/`/g, '')}`.slice(0, 120),
       onPress: async () => {
         await openTray($, { row, kind, id: p.id })
         await tellOpened($, heads ? { kind, row, term: g.term, title: g.title } : { kind, row, term: g.term }, own)

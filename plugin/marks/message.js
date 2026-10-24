@@ -11,6 +11,7 @@
 //   withRewrites(text, items)  -> the text with the sentences its marks' checks rewrote in place of its own
 //   rewritesIn(text, items)    -> that text, and the marks whose rewrite stands in it
 //   withCorrections(text, items) -> the text with each corrected mark's words in place of its own
+//   carrier(was, now)          -> where a place on a text stands in the version of it the checks made (null: nowhere)
 //   plainSentence(sentence)    -> that sentence as a person reads it: no markdown, a table row's cells joined by ` · `
 //   withoutMarks(text)         -> the text with each mark as its words alone (marks switched off)
 //   blocks(text)               -> the markdown's blocks with their offsets
@@ -221,6 +222,50 @@ export function withCorrections(text, items) {
   return out
 }
 
+/**
+ * Where a place on a text stands in the version of it the checks made (withCorrections, withRewrites): `carrier(was,
+ * now)` is a function (start, end) -> {start, end} or null. Both texts hold the same marks; each is cut at its marks'
+ * words, and in each piece the words both versions share at its start and at its end keep their place. An end in the
+ * words a correction changed goes to that mark's corrected words, so a place on a mark's words stays on them whatever
+ * the check made of them. One in words a rewrite changed outside the marks has no place, nor has any when the marks
+ * differ.
+ */
+export function carrier(was, now) {
+  const a = String(was || '')
+  const b = String(now || '')
+  const ma = marksIn(a)
+  const mb = marksIn(b)
+  if (ma.length !== mb.length) return () => null
+  const cuts = (s, ms) => [0, ...ms.flatMap(m => [m.start + 1, m.start + 1 + m.words.length]), s.length]
+  const ca = cuts(a, ma)
+  const cb = cuts(b, mb)
+  const pieces = ca.slice(1).map((ob, i) => {
+    const oa = ca[i], na = cb[i], nb = cb[i + 1]
+    const most = Math.min(ob - oa, nb - na)
+    let p = 0
+    while (p < most && a[oa + p] === b[na + p]) p++
+    let q = 0
+    while (q < most - p && a[ob - 1 - q] === b[nb - 1 - q]) q++
+    return { oa, ob, na, nb, p, q, mark: i % 2 === 1 }
+  })
+  // a start stands in the piece it opens, an end in the piece it closes. Outside a mark, its first or last character
+  // must be one both versions share; on a mark's words, one next to the changed words is enough
+  const to = (x, end) => {
+    const c = pieces.find(k => (end ? x > k.oa && x <= k.ob : x >= k.oa && x < k.ob))
+    if (!c) return null
+    const k = x - c.oa
+    const r = c.ob - x
+    if (end ? k <= c.p : k < c.p || (c.mark && k === c.p)) return c.na + k
+    if (end ? r < c.q || (c.mark && r === c.q) : r <= c.q) return c.nb - r
+    return c.mark ? (end ? c.nb : c.na) : null
+  }
+  return (start, end) => {
+    const x = to(start, false)
+    const y = to(end, true)
+    return x != null && y != null && y > x ? { start: x, end: y } : null
+  }
+}
+
 /** A sentence of sentenceOf as a person reads it: no heading, quote or list marker, a table row's cells joined by
  *  ` · `, each mark's words without its brackets, and no code marks. */
 export function plainSentence(sentence) {
@@ -339,7 +384,8 @@ function linkAt(s) {
  * own: an explainer, a heads-up; core/answerview.ts Span), and `tag` the drawing's own (a glyph after a mark's words).
  * Bold, italic and inline code as Claude Code draws them; a mark's words keep their own bold, `*` italic and code, and
  * draw each `_` as written; a link that is no mark reads as its words then its target, as Claude Code draws one. A span
- * lies on plain words, inside one mark's words or outside every mark ({start, end}: offsets into the text).
+ * lies on plain words, inside one mark's words, or over whole marks, whose runs then carry both ({start, end}: offsets
+ * into the text).
  */
 export function inline(text, from, to, marks = [], spans = []) {
   const s = String(text || '')
@@ -367,18 +413,19 @@ export function inline(text, from, to, marks = [], spans = []) {
   const walk = (a, end, extra) => {
     let i = a
     while (i < end) {
-      const mk = extra.mark === undefined ? mine.find(m => m.start === i) : null
-      if (mk) {
-        const saved = { ...style }
-        walk(mk.start + 1, mk.start + 1 + mk.words.length, { mark: mk.i })
-        Object.assign(style, saved)
-        i = mk.end
-        continue
-      }
+      // a span first: one that starts on a mark's bracket covers the mark whole, and the mark's words are the span's too
       const sp = extra.span === undefined ? spanned.find(x => x.start === i && x.end <= end) : null
       if (sp) {
         walk(sp.start, sp.end, { ...extra, span: sp.i })
         i = sp.end
+        continue
+      }
+      const mk = extra.mark === undefined ? mine.find(m => m.start === i) : null
+      if (mk) {
+        const saved = { ...style }
+        walk(mk.start + 1, mk.start + 1 + mk.words.length, { mark: mk.i, ...(extra.span !== undefined ? { span: extra.span } : {}) })
+        Object.assign(style, saved)
+        i = mk.end
         continue
       }
       const c = s[i]

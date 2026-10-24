@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { inline, marksIn, rewritesIn, runsText, sentenceOf, withCorrections, withRewrites } from '../message.js'
+import { carrier, inline, marksIn, rewritesIn, runsText, sentenceOf, withCorrections, withRewrites } from '../message.js'
 
 const words = text => marksIn(text).map(m => m.words)
 
@@ -93,7 +93,30 @@ test('a correction\'s words stand in place of its mark\'s words, so features pla
   assert.equal(withCorrections(text, [{ status: 'corrected', shown: '11 of [40' }]), text)
 })
 
-test("a feature's span lies on plain words or inside one mark's words, and its runs carry its index", () => {
+test("a place on Claude's words follows its words into the version the checks made: a correction's words, a rewrite's", () => {
+  const was = 'They saved under [3,103 different usernames](#). Each run has a different fake date.'
+  const now = withCorrections(was, [{ status: 'corrected', shown: '3,102 different usernames' }])
+  const carry = carrier(was, now)
+  const on = (w, from = 0) => carry(was.indexOf(w, from), was.indexOf(w, from) + w.length)
+  const at = p => (p ? now.slice(p.start, p.end) : null)
+  // the mark's words, whole or in part, stand on the corrected words; words outside the mark keep their place
+  assert.equal(at(on('3,103 different usernames')), '3,102 different usernames')
+  assert.equal(at(on('3,103')), '3,102')
+  assert.equal(at(on('different usernames')), 'different usernames')
+  assert.equal(at(on('a different fake date')), 'a different fake date')
+  assert.equal(at(on('saved under [3,103 different usernames](#)')), 'saved under [3,102 different usernames](#)')
+  // in a sentence a check rewrote: the words it kept keep their place, the words it changed have none
+  const text = 'Of the runs, [12 of 40](#) failed on Tuesday. The p95 rose.'
+  const rewritten = withRewrites(text, [{ status: 'corrected', shown: '11 of 40', rewrite: 'Of the runs, [11 of 40] failed on Monday.' }])
+  const moved = carrier(text, rewritten)
+  assert.equal(moved(text.indexOf('Tuesday'), text.indexOf('Tuesday') + 7), null)
+  const p95 = moved(text.indexOf('p95'), text.indexOf('p95') + 3)
+  assert.equal(rewritten.slice(p95.start, p95.end), 'p95')
+  // texts with other marks: no place
+  assert.equal(carrier(was, 'No marks here.')(0, 4), null)
+})
+
+test("a feature's span lies on plain words, inside one mark's words or over whole marks, and its runs carry its index", () => {
   const text = 'The page waits on `hydrate()` until [the query ends](#), then hydrate runs.'
   const marks = marksIn(text)
   const at = (w, from = 0) => text.indexOf(w, from)
@@ -110,4 +133,12 @@ test("a feature's span lies on plain words or inside one mark's words, and its r
   assert.deepEqual([inside.s, inside.mark], ['query', 0])
   // the words of the mark around the span stay the mark's
   assert.equal(runs.filter(r => r.mark === 0).map(r => r.s).join(''), 'the query ends')
+  // a span over a whole mark: the mark's words are the mark's and the span's, the words around them the span's
+  const by = 'Answers were shared by [1,212 accounts](#) in June.'
+  const over = inline(by, 0, by.length, marksIn(by), [{ start: by.indexOf('by'), end: by.indexOf(' in June') }])
+  assert.deepEqual(over.filter(r => r.span === 0).map(r => [r.s, r.mark]), [['by ', undefined], ['1,212 accounts', 0]])
+  // one that starts on the mark's bracket too
+  const first = '[1,212 accounts](#) shared answers.'
+  const from = inline(first, 0, first.length, marksIn(first), [{ start: 0, end: first.indexOf(' answers') }])
+  assert.deepEqual(from.filter(r => r.span === 0).map(r => [r.s, r.mark]), [['1,212 accounts', 0], [' shared', undefined]])
 })
