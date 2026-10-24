@@ -44,7 +44,6 @@ import { labelsOf, turnOfRow, turnsNow } from '../core/answers'
 import { rootHere, runThimble } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
 import { accent } from '../core/theme'
-import { featureOn } from '../settings/features.mjs'
 import type { Take } from '../hooks/keys'
 import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
@@ -182,8 +181,6 @@ async function cardNames($: Engine, id: string): Promise<string[]> {
 }
 
 export async function labelsUnderAnswer($: Engine, els: Any, row: string, _cols: number): Promise<Any[]> {
-  // none while thimble is off in this session (/thimble-off), as the answer's other lines
-  if (!featureOn('thimble')) return []
   const turn = await turnOfRow($, row)
   if (!turn || turn.answer !== row || !turn.labels?.length) return []
   // not those a card of this answer shows
@@ -198,7 +195,6 @@ export async function labelsUnderAnswer($: Engine, els: Any, row: string, _cols:
 }
 
 export async function labelsUnderCard($: Engine, els: Any, id: string, _cols: number): Promise<Any[]> {
-  if (!featureOn('thimble')) return []
   const found = await usedOf($, await cardNames($, id))
   if (!found?.length) return []
   const tree = (await treeOf($, id))?.tree ?? null

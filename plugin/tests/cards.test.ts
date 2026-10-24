@@ -548,17 +548,17 @@ test('the Client makes every run of a card clickable without a Button that holds
   expect(posts.at(-1).events.at(-1).pointer).toEqual({ down: { x: 8, y: 2 }, up: { x: 8, y: 2 }, button: 'left' })
 })
 
-test('a card shows `? ask` at its title\'s right, which names the item selected; a click on words on no item asks a side thread about them', async ($, on) => {
+test('a card shows `ask about this card` at its title\'s right, which names the item selected; a click on words on no item asks a side thread about them', async ($, on) => {
   const w = world(on)
   const opened: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  // nothing selected: `? ask`, about the card
+  // nothing selected: `ask about this card`
   const input = { title: 'Scores', data: 'runs.json', view: VIEW }
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_31', ...input } as never)
   const row = await shown($, callRow('toolu_made_up_31', input))
   let ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_31', input) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
-  expect(textOf(ask)).toBe('? ask')
+  expect(textOf(ask)).toBe('ask about this card')
   expect(ask.props.label).toBe('ask about the card "Scores"')
   // a click on the words `bram 5`, on no item the card's keys select: the runner is asked, then a side thread about
   // them opens
@@ -572,6 +572,21 @@ test('a card shows `? ask` at its title\'s right, which names the item selected;
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_32', ...picked } as never)
   await (await shown($, callRow('toolu_made_up_32', picked))).unmount()
   ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_32', picked) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
-  expect(textOf(ask)).toBe('? ask about bram 5')
+  expect(textOf(ask)).toBe('ask about bram 5')
   expect(ask.props.label).toBe('ask about "bram 5" in the card "Picked"')
+})
+
+test("a view's own Button under the pointer: its words show inverse, and a bar in it keeps its color", async () => {
+  const el = (type: string) => (p: Any) => ({ type, props: p })
+  const surface: Any = { elements: { Box: el('Box'), Text: el('Text'), Button: el('Button') }, columns: 60, rows: 0, post: () => undefined, onPointer: () => undefined }
+  // a row the view made a Button: its label and number, then its bar in a Text of its own color
+  const row = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Button', p: { plain: true, onPress: 3 }, c: [{ t: 'Text', p: { bold: true }, c: ['▸ bram  5 ', { t: 'Text', p: { color: 'success' }, c: ['█████'] }] }] }] }
+  const button = elements((Card as Any)({ tree: row, width: 60 }, surface)).find(n => n.type === 'Button')!
+  expect(button.props.hover).toMatchObject({ inverse: false })
+  const texts = elements(button).filter(n => n.type === 'Text')
+  const words = texts.find(n => n.props.children === '▸ bram  5 ')!
+  expect(words.props.hover).toMatchObject({ scope: button.props.hover.scope, inverse: true })
+  const bar = texts.find(n => n.props.color === 'success')!
+  expect(bar.props.children).toEqual(['█████'])
+  expect(bar.props.hover).toBeUndefined()
 })

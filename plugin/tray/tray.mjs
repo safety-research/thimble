@@ -14,11 +14,10 @@
 //   sameRef(a, b), open(f), push(tray, f), back(tray), top(tray), base(tray)
 //   stopsOfRow(row, cites, spans, cards)   one row's stops: its citations and spans by where they stand, then its cards
 //   stopsOfTurn(rows, stopsOf, inline)     a turn's stops: its rows' and the cards Claude drew between them
-//   pageOf(heights, room, from), rowsOf(line, width)   what of a tall tray body fits above the bar, and `m` for more
+//   rowsOf(line, width)                    the rows a line takes when it wraps
 //   indexOf(list, at), stepFrom(list, k, dir), restStop(pool, dir)   where ] and [ go next, and from rest
 //   stopWhat(stop), stepWords(ends), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
-//   scopeText(frame, info)                 what a question asked with the tray open carries for Claude
 //   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it, or
 //                                          did not run: x starts it)
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
@@ -93,44 +92,6 @@ export function stopsOfTurn(rows, stopsOf, inline) {
   return out
 }
 
-/**
- * Which units of a body fit in `room` rows (`heights`: each unit's rows), from unit `from`: {start, end, more} where
- * units start..end-1 show and `more` is how many are left out. When all fit, all show. Else one row is kept for the
- * line that says there is more, and at least one unit shows; the rows left after the units that fit show the next unit's
- * first rows. `next`: where `m` goes (that cut unit, whole), the start again after the end. A unit taller than the room
- * shows a room of its rows at a time: `skip` (from `skip`, its rows already shown) is how many of its first rows the
- * page leaves out, and `nextSkip` where `m` goes on in it.
- */
-export function pageOf(heights, room, from = 0, skip = 0) {
-  const hs = (heights || []).map(h => Math.max(1, h | 0))
-  const total = hs.reduce((a, b) => a + b, 0)
-  if (!(room > 0) || total <= room) return { start: 0, end: hs.length, more: 0, next: null }
-  const start = from > 0 && from < hs.length ? from : 0
-  const cut = start === from && skip > 0 && skip < hs[start] ? skip : 0
-  const shown = cut ? { skip: cut } : {}
-  let end = start + 1
-  let used = hs[start] - cut
-  // the rest of the first unit is taller than the room: its next rows, and m goes on in it
-  if (used > room - 1) return { start, end, more: hs.length - end + start, next: start, ...shown, nextSkip: cut + room - 1 }
-  while (end < hs.length && used + hs[end] <= room - 1) { used += hs[end]; end++ }
-  // a unit too tall for the rows left shows its first rows there (the page cuts it) and m starts at it, so the rows
-  // under a short unit are not left empty when the next one wraps to more of them
-  if (end < hs.length && used < room - 1) return { start, end: end + 1, more: hs.length - end - 1 + start, next: end, ...shown }
-  return { start, end, more: hs.length - end + start, next: end < hs.length ? end : 0, ...shown }
-}
-
-/** The lines a page of a body shows, as the line that says there is more counts them: {first, last, total}, from 1,
- *  in rows (`heights` and `room` as pageOf takes them, `page` its result), so a paragraph that wraps to five rows
- *  counts as five lines. */
-export function pageRows(heights, room, page) {
-  const hs = (heights || []).map(h => Math.max(1, h | 0))
-  const sum = n => hs.slice(0, n).reduce((a, b) => a + b, 0)
-  const total = sum(hs.length)
-  const first = Math.min(total, sum(page.start) + (page.skip || 0) + 1)
-  const last = Math.max(first, Math.min(total, sum(page.end), first - 1 + Math.max(1, room - 1)))
-  return { first, last, total }
-}
-
 /** The rows a line of `width` cells takes when it wraps at words (a line is at least one row). */
 export function rowsOf(line, width) {
   const w = Math.max(8, width | 0)
@@ -203,34 +164,6 @@ export function aboutOf(f, info = {}) {
   const g = info.gloss || {}
   if (f.kind === 'heads') return `the heads-up ${q(cut(plain(g.title || g.term), 80))}`
   return `the explainer of ${q(cut(plain(g.term), 80))}`
-}
-
-/** Where a citation's evidence is, in words for Claude: the cited place, or the code that computed it. */
-function evidenceWords(ev) {
-  if (!ev) return ''
-  if (ev.kind === 'computed') return ` Its evidence is the output of code ${ev.by === 'main' ? 'you' : 'the check'} ran.`
-  if (ev.kind === 'card') return ` Its evidence is the card "${ev.title}" (${ev.ref}).`
-  return ` Its evidence is ${ev.file}:${ev.line}.`
-}
-
-/**
- * What a question the person asks with the tray open carries for Claude: which mark was open, where it stands, and
- * what it said, so "this" can mean it. `info`: {begins (the reply's first words), words, status, evidence} for a
- * citation, {begins, gloss} for an explainer or a heads-up.
- */
-export function scopeText(f, info = {}) {
-  if (!f) return ''
-  const begins = cut(String(info.begins || '').replace(/\s+/g, ' ').trim(), 80)
-  const where = begins ? ` in your reply that begins "${begins}"` : ''
-  if (f.kind === 'citation') {
-    const st = info.status === 'corrected' ? ' The check corrected it.' : info.status === 'failed' ? (info.failedBy === 'none' ? ' Its check did not run.' : ' The check flagged it.') : info.status === 'verified' ? ' The check verified it.' : ''
-    return `The analyst asked this with a citation of your reply open in the tray: "${plain(info.words)}"${where}. "This" may mean that value.${st}${evidenceWords(info.evidence)}`
-  }
-  const g = info.gloss || {}
-  if (f.kind === 'heads') {
-    return `The analyst asked this with an important detail of your reply open in the tray: "${plain(g.title || g.term)}", on the words "${plain(g.term)}"${where}. It said: ${(g.bullets || []).map(plain).join(' ')}${g.offer ? ` It offered that Claude can do this: ${plain(g.offer)}.` : ''} "This" or "it" may mean that detail.`
-  }
-  return `The analyst asked this with an explainer of your reply open in the tray: the term "${plain(g.term)}"${where}. The explainer said: ${plain(g.body || g.title)}${g.here ? ` ${plain(g.here)}` : ''} "This" or "it" may mean that term.`
 }
 
 /** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run). */
