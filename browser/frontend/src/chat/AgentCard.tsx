@@ -354,7 +354,7 @@ function AgentChip({ ws, chat, role, title, ts, log, run, thread }: AgentCardPro
   }
   return (
     <div className={`chat-msg chat-task chat-agent${open ? ' open' : ''}`} data-chat={chat} data-role={role} data-status={status} data-ts={ts}>
-      <span className="chat-agent-head">
+      <span className={`chat-agent-head${thread ? ' chat-agent-threaded' : ''}`}>
         <button type="button" className="chat-callchip chat-agent-chip" aria-expanded={open} onClick={toggle}>
           <span className="chat-agent-name">{name}</span>
           {target && <span className="chat-agent-target">{target}</span>}

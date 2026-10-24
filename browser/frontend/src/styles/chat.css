@@ -531,6 +531,21 @@ button.chat-call-chip:hover,
   color: var(--text-primary);
   font-weight: 500;
 }
+/* an agent with a thread of its own keeps its state and the thread's link on the chip's line: its name gives way */
+.chat-agent-threaded {
+  flex-wrap: nowrap;
+}
+.chat-agent-threaded .chat-agent-name {
+  min-width: 6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-agent-threaded .chat-agent-meta {
+  flex: 0 1000 auto;
+}
+.chat-agent-threaded .chat-thread-chip {
+  flex: none;
+}
 .chat-agent-target {
   color: var(--text-secondary);
 }
