@@ -476,7 +476,7 @@ test('under the claims pane the input names what it asks about, each question sh
   s.files[`${await keptDir(s.$)}/claims.json`] = JSON.stringify(store)
   const e = { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }
   const input = async (args: Any) => nodes(await threadUnder(s.$, e, 'claims', args, els)).find(n => n.type === 'Input')
-  expect((await input({ claim: 'c1' })).props.placeholder).toBe('Ask about: “Run 4 failed on the p95 check.”')
+  expect((await input({ claim: 'c1' })).props.placeholder).toBe('Ask about this claim…')
   expect((await input({ group: 'k1' })).props.placeholder).toBe('Ask about the whole cluster “failures”…')
   expect((await input({})).props.placeholder).toBe('Ask about all the claims…')
   // no conversation yet: nothing scrolls with the pane's drawing, so the pane opens at its top (core/pane.ts); the

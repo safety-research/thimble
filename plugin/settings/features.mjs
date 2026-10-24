@@ -8,7 +8,8 @@
 
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `does`:
  *  one line on what the person gets and what it costs, the field's description (a test checks). `lenses`: the lenses of
- *  the observer's look it needs (observer/lenses.mjs): the look runs while one such feature is on. */
+ *  the observer's look it needs (observer/lenses.mjs): the look runs while one such feature is on. `auto`: the feature
+ *  whose lens joins the look after each reply only while this switch is on (else it looks on demand). */
 export const SWITCHES = [
   {
     key: 'marks', title: 'Citations', default: true,
@@ -36,7 +37,11 @@ export const SWITCHES = [
   },
   {
     key: 'claims', title: 'Claims', default: true, lenses: ['claims'],
-    does: 'c opens what Claude and you claimed in the session, with sources; the bar counts them. The largest part of the call after each reply.',
+    does: 'c opens what Claude and you claimed in the session, with sources; the bar counts them. f in that pane finds the claims of the answers it has not read.',
+  },
+  {
+    key: 'claimsAuto', title: 'Claims after every reply', default: false, auto: 'claims',
+    does: 'Off: claims are found when you ask in the Claims pane, which spends fewer tokens. On: they are found after every reply, the largest part of the call after it.',
   },
   {
     key: 'counts', title: 'Labels and coverage on the bar', default: true,
@@ -82,12 +87,16 @@ export function setSessionOff(off) {
 }
 
 /** Whether a feature acts now: its option when it is a boolean, else its default; none while thimble is off in this
- *  session. `observer` is whether the look after each reply runs: while a feature one of whose lenses it serves is on.
+ *  session. `observer` is whether the look after each reply runs: while a feature one of whose lenses it serves is on
+ *  (and its `auto` switch, when it has one).
  *  `thimble` is whether thimble acts at all in this session (its guidance, the bar, the side pane). */
 export function featureOn(key) {
   if (sessionOff) return false
   if (key === 'thimble') return true
-  if (key === 'observer') return SWITCHES.some(s => (s.lenses ?? []).length > 0 && switchesFrom(current)(s.key))
+  if (key === 'observer') {
+    const on = switchesFrom(current)
+    return SWITCHES.some(s => (s.lenses ?? []).length > 0 && on(s.key) && SWITCHES.every(a => a.auto !== s.key || on(a.key)))
+  }
   return switchesFrom(current)(key)
 }
 

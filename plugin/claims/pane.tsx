@@ -1,13 +1,17 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
-// out: the head (how many claims), the map of clusters (its cells shorter when the detail needs the rows; a list in a
-// narrow pane; none in a short session, whose clusters are listed with their claims), the detail under it (the cluster chosen and its claims, or the claim picked in that list with its
-// chips, and with e its history and evidence), and the keys. A pane taller than Claude Code gives it scrolls. A click is
-// the main way to move: a cluster's name chooses the cluster, a dot or a claim in the list picks that claim (its dot
-// again, the cluster); `↑ N earlier` and `↓ N more` page the list; ‹ › step through the citations; a citation opens its
+// out: at rest the head (how many claims) and the line that finds the claims of the answers not read yet (f, a press
+// the observer's ui.press hook takes: claims are found on demand unless Claims after every reply is on), the map of
+// clusters (a list in a narrow pane; none in a short session, whose clusters are listed with their claims), the detail
+// under it (the cluster chosen and its claims, or the claim picked and why it holds, and with e its history and
+// evidence), and the keys. A pane taller than Claude Code gives it scrolls. A click is the main way to move: a
+// cluster's name chooses the cluster, a dot or a claim in the list picks that claim (its dot again, the cluster);
+// `↑ N earlier` and `↓ N more` page the list; ‹ › step through the citations. A citation under a claim, and a term
+// with an explainer, open as a press on them in the reply does (the tray); a citation of the evidence opens its
 // evidence pane. Tab and Enter reach the same Buttons.
 //
 //   keys while the pane holds the keyboard, each once: p n the previous or next cluster, in reading order of the map
-//   as drawn (row by row, left to right; a list top to bottom; nothing chosen yet: n the first, p the last) · k j the
+//   as drawn (row by row, left to right; a list top to bottom; nothing chosen yet: n the first, p the last), while no
+//   claim is picked (a claim's cluster is then a click away) · k j the
 //   previous or next claim of the cluster shown (none picked yet: the last or the first; with one cluster, its claims
 //   from the start; nothing chosen: the first claim of the first cluster, the last of the last) · e the claim's
 //   evidence, open or closed (`no citations` on a claim with none to show) · x repair a failed citation (a check of it
@@ -16,9 +20,10 @@
 //   evidence then opens · with it open: c the code and output whole · h the whole history · k j the previous or next
 //   citation (the claim's, when it has one citation) · b back (where it was said). A focused pane hands a plugin only
 //   its Buttons' hotkeys, one letter or digit each, so the citations step on k j, not [ ]; and Claude Code types any
-//   other letter into the prompt, the keyboard going with it. So k j p n are keys in every state (p n with one cluster
-//   choose it), e in every state with a claim picked, and a key the pane showed stays while its press can still be
-//   expected (x after a repair began). The input under the pane asks about what is chosen (threads/pane.tsx). A claim
+//   other letter into the prompt, the keyboard going with it. So k j are keys in every state, p n while no claim is picked
+//   (with one cluster they choose it), e in every state with a claim picked, and a key the pane showed stays while its press can still be
+//   expected (x after a repair began). f at rest finds the claims of the answers not read. The input under the pane
+//   asks about what is chosen (threads/pane.tsx). A claim
 //   that wraps is one press over all its lines (rowEls), so it highlights whole.
 //
 // A claim's citations are the reply's marks near its words (store.js sources): their check and evidence come from
@@ -26,6 +31,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { messageOf } from '../core/answers'
+import { markPressed } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { tellOpened } from '../core/engaged'
 import { failNotice } from '../bar/notice'
@@ -35,18 +41,19 @@ import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { launchRepair, repairOf } from '../marks/checker'
 import { citeWords } from '../marks/evidence'
-import { citeHeat } from '../marks/view'
+import { citeHeat, wordsLook, type MarkStatus } from '../marks/view'
 import { plainSentence } from '../marks/message.js'
 import { NOT_RUN, rowMarks, type MarkItem } from '../marks/store'
-import { explaining, explainTerm, glossFor, sessionGlosses, type SessionGloss } from '../explain/seam'
+import { sessionGlosses, type SessionGloss } from '../explain/seam'
+import { openTray } from '../tray/seam'
 import { markColors } from '../explain/place.mjs'
-import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, passageRows, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
-import { claimsBright, claimsStore, placeText, showClaims, type ClaimsArgs } from './term'
+import { claimGroup, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
+import { claimsBright, claimsStore, claimsToFind, placeText, showClaims, type ClaimsArgs } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
-type Run = { s: string; tone?: string | null; bold?: boolean; underline?: boolean; tint?: boolean; bg?: string; part?: string | null }
+type Run = { s: string; tone?: string | null; bold?: boolean; underline?: boolean; tint?: boolean; cite?: string; bg?: string; part?: string | null }
 
 /** The clusters' colors (0.10's c1..c6) and what each other tone draws as: theme colors, so light and dark both read;
  *  a faint tone is its color dimmed; `code` the code's color of the citations' card; `plain` the theme's text color
@@ -71,13 +78,13 @@ function look(tone: string | null | undefined): Record<string, unknown> {
 }
 
 /** A run as a Text: its tone, bold and underline; cited words in evidence look as in the citations' card (citeWords,
- *  in hover group `id`). */
+ *  in hover group `id`); a citation (`cite`, its status) as citations look in the reply (wordsLook). */
 function spanOf(els: Any, r: Run, i: number, id: string): unknown {
   // `gloss`: the words of a term that has an explainer, in the explainers' fill as the reply draws them
   const bg = r.bg === 'gloss' ? { backgroundColor: markColors(themeLast()).glossBg } : {}
   return els.Text({
     key: `t${i}`, ...look(r.tone), ...bg, ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}),
-    ...(r.tint ? citeWords(id) : {}), children: r.s,
+    ...(r.tint ? citeWords(id) : {}), ...(r.cite ? wordsLook(r.cite as MarkStatus, id) : {}), children: r.s,
   })
 }
 
@@ -88,7 +95,7 @@ function rowEl(els: Any, runs: Run[], key: string, press: (part: string) => unkn
   const { Box, Button, Text } = els
   // the row's cited words are one hover group: a Text that holds them nested joins it, so the pointer over it lights them
   const id = `claims:${key}`
-  const heat = (rs: Run[]) => (rs.some(r => r.tint) ? citeHeat(id) : {})
+  const heat = (rs: Run[]) => (rs.some(r => r.tint || r.cite) ? citeHeat(id) : {})
   const span = (r: Run, i: number) => spanOf(els, r, i, id)
   if (!runs.length) return Text({ key, children: ' ' })
   if (!runs.some(r => r.part)) return Text({ key, wrap: 'truncate-end', ...heat(runs), children: runs.map(span) })
@@ -175,7 +182,8 @@ export async function claimsThreadScope($: Engine, args: unknown): Promise<{ abo
     return { about: threadAbout(c, true), args: { source: a.source, ...(a.row ? { row: a.row } : {}) }, ask: 'Ask about where this claim was said…', ...(c ? { quote: String(c.text) } : {}) }
   }
   const c = a.claim ? data.claims.find((x: Any) => x.id === a.claim) ?? null : null
-  if (c) return { about: threadAbout(c), args: { claim: c.id }, ask: `Ask about: “${String(c.text).replace(/\s+/g, ' ').trim()}”`, quote: String(c.text) }
+  // the claim stands right above the input: the words name it, and the question goes to it
+  if (c) return { about: threadAbout(c), args: { claim: c.id }, ask: 'Ask about this claim…', quote: String(c.text) }
   if (a.group != null && data.groups.some((g: Any) => (g.id == null ? '-' : String(g.id)) === String(a.group))) {
     const { name, cs } = groupOf(data, a.group)
     return { about: threadAbout(null, false, { name, n: cs.length }), args: { group: String(a.group) }, ask: `Ask about the whole cluster “${String(name)}”…` }
@@ -239,16 +247,6 @@ export async function repairShown($: Engine): Promise<boolean> {
   return true
 }
 
-/** The explainer of `term` as the detail shows it under the claim (graph.js explainerRows): the session's, else one
- *  being written, else why it was not. */
-function explainerOf(glosses: SessionGloss[], term: string): Any {
-  const g = glossFor(glosses, term)
-  if (g) return { term: g.term, body: g.body ?? '', here: g.here ?? '' }
-  const now = explaining(term)
-  if (now.pending) return { term, pending: true }
-  return { term, why: now.why || 'No explainer of these words yet: click them again to ask for one.' }
-}
-
 export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Promise<unknown> {
   const a = (args && typeof args === 'object' ? args : {}) as ClaimsArgs
   const W = Math.max(24, Number(e?.props?.bodyColumns) || 90)
@@ -278,19 +276,19 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   // the session's explainers: their terms in the explainers' fill wherever a claim or its paragraph says them
   const glosses = await sessionGlosses($).catch(() => [] as SessionGloss[])
   const terms = glosses.map(g => ({ term: g.term, key: `${g.row}|${g.id}` }))
-  // the claim picked: the paragraph of the reply it came from, and the explainer asked for under it
+  // the claim picked: the reply it came from, whose sentences say why it holds when the lens gave no reason
   const sel = selectedOf(raw, keep).claim as Any
   const said = sel ? ((sel.said || []) as Any[]).find(x => x.row && x.by === 'claude') ?? (sel.said || []).find((x: Any) => x.row) ?? null : null
   const md = said ? await placeText($, said.row, said) : null
   const passage = md ? { md, place: said } : null
   const st = { ...keep, ...(a.from != null ? { from: a.from } : {}) }
-  const opts = { w: W, h: H, bright: await claimsBright($), terms, passage, explainer: a.term ? explainerOf(glosses, a.term) : null }
+  const opts = { w: W, h: H, bright: await claimsBright($), terms, passage }
   const view = graphView(raw, st, opts)
   // the claims and clusters as the map draws them (graph.js fitClusters)
   const data = view.data as Any
   const claim = view.claim as Any
   const group = view.group as string | null
-  const pick = (id: string | null, more: { term?: string } = {}) => (id ? showClaims($, { claim: id, at: data.last, ...more }) : undefined)
+  const pick = (id: string | null) => (id ? showClaims($, { claim: id, at: data.last }) : undefined)
   const pickGroup = (k: string | null) => (k != null ? showClaims($, { group: k, at: data.last }) : undefined)
   const cites = claim ? (evidenceOf(claim) as Any[]) : []
   const openEvidence = async (s: Any) => {
@@ -298,6 +296,12 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     await openPane($, 'evidence', { row: s.row, n: s.n }, `citation ${s.n}`, { focus: true })
     const m = await messageOf($, s.row)
     await tellOpened($, { kind: 'citation', row: s.row, n: s.n, words: s.label, status: s.status, failedBy: s.failedBy }, m?.text ?? '')
+  }
+  // a citation in why a claim holds: as a press on it in the reply, the tray opens on it (else its evidence pane)
+  const openCite = async (s: Any) => {
+    if (!s?.row || !s.n) return
+    if (await markPressed($, s.row, s.n)) return
+    await openEvidence(s)
   }
   const at = claim ? { claim: claim.id, at: data.last } : null
   const cite = Math.max(0, Math.min(view.cites - 1, Number(a.cite) || 0))
@@ -316,27 +320,14 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     }
     if (part.startsWith('n:')) return pick(part.slice(2))
     if (part.startsWith('c:')) return undefined
-    // a term that has an explainer: it shows under its claim (again: it closes)
+    // a term that has an explainer: the tray opens on it, as a press on it in the reply does
     if (part.startsWith('x:')) {
-      const [id, k] = JSON.parse(part.slice(2)) as [string | null, string]
+      const [, k] = JSON.parse(part.slice(2)) as [string | null, string]
       const g = glosses.find(x => `${x.row}|${x.id}` === k)
-      const cid = id ?? claim?.id ?? null
-      if (!g || !cid) return
-      return pick(cid, claim?.id === cid && a.term === g.term ? {} : { term: g.term })
+      return g ? openTray($, { row: g.row, kind: 'explain', id: g.id }) : undefined
     }
-    // a citation's words in the claim's paragraph: an explainer of them, written now when the session has none
-    const w = /^w:(\d+)$/.exec(part)
-    if (w && claim && passage) {
-      const words = (passageRows(passage.md, passage.place, W - 4).words as string[])[Number(w[1])]
-      if (!words) return
-      const have = glossFor(glosses, words)
-      const busy = explaining(words).pending
-      // the explainer shown again: it closes; one that failed is asked for again
-      if (a.term && (a.term === words || a.term === have?.term) && (have || busy)) return pick(claim.id)
-      void pick(claim.id, { term: have?.term ?? words })
-      if (!have && !busy) void explainTerm($, passage.place.row, words).catch(() => undefined)
-      return
-    }
+    const ci = /^cite:(\d+)$/.exec(part)
+    if (ci && claim) return openCite((claim.sources || [])[Number(ci[1])])
     const ev = /^ev-(\d+)$/.exec(part)
     if (ev && claim) return openEvidence(cites[Number(ev[1]) - 1])
     if (part.startsWith('was-')) return pick(part.slice(4))
@@ -347,7 +338,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   // cluster, its claims from the start; nothing chosen: j the first claim of the first cluster, k the last of the last
   const cs = (view.chosen || data.groups.length < 2) && group != null ? (groupOf(data, group).cs as Any[]) : []
   const i = claim ? cs.findIndex(c => c.id === claim.id) : -1
-  // the list's ends hold: k on the first claim and j on the last stay there (the chips say which claim of how many)
+  // the list's ends hold: k on the first claim and j on the last stay there (the claim says which of how many)
   const claimKeys = () => {
     if (cs.length) {
       key('k', 'previous claim', () => pick(cs[Math.max(0, i - 1)]?.id ?? null))
@@ -380,27 +371,51 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     // says so (a second x is not typed into the prompt)
     if (repairable(view.shown)) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
     else if (shown?.repair && shown.status === 'checking') key('x', 'checking again', () => undefined)
-    clusterKeys()
     key('e', 'close', () => showClaims($, at))
+  } else if (claim && at) {
+    // a claim picked: the keys that move between claims and open its evidence; the clusters are a click away
+    claimKeys()
+    // a claim with nothing to show under it: e says so (and is not typed into the prompt)
+    key('e', view.cites || view.fixes ? 'evidence' : 'no citations', view.cites || view.fixes ? () => showClaims($, { ...at, open: true, cite: 0 }) : () => undefined)
+    // a claim picked with a failed citation: x repairs it (its first failed one) as with the evidence open (seam.ts)
+    if (cites.some(repairable)) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
   } else {
     claimKeys()
     clusterKeys()
-    // a claim with nothing to show under it: e says so (and is not typed into the prompt)
-    if (claim && at) key('e', view.cites || view.fixes ? 'evidence' : 'no citations', view.cites || view.fixes ? () => showClaims($, { ...at, open: true, cite: 0 }) : () => undefined)
-    // a claim picked with a failed citation: x repairs it (its first failed one) as with the evidence open (seam.ts)
-    if (claim && at && cites.some(repairable)) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
   }
   const row = (r: Run[], k: string) => rowEl(els, r, k, press)
-  const rule: Run[] = [{ s: '─'.repeat(W), tone: 'dim-faint' }]
-  // graph.js keeps two rows for the rule and the keys; in a narrow pane the keys wrap, and the map and the detail are
-  // laid out again in the rows left, so the pane's rows hold the whole drawing
-  const keyRows = keys.length ? treeRows(keysRow(els, keys, W), W) : 1
-  const laid = keyRows > 1 ? graphView(raw, st, { ...opts, h: H - (keyRows - 1) }) : view
+  // the answers the claims have not read yet (claims are found on demand): f finds theirs, in the ui.press hook of the
+  // observer's (observer.ts), which runs the claims step on them
+  const find = await claimsToFind($)
+  const findRows = !view.chosen ? findEls(els, find, !raw.claims.length) : []
+  // graph.js keeps two rows for the keys (a blank row and theirs); when they wrap in a narrow pane, or the line that
+  // finds claims shows, the map and the detail are laid out again in the rows left, so the pane's rows hold the whole
+  // drawing
+  const more = (keys.length ? 1 + treeRows(keysRow(els, keys, W), W) : 0) + (findRows.length ? treeRows(findRows, W) : 0) - 2
+  const laid = more ? graphView(raw, st, { ...opts, h: H - more }) : view
   return Box({ flexDirection: 'column', children: [
     ...(laid.head as Run[][]).map((r, i) => row(r, `h${i}`)),
+    ...findRows,
     ...((laid.graph as Run[][]).length || laid.listed ? [row([], 'gap')] : []),
     ...(laid.graph as Run[][]).map((r, i) => row(r, `g${i}`)),
     ...rowEls(els, laid.panel as Run[][], 'p', press),
-    ...(keys.length ? [row(rule, 'rule'), keysRow(els, keys, W)] : []),
+    ...(keys.length ? [row([], 'keys-gap'), keysRow(els, keys, W)] : []),
   ] })
+}
+
+/** The address of f's Button: the observer's ui.press hook (observer.ts) runs the claims step on the answers. */
+export const CLAIMS_FIND = 'claims-find'
+
+/** The line that finds claims, at the pane's top: `f: find the claims of N answers` (a press, or f), or that they are
+ *  being found; none when every answer was read. `empty`: no claims yet, so it says why there are none. */
+function findEls(els: Any, find: { answers: number; finding: number }, empty: boolean): unknown[] {
+  const { Button, Text } = els
+  const many = (n: number) => `${n} answer${n === 1 ? '' : 's'}`
+  if (find.finding) return [Text({ key: 'find', dimColor: true, wrap: 'wrap', children: `Finding the claims of ${many(find.finding)}…` })]
+  if (!find.answers) return empty ? [Text({ key: 'find', dimColor: true, wrap: 'wrap', children: 'No answers to read yet.' })] : []
+  const words = empty ? `find the claims of this chat's ${many(find.answers)}` : `find the claims of ${find.answers === 1 ? 'the newest answer' : `the ${find.answers} newest answers`}`
+  return [
+    ...(empty ? [Text({ key: 'find-why', dimColor: true, wrap: 'wrap', children: 'Claims are found when you ask, to save tokens.' })] : []),
+    Button({ key: CLAIMS_FIND, plain: true, hotkey: 'f', label: words, hover: quiet('claims-find'), onPress: () => undefined, children: [Text({ key: 'w', color: accent(), children: words })] }),
+  ]
 }

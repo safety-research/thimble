@@ -29,13 +29,16 @@
 //
 // Switches (settings/features.mjs): each lens belongs to a feature (explain, details, claims); the observer runs while
 // one of them is on, and a lens whose feature is off has no section in the prompt, no key in the reply and no merge.
+// A lens with an `auto` switch (the claims: Claims after every reply) joins the look after each reply only while that
+// switch is on; else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims
+// have not read, for a look of that lens alone.
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { cardText } from '../cards/draw'
 import { metaOf } from '../cards/store'
-import { claimsLookFailed, claimsMerge, claimsState } from '../claims/seam'
+import { CLAIMS_FIND, claimsFindEnd, claimsFindStart, claimsLookFailed, claimsMerge, claimsState, claimsUnread } from '../claims/seam'
 import { messageOf, turnOf, type TurnRec } from '../core/answers'
 import { isPersonPrompt, oneLine } from '../core/answers.mjs'
 import { textView } from '../core/answerview'
@@ -57,14 +60,15 @@ type Any = any
 /** The prompt of a message's turn: its words, and who sent it (prompt.submit's origin kind). */
 export type TurnPrompt = { text: string; by: string }
 /** One of Claude's messages a look reads: its row, its words, whether it ended its turn, its turn and that turn's
- *  prompt. `at`: when it was queued (session clock); `t`: the same in wall time. */
-export type LookMsg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; at: number; t: number }
+ *  prompt. `at`: when it was queued (session clock); `t`: the same in wall time. `only`: the lenses of a look on
+ *  demand (the claims'), which reads it with those alone. */
+export type LookMsg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; at: number; t: number; only?: string[] }
 /** What one look gave, as a feature's merge reads it: the messages it read (the newest last), the reply read
  *  leniently (reply.mjs parseAnswer), whether the person started another turn while it looked, and a log of the
  *  look's own (a feature may note what it placed). */
 export type Look = { msgs: LookMsg[]; out: { glosses: unknown[]; heads: unknown; claims: unknown[]; clusters: unknown[] }; moved: boolean; log: (key: string, value: unknown) => void }
 
-type Lens = { name: string; feature: PromptName; option: string; skeleton: string; read: (r: Any) => Any; raw: (r: Any) => Any; digest: (st: Any) => Any; when: (st: Any) => string[] }
+type Lens = { name: string; feature: PromptName; option: string; auto?: string; skeleton: string; read: (r: Any) => Any; raw: (r: Any) => Any; digest: (st: Any) => Any; when: (st: Any) => string[] }
 type Part = { lens: Lens; text: string; id: string }
 
 const LONG_REPLY = 600 // characters: words Claude wrote before it went on working are a reply worth a look from this long
@@ -87,8 +91,11 @@ const S = {
 const cut = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`)
 const wait = ($: Engine, ms: number) => new Promise<void>(done => { $.clock.after(ms, () => done()) })
 
-/** Whether the observer runs: one of the features its lenses serve is on. */
-export const observerOn = (): boolean => (LENSES as Lens[]).some(l => featureOn(l.option))
+/** Whether a lens joins the look after each reply: its feature is on, and its `auto` switch when it has one. */
+const lensAuto = (l: Lens): boolean => featureOn(l.option) && (!l.auto || featureOn(l.auto))
+
+/** Whether the observer looks after each reply: one of its lenses joins that look. */
+export const observerOn = (): boolean => (LENSES as Lens[]).some(lensAuto)
 
 // ------------------------------------------------------------------------------------------------ what it reads
 
@@ -152,13 +159,16 @@ export function lookWord(lenses: string[]): string {
 
 // ------------------------------------------------------------------------------------------------ the queue
 
+/** A message as the queue knows it: its row, and the lenses of a look on demand. */
+const queuedKey = (m: { row: string; only?: string[] }) => (m.only ? `${m.row}#${m.only.join(',')}` : m.row)
+
 async function enqueue($: Engine, m: Omit<LookMsg, 'at' | 't'>): Promise<void> {
-  if (S.queued.has(m.row)) {
+  if (S.queued.has(queuedKey(m))) {
     // its words were queued as a reply already: it is the answer now, while it still waits
     if (m.kind === 'answer') { const w = S.queue.find(x => x.row === m.row); if (w) w.kind = 'answer' }
     return
   }
-  S.queued.add(m.row)
+  S.queued.add(queuedKey(m))
   S.queue.push({ ...m, at: Number(await $.clock.now()), t: Date.now() })
   $.clock.after(LOOK_DELAY, () => { void drain($) })
 }
@@ -167,7 +177,12 @@ async function drain($: Engine): Promise<void> {
   if (S.busy) return
   S.busy = true
   try {
-    while (S.queue.length) await look($, S.queue.splice(0))
+    // the messages that wait, together, up to the first that wants other lenses (a look on demand, or after a reply)
+    while (S.queue.length) {
+      const kind = String(S.queue[0]!.only ?? '')
+      const n = S.queue.findIndex(m => String(m.only ?? '') !== kind)
+      await look($, S.queue.splice(0, n < 0 ? S.queue.length : n))
+    }
   } finally {
     S.busy = false
     if (S.queue.length) $.clock.after(LOOK_DELAY, () => { void drain($) })
@@ -181,12 +196,39 @@ async function msgOf($: Engine, t: TurnRec, row: string, kind: 'answer' | 'reply
   return { row, text: m.text, kind, turnId: t.turnId, turnNo: t.n, prompt: { text: t.prompt.text, by: t.prompt.by } }
 }
 
+/** A turn's answer as looks read it: a reply with cards is one answer, so the words above and between its cards come
+ *  first, then its last row. */
+async function answerMsgs($: Engine, t: TurnRec): Promise<Omit<LookMsg, 'at' | 't'>[]> {
+  const out: Omit<LookMsg, 'at' | 't'>[] = []
+  const first = Math.min(...t.cards.map(c => (typeof c.after === 'number' ? c.after : Infinity)))
+  if (Number.isFinite(first)) {
+    for (const row of t.rows.slice(Math.max(0, first - 1), -1)) {
+      const w = await msgOf($, t, row, 'reply')
+      if (w) out.push(w)
+    }
+  }
+  const m = t.answer ? await msgOf($, t, t.answer, 'answer') : null
+  if (m) out.push(m)
+  return out
+}
+
+/** f in the Claims pane: the answers the claims have not read, queued for a look of the claims lens alone. Answers
+ *  how many answers it queued. */
+export async function findClaimsNow($: Engine): Promise<number> {
+  const turns = await claimsUnread($)
+  if (!turns.length) return 0
+  await claimsFindStart($, turns.length)
+  for (const t of turns) for (const m of await answerMsgs($, t)) await enqueue($, { ...m, only: ['claims'] })
+  return turns.length
+}
+
 // ------------------------------------------------------------------------------------------------ the look
 
-async function lensParts($: Engine): Promise<Part[]> {
+/** The lenses of a look and their fragments: those that join the look after each reply, or `only` these (on demand). */
+async function lensParts($: Engine, only?: string[]): Promise<Part[]> {
   const parts: Part[] = []
   for (const lens of LENSES as Lens[]) {
-    if (!featureOn(lens.option)) continue
+    if (only ? !only.includes(lens.name) || !featureOn(lens.option) : !lensAuto(lens)) continue
     parts.push({ lens, text: await promptText($, lens.feature), id: lens.feature })
   }
   return parts
@@ -223,9 +265,12 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
   const started = Date.now()
   const gen = S.gen
   const row: Record<string, unknown> = { kind: 'look', turn: newest.turnNo, messages: batch.map(m => ({ row: m.row, kind: m.kind, turn: m.turnNo })), wait_ms: Math.max(0, started - batch[0]!.t) }
+  const only = newest.only
+  if (only) row.only = only
+  const on = () => (only ? (LENSES as Lens[]).some(l => only.includes(l.name) && featureOn(l.option)) : observerOn())
   try {
-    if (!observerOn()) { row.dropped = 'turned off'; return }
-    const parts = await lensParts($)
+    if (!on()) { row.dropped = 'turned off'; return }
+    const parts = await lensParts($, only)
     if (!parts.length) { row.skip = 'no lens on'; return }
     const turns: TurnRec[] = []
     for (const id of [...new Set(batch.map(m => m.turnId))]) { const t = await turnOf($, id); if (t) turns.push(t) }
@@ -240,7 +285,7 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
     if (!p.out && !signInFailed(p.f)) {
       row.first_try = { error: p.fork.error ?? 'its reply could not be read', ms: p.ms }
       await wait($, RETRY_MS)
-      if (!observerOn()) { row.dropped = 'turned off'; return }
+      if (!on()) { row.dropped = 'turned off'; return }
       p = await pass($, { frame, parts, msgs: batch, vals, st })
     }
     row.fork = p.fork
@@ -254,19 +299,21 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
       return
     }
     const look = lookOf(p.out)
-    const on = new Set(parts.map(x => x.lens.name))
-    if (on.has('explain') || on.has('heads')) {
+    const lensOn = new Set(parts.map(x => x.lens.name))
+    if (lensOn.has('explain') || lensOn.has('heads')) {
       // a lens that is off gives nothing to place
-      const out = { ...p.out, glosses: on.has('explain') ? p.out.glosses : [], heads: on.has('heads') ? p.out.heads : null }
+      const out = { ...p.out, glosses: lensOn.has('explain') ? p.out.glosses : [], heads: lensOn.has('heads') ? p.out.heads : null }
       try { await explainMerge($, { ...look, out }) } catch (err) { row.explain_error = cut(String((err as Error)?.message || err), 300) }
     }
-    if (on.has('claims')) {
+    if (lensOn.has('claims')) {
       try { await claimsMerge($, look) } catch (err) { row.claims_error = cut(String((err as Error)?.message || err), 300) }
     }
     row.land_ms = Date.now() - newest.t
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
   } finally {
+    // a look for the claims on demand ended, whatever came of it: the pane stops saying they are being found
+    if (only?.includes('claims')) await claimsFindEnd($).catch(() => undefined)
     row.ms = Date.now() - started
     if (gen === S.gen) {
       S.log = [...S.log, { at: new Date(Number(await $.clock.now())).toISOString(), ...row }].slice(-400)
@@ -307,6 +354,18 @@ export const registerObserver: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // f in the Claims pane, or a click on its line: the claims of the answers they have not read, found now
+  on('ui.press', { element: /^claims-find$/ }, async ($, e, next) => {
+    if (e.plugin !== 'thimble' || e.element !== CLAIMS_FIND) return next(e)
+    try {
+      await findClaimsNow($)
+    } catch (err) {
+      await claimsFindEnd($).catch(() => undefined)
+      failNotice($, `thimble could not start finding the claims: ${cut(String((err as Error)?.message || err), 160)}. Press f to try again.`, 'claims:find')
+    }
+    return { element: e.element }
+  }).catch(($, e, next) => next(e))
+
   // a step after words Claude wrote to the person: those words were a reply in a long turn
   on('turn.step', { turnId: /\S/ }, async function* ($, e, next) {
     if (e.agentId === undefined) {
@@ -335,16 +394,7 @@ export const registerObserver: Register = on => {
     try {
       if (e.reason !== 'answer' || !observerOn() || S.person !== 'now') return r
       const t = await turnOf($, e.turnId)
-      // a reply with cards is one answer: the words above and between its cards are looked at with its last row
-      const first = Math.min(...(t?.cards ?? []).map(c => (typeof c.after === 'number' ? c.after : Infinity)))
-      if (t && Number.isFinite(first)) {
-        for (const row of t.rows.slice(Math.max(0, first - 1), -1)) {
-          const w = S.queued.has(row) ? null : await msgOf($, t, row, 'reply')
-          if (w) await enqueue($, w)
-        }
-      }
-      const m = t?.answer ? await msgOf($, t, t.answer, 'answer') : null
-      if (m) await enqueue($, m)
+      if (t) for (const m of await answerMsgs($, t)) await enqueue($, m)
     } catch {
       // the turn ends whatever the observer makes of it
     }

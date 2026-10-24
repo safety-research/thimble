@@ -1,10 +1,10 @@
 // The side pane's way back (core/trail.mjs): which pane goes on the trail, which takes another's place, which goes back
-// down it; the crumbs as drawn; the rows a drawing takes. All data is made up.
+// down it; the rows a drawing takes. All data is made up.
 //   node --test plugin/core/test/trail.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { crumbOf, crumbsLine, nextTrail, TRAIL_MAX, treeRows } from '../trail.mjs'
+import { crumbOf, nextTrail, TRAIL_MAX, treeRows } from '../trail.mjs'
 
 /** The pane after `kind, args` opens over `was` (open), as core/pane.ts openPane keeps it. */
 const go = (was, kind, args, open = true) => ({ kind, args, title: kind, trail: nextTrail(was, open, kind, args) })
@@ -58,19 +58,6 @@ test('a pane opened while none was open starts a new trail; the trail keeps its 
   // kinds that take turns: each goes on top
   for (let n = 1; n <= TRAIL_MAX + 5; n++) p = go(p, n % 2 ? 'evidence' : 'threads', { row: 'r1', n })
   assert.equal(p.trail.length, TRAIL_MAX)
-})
-
-test('the crumbs that fit: the newest kept, `…` where earlier ones were left out, each earlier one with its place', () => {
-  let p = go(null, 'claims', {})
-  p = go(p, 'claims', { group: 'k1' })
-  p = go(p, 'claims', { claim: 'c1' })
-  p = go(p, 'claims', { claim: 'c1', open: true })
-  const all = crumbsLine(p.trail, p, 80)
-  assert.equal(all.cut, false)
-  assert.deepEqual(all.crumbs.map(c => [c.words, c.at]), [['claims', 0], ['cluster', 1], ['claim', 2], ['evidence', -1]])
-  const short = crumbsLine(p.trail, p, 20)
-  assert.equal(short.cut, true)
-  assert.deepEqual(short.crumbs.map(c => c.words), ['claim', 'evidence'])
 })
 
 test("a drawing's rows: a column adds its children, a row takes its tallest, text wraps unless cut, as Claude Code's elements hold their children", () => {

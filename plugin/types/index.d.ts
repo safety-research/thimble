@@ -67,9 +67,6 @@ declare module 'claude-code' {
       // ---- core (core/)
       /** what the side pane shows, and the trail of panes it showed before, to go back to (core/pane.ts) */
       pane: { kind: string; args: unknown; title?: string; escape?: boolean; rows?: number; trail?: { kind: string; args: unknown; title: string; rows?: number }[] } | null
-      /** what main does, for the side pane's top row: working, waiting for the person, or replied while the pane was
-       *  open (core/pane.ts) */
-      paneMain: { s: 'working' | 'asks' | 'replied'; at?: number } | null
       /** whether thimble is off in this session (/thimble-off, settings/term.ts) */
       sessionOff: boolean
       /** the id of main's turn that runs, null when none runs (core/turn.ts) */
@@ -148,13 +145,15 @@ declare module 'claude-code' {
       squeezeCards: { shown: Record<string, { copy: string; v: number }>; hidden: string[]; did: Record<string, string> }
 
       // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
-      /** { v, session, updated, claims, clusters, gaps } (claims/store.js) */
+      /** { v, session, updated, claims, clusters, gaps, read } (claims/store.js) */
       claims: unknown
       /** when the count of claims last went up: the bar's count is bold for a moment after (claims/term.ts) */
       claimsBright: number | null
       /** the session's first claims: the bar's count pulses (`lit` while on) and says `new` until the pane is opened
        *  (claims/term.ts) */
       claimsFirst: { lit: boolean; opened: boolean } | null
+      /** a look on demand for the claims: how many answers it reads, and when it began (claims/term.ts) */
+      claimsFinding: { n: number; at: number } | null
     }
   }
 }

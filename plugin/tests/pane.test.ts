@@ -1,11 +1,9 @@
-// The side pane (core/pane.ts): its trail of the panes it showed, the top row that goes back down it (`‹ back`, a
-// crumb), esc going back while the trail holds a pane and closing on the first one, what main does at the row's right,
-// and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
+// The side pane (core/pane.ts): its trail of the panes it showed, the top row that goes back down it (`‹ back to …`)
+// and closes it (`× close`), esc going back while the trail holds a pane and closing on the first one, and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { keyedWords } from '../bar/bar'
 import { drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
-import { askOf } from '../labels/use.mjs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -59,7 +57,7 @@ const textOf = (node: Any): string => {
 const DOCK = (rows = 30) => ({ requestId: 'thimble', props: { title: 't', isFocused: true, bodyColumns: 70, placement: 'dock', scroll: { offset: 0, bodyRows: rows }, view: {} } })
 const draw = async (s: ReturnType<typeof setup>, rows = 30) => drawPane(s.$, DOCK(rows), await paneNow(s.$), els)
 
-test('the pane keeps a trail: ‹ back and a crumb go back down it, esc goes back, and on the first pane esc closes it', async () => {
+test('the pane keeps a trail: ‹ back goes back down it, esc goes back, and on the first pane esc closes it; × close closes it', async () => {
   const s = setup()
   await openPane(s.$, 'threads', {}, 'Threads', { focus: true })
   // the first pane: no way back to show
@@ -68,10 +66,12 @@ test('the pane keeps a trail: ‹ back and a crumb go back down it, esc goes bac
   await openPane(s.$, 'other', {}, 'Other', { focus: true })
   const tree = nodes(await draw(s))
   const top = tree.find(n => n.props?.key === 'pane-top')
-  expect(textOf(top)).toContain('‹ back')
-  expect(textOf(top)).toContain('threads › made-up › other')
-  // a crumb goes back to its pane, the ones over it gone
-  await tree.find(n => n.props?.key === 'crumb-0').props.onPress()
+  expect(textOf(top)).toContain('‹ back to made-up')
+  expect(textOf(top)).toContain('× close')
+  // ‹ back goes back one pane
+  await tree.find(n => n.props?.key === 'pane-back').props.onPress()
+  expect(await paneNow(s.$)).toMatchObject({ kind: 'made-up', args: { n: 1 } })
+  await nodes(await draw(s)).find(n => n.props?.key === 'pane-back').props.onPress()
   expect(await paneNow(s.$)).toMatchObject({ kind: 'threads', args: {} })
   expect((await paneNow(s.$))?.trail).toBeUndefined()
   expect(s.opens.at(-1)).toMatchObject({ id: 'thimble', title: 'Threads', focus: true, closeOnEscape: true })
@@ -88,38 +88,12 @@ test('the pane keeps a trail: ‹ back and a crumb go back down it, esc goes bac
   await openPane(s.$, 'made-up', { n: 3 }, 'Made up', { focus: true })
   await s.call('ui.close', { id: 'thimble', origin: { kind: 'plugin' } }, async () => { closed += 1 })
   expect(closed).toBe(2)
-})
-
-test("the top row says what main does: working, waiting for the person's yes, replied while the pane was open", async () => {
-  const s = setup()
+  // × close closes the pane with a trail under it, not a step back
   await openPane(s.$, 'threads', {}, 'Threads', { focus: true })
-  const said = async () => textOf(nodes(await draw(s)).find(n => n.props?.key === 'main-state'))
-  expect(await said()).toBe('')
-  await s.call('turn.start', { turnId: 't1', text: 'how many?' })
-  expect(await said()).toBe('Claude is working…')
-  await s.call('classic.PermissionRequest', { hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: {} }, async () => ({}))
-  expect(await said()).toBe('Claude is waiting on you')
-  await s.call('tool.call', { tool: 'Bash', tool_use_id: 'b1' }, async () => ({ result: {} }))
-  expect(await said()).toBe('Claude is working…')
-  // a fork's turn says nothing of main
-  await s.call('turn.complete', { turnId: 'f1', agentId: 'a-fork' })
-  expect(await said()).toBe('Claude is working…')
-  await s.call('turn.complete', { turnId: 't1' })
-  expect(await said()).toBe('Claude replied')
-})
-
-test("while a label run's ask waits at the pane's top, the top row says Claude waits on the person, in the ask's words", async () => {
-  const s = setup()
-  await openPane(s.$, 'threads', {}, 'Threads', { focus: true })
-  await s.call('turn.start', { turnId: 't1', text: 'label them' })
-  const said = async () => textOf(nodes(await draw(s)).find(n => n.props?.key === 'main-state'))
-  expect(await said()).toBe('Claude is working…')
-  await s.$.state.set({ plugin: 'thimble', key: 'labelAsk' }, askOf({ kind: 'label_ask', name: 'spam', root: '/made-up/data', ask: 'a1', units: 420, calls: 9, sample: 300, text: 'Read 420 records of chat.jsonl with Claude' }))
-  const tree = nodes(await draw(s))
-  expect(textOf(tree.find(n => n.props?.key === 'pane-ask'))).toContain('Claude is waiting on you')
-  expect(await said()).toBe('Claude is waiting on you')
-  await s.$.state.set({ plugin: 'thimble', key: 'labelAsk' }, null)
-  expect(await said()).toBe('Claude is working…')
+  await openPane(s.$, 'made-up', { n: 4 }, 'Made up', { focus: true })
+  await nodes(await draw(s)).find(n => n.props?.key === 'pane-close').props.onPress()
+  expect(await paneNow(s.$)).toBeNull()
+  expect(s.isOpen()).toBe(false)
 })
 
 test('docked, the frame takes the pane\'s rows and a row past it, never shown; inline the drawing alone', async () => {

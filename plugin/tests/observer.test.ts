@@ -93,7 +93,7 @@ async function answered(s: ReturnType<typeof setup>, o: { id: string; prompt: st
 const READ = { isAnswered: true, text: '{"glosses": [{"term": "p95", "body": "b"}], "heads": null, "claims": []}', usage: { input_tokens: 10, output_tokens: 5 } }
 
 test("an answer gets one look: a fork of the conversation with the lenses' sections, the message to read, the session's reads", async () => {
-  setOptions({})
+  setOptions({ claimsAuto: true })
   const s = setup([READ])
   await answered(s, { id: 't1', prompt: 'How many test runs failed?', rows: ['Two runs failed, both on the p95 check.'] })
   expect(s.forks.length).toBe(1)
@@ -150,7 +150,7 @@ test('a reply with a card is one answer: the words above and after the card are 
 })
 
 test("a reply that cannot be read is tried once more, then the failure line says what is missing and why", async () => {
-  setOptions({})
+  setOptions({ claimsAuto: true })
   const s = setup([{ isAnswered: true, text: 'no json here' }, { isAnswered: true, text: 'still none' }])
   await answered(s, { id: 't1', prompt: 'Why?', rows: ['Because.'] })
   await new Promise(r => setTimeout(r, 20))

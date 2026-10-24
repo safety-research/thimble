@@ -7,12 +7,12 @@ import test from 'node:test'
 
 import { SWITCHES, featureOn, setOptions } from '../features.mjs'
 
-test("the manifest's userConfig is the features, each on by default and turned off by an option; the observer's look runs while a feature one of its lenses serves is on", () => {
+test("the manifest's userConfig is the features, each with its default and turned on or off by an option; the observer's look runs while a feature one of its lenses serves is on", () => {
   // the manifest's userConfig is the features: one boolean each, with its name, its words and its default
   {
     const manifest = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
     assert.deepEqual(Object.keys(manifest.userConfig), SWITCHES.map(s => s.key))
-    assert.deepEqual(SWITCHES.map(s => s.key), ['marks', 'checkOnOpen', 'cards', 'squeeze', 'explain', 'details', 'claims', 'counts', 'squeezeCards'])
+    assert.deepEqual(SWITCHES.map(s => s.key), ['marks', 'checkOnOpen', 'cards', 'squeeze', 'explain', 'details', 'claims', 'claimsAuto', 'counts', 'squeezeCards'])
     for (const s of SWITCHES) assert.deepEqual(manifest.userConfig[s.key], { type: 'boolean', title: s.title, description: s.does, default: s.default })
   }
   // the heads-ups' switch is named as the tray and the threads name what it gives, and keeps its stored key, so a
@@ -35,13 +35,17 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('cards'), true)
     setOptions({})
   }
-  // the observer's look runs while a feature one of its lenses serves is on
+  // the look after each reply runs while a feature one of its lenses serves is on; the claims join it only with
+  // Claims after every reply on (else they are found on demand)
   {
     setOptions({})
     assert.equal(featureOn('observer'), true)
+    assert.equal(featureOn('claimsAuto'), false)
     setOptions({ explain: false, details: false })
+    assert.equal(featureOn('observer'), false)
+    setOptions({ explain: false, details: false, claimsAuto: true })
     assert.equal(featureOn('observer'), true)
-    setOptions({ explain: false, details: false, claims: false })
+    setOptions({ explain: false, details: false, claims: false, claimsAuto: true })
     assert.equal(featureOn('observer'), false)
     setOptions({})
   }

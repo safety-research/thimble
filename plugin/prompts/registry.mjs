@@ -53,9 +53,9 @@ export const TEXTS = {
     use: "a section of the look's prompt while Heads-ups is on",
   },
   'lens-claims': {
-    about: "the turn's claims, each placed by a quote, in a cluster",
+    about: "the turn's claims, each placed by a quote, in a cluster, with why it holds",
     reader: 'observer/observer.ts',
-    use: "a section of the look's prompt while Claims is on",
+    use: "a section of the look's prompt after each reply while Claims after every reply is on, else of a look of its own when f in the Claims pane asks",
   },
   'explain-expand': {
     about: 'an explainer written again at more length, over the term, the answer and the files it cites',
