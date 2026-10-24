@@ -190,9 +190,12 @@ function keysRow(els: Any, keys: Key[]): unknown {
   const { Box, Button, Text } = els
   return Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
     ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
-    Button({ key: x.id ?? `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, hover: quiet(`claims-${x.id ?? `key-${x.k}`}`), onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: x.label })] }),
+    Button({ key: x.id ?? `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, hover: quiet(`claims-${x.id ?? `key-${x.k}`}`), onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: `${x.label}${ARROW[x.k] ?? ''}` })] }),
   ]) })
 }
+
+/** ↑ and ↓ press k and j in a pane that holds the keyboard (core/pane.ts): the row says so beside them. */
+const ARROW: Record<string, string> = { k: ' ↑', j: ' ↓' }
 
 /** The address of x's Button in the keys' row: this feature's ui.press hook (seam.ts) starts the repair, so the
  *  repair's fork starts inside a hook (core/forks.ts). */

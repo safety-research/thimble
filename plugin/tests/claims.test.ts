@@ -182,10 +182,10 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   // the keys, each once, k j then p n: a plain Button Claude Code draws as its key, then its words, dim; the words
   // never hold the key, which drew it twice. At rest too every key of the pane is held, so none is typed into the prompt
   expect(keysOf(pane)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['p', 'previous cluster'], ['n', 'next cluster']])
-  expect(buttons(pane).filter(b => b.hotkey).map(b => textOf(b.children))).toEqual(['previous claim', 'next claim', 'previous cluster', 'next cluster'])
+  expect(buttons(pane).filter(b => b.hotkey).map(b => textOf(b.children))).toEqual(['previous claim ↑', 'next claim ↓', 'previous cluster', 'next cluster'])
   // under the pointer a key's words brighten, never Claude Code's inverse of a plain Button
   expect(buttons(pane).filter(b => b.hotkey).map(b => b.hover?.inverse)).toEqual([false, false, false, false])
-  expect(t).toContain('previous cluster · next cluster')
+  expect(t).toContain('previous claim ↑ · next claim ↓ · previous cluster · next cluster')
   // at rest n chooses the first cluster in reading order (the list's top), p the last; j and k the first claim
   await buttons(pane).find(b => b.hotkey === 'n').onPress()
   expect(paneNow(s).args).toMatchObject({ group: 'k1' })
