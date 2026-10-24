@@ -93,3 +93,11 @@ test("a wrapping row of items with margins beside them wraps by whole items, the
   assert.equal(treeRows(row, 70), 2)
   assert.equal(treeRows(row, 80), 1)
 })
+
+test("a key's Button counts the hotkey Claude Code draws before its words", () => {
+  const el = (type, props, children) => ({ type, props: { ...props, children } })
+  const key = (k, w) => el('Button', { hotkey: k, plain: true, label: w }, [el('Text', {}, w)])
+  const row = el('Box', { flexDirection: 'row', flexWrap: 'wrap' }, [key('k', 'previous claim'), el('Text', {}, ' · '), key('j', 'next claim'), el('Text', {}, ' · '), key('e', 'evidence')])
+  // `k: previous claim · j: next claim · e: evidence`, 47 cells: two rows at 40 columns, where the words alone (38) fit one
+  assert.equal(treeRows(row, 40), 2)
+})

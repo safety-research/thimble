@@ -30,6 +30,7 @@ import { quiet } from '../core/askcell.js'
 import { tellOpened } from '../core/engaged'
 import { failNotice } from '../bar/notice'
 import { openPane, paneNow } from '../core/pane'
+import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { launchRepair, repairOf } from '../marks/checker'
@@ -184,15 +185,25 @@ export async function claimsThreadScope($: Engine, args: unknown): Promise<{ abo
 
 type Key = { k: string; label: string; onPress: () => unknown; id?: string }
 
-/** The keys' row, ` · ` between them: each a plain Button the key presses (its address `key-<k>`, or its own `id`).
+/** The keys' rows, ` · ` between them: each a plain Button the key presses (its address `key-<k>`, or its own `id`).
  *  Claude Code draws its key itself (lit, then a colon), so its words are only the label's, dim as the bar's: words
- *  that held the key too drew it twice. */
-function keysRow(els: Any, keys: Key[]): unknown {
+ *  that held the key too drew it twice. The keys are cut into rows of `W` cells here, each key as wide as it is drawn
+ *  with its `k: `: Claude Code lays a Button out without that colon, so a row it wrapped itself lost its last key. */
+function keysRow(els: Any, keys: Key[], W = Infinity): unknown {
   const { Box, Button, Text } = els
-  return Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
+  const lines: Key[][] = [[]]
+  let used = 0
+  for (const x of keys) {
+    const w = textWidth(`${x.k}: ${x.label}${ARROW[x.k] ?? ''}`)
+    if (used && used + 3 + w > W) { lines.push([]); used = 0 }
+    used += (used ? 3 : 0) + w
+    lines[lines.length - 1]!.push(x)
+  }
+  const row = (line: Key[], r: number) => Box({ key: `keys-${r}`, flexDirection: 'row', children: line.flatMap((x, i) => [
     ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
     Button({ key: x.id ?? `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, hover: quiet(`claims-${x.id ?? `key-${x.k}`}`), onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: `${x.label}${ARROW[x.k] ?? ''}` })] }),
   ]) })
+  return Box({ key: 'keys', flexDirection: 'column', children: lines.map(row) })
 }
 
 /** ↑ and ↓ press k and j in a pane that holds the keyboard (core/pane.ts): the row says so beside them. */
@@ -383,13 +394,13 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const rule: Run[] = [{ s: '─'.repeat(W), tone: 'dim-faint' }]
   // graph.js keeps two rows for the rule and the keys; in a narrow pane the keys wrap, and the map and the detail are
   // laid out again in the rows left, so the pane's rows hold the whole drawing
-  const keyRows = keys.length ? treeRows(keysRow(els, keys), W) : 1
+  const keyRows = keys.length ? treeRows(keysRow(els, keys, W), W) : 1
   const laid = keyRows > 1 ? graphView(raw, st, { ...opts, h: H - (keyRows - 1) }) : view
   return Box({ flexDirection: 'column', children: [
     ...(laid.head as Run[][]).map((r, i) => row(r, `h${i}`)),
     ...((laid.graph as Run[][]).length || laid.listed ? [row([], 'gap')] : []),
     ...(laid.graph as Run[][]).map((r, i) => row(r, `g${i}`)),
     ...rowEls(els, laid.panel as Run[][], 'p', press),
-    ...(keys.length ? [row(rule, 'rule'), keysRow(els, keys)] : []),
+    ...(keys.length ? [row(rule, 'rule'), keysRow(els, keys, W)] : []),
   ] })
 }

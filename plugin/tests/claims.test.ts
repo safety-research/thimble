@@ -143,6 +143,14 @@ test("an answer's claims come in with the citations near their words; c counts t
   expect(await claimsBar(s.$, k => k !== 'claims', false)).toEqual([])
 })
 
+/** The first node with this key. */
+const findKey = (node: Any, key: string): Any => {
+  if (!node || typeof node !== 'object') return null
+  if (Array.isArray(node)) { for (const n of node) { const f = findKey(n, key); if (f) return f } return null }
+  if (node.props?.key === key) return node
+  return findKey(node.props?.children, key)
+}
+
 test('a look that fails leaves a gap the pane names; c opens the pane, a short session as a list where a press on a name selects a cluster and a press on a claim picks it; the map comes with ten claims, a press on a dot its claim', async () => {
   setOptions({})
   const more = Array.from({ length: 7 }, (_, i) => ({ claim: `Run ${i + 11} passed.`, quote: `Run ${i + 11} passed`, cluster: 'passes' }))
@@ -314,6 +322,11 @@ test("a narrow pane whose keys wrap: the map and the claim's detail keep to the 
       // the keys say five keys with their arrows, more than one row of a narrow pane
       expect(textOf(pane)).toContain('no citations')
       expect(`${W}x${H}: ${treeRows(pane, W)}`).toBe(`${W}x${H}: ${Math.min(H, treeRows(pane, W))}`)
+      // the keys come in rows no wider than the pane as Claude Code draws them, each key with its `k: `
+      const drawnWidth = (row: Any) => (row.props.children as Any[]).reduce((n: number, c: Any) => n + (c.type === 'Button' ? c.props.hotkey.length + 2 : 0) + [...textOf(c)].length, 0)
+      const rows = (findKey(pane, 'keys').props.children as Any[])
+      for (const r of rows) expect(drawnWidth(r)).toBeLessThanOrEqual(W)
+      expect(rows.length).toBeGreaterThan(1)
     }
   }
 })

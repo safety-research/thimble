@@ -85,7 +85,8 @@ function textIn(n) {
   if (typeof n === 'string' || typeof n === 'number') return String(n)
   if (Array.isArray(n)) return n.map(textIn).join('')
   const p = n.props ?? {}
-  if (n.type === 'Button') return kids(n).length ? textIn(kids(n)) : String(p.label ?? '')
+  // Claude Code draws a Button's hotkey before its words (`k: previous claim`)
+  if (n.type === 'Button') return `${typeof p.hotkey === 'string' && p.hotkey ? `${p.hotkey}: ` : ''}${kids(n).length ? textIn(kids(n)) : String(p.label ?? '')}`
   if (n.type === 'Markdown') return String(p.text ?? '')
   if (n.type === 'Code') return String(p.source ?? '')
   if (n.type === 'Input') return String(p.value || p.placeholder || '')
