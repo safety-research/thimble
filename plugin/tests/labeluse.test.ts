@@ -6,6 +6,7 @@
 // ask back. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { setSessionOff } from '../settings/features.mjs'
 import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelAskPaneHead, labelRowEl, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -116,6 +117,12 @@ test('a card shows the labels its turn ran before it; the answer only those no c
   expect(textOf(answer)).toBe('label tone · code · 6 records  ● calm  ● angry')
   // a row that is not the turn's answer gets none
   expect(await labelsUnderAnswer(w.$, ELS, 'r1', 80)).toEqual([])
+  // while thimble is off in this session (/thimble-off) neither row shows, and both come back with /thimble-on
+  setSessionOff(true)
+  expect(await labelsUnderAnswer(w.$, ELS, 'r2', 80)).toEqual([])
+  expect(await labelsUnderCard(w.$, ELS, card, 80)).toEqual([])
+  setSessionOff(false)
+  expect(textOf(await labelsUnderAnswer(w.$, ELS, 'r2', 80))).toBe('label tone · code · 6 records  ● calm  ● angry')
   // the read ran once, as the person's (`thimble label --json`)
   expect(w.ran.filter(a => a.join(' ') === 'label --json').length).toBe(1)
   // a press on the label's name opens the labels pane on it, the open made inside the press (what the press returns
