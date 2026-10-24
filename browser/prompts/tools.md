@@ -472,7 +472,7 @@ File a ticket for thimble's developer agent to change a view it built for this c
 
 ## fix_thimble
 
-Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is theirs, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, offer the fix and let them decide. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
+Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is the person's own tool, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, offer a fix and start it only when they say yes. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
 
 ```json
 {

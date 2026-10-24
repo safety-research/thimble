@@ -1,6 +1,6 @@
 ---
 name: fix-thimble
-description: Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is theirs, so when it misbehaves in this session, such as a card, a citation's evidence, a pane, the bar or a key of thimble's that draws or acts wrong, offer the fix and let them decide. The argument says what thimble does wrong and what it should do. A copy of you then changes thimble in the background, and the person decides with a key whether to use the fix.
+description: Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is the person's own tool, so when it misbehaves in this session, such as a card, a citation's evidence, a pane, the bar or a key of thimble's that draws or acts wrong, offer a fix and start it only when they say yes. The argument says what thimble does wrong and what it should do. A copy of you then changes thimble in the background, and the person decides with a key whether to use the fix.
 argument-hint: "[N | new] what thimble does wrong, and what it should do"
 user-invocable: false
 ---

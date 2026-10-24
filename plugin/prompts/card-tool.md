@@ -10,4 +10,19 @@ Input: `const keys = "jk"` names the letters the card takes at an empty prompt, 
 
 The call returns a text copy of the card or the view's error. Try each key and Button with `actions`, and read each copy as the analyst will. Before you go on, fix in one new version what they would misread, a plot that came out mangled, and any change that makes the card easier to read or use. For a change, also one the analyst asks for, call card with the `id` and `edits`, since a whole view takes half a minute to write. The new version still answers the card's first question, with the change beside it. A new question gets a new card.
 
+Drawing for the terminal:
+- The first line states the answer, since the analyst reads it first.
+- Each part of the question has its answer on the card, in words that code computes from the rows, next to the marks it explains.
+- thimble draws the title.
+- Take colors from `surface.colors`, so they stay muted and read on light and dark terminals.
+- Show what each color, symbol and line style means with a sample (`█ survived`); mark the selected item with bold or `▸`.
+- When a key or click changes the card's state, every row stays where it was; what follows the selection, such as a note or details, goes on rows kept for it.
+- Size each column from its longest value; a cut value keeps the part that tells it apart, and a line counts what is left out (`+47 more`).
+- Numbers that touch read as one; a cell of two records shows its count.
+- Put each axis label at its tick.
+- A blank line between a card's sections often makes it easier to read.
+- About 30 rows fit; say which page shows ("rows 1-14 of 28").
+
+When a call fails because of the setup, not the view, try again in a later turn. When the analyst presses v under an answer, thimble draws a card of it in the background and tells you with their next message.
+
 The guidance's Cards section says what makes a good card.
