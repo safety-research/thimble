@@ -44,7 +44,6 @@ import { drawThreadsPane, threadPaneParts, threadUnderSplit } from '../threads/s
 import { quiet } from './askcell.js'
 import { cut, textWidth } from './text.js'
 import { accent } from './theme'
-import { featureOn } from '../settings/features.mjs'
 import { crumbsLine, nextTrail, treeRows } from './trail.mjs'
 
 type Engine = EngineInterface
@@ -218,7 +217,6 @@ const idOf = (now: PaneNow) => `${now.kind}:${JSON.stringify(now.args ?? null)}`
 export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any): Promise<unknown> {
   try {
     if (!now) return els.Text({ dimColor: true, children: 'Nothing is open here.' })
-    if (!featureOn('thimble')) return els.Text({ dimColor: true, wrap: 'wrap', children: 'thimble is off in this session. /thimble-on turns it back on.' })
     const W = Math.max(20, Number(e?.props?.bodyColumns) || 80)
     const H = Math.max(8, Number(e?.props?.scroll?.bodyRows) || 40)
     // docked, the frame is the pane's whole height and the input bar stays at its bottom; inline the frame fits the tree

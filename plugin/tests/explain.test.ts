@@ -10,7 +10,7 @@ import { resetEngaged } from '../core/engaged'
 import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
 import { explainState, expandExplainer, explaining, explainTerm, glossFor, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
-import { drawEvidence, fieldsOf } from '../marks/evidence'
+import { drawEvidence } from '../marks/evidence'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
@@ -189,13 +189,10 @@ test('on demand: words the analyst picked get an explainer from the explain-expa
   expect(explaining('the client').why).toContain('was not written')
 })
 
-test("a quote of a JSON record reads as a record: its key fields and the cited words decoded; r shows the raw lines; w explains the cited words in place", async () => {
+test("a quote of a JSON line shows the line as the file holds it, the cited words highlighted in it; w explains the cited words in place", async () => {
   setOptions({})
   const s = setup([LOOK], { complete: reply({ body: 'A page anyone can bump to leave a number for the next copy.', here: '' }) })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
-  const record = { rev_id: 1044, page: 'BrindleNotes', author: 'CopyTrain9', time: '2026-06-15T00:48:00Z', text: 'Note to the next copy: round 1 asked for Brindle. Paste it fast.' }
-  s.files.set('/made-up/data/revisions.jsonl', `{"rev_id": 1}\n${JSON.stringify(record)}\n{"rev_id": 3}\n`)
-  s.$.fs.stat = async (p: string) => (s.files.has(p) ? { kind: 'file', size: s.files.get(p)!.length, mtimeMs: 1 } : { kind: 'missing', size: 0 })
   const item = { n: 1, row: 't1-row', words: '41 of the 44', start: 57, end: 75, sentence: 'Uploads fail.', status: 'verified', shown: 'Paste it fast',
     evidence: { kind: 'quote', file: 'revisions.jsonl', line: '2', lines: [{ n: 1, text: '{"rev_id": 1}' }, { n: 2, text: 'Note to the next copy: round 1 asked for Brindle. Paste it fast.', highlight: [50, 63], decoded: true }, { n: 3, text: '{"rev_id": 3}' }] } }
   await s.$.state.set({ plugin: 'thimble', key: 'marksRow', id: 't1-row' }, 'k1')
@@ -204,23 +201,18 @@ test("a quote of a JSON record reads as a record: its key fields and the cited w
   const pane = await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els)
   const t = textOf(pane)
   expect(t).toContain('revisions.jsonl:2')
-  expect(t).toContain('rev_id 1044 · page BrindleNotes · author CopyTrain9 · time 2026-06-15T00:48:00Z')
-  expect(t).toContain('▎Note to the next copy: round 1 asked for Brindle. Paste it fast.')
-  // the raw lines wait behind r
-  expect(t).not.toContain('{"rev_id": 3}')
-  const keys = buttonsOf(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])
-  expect(keys).toEqual([['w', 'explain these words'], ['r', 'raw lines']])
-  buttonsOf(pane).find(b => b.hotkey === 'r').onPress()
-  const raw = textOf(await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els))
-  expect(raw).toContain('{"rev_id": 3}')
-  expect(raw).toContain("the line's JSON text, decoded")
+  expect(t).toContain('{"rev_id": 3}')
+  expect(t).toContain("the line's JSON text, decoded")
+  // the quoted words are in the cited line, in the citations' look (bold)
+  const bold: string[] = []
+  const walk = (n: Any): void => { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === 'object') { if (n.type === 'Text' && n.props?.bold) bold.push(textOf(n)); walk(n.props?.children) } }
+  walk(pane)
+  expect(bold).toContain('Paste it fast')
+  expect(buttonsOf(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])).toEqual([['w', 'explain these words']])
   // w: the cited words' explainer, written now, shows in the pane
   buttonsOf(pane).find(b => b.hotkey === 'w').onPress()
   await settle()
   const ex = textOf(await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els))
   expect(ex).toContain('Paste it fast  explainer')
   expect(ex).toContain('A page anyone can bump to leave a number for the next copy.')
-  // the fields a record shows: its short values, in its order, none that holds the cited words
-  expect(fieldsOf('{"a": "x", "b": 2, "long": "' + 'y'.repeat(80) + '", "c": "it holds Paste it fast"}', 'Paste it fast')).toEqual([['a', 'x'], ['b', '2']])
-  expect(fieldsOf('not json')).toEqual([])
 })
