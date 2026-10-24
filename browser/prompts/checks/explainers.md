@@ -9,7 +9,7 @@ An explainer marks words of the answer and gives, in place, the background that 
 
     Answer    These are the support tickets of a print-on-demand shop. [Most of the 410 refund requests](#) come from
               repeat callers, and [a third of those](#) end in a chargeback.
-    Explainers add_comment({"ref": "<the sentence's ref>", "text": "print-on-demand shop: a shop that keeps no stock: a partner prints each mug or shirt after it is ordered and ships it from its own plant. The shop answers the customers but cannot see an order once it goes to print, so its support team often cannot say where an item is.",
+    Good      add_comment({"ref": "<the sentence's ref>", "text": "print-on-demand shop: a shop that keeps no stock: a partner prints each mug or shirt after it is ordered and ships it from its own plant. The shop answers the customers but cannot see an order once it goes to print, so its support team often cannot say where an item is.",
                 "details": "Ticket 2210 is typical: support asks the print partner where a shirt is, and the customer waits two days for the answer [[tickets/march.jsonl#L40]]."})
               add_comment({"ref": "<the sentence's ref>", "text": "chargeback: a refund that the customer's bank takes back from the shop, after the customer disputes the payment with their bank instead of with the shop. The shop also pays the bank a fee for each one.",
                 "details": "Ticket 4471 is one: the bank took back $89 for a hoodie the customer said never came [[tickets/march.jsonl#L88]]."})

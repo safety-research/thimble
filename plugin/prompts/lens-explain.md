@@ -5,7 +5,7 @@ An explainer marks words of the answer and gives, in place, the background that 
 ```
 Answer    These are the support tickets of a print-on-demand shop. [Most of the 410 refund requests](#) come from
           repeat callers, and [a third of those](#) end in a chargeback.
-Explainers "glosses": [
+Good      "glosses": [
             {"term": "print-on-demand shop", "body": "A shop that keeps no stock: a partner prints each mug or shirt
              after it is ordered and ships it from its own plant. The shop answers the customers but cannot see an
              order once it goes to print, so its support team often cannot say where an item is.",
