@@ -513,3 +513,11 @@ test('a claim that cites no record: a hollow dot on the map and a hollow marker 
   const v = graphView(paneData(st), { group: '5' }, { w: 136, h: 46 })
   assert.ok(v.graph.flat().some(x => x.part === 'd:c40' && x.s === '○'))
 })
+
+test("a claim said in a table row: its paragraph is that row, its cells between ·", () => {
+  const md = 'The kinds:\n\n| Kind | Edits |\n|---|---|\n| Shares a task answer | [138](#) |\n| Ordinary edit | 111 |\n'
+  const at = md.indexOf('Shares')
+  const pass = passageRows(md, { quote: 'Shares a task answer', start: at, end: at + 20 }, 80)
+  assert.deepEqual(pass.rows.map(rowText), ['▎ Shares a task answer · 138'])
+  assert.deepEqual(pass.words, ['138'])
+})

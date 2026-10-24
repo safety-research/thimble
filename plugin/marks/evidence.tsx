@@ -268,7 +268,8 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   if (explainShown.has(me)) {
     const g = glossFor(await sessionGlosses($).catch(() => []), words)
     const now = explaining(words)
-    const bar = (k: string, child: Any) => Text({ key: `x-${k}`, wrap: 'wrap', children: [Text({ dimColor: true, children: '▎ ' }), child] })
+    // each part after a dim ▎, its wrapped lines under its first (the gutter is a column of its own)
+    const bar = (k: string, child: Any) => Box({ key: `x-${k}`, flexDirection: 'row', children: [Text({ dimColor: true, children: '▎' }), Box({ flexShrink: 1, marginLeft: 1, children: [Text({ wrap: 'wrap', children: [child] })] })] })
     rows.push(Text({ key: 'x-gap', children: ' ' }), bar('t', Text({ children: [Text({ bold: true, backgroundColor: markColors(themeLast()).glossBg, children: g?.term ?? words }), Text({ dimColor: true, children: '  explainer' })] })))
     const plain = (t: string) => String(t || '').replace(/\[([^\]\n]+)\]\([^()\s]*\)/g, '$1').replace(/[`*]/g, '').replace(/\s+/g, ' ').trim()
     if (g) {

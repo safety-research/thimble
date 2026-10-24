@@ -989,14 +989,26 @@ export function passageRows(md, place, n, { terms = [], max = 5, claim = null } 
   if (!s || !place) return null
   const span = spanOf(s, place)
   if (!span) return null
-  const b = blocks(s).find(x => x.type !== 'rule' && x.type !== 'code' && x.from <= span[0] && span[0] < x.to)
+  let b = blocks(s).find(x => x.type !== 'rule' && x.type !== 'code' && x.from <= span[0] && span[0] < x.to)
   if (!b) return null
+  // a table: the row that holds the claim's words, its cells between ` · `
+  const table = b.type === 'table'
+  if (table) {
+    const from = s.lastIndexOf('\n', span[0]) + 1
+    const end = s.indexOf('\n', span[0])
+    b = { ...b, from, to: end < 0 ? s.length : end }
+  }
   const p = plainOf(s.slice(b.from, b.to))
   // the plain text one-spaced, with each kept character's markdown offset
   let text = ''
   const at = []
   for (let i = 0; i < p.plain.length; i++) {
-    const ch = /\s/.test(p.plain[i]) ? ' ' : p.plain[i]
+    let ch = /\s/.test(p.plain[i]) ? ' ' : p.plain[i]
+    if (table && ch === '|') {
+      // the row's outer bars go; the others part its cells
+      if (!text.trim() || !p.plain.slice(i + 1).trim()) continue
+      ch = '·'
+    }
     if (ch === ' ' && (!text || text.endsWith(' '))) continue
     text += ch
     at.push(p.at[i] + b.from)

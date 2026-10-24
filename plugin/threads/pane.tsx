@@ -46,7 +46,7 @@ import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
 import { sessionGlosses, type SessionGloss } from '../explain/seam'
-import { anchorTerm, markColors } from '../explain/place.mjs'
+import { anchorTerm, findInLink, markColors } from '../explain/place.mjs'
 import { cut, textWidth } from '../core/text.js'
 import { themeLast, themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
@@ -228,7 +228,8 @@ const glossOpen = new Map<string, string>()
 /** Where a term stands in an answer's words: as written or in another form of its words, never in a citation or code. */
 const termAt = (text: string, term: string, taken: { start: number; end: number }[] = []) => {
   const at = anchorTerm(text, term, taken)
-  return at && at.how !== 'word' ? at : null
+  // else in a citation's words, as the reply places an explainer there too (explain/place.mjs findInLink)
+  return at && at.how !== 'word' ? at : findInLink(text, term, taken)
 }
 
 /** The index of the thread's last answer that holds the term, else -1. */
@@ -261,7 +262,9 @@ function termSpansOf($: Engine, t: Thread, text: string, glosses: SessionGloss[]
 function explainerEls(els: Any, g: SessionGloss, key: string): Any[] {
   const { Text } = els
   const words = (s: string) => String(s || '').replace(/\[([^\]\n]+)\]\([^()\s]*\)/g, '$1').replace(/[`*]/g, '').replace(/\s+/g, ' ').trim()
-  const bar = (k: string, child: Any) => Text({ key: `${key}-${k}`, wrap: 'wrap', children: [Text({ dimColor: true, children: '  ▎ ' }), child] })
+  const { Box } = els
+  // each part after a dim ▎, its wrapped lines under its first (the gutter is a column of its own)
+  const bar = (k: string, child: Any) => Box({ key: `${key}-${k}`, flexDirection: 'row', children: [Text({ dimColor: true, children: '  ▎' }), Box({ flexShrink: 1, marginLeft: 1, children: [Text({ wrap: 'wrap', children: [child] })] })] })
   return [
     Text({ key: `${key}-gap`, children: ' ' }),
     bar('t', Text({ children: [Text({ bold: true, backgroundColor: markColors(themeLast()).glossBg, children: g.term }), Text({ dimColor: true, children: '  explainer' })] })),
