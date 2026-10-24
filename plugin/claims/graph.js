@@ -1036,7 +1036,9 @@ export function passageRows(md, place, n, { terms = [], max = 5, claim = null } 
   for (const t of termSpans(text, terms)) spans.push({ a: t.a, b: t.b, look: termLook(t.key, claim) })
   let rows = styledRows(text, Math.max(10, n - 2), { tone: 'dim' }, spans)
   if (rows.length > max) {
-    // the window round the claim's words
+    // the window round the claim's words, its rows wrapped two cells shorter so the `… ` before its first row and the
+    // ` …` after its last fit the row (a row wider than the pane wraps, and loses the space where it breaks)
+    rows = styledRows(text, Math.max(10, n - 4), { tone: 'dim' }, spans)
     const lineOf = i => { let k = 0, used = 0; for (const r of rows) { used += r.reduce((a, x) => a + len(x.s), 0) + 1; if (used > i) return k; k++ } return rows.length - 1 }
     const from = Math.max(0, Math.min(own ? lineOf(own.a) - 1 : 0, rows.length - max))
     const cutTop = from > 0, cutEnd = from + max < rows.length

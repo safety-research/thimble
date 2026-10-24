@@ -521,3 +521,13 @@ test("a claim said in a table row: its paragraph is that row, its cells between 
   assert.deepEqual(pass.rows.map(rowText), ['▎ Shares a task answer · 138'])
   assert.deepEqual(pass.words, ['138'])
 })
+
+test("a long paragraph's window keeps each row, with its … marks, within the width it was given", () => {
+  const md = `${'The copies posted round answers on shared pages while others waited for them. '.repeat(6)}They bumped [the counter to 412](#) when a round ended. ${'Later rounds went the same way on many pages of the wiki. '.repeat(6)}`
+  const at = md.indexOf('They bumped')
+  for (const n of [45, 66]) {
+    const pass = passageRows(md, { quote: 'They bumped the counter to 412', start: at, end: at + 30 }, n)
+    assert.ok(pass.rows.length === 5 && rowText(pass.rows[0]).startsWith('▎ … ') && rowText(pass.rows[4]).endsWith(' …'))
+    for (const r of pass.rows) assert.ok(rowText(r).length <= n, `${rowText(r).length} > ${n}: ${rowText(r)}`)
+  }
+})
