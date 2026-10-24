@@ -30,6 +30,7 @@ import { quiet } from '../core/askcell.js'
 import { tellOpened } from '../core/engaged'
 import { failNotice } from '../bar/notice'
 import { openPane, paneNow } from '../core/pane'
+import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { launchRepair, repairOf } from '../marks/checker'
 import { citeWords } from '../marks/evidence'
@@ -271,7 +272,9 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const said = sel ? ((sel.said || []) as Any[]).find(x => x.row && x.by === 'claude') ?? (sel.said || []).find((x: Any) => x.row) ?? null : null
   const md = said ? await placeText($, said.row) : null
   const passage = md ? { md, place: said } : null
-  const view = graphView(raw, { ...keep, ...(a.from != null ? { from: a.from } : {}) }, { w: W, h: H, bright: await claimsBright($), terms, passage, explainer: a.term ? explainerOf(glosses, a.term) : null })
+  const st = { ...keep, ...(a.from != null ? { from: a.from } : {}) }
+  const opts = { w: W, h: H, bright: await claimsBright($), terms, passage, explainer: a.term ? explainerOf(glosses, a.term) : null }
+  const view = graphView(raw, st, opts)
   // the claims and clusters as the map draws them (graph.js fitClusters)
   const data = view.data as Any
   const claim = view.claim as Any
@@ -378,11 +381,15 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   }
   const row = (r: Run[], k: string) => rowEl(els, r, k, press)
   const rule: Run[] = [{ s: '─'.repeat(W), tone: 'dim-faint' }]
+  // graph.js keeps two rows for the rule and the keys; in a narrow pane the keys wrap, and the map and the detail are
+  // laid out again in the rows left, so the pane's rows hold the whole drawing
+  const keyRows = keys.length ? treeRows(keysRow(els, keys), W) : 1
+  const laid = keyRows > 1 ? graphView(raw, st, { ...opts, h: H - (keyRows - 1) }) : view
   return Box({ flexDirection: 'column', children: [
-    ...(view.head as Run[][]).map((r, i) => row(r, `h${i}`)),
-    ...((view.graph as Run[][]).length || view.listed ? [row([], 'gap')] : []),
-    ...(view.graph as Run[][]).map((r, i) => row(r, `g${i}`)),
-    ...rowEls(els, view.panel as Run[][], 'p', press),
+    ...(laid.head as Run[][]).map((r, i) => row(r, `h${i}`)),
+    ...((laid.graph as Run[][]).length || laid.listed ? [row([], 'gap')] : []),
+    ...(laid.graph as Run[][]).map((r, i) => row(r, `g${i}`)),
+    ...rowEls(els, laid.panel as Run[][], 'p', press),
     ...(keys.length ? [row(rule, 'rule'), keysRow(els, keys)] : []),
   ] })
 }

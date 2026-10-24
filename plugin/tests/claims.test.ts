@@ -12,6 +12,7 @@ import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/
 import { claimsStore, openClaims } from '../claims/term'
 import { failLineNow } from '../bar/notice'
 import { promptStub, tempRun } from './stubs'
+import { treeRows } from '../core/trail.mjs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -298,6 +299,23 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   expect(paneNow(s).args).toMatchObject({ claim: 'c1' })
   await buttons(onMap).find(b => /^g\d+:d:c3$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c3' })
+})
+
+test("a narrow pane whose keys wrap: the map and the claim's detail keep to the rows the pane gives, keys included", async () => {
+  setOptions({})
+  const many = Array.from({ length: 10 }, (_, i) => ({ claim: `Run ${i + 1} failed on a long and slow p95 check of the nightly batch.`, quote: `Run ${i + 1} failed`, cluster: i < 5 ? 'failures' : 'slow runs' }))
+  const s = setup([reply(many)])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: [many.map(c => `${c.quote} on a long and slow p95 check of the nightly batch.`).join(' ')] })
+  // every height: a detail that fills its room would otherwise lose its last rows under the pane's edge
+  for (const W of [48, 70]) {
+    for (let H = 24; H <= 44; H++) {
+      const pane = await drawClaimsPane(s.$, { props: { bodyColumns: W, scroll: { bodyRows: H } } }, { claim: 'c2' }, els)
+      // the keys say five keys with their arrows, more than one row of a narrow pane
+      expect(textOf(pane)).toContain('no citations')
+      expect(`${W}x${H}: ${treeRows(pane, W)}`).toBe(`${W}x${H}: ${Math.min(H, treeRows(pane, W))}`)
+    }
+  }
 })
 
 test('c in a terminal too narrow for the pane says to type /claims; once /claims opens the pane, that line goes', async () => {
