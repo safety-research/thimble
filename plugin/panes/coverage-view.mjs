@@ -230,7 +230,14 @@ export function coverageView(cov, view, { W, H, under = 0 }) {
   const head = []
   const right = !files ? 'no files' : none ? 'nothing touched yet' : `${num(touched)}/${num(files)} ${narrow ? 'touched' : 'files touched'} · ${pct(touched, files)}`
   head.push([{ s: 'Coverage', tone: 'bold' }, { s: padStart(cut(right, W - 9), W - 8), tone: none ? 'dim' : null }])
-  head.push([{ s: cut(WHY, W), tone: 'dim' }])
+  // whole, in as many rows as a narrow pane needs
+  const why = [['']]
+  for (const word of WHY.split(' ')) {
+    const line = why[why.length - 1]
+    if (line[0] && width(`${line[0]} ${word}`) > W) why.push([word])
+    else line[0] = line[0] ? `${line[0]} ${word}` : word
+  }
+  head.push(...why.map(([l]) => [{ s: cut(l, W), tone: 'dim' }]))
   if (!files) {
     head.push([], [{ s: cut('This folder holds no files, so there is nothing to cover yet.', W), tone: 'dim' }])
     return { lines: head.map((runs, i) => ({ key: `h${i}`, runs })), keys: [], sel: -1, selKey: null, top: 0, room: 0, rows: 0, open: [], picked: null, isDir: false, anyOpen: false }

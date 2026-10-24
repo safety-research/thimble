@@ -120,3 +120,10 @@ test('a folder with no files: the head says so, and why coverage matters, and no
   assert.equal(v.keys.length, 0)
   fits(v, 66)
 })
+
+test('in a narrow pane the line on why coverage matters wraps whole, never cut', () => {
+  const v = coverageView({ root: '/made-up/empty', total: { files: 0, touched_files: 0, seen_files: 0 }, groups: [], files: [], untouched: {} }, null, { ...DIMS, W: 49 })
+  const t = textOf(v).split('\n')
+  assert.deepEqual(t.slice(1, 3), ['A file Claude never opened can hold cases that', 'change its answer.'])
+  fits(v, 49)
+})
