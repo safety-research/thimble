@@ -524,6 +524,9 @@ test("a claim said in a table row: why it holds is that row, its cells between Â
   const why = reasonOf(claim, { md, place: { row: 'a1', quote: 'Shares a task answer', start: at, end: at + 20 } })
   assert.equal(why.text, 'Shares a task answer Â· 138')
   assert.deepEqual(why.spans.map(x => [why.text.slice(x.a, x.b), x.look.part]), [['138', 'cite:0']])
+  // two citations of the same words (two replies said them) show once
+  const twice = reasonOf({ id: 'c2', text: 'The admin deleted pages.', sources: [{ label: '5,144 pages', status: 'verified' }, { label: '5,144 pages', status: 'failed' }] })
+  assert.equal(twice.more.text, '5,144 pages')
 })
 
 test("a short session's list with a claim picked: the claim and why it holds, the other claims and clusters one line each", () => {

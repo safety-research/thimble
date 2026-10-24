@@ -291,11 +291,12 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     const m = await messageOf($, s.row)
     await tellOpened($, { kind: 'citation', row: s.row, n: s.n, words: s.label, status: s.status, failedBy: s.failedBy }, m?.text ?? '')
   }
-  // a citation in why a claim holds: as a press on it in the reply, the tray opens on it (else its evidence pane)
+  // a citation in why a claim holds: as a press on it in the reply, the tray opens on it (else its evidence pane); the
+  // pane keeps the keyboard, so k j e still move in it
   const openCite = async (s: Any) => {
     if (!s?.row || !s.n) return
-    if (await markPressed($, s.row, s.n)) return
-    await openEvidence(s)
+    if (!(await markPressed($, s.row, s.n))) return openEvidence(s)
+    await showClaims($, a)
   }
   const at = claim ? { claim: claim.id, at: data.last } : null
   const cite = Math.max(0, Math.min(view.cites - 1, Number(a.cite) || 0))

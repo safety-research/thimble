@@ -1050,8 +1050,9 @@ export function reasonOf(claim, passage = null) {
       } else out = r.text ? r : null
     }
   }
-  // the claim's citations the text does not hold: on a line of their own, ` · ` between them
-  const rest = srcs.map((s, i) => ({ s, i })).filter(x => !used.has(x.i) && one(x.s.shown || x.s.label))
+  // the claim's citations the text does not hold: on a line of their own, ` · ` between them, the same words once
+  const seen = new Set()
+  const rest = srcs.map((s, i) => ({ s, i })).filter(x => !used.has(x.i) && one(x.s.shown || x.s.label) && !seen.has(fold(x.s.shown || x.s.label)) && seen.add(fold(x.s.shown || x.s.label)))
   let more = ''
   const moreSpans = []
   for (const { s, i } of rest) {
