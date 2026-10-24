@@ -15,10 +15,12 @@
 import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
+import { quiet } from '../core/askcell.js'
 import { cut, textWidth } from '../core/text.js'
 import { accent } from '../core/theme'
 import { vReady } from '../designer/v'
 import { fixLineRows } from '../fix/line'
+import { pressKey } from '../hooks/keys'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow, keptCounts } from './counts'
@@ -116,13 +118,46 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   return [...(preview ? [] : await lineRows($, els, width)), ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), bar]
 }
 
-/** The failure line: what failed, whole, in red, or a notice. */
+/** The failure line: what failed, whole, in red, or a notice. A key it names (`Press x to try again`) is a click
+ *  too, which presses that key as the prompt would take it (hooks/keys.ts pressKey); esc and the keys of a pane are
+ *  not, as no click at the prompt can press them. */
 async function lineRows($: Engine, els: Any, width: number): Promise<Any[]> {
-  const { Box, Text } = els
+  const { Box, Button, Text } = els
   const fail = await failLineNow($)
   if (!fail) return []
-  const text = fail.kind === 'failed'
-    ? Text({ key: 'fail-text', color: 'error', wrap: 'wrap', children: `× ${fail.text.replace(/^[×!]\s*/, '')}` })
-    : Text({ key: 'fail-text', color: 'warning', wrap: 'wrap', children: fail.text })
-  return [Box({ key: 'fail-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [text] })]
+  const look = fail.kind === 'failed' ? { color: 'error' } : { color: 'warning' }
+  const words = fail.kind === 'failed' ? `× ${fail.text.replace(/^[×!]\s*/, '')}` : fail.text
+  const parts = keyedWords(words)
+  if (!parts.some(p => p.key)) return [Box({ key: 'fail-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [Text({ key: 'fail-text', ...look, wrap: 'wrap', children: words })] })]
+  // with a key to press: wrapped here, word by word, so its press stands among the words (a Text holds no Button)
+  const lines: Any[][] = [[]]
+  let used = 0
+  parts.forEach((p, i) => {
+    const pieces = p.key ? [p.s] : p.s.split(/(?<= )/)
+    pieces.forEach((w, j) => {
+      if (used && used + len(w.trimEnd()) > width) { lines.push([]); used = 0 }
+      if (!used && !p.key) w = w.trimStart()
+      if (!w) return
+      used += len(w)
+      lines[lines.length - 1]!.push(p.key
+        ? Button({ key: `fail-key-${i}`, plain: true, label: `press ${p.key}`, hover: quiet(`fail-key-${i}`), onPress: () => pressKey($, p.key!), children: [Text({ ...look, bold: true, underline: true, children: w })] })
+        : Text({ key: `fail-w-${i}-${j}`, ...look, children: w }))
+    })
+  })
+  const text = Box({ key: 'fail-text', flexDirection: 'column', children: lines.map((l, k) => Box({ key: `fail-row-${k}`, flexDirection: 'row', children: l })) })
+  return [Box({ key: 'fail-line', flexDirection: 'row', width, children: [text] })]
+}
+
+/** A line's words cut at each key it tells the person to press (`Press x`, `press 0`): the key alone is its own part. */
+export function keyedWords(s: string): { s: string; key?: string }[] {
+  const out: { s: string; key?: string }[] = []
+  let at = 0
+  for (const m of s.matchAll(/\b[Pp]ress ([a-z0-9])\b(?! ?\+)/g)) {
+    const k = m.index! + m[0].length - 1
+    if (k > at) out.push({ s: s.slice(at, k) })
+    out.push({ s: m[1]!, key: m[1]! })
+    at = k + 1
+  }
+  if (at < s.length) out.push({ s: s.slice(at) })
+  return out
 }

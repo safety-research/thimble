@@ -9,12 +9,10 @@
 //                check records), and esc closes it
 import type { EngineInterface, Register } from 'claude-code'
 
-import { aboveBar, barLeft } from '../core/answerview'
-import { quiet } from '../core/askcell.js'
-import { featureOn } from '../settings/features.mjs'
-import { syncOff } from '../settings/term'
+import { aboveBar } from '../core/answerview'
 import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
+import { syncOff } from '../settings/term'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
 import { noticeLine, promptTyped } from './notice'
@@ -58,20 +56,6 @@ export async function openSettings($: Engine): Promise<void> {
 export async function barKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
   if (!BAR_KEYS.includes(k) || !(await barKeys($)).has(k)) return null
   return { later: () => togglePane($, k === 'r' ? 'coverage' : 'labels') }
-}
-
-/** The row over what stands above the bar: while the tray is open, its close (or back) at the row's right, where the
- *  eye looks for a close. Claude Code draws its own `[-]` at the band's top right, a few cells to the right of it, which
- *  hides all of thimble's band (the bar, the tray) until the person presses ctrl+x ctrl+a or the line it leaves: with
- *  no close of thimble's at that corner, the `[-]` read as the tray's own and hid the band. */
-async function aboveTop($: Engine, els: Any, width: number): Promise<Any> {
-  const zero = (await barLeft($, featureOn, false).catch(() => [])).find(x => x.id === 'tray-0' && x.press)
-  if (!zero) return els.Text({ key: 'above-gap', children: ' ' })
-  const words = zero.words === 'close' ? '× close' : `‹ ${zero.words}`
-  return els.Box({ key: 'above-gap', flexDirection: 'row', justifyContent: 'flex-end', width, children: [
-    els.Button({ key: 'band-close', plain: true, label: zero.words === 'close' ? 'close the tray' : 'back in the tray', hover: quiet('band-close'), onPress: zero.press, children: [els.Text({ dimColor: true, children: words })] }),
-    els.Text({ key: 'band-close-gap', children: '  ' }),
-  ] })
 }
 
 export const registerBar: Register = on => {
@@ -119,7 +103,7 @@ export const registerBar: Register = on => {
       // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off
       const room = Number(e.props.maxRows) > 0 ? Math.max(4, Number(e.props.maxRows) - rows.length - 2) : 0
       const above = await aboveBar($, els, width, room)
-      return els.Box({ flexDirection: 'column', children: [...(above.length ? [await aboveTop($, els, width), ...above] : []), els.Text({ key: 'gap', children: ' ' }), ...rows] })
+      return els.Box({ flexDirection: 'column', children: [...(above.length ? [els.Text({ key: 'above-gap', children: ' ' }), ...above] : []), els.Text({ key: 'gap', children: ' ' }), ...rows] })
     } catch {
       // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
       return next(e)

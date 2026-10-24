@@ -64,6 +64,16 @@ async function takerOf($: Engine, key: string, until: number): Promise<Take | nu
   return (await fixKey($, key)) ?? (await vKey($, key, until)) ?? (await restoredKey($, key, until)) ?? (await cardTake($, key)) ?? (await barKey($, key))
 }
 
+/** A key a click pressed (a key a failure line names, bar/bar.tsx): done at once, by whoever takes it now, as if it
+ *  were typed at an empty prompt with no letter after it. False when no one takes it now. */
+export async function pressKey($: Engine, key: string): Promise<boolean> {
+  const t = await takerOf($, key, Number(await $.clock.now()) + WORD_MS)
+  if (!t) return false
+  await t.now?.()
+  await t.later?.()
+  return true
+}
+
 /** The window still open at `now`, or null. */
 const windowAt = (now: number) => (open && !open.shut && now - open.at < WORD_MS ? open : null)
 

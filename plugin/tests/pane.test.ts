@@ -3,6 +3,7 @@
 // and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
+import { keyedWords } from '../bar/bar'
 import { drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -118,4 +119,13 @@ test('docked, the frame takes the pane\'s rows and a row past it, never shown; i
   const inline = await drawPane(s.$, { requestId: 'thimble', props: { bodyColumns: 70, placement: 'inline', scroll: { offset: 0, bodyRows: 24 } } }, await paneNow(s.$), els)
   expect(nodes(inline).some(n => n.props?.key === 'pane-frame')).toBe(false)
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(false)
+})
+
+test('a key a failure line names is a part of its own, so a click presses it; esc and a key with a modifier are not', async () => {
+  expect(keyedWords('× The repair did not start: no answer. Press x to try again.')).toEqual([
+    { s: '× The repair did not start: no answer. Press ' }, { s: 'x', key: 'x' }, { s: ' to try again.' },
+  ])
+  expect(keyedWords('Press 0 or pick the level again.').map(p => p.key ?? '')).toEqual(['', '0', ''])
+  expect(keyedWords('This pane could not be drawn. Press esc, then open it again.').some(p => p.key)).toBe(false)
+  expect(keyedWords('Press ctrl + x to hide it.').some(p => p.key)).toBe(false)
 })
