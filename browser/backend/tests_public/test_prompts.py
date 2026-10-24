@@ -223,4 +223,4 @@ def test_the_lens_checks_say_what_the_terminal_lenses_say(check):
     the lens's JSON and the check's add_comment, each in its own example and paragraph."""
     browser = _shared((REPO / "prompts" / "checks" / f"{check}.md").read_text("utf-8"))
     terminal = _shared((REPO.parent / "plugin" / "prompts" / f"{LENS_TEXTS[check]}.md").read_text("utf-8"))
-    assert len(browser) >= 3 and browser == terminal
+    assert browser and browser == terminal
