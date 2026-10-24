@@ -371,17 +371,17 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
   const out: BarItem[] = []
   const say = (id: string, words: string, color?: string) => out.push({ id, words, focus: true, ...(color ? { color } : {}) })
   const key = (id: string, k: string, words: string, press?: () => unknown) => out.push({ id, key: k, words, focus: true, ...(press ? { press } : {}) })
-  if (open.typing != null) { say('sq-typing', `+ ${open.typing}▏ ↵ adds it · tab lets it go`, 'warning'); return out }
+  if (open.typing != null) { say('sq-typing', `+ ${open.typing}▏ ↵ adds it · tab lets it go`, accent()); return out }
   if (open.hint) {
     const dims = await ownEarlier($)
-    say('sq-hint', `squeeze for…${dims.length ? ` · earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, 'warning')
+    say('sq-hint', `squeeze for…${dims.length ? ` · earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, accent())
     return out
   }
   // s close comes first, so leaving is the first thing the bar names while the chips hold the keys
   key('sq-close', 's', 'close', () => setOpen($, null))
   if (ui.error) say('sq-error', `× ${ui.error}`, 'error')
-  else if (open.edge && focus) say('sq-edge', `${focus.name} goes no further than ${focus.levels[focus.level]}`, 'warning')
-  else if ((rec.squeeze?.problems ?? [])[0] && typeof rec.shown === 'string') say('sq-problem', `! ${rec.squeeze.problems[0]}`, 'warning')
+  else if (open.edge && focus) say('sq-edge', `${focus.name} goes no further than ${focus.levels[focus.level]}`, accent())
+  else if ((rec.squeeze?.problems ?? [])[0] && typeof rec.shown === 'string') say('sq-problem', `! ${rec.squeeze.problems[0]}`, accent())
   const revertable = !!rec.catchup || !orig || pending
   if (open.held) {
     key('sq-tab', 'tab', 'next chip', nextChip)

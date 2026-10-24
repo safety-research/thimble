@@ -1,5 +1,5 @@
 // client.tsx: the one Client module that draws every card. Claude Code runs it in the terminal's drawing thread; draw.ts
-// names it by this file and hands it the card's drawing as props: {tree, width, need, ack, tint, accent}, the plain tree the runner
+// names it by this file and hands it the card's drawing as props: {tree, width, need, ack, tint, accent, theme}, the plain tree the runner
 // made of the view (Box, Text and Button nodes with the props each element takes), or null before there is one. It
 // holds no data and no logic of the card. It sends the hooks module events:
 //
@@ -129,11 +129,29 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
       children: [E.Text({ ...p, hover: { scope, ...look }, children })],
     })
   }
-  /** A Button's children, drawn as in a Text: each run of words shows inverse while the pointer is on the Button
-   *  (`scope`), a run of glyphs without letters or digits keeps its look. */
-  const lit = (c: Array<Node | string> | undefined, scope: string): Any[] => (Array.isArray(c) ? c : []).map(k => {
-    if (typeof k === 'string') return /[\p{L}\p{N}]/u.test(k) ? E.Text({ hover: { scope, inverse: true }, children: k }) : k
-    if (k && typeof k === 'object' && k.t === 'Text') return E.Text({ ...pick(k.p, TEXT), children: lit(k.c, scope) })
+  // the screen's ground for the drawing's theme (core/theme.ts), which a bar's cells move toward under the pointer
+  const ground = props?.theme === 'light' ? [255, 255, 255] : [30, 30, 30]
+  /** A bar's color as the highlight draws it: its hex moved most of the way to the ground, so on the highlight (the
+   *  inverse of the words) the bar reads inverted and stays in view; a color by name keeps itself. */
+  const inverted = (color: string): string => {
+    const m = /^#([0-9a-f]{6})$/i.exec(color)
+    if (!m) return color
+    const rgb = [0, 2, 4].map((i, k) => Math.round(parseInt(m[1].slice(i, i + 2), 16) * 0.45 + ground[k] * 0.55))
+    return `#${rgb.map(v => v.toString(16).padStart(2, '0')).join('')}`
+  }
+  /** A Button's children, drawn as in a Text: while the pointer is on the Button (`scope`) the whole row shows
+   *  highlighted, each run of words inverse and each run of glyphs in a color (a bar) inverted on the highlight's
+   *  ground (Claude Code's inverse of a bar's block cells would turn them into the background's color). `color`: the
+   *  color the run inherits. A bar of blocks in no color keeps its look. */
+  const lit = (c: Array<Node | string> | undefined, scope: string, color = ''): Any[] => (Array.isArray(c) ? c : []).map(k => {
+    if (typeof k === 'string') {
+      if (/[\p{L}\p{N}]/u.test(k) || (!color && !/[\u2580-\u259f]/.test(k))) return E.Text({ hover: { scope, inverse: true }, children: k })
+      return color ? E.Text({ hover: { scope, color: inverted(color), backgroundColor: 'text' }, children: k }) : k
+    }
+    if (k && typeof k === 'object' && k.t === 'Text') {
+      const p = pick(k.p, TEXT)
+      return E.Text({ ...p, children: lit(k.c, scope, typeof p.color === 'string' ? p.color : color) })
+    }
     return null
   }).filter(x => x != null)
   const kids = (c: Node[] | undefined, inText: boolean, line = '', owned = false, path: number[] = []): Any[] => (Array.isArray(c) ? c : []).map((k, i) => draw(k, inText, line, owned, [...path, i])).filter(x => x != null)
@@ -149,7 +167,7 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     if (n.t === 'Button') {
       const press = n.p?.onPress
       const key = typeof n.p?.key === 'string' ? `k${n.p.key}` : `b${String(press)}`
-      // under the pointer, the Button's words show inverse and its runs of glyphs (a bar) keep their color: Claude
+      // under the pointer, the Button's words show inverse and its runs of glyphs (a bar) inverted (lit): Claude
       // Code's inverse of the whole Button would turn a bar's cells into the background's color
       const scope = `${me.id}-${key}`
       return E.Button({

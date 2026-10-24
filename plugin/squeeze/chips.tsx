@@ -6,7 +6,8 @@
 //           nothing is), catchup: {n, replies} (null when the row offers no catch-up), width, ack}
 //   in a frame in thimble's color, one row of chips, wrapped to the width: each its digit (a key, drawn as the bar draws its keys), its name, its two ends either
 //   side of its dots, each end and dot a press (`1 Length shorter ○●○○ longer`), and its level in words where it
-//   stands away from the original or is picked (` · as written`), the picked chip in the warning color; then the
+//   stands away from the original or is picked (` · as written`), the picked chip in thimble's color, as its frame
+//   and its keys are; then the
 //   catch-up, when replies piled up (`4 Catch up on 2 replies`); then `+`, which adds a chip of the person's own; then
 //   `s close`, its key drawn as the bar draws its keys, which closes the chips (not while words are typed after +,
 //   where s is a letter)
@@ -48,7 +49,7 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   const keyColor = typeof props?.color === 'string' ? props.color : undefined
   const press = (id: string, label: string, kids: Any[]) => E.Button({ key: id, plain: true, label, onPress: () => send({ press: id }), children: kids })
   const chip = (c: Item) => {
-    const tone = c.picked ? { color: 'warning' } : { dimColor: true }
+    const tone = c.picked ? { color: keyColor } : { dimColor: true }
     const last = c.levels.length - 1
     const dots = c.levels.map((lv, i) => press(`lvl-${c.id}-${i}`, `${c.name}: ${lv}`, [E.Text({ ...tone, children: i === c.level ? '●' : '○' })]))
     // the ends, either side of the dots: a press sets the chip at that end
@@ -60,14 +61,14 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
       end(0, lo, 'l'),
       ...dots,
       end(last, hi, 'r'),
-      ...(c.picked || away ? [press(`word-${c.id}`, `${c.name}: ${c.word}`, [E.Text({ bold: c.picked, ...(c.picked ? { color: 'warning' } : {}), children: ` · ${c.word}` })])] : []),
+      ...(c.picked || away ? [press(`word-${c.id}`, `${c.name}: ${c.word}`, [E.Text({ bold: c.picked, ...(c.picked ? { color: keyColor } : {}), children: ` · ${c.word}` })])] : []),
     ] })
   }
   const cu = props?.catchup && typeof props.catchup === 'object' ? props.catchup : null
   const catchup = cu ? [E.Box({ key: 'c-catchup', flexDirection: 'row', marginRight: 3, children: [
     press('catchup', `catch up on ${cu.replies} replies`, [E.Text({ color: keyColor, bold: true, children: `${cu.n} ` }), E.Text({ children: `Catch up on ${cu.replies} replies` })]),
   ] })] : []
-  const add = press('add', 'add a chip of your own', [E.Text(plus != null ? { color: 'warning', bold: true, children: `+ ${plus}▏` } : { dimColor: true, children: '+' })])
+  const add = press('add', 'add a chip of your own', [E.Text(plus != null ? { color: keyColor, bold: true, children: `+ ${plus}▏` } : { dimColor: true, children: '+' })])
   // s close, its key as the bar draws its keys (props.color: core/theme.ts accent()), so leaving is named where the person looks
   const close = plus == null ? [E.Box({ key: 'c-close', flexDirection: 'row', marginLeft: 3, children: [
     press('close', 's close', [E.Text({ color: keyColor, bold: true, children: 's' }), E.Text({ dimColor: true, children: ' close' })]),

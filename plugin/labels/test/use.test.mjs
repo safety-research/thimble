@@ -32,13 +32,15 @@ test('a row names the values its records have, then the records with no value, a
 })
 
 test('an ask is one question for the question tool: run all, a sample or cancel, each with its cost, one for the rest no sample; the answer picks the choice, and Claude hears how to label the rest', () => {
-  const ev = { kind: 'label_ask', name: 'spam', root: '/made-up/data/', ask: 'a1', units: 420, calls: 9, sample: 300, text: 'Read 420 records with Claude', meta: '9 model calls', t: 1 }
+  const ev = { kind: 'label_ask', name: 'spam', root: '/made-up/data/', ask: 'a1', units: 420, calls: 9, chars: 300000, sample: 300, text: 'Read 420 records with Claude', meta: '9 model calls', t: 1 }
   const a = askOf(ev)
-  // the choices, each with what it costs
+  // the choices, each with what it costs: its calls, the model, the time and the dollars (from the records' size and
+  // the model's list price; none without a size)
   {
     assert.equal(a.root, '/made-up/data')
     assert.equal(sampleOffered(a), true)
-    assert.deepEqual(askChoices(a).map(c => `${c.label}: ${c.cost}`), ['Run all: 9 model calls, about 20 s', 'Run on a sample of 300: 7 model calls, about 10 s', 'Cancel: reads none'])
+    assert.deepEqual(askChoices(a).map(c => `${c.label}: ${c.cost}`), ['Run all: 9 calls to Claude Sonnet 5.5, about 20 s, about $0.40', 'Run on a sample of 300: 7 calls to Claude Sonnet 5.5, about 10 s, about $0.25', 'Cancel: reads none'])
+    assert.equal(askChoices(askOf({ ...ev, chars: undefined }))[0].cost, '9 calls to Claude Sonnet 5.5, about 20 s')
     const rest = askOf({ ...ev, ask: 'a2', units: 120, sample: 0, rest: true })
     assert.deepEqual(askChoices(rest).map(c => c.label), ['Run the rest', 'Cancel'])
     assert.equal(askOf({ ...ev, name: '../x' }), null)

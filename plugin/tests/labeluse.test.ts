@@ -240,8 +240,8 @@ test("a large label run: Claude reads the ask after its command, as the question
   const input = JSON.parse(told.slice(told.indexOf('{')))
   expect(input.questions[0].question).toBe('Read 420 records of chat.jsonl with Claude for the label spam?')
   expect(input.questions[0].options).toEqual([
-    { label: 'Run all', description: '9 model calls, about 20 s' },
-    { label: 'Run on a sample of 300', description: '7 model calls, about 10 s' },
+    { label: 'Run all', description: '9 calls to Claude Sonnet 5.5, about 20 s' },
+    { label: 'Run on a sample of 300', description: '7 calls to Claude Sonnet 5.5, about 10 s' },
     { label: 'Cancel', description: 'reads none' },
   ])
   // the person answers Claude's question: their choice runs as their own command, and Claude reads what it started

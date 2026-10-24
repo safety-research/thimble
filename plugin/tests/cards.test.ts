@@ -548,7 +548,7 @@ test('the Client makes every run of a card clickable without a Button that holds
   expect(posts.at(-1).events.at(-1).pointer).toEqual({ down: { x: 8, y: 2 }, up: { x: 8, y: 2 }, button: 'left' })
 })
 
-test('a card shows `ask about this card` at its title\'s right, which names the item selected; a click on words on no item asks a side thread about them', async ($, on) => {
+test('a card shows `ask about this card` at its title\'s right, whose question names the item selected; a click on words on no item asks a side thread about them', async ($, on) => {
   const w = world(on)
   const opened: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
@@ -567,26 +567,29 @@ test('a card shows `ask about this card` at its title\'s right, which names the 
   expect(w.asked).toContain('pick')
   expect(opened.some(e => /bram 5/.test(String(e.title)))).toBe(true)
   await row.unmount()
-  // an item selected (▸): the ask names it
+  // an item selected (▸): the words stay `ask about this card`, and the question names the item
   const picked = { title: 'Picked', data: 'runs.json', view: `${VIEW}\n// SELECTED` }
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_32', ...picked } as never)
   await (await shown($, callRow('toolu_made_up_32', picked))).unmount()
   ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_32', picked) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
-  expect(textOf(ask)).toBe('ask about bram 5')
+  expect(textOf(ask)).toBe('ask about this card')
   expect(ask.props.label).toBe('ask about "bram 5" in the card "Picked"')
 })
 
-test("a view's own Button under the pointer: its words show inverse, and a bar in it keeps its color", async () => {
+test("a view's own Button under the pointer: the whole row shows highlighted, its words inverse and its bar inverted on the highlight", async () => {
   const el = (type: string) => (p: Any) => ({ type, props: p })
   const surface: Any = { elements: { Box: el('Box'), Text: el('Text'), Button: el('Button') }, columns: 60, rows: 0, post: () => undefined, onPointer: () => undefined }
-  // a row the view made a Button: its label and number, then its bar in a Text of its own color
-  const row = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Button', p: { plain: true, onPress: 3 }, c: [{ t: 'Text', p: { bold: true }, c: ['▸ bram  5 ', { t: 'Text', p: { color: 'success' }, c: ['█████'] }] }] }] }
-  const button = elements((Card as Any)({ tree: row, width: 60 }, surface)).find(n => n.type === 'Button')!
+  // a row the view made a Button: its label and number, then its bar in a Text of its own color (a hex of the card
+  // palette, and a color by name)
+  const row = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Button', p: { plain: true, onPress: 3 }, c: [{ t: 'Text', p: { bold: true }, c: ['▸ bram  5 ', { t: 'Text', p: { color: '#0060c0' }, c: ['█████'] }, { t: 'Text', p: { color: 'success' }, c: ['██'] }] }] }] }
+  const button = elements((Card as Any)({ tree: row, width: 60, theme: 'light' }, surface)).find(n => n.type === 'Button')!
   expect(button.props.hover).toMatchObject({ inverse: false })
   const texts = elements(button).filter(n => n.type === 'Text')
   const words = texts.find(n => n.props.children === '▸ bram  5 ')!
   expect(words.props.hover).toMatchObject({ scope: button.props.hover.scope, inverse: true })
-  const bar = texts.find(n => n.props.color === 'success')!
-  expect(bar.props.children).toEqual(['█████'])
-  expect(bar.props.hover).toBeUndefined()
+  // the bar keeps its color at rest; under the pointer its cells take a light tint of it on the highlight's ground
+  const bar = texts.find(n => n.props.color === '#0060c0')!
+  expect(elements(bar).find(n => n.props?.children === '█████')!.props.hover).toEqual({ scope: button.props.hover.scope, color: '#8cb7e3', backgroundColor: 'text' })
+  const named = texts.find(n => n.props.color === 'success')!
+  expect(elements(named).find(n => n.props?.children === '██')!.props.hover).toEqual({ scope: button.props.hover.scope, color: 'success', backgroundColor: 'text' })
 })
