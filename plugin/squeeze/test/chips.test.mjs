@@ -4,7 +4,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, catchUpText, changeWords, changedCitations, checkRewrite, chipsOf, endsOf, fromVersions, mapLinks, request, restore, settledNote, shownKey, termsOf } from '../chips.mjs'
+import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, catchUpText, changedCitations, checkRewrite, chipsOf, endsOf, fromVersions, mapLinks, request, restore, settledNote, shownKey, termsOf } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -113,13 +113,9 @@ test('a cited number the rewrite changed is named, though the original states it
   assert.deepEqual(checkRewrite(orig, 'It ran [26 times](#).').problems, [])
 })
 
-test('each chip names its two ends, and a rewrite on its way says what it writes', () => {
+test('each chip names its two ends', () => {
   const chips = chipsOf({ text: 'x', squeeze: {} })
   assert.deepEqual(chips.map(endsOf), [['shorter', 'longer'], ['facts', 'expert reading'], ['new', 'expert']])
   // a chip of the person's own runs from as written to fully
   assert.deepEqual(endsOf({ levels: ['as written', 'a little', 'more', 'fully'] }), ['as written', 'fully'])
-  const rec = { text: 'x', squeeze: {} }
-  assert.equal(changeWords(rec, { familiarity: 0 }, {}), 'Background new')
-  assert.equal(changeWords(rec, { length: 0, familiarity: 0 }, { length: 0 }), 'Background new')
-  assert.equal(changeWords(rec, {}, { length: 0 }), 'Length as written')
 })

@@ -36,7 +36,6 @@ import type { EngineInterface, Register } from 'claude-code'
 import { failCleared, failLineNow } from '../bar/notice'
 import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
-import { labelAskPaneHead } from '../labels/use'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
 import { drawSettings } from '../panes/settings'
@@ -223,10 +222,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const pinned = e?.props?.placement === 'dock'
     const keys = new Map<string, () => unknown>()
     const kels = noting(els, keys)
-    // a large label run's ask waits at the pane's top, where the person reads (labels/use.ts), over the top row
-    const ask = await labelAskPaneHead($, els).catch(() => null)
-    // while that ask waits, main waits for the person, whatever its turn's last state said
-    const top = [...(ask ? [ask] : []), ...topRow($, els, now, W, ask ? { s: 'asks' } : await mainNow($))]
+    const top = topRow($, els, now, W, await mainNow($))
     const T = top.length ? treeRows(top, W) : 0
     // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
     // and input bar (`under`, kept at the bottom)

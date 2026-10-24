@@ -324,7 +324,7 @@ async function reveal($: Engine, at: { row: string; card?: string }): Promise<vo
 
 /** Open the tray on a mark (a press on it, ] and [): its answer becomes the one the keys act on. */
 export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}): Promise<void> {
-  // a citation that waits to be checked until it is opened (checkOnOpen) starts its check: the spawn first
+  // a citation that waits to be checked until it is opened (citationChecks) starts its check: the spawn first
   if (f.kind === 'citation') await checkOpened($, f.row, f.n).catch(() => undefined)
   await setTray($, open(f) as Tray)
   const t = await turnOfRow($, f.row)
@@ -571,7 +571,7 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
 /** A citation's status as its header says it, beside the kind: a sign, the word and its color. */
 const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
   checking: { word: 'checking', dim: true },
-  deferred: { word: 'not checked yet', dim: true },
+  deferred: { word: 'not checked', dim: true },
   verified: { word: '✓ verified', color: 'success' },
   corrected: { word: '✓ verified', color: 'success' },
   failed: { word: '× failed', color: 'error' },

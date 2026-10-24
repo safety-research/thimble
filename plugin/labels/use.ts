@@ -16,38 +16,30 @@
 // `aborted` and leave the rows empty.
 //
 // The ask. A --prompt label over more than a sample of records (engine/kernel/estimate.py) does not start: the kernel
-// writes a `label_ask` line in the change feed (core/feed.ts hands it to labelAskFromFeed), and the ask waits above
-// the bar as a question in the warning color, tagged `Claude is waiting on you` (its turn waits for the answer), with its choices,
-// each a press with about how long it takes, and in the bar as its keys: 1 run all (run the rest, after a sample),
-// 2 run on a sample, 0 cancel. An open side pane shows the same ask at its top (labelAskPaneHead). After a choice
-// the band says for a moment what runs now (`labeling a sample of 300 records for complaint…`). A key acts once the word window closed with no letter after it (a letter makes it the
-// start of a word, and nothing runs); the choices leave the screen at once, and come back when the key began a word.
-// The choice runs as the person (`thimble label NAME --answer all|sample|cancel --ask ID`), the model's reads start
-// beside the session (labels.ts labelFromFeed), and Claude hears the choice with the next prompt (core/tell.ts).
+// writes a `label_ask` line in the change feed (core/feed.ts hands it to labelAskFromFeed). After the Bash call that
+// made it, Claude reads the ask as the input of Claude Code's own question tool (use.mjs askContext: run all, or the
+// rest after a sample; run on a sample; cancel; each with its model calls and about how long they take), and asks the
+// person with it. Their answer in that tool's result is the choice (use.mjs answerChoice): it runs as the person
+// (`thimble label NAME --answer all|sample|cancel --ask ID`, an id Claude never sees), the model's reads start beside
+// the session (labels.ts labelFromFeed), and Claude reads what was chosen after the tool's result. An answer in the
+// person's own words starts nothing; the same command again asks again.
 //
 //   labelsUnderAnswer($, els, row, cols)   the row under an answer
 //   labelsUnderCard($, els, id, cols)      the row under a card
-//   labelAskKey($, key, until)             the ask's keys while it waits
-//   labelAskBand($, els, width)            the ask, drawn above the bar while it waits, and the echo of a choice
-//   labelAskPaneHead($, els)               the ask at the top of an open side pane (core/pane.ts)
-//   labelAskBar($, on, preview)            its keys at the bar's left while it waits
 //   labelAskFromFeed($, ev)                a `label_ask` line of the kernel's change feed
-//   answerAsk($, choice, ask?)             the person's choice, as a press or a key gives it
+//   answerAsk($, choice, ask?)             the person's choice; what Claude reads of it
 //   registerLabelUse                       the reads of the labels (session.start, turn.complete, a `thimble label`
-//                                          command); the feed, the keys and the drawings call in
+//                                          command), the ask after that command, and the person's answer to it
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BarItem } from '../bar/bar'
 import { failNotice } from '../bar/notice'
 import { metaOf, treeOf } from '../cards/store'
 import { labelsOf, turnOfRow, turnsNow } from '../core/answers'
 import { rootHere, runThimble } from '../core/env'
-import { tellAtNextPrompt } from '../core/tell'
-import { accent } from '../core/theme'
-import type { Take } from '../hooks/keys'
+import { readFeed } from '../core/feed'
 import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
-import { ASK_KEYS, answerNote, askChoices, askOf, askQuestion, choiceEcho, howMade, NO_VALUE, rowValues, sampleOffered, tonesInTree, usedNames } from './use.mjs'
+import { answerChoice, answerNote, askContext, askOf, howMade, NO_VALUE, rowValues, tonesInTree, usedNames } from './use.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -62,9 +54,6 @@ export type LabelAsk = { root: string; name: string; ask: string; text: string; 
 type Choice = 'all' | 'sample' | 'cancel'
 
 const LABELASK = { plugin: 'thimble', key: 'labelAsk' } as const
-const ECHO = { plugin: 'thimble', key: 'labelAskEcho' } as const
-/** How long the band says what a choice runs. */
-const ECHO_MS = 6000
 /** The values a row names at most. */
 const VALUES_SHOWN = 8
 
@@ -221,26 +210,28 @@ export async function labelAskNow($: Engine): Promise<LabelAsk | null> {
   return ((await $.state.get(LABELASK)).value ?? null) as LabelAsk | null
 }
 
-/** Show an ask again, or (null) take it off the screen at once, before its answer runs. */
+/** The ask that waits (null: none). */
 export async function setLabelAsk($: Engine, a: LabelAsk | null): Promise<void> {
   await $.state.set(LABELASK, a)
-  $.ui.invalidate('ui.render')
 }
+
+/** The asks the feed brought since the last Bash call took them (askContext tells Claude of each). */
+let fresh: LabelAsk[] = []
 
 export async function labelAskFromFeed($: Engine, ev: unknown): Promise<void> {
   const a = askOf(ev) as LabelAsk | null
   if (!a || asksSeen.has(a.ask)) return
   asksSeen.add(a.ask)
+  fresh.push(a)
   await setLabelAsk($, a)
 }
 
 /** The person's choice for the ask: run all, run on a sample, or cancel, as their own command. The reads start here,
- *  beside the session, and Claude hears the choice with the next prompt. */
-export async function answerAsk($: Engine, choice: Choice, given?: LabelAsk): Promise<void> {
+ *  beside the session. Returns what Claude reads of it, or null when the choice did not run (a failure line says why). */
+export async function answerAsk($: Engine, choice: Choice, given?: LabelAsk): Promise<string | null> {
   const a = given ?? (await labelAskNow($))
-  if (!a) return
+  if (!a) return null
   await setLabelAsk($, null)
-  await echo($, choiceEcho(a, choice))
   const about = `label-ask:${a.root}|${a.name}`
   let out = ''
   let ok = false
@@ -254,82 +245,14 @@ export async function answerAsk($: Engine, choice: Choice, given?: LabelAsk): Pr
   let got: Any = null
   try { got = JSON.parse(out) } catch { got = null }
   if (!ok || !got) {
-    failNotice($, `× The label ${a.name} did not start: ${out.split('\n').slice(-1)[0]?.replace(/^thimble label: /, '').slice(0, 200) || 'thimble label gave nothing'}. Ask Claude to run it again.`, about)
-    return
+    const why = out.split('\n').slice(-1)[0]?.replace(/^thimble label: /, '').slice(0, 200) || 'thimble label gave nothing'
+    failNotice($, `× The label ${a.name} did not start: ${why}. Ask Claude to run it again.`, about)
+    return `The analyst's choice for the label ${a.name} did not run: ${why}. Run the same \`thimble label\` command again to ask them again.`
   }
-  await tellAtNextPrompt($, about, answerNote(a, choice, got))
   await labelsChanged($)
   needLabelList($)
   if (choice !== 'cancel') labelFromFeed($, { name: a.name, root: a.root, t: `${a.ask}-${choice}` })
-}
-
-export async function labelAskKey($: Engine, key: string, _until: number): Promise<Take | null> {
-  const choice = (ASK_KEYS as Record<string, Choice>)[key]
-  if (!choice) return null
-  const a = await labelAskNow($)
-  if (!a || (choice === 'sample' && !sampleOffered(a))) return null
-  return {
-    // the choices leave the bar and the band at once; a letter after the key shows them again, and nothing runs
-    now: () => setLabelAsk($, null),
-    undo: () => setLabelAsk($, a),
-    later: () => answerAsk($, choice, a),
-  }
-}
-
-/** What a choice runs, said in the band for a moment (ECHO_MS), so the person sees their answer arrived. */
-async function echo($: Engine, words: string): Promise<void> {
-  const until = Number(await $.clock.now()) + ECHO_MS
-  await $.state.set(ECHO, { words, until })
-  $.clock.after(ECHO_MS, () => {
-    void (async () => {
-      const cur = (await $.state.get(ECHO)).value as { until: number } | null
-      if (cur && cur.until <= until) await $.state.set(ECHO, null)
-    })().catch(() => undefined)
-  })
-}
-
-/** The ask as drawn above the bar and at the top of a side pane: the `Claude is waiting on you` tag and the question in the
- *  warning color, the choices, each a press with about how long it takes, and under them the one exact number, its
- *  model calls, dim. */
-function askEl($: Engine, els: Any, a: LabelAsk, key: string): Any {
-  const { Box, Text, Button } = els
-  const choice = (c: { key: string; words: string; choice: Choice; time: string }) =>
-    Box({ key: `ask-${c.choice}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: c.words, onPress: () => { void answerAsk($, c.choice, a) }, children: [
-      Text({ key: 'k', color: accent(), bold: true, children: c.key }), Text({ key: 'w', children: ` ${c.words}` }), ...(c.time ? [Text({ key: 't', dimColor: true, children: ` (${c.time})` })] : []),
-    ] })] })
-  return Box({ key, flexDirection: 'column', children: [
-    Text({ key: 'ask-text', wrap: 'wrap', children: [
-      Text({ key: 'tag', color: 'warning', inverse: true, bold: true, children: ' Claude is waiting on you ' }),
-      Text({ key: 'q', color: 'warning', bold: true, children: ` ${askQuestion(a)}` }),
-    ] }),
-    Box({ key: 'ask-keys', flexDirection: 'row', flexWrap: 'wrap', children: askChoices(a).map(choice) }),
-    ...(a.meta ? [Text({ key: 'ask-meta', dimColor: true, children: `${a.meta} · the times are rough` })] : []),
-  ] })
-}
-
-/** A large label run's ask above the bar while it waits (askEl); after the person's choice, for a moment, what it runs. */
-export async function labelAskBand($: Engine, els: Any, _width: number): Promise<Any[]> {
-  const a = await labelAskNow($)
-  if (a) return [askEl($, els, a, 'label-ask')]
-  const e = (await $.state.get(ECHO)).value as { words: string; until: number } | null
-  if (!e || e.until <= Number(await $.clock.now())) return []
-  return [els.Text({ key: 'label-ask-echo', wrap: 'wrap', children: [els.Text({ key: 'ok', color: 'success', children: '✓ ' }), e.words] })]
-}
-
-/** The ask at the top of an open side pane, so it is seen where the person reads (core/pane.ts); null when none waits. */
-export async function labelAskPaneHead($: Engine, els: Any): Promise<Any | null> {
-  const a = await labelAskNow($)
-  if (!a) return null
-  return els.Box({ key: 'pane-ask', flexDirection: 'column', marginBottom: 1, children: [askEl($, els, a, 'pane-ask-body')] })
-}
-
-/** The ask's keys at the bar's left while it waits: `1 run all · 2 run on a sample of 300 · 0 cancel`. */
-export async function labelAskBar($: Engine, _on: (key: string) => boolean, _preview: boolean): Promise<BarItem[]> {
-  const a = await labelAskNow($)
-  if (!a) return []
-  return askChoices(a).map((c: { key: string; words: string; choice: Choice }) => ({
-    id: `label-ask-${c.choice}`, key: c.key, words: c.words, focus: true, press: () => answerAsk($, c.choice, a),
-  }))
+  return answerNote(a, choice, got)
 }
 
 /** A Bash command of Claude's that runs `thimble label` (labels/register.ts reads it alike). */
@@ -348,11 +271,27 @@ export const registerLabelUse: Register = on => {
     if (e.agentId === undefined) needLabelList($)
     return r
   }).catch(($, e, next) => next(e))
-  // a `thimble label` command of Claude's (main's or a fork's) may change a label
+  // a `thimble label` command of Claude's (main's or a fork's) may change a label, or make an ask: Claude reads the ask
+  // after the command's output, as the question to ask the person
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const r = await next(e)
-    if (LABEL_COMMAND.test(String((e as { command?: unknown }).command || ''))) needLabelList($)
-    return r
+    if (!LABEL_COMMAND.test(String((e as { command?: unknown }).command || ''))) return r
+    needLabelList($)
+    await readFeed($)
+    const asks = fresh
+    fresh = []
+    if (!asks.length || 'deny' in r) return r
+    return { ...r, context: [...(r.context ?? []), ...asks.map(a => askContext(a))] }
+  }).catch(($, e, next) => next(e))
+  // the person's answer to Claude's question about an ask: their choice runs, and Claude reads what it started
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    const r = await next(e)
+    const a = await labelAskNow($)
+    if (!a || 'deny' in r) return r
+    const choice = answerChoice(a, e, (r as { result?: unknown }).result) as Choice | null
+    if (!choice) return r
+    const note = await answerAsk($, choice, a)
+    return note ? { ...r, context: [...(r.context ?? []), note] } : r
   }).catch(($, e, next) => next(e))
 }
 
@@ -362,4 +301,5 @@ export function resetLabelUse(): void {
   reading.clear()
   again.clear()
   asksSeen.clear()
+  fresh = []
 }
