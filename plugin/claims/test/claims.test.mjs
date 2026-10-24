@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseAnswer } from '../../observer/reply.mjs'
-import { CAPTION_LIST, CAPTION_MAP, cardOf, checkChips, citationRows, correctionsOf, evidenceOf, explainerRows, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, passageRows, repairable, rowText, snippetOf, termSpans, wordDiff } from '../graph.js'
+import { CAPTION_LIST, CAPTION_MAP, cardOf, checkChips, citationRows, correctionsOf, evidenceOf, explainerRows, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, passageRows, repairable, rowText, snippetOf, wordDiff } from '../graph.js'
 import lens from '../lens.mjs'
 import { applyTurn, edgesOf, emptyStore, parseClaims, promptLines, readStore, viewOf } from '../store.js'
 
@@ -474,30 +474,24 @@ function withPassage() {
   return { st, md }
 }
 
-test("a claim picked shows the paragraph it came from (its own words plain, the citations underlined and a press that explains them), and the session's explainers' terms in their fill", () => {
+test("a claim picked shows the paragraph it came from: its own words plain, the citations underlined and a press that explains them", () => {
   const { st, md } = withPassage()
   const data = paneData(st)
-  const terms = [{ term: 'public hit counter', key: 'a1|g1' }]
-  // a term is found in another form of its words, never on one small word alone
-  assert.deepEqual(termSpans('Some copies used public hit counters as signals.', terms).map(x => x.key), ['a1|g1'])
-  assert.deepEqual(termSpans('A counter was used.', terms), [])
   const c2 = data.claims.find(c => c.id === 'c2')
-  const pass = passageRows(md, c2.said[0], 80, { terms, claim: 'c2' })
+  const pass = passageRows(md, c2.said[0], 80)
   assert.deepEqual(pass.words, ['the counter to 412', '412 on the counter'])
   const t = pass.rows.map(rowText).join('\n')
   assert.match(t, /^▎ Some copies used a public hit counter as a signal\. They bumped the counter to\n▎ 412 when a round ended/)
   assert.doesNotMatch(t, /Another paragraph|\]\(#\)/)
   const runs = pass.rows.flat()
   assert.ok(runs.some(x => x.underline && x.part === 'w:0' && x.s.includes('412')))
-  assert.ok(runs.some(x => x.bg === 'gloss' && x.s === 'public hit counter' && x.part === `x:${JSON.stringify(['c2', 'a1|g1'])}`))
+  // the session's explainers are not marked on the claims: the claim's words are its own explainer
+  assert.ok(!runs.some(x => x.bg === 'gloss'))
   // the claim's own words plain, the rest of the paragraph dim
   assert.ok(runs.some(x => x.s.startsWith('They bumped') && !x.tone) && runs.some(x => x.s.startsWith('Some copies') && x.tone === 'dim'))
   // in the pane: under the claim's chips, then the explainer asked for, then its first citation
-  const v = graphView(data, { claim: 'c2', term: 'public hit counter' }, { w: 90, h: 40, terms, passage: { md, place: c2.said[0] }, explainer: { term: 'public hit counter', body: 'A free web page that counts visits.', here: 'Copies [bumped it](revisions.jsonl#L4).' } })
+  const v = graphView(data, { claim: 'c2', term: 'public hit counter' }, { w: 90, h: 40, passage: { md, place: c2.said[0] }, explainer: { term: 'public hit counter', body: 'A free web page that counts visits.', here: 'Copies [bumped it](revisions.jsonl#L4).' } })
   assert.match(panel(v), /claim 2 of 2 {2}✓? ?.*turn 1\n {4}▎ Some copies used a public hit counter[\s\S]*\n {4}▎ public hit counter {2}explainer\n {4}▎ A free web page that counts visits\.\n {4}▎ Copies bumped it\.\n {4}the counter to 412/)
-  // the claim's list row: its term in the fill, a press on it opens the explainer under that claim
-  const row = graphView(data, { group: String(data.groups[0].id) }, { w: 90, h: 40, terms }).panel.flat()
-  assert.ok(row.some(x => x.bg === 'gloss' && x.s === 'public hit counters' && x.part === `x:${JSON.stringify(['c1', 'a1|g1'])}`))
 })
 
 test('an explainer under a claim: written, being written, or why not', () => {

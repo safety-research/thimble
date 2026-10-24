@@ -1,6 +1,7 @@
 // settings.tsx: the settings pane (core/pane.ts kind `settings`): /thimble-settings, or a click on `thimble` in the
 // bar, opens it. At its top the bar as these switches leave it (bar.tsx, drawn as a preview: nothing in it presses),
-// then the switches, each named by what the person gets. ↵ on a switch or a click
+// then the switches, each named by what the person gets; a group's (Comments: Explainers, Heads-ups) under its
+// heading, indented. ↵ on a switch or a click
 // turns it on or off through Claude Code (settings/term.ts settingsAction), which keeps the value and loads the plugin
 // again with it; the pane and the bar draw the change at once. A feature with modes (Citation checks) names them after
 // its title, the one set in bold: a click on one sets it, ↵ on the row goes to the next. Tab walks the switches, esc
@@ -26,10 +27,13 @@ export async function drawSettings($: EngineInterface, e: Any, _args: unknown, e
     if (typeof said === 'string' && said) $.ui.toast(said)
   }
   const bar = await barRows($, els, width - 4, { on: switchesFrom(values), preview: true })
-  const rows = SWITCHES.map((s, i) => {
+  const rows = SWITCHES.flatMap((s, i) => {
     const v = values[s.key]
     const on = typeof v === 'string' ? v !== 'off' : !!v
     const choices: string[] = (s as { choices?: string[] }).choices ?? []
+    const group = (s as { group?: string }).group
+    const opens = group && (SWITCHES[i - 1] as { group?: string } | undefined)?.group !== group
+    const head = opens ? [Box({ key: `group-${group}`, marginTop: 1, children: [Text({ bold: true, children: group })] })] : []
     // a feature with modes: each mode after the title, the one set in bold, each a press that sets it
     const modes = choices.flatMap((c, k) => [
       ...(k ? [Text({ key: `sep-${c}`, dimColor: true, children: ' · ' })] : []),
@@ -37,14 +41,14 @@ export async function drawSettings($: EngineInterface, e: Any, _args: unknown, e
         Text({ key: 'w', ...(c === v ? { bold: true, color: on ? 'success' : undefined } : { dimColor: true }), children: c }),
       ] }),
     ])
-    return Box({ key: `sw-${s.key}`, flexDirection: 'row', flexWrap: 'wrap', marginTop: 1, children: [
+    return [...head, Box({ key: `sw-${s.key}`, flexDirection: 'row', flexWrap: 'wrap', marginTop: opens ? 0 : 1, ...(group ? { marginLeft: 2 } : {}), children: [
       Button({ key: `switch-${s.key}`, plain: true, label: `${s.title}: ${typeof v === 'string' ? v : on ? 'on' : 'off'}`, onPress: act({ do: 'toggle', key: s.key }), ...(i === 0 ? { autoFocus: true } : {}), children: [
         // a feature with modes names its mode after its title, not on or off here
         Text({ key: 'state', ...(on ? { color: 'success' } : { dimColor: true }), children: (choices.length ? '' : on ? '● on' : '○ off').padEnd(IN) }),
         Text({ key: 'title', ...(on ? { bold: true } : { dimColor: true }), children: s.title }),
       ] }),
       ...(modes.length ? [Text({ key: 'gap', children: '   ' }), ...modes] : []),
-    ] })
+    ] })]
   })
   return Box({ flexDirection: 'column', width, children: [
     Box({ key: 'preview', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1, width, children: bar }),

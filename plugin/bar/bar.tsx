@@ -4,20 +4,22 @@
 //                  the whole failure shows
 //   the fix line   only while there is one (fix/line.ts): a fix that is ready (y use it now · d what changed · n
 //                  later), on (u undo), off, failed, or a request with no code
-//   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), `v card` while
+//   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), the keys of the
+//                  card that takes them now (cards/draw.ts cardKeyWords: `j down · k up`), `v card` while
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
 //                  right their items (barRight: `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
 //                  Labels and coverage is on (a click or the key opens the pane; register.ts says how each closes)
 //
 // The settings pane draws the same bar as its switches would leave it (`preview`): nothing in it is a press and no
-// work shows. Card keys are never named here: a focused card names its own keys under its frame.
+// work shows.
 import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { cut, textWidth } from '../core/text.js'
 import { accent } from '../core/theme'
+import { cardKeyWords } from '../cards/draw'
 import { vReady } from '../designer/v'
 import { fixLineRows } from '../fix/line'
 import { pressKey } from '../hooks/keys'
@@ -65,6 +67,10 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
   if (b) out.push({ id: 'busy', glyph: b.glyph, words: [`${b.word}${b.secs != null ? ` ${b.secs}s` : ''}`, ...b.more].join(' · ') })
   const features = await barLeft($, on, preview)
   if (features.some(x => x.focus)) return [...out, ...features.filter(x => x.focus)]
+  // the keys of the card on screen that takes them, each a click that presses it
+  if (!preview && on('cards')) {
+    for (const k of await cardKeyWords($).catch(() => [])) out.push({ id: `card-key-${k.key}`, key: k.key, words: k.words, ...(k.key.length === 1 ? { press: () => pressKey($, k.key) } : {}) })
+  }
   // a click on `v card` starts the designer fork as v does, in the ui.press hook that answers it (designer/v.ts)
   if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'card', ...(preview ? {} : { press: () => undefined }) })
   out.push(...features)

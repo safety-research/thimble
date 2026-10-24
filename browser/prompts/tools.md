@@ -455,7 +455,7 @@ Turn a report check off, {{if:browser}}as the switch in the Comments pane does, 
 
 ## file_dev_ticket
 
-File a ticket for thimble's developer agent when thimble itself should change, such as a bug or a missing control, never for a question about the data.
+File a ticket for thimble's developer agent to change a view it built for this corpus, named in `view`. A change to thimble itself is a fix of the person's thimble, which `fix_thimble` starts.
 
 ```json
 {
@@ -472,7 +472,7 @@ File a ticket for thimble's developer agent when thimble itself should change, s
 
 ## fix_thimble
 
-Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is theirs, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, offer the fix in one line and let them decide. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
+Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is theirs, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, offer the fix and let them decide. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
 
 ```json
 {
@@ -889,23 +889,19 @@ Filed {label}: {title}. {start}
 
 ## file_dev_ticket-fix
 
-thimble's fixer works on this change, "{title}", in a copy of thimble, with this conversation as its context. The row above the composer shows how it goes. When the change passes thimble's checks, a notice at the top of the chat asks the analyst to use it, and thimble starts again with it after their click. Tell the analyst in one line.
-
-## file_dev_ticket-fix-failed
-
-The fixer did not start on this change: {why} Tell the analyst in one line.
+This call filed nothing: a change to thimble itself is a fix of the person's thimble, which `fix_thimble` starts when they ask for it.
 
 ## fix_thimble-new
 
-thimble started a fork of this conversation that fixes thimble in the background, in a copy ("{fix}"). The chat shows the line that opens its thread just above your reply, and thimble asks the person to use the fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
+thimble started a fork of this conversation that fixes thimble in the background, in a copy ("{fix}"). The chat shows its work above your reply, and thimble asks the person to use the fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
 
 ## fix_thimble-round
 
-thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy. The chat shows the line that opens the fix's thread just above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy. The chat shows its work above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
 
 ## fix_thimble-round-on
 
-thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy; the version they have stays until they use the changed one. The chat shows the line that opens the fix's thread just above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy; the version they have stays until they use the changed one. The chat shows its work above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
 
 ## fix_thimble-live
 

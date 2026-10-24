@@ -6,7 +6,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { findInLink, findRead, findTerm, glossesOf, headsOf, mergeLook } from '../place.mjs'
+import { citeLinks, filePlaces, findInLink, findRead, findTerm, glossesOf, headsOf, mergeLook } from '../place.mjs'
 
 const at = (text, p) => (p ? text.slice(p.start, p.end) : null)
 
@@ -25,11 +25,18 @@ test("the look's explainers: a term the text holds, once, none already explained
   const gs = glossesOf([{ term: '`p95`', body: 'b' }, { term: 'p95', body: 'again' }, { term: 'SuspenseBoundary', body: 'w' }, { term: 'not here', body: 'x' }], text, ['suspenseboundary'])
   assert.deepEqual(gs, [{ id: 'g1', term: 'p95', title: 'p95', body: 'b', here: '' }])
   assert.equal(headsOf({ term: 'p95 latency', title: 't', bullets: [] }, text), null)
-  assert.deepEqual(headsOf({ term: 'p95 latency rose', title: 'Only one day', bullets: ['[The log ends on Mar 14](logs/a.log).'], offer: 'Count the latency per hour' }, text),
-    { id: 'h1', kind: 'heads', term: 'p95 latency rose', title: 'Only one day', bullets: ['[The log ends on Mar 14](logs/a.log).'], offer: 'Count the latency per hour' })
-  // no offer: the heads-up only informs, and an old look's todo (an order to the reader) is not kept
-  assert.deepEqual(headsOf({ term: 'p95 latency rose', title: 'Only one day', bullets: ['b'], todo: 'Count again.' }, text),
+  assert.deepEqual(headsOf({ term: 'p95 latency rose', title: 'Only one day', bullets: ['[The log ends on Mar 14](logs/a.log).'] }, text),
+    { id: 'h1', kind: 'heads', term: 'p95 latency rose', title: 'Only one day', bullets: ['[The log ends on Mar 14](logs/a.log).'] })
+  // the heads-up only informs: an older look's offer or todo (a call to action) is not kept
+  assert.deepEqual(headsOf({ term: 'p95 latency rose', title: 'Only one day', bullets: ['b'], todo: 'Count again.', offer: 'Count the latency per hour' }, text),
     { id: 'h1', kind: 'heads', term: 'p95 latency rose', title: 'Only one day', bullets: ['b'] })
+})
+
+test("an explainer's links to a file's lines become citations, each with its place; a citation, a web address and code stay as they are", () => {
+  const got = citeLinks('A [x](#) and [ticket 4](t/a.jsonl#L88) and `[c](d.py#L1)`, [web](https://example.test) and [f](f.py:3-5).')
+  assert.equal(got.text, 'A [x](#) and [ticket 4](#) and `[c](d.py#L1)`, [web](https://example.test) and [f](#).')
+  assert.deepEqual(got.places, [null, { path: 't/a.jsonl', from: 88, to: 88 }, { path: 'f.py', from: 3, to: 5 }])
+  assert.deepEqual(filePlaces('[a](b.py#L2-L4) [c](#) [d](e/f.txt)'), [{ path: 'b.py', from: 2, to: 4 }, { path: 'e/f.txt', from: null, to: null }])
 })
 
 test('a look places each explainer in the newest message that holds it, adds to what the message had, and names what it placed', () => {

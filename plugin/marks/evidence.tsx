@@ -4,9 +4,7 @@
 //   computed   that call's real output, the marked words highlighted, first, so it is on the screen; then the code
 //              the check ran
 //   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
-//   code       the substring highlighted. A record of a JSON file (a JSONL line) reads as a record: its key fields
-//              (`page … · author … · time …`, read from the line), then the cited words in their decoded text, the
-//              words highlighted; `r` (or a click) shows the raw lines around it, as the file holds them
+//   code       the substring highlighted
 //
 // Under the sentence, `w` (or a click) explains the cited words in place: the session's explainer of them, else one
 // written now (explain/seam.ts explainTerm), which their reply then shows too.
@@ -22,7 +20,6 @@
 import type { EngineInterface } from 'claude-code'
 
 import { quiet } from '../core/askcell.js'
-import { rootHere, startDir } from '../core/env'
 import { themeLast, themeNow } from '../core/theme'
 import { explaining, explainTerm, glossFor, sessionGlosses } from '../explain/seam'
 import { markColors } from '../explain/place.mjs'
@@ -143,70 +140,8 @@ export function tableRows(els: Any, t: EvidenceTable, width: number, key = 'tb')
   ]
 }
 
-// the citations whose raw lines show (`<row>:<n>`), and those whose cited words' explainer shows
-const rawShown = new Set<string>()
+// the citations whose cited words' explainer shows
 const explainShown = new Set<string>()
-/** A file read for its records' fields: up to this size (a larger one shows its cited words without them). */
-const FIELDS_BYTES = 16 * 1024 * 1024
-/** A record's fields shown at most, and the longest value of one. */
-const FIELDS_MAX = 6
-const FIELD_CHARS = 60
-// the lines of the files read for fields, by path, size and time
-const linesRead = new Map<string, string[]>()
-
-/** A record's key fields, read from line `line` of `file` (relative to the session's folder or the label root): its
- *  short values (a string of one line, a number, a true or false), in the record's order, the ones that hold the cited
- *  words left out. [] when the line is no JSON object, or the file is not read. */
-export async function recordFields($: EngineInterface, file: string, line: number, cited = ''): Promise<[string, string][]> {
-  const roots = file.startsWith('/') ? [''] : [...new Set([(await rootHere($).catch(() => null)) || '', await startDir($).catch(() => '')].filter(Boolean))]
-  for (const root of roots) {
-    const path = root ? `${root.replace(/\/+$/, '')}/${file}` : file
-    const st = await $.fs.stat(path).catch(() => null)
-    if (!st || st.kind !== 'file' || st.size > FIELDS_BYTES) continue
-    const key = `${path}|${st.size}|${st.mtimeMs}`
-    let lines = linesRead.get(key)
-    if (!lines) {
-      try { lines = String(await $.fs.read(path)).split('\n') } catch { continue }
-      if (linesRead.size > 8) linesRead.delete(linesRead.keys().next().value!)
-      linesRead.set(key, lines)
-    }
-    return fieldsOf(lines[line - 1] ?? '', cited)
-  }
-  return []
-}
-
-/** A JSON line's short fields: [[key, value]], the values that hold `cited` left out (pure). */
-export function fieldsOf(raw: string, cited = ''): [string, string][] {
-  let v: unknown
-  try { v = JSON.parse(raw) } catch { return [] }
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return []
-  const out: [string, string][] = []
-  const words = cited.replace(/\s+/g, ' ').trim().toLowerCase()
-  for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
-    if (out.length >= FIELDS_MAX) break
-    if (typeof x === 'number' || typeof x === 'boolean') out.push([k, String(x)])
-    else if (typeof x === 'string' && x && !x.includes('\n') && x.length <= FIELD_CHARS && !(words && x.toLowerCase().includes(words))) out.push([k, x])
-  }
-  return out
-}
-
-/** One cited record of a JSON file, as a person reads it: `path:line`, its key fields, then each cited line's decoded
- *  words after a dim `▎`, the cited words highlighted. */
-function recordRows(els: Any, p: Place, fields: [string, string][], key: string): Any[] {
-  const { Box, Text } = els
-  const hit = p.lines.find(l => l.highlight && inRange(l.n, p.line))?.n
-  const at = `${p.file}:${hit ?? p.line}`
-  return [
-    Text({ key: `${key}at`, wrap: 'wrap', children: [Text({ key: 'a', bold: true, children: at })] }),
-    ...(fields.length ? [Text({ key: `${key}f`, wrap: 'wrap', children: fields.flatMap(([k, v], i) => [
-      ...(i ? [Text({ key: `s${i}`, dimColor: true, children: ' · ' })] : []), Text({ key: `k${i}`, dimColor: true, children: `${k} ` }), Text({ key: `v${i}`, children: v }),
-    ]) })] : []),
-    ...p.lines.filter(l => inRange(l.n, p.line)).map(l => Box({ key: `${key}d${l.n}`, flexDirection: 'row', children: [
-      Text({ dimColor: true, children: '▎' }),
-      Box({ flexShrink: 1, marginLeft: 1, children: [l.highlight ? highlighted(els, l.text, [l.highlight], 't') : Text({ wrap: 'wrap', children: l.text || ' ' })] }),
-    ] })),
-  ]
-}
 
 function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   const { Box, Code, Text } = els
@@ -277,21 +212,8 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
       if (g.here) rows.push(bar('h', Text({ dimColor: true, children: plain(g.here) })))
     } else rows.push(bar('w', Text({ ...(now.why ? { color: 'error' } : { dimColor: true }), children: now.pending ? 'writing an explainer of these words…' : now.why || 'no explainer yet: press w to ask for one' })))
   }
-  const ev = m.evidence
-  // a quote of JSON records: each read as a record, its raw lines behind r
-  const places = ev && ev.kind === 'quote' ? [ev, ...(ev.more ?? [])] : []
-  const records = places.length > 0 && places.some(p => p.lines.some(l => l.decoded))
-  const raw = rawShown.has(me)
-  if (ev && records && !raw) {
-    const out: Any[] = []
-    for (const [k, p] of places.entries()) {
-      const hit = p.lines.find(l => l.highlight && inRange(l.n, p.line))
-      const fields = hit ? await recordFields($, p.file, hit.n, hit.highlight ? hit.text.slice(hit.highlight[0], hit.highlight[1]) : '') : []
-      out.push(...(k ? [Text({ key: `rgap${k}`, children: ' ' })] : []), ...recordRows(els, p, fields, `r${k}`))
-    }
-    rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: out }))
-  } else if (ev) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, ev, Number(e?.props?.bodyColumns) || 60) }))
-  // the pane's keys: explain the cited words; the raw lines of a record
+  if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60) }))
+  // the pane's key: explain the cited words
   const keys: { k: string; label: string; press: () => unknown }[] = []
   if (words) keys.push({ k: 'w', label: explainShown.has(me) ? 'hide the explainer' : 'explain these words', press: () => {
     if (explainShown.has(me)) explainShown.delete(me)
@@ -301,7 +223,6 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     }
     $.ui.invalidate('ui.render')
   } })
-  if (ev && records) keys.push({ k: 'r', label: raw ? 'hide the raw lines' : 'raw lines', press: () => { if (raw) rawShown.delete(me); else rawShown.add(me); $.ui.invalidate('ui.render') } })
   if (keys.length) {
     const { Button } = els
     rows.push(Text({ key: 'keys-gap', children: ' ' }), Box({ key: 'ev-keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [

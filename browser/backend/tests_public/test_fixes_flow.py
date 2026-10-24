@@ -182,8 +182,12 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
     fixes._phase.clear()  # the server that starts again knows of no phase: the notice is gone once the fix is on
     assert fixes.status()["fixes"] == []
     assert fixes.status(every=True)["fixes"][0]["state"] == "on"  # Your fixes still lists it, with Undo
-    # main's chat keeps one line that says so
-    assert any(r.get("type") == "text" and "“Card says how many rows” is on" in r.get("delta", "") for r in _log(CORPUS))
+    # how it ended, then that it is on: rows of main's chat and of the fix's thread, in the order they happened
+    rows = [("ready", "thimble fixed: Card says how many rows · tests pass"), ("fixed", "“Card says how many rows” is on")]
+    [chat] = _fixer_chats(CORPUS)
+    for log in (_log(CORPUS), _log(CORPUS, chat["id"])):
+        assert [(r["status"], r["text"]) for r in log if r.get("type") == "chip" and r.get("kind") == "fix"] == rows
+        assert {r["ref"] for r in log if r.get("kind") == "fix"} == {"fix:1"}
 
 
 def scripted(main: list[Any], fixer: list[Any]) -> list[Any]:
@@ -220,8 +224,8 @@ def _asked(client: Any, i: int = -1) -> str:
             and "The person asked for this change to their thimble" not in m][i]
 
 
-async def test_a_fix_runs_in_its_own_chat_in_the_tree_and_main_shows_only_the_message_and_one_line(fixing, monkeypatch,
-                                                                                                    analyst):
+async def test_a_fix_runs_in_its_own_chat_in_the_tree_and_main_shows_it_where_main_started_it(fixing, monkeypatch,
+                                                                                               analyst):
     work = fixing.home / "fixes" / "work" / "1"
     client = api_key(monkeypatch, scripted(
         [call("fix_thimble", {"words": "new make the card count its rows"}), text("Started a fix for the card.")],
@@ -246,11 +250,13 @@ async def test_a_fix_runs_in_its_own_chat_in_the_tree_and_main_shows_only_the_me
     assert users == ["make the card count its rows"]
     assert any(r["type"] == "tool_use" and r["name"] == "Write" for r in records)
     assert "Incidents by week" in json.dumps([b for b in client.bodies if "The person asked for this change" in json.dumps(b)][-1]["messages"])
-    # main's chat: the message as the person typed it, main's line and one line that the fix started in its chat; none
-    # of the fixer's steps, and main's call carries the fix's name, never its number
+    # main's chat: the message as the person typed it, the fixer as main's subagent (its card reads the fix's chat),
+    # main's line, and at the fix's end the row that asks the person; main's call carries the fix's name, never its
+    # number
     added = _log(CORPUS)[before:]
     assert [(r["type"], r.get("text") or r.get("chat")) for r in added if r["type"] in ("user", "agent")] == [
         ("user", "/thimble-fix make the card count its rows"), ("agent", chat["id"])]
+    assert [(r["status"], r["ref"]) for r in added if r["type"] == "chip"] == [("ready", "fix:1")]
     assert [r.get("name", "").rsplit("__", 1)[-1] for r in added if r["type"] == "tool_use"] == ["fix_thimble"]
     # what main read of its call: the fix by its name, never its number
     result = json.dumps([b for b in client.bodies if "tool_result" in json.dumps(b["messages"])
@@ -290,6 +296,8 @@ async def test_main_tells_a_follow_up_from_a_new_fix_with_the_person_s_fixes_bes
     assert chat["title"] == "changing Card counts rows"
     assert [(r["type"], r.get("text")) for r in _log(CORPUS)[before:] if r["type"] == "user"] == [
         ("user", "/thimble-fix it should count the columns too")]
+    # main's card of the round is the fix's second run, so it shows that run's steps alone
+    assert [(r["chat"], r.get("run")) for r in _log(CORPUS)[before:] if r["type"] == "agent"] == [(chat["id"], 1)]
     await _ended()
     assert [r["text"] for r in _log(CORPUS, chat["id"]) if r["type"] == "user"] == ["count the rows", "count the columns too"]
     # a number that is no fix of the person's is part of the words of a new fix, as the terminal reads it
@@ -456,15 +464,12 @@ async def test_the_routes_take_the_analyst_s_click_alone(fixing):
     assert e.value.status_code == 400
 
 
-async def test_file_dev_ticket_on_thimble_s_code_asks_for_a_fix(fixing, monkeypatch):
-    api_key(monkeypatch, [text("Title: Wider pane\nWhat it does: The pane is wider.")])
+async def test_file_dev_ticket_on_thimble_s_code_starts_no_fix(fixing):
+    # a change to thimble itself is the person's fix, which fix_thimble starts once they ask for it
     res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Wider pane", "body": "the pane is narrow"},
                            tool_use_id="toolu_ticket")
-    said = json.dumps(res.content)
-    assert '\\"Wider pane\\"' in said and "fix 1" not in said  # the fix by its name
-    assert fixing.calls[0][0] == "new" and fixing.recs[1]["words"] == ["Wider pane\n\nthe pane is narrow"]
-    assert fixing.recs[1]["made_in"] == "browser"
-    await _ended()
+    assert "fix_thimble" in json.dumps(res.content) and not res.is_error
+    assert fixing.calls == [] and _fixer_chats(CORPUS) == []
 
 
 def test_fixes_off_leave_the_code_tickets_their_entry_points(monkeypatch):

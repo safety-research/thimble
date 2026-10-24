@@ -43,8 +43,7 @@ export const registerGuidance: Register = on => {
   // a prompt that starts or joins a turn of main's; a slash command's line, and a prompt the engine does not let a
   // hook change (isMeta), carry nothing: the next prompt does
   on('prompt.submit', async ($, e, next) => {
-    // none while thimble is off in this session (/thimble-off)
-    if (e.command || e.isMeta || !featureOn('thimble')) return next(e)
+    if (e.command || e.isMeta) return next(e)
     let text = ''
     try {
       text = guidanceFor(fill(await promptText($, 'guidance'), { TMPDIR: await tempDir($) }), featureOn)

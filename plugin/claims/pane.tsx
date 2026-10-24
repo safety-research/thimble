@@ -73,7 +73,7 @@ function look(tone: string | null | undefined): Record<string, unknown> {
 /** A run as a Text: its tone, bold and underline; cited words in evidence look as in the citations' card (citeWords,
  *  in hover group `id`). */
 function spanOf(els: Any, r: Run, i: number, id: string): unknown {
-  // `gloss`: the words of a term that has an explainer, in the explainers' fill as the reply draws them
+  // `gloss`: an explainer's term, in the explainers' fill as the reply draws it
   const bg = r.bg === 'gloss' ? { backgroundColor: markColors(themeLast()).glossBg } : {}
   return els.Text({
     key: `t${i}`, ...look(r.tone), ...bg, ...(r.bold ? { bold: true } : {}), ...(r.underline ? { underline: true } : {}),
@@ -275,16 +275,15 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   }
 
   // ---- the map and the detail
-  // the session's explainers: their terms in the explainers' fill wherever a claim or its paragraph says them
+  // the session's explainers: the one of words pressed in the claim's paragraph shows under it
   const glosses = await sessionGlosses($).catch(() => [] as SessionGloss[])
-  const terms = glosses.map(g => ({ term: g.term, key: `${g.row}|${g.id}` }))
   // the claim picked: the paragraph of the reply it came from, and the explainer asked for under it
   const sel = selectedOf(raw, keep).claim as Any
   const said = sel ? ((sel.said || []) as Any[]).find(x => x.row && x.by === 'claude') ?? (sel.said || []).find((x: Any) => x.row) ?? null : null
   const md = said ? await placeText($, said.row, said) : null
   const passage = md ? { md, place: said } : null
   const st = { ...keep, ...(a.from != null ? { from: a.from } : {}) }
-  const opts = { w: W, h: H, bright: await claimsBright($), terms, passage, explainer: a.term ? explainerOf(glosses, a.term) : null }
+  const opts = { w: W, h: H, bright: await claimsBright($), passage, explainer: a.term ? explainerOf(glosses, a.term) : null }
   const view = graphView(raw, st, opts)
   // the claims and clusters as the map draws them (graph.js fitClusters)
   const data = view.data as Any
@@ -316,14 +315,6 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     }
     if (part.startsWith('n:')) return pick(part.slice(2))
     if (part.startsWith('c:')) return undefined
-    // a term that has an explainer: it shows under its claim (again: it closes)
-    if (part.startsWith('x:')) {
-      const [id, k] = JSON.parse(part.slice(2)) as [string | null, string]
-      const g = glosses.find(x => `${x.row}|${x.id}` === k)
-      const cid = id ?? claim?.id ?? null
-      if (!g || !cid) return
-      return pick(cid, claim?.id === cid && a.term === g.term ? {} : { term: g.term })
-    }
     // a citation's words in the claim's paragraph: an explainer of them, written now when the session has none
     const w = /^w:(\d+)$/.exec(part)
     if (w && claim && passage) {

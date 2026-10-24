@@ -60,7 +60,7 @@ export function nextTrail(was, open, kind, args) {
   const d0 = crumbOf(was.kind, was.args).depth
   const d1 = crumbOf(kind, args).depth
   // the same depth takes its place (the next claim, value or citation), but another side thread goes on top: its
-  // conversation is the person's own, kept to go back to (a heads-up's offer asked from the tray while a thread shows)
+  // conversation is the person's own, kept to go back to (a heads-up asked about from the tray while a thread shows)
   if (d1 === d0) return OWN[kind] && OWN[kind](obj(was.args)) !== OWN[kind](obj(args)) ? push() : trail
   if (d1 > d0) return push()
   // shallower: the trail's panes of this kind as deep or deeper go
