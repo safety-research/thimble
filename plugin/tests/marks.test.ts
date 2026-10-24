@@ -490,6 +490,9 @@ test('a card of the answer that still shows a figure its check corrected is flag
   await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
   expect(textOf(await cardFlagLine($, ELS, card))).toBe('  ✎ The check corrected "15 of 40" to "12 of 40" in the reply. This card was drawn before and still shows the old figure.')
   expect(await cardFlagLine($, ELS, 'c0000000000')).toEqual([])
+  // cited words that are a quote keep their own quotes, never two
+  await $.state.set({ plugin: 'thimble', key: 'marksCardStale' }, { [card]: [{ n: 1, was: '"13s"', now: '1 second', figure: '13' }] })
+  expect(textOf(await cardFlagLine($, ELS, card))).toBe('  ✎ The check corrected "13s" to "1 second" in the reply. This card was drawn before and still shows the old figure.')
   const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
   expect(told['marks:row-1:cards']).toContain('- the card "Merged pull requests" (c1a2b3c4d5) still shows "15 of 40", which the check corrected to "12 of 40"')
 })

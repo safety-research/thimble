@@ -507,7 +507,7 @@ export async function cardFlagLine($: Engine, els: Any, id: string): Promise<Any
   const more = found.length > 1 ? ` (and ${found.length - 1} more)` : ''
   return [els.Text({ key: `stale-${id}`, wrap: 'wrap', children: [
     els.Text({ key: 's', color: accent(), children: '  ✎ ' }),
-    els.Text({ key: 'w', dimColor: true, children: `The check corrected "${f.was}" to "${f.now}" in the reply${more}. This card was drawn before and still shows the old figure.` }),
+    els.Text({ key: 'w', dimColor: true, children: `The check corrected ${q(f.was)} to ${q(f.now)} in the reply${more}. This card was drawn before and still shows the old figure.` }),
   ] })]
 }
 
