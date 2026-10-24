@@ -544,7 +544,9 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
     return out
   }
   const g = await glossOf($, f.row, f.id)
-  if (f.kind === 'explain' && g && !g.expanded) out.push({ id: 'tray-e', key: 'e', words: 'expand', focus: true, press: () => expand($, f) })
+  // the longer explainer is a model's call: a press starts it and returns, as the key does (`later`), since Claude Code
+  // skips a press hook that runs past its 10 s and says so in the conversation
+  if (f.kind === 'explain' && g && !g.expanded) out.push({ id: 'tray-e', key: 'e', words: 'expand', focus: true, press: () => { void expand($, f).catch(err => failNotice($, `The longer explainer was not written: ${String((err as Error)?.message || err).slice(0, 160)}. Press e in the tray to try again.`, 'tray:expand')) } })
   if (f.kind === 'heads' && g?.offer) out.push({ id: 'tray-o', key: 'o', words: OFFER_WORDS.slice(2), focus: true, press: () => takeOffer($, f) })
   out.push({ id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askAbout($, f) }, zero, ...(await steps()))
   return out

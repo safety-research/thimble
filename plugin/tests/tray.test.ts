@@ -547,3 +547,22 @@ test('an explainer paragraph taller than the room shows a room of its rows at a 
   await $.prompt.edit(key('m'))
   expect((await pageNow()).body.props.marginTop ?? 0).toBe(0)
 })
+
+test("a click on e expand starts the longer explainer and returns, as e does: the press never waits on the model's call", async ($, on) => {
+  let calls = 0
+  let finish: (v: unknown) => void = () => undefined
+  on('model.complete', () => { calls++; return new Promise(r => { finish = r }) as never })
+  const { clock } = await resumed($, on, QUOTED, 's-tray-expand', { parts: { explain: { order: ['g1'], items: { g1: { id: 'g1', term: 'p95', body: 'The time under which 95 of 100 runs finish.' } } } } })
+  await $.prompt.edit(key(']'))
+  await clock.advance(2000)
+  await $.prompt.edit(key(']'))
+  expect(textOf(await $.ui.render(above(20)))).toContain('e expand')
+  // the press settles while the call still runs: Claude Code skips a press hook past its 10 s and says so
+  const band = await $.ui.mount(above(20))
+  const settled = await Promise.race([Promise.resolve(band.press({ key: 'bar-tray-e' })).then(() => 'returned'), new Promise(r => setTimeout(() => r('waits'), 300))])
+  await band.unmount()
+  expect(settled).toBe('returned')
+  await new Promise(r => setTimeout(r, 20))
+  expect(calls).toBe(1)
+  finish({ isAnswered: true, text: '{"body":"A longer one."}' })
+})
