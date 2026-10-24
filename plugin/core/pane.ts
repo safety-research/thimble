@@ -129,8 +129,15 @@ const OWN_ROOM = new Set(['labels', 'coverage'])
 const THREADED = new Set(['evidence', 'labels', 'coverage', 'claims'])
 
 /** The last drawing's layout, for the ui.scroll hook: which pane, whether its input bar is pinned to its bottom, how
- *  many rows of its drawing do not fit, and the keys its Buttons press. */
-let laid: { id: string; pinned: boolean; over: number; keys: Map<string, () => unknown> } | null = null
+ *  many rows of its drawing do not fit, the keys its Buttons press, and how a drawing that scrolls a part of itself
+ *  scrolls it (scrollsOwn). */
+let laid: { id: string; pinned: boolean; over: number; keys: Map<string, () => unknown>; own: ((by: number) => unknown) | null } | null = null
+/** A drawing that fits the pane but scrolls a part of itself (the claims' detail under their overview) names how, while
+ *  it draws: the wheel and the page keys then move that part, by `by` rows (a page key by the pane's rows). */
+let own: ((by: number) => unknown) | null = null
+export function scrollsOwn(fn: ((by: number) => unknown) | null): void {
+  own = fn
+}
 /** How far the drawing above the input bar is scrolled, in the pane it was scrolled in. */
 let scrolled = { id: '', by: 0, conv: 0 }
 
@@ -189,6 +196,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const pinned = e?.props?.placement === 'dock'
     const keys = new Map<string, () => unknown>()
     const kels = noting(els, keys)
+    own = null
     const top = topRow($, els, now, W)
     const T = top.length ? treeRows(top, W) : 0
     // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
@@ -211,7 +219,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const U = under.length ? treeRows(under, W) : 0
     const id = idOf(now)
     if (!pinned) {
-      laid = { id, pinned: false, over: 0, keys }
+      laid = { id, pinned: false, over: 0, keys, own }
       const parts = [...top, drawn, ...conv, ...under]
       return parts.length === 1 ? drawn : els.Box({ flexDirection: 'column', children: parts })
     }
@@ -225,7 +233,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     if (scrolled.id !== id) scrolled = { id, by: C ? over : 0, conv: C }
     else if (C !== scrolled.conv) scrolled = { id, by: over, conv: C }
     scrolled.by = Math.max(0, Math.min(over, scrolled.by))
-    laid = { id, pinned: true, over, keys }
+    laid = { id, pinned: true, over, keys, own }
     const left = over - scrolled.by
     const cue = over > 0 ? els.Text({ key: 'pane-more', dimColor: true, wrap: 'truncate-end', children: left > 0 ? `↓ ${left} more row${left === 1 ? '' : 's'} · scroll or ↓` : `↑ ${over} row${over === 1 ? '' : 's'} above · scroll or ↑` }) : null
     const body = els.Box({ key: 'pane-body', flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden', children: [
@@ -251,7 +259,8 @@ export async function paneDrawing($: Engine, els: Any): Promise<{ kind: string; 
 }
 
 /** A scroll of the docked pane: the drawing above its input bar moves in its room, or, where it fits, ↑ and ↓ press
- *  k and j. Claude Code's own window stays where it is (the frame fills it). False for a pane drawn inline. */
+ *  k and j and the wheel and the page keys move the part the drawing scrolls itself (scrollsOwn). Claude Code's own
+ *  window stays where it is (the frame fills it). False for a pane drawn inline. */
 export async function scrollPane($: Engine, e: { by?: number; origin?: { kind?: string }; pointer?: unknown }): Promise<boolean> {
   const l = laid
   if (!l?.pinned) return false
@@ -260,6 +269,11 @@ export async function scrollPane($: Engine, e: { by?: number; origin?: { kind?: 
   if (arrow && l.over === 0) {
     const press = l.keys.get(by > 0 ? 'j' : 'k')
     if (press) await Promise.resolve(press()).catch(() => undefined)
+    return true
+  }
+  // a drawing that fits and scrolls a part of itself: the wheel and the page keys move that part
+  if (by && !l.over && l.own) {
+    await Promise.resolve(l.own(by)).catch(() => undefined)
     return true
   }
   if (!by || !l.over) return true
