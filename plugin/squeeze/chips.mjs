@@ -93,10 +93,10 @@ export function mapLinks(text, fn) {
 
 /** The chips every message has, in the order drawn. `level0` is where the original stands: "as written". */
 export const CHIPS = Object.freeze([
-  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['short', 'as written', 'longer', 'much longer']), level0: 1, kind: 'fixed' }),
+  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['short', 'as written', 'longer', 'much longer']), level0: 1, kind: 'fixed', ends: Object.freeze(['shorter', 'longer']) }),
   // (the ids are the records' since before the chips were renamed)
-  Object.freeze({ id: 'interpret', name: 'Interpretation', levels: Object.freeze(['facts only', 'as written', 'expert reading']), level0: 1, kind: 'fixed' }),
-  Object.freeze({ id: 'familiarity', name: 'Background', levels: Object.freeze(['new', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed' }),
+  Object.freeze({ id: 'interpret', name: 'Interpretation', levels: Object.freeze(['facts only', 'as written', 'expert reading']), level0: 1, kind: 'fixed', ends: Object.freeze(['facts', 'expert reading']) }),
+  Object.freeze({ id: 'familiarity', name: 'Background', levels: Object.freeze(['new', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed', ends: Object.freeze(['new', 'expert']) }),
 ])
 export const LENGTH = CHIPS[0]
 /** The level of Length a catch-up arrives at: short. */
@@ -116,6 +116,22 @@ export function glyph(chip, v) {
   const n = Math.max(1, chip.levels.length)
   const lv = Math.max(0, Math.min(n - 1, v))
   return Array.from({ length: n }, (_, i) => (i === lv ? '●' : '○')).join('')
+}
+
+/** What a chip's two ends mean, as its row names them on either side of its dots: `facts` and `expert reading`. */
+export function endsOf(c) {
+  const lv = Array.isArray(c?.levels) ? c.levels : []
+  return Array.isArray(c?.ends) && c.ends.length === 2 ? [...c.ends] : [lv[0] ?? '', lv[lv.length - 1] ?? '']
+}
+
+/** What a rewrite on its way writes, in words, for the line beside the chips: each chip whose level `want` changes
+ *  from the levels `shown`, by its name and the level asked (`Background new · Length short`); `as written` when it
+ *  goes back to the original. */
+export function changeWords(rec, want, shown) {
+  const to = chipsOf({ ...rec, squeeze: { ...sq(rec), at: want || {} } })
+  const was = new Map(chipsOf({ ...rec, squeeze: { ...sq(rec), at: shown || {} } }).map(c => [c.id, c.level]))
+  const moved = to.filter(c => c.level !== was.get(c.id)).map(c => `${c.name} ${c.level === c.level0 ? 'as written' : c.levels[c.level]}`)
+  return moved.length ? moved.join(' · ') : isOriginal(to) ? 'as written' : setWords({ ...rec, squeeze: { ...sq(rec), at: want || {} } })
 }
 
 /** A chip's level in words: its name, and `as written` where the original stands. */
@@ -636,10 +652,40 @@ function roundings(n) {
   return forms
 }
 
+/** The citations of a text (`[words](#)`), each with its words as read and the numbers they state. */
+const citedIn = text => linkSpans(text).filter(m => m[2] === '#').map(m => ({ words: plainLine(m[1]), nums: numbersIn(plainLine(m[1])) }))
+
+/** The words of a citation other than its numbers, for finding the citation of the original a rewrite's one stands for. */
+const wordSet = w => new Set((String(w).toLowerCase().match(/[a-z][a-z'-]{2,}/g) || []))
+
 /**
- * A rewrite held to the original: a number the original never states is named as a problem. Its citations stay as
- * written: one on the words of a checked citation looks as that one does, any other as unchecked (marks/register.ts
- * looksByWords). Returns the text to show and the problems.
+ * The citations of a rewrite whose numbers no citation of the original states: a cited value the rewrite changed
+ * (`[23 times](#)` where the original cites `[26 times](#)`). Each as {words, was}, `was` the original's citation with the
+ * most words in common, or null.
+ */
+export function changedCitations(original, text) {
+  const orig = citedIn(original)
+  const cited = new Set(orig.flatMap(c => c.nums.flatMap(roundings)))
+  const out = []
+  for (const c of citedIn(text)) {
+    if (!c.nums.length || c.nums.every(n => cited.has(n))) continue
+    const mine = wordSet(c.words)
+    let was = null
+    let best = 0
+    for (const o of orig) {
+      const k = [...wordSet(o.words)].filter(w => mine.has(w)).length
+      if (k > best && o.nums.length) { best = k; was = o.words }
+    }
+    out.push({ words: c.words, was })
+  }
+  return out
+}
+
+/**
+ * A rewrite held to the original: a number the original never states is named as a problem, and so is a citation whose
+ * numbers no citation of the original states (changedCitations). Its citations stay as written: one on the words of
+ * a checked citation looks as that one does, any other as unchecked (marks/register.ts looksByWords). Returns the text
+ * to show and the problems.
  */
 export function checkRewrite(original, text) {
   const problems = []
@@ -649,6 +695,9 @@ export function checkRewrite(original, text) {
   const have = new Set(numbersIn(original).flatMap(roundings))
   const stray = [...new Set(numbersIn(mapLinks(out, (all, words) => words)).filter(n => !have.has(n)))]
   if (stray.length) problems.push(`${stray.slice(0, 3).map(n => `"${n}"`).join(', ')} ${stray.length === 1 ? 'is' : 'are'} not in the original`)
+  // a cited number the rewrite changed, though the original states it elsewhere
+  const changed = changedCitations(original, out).filter(c => !c.words || !stray.some(n => numbersIn(c.words).includes(n)))
+  for (const c of changed.slice(0, 2)) problems.push(c.was ? `the citation "${c.words}" stands as "${c.was}" in the original` : `the citation "${c.words}" cites a number no citation of the original states`)
   return { text: out, problems }
 }
 

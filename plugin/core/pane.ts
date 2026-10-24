@@ -19,6 +19,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { failCleared, failLineNow } from '../bar/notice'
 import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
+import { labelAskPaneHead } from '../labels/use'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
 import { drawSettings } from '../panes/settings'
@@ -119,6 +120,9 @@ export const registerPanes: Register = on => {
     const els = $.ui.resolve(e) as Any
     const cols = Number((e as Any).props?.bodyColumns)
     if (cols > 0) paneColumns = cols
-    return drawPane($, e, await paneNow($), els)
+    const drawn = await drawPane($, e, await paneNow($), els)
+    // a large label run's ask waits at the pane's top, where the person reads (labels/use.ts)
+    const ask = await labelAskPaneHead($, els).catch(() => null)
+    return ask ? els.Box({ flexDirection: 'column', children: [ask, drawn] }) : drawn
   })
 }

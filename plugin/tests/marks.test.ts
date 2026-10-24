@@ -7,7 +7,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
-import { autoRepair, awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
+import { autoRepair, awaitsCheck, cardFlagLine, checkAnswer, checkerDenial, checkerPrompt, checkOpened, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
+import { setOptions } from '../settings/features.mjs'
 import { marksIn, withRewrites } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
@@ -117,7 +118,8 @@ test('a reply with marks starts one checker fork with its marks filled in, and i
   // the validator read the fork's real Bash call
   expect(JSON.parse(seen.stdin[0]!).calls[0]).toEqual({ command: "python3 - <<'PY'\nprint('12 of 40')\nPY", output: '12 of 40', by: 'checker' })
   const settled = await drawn($)
-  expect(settled).toContain('merged 12 of 40.')
+  // a figure the check corrected is marked: ✎ after it
+  expect(settled).toContain('merged 12 of 40 ✎.')
   expect(settled).toContain('"ship it" ×')
   // once settled no footer counts the marks: each shows its own status where it stands
   expect(settled).not.toContain('citation wrong')
@@ -313,7 +315,7 @@ test('x on a wrong citation checks it again in a fork of its own; its answer cor
   expect(seen.spawned[1].prompt).toBe('CHECK\n3. ["ship it"] in: It said ["ship it"].\nIN /made-up/data\n\nThe analyst pressed x to repair citation 3. It may stand in an earlier reply than your last. The first check found it wrong: "no record holds these words"\nCheck it again from the start. When the cited words hold, answer `verified` with the evidence that shows them. Else make the citation correct: change the cited words or the sentence, whatever makes it true to the records, and answer `corrected` with the evidence that shows the new cited words.\nWhen the value is right but the cited words also hold your own words that no record shows, such as a translation or an explanation, answer `narrowed` with only the part of the cited words that the evidence shows.')
   // while it runs the citation spins; the other marks keep their results; no second repair of it starts
   expect(await drawn($)).toContain('"ship it" ⠋')
-  expect(await drawn($)).toContain('merged 12 of 40.')
+  expect(await drawn($)).toContain('merged 12 of 40 ✎.')
   expect(await repairOf($, 'row-1', 3)).toBe(null)
   await endCheck($, { agentId: `${FORK}1`, reason: 'answer', answer: '```json\n[]\n```' })
   const m = (await rowMarks($, 'row-1'))!.items[2]!
@@ -343,8 +345,8 @@ test("x whose check rewrites the citation's sentence: the reply shows the new se
   expect(text).toBe('Of the [40](#) pull requests, agent-07 merged [15 of 40](#).\n\nIt said ["ship it now"](#) on line 9.')
   const looks = items.map(m => ({ n: m.n, status: m.status, shown: m.shown }))
   const body = textOf(messageEl(ELS, { text, marks: marksIn(text), looks, key: 'k', cols: 100, first: true, spin: '', onMark: () => undefined }))
-  expect(body).toContain('It said "ship it now" on line 9.')
-  expect(body).toContain('merged 12 of 40.')
+  expect(body).toContain('It said "ship it now" ✎ on line 9.')
+  expect(body).toContain('merged 12 of 40 ✎.')
   const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
   expect(told['marks:row-1:repair:3']).toContain('- the sentence "It said "ship it"." is rewritten as "It said "ship it now" on line 9.", which cites "ship it now" (the check: "line 9 holds these words")')
 })
@@ -378,7 +380,7 @@ test("a check that fails a citation repairs it at once, with x's request: it spi
   expect(seen.spawned[1].prompt).toBe(REPAIR_3)
   expect((await rowMarks($, 'row-1'))!.items[2]).toMatchObject({ status: 'checking', repair: true })
   expect(await drawn($)).toContain('"ship it" ⠋')
-  expect(await drawn($)).toContain('merged 12 of 40.')
+  expect(await drawn($)).toContain('merged 12 of 40 ✎.')
   // started once: the same check's end again, or x while it runs, starts no other
   await autoRepair($, FORK)
   expect(await repairOf($, 'row-1', 3)).toBe(null)
@@ -446,4 +448,48 @@ test("a repair that cannot start leaves the citation failed and says why, with x
   await autoRepair($, FORK)
   expect((await rowMarks($, 'row-1'))!.items[2]!.status).toBe('failed')
   expect(String((await failLineNow($))?.text)).toContain('The repair did not start (made-up: no agents now). Press x on the citation to try again.')
+})
+
+test('with "Check citations only when I open one" the reply\'s citations wait unchecked; opening one checks it alone', async () => {
+  setOptions({ checkOnOpen: true })
+  try {
+    const { $, seen } = engine(VALIDATED)
+    await noteRow($, 'row-1', REPLY)
+    await startCheck($, { turnId: 't-1', reason: 'answer' })
+    // no check after the reply: each citation reads as the reply's own cited words, with no sign after it
+    expect(seen.spawned.length).toBe(0)
+    expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'deferred', 'deferred'])
+    expect(await drawn($)).toContain('merged 15 of 40.')
+    // the person opens citation 2: its check alone starts, and it spins
+    await checkOpened($, 'row-1', 2)
+    expect(seen.spawned.length).toBe(1)
+    expect(seen.spawned[0].prompt).toBe('CHECK\n2. [15 of 40] in: Of the [40] pull requests, agent-07 merged [15 of 40].\nIN /made-up/data\n\nThe analyst opened citation 2 to read its evidence. It may stand in an earlier reply than your last.')
+    expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'checking', 'deferred'])
+    // opened again while it runs: no second check
+    await checkOpened($, 'row-1', 2)
+    expect(seen.spawned.length).toBe(1)
+    await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+    expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'corrected', 'deferred'])
+    expect(await drawn($)).toContain('merged 12 of 40 ✎.')
+    // a checked citation opened again starts nothing
+    await checkOpened($, 'row-1', 2)
+    expect(seen.spawned.length).toBe(1)
+  } finally {
+    setOptions({})
+  }
+})
+
+test('a card of the answer that still shows a figure its check corrected is flagged under its frame, and main hears which', async () => {
+  const { $ } = engine(VALIDATED)
+  const card = 'c1a2b3c4d5'
+  await $.state.set({ plugin: 'thimble', key: 'answerTurn', id: 't-1' }, { turnId: 't-1', n: 1, prompt: { text: 'q', by: 'composer', row: null }, rows: ['row-1'], answer: 'row-1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: [{ id: card, toolUseId: 'u9', seq: 1, after: 0 }], seq: 1 })
+  await $.state.set({ plugin: 'thimble', key: 'card', id: card }, { id: card, version: 1, title: 'Merged pull requests', toolUseId: 'u9' })
+  await $.state.set({ plugin: 'thimble', key: 'cardTree', id: card }, { gen: 1, width: 80, seq: 1, tree: { t: 'Box', p: {}, c: [{ t: 'Text', p: {}, c: ['agent-07 merged 15 of 40'] }] } })
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(textOf(await cardFlagLine($, ELS, card))).toBe('  ✎ The check corrected "15 of 40" to "12 of 40" in the reply. This card was drawn before and still shows the old figure.')
+  expect(await cardFlagLine($, ELS, 'c0000000000')).toEqual([])
+  const told = ((await $.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['marks:row-1:cards']).toContain('- the card "Merged pull requests" (c1a2b3c4d5) still shows "15 of 40", which the check corrected to "12 of 40"')
 })

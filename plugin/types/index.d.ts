@@ -6,11 +6,14 @@ declare module 'claude-code' {
       // ---- marks (marks/)
       /** a reply's marks and their checks, by the reply's key, its last text row (a session.append uuid of main's; the
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
-       *  sentence, status: 'checking' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
+       *  sentence, status: 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
        *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair?, narrowed?, rewrite? }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
       /** the reply each text row with marks belongs to, by the row: the reply's key */
       marksRow: StateFamily<string>
+      /** the cards that still show a figure their answer's check corrected, by the card: [{ n, was, now, figure, key }]
+       *  (marks/checker.ts flagCards) */
+      marksCardStale: Record<string, { n: number; was: string; now: string; figure: string; key: string }[]>
       /** main's text rows of the turn that runs, until its reply's marks are in the store: [{ row, text, at }] */
       marksRows: { row: string; text: string; at: number }[]
       /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
@@ -57,7 +60,9 @@ declare module 'claude-code' {
       labelGen: number
       /** the ask before a large label run that waits for the person's choice (labels/use.ts): { root, name, ask, text,
        *  meta, units, sample, rest }, or null */
-      labelAsk: { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean } | null
+      labelAsk: { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean; calls?: number } | null
+      /** what the band says for a moment after the person answered an ask: { words, until } (labels/use.ts) */
+      labelAskEcho: { words: string; until: number } | null
 
       // ---- core (core/)
       /** what the side pane shows (core/pane.ts) */
@@ -83,8 +88,10 @@ declare module 'claude-code' {
       answerMsg: StateFamily<unknown>
       /** the turn a text row belongs to, by the row */
       answerRowTurn: StateFamily<string>
-      /** the answer the person picked for the keys with { and }, or null: the newest */
+      /** the answer the person picked for the keys with { and } or by opening one of its marks, or null: the newest */
       answerSel: string | null
+      /** the answer the person picked with { and } alone, or null: the newest (what s squeezes) */
+      answerSelKeys: string | null
 
       // ---- the tray (tray/tray.ts)
       /** the cite and explain tray while it is open: { stack: [MarkRef & { open?: 'code' | null }] }, its top shown */

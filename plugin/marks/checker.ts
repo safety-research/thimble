@@ -26,6 +26,13 @@
 //                             hook around endCheck's (marks/register.ts): the repair's fork skips the hook that spawned
 //                             it, so its end still reaches endCheck
 //
+// With the setting "Check citations only when I open one" (settings/features.mjs checkOnOpen) a reply's marks are not
+// checked after the reply: they wait `deferred` (drawn as the reply's own cited words), and opening one (tray.ts
+// openMark) checks that one (checkOpened), as a reply's check would.
+//
+// When a check corrects a figure that a card drawn in the same answer still shows, the card is flagged under its
+// frame (cardFlagLine), and main hears which card shows the old figure (flagCards).
+//
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
 // mark of its share `checking`: a mark it gave no answer for is failed, as the person sees it (store.ts notRun). When a reply's last mark settles, main is told what changed (tellText), once; when a
 // repair ends, main is told how that one mark ended (repairTellText): who started it, the person (x) or thimble (auto).
@@ -35,7 +42,9 @@
 import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { cardsDir } from '../cards/store'
+import { cardsDir, metaOf, treeOf } from '../cards/store'
+import { turnOf } from '../core/answers'
+import { accent } from '../core/theme'
 import { failNotice, noticeLine } from '../bar/notice'
 import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
@@ -46,6 +55,7 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
+import { staleFigures, treeWords } from './cardflag.mjs'
 import { marksIn, plainSentence, sentenceOf } from './message.js'
 import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, notRun, type Reply, replyKeyOf, replyOf } from './store'
 
@@ -59,6 +69,7 @@ type Any = any
 type Check = { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string }
 
 const RUNNING = { plugin: 'thimble', key: 'marksRunning' } as const
+const STALE = { plugin: 'thimble', key: 'marksCardStale' } as const
 const ROWS = { plugin: 'thimble', key: 'marksRows' } as const
 
 /** A reply with many marks is split between forks, each with about PER_FORK marks (at most MAX_FORKS forks): a fork's
@@ -107,10 +118,10 @@ async function running($: Engine): Promise<Record<string, Check>> {
 }
 
 /** Every mark of the reply's rows, numbered from 1 across them, each with its row and sentence. */
-function itemsOf(reply: { row: string; text: string }[]): MarkItem[] {
+function itemsOf(reply: { row: string; text: string }[], later = false): MarkItem[] {
   let n = 0
   return reply.flatMap(r => marksIn(r.text).map((m: Any) => ({
-    n: ++n, row: r.row, words: m.words, start: m.start, end: m.end, sentence: sentenceOf(r.text, m), status: 'checking' as MarkStatus, shown: m.words,
+    n: ++n, row: r.row, words: m.words, start: m.start, end: m.end, sentence: sentenceOf(r.text, m), status: (later ? 'deferred' : 'checking') as MarkStatus, shown: m.words,
   })))
 }
 
@@ -276,16 +287,19 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   const done = async () => { await $.state.set(ROWS, []) }
   const reply = noted.filter(r => r.text.trim())
   if (!reply.length || !featureOn('marks')) return await done()
-  const items = itemsOf(reply)
+  const later = featureOn('checkOnOpen')
+  const items = itemsOf(reply, later)
   if (!items.length) return await done()
   const now = Number(await $.clock.now())
   const key = reply[reply.length - 1]!.row
   const rows = [...new Set([...items.map(m => m.row), key])]
   try {
-    await newReply($, { key, turnId: e.turnId, rows, startedAt: now, settledAt: null, items })
+    await newReply($, { key, turnId: e.turnId, rows, startedAt: now, settledAt: later ? now : null, items })
   } finally {
     await done()
   }
+  // checked when the person opens one (checkOpened)
+  if (later) return
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
   const whole: Check = { agentId: '', key, turnId: e.turnId, marks: items.map(m => m.n), cwd, root, replyEnd: reply[reply.length - 1]!.at, spawnedAt: now }
@@ -331,10 +345,12 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
  *  thread's turn.complete hook, as startCheck. */
 export async function checkAnswer($: Engine, a: { row: string; text: string; turnId: string; agentId: string; about: string; reason: string }): Promise<void> {
   if (!featureOn('marks') || (await replyOf($, a.row))) return
-  const items = itemsOf([{ row: a.row, text: a.text }])
+  const later = featureOn('checkOnOpen')
+  const items = itemsOf([{ row: a.row, text: a.text }], later)
   if (!items.length) return
   const now = Number(await $.clock.now())
-  await newReply($, { key: a.row, turnId: a.turnId, rows: [a.row], startedAt: now, settledAt: null, items, thread: { agentId: a.agentId, about: a.about } })
+  await newReply($, { key: a.row, turnId: a.turnId, rows: [a.row], startedAt: now, settledAt: later ? now : null, items, thread: { agentId: a.agentId, about: a.about } })
+  if (later) return
   const whole: Check = { agentId: '', key: a.row, turnId: a.turnId, marks: items.map(m => m.n), cwd: String(await $.session.cwd()), root: await startDir($), replyEnd: now, spawnedAt: now, thread: a.agentId }
   if (a.reason !== 'answer') {
     await giveUp($, whole, 'The answer was interrupted.', now)
@@ -424,6 +440,75 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
     if (held === hold) held = null
     starting.delete(id)
   }
+}
+
+/** A citation opened (tray.ts openMark) whose reply waits to be checked until one is opened (checkOnOpen): its check,
+ *  one fork for it alone, as a reply's check is made. Call it inside the hook of the press or key that opened it (the
+ *  spawn is its first call). Nothing for a citation that is checked, or whose check runs. */
+export async function checkOpened($: Engine, row: string, n: number): Promise<void> {
+  const key = await replyKeyOf($, row)
+  const r = key ? await replyOf($, key) : null
+  const m = r?.items.find(x => x.n === n)
+  if (!key || !r || !m || m.status !== 'deferred' || starting.has(`${key}:${n}`)) return
+  const id = `${key}:${n}`
+  starting.add(id)
+  try {
+    let template = ''
+    try { template = await promptText($, 'checker') } catch { return }
+    const cwd = String(await $.session.cwd())
+    const root = await startDir($)
+    const reply = r.thread ? threadAnswer(r.thread.about) : LAST_REPLY
+    const prompt = `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\nThe analyst opened citation ${n} to read its evidence. It may stand in an earlier reply than your last.`
+    const fork = await spawnFork($, { kind: 'checker', prompt, description: 'checking a citation' })
+    if (!fork.agentId) {
+      failNotice($, `The check of citation ${n} could not start (${String(fork.deny || 'no reason given').slice(0, 80)}). Open it again to try again.`)
+      return
+    }
+    const agentId = fork.agentId
+    const now = Number(await $.clock.now())
+    await editReply($, key, rep => ({ ...rep, settledAt: null, items: rep.items.map(x => (x.n === n ? { ...x, status: 'checking' as MarkStatus } : x)) }))
+    const c: Check = { agentId, key, turnId: r.turnId, marks: [n], cwd, root, replyEnd: now, spawnedAt: now, ...(r.thread ? { thread: r.thread.agentId } : {}) }
+    await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: c }))
+    await showRunning($, key, 1, [agentId])
+  } finally {
+    starting.delete(id)
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ cards a check left behind
+
+type Stale = { n: number; was: string; now: string; figure: string; key: string }
+
+/** After a check corrected citations of main's answer: each card drawn in that answer's turn whose words still show a
+ *  figure the check changed is flagged under its frame (cardFlagLine), and main hears which card shows the old one. */
+async function flagCards($: Engine, reply: Reply, fixed: MarkItem[]): Promise<void> {
+  const turn = await turnOf($, reply.turnId).catch(() => null)
+  const lines: string[] = []
+  for (const use of turn?.cards ?? []) {
+    const meta = await metaOf($, use.id)
+    const tree = (await treeOf($, use.id))?.tree
+    if (!meta || tree == null) continue
+    const found = staleFigures(`${meta.title}\n${treeWords(tree)}`, fixed)
+    if (!found.length) continue
+    await update($, STALE, cur => ({ ...((cur as Record<string, Stale[]> | undefined) ?? {}), [use.id]: found.map((f: Omit<Stale, 'key'>) => ({ ...f, key: reply.key })) }))
+    for (const f of found) lines.push(`- the card "${meta.title}" (${use.id}) still shows ${q(f.was)}, which the check corrected to ${q(f.now)}`)
+  }
+  if (lines.length) await tellAtNextPrompt($, `marks:${reply.key}:cards`, `A card of your last answer shows a figure the check of its citations corrected. The analyst sees a note under the card:\n${fenced(lines.join('\n'))}`)
+}
+
+/** The note under a card that still shows a figure its answer's check corrected: what the check changed, and that the
+ *  card shows the old figure. Nothing for a card with none. */
+export async function cardFlagLine($: Engine, els: Any, id: string): Promise<Any[]> {
+  if (!featureOn('marks')) return []
+  const all = ((await $.state.get(STALE)).value ?? {}) as Record<string, Stale[]>
+  const found = all[id] ?? []
+  if (!found.length) return []
+  const f = found[0]!
+  const more = found.length > 1 ? ` (and ${found.length - 1} more)` : ''
+  return [els.Text({ key: `stale-${id}`, wrap: 'wrap', children: [
+    els.Text({ key: 's', color: accent(), children: '  ✎ ' }),
+    els.Text({ key: 'w', dimColor: true, children: `The check corrected "${f.was}" to "${f.now}" in the reply${more}. This card was drawn before and still shows the old figure.` }),
+  ] })]
 }
 
 /** The citations each ended check found wrong or could not confirm, by the check's fork, until autoRepair starts their
@@ -526,6 +611,9 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
       return { ...m, ...rest, shown: String(res.shown ?? m.words) }
     })))
     if (!reply) return
+    // a card of main's answer that still shows a figure this check corrected is flagged
+    const fixed = reply.items.filter(m => mine.has(m.n) && m.status === 'corrected' && !m.narrowed)
+    if (fixed.length && !c.thread) await flagCards($, reply, fixed).catch(() => undefined)
     // a reply's check: the citations it found wrong or could not confirm are repaired as soon as it ends (autoRepair)
     const found = c.repair ? [] : reply.items.filter(m => mine.has(m.n) && m.status === 'failed' && m.failedBy !== 'none').map(m => m.n)
     if (found.length) toRepair.set(e.agentId, { key: c.key, marks: found })

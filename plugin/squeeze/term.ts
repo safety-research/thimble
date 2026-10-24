@@ -32,6 +32,7 @@ import { keptDir } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
 import { modelWhy } from '../core/why.js'
 import type { ExplainPart } from '../explain/seam'
+import { rewritesIn, withCorrections } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
@@ -178,16 +179,25 @@ async function done($: Engine, id: string, gen: number): Promise<void> {
   await noteSettled($, id)
 }
 
-/** The sentences of the citations the check corrected in the rows a record covers, each with its citation as written:
- *  a version keeps them, so the corrected value stays in place. */
-async function correctedSentences($: Engine, rows: string[]): Promise<string[]> {
-  const out: string[] = []
-  for (const r of rows) {
-    for (const it of (await rowMarks($, r))?.items ?? []) {
-      if (it.status === 'corrected' && it.sentence && !out.includes(it.sentence)) out.push(it.sentence)
-    }
+/** A message's words as the person reads them: each sentence a check rewrote in place of Claude's, and each corrected
+ *  citation's words in place of its own (as marks/register.ts draws them), so a rewrite starts from the corrected
+ *  values and never sees the wrong ones beside them. */
+async function asRead($: Engine, row: string, text: string): Promise<string> {
+  const items = (await rowMarks($, row))?.items ?? []
+  if (!items.some(it => it.status === 'corrected')) return text
+  return withCorrections(rewritesIn(text, items).text, items)
+}
+
+/** The original a record's rewrite starts from: its message as the person reads it (asRead), or, for a catch-up, each
+ *  of its messages so, one after another. */
+async function originalOf($: Engine, rec: Rec): Promise<string> {
+  if (!rec.catchup) return asRead($, rec.row, rec.text)
+  const texts: string[] = []
+  for (const r of rec.catchup.rows) {
+    const m = await messageOf($, r)
+    if (m?.text?.trim()) texts.push(await asRead($, r, m.text))
   }
-  return out.slice(0, 4)
+  return texts.length ? catchUpText(texts) : rec.text
 }
 
 /** One call for a change; its result shows only while no later change came (`gen`, the change's number). */
@@ -195,7 +205,9 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   const rec = await recOf($, id)
   if (!rec) return
   const s = (rec.squeeze ?? {}) as Any
-  const probe: Rec = { ...rec, squeeze: { ...s, at: want.at, scale: SCALE } }
+  // the original as the person reads it: the citations the check corrected stand corrected in it
+  const original = await originalOf($, rec).catch(() => rec.text)
+  const probe: Rec = { ...rec, text: original, squeeze: { ...s, at: want.at, scale: SCALE } }
   const stale = () => latest.get(id) !== gen
   revealing.delete(id)
   await setUi($, id, { running: { since: Number(await $.clock.now()) }, error: null, reveal: null })
@@ -203,9 +215,8 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   // a catch-up answers the person's last prompt, whatever notification or hand-back came after it
   const question = rec.catchup ? String(rec.catchup.question || '') : await questionOf($, rec.row).catch(() => '')
   const system = await promptText($, 'squeeze')
-  // the corrections in the original are named in the request (Claude's own, and the citations the check corrected),
-  // and one the rewrite left out is put back after it
-  const keep: string[] = [...mustKeep(rec.text), ...(await correctedSentences($, rows))].slice(0, 6)
+  // Claude's own corrections in the original are named in the request, and one the rewrite left out is put back after it
+  const keep: string[] = mustKeep(original).slice(0, 6)
   // the terms of the explainers on its words are named in the request
   const terms: string[] = []
   for (const r of rows) for (const t of termsOf(await partOf<ExplainPart>($, r, 'explain'))) if (!terms.includes(t)) terms.push(t)
@@ -238,11 +249,11 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   // a heading the rewrite ends on, with nothing under it, promises what the text does not give: dropped before a
   // correction is put back after it, and after
   const bare = dropOrphanHeads(reply.text)
-  const back = keepCorrections(bare.text, keep, rec.text)
+  const back = keepCorrections(bare.text, keep, original)
   const whole = dropOrphanHeads(back.text)
   whole.dropped.unshift(...bare.dropped)
   // held to the whole answer it was shown: the message, and its cards' words and rows when the request had them
-  const checked = checkRewrite(answerText(rec.text, answer?.cards ?? []), whole.text)
+  const checked = checkRewrite(answerText(original, answer?.cards ?? []), whole.text)
   // the cards this version changes, made as the person's; one that does not draw is left out, said why
   // (a card a catch-up adds stands under the catch-up, at the row it draws at)
   const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, rec.catchup ? drawnAt(rec) : rec.row, setWords(probe) || 'as written') : null
@@ -261,7 +272,7 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   await settled($, id, next, { written: true })
   await log($, {
     row: id, ok: true, ms, model: req.model, effort: req.effort, prompt: 'squeeze', usage: (r as Any).usage, key: keyWords, problems: checked.problems,
-    rows: rowsOf(checked.text, viewCols), of: rowsOf(rec.text, viewCols),
+    rows: rowsOf(checked.text, viewCols), of: rowsOf(original, viewCols), ...(original !== rec.text ? { corrected: true } : {}),
     ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}),
     ...(terms.length ? { terms: terms.length } : {}), ...(rec.catchup ? { catchup: rec.catchup.replies } : {}),
     ...(answer ? { cards: answer.cards.length, asked: reply.cards.map((c: Any) => `${c.op} ${c.id}`), did: (cards?.did ?? []).map((d: Any) => `${d.did} ${d.id}`), card_problems: cardProblems, ...(changed?.unknown.length ? { unknown_cards: changed.unknown } : {}) } : {}),

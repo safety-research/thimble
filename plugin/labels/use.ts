@@ -17,8 +17,10 @@
 //
 // The ask. A --prompt label over more than a sample of records (engine/kernel/estimate.py) does not start: the kernel
 // writes a `label_ask` line in the change feed (core/feed.ts hands it to labelAskFromFeed), and the ask waits above
-// the bar with its choices, each a press, and in the bar as its keys: 1 run all (run the rest, after a sample),
-// 2 run on a sample, 0 cancel. A key acts once the word window closed with no letter after it (a letter makes it the
+// the bar as a question in the warning color, tagged `Claude is waiting on you` (its turn waits for the answer), with its choices,
+// each a press with about how long it takes, and in the bar as its keys: 1 run all (run the rest, after a sample),
+// 2 run on a sample, 0 cancel. An open side pane shows the same ask at its top (labelAskPaneHead). After a choice
+// the band says for a moment what runs now (`labeling a sample of 300 records for complaint…`). A key acts once the word window closed with no letter after it (a letter makes it the
 // start of a word, and nothing runs); the choices leave the screen at once, and come back when the key began a word.
 // The choice runs as the person (`thimble label NAME --answer all|sample|cancel --ask ID`), the model's reads start
 // beside the session (labels.ts labelFromFeed), and Claude hears the choice with the next prompt (core/tell.ts).
@@ -26,7 +28,8 @@
 //   labelsUnderAnswer($, els, row, cols)   the row under an answer
 //   labelsUnderCard($, els, id, cols)      the row under a card
 //   labelAskKey($, key, until)             the ask's keys while it waits
-//   labelAskBand($, els, width)            the ask, drawn above the bar while it waits
+//   labelAskBand($, els, width)            the ask, drawn above the bar while it waits, and the echo of a choice
+//   labelAskPaneHead($, els)               the ask at the top of an open side pane (core/pane.ts)
 //   labelAskBar($, on, preview)            its keys at the bar's left while it waits
 //   labelAskFromFeed($, ev)                a `label_ask` line of the kernel's change feed
 //   answerAsk($, choice, ask?)             the person's choice, as a press or a key gives it
@@ -44,7 +47,7 @@ import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
-import { ASK_KEYS, answerNote, askChoices, askOf, howMade, NO_VALUE, rowValues, sampleOffered, tonesInTree, usedNames } from './use.mjs'
+import { ASK_KEYS, answerNote, askChoices, askOf, askQuestion, choiceEcho, howMade, NO_VALUE, rowValues, sampleOffered, tonesInTree, usedNames } from './use.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,10 +58,13 @@ type Any = any
  *  of `values` when not given. `tones`, set only under a card: the colors the card gives its values. */
 export type UsedLabel = { name: string; values: string[]; shown?: { v: string; name: string }[]; kind?: string; records?: number; tones?: Record<string, string> }
 /** The ask that waits for the person's choice. */
-export type LabelAsk = { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean }
+export type LabelAsk = { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean; calls?: number }
 type Choice = 'all' | 'sample' | 'cancel'
 
 const LABELASK = { plugin: 'thimble', key: 'labelAsk' } as const
+const ECHO = { plugin: 'thimble', key: 'labelAskEcho' } as const
+/** How long the band says what a choice runs. */
+const ECHO_MS = 6000
 /** The values a row names at most. */
 const VALUES_SHOWN = 8
 
@@ -232,6 +238,7 @@ export async function answerAsk($: Engine, choice: Choice, given?: LabelAsk): Pr
   const a = given ?? (await labelAskNow($))
   if (!a) return
   await setLabelAsk($, null)
+  await echo($, choiceEcho(a, choice))
   const about = `label-ask:${a.root}|${a.name}`
   let out = ''
   let ok = false
@@ -267,19 +274,51 @@ export async function labelAskKey($: Engine, key: string, _until: number): Promi
   }
 }
 
-/** A large label run's ask above the bar: what the run reads, the choices, each a press, and under them the one exact
- *  number, its model calls, dim. */
+/** What a choice runs, said in the band for a moment (ECHO_MS), so the person sees their answer arrived. */
+async function echo($: Engine, words: string): Promise<void> {
+  const until = Number(await $.clock.now()) + ECHO_MS
+  await $.state.set(ECHO, { words, until })
+  $.clock.after(ECHO_MS, () => {
+    void (async () => {
+      const cur = (await $.state.get(ECHO)).value as { until: number } | null
+      if (cur && cur.until <= until) await $.state.set(ECHO, null)
+    })().catch(() => undefined)
+  })
+}
+
+/** The ask as drawn above the bar and at the top of a side pane: the `Claude is waiting on you` tag and the question in the
+ *  warning color, the choices, each a press with about how long it takes, and under them the one exact number, its
+ *  model calls, dim. */
+function askEl($: Engine, els: Any, a: LabelAsk, key: string): Any {
+  const { Box, Text, Button } = els
+  const choice = (c: { key: string; words: string; choice: Choice; time: string }) =>
+    Box({ key: `ask-${c.choice}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: c.words, onPress: () => { void answerAsk($, c.choice, a) }, children: [
+      Text({ key: 'k', color: accent(), bold: true, children: c.key }), Text({ key: 'w', children: ` ${c.words}` }), ...(c.time ? [Text({ key: 't', dimColor: true, children: ` (${c.time})` })] : []),
+    ] })] })
+  return Box({ key, flexDirection: 'column', children: [
+    Text({ key: 'ask-text', wrap: 'wrap', children: [
+      Text({ key: 'tag', color: 'warning', inverse: true, bold: true, children: ' Claude is waiting on you ' }),
+      Text({ key: 'q', color: 'warning', bold: true, children: ` ${askQuestion(a)}` }),
+    ] }),
+    Box({ key: 'ask-keys', flexDirection: 'row', flexWrap: 'wrap', children: askChoices(a).map(choice) }),
+    ...(a.meta ? [Text({ key: 'ask-meta', dimColor: true, children: `${a.meta} · the times are rough` })] : []),
+  ] })
+}
+
+/** A large label run's ask above the bar while it waits (askEl); after the person's choice, for a moment, what it runs. */
 export async function labelAskBand($: Engine, els: Any, _width: number): Promise<Any[]> {
   const a = await labelAskNow($)
-  if (!a) return []
-  const { Box, Text, Button } = els
-  const choice = (c: { key: string; words: string; choice: Choice }) =>
-    Box({ key: `ask-${c.choice}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: c.words, onPress: () => { void answerAsk($, c.choice, a) }, children: [Text({ key: 'k', color: accent(), bold: true, children: c.key }), Text({ key: 'w', children: ` ${c.words}` })] })] })
-  return [Box({ key: 'label-ask', flexDirection: 'column', children: [
-    Text({ key: 'ask-text', wrap: 'wrap', children: [Text({ key: 'n', dimColor: true, children: `label ${a.name}  ` }), `${a.text}?`] }),
-    Box({ key: 'ask-keys', flexDirection: 'row', flexWrap: 'wrap', children: askChoices(a).map(choice) }),
-    ...(a.meta ? [Text({ key: 'ask-meta', dimColor: true, children: a.meta })] : []),
-  ] })]
+  if (a) return [askEl($, els, a, 'label-ask')]
+  const e = (await $.state.get(ECHO)).value as { words: string; until: number } | null
+  if (!e || e.until <= Number(await $.clock.now())) return []
+  return [els.Text({ key: 'label-ask-echo', wrap: 'wrap', children: [els.Text({ key: 'ok', color: 'success', children: '✓ ' }), e.words] })]
+}
+
+/** The ask at the top of an open side pane, so it is seen where the person reads (core/pane.ts); null when none waits. */
+export async function labelAskPaneHead($: Engine, els: Any): Promise<Any | null> {
+  const a = await labelAskNow($)
+  if (!a) return null
+  return els.Box({ key: 'pane-ask', flexDirection: 'column', marginBottom: 1, children: [askEl($, els, a, 'pane-ask-body')] })
 }
 
 /** The ask's keys at the bar's left while it waits: `1 run all · 2 run on a sample of 300 · 0 cancel`. */

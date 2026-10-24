@@ -24,7 +24,8 @@ const answer = (requestId: string, text: string) => ({ plugin: 'thimble', compon
 const above = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: VIEW } as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
 
-async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
+/** `kept`: files of the conversation's folder before the session starts, by their path in it (`marks/row-t1.json`). */
+async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kept: Record<string, string> = {}) {
   resetSqueeze()
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
@@ -34,9 +35,10 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
+  const keptOf = (path: string) => Object.keys(kept).find(k => path.endsWith(`/${k}`))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? (keptOf(e.path) ? kept[keptOf(e.path)!] : undefined) ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content: string }) => { files[e.path] = String(e.content); return { value: undefined } })
-  on('fs.list', () => ({ value: [] }))
+  on('fs.list', (_$: unknown, e: { path: string }) => ({ value: Object.keys(kept).filter(k => String(e.path).endsWith(`/${k.split('/')[0]}`)).map(k => ({ name: k.split('/')[1], kind: 'file' })) }))
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files }))
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   on('env.set', () => ({ value: {} }))
@@ -44,7 +46,9 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   on('command.register', () => ({ value: { command: 'x' } }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.scroll', () => ({ value: undefined }))
-  on('prompt.fill', () => ({ value: undefined }))
+  on('prompt.fill', () => ({ isFilled: true }) as never)
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
+  on('prompt.change', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
   on('model.complete', async (_$: unknown, e: Any) => { asked.push(e); return { value: { isAnswered: true, text: `<text>\n${(await replies.shift()) ?? 'Short.'}\n</text>`, usage: {} } } })
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
@@ -65,7 +69,7 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[]) {
   }
   const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
   const bar = async () => textOf(await $.ui.render(above))
-  return { clock, asked, ask, say, turn, press, bar }
+  return { clock, asked, ask, say, turn, press, bar, files }
 }
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
@@ -76,7 +80,7 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(await t.bar()).toContain('s squeeze')
   expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
   const open = await t.bar()
-  expect(open).toContain('[ ] shorter / longer')
+  expect(open).toContain('[ shorter · ] longer')
   // leaving comes first: `s close` is the bar's first item while the chips are open
   expect(open).toContain('thimble  s close · ')
   expect(open).not.toContain('s done')
@@ -203,7 +207,7 @@ test('a citation opened over the open chips takes the keys: the bar names 0 once
   const open = await t.bar()
   expect(open).toContain('3 failed')
   expect(open.match(/0 (close|back|revert)/g)).toEqual(['0 close'])
-  expect(open).not.toContain('shorter / longer')
+  expect(open).not.toContain('] longer')
   // 0 closes the tray; the longer version stays, and the chips hold the keys again
   await t.press('0')
   expect(await t.bar()).not.toContain('0 close')
@@ -241,4 +245,136 @@ test("a catch-up's reworded citations: a press acts on the reply's citation with
   const band = await t.bar()
   expect(band).toContain('slow mirror')
   expect(band).not.toContain('12 runs')
+})
+
+// A person opened an explainer of an older reply and the chips then opened under it: opening a mark picks that answer for
+// the marks' keys, never for s
+test('s opens the chips under the newest reply after a mark of an older one was opened; { } picks another, and the chips say which', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  await t.turn('t2', 'The retry passed on the [slow mirror](#).')
+  // a citation of the first reply opened (the tray picks its answer for the marks' keys), then closed
+  const cite = nodes(await $.ui.render(answer('row-t1', LONG))).find(n => n.type === 'Button' && /^citation 1/.test(String(n.props.label)))
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  await ui.press({ key: cite.props.key })
+  await ui.unmount()
+  expect(await t.bar()).toContain('3 of 12')
+  await t.press('0')
+  await t.press('s')
+  expect((await chipsDrawn($, 'row-t2', 'The retry passed on the [slow mirror](#).')).client).toBeTruthy()
+  expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
+  // the newest: no line says which
+  expect((await chipsDrawn($, 'row-t2', 'The retry passed on the [slow mirror](#).')).client.props.props.older).toBe(null)
+  await t.press('s')
+  // { picks the older answer for the keys: s opens the chips there, and their row says which reply they squeeze
+  await t.press('{')
+  await t.press('s')
+  const older = await chipsDrawn($, 'row-t1', LONG)
+  expect(older.client.props.props.older).toMatch(/^squeezing the reply from \d\d:\d\d · \{ \} picks another$/)
+  expect(textOf(older.tree)).toContain('squeezing the reply from')
+  // a new turn gives s back to the newest answer
+  await t.press('s')
+  await t.turn('t3', 'Done.')
+  await t.press('s')
+  expect((await chipsDrawn($, 'row-t3', 'Done.')).client).toBeTruthy()
+})
+
+test('s pressed twice quickly opens the chips once and types nothing, as two keys or as one edit of both', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  expect(await $.prompt.edit(key('s'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(120)
+  expect(await $.prompt.edit(key('s'))).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(400)
+  expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeTruthy()
+  await t.press('s')
+  expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
+  // both in one edit (a burst)
+  const burst = { origin: { kind: 'composer' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'ss' } as never
+  expect(await $.prompt.edit(burst)).toEqual({ text: '', cursor: 0 })
+  await t.clock.advance(400)
+  expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeTruthy()
+  // a word that starts with s is still typed whole
+  await t.press('s')
+  await $.prompt.edit(key('s'))
+  await t.clock.advance(50)
+  expect(await $.prompt.edit(key('o'))).toEqual({ text: 'so', cursor: 2 })
+})
+
+test('each chip names its ends; while a rewrite is on its way the chips say what it writes and for how long, the text dims, and a version seen before comes back with no call', async ($, on) => {
+  const gates: ((v: string) => void)[] = []
+  const t = await setup($, on, [new Promise<string>(r => { gates.push(r) })])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  const at0 = await chipsDrawn($, 'row-t1', LONG)
+  expect(at0.client.props.props.items.map((c: Any) => c.ends)).toEqual([['shorter', 'longer'], ['facts', 'expert reading'], ['new', 'expert']])
+  expect(textOf(at0.tree)).toContain('1 Length shorter ○●○○ longer · as written')
+  expect(textOf(at0.tree)).toContain('2 Interpretation facts ○●○ expert reading')
+  // a press on an end sets that level
+  expect(nodes(at0.tree).some(n => n.type === 'Button' && n.props.label === 'Background: new')).toBe(true)
+  // each of the bar's keys is a press: [ and ] each one way, and 1–3 picks the next chip
+  const bar = nodes(await $.ui.render(above)).filter(n => n.type === 'Button').map(n => String(n.props.label))
+  expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–3 chip', '+ your own']))
+  const pressBar = async (k: string) => { const ui = await $.ui.mount(above); await ui.press({ key: k }); await ui.unmount() }
+  await pressBar('bar-sq-pick')
+  expect(await t.bar()).toContain('[ facts · ] interpretation')
+  await t.press('3')
+  await t.press('[')
+  await t.press('[')
+  await t.clock.advance(3200)
+  expect(t.asked.length).toBe(1)
+  const busy = await chipsDrawn($, 'row-t1', LONG)
+  expect(busy.client.props.props.doing).toMatchObject({ words: 'rewriting: Background new' })
+  expect(busy.client.props.props.doing.secs).toBeGreaterThanOrEqual(3)
+  expect(textOf(busy.tree)).toMatch(/rewriting: Background new… \ds/)
+  gates.shift()!('The nightly build failed on [3 of 12](#) runs, in plain words.')
+  await t.clock.advance(5000)
+  expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.doing).toBe(null)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('in plain words.')
+  // back to the original and to that version again: no call
+  await t.press('0')
+  await t.press('[')
+  await t.press('[')
+  await t.clock.advance(3000)
+  expect(t.asked.length).toBe(1)
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('in plain words.')
+})
+
+test('the rewrite starts from the corrected citations: the request holds the corrected value alone, and names no correction', async ($, on) => {
+  // a resumed session: the check corrected the reply's citation
+  const at = LONG.indexOf('[3 of 12](#)')
+  const t = await setup($, on, ['The build failed on [4 of 12](#) runs.'], {
+    'marks/row-t1.json': JSON.stringify({ key: 'row-t1', turnId: 't1', rows: ['row-t1'], startedAt: 0, settledAt: 1, items: [
+      { n: 1, row: 'row-t1', words: '3 of 12', start: at, end: at + 12, sentence: 'The nightly build failed on [3 of 12] runs.', status: 'corrected', shown: '4 of 12', was: '3 of 12' },
+    ] }),
+    'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'why did it fail?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: LONG, at: 1 }] }),
+  })
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('4 of 12 ✎')
+  await t.press('s')
+  await t.press('[')
+  await t.clock.advance(3000)
+  const prompt = JSON.stringify(t.asked[0].prompt)
+  expect(prompt).toContain('[4 of 12](#)')
+  expect(prompt).not.toContain('3 of 12')
+  expect(prompt).not.toContain('Corrections in the original')
+})
+
+test('+ in the chips shows an example of what to ask, and a key at the prompt (esc gave it the keys) or esc esc clearing it lets the words go', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  await ui.press({ key: 'add' })
+  await ui.unmount()
+  const typing = await chipsDrawn($, 'row-t1', LONG)
+  expect(typing.client.props.props.plus).toBe('')
+  expect(textOf(typing.tree)).toContain('+ ▏e.g. less jargon, or add an example')
+  expect(await t.bar()).toContain('↵ adds it · tab lets it go')
+  await $.prompt.edit({ origin: { kind: 'composer' }, text: 'h', cursor: 1, start: 0, end: 0, inputText: 'h', key: { key: 'h' } } as never)
+  expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.plus).toBe(null)
+  // + at the prompt: /squeeze in the box, and the bar asks what for; esc esc clears the box, and the bar lets it go
+  await t.press('+')
+  expect(await t.bar()).toContain('squeeze for… e.g. less jargon, or add an example')
+  await $.prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } } as never)
+  expect(await t.bar()).not.toContain('squeeze for')
 })

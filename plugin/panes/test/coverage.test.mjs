@@ -48,13 +48,15 @@ test('step 1, opened: one bar and its key, then one line per row with a small ba
   show('1 · opens', v)
   const t = textOf(v).split('\n')
   assert.match(t[0], /^Coverage +19\/996 files touched · 1\.9%$/)
-  assert.match(t[1], /^█+░+$/)
-  assert.equal(textWidth(t[1]), 66)
-  assert.match(t[2], /█ read into Claude's context 1$/)
-  assert.match(t[3], /█ computed over or searched, not in its context 18 {3}░ untouched$/)
-  assert.match(t[5], /touched$/)
+  // why it matters, in one line under the head
+  assert.equal(t[1], 'A file Claude never opened can hold cases that change its answer.')
+  assert.match(t[2], /^█+░+$/)
+  assert.equal(textWidth(t[2]), 66)
+  assert.match(t[3], /█ read into Claude's context 1$/)
+  assert.match(t[4], /█ computed over or searched, not in its context 18 {3}░ untouched$/)
+  assert.match(t[6], /touched$/)
   // the top folder Claude touched opens at first: each of its 16 folders on one line
-  assert.match(t[6], /^▾ trials\/ +█░+ {2}16\/904/)
+  assert.match(t[7], /^▾ trials\/ +█░+ {2}16\/904/)
   assert.equal(t.filter(l => l.startsWith('  ▸ trial')).length, 16)
   assert.ok(t.some(l => /^ {2}README\.md +█{12} {2}1\/1/.test(l)))
   assert.ok(t.some(l => /^▸ notes\/ .* 2\/91/.test(l)))
@@ -108,3 +110,13 @@ test('step 3, a file picked: its detail in its own unit, the tree scrolled to ke
   fits(v, 66)
 })
 
+
+test('a folder with no files: the head says so, and why coverage matters, and nothing else', () => {
+  const v = coverageView({ root: '/made-up/empty', total: { files: 0, touched_files: 0, seen_files: 0 }, groups: [], files: [], untouched: {} }, null, DIMS)
+  const t = textOf(v).split('\n')
+  assert.match(t[0], /^Coverage +no files$/)
+  assert.equal(t[1], 'A file Claude never opened can hold cases that change its answer.')
+  assert.ok(t.some(l => l === 'This folder holds no files, so there is nothing to cover yet.'))
+  assert.equal(v.keys.length, 0)
+  fits(v, 66)
+})

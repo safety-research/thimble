@@ -2,7 +2,8 @@
 // (engine/kernel/coverage.py says what each measure is). No `$`, no DOM: coverage.tsx draws what this returns with
 // Claude Code's own elements, and the tests read it as text.
 //
-//   the head     `Coverage` and, at the right, how many of the folder's files Claude touched. One bar for the whole
+//   the head     `Coverage` and, at the right, how many of the folder's files Claude touched; under it, dim, why that
+//                matters (WHY). One bar for the whole
 //                folder in three shades: files read into Claude's context (█), files only computed over or searched
 //                (█ in gray), files untouched (░); its key under it, then a dim `touched` over the count column
 //   the tree     one line per row: a folder or a file, its name cut with … to fit, a 12-cell bar of the same three
@@ -14,8 +15,11 @@
 //                no unit (an image) is read or not as a whole
 //
 // A pane under 48 columns draws no bars in the rows. Before Claude touched anything the bar is empty and the rows dim,
-// with their file counts.
+// with their file counts. A folder with no files says so, under the head, and draws nothing else.
 import { cut, textWidth } from '../core/text.js'
+
+/** Why coverage matters, in one line under the pane's head. */
+export const WHY = "A file Claude never opened can hold cases that change its answer."
 
 /** Cells of a row's bar, and of the detail's. */
 export const ROW_BAR = 12
@@ -224,8 +228,13 @@ export function coverageView(cov, view, { W, H, under = 0 }) {
 
   // ---- the head
   const head = []
-  const right = none ? 'nothing touched yet' : `${num(touched)}/${num(files)} ${narrow ? 'touched' : 'files touched'} · ${pct(touched, files)}`
+  const right = !files ? 'no files' : none ? 'nothing touched yet' : `${num(touched)}/${num(files)} ${narrow ? 'touched' : 'files touched'} · ${pct(touched, files)}`
   head.push([{ s: 'Coverage', tone: 'bold' }, { s: padStart(cut(right, W - 9), W - 8), tone: none ? 'dim' : null }])
+  head.push([{ s: cut(WHY, W), tone: 'dim' }])
+  if (!files) {
+    head.push([], [{ s: cut('This folder holds no files, so there is nothing to cover yet.', W), tone: 'dim' }])
+    return { lines: head.map((runs, i) => ({ key: `h${i}`, runs })), keys: [], sel: -1, selKey: null, top: 0, room: 0, rows: 0, open: [], picked: null, isDir: false, anyOpen: false }
+  }
   head.push(bar(seen, touched - seen, files, W))
   if (none) head.push([])
   else if (narrow) {

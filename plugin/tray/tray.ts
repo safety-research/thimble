@@ -50,7 +50,7 @@ import { quiet } from '../core/askcell.js'
 import { accent, themeNow } from '../core/theme'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
 import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
-import { launchRepair, repairOf } from '../marks/checker'
+import { checkOpened, launchRepair, repairOf } from '../marks/checker'
 import { highlighted, wrapCode } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withoutMarks, withRewrites } from '../marks/message.js'
@@ -312,6 +312,8 @@ async function reveal($: Engine, at: { row: string; card?: string }): Promise<vo
 
 /** Open the tray on a mark (a press on it, ] and [): its answer becomes the one the keys act on. */
 export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}): Promise<void> {
+  // a citation that waits to be checked until it is opened (checkOnOpen) starts its check: the spawn first
+  if (f.kind === 'citation') await checkOpened($, f.row, f.n).catch(() => undefined)
   await setTray($, open(f) as Tray)
   const t = await turnOfRow($, f.row)
   if (t?.answer) await pickAnswer($, t.answer)
@@ -591,6 +593,7 @@ async function hyperlinksHere($: Engine): Promise<boolean> {
 /** A citation's status as its header says it, beside the kind: a sign, the word and its color. */
 const STATUS: Record<string, { word: string; color?: string; dim?: boolean }> = {
   checking: { word: 'checking', dim: true },
+  deferred: { word: 'not checked yet', dim: true },
   verified: { word: '✓ verified', color: 'success' },
   corrected: { word: '✓ verified', color: 'success' },
   failed: { word: '× failed', color: 'error' },

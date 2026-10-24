@@ -70,6 +70,10 @@ export function shareOfFiles(part: number, all: number): string {
   return `${percent(all ? part / all : 0)} (${part.toLocaleString('en-US')}/${all.toLocaleString('en-US')} ${all === 1 ? 'file' : 'files'})`
 }
 
+/** The coverage of a folder with nothing to count (no files, or a count that printed nothing and ended well): the bar
+ *  names no coverage, and the pane says the folder holds no files. */
+const EMPTY_COVERAGE = { files: [], untouched: {}, groups: [], types: [], total: { files: 0, touched_files: 0, seen_files: 0 } }
+
 /** The folder coverage counts: the one under analysis, else the one the session started in (never the home folder). */
 async function coverageRoot($: Engine): Promise<string | null> {
   const root = await rootHere($)
@@ -79,8 +83,10 @@ async function coverageRoot($: Engine): Promise<string | null> {
 }
 
 /** A command's record read as JSON, or an error that says in words why there is none: the last line of its errors,
- *  else its exit. Its output itself is never the reason, since it is the record cut short. */
-function record(r: Ran, what: string): Any {
+ *  else its exit. Its output itself is never the reason, since it is the record cut short. A command that ended well
+ *  and printed nothing has nothing to count: `empty`, when given, is its record. */
+function record(r: Ran, what: string, empty?: Any): Any {
+  if (empty !== undefined && r.code === 0 && !r.stdout.trim() && !r.stderr.trim()) return empty
   try {
     return JSON.parse(r.stdout)
   } catch {
@@ -110,7 +116,7 @@ export async function recount($: Engine): Promise<void> {
   const session = await sessionKey($)
   let got: Any = null
   try {
-    got = record(await busy($, 'counting coverage', () => coverageOf($, root, session)), 'thimble coverage')
+    got = record(await busy($, 'counting coverage', () => coverageOf($, root, session)), 'thimble coverage', EMPTY_COVERAGE)
     const files = Number(got.total?.files) || 0
     coverage = files ? shareOfFiles(Number(got.total?.touched_files) || 0, files) : null
   } catch (err) {

@@ -15,6 +15,12 @@
       "description": "Claude adds a citation to each claim you would check, and a second Claude checks each one after the reply.",
       "default": true
     },
+    "checkOnOpen": {
+      "type": "boolean",
+      "title": "Check citations only when I open one",
+      "description": "Off: a second Claude checks every citation after each reply. On: it checks a citation when you open it, which spends fewer tokens.",
+      "default": false
+    },
     "cards": {
       "type": "boolean",
       "title": "Cards",

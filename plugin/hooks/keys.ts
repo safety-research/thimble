@@ -16,8 +16,11 @@
 // fork Claude Code holds until the window closes), or `later`, once the window closed with no letter (a pane or a turn,
 // which cannot be undone). A card's own keys typed quickly one after another are not a word: the same card takes each.
 //
+// The same letter again within the window (s pressed twice, a key held down) is one press, not a word: the second is
+// let go, so the box never fills with `ss`. (A key that is no letter starts no word, so ] ] ] are three presses.)
+//
 // Keys that come quickly can arrive as one edit with several letters (a burst): it is taken key by key when each is a
-// key of the same card, and typed whole otherwise (a paste is typed whole). Claude Code asks this hook with the box as
+// key of the same card, as one press when it is one letter repeated, and typed whole otherwise (a paste is typed whole). Claude Code asks this hook with the box as
 // it would be had the keys still waiting for an answer been typed into it: so a box that holds only keys thimble took
 // is empty too.
 import type { EngineInterface, Register } from 'claude-code'
@@ -28,6 +31,7 @@ import { cardTake } from '../cards/draw'
 import { restoredKey, restoredKeys } from '../core/answerview'
 import { vKey } from '../designer/v'
 import { fixKey } from '../fix/line'
+import { promptHasKeys } from '../squeeze/ui'
 
 type Engine = EngineInterface
 
@@ -94,6 +98,8 @@ async function press($: Engine, key: string, now: number, live: () => boolean): 
     await t.now?.()
     return true
   }
+  // the key thimble just took, pressed again: one press
+  if (w && !w.card && w.keys === key && isLetter(key)) { w.at = now; return true }
   const word = await wordOf(now, key)
   if (word) return `${word}${key}`
   if (!t) return key
@@ -120,6 +126,11 @@ async function oneCard($: Engine, keys: string[]): Promise<boolean> {
 
 /** A burst of keys in one edit: taken key by key when each is a key of one card, else typed whole. */
 async function burst($: Engine, keys: string[], now: number, live: () => boolean): Promise<true | string> {
+  // one key repeated (pressed twice quickly, or held down): one press of it, when thimble takes it
+  if (keys.length > 1 && isLetter(keys[0]!) && keys.every(k => k === keys[0]) && !(await oneCard($, keys.slice(0, 1)))) {
+    const r = await press($, keys[0]!, now, live)
+    return r === true ? true : r + keys.slice(1).join('')
+  }
   if (await oneCard($, keys)) {
     let typed = ''
     for (const key of keys) {
@@ -133,6 +144,8 @@ async function burst($: Engine, keys: string[], now: number, live: () => boolean
 
 export const registerKeys: Register = on => {
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
+    // the prompt has the keys: words begun after + in the squeeze chips are let go (esc gave the keys back)
+    await promptHasKeys($).catch(() => undefined)
     // the box holds what the person typed: every key types
     if (e.text !== '' && !(taken && taken.endsWith(e.text))) {
       taken = ''

@@ -30,7 +30,7 @@ import { featureOn } from '../settings/features.mjs'
 import { restoreCardsShown } from './cards'
 import { ownWords } from './chips.mjs'
 import { promptSent, recOf } from './term'
-import { addOwn, barItems, catchUpEl, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
+import { addOwn, barItems, catchUpEl, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -110,6 +110,13 @@ export const registerSqueeze: Register = on => {
     // a row writes the whole words in place of what follows /squeeze (the token is the last word typed)
     const head = e.text.slice(9, e.start)
     return { suggestions: [...r.suggestions, ...hits.filter(d => d.toLowerCase().startsWith(head.toLowerCase())).map(d => ({ text: d.slice(head.length), label: d, description: 'a chip you typed earlier' }))] }
+  }).catch(($, e, next) => next(e))
+
+  // the prompt box changed (a key typed there, esc esc): the chips let go of words begun after + (ui.ts promptHasKeys)
+  on('prompt.change', async ($, e, next) => {
+    const r = await next(e)
+    await promptHasKeys($, String(e.text ?? '')).catch(() => undefined)
+    return r
   }).catch(($, e, next) => next(e))
 
   // the chips' Client posted: a press, or a key while a click gave them the keyboard

@@ -4,7 +4,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, catchUpText, checkRewrite, chipsOf, fromVersions, mapLinks, request, restore, settledNote, shownKey, termsOf } from '../chips.mjs'
+import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, catchUpText, changeWords, changedCitations, checkRewrite, chipsOf, endsOf, fromVersions, mapLinks, request, restore, settledNote, shownKey, termsOf } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -100,4 +100,26 @@ test('Claude hears the version the person settled on once, the original only aft
   assert.match(settledNote({ ...cu, catchup: { ...cu.catchup, dismissed: true } }, shownKey(cu)), /went back to reading your 2 replies/)
   // the terms of a message's explainers, not its heads-ups
   assert.deepEqual(termsOf({ items: { a: { id: 'a', term: 'hydrate' }, b: { id: 'b', term: 'the cache', kind: 'heads' } }, order: ['a', 'b'] }), ['hydrate'])
+})
+
+test('a cited number the rewrite changed is named, though the original states it elsewhere', () => {
+  const orig = 'The job ran [26 times](#) in March. It ran 23 times in April.'
+  // 23 is in the original, so the plain number check finds nothing; the citation still changed
+  const out = checkRewrite(orig, 'The job ran [23 times](#) in March.')
+  assert.deepEqual(out.problems, ['the citation "23 times" stands as "26 times" in the original'])
+  assert.deepEqual(changedCitations(orig, 'It ran [26 times](#), then [23](#) more.'), [{ words: '23', was: null }])
+  // a cited value kept, or rounded as a rewrite may round it, is no change
+  assert.deepEqual(checkRewrite('Errors fell to [0.369](#) of runs.', 'Errors fell to [37%](#) of runs.').problems, [])
+  assert.deepEqual(checkRewrite(orig, 'It ran [26 times](#).').problems, [])
+})
+
+test('each chip names its two ends, and a rewrite on its way says what it writes', () => {
+  const chips = chipsOf({ text: 'x', squeeze: {} })
+  assert.deepEqual(chips.map(endsOf), [['shorter', 'longer'], ['facts', 'expert reading'], ['new', 'expert']])
+  // a chip of the person's own runs from as written to fully
+  assert.deepEqual(endsOf({ levels: ['as written', 'a little', 'more', 'fully'] }), ['as written', 'fully'])
+  const rec = { text: 'x', squeeze: {} }
+  assert.equal(changeWords(rec, { familiarity: 0 }, {}), 'Background new')
+  assert.equal(changeWords(rec, { length: 0, familiarity: 0 }, { length: 0 }), 'Background new')
+  assert.equal(changeWords(rec, {}, { length: 0 }), 'Length as written')
 })

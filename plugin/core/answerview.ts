@@ -27,6 +27,7 @@ import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
 import { explainKey, explainSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelAskBand, labelAskBar, labelAskKey, labelsUnderAnswer, labelsUnderCard } from '../labels/use'
+import { cardFlagLine } from '../marks/checker'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
@@ -150,9 +151,10 @@ export async function cardHidden($: Engine, id: string): Promise<boolean> {
   return safe(squeezeHidesCard($, id), false)
 }
 
-/** The lines under one card's frame: what a squeeze changed of it, the labels it used. */
+/** The lines under one card's frame: a figure its answer's check corrected that it still shows, what a squeeze changed
+ *  of it, the labels it used. */
 export async function underCard($: Engine, els: Any, id: string, cols: number): Promise<Any[]> {
-  return [...els0(await safe(squeezeUnderCard($, els, id, cols), [])), ...els0(await safe(labelsUnderCard($, els, id, cols), []))]
+  return [...els0(await safe(cardFlagLine($, els, id), [])), ...els0(await safe(squeezeUnderCard($, els, id, cols), [])), ...els0(await safe(labelsUnderCard($, els, id, cols), []))]
 }
 
 // ------------------------------------------------------------------------------------------------ above the prompt

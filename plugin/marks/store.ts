@@ -18,7 +18,9 @@ import { safeName } from '../core/layout.mjs'
 
 type Engine = EngineInterface
 
-export type MarkStatus = 'checking' | 'verified' | 'corrected' | 'failed'
+/** `deferred`: a mark that waits to be checked until the person opens it (the setting "Check citations only when I open
+ *  one", checker.ts checkOpened); drawn as the reply's own cited words. */
+export type MarkStatus = 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed'
 /** A cited place of a file: its path from the folder the session started in, the cited line or range, and those lines
  *  with a line around them, the words found highlighted. */
 export type Place = { file: string; line: string; lines: { n: number; text: string; highlight?: [number, number]; decoded?: true }[] }
@@ -143,7 +145,7 @@ export async function rowMarks($: Engine, row: string): Promise<RowMarks | null>
 
 /** The replies kept for this conversation that the state does not hold (a resumed session), back in it. Their marks
  *  that were still checked did not run: the check ended with the session that ran it. A mark an earlier thimble kept
- *  as `unchecked` is failed too. */
+ *  as `unchecked` is failed too. One that waits to be opened (`deferred`) still waits. */
 export async function restoreMarks($: Engine): Promise<void> {
   const dir = `${await keptDir($)}/marks`
   let entries: { name: string; kind: string }[] = []

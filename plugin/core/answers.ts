@@ -19,8 +19,10 @@
 //   turnsNow($), turnOf($, id), turnOfRow($, row), messageOf($, row), textRows($)   the records
 //   answerRows($), latestAnswer($)    each answered turn's answer row, oldest first; the newest
 //   actingRow($), pickAnswer($, row), stepAnswer($, dir)   the answer the keys act on: the one the person picked with
-//                                     { and } (answerStepKey), else the newest; a new turn of main's gives the keys
-//                                     back to its answer
+//                                     { and } (answerStepKey) or by opening one of its marks, else the newest; a new
+//                                     turn of main's gives the keys back to its answer
+//   keysRow($), keysPicked($)         the answer the person picked with { and } alone, else the newest: what s squeezes,
+//                                     so opening a citation or an explainer of an older answer never moves the chips
 //   sinceLast($)                      since the person's last prompt: the prompt, Claude's text rows, the answers
 //   questionOf($, row)                the words of the prompt the row's turn answers
 //   partOf($, row, feature), setPart($, row, feature, value)   a feature's own part of a message
@@ -51,6 +53,7 @@ const TURNS = { plugin: 'thimble', key: 'answerTurns' } as const
 const MSG = { plugin: 'thimble', key: 'answerMsg' } as const
 const ROWTURN = { plugin: 'thimble', key: 'answerRowTurn' } as const
 const SEL = { plugin: 'thimble', key: 'answerSel' } as const
+const SELKEYS = { plugin: 'thimble', key: 'answerSelKeys' } as const
 
 const PROMPT_MAX = 4000
 
@@ -133,17 +136,32 @@ export async function pickedRow($: Engine): Promise<string | null> {
   return sel && sel !== (await latestAnswer($)) && (await answerRows($)).includes(sel) ? sel : null
 }
 
-/** The keys act on `row` (null: the newest answer again). */
-export async function pickAnswer($: Engine, row: string | null): Promise<void> {
-  await $.state.set(SEL, row && row !== (await latestAnswer($)) ? row : null)
+/** The keys act on `row` (null: the newest answer again). `keys`: the person picked it with { or } (stepAnswer); a
+ *  pick by opening a mark (the tray) moves the keys of the marks, not squeeze's (keysRow). */
+export async function pickAnswer($: Engine, row: string | null, o: { keys?: boolean } = {}): Promise<void> {
+  const sel = row && row !== (await latestAnswer($)) ? row : null
+  await $.state.set(SEL, sel)
+  if (o.keys || sel === null) await $.state.set(SELKEYS, sel)
+}
+
+/** The answer the person picked with { and }, while it is an answer other than the newest; else null. */
+export async function keysPicked($: Engine): Promise<string | null> {
+  const sel = (await $.state.get(SELKEYS)).value as string | null | undefined
+  return sel && sel !== (await latestAnswer($)) && (await answerRows($)).includes(sel) ? sel : null
+}
+
+/** The answer s acts on: the one picked with { and } (keysPicked), else the newest. */
+export async function keysRow($: Engine): Promise<string | null> {
+  return (await keysPicked($)) ?? (await latestAnswer($))
 }
 
 /** The keys act on the answer before (-1) or after (1) the one they act on now; the row now, or null when there is
- *  none that way (nothing changes then). */
+ *  none that way (the answer the keys act on then stays, and s acts on it too: the person pressed { or } on it). */
 export async function stepAnswer($: Engine, dir: number): Promise<string | null> {
-  const next = stepFrom(await answerRows($), await actingRow($), dir)
-  if (!next) return null
-  await pickAnswer($, next)
+  const now = await actingRow($)
+  const next = stepFrom(await answerRows($), now, dir)
+  if (!next) { if (now) await pickAnswer($, now, { keys: true }); return null }
+  await pickAnswer($, next, { keys: true })
   return next
 }
 
@@ -290,6 +308,7 @@ export async function turnAnswers($: Engine): Promise<void> {
   waiting = []
   await $.state.set(TURNS, [])
   await $.state.set(SEL, null)
+  await $.state.set(SELKEYS, null)
   await restoreAnswers($, true)
 }
 
@@ -301,12 +320,13 @@ export async function answerStepKey($: Engine, key: string): Promise<{ now: () =
   if (key !== '{' && key !== '}') return null
   if ((await answerRows($)).length < 2) return null
   const was = (await $.state.get(SEL)).value as string | null | undefined
+  const wasKeys = (await $.state.get(SELKEYS)).value as string | null | undefined
   return {
     now: async () => {
       const row = await stepAnswer($, key === '{' ? -1 : 1)
       if (row) await $.ui.scroll({ to: { key: `ans-${row}` }, block: 'nearest' }).catch(() => undefined)
     },
-    undo: () => $.state.set(SEL, was ?? null),
+    undo: async () => { await $.state.set(SEL, was ?? null); await $.state.set(SELKEYS, wasKeys ?? null) },
   }
 }
 
@@ -376,6 +396,7 @@ export const registerAnswers: Register = on => {
         await newTurn($, e.turnId, p)
         // a new turn of main's: the keys act on its answer
         await $.state.set(SEL, null)
+        await $.state.set(SELKEYS, null)
       } catch {
         // the turn runs whatever the record makes of it
       }

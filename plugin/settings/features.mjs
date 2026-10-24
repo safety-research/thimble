@@ -15,6 +15,10 @@ export const SWITCHES = [
     does: 'Claude adds a citation to each claim you would check, and a second Claude checks each one after the reply.',
   },
   {
+    key: 'checkOnOpen', title: 'Check citations only when I open one', default: false,
+    does: 'Off: a second Claude checks every citation after each reply. On: it checks a citation when you open it, which spends fewer tokens.',
+  },
+  {
     key: 'cards', title: 'Cards', default: true,
     does: 'Claude draws interactive cards, and v draws one of the last answer.',
   },

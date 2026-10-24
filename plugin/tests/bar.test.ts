@@ -131,6 +131,18 @@ test("a drawing never starts a count, since Claude Code stops a drawing's calls 
   expect(counted()).toBe(1)
 })
 
+test('an empty folder: the count ends well with nothing to count, so the bar names no coverage and no failure line shows', async ($, on) => {
+  // the kernel printed nothing and ended well
+  const w = world(on, { ok: true, out: '' })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(100)
+  expect(w.ran.some(a => a.includes('coverage'))).toBe(true)
+  const line = textOf(await $.ui.render(BAND))
+  expect(line).toContain('l 2 labels')
+  expect(line).not.toContain('coverage')
+  expect(line).not.toContain('could not be counted')
+})
+
 /** Elements as plain data, for drawing the bar without a surface. */
 const ELS = { Box: (p: Any) => ({ type: 'Box', props: p }), Text: (p: Any) => ({ type: 'Text', props: p }), Button: (p: Any) => ({ type: 'Button', props: p }) }
 

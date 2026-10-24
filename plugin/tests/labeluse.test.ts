@@ -6,7 +6,7 @@
 // ask back. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelRowEl, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
+import { labelAskBand, labelAskBar, labelAskFromFeed, labelAskKey, labelAskNow, labelAskPaneHead, labelRowEl, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -190,10 +190,14 @@ test("a `thimble label` command of Claude's reads the labels again from its hook
 
 test('a large label run asks above the bar and in the bar; its key acts after the word window and runs as the person; Claude hears the choice', async () => {
   const w = engine(args => (args.includes('--answer') ? { out: { name: 'spam', choice: 'sample', reads: 300, of: 420, waiting: 300 } } : { out: {} }))
-  const ev = { kind: 'label_ask', name: 'spam', root: '/made-up/data', ask: 'a1', units: 420, sample: 300, text: 'Read 420 records of chat.jsonl with Claude', meta: '9 model calls', t: 1 }
+  const ev = { kind: 'label_ask', name: 'spam', root: '/made-up/data', ask: 'a1', units: 420, calls: 9, sample: 300, text: 'Read 420 records of chat.jsonl with Claude', meta: '9 model calls', t: 1 }
   await labelAskFromFeed(w.$, ev)
   const band = await labelAskBand(w.$, ELS, 100)
-  expect(textOf(band)).toBe('label spam  Read 420 records of chat.jsonl with Claude?1 run all2 run on a sample of 3000 cancel9 model calls')
+  // a question in the warning color, tagged as waiting on the person, each choice with about how long it takes
+  expect(textOf(band)).toBe(' Claude is waiting on you  Read 420 records of chat.jsonl with Claude for the label spam?1 run all (about 20 s)2 run on a sample of 300 (about 10 s)0 cancel9 model calls · the times are rough')
+  expect(all(band).find(n => n.type === 'Text' && n.props?.inverse)?.props).toMatchObject({ color: 'warning' })
+  // an open side pane shows the same ask at its top
+  expect(textOf(await labelAskPaneHead(w.$, ELS))).toContain('Claude is waiting on you')
   expect((await labelAskBar(w.$, () => true, false)).map(x => `${x.key} ${x.words}${x.focus ? ' (focus)' : ''}`)).toEqual(['1 run all (focus)', '2 run on a sample of 300 (focus)', '0 cancel (focus)'])
   // other keys are not the ask's
   expect(await labelAskKey(w.$, '3', 0)).toBe(null)
@@ -207,6 +211,9 @@ test('a large label run asks above the bar and in the bar; its key acts after th
   await take!.now!()
   await take!.later!()
   expect(w.ran.find(a => a.includes('--answer'))).toEqual(['label', 'spam', '--answer', 'sample', '--ask', 'a1'])
+  // the band says for a moment what runs now, then nothing
+  expect(textOf(await labelAskBand(w.$, ELS, 100))).toBe('✓ labeling a sample of 300 records for spam…')
+  expect(await labelAskPaneHead(w.$, ELS)).toBe(null)
   const told = (w.state.get(JSON.stringify({ plugin: 'thimble', key: 'tell' }))?.value ?? {}) as Record<string, string>
   expect(told['label-ask:/made-up/data|spam']).toContain('random sample of 300 of the label spam\'s 420 records')
   // Claude hears that the sample is being read and how to wait for its counts, never that a trial's counts are the label's

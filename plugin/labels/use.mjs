@@ -10,9 +10,15 @@
 //   askOf(ev)                     -> the ask a `label_ask` line of the change feed carries, or null
 //   sampleOffered(ask)            -> whether the ask offers a sample: not after the person chose one (an ask for the
 //                                    rest), nor when all fit in one
-//   askChoices(ask)               -> [{key, words, choice}]: 1 run all (or run the rest), 2 run on a sample of N, 0 cancel
+//   askChoices(ask)               -> [{key, words, choice, time}]: 1 run all (or run the rest), 2 run on a sample of N,
+//                                    0 cancel; `time`, about how long the reads take ('' for cancel)
+//   askTime(calls)                -> about how long `calls` model calls take, in words ('about 2 min')
+//   askQuestion(ask)              -> the ask as the question the person answers
+//   choiceEcho(ask, choice)       -> what the band says for a moment after the person chose
 //   ASK_KEYS                      -> {'1': 'all', '2': 'sample', '0': 'cancel'}
 //   answerNote(ask, choice, got)  -> what Claude hears with the next prompt after the person's choice
+
+import { SETTINGS } from './labelreads.mjs'
 
 /** A label's name, as the kernel takes it (engine/kernel/labels.py). */
 const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$/
@@ -115,21 +121,52 @@ export function askOf(ev) {
   return {
     root: String(ev.root).replace(/\/+$/, ''), name: ev.name, ask: ev.ask,
     text: String(ev.text || `Read ${Number(ev.units) || 0} records with Claude`), meta: String(ev.meta || ''),
-    units: Number(ev.units) || 0, sample: Number(ev.sample) || 0, rest: ev.rest === true,
+    units: Number(ev.units) || 0, sample: Number(ev.sample) || 0, rest: ev.rest === true, calls: Number(ev.calls) || 0,
   }
 }
 
 export const sampleOffered = a => !!a && !a.rest && a.sample > 0 && a.units > a.sample
+
+/** About how long one model call of a label run takes (a batch of records, read at low effort), and how many run at
+ *  once (labelreads.mjs SETTINGS.parallel): the time an ask names is the calls' rounds times this. Rough, as the
+ *  records' length and the API's load change it, so the ask says "about". */
+export const CALL_SECONDS = 10
+export const PARALLEL = SETTINGS.parallel
+
+export function askTime(calls, parallel = PARALLEL) {
+  const n = Math.max(0, Number(calls) || 0)
+  if (!n) return ''
+  const secs = Math.ceil(n / Math.max(1, parallel)) * CALL_SECONDS
+  if (secs < 60) return `about ${Math.max(10, Math.round(secs / 10) * 10)} s`
+  return `about ${Math.round(secs / 60)} min`
+}
+
+/** The model calls a run of `units` records makes, from the ask's calls for all of them. */
+const callsFor = (a, units) => (a.units > 0 && a.calls > 0 ? Math.max(1, Math.ceil((a.calls * units) / a.units)) : 0)
 
 /** An ask's first choice in words: "run all", or "run the rest" after a sample. */
 const allWords = a => (a.rest ? 'run the rest' : 'run all')
 
 export function askChoices(a) {
   return [
-    { key: '1', words: allWords(a), choice: 'all' },
-    ...(sampleOffered(a) ? [{ key: '2', words: `run on a sample of ${a.sample.toLocaleString('en-US')}`, choice: 'sample' }] : []),
-    { key: '0', words: 'cancel', choice: 'cancel' },
+    { key: '1', words: allWords(a), choice: 'all', time: askTime(callsFor(a, a.units)) },
+    ...(sampleOffered(a) ? [{ key: '2', words: `run on a sample of ${a.sample.toLocaleString('en-US')}`, choice: 'sample', time: askTime(callsFor(a, a.sample)) }] : []),
+    { key: '0', words: 'cancel', choice: 'cancel', time: '' },
   ]
+}
+
+/** The ask as a question: what the run reads, for which label (the kernel's sentence, `Read 2,933 records of
+ *  orders.jsonl with Claude`), and that Claude waits for the answer. */
+export function askQuestion(a) {
+  const text = String(a.text || '').trim()
+  return `${text}${a.name ? ` for the label ${a.name}` : ''}?`
+}
+
+/** The echo of a choice, in the band for a moment: what runs now. */
+export function choiceEcho(a, choice) {
+  if (choice === 'cancel') return `canceled: the label ${a.name} reads none of its ${n(a.units)} records`
+  if (choice === 'sample') return `labeling a sample of ${n(a.sample)} records for ${a.name}…`
+  return `labeling ${a.rest ? 'the other' : 'all'} ${n(a.units)} records for ${a.name}…`
 }
 
 const n = x => Number(x || 0).toLocaleString('en-US')

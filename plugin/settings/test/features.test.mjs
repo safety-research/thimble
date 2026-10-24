@@ -12,7 +12,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
   {
     const manifest = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
     assert.deepEqual(Object.keys(manifest.userConfig), SWITCHES.map(s => s.key))
-    assert.deepEqual(SWITCHES.map(s => s.key), ['marks', 'cards', 'squeeze', 'explain', 'details', 'claims', 'counts', 'squeezeCards'])
+    assert.deepEqual(SWITCHES.map(s => s.key), ['marks', 'checkOnOpen', 'cards', 'squeeze', 'explain', 'details', 'claims', 'counts', 'squeezeCards'])
     for (const s of SWITCHES) assert.deepEqual(manifest.userConfig[s.key], { type: 'boolean', title: s.title, description: s.does, default: s.default })
   }
   // a feature is on by default, and an option turns it off
