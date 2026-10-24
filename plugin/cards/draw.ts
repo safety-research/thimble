@@ -4,8 +4,9 @@
 // call, since the old place is in the terminal's scrollback: canRedraw). Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
-//   frame         the card's frame: its title (a click asks about the card), the Client (a click on a run of its words
-//                 asks about that run: client.tsx), a failure, and the keys that reach it now; left of it, the
+//   frame         the card's frame: its title (a click asks about the card) and, at its right, `? ask`, which asks about
+//                 the card or the item selected (`? ask about Cherbourg`), the Client (a click on an item selects it as
+//                 its key does; on other words, asks about them: client.tsx, runner.mjs pick), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
 //                 asked), beside the line a click selected (`▸`), about that part, else beside the title; nothing for a card the version of its answer shown now leaves out (core/answerview.ts
 //                 cardHidden)
@@ -17,7 +18,8 @@
 //                 lists the key, else the newest that lists it
 //   cardTake      a letter at an empty prompt that a card takes (hooks/keys.ts asks): the key at once, and its undo when
 //                 the person was typing a word
-//   cardPost      what a card's Client sends: Button presses, clicks, and a click on a run of words (its side thread)
+//   cardPost      what a card's Client sends: Button presses, clicks, and a click on a run of words (the item on its
+//                 line, else its side thread)
 //   cardText      a card's text copy as it draws now (for v)
 //   revealCard    the card's row brought into view in the conversation
 //
@@ -40,6 +42,7 @@ import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
+import { cardPart, partWords } from '../threads/threads.mjs'
 import { ask } from './ask'
 import { layoutLines } from './layout.js'
 import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, keptFocus, keptMeta, keptSeen, markSeen, metaOf, readState, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
@@ -258,14 +261,18 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // the title asks about the whole card when clicked, its words underlined under the pointer
   const whole = sel ? await cardAsk($, meta.id, meta.title) : ask
   const title = E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title })
+  const titled = whole ? E.Button({ key: 'title-ask', plain: true, label: `ask about ${whole.label}`, onPress: whole.press, hover: quiet(`card-title-${meta.id}`), children: [title] }) : title
+  // at the title's right, in thimble's color, what asks a side thread: about the item selected, named, else the card
+  const askWords = askLabel(sel?.text ?? '')
+  const askEl = ask ? E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: [E.Text({ key: 'ask-w', color: accent(), wrap: 'truncate-end', children: askWords })] }) : null
   const rows: Any[] = [
-    whole ? E.Button({ key: 'title-ask', plain: true, label: `ask about ${whole.label}`, onPress: whole.press, hover: quiet(`card-title-${meta.id}`), children: [title] }) : title,
+    askEl ? E.Box({ key: 'title-row', flexDirection: 'row', justifyContent: 'space-between', children: [E.Box({ key: 'title-l', flexShrink: 1, children: [titled] }), E.Box({ key: 'title-r', flexShrink: 0, marginLeft: 2, children: [askEl] })] }) : titled,
     // a drawing wider than the frame: its columns past the frame's edge are cut
     ...(fault ? [] : [width > inside ? E.Box({ key: 'cut', flexDirection: 'column', width: inside, overflow: 'hidden', children: [client] }) : client]),
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
-  const titleRows = Math.max(1, Math.ceil(Array.from(meta.title).length / Math.max(1, inside)))
+  const titleRows = Math.max(1, Math.ceil(Array.from(meta.title).length / Math.max(1, inside - (askEl ? Array.from(askWords).length + 2 : 0))))
   const box = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: ask ? 0 : 2, width: inside + 4, children: rows })
   // the margin left of the frame, in the 2 columns of its indent, beside its title: asks a side thread about the card
   // (its title and what it shows); the row's keyed Box scopes the ?'s hover, so it shows while the pointer is on the card
@@ -275,6 +282,14 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
   const under = await underCard($, E, meta.id, inside)
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
+}
+
+/** The words of the card's visible ask: `? ask about` the item selected (its words, cut), else `? ask`. */
+export function askLabel(selected: string): string {
+  const words = partWords(cardPart(selected))
+  if (!words) return '? ask'
+  const cut = Array.from(words).length > 28 ? `${Array.from(words).slice(0, 27).join('')}…` : words
+  return `? ask about ${cut}`
 }
 
 // the selected line of each drawing, worked out once for each tree
@@ -380,8 +395,14 @@ const handled = new Map<string, number>()
 async function clientEvent($: Engine, meta: CardMeta, ev: Any): Promise<Any> {
   if (ev.seen) { await markSeen($, meta.id); return null }
   if (typeof ev.rows === 'number') { heights.set(meta.id, ev.rows); return null }
-  // a click on a run of the card's words: the side thread about it, as the margin asks about the card
+  // a click on a run of the card's words: the item on its line, as the card's keys select it (runner.mjs pick); else
+  // the side thread about the run, as the margin asks about the card
   if (ev.ask && typeof ev.ask === 'object') {
+    if (Array.isArray(ev.ask.path)) {
+      await atWidth($, meta, Number(ev.width))
+      const r = await askCard($, meta, 'pick', { path: ev.ask.path.slice(0, 64).map((x: unknown) => Math.trunc(Number(x) || 0)) })
+      if (r?.ok && r.handled) { await setFocus($, meta.id); return r }
+    }
     const element = { text: String(ev.ask.text ?? '').slice(0, 400), line: String(ev.ask.line ?? '').slice(0, 400) }
     const a = await cardAsk($, meta.id, meta.title, '', element)
     if (a) await Promise.resolve(a.press()).catch(() => undefined)

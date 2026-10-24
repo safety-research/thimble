@@ -114,6 +114,8 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
       draw: { ok: true, tree: TREE, state: 'null' },
       copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
       undo: { ok: true, tree: TREE, state: 'null' },
+      // a click on words that stand on no item
+      pick: { ok: true, handled: false },
     }
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ...(answers[op] ?? { ok: false, error: 'no such request' }) as object, ...(o.wide ? { seq: ++seq } : {}) }) } }
   })
@@ -520,7 +522,8 @@ const ROWS = { t: 'Box', p: { flexDirection: 'column' }, c: [
 test('the Client makes every run of a card clickable without a Button that holds a Box: a bar takes thimble\'s color under the pointer, words its tint and an underline', async () => {
   const el = (type: string) => (p: Any) => ({ type, props: p })
   const posts: Any[] = []
-  const surface: Any = { elements: { Box: el('Box'), Text: el('Text'), Button: el('Button') }, columns: 60, rows: 0, post: (m: Any) => posts.push(m), onPointer: () => undefined }
+  let pointer: Any = null
+  const surface: Any = { elements: { Box: el('Box'), Text: el('Text'), Button: el('Button') }, columns: 60, rows: 0, post: (m: Any) => posts.push(m), onPointer: (f: Any) => { pointer = f } }
   const drawn = (Card as Any)({ tree: ROWS, width: 60, tint: '#f0e8ff', accent: 'merged' }, surface)
   const all = elements(drawn)
   const buttons = all.filter(n => n.type === 'Button')
@@ -532,7 +535,40 @@ test('the Client makes every run of a card clickable without a Button that holds
   expect(of('███').props.hover).toMatchObject({ inverse: false, color: 'merged' })
   expect(of('███').props.children[0].props).toMatchObject({ color: 'success', hover: { color: 'merged' } })
   expect(of('  bram ').props.hover).toMatchObject({ inverse: false, underline: true, backgroundColor: '#f0e8ff' })
-  // a click on a bar asks about it on its row's line
+  // a click on a bar: the run, its row's line and its place in the tree, which the runner reads for the item on that
+  // line (a Button takes the click, so no pointer event comes)
   of('█████').props.onPress()
-  expect(posts.at(-1).events.at(-1).ask).toEqual({ text: '█████', line: '  bram █████ 5' })
+  expect(posts.at(-1).events.at(-1).ask).toEqual({ text: '█████', line: '  bram █████ 5', path: [2, 1] })
+  // a click elsewhere still goes as a pointer event
+  pointer({ type: 'down', x: 8, y: 2, button: 'left' })
+  pointer({ type: 'up', x: 8, y: 2 })
+  expect(posts.at(-1).events.at(-1).pointer).toEqual({ down: { x: 8, y: 2 }, up: { x: 8, y: 2 }, button: 'left' })
+})
+
+test('a card shows `? ask` at its title\'s right, which names the item selected; a click on words on no item asks a side thread about them', async ($, on) => {
+  const w = world(on)
+  const opened: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  // nothing selected: `? ask`, about the card
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_31', ...input } as never)
+  const row = await shown($, callRow('toolu_made_up_31', input))
+  let ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_31', input) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
+  expect(textOf(ask)).toBe('? ask')
+  expect(ask.props.label).toBe('ask about the card "Scores"')
+  // a click on the words `bram 5`, on no item the card's keys select: the runner is asked, then a side thread about
+  // them opens
+  const key = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_31', input) as Any) })).find(n => n.type === 'Client')?.key
+  await row.post({ client: 'made-up', width: 92, events: [{ n: 1, ask: { text: 'bram 5', line: 'bram 5', path: [1] }, width: 92 }] }, { in: key })
+  expect(w.asked).toContain('pick')
+  expect(opened.some(e => /bram 5/.test(String(e.title)))).toBe(true)
+  await row.unmount()
+  // an item selected (▸): the ask names it
+  const picked = { title: 'Picked', data: 'runs.json', view: `${VIEW}\n// SELECTED` }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_32', ...picked } as never)
+  await (await shown($, callRow('toolu_made_up_32', picked))).unmount()
+  ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_32', picked) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
+  expect(textOf(ask)).toBe('? ask about bram 5')
+  expect(ask.props.label).toBe('ask about "bram 5" in the card "Picked"')
 })

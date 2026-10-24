@@ -65,7 +65,7 @@ const SCHEMA = {
     actions: {
       type: 'array',
       description: 'keys and clicks to try in order; each returns a text copy, then the card goes back',
-      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'the words on a Button, or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
+      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'words the card shows (a click there, as the analyst clicks), or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
     },
   },
 }

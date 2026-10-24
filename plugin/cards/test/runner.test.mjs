@@ -129,7 +129,7 @@ test('actions give a copy after each, then the card is as it was', async () => {
   const r = await ask('act', { id, width: 40, actions: [{ key: '+' }, { click: 'add ten' }, { click: [0, 0] }, { click: 'no such button' }, { key: 'x' }] })
   assert.equal(r.ok, true)
   assert.deepEqual(r.copies.map(c => c.lines?.[0]), ['count 2', 'count 12', 'count 12 clicked 0,0', 'count 12 clicked 0,0', 'count 12 clicked 0,0'])
-  assert.match(r.copies[3].note, /no Button shows "no such button"/)
+  assert.match(r.copies[3].note, /no line shows "no such button"/)
   assert.deepEqual(JSON.parse(r.state), { n: 1 })
 })
 
@@ -291,4 +291,54 @@ test("a view's stray rejected promise or async error does not take the runner do
   // the runner still answers after every one of these
   assert.equal((await ask('ping', {})).ok, true)
   assert.deepEqual((await load(COUNTER)).r.lines, ['count 0', 'ada 3', 'bram 5', 'cleo 1', '[ add ten ]'])
+})
+
+// A day chart drawn as Text runs that j and k step through, the day shown marked ▸ (the card guide's marker), and the
+// day's details under it, also marked ▸. A click on a day's bar selects that day, as the keys would; a click on words
+// no key selects (the title, the details) names the words, which the hooks ask a side thread about.
+const DAYS = `const keys = "jk"
+function onKey(k, s, p) { const i = s.state?.i ?? 0; const n = p.rows.length; if (k === 'j') s.setState({ i: Math.min(n - 1, i + 1) }); if (k === 'k') s.setState({ i: Math.max(0, i - 1) }) }
+function view(props, surface) {
+  const { Box, Text } = surface.elements
+  const i = surface.state?.i ?? 0
+  return Box({ flexDirection: 'column', children: [
+    Text({ bold: true, children: 'Scores by name' }),
+    ...props.rows.map((r, k) => Box({ children: [Text({ children: (k === i ? '▸ ' : '  ') + r.name.padEnd(5) }), Text({ children: '█'.repeat(r.score) }), Text({ children: ' ' + r.score }) ] })),
+    Text({ children: '▸ ' + props.rows[i].name + ' scored ' + props.rows[i].score }),
+  ] })
+}`
+
+test('a click on an item of a card that steps with j and k selects it as the keys do; a click on other words names them', async () => {
+  const { id, r: loaded } = await load(DAYS)
+  assert.deepEqual(loaded.lines, ['Scores by name', '▸ ada  ███ 3', '  bram █████ 5', '  cleo █ 1', '▸ ada scored 3'])
+  // cleo's bar, two rows down: j twice
+  let r = await ask('pointer', { id, down: { x: 8, y: 3 }, up: { x: 8, y: 3 } })
+  assert.equal(r.handled, true)
+  assert.deepEqual(JSON.parse(r.state), { i: 2 })
+  // bram, above it: k, as j stops at the end
+  r = await ask('pointer', { id, down: { x: 3, y: 2 }, up: { x: 3, y: 2 } })
+  assert.deepEqual(JSON.parse(r.state), { i: 1 })
+  // the item already selected: it stays, and nothing is asked
+  r = await ask('pointer', { id, down: { x: 3, y: 2 }, up: { x: 3, y: 2 } })
+  assert.equal(r.handled, true)
+  assert.deepEqual(JSON.parse(r.state), { i: 1 })
+  // the details (▸ in every state) and the title are no item: the click names the words, the state stays
+  r = await ask('pointer', { id, down: { x: 4, y: 4 }, up: { x: 4, y: 4 } })
+  assert.equal(r.handled, false)
+  assert.deepEqual(r.run, { text: '▸ bram scored 5', line: '▸ bram scored 5' })
+  assert.deepEqual(JSON.parse(r.state), { i: 1 })
+  r = await ask('pointer', { id, down: { x: 1, y: 0 }, up: { x: 1, y: 0 } })
+  assert.deepEqual(r.run, { text: 'Scores by name', line: 'Scores by name' })
+  // a click on a run (the Client's Button, by the run's place in the tree): cleo's bar, then the title, on no item
+  r = await ask('pick', { id, path: [3, 1] })
+  assert.equal(r.handled, true)
+  assert.deepEqual(JSON.parse(r.state), { i: 2 })
+  r = await ask('pick', { id, path: [0] })
+  assert.equal(r.handled, false)
+  r = await ask('pointer', { id, down: { x: 3, y: 2 }, up: { x: 3, y: 2 } })
+  // the tool's own test of a click at a cell does what a live click does
+  r = await ask('act', { id, width: 40, actions: [{ click: [8, 3] }, { click: 'bram' }, { click: 'Scores by' }] })
+  assert.equal(r.copies[0].lines[3], '▸ cleo █ 1')
+  assert.equal(r.copies[1].lines[2], '▸ bram █████ 5')
+  assert.match(r.copies[2].note, /asks the analyst's side thread/)
 })
