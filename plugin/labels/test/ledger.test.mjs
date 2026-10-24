@@ -70,7 +70,7 @@ test('a value open: its label a table with the ▸, the others one line each, it
   const top = ledgerTop(FIVE, chosen, { w: W, rows: ROWS })
   const t = text(top.rows)
   assert.deepEqual(t.slice(0, 3).map(x => x.split(/\s+/)[0]), ['stuck', '', 'asks_review'])
-  assert.equal(t[3], 'code gave each record its value — yes 2,165 / no 7,756')
+  assert.equal(t[3], 'yes 2,165 / no 7,756')
   assert.match(t[4], /^▸ yes +▅+ +2,165 +22%$/)
   // a label folded to one line is cut with … where its values do not fit
   assert.ok(t.find(x => x.startsWith('post_kind')).endsWith('…'))

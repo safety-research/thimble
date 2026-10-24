@@ -154,13 +154,13 @@ function spread(left, right, w) {
 }
 
 /** What a label means, in one plain line with its values and their counts: a --prompt label's definition (its first
- *  sentence), how a regex, code or set label gave its values, then `— yes 1,607 / no 1,366`. */
+ *  sentence), how a regex or set label gave its values (code says nothing the values don't), then `— yes 1,607 / no 1,366`. */
 export function plainLine(l) {
   const rule = oneLine(String(l?.rule || ''))
   const first = rule.replace(/^(.{12,}?[.?!])\s.*$/, '$1')
   const how = l?.kind === 'prompt' ? (first || 'Claude read each record and gave it a value')
     : l?.kind === 'regex' ? `the record's words match ${cut(rule, 60)}`
-      : l?.kind === 'code' ? 'code gave each record its value'
+      : l?.kind === 'code' ? ''
         : l?.kind === 'set' ? 'values Claude gave records after reading them'
           : first
   const values = partsOf(l).filter(p => p.v !== NONE).map(p => `${p.name} ${num(p.n)}`).join(' / ')
