@@ -18,7 +18,7 @@
 // back, as esc does: Claude Code closes a pane on esc (and on its close mark), and while the trail holds a pane the
 // ui.close hook goes back to it instead. On the trail's first pane esc closes the pane.
 //
-// The same row says what main does, at its right (`Claude is working…`, `Claude is waiting for you`, `Claude
+// The same row says what main does, at its right (`Claude is working…`, `Claude is waiting on you`, `Claude
 // replied`), so the person can stay in the pane while main works.
 //
 // Docked beside the conversation, the pane keeps its input bar and its key row at its bottom: the drawing above them
@@ -138,7 +138,7 @@ async function mainNow($: Engine): Promise<MainState | null> {
 export function mainWords(m: MainState | null): { words: string; color?: string; dim?: boolean } | null {
   if (!m) return null
   if (m.s === 'working') return { words: 'Claude is working…', dim: true }
-  if (m.s === 'asks') return { words: 'Claude is waiting for you', color: 'warning' }
+  if (m.s === 'asks') return { words: 'Claude is waiting on you', color: 'warning' }
   return { words: 'Claude replied', color: 'success' }
 }
 
@@ -227,7 +227,8 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const kels = noting(els, keys)
     // a large label run's ask waits at the pane's top, where the person reads (labels/use.ts), over the top row
     const ask = await labelAskPaneHead($, els).catch(() => null)
-    const top = [...(ask ? [ask] : []), ...topRow($, els, now, W, await mainNow($))]
+    // while that ask waits, main waits for the person, whatever its turn's last state said
+    const top = [...(ask ? [ask] : []), ...topRow($, els, now, W, ask ? { s: 'asks' } : await mainNow($))]
     const T = top.length ? treeRows(top, W) : 0
     // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
     // and input bar (`under`, kept at the bottom)
