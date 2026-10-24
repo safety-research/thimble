@@ -22,8 +22,9 @@
 // replied`), so the person can stay in the pane while main works.
 //
 // Docked beside the conversation, the pane keeps its input bar and its key row at its bottom: the drawing above them
-// gets the rows left over (a pane that lays itself out reads them as its `bodyRows`), and when it is taller still it
-// scrolls in that room with the wheel and ↑ ↓ (the ui.scroll hook). In a pane whose drawing fits, ↑ and ↓ press the
+// gets the rows left over (a pane that lays itself out reads them as its `bodyRows`), the side thread's conversation
+// follows it, and when the two are taller than that room they scroll in it with the wheel and ↑ ↓ (the ui.scroll
+// hook), the end shown when the conversation grows. In a pane whose drawing fits, ↑ and ↓ press the
 // pane's k and j (the previous and next claim, the coverage row above or below): Claude Code gives a plugin no arrow
 // keys of its own, but sends ↑ and ↓ in a pane that can scroll as scrolls, and a row under the frame that is never
 // shown keeps the pane scrollable.
@@ -39,7 +40,7 @@ import { labelAskPaneHead } from '../labels/use'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
 import { drawSettings } from '../panes/settings'
-import { drawThreadsPane, threadPaneParts, threadUnder } from '../threads/seam'
+import { drawThreadsPane, threadPaneParts, threadUnderSplit } from '../threads/seam'
 import { quiet } from './askcell.js'
 import { cut, textWidth } from './text.js'
 import { accent } from './theme'
@@ -153,7 +154,7 @@ const THREADED = new Set(['evidence', 'labels', 'coverage', 'claims'])
  *  many rows of its drawing do not fit, and the keys its Buttons press. */
 let laid: { id: string; pinned: boolean; over: number; keys: Map<string, () => unknown> } | null = null
 /** How far the drawing above the input bar is scrolled, in the pane it was scrolled in. */
-let scrolled = { id: '', by: 0 }
+let scrolled = { id: '', by: 0, conv: 0 }
 
 /** The pane's columns at its last drawing, or 0 before one: the width a copy of it is drawn at (paneDrawing). */
 let paneColumns = 0
@@ -225,16 +226,20 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const keys = new Map<string, () => unknown>()
     const kels = noting(els, keys)
     const top = topRow($, els, now, W, await mainNow($))
+    // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
+    // and input bar (`under`, kept at the bottom)
     let under: Any[] = []
+    let conv: Any[] = []
     let drawn: unknown
     if (now.kind === 'thread') {
-      // a thread's own key row and input bar stand where a pane's thread stands
+      // a thread's own key row and input bar stand where a pane's thread's do
       const p = await threadPaneParts($, { ...e, props: { ...(e?.props ?? {}), scroll: { ...(e?.props?.scroll ?? {}), bodyRows: Math.max(4, H - top.length) } } }, now.args, kels)
       under = p.bottom as Any[]
-      drawn = els.Box({ key: 'thread-body', flexDirection: 'column', children: p.body })
+      conv = p.body.slice(1) as Any[]
+      drawn = p.body[0] ?? null
     } else {
       if (THREADED.has(now.kind)) {
-        try { under = await threadUnder($, e, now.kind, now.args, kels) } catch { under = [] }
+        try { ({ conv, bottom: under } = (await threadUnderSplit($, e, now.kind, now.args, kels)) as { conv: Any[]; bottom: Any[] }) } catch { under = []; conv = [] }
       }
       drawn = await drawKind($, e, now, kels, Math.max(4, H - top.length - (OWN_ROOM.has(now.kind) ? 0 : treeRows(under, W))))
     }
@@ -242,19 +247,24 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const id = idOf(now)
     if (!pinned) {
       laid = { id, pinned: false, over: 0, keys }
-      const parts = [...top, drawn, ...under]
+      const parts = [...top, drawn, ...conv, ...under]
       return parts.length === 1 ? drawn : els.Box({ flexDirection: 'column', children: parts })
     }
-    // the rows above the input bar, and how far the drawing reaches past them
+    // the rows above the input bar, and how far the drawing and the conversation reach past them
     const space = Math.max(1, H - top.length - U)
-    const over = Math.max(0, treeRows(drawn, W) - space)
-    if (scrolled.id !== id) scrolled = { id, by: 0 }
+    const C = conv.length ? treeRows(conv, W) : 0
+    const tall = treeRows(drawn, W) + C
+    // a drawing taller than the room loses a row of it to the line that says how much more there is
+    const over = tall > space ? tall - (space - 1) : 0
+    // a pane opened again, or a conversation that grew (a question, an answer), shows its end, as a chat does
+    if (scrolled.id !== id) scrolled = { id, by: C ? over : 0, conv: C }
+    else if (C !== scrolled.conv) scrolled = { id, by: over, conv: C }
     scrolled.by = Math.max(0, Math.min(over, scrolled.by))
     laid = { id, pinned: true, over, keys }
     const left = over - scrolled.by
     const cue = over > 0 ? els.Text({ key: 'pane-more', dimColor: true, wrap: 'truncate-end', children: left > 0 ? `↓ ${left} more row${left === 1 ? '' : 's'} · scroll or ↓` : `↑ ${over} row${over === 1 ? '' : 's'} above · scroll or ↑` }) : null
     const body = els.Box({ key: 'pane-body', flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden', children: [
-      els.Box({ key: 'pane-body-in', flexDirection: 'column', flexShrink: 0, ...(scrolled.by ? { position: 'relative', top: -scrolled.by } : {}), children: [drawn] }),
+      els.Box({ key: 'pane-body-in', flexDirection: 'column', flexShrink: 0, ...(scrolled.by ? { position: 'relative', top: -scrolled.by } : {}), children: [drawn, ...conv] }),
     ] })
     return els.Box({ flexDirection: 'column', children: [
       els.Box({ key: 'pane-frame', flexDirection: 'column', height: H, children: [...top, body, ...(cue ? [cue] : []), ...(under.length ? [els.Box({ key: 'pane-under', flexDirection: 'column', flexShrink: 0, children: under })] : [])] }),
@@ -290,7 +300,7 @@ export async function scrollPane($: Engine, e: { by?: number; origin?: { kind?: 
   if (!by || !l.over) return true
   // a page key moves by the pane's rows, Home and End to the ends (clamped)
   const was = scrolled.id === l.id ? scrolled.by : 0
-  scrolled = { id: l.id, by: Math.max(0, Math.min(l.over, was + by)) }
+  scrolled = { ...scrolled, id: l.id, by: Math.max(0, Math.min(l.over, was + by)) }
   if (scrolled.by !== was) $.ui.invalidate('ui.render')
   return true
 }

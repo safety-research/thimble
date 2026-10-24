@@ -19,6 +19,8 @@
 //                                      the tray's `↳ thread: … · a opens it` line
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
 //                                      conversation and its input bar, about what the pane shows (core/pane.ts)
+//   threadUnderSplit($, e, kind, args, els)   the same in two parts: the conversation, and the key row with the input
+//                                      bar, which the docked pane keeps at its bottom (core/pane.ts)
 //   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
 //   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
 //                                      subject; `has` once a question was asked of it, `ask` opens it (openThread)
@@ -34,7 +36,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under } from './pane'
+import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadsBright } from './thread'
 import { featureOn } from '../settings/features.mjs'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
@@ -92,6 +94,10 @@ export async function threadAsked($: Engine, scope: ThreadScope): Promise<string
 
 export async function threadUnder($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<unknown[]> {
   return under($, e, kind, args, els)
+}
+
+export async function threadUnderSplit($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: unknown[]; bottom: unknown[] }> {
+  return threadUnderParts($, e, kind, args, els)
 }
 
 /** About how many rows threadUnder takes under a pane (threads/pane.tsx rowsUnder). */

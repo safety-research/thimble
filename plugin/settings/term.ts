@@ -71,8 +71,8 @@ export async function syncOff($: Engine): Promise<boolean> {
   return !featureOn('thimble')
 }
 
-const OFF_SAID = 'thimble is off in this session only: no citations, checks, cards, explainers, claims, bar or side pane until /thimble-on or the session ends. Other sessions, and this one when you start it again, keep thimble on; your settings did not change.'
-const ON_SAID = 'thimble is on again in this session.'
+const OFF_SAID = 'off in this session only: no citations, checks, cards, explainers, claims, bar or side pane until /thimble-on or the session ends. Other sessions, and this one when you start it again, keep thimble on; your settings did not change.'
+const ON_SAID = 'on again in this session.'
 /** What Claude reads with each: the guidance it had (if any) stops or starts to apply. */
 const OFF_TOLD = 'The analyst turned thimble off for the rest of this session. From now on, write as you would without thimble: no citation links to `#`, no card tool.'
 const ON_TOLD = 'The analyst turned thimble on again in this session; its guidance applies again.'
@@ -93,7 +93,7 @@ export const registerSettings: Register = (on, options) => {
 
   on('command.run', { command: /^(thimble:)?thimble-(off|on)$/ }, async ($, e) => {
     const off = /off$/.test(String(e.command))
-    if ((await syncOff($)) === off) return { text: off ? 'thimble is already off in this session. /thimble-on turns it back on.' : 'thimble is already on in this session.' }
+    if ((await syncOff($)) === off) return { text: off ? 'already off in this session. /thimble-on turns it back on.' : 'already on in this session.' }
     setSessionOff(off)
     await $.state.set(OFF, off)
     // the side pane closes; the bar and every feature's drawing are drawn again, without thimble's parts

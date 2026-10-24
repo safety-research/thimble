@@ -93,11 +93,26 @@ function kids(n) {
   return Array.isArray(c) ? c : c == null ? [] : [c]
 }
 
-/** Rows a text takes at `w` cells: each of its lines wraps, or keeps to one row when it is cut. */
+/** Rows a text takes at `w` cells: each of its lines wraps at spaces (a word wider than a row is cut across rows), or
+ *  keeps to one row when it is cut. */
 function textRows(s, w, wraps) {
   const lines = String(s).split('\n')
   if (!wraps) return lines.length
-  return lines.reduce((n, l) => n + Math.max(1, Math.ceil(textWidth(l) / Math.max(1, w))), 0)
+  const W = Math.max(1, w)
+  let rows = 0
+  for (const line of lines) {
+    let n = 1
+    let used = 0
+    for (const word of line.split(/(?<= )/)) {
+      const ww = textWidth(word)
+      const bare = textWidth(word.trimEnd())
+      if (used && used + bare > W) { n += 1; used = 0 }
+      if (ww > W) { n += Math.ceil(ww / W) - 1; used = ww % W; continue }
+      used += ww
+    }
+    rows += n
+  }
+  return rows
 }
 
 export function treeRows(el, width) {
@@ -118,7 +133,10 @@ export function treeRows(el, width) {
       if (p.flexDirection === 'column' || p.flexDirection === 'column-reverse') return my + cs.reduce((n, c) => n + treeRows(c, iw), 0)
       // a row: its children side by side, or wrapped as one text when the row wraps
       if (p.flexWrap === 'wrap') return my + textRows(textIn(cs), iw, true)
-      return my + cs.reduce((n, c) => Math.max(n, treeRows(c, iw)), cs.length ? 1 : 0)
+      // the children with a width of their own take it; the others share what is left
+      const fixed = cs.reduce((n, c) => n + (typeof c?.props?.width === 'number' ? c.props.width : 0), 0)
+      const rest = Math.max(1, iw - fixed)
+      return my + cs.reduce((n, c) => Math.max(n, treeRows(c, typeof c?.props?.width === 'number' ? c.props.width : rest)), cs.length ? 1 : 0)
     }
     case 'Text': {
       const wraps = !String(p.wrap ?? 'wrap').startsWith('truncate')
