@@ -191,8 +191,8 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   // the keys, each once, k j then p n: a plain Button Claude Code draws as its key, then its words, dim; the words
   // never hold the key, which drew it twice. At rest too every key of the pane is held, so none is typed into the prompt
   // the answer whose look failed waits to be read: f finds its claims
-  expect(keysOf(pane)).toEqual([['f', 'find the claims of the newest answer'], ['k', 'previous claim'], ['j', 'next claim'], ['p', 'previous cluster'], ['n', 'next cluster']])
-  expect(buttons(pane).filter(b => b.hotkey).map(b => textOf(b.children))).toEqual(['find the claims of the newest answer', 'previous claim ↑', 'next claim ↓', 'previous cluster', 'next cluster'])
+  expect(keysOf(pane)).toEqual([['f', 'extract claims of the newest answer'], ['k', 'previous claim'], ['j', 'next claim'], ['p', 'previous cluster'], ['n', 'next cluster']])
+  expect(buttons(pane).filter(b => b.hotkey).map(b => textOf(b.children))).toEqual(['extract claims of the newest answer', 'previous claim ↑', 'next claim ↓', 'previous cluster', 'next cluster'])
   // under the pointer a key's words brighten, never Claude Code's inverse of a plain Button
   expect(buttons(pane).filter(b => b.hotkey).map(b => b.hover?.inverse)).toEqual([false, false, false, false, false])
   expect(t).toContain('previous claim ↑ · next claim ↓ · previous cluster · next cluster')
@@ -432,8 +432,9 @@ test('claims on demand: no look reads them after a reply; c shows the pane with 
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, args, els)
   const empty = await draw({})
   expect(textOf(empty)).toContain('Claims · no claims yet')
+  expect(textOf(empty)).not.toContain('to save tokens')
   const f = buttons(empty).find(b => b.hotkey === 'f')
-  expect([f?.key, f?.label]).toEqual(['claims-find', "find the claims of this chat's 1 answer"])
+  expect([f?.key, f?.label]).toEqual(['claims-find', 'extract claims'])
   // f: a look of the claims lens alone over that answer; the claims come in, and f is offered no more
   const r = await s.call('ui.press', { plugin: 'thimble', element: 'claims-find', component: 'Pane', requestId: 'thimble', surface: 'terminal' }, async () => ({ element: 'none' }))
   expect(r).toEqual({ element: 'claims-find' })
@@ -454,7 +455,7 @@ test('claims on demand: no look reads them after a reply; c shows the pane with 
   // a newer answer waits: f offers it alone
   await answered(s, { id: 't2', prompt: 'Why?', rows: ['The cache was cold.'] })
   expect(s.forks.length).toBe(1)
-  expect(buttons(await draw({})).find(b => b.hotkey === 'f')?.label).toBe('find the claims of the newest answer')
+  expect(buttons(await draw({})).find(b => b.hotkey === 'f')?.label).toBe('extract claims of the newest answer')
   // why the claim holds, under it, its citation in the reply's look
   const picked = await draw({ claim: 'c1' })
   expect(textOf(picked)).toContain('Its log ends at the p95 check.')

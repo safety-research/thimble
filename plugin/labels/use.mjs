@@ -11,7 +11,10 @@
 //   sampleOffered(ask)            -> whether the ask offers a sample: not after the person chose one (an ask for the
 //                                    rest), nor when all fit in one
 //   askChoices(ask)               -> [{label, choice, cost}]: Run all (or Run the rest), Run on a sample of N, Cancel;
-//                                    `cost`, its model calls and about how long they take ('reads none' for cancel)
+//                                    `cost`, its model calls, the model, about how long they take and about what they
+//                                    cost ('reads none' for cancel)
+//   askDollars(ask, units)        -> about what reading `units` of the ask's records costs, in dollars (null when the
+//                                    ask has no size of its records or the model has no price)
 //   askTime(calls)                -> about how long `calls` model calls take, in words ('about 2 min')
 //   askQuestion(ask)              -> the ask as the question the person answers
 //   askInput(ask)                 -> the ask as Claude Code's question tool (AskUserQuestion) takes it
@@ -20,6 +23,7 @@
 //                                    or null
 //   answerNote(ask, choice, got)  -> what Claude reads after the person's choice
 
+import { aboutDollars, dollars, modelOf } from '../core/models.js'
 import { SETTINGS } from './labelreads.mjs'
 
 /** A label's name, as the kernel takes it (engine/kernel/labels.py). */
@@ -122,6 +126,7 @@ export function askOf(ev) {
     root: String(ev.root).replace(/\/+$/, ''), name: ev.name, ask: ev.ask,
     text: String(ev.text || `Read ${Number(ev.units) || 0} records with Claude`), meta: String(ev.meta || ''),
     units: Number(ev.units) || 0, sample: Number(ev.sample) || 0, rest: ev.rest === true, calls: Number(ev.calls) || 0,
+    chars: Number(ev.chars) || 0,
   }
 }
 
@@ -147,10 +152,29 @@ const callsFor = (a, units) => (a.units > 0 && a.calls > 0 ? Math.max(1, Math.ce
 /** An ask's first choice in words: "run all", or "run the rest" after a sample. */
 const allWords = a => (a.rest ? 'run the rest' : 'run all')
 
-/** What a run of `units` records costs: its model calls and about how long they take. */
+/** The tokens of a label run, as the kernel sizes it (`chars`: the characters of the waiting records as its batches
+ *  count them): about CHARS_PER_TOKEN characters a token for the records (JSON reads at about 3), the label's prompt
+ *  in each call, and about OUT_PER_RECORD tokens of answer for each record. Measured on label runs of JSON records:
+ *  a call of 50 records read about 13,400 tokens and wrote about 1,900. */
+export const CHARS_PER_TOKEN = 3
+export const PROMPT_TOKENS = 400
+export const OUT_PER_RECORD = 40
+
+export function askDollars(a, units, model = SETTINGS.model) {
+  const calls = callsFor(a, units)
+  if (!calls || !(a.chars > 0)) return null
+  const input = (a.chars * units) / a.units / CHARS_PER_TOKEN + calls * PROMPT_TOKENS
+  return dollars(model, input, units * OUT_PER_RECORD)
+}
+
+/** What a run of `units` records costs: its model calls, to which model, about how long they take and about what
+ *  they cost. */
 function costOf(a, units) {
   const calls = callsFor(a, units)
-  return calls ? `${n(calls)} model ${calls === 1 ? 'call' : 'calls'}, ${askTime(calls)}` : ''
+  if (!calls) return ''
+  const m = modelOf(SETTINGS.model)
+  const price = askDollars(a, units)
+  return `${n(calls)} ${calls === 1 ? 'call' : 'calls'} to ${m ? m.name : `Claude (${SETTINGS.model})`}, ${askTime(calls)}${price != null ? `, ${aboutDollars(price)}` : ''}`
 }
 
 export function askChoices(a) {

@@ -371,3 +371,17 @@ test('+ in the chips types a chip, and a key at the prompt (esc gave it the keys
   await $.prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } } as never)
   expect(await t.bar()).not.toContain('squeeze for')
 })
+
+test('the chips draw in one color: the frame, the keys, the picked chip, its dot and its level words in thimble\'s purple, no amber', async () => {
+  const surface = { elements: ELS, columns: 100, onKey: () => undefined, post: () => undefined }
+  const items = [
+    { id: 'length', n: 1, name: 'Length', levels: ['shorter', 'as written', 'longer'], level: 1, level0: 1, word: 'as written', picked: true },
+    { id: 'reader', n: 2, name: 'Background', levels: ['new', 'expert'], level: 0, level0: 0, word: 'new', picked: false },
+  ]
+  const tree = Chips({ items, plus: 'for a manager', catchup: null, width: 90, color: 'merged' } as never, surface as never)
+  const all = nodes(tree)
+  expect(all.some(n => n.props?.color === 'warning')).toBe(false)
+  expect(tree.props.borderColor).toBe('merged')
+  const texts = all.filter(n => n.type === 'Text')
+  for (const words of ['1 ', 'Length ', '●', ' · as written', '+ for a manager▏']) expect(texts.find(n => n.props.children === words)?.props.color).toBe('merged')
+})

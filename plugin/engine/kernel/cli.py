@@ -373,11 +373,14 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         # label and scope; the person's key answers with --answer, as the person (labels/use.ts)
         ask = None
         if kind == "prompt" and not a.limit and EST.needs_asking(s["waiting"]) and not LB.approved(lab):
-            calls = len(LB.batches(LB.waiting(st, name)["units"]))
+            units = LB.waiting(st, name)["units"]
+            calls = len(LB.batches(units))
             ask = LB.hold_for_ask(st, name, calls)
             lab = _load(st, name)
-            # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample
+            # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample. `chars`: the
+            # records' size as the batches count it, from which the plugin says about what the run costs (labels/use.mjs)
             st.emit({"kind": "label_ask", "name": name, "ask": ask["id"], "units": ask["units"], "calls": ask["calls"],
+                     "chars": sum(len(u["text"]) + 40 for u in units),
                      "sample": 0 if ask["rest"] else min(EST.SAMPLE, ask["units"]), "rest": ask["rest"],
                      "text": f"Read {'the other ' if ask['rest'] else ''}{ask['units']:,} records{_where_of(st, lab)} with Claude",
                      "meta": EST.calls_line(ask["calls"])})

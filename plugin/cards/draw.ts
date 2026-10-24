@@ -4,8 +4,8 @@
 // call, since the old place is in the terminal's scrollback: canRedraw). Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
-//   frame         the card's frame: its title (a click asks about the card) and, at its right, `ask about this card`,
-//                 or about the item selected (`ask about Cherbourg`), the Client (a click on an item selects it as
+//   frame         the card's frame: its title (a click asks about the card) and, at its right, `ask about this card`
+//                 (the question names the item selected, when one is), the Client (a click on an item selects it as
 //                 its key does; on other words, asks about them: client.tsx, runner.mjs pick), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
 //                 asked), beside the line a click selected (`▸`), about that part, else beside the title; nothing for a card the version of its answer shown now leaves out (core/answerview.ts
@@ -42,7 +42,6 @@ import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { cardPart, partWords } from '../threads/threads.mjs'
 import { ask } from './ask'
 import { layoutLines } from './layout.js'
 import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, keptFocus, keptMeta, keptSeen, markSeen, metaOf, readState, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
@@ -319,8 +318,9 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   const whole = sel ? await cardAsk($, meta.id, meta.title) : ask
   const title = E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title })
   const titled = whole ? E.Button({ key: 'title-ask', plain: true, label: `ask about ${whole.label}`, onPress: whole.press, hover: quiet(`card-title-${meta.id}`), children: [title] }) : title
-  // at the title's right, in thimble's color, what asks a side thread: about the item selected, named, else the card
-  const askWords = askLabel(sel?.text ?? '')
+  // at the title's right, in thimble's color, what asks a side thread about the card (the question names the item
+  // selected, when one is)
+  const askWords = 'ask about this card'
   const askEl = ask ? E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: [E.Text({ key: 'ask-w', color: accent(), wrap: 'truncate-end', children: askWords })] }) : null
   const rows: Any[] = [
     askEl ? E.Box({ key: 'title-row', flexDirection: 'row', justifyContent: 'space-between', children: [E.Box({ key: 'title-l', flexShrink: 1, children: [titled] }), E.Box({ key: 'title-r', flexShrink: 0, marginLeft: 2, children: [askEl] })] }) : titled,
@@ -339,14 +339,6 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
   const under = await underCard($, E, meta.id, inside)
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
-}
-
-/** The words of the card's visible ask: `ask about` the item selected (its words, cut), else `ask about this card`. */
-export function askLabel(selected: string): string {
-  const words = partWords(cardPart(selected))
-  if (!words) return 'ask about this card'
-  const cut = Array.from(words).length > 28 ? `${Array.from(words).slice(0, 27).join('')}…` : words
-  return `ask about ${cut}`
 }
 
 // the selected line of each drawing, worked out once for each tree
@@ -499,7 +491,7 @@ function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: The
  *  needs. */
 function propsAt(meta: CardMeta, t: CardTree | null | undefined, room: number, theme: Theme): Any {
   const d = drawingAt(t, meta.gen, room, theme)
-  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme), tint: citeTint('verified', theme), accent: accent() }
+  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme), tint: citeTint('verified', theme), accent: accent(), theme }
 }
 
 /** A Client's post: the events it has not had an answer for, each handled once, in order. After a press or a click,

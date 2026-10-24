@@ -395,16 +395,17 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
 /** The address of f's Button: the observer's ui.press hook (observer.ts) runs the claims step on the answers. */
 export const CLAIMS_FIND = 'claims-find'
 
-/** The line that finds claims, at the pane's top: `f: find the claims of N answers` (a press, or f), or that they are
- *  being found; none when every answer was read. `empty`: no claims yet, so it says why there are none. */
+/** The line that finds claims, at the pane's top: `f: extract claims` (a press, or f; `of the N newest answers` when
+ *  some answers were read), or that they are being found; none when every answer was read. `empty`: no claims yet, so
+ *  a blank line sets it apart from the head. */
 function findEls(els: Any, find: { answers: number; finding: number }, empty: boolean): unknown[] {
   const { Button, Text } = els
   const many = (n: number) => `${n} answer${n === 1 ? '' : 's'}`
   if (find.finding) return [Text({ key: 'find', dimColor: true, wrap: 'wrap', children: `Finding the claims of ${many(find.finding)}…` })]
   if (!find.answers) return empty ? [Text({ key: 'find', dimColor: true, wrap: 'wrap', children: 'No answers to read yet.' })] : []
-  const words = empty ? `find the claims of this chat's ${many(find.answers)}` : `find the claims of ${find.answers === 1 ? 'the newest answer' : `the ${find.answers} newest answers`}`
+  const words = empty ? 'extract claims' : `extract claims of ${find.answers === 1 ? 'the newest answer' : `the ${find.answers} newest answers`}`
   return [
-    ...(empty ? [Text({ key: 'find-why', dimColor: true, wrap: 'wrap', children: 'Claims are found when you ask, to save tokens.' })] : []),
+    ...(empty ? [Text({ key: 'find-gap', children: ' ' })] : []),
     Button({ key: CLAIMS_FIND, plain: true, hotkey: 'f', label: words, hover: quiet('claims-find'), onPress: () => undefined, children: [Text({ key: 'w', color: accent(), children: words })] }),
   ]
 }

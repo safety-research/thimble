@@ -297,6 +297,8 @@ def test_a_big_prompt_label_asks_the_person_first_and_their_key_answers(root: Pa
     assert "Answer now" not in r.stdout and "Counts from a trial are not the label's" in r.stdout
     ev = feed(root)[-1]
     assert ev["kind"] == "label_ask" and ev["units"] == 420 and ev["sample"] == 300
+    # the records' size, as the batches count it, from which the plugin says about what the run costs
+    assert ev["chars"] > 420 * 40
     assert ev["text"] == "Read 420 records of chat/big.jsonl with Claude" and ev["meta"] == "9 model calls"
     assert "the analyst's choice" in run(root, "label", "spam").stdout
     # --wait waits for the analyst's choice up to its time, and then says nothing runs before they choose
