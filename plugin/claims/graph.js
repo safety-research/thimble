@@ -16,7 +16,8 @@
 //                   A narrow pane lists every cluster one per line
 //   a short session fewer than FEW (10) claims: no map, since a few dots in one or two cells look sparse. The clusters
 //                   are listed, each its name then its claims, a blank row between (listOf), with the selection, chips,
-//                   evidence and keys of the detail; the map appears once there are FEW claims
+//                   evidence and keys of the detail (a claim picked: the other clusters one line each); the map appears
+//                   once there are FEW claims
 //   the selection   at rest nothing is chosen. A press on a name, or p n, chooses a cluster: its dots and name bold in
 //                   its color, every other in the text color. A press on a dot, or on a claim in the list, picks that claim
 //   the detail      under the map, after a rule: the cluster's name and its claims, each after a dim – (two lines at
@@ -1088,7 +1089,7 @@ function pickedOf(c, { tone, W, fixes, narrow, cs = [], st = {}, ctx = {} }) {
   if (st.open) return rows
   // why a claim of Claude's has no citation: the reply cites no record for it, so nothing checked it
   if (uncited(c) && c.by !== 'person') rows.push(...wrap('The reply cites no record for this claim, so thimble did not check it.', W - 4).map(l => [{ s: '    ' }, { s: l, tone: 'dim' }]))
-  const pass = ctx.passage ? passageRows(ctx.passage.md, ctx.passage.place, W - 4, { terms: ctx.terms || [], claim: c.id }) : null
+  const pass = ctx.passage ? passageRows(ctx.passage.md, ctx.passage.place, W - 4, { terms: ctx.terms || [], claim: c.id, ...(ctx.max ? { max: ctx.max } : {}) }) : null
   if (pass) rows.push(...indent(pass.rows, 4))
   rows.push(...indent(explainerRows(ctx.explainer, W - 4), 4))
   rows.push(...indent(firstCiteRows(c, W - 4), 4))
@@ -1177,26 +1178,52 @@ export function panelOf({ data, claim, group, tone, W, byId = new Map((data.clai
  * name (nameRows; a press chooses it, `g:<key>`) then its claims (itemRows; a press picks one, `n:<id>`), a blank row
  * between clusters. The selection is as under the map: a cluster chosen, its name `● name` bold in its color and every
  * other cluster dim; a claim picked, `▸` and bold in its cluster's color with its chips under it (a press on it chooses
- * its cluster), every other claim and cluster dim; with `open` only its cluster's name and the claim stay, its evidence
- * under it (panelOf). The list has no window: a list taller than the pane scrolls. {rows, cites, shown, cut, fixes,
- * windowed}
+ * its cluster), every other claim of its cluster dim and every other cluster one dim line (`● name · N claims`, a press
+ * that chooses it), so the claim's paragraph and first citation leave the keys on screen; with `open` only its
+ * cluster's name and the claim stay, its evidence under it (panelOf). `room`: the rows the list may take (0: no limit);
+ * a picked claim's paragraph keeps fewer rows, two at least, while the list is taller than that. Past that, a list
+ * taller than the pane scrolls. {rows, cites, shown, cut, fixes, windowed}
  */
-export function listOf({ data, claim, group, chosen, tone, W, byId = new Map((data.claims || []).map(c => [c.id, c])), st = {}, fresh = new Set(), narrow = false, ctx = {} }) {
+export function listOf({ data, claim, group, chosen, tone, W, byId = new Map((data.claims || []).map(c => [c.id, c])), st = {}, fresh = new Set(), narrow = false, ctx = {}, room = 0 }) {
   if (claim && st.open) return panelOf({ data, claim, group, tone, W, byId, st, fresh, narrow, ctx })
   const fixes = claim ? correctionsOf(claim, byId).length : 0
-  const rows = [[{ s: '─'.repeat(W), tone: 'dim-faint' }]]
-  for (const g of counted(data)) {
-    const cs = groupOf(data, g.key).cs
-    const gtone = toneOf(g.i)
-    const mine = chosen && g.key === group
-    if (rows.length > 1) rows.push([])
-    rows.push(...nameRows(g.name, gtone, W, { after: clusterWords(cs), part: `g:${g.key}`, lit: mine && !claim, dim: chosen && !mine, narrow, about: g.about || '' }))
-    for (const c of cs) {
-      if (claim?.id === c.id) rows.push(...pickedOf(c, { tone: gtone, W, fixes, narrow, cs, st, ctx }))
-      else rows.push(...itemRows(c, W, { tone: gtone, dim: !!claim || (chosen && !mine), fresh: fresh.has(c.id), part: `n:${c.id}`, terms: ctx.terms || [] }))
+  const build = max => {
+    const rows = [[{ s: '─'.repeat(W), tone: 'dim-faint' }]]
+    // a picked claim's cluster is listed whole; the clusters around it one line each, with no blank row between them
+    let wasLine = false
+    for (const g of counted(data)) {
+      const cs = groupOf(data, g.key).cs
+      const gtone = toneOf(g.i)
+      const mine = chosen && g.key === group
+      if (claim && !mine) {
+        if (rows.length > 1 && !wasLine) rows.push([])
+        rows.push(clusterLine(g.name, cs, gtone, W, `g:${g.key}`))
+        wasLine = true
+        continue
+      }
+      if (rows.length > 1) rows.push([])
+      wasLine = false
+      rows.push(...nameRows(g.name, gtone, W, { after: clusterWords(cs), part: `g:${g.key}`, lit: mine && !claim, dim: chosen && !mine, narrow, about: g.about || '' }))
+      for (const c of cs) {
+        if (claim?.id === c.id) rows.push(...pickedOf(c, { tone: gtone, W, fixes, narrow, cs, st, ctx: { ...ctx, max } }))
+        else rows.push(...itemRows(c, W, { tone: gtone, dim: !!claim || (chosen && !mine), fresh: fresh.has(c.id), part: `n:${c.id}`, terms: ctx.terms || [] }))
+      }
     }
+    return rows
   }
+  let rows = build(PASSAGE_MAX)
+  if (claim && room > 0 && rows.length > room) rows = build(Math.max(2, PASSAGE_MAX - (rows.length - room)))
   return { rows, cites: claim ? evidenceOf(claim).length : 0, shown: null, cut: false, fixes, windowed: false }
+}
+
+/** The rows a picked claim's paragraph keeps at most (passageRows). */
+const PASSAGE_MAX = 5
+
+/** A cluster as one dim line of a short session's list while a claim of another cluster is picked: `● name · N claims`,
+ *  the dot in its color, the name cut after a whole word to fit; a press on it (`part`) chooses it. */
+function clusterLine(name, cs, tone, W, part) {
+  const after = ` ${clusterWords(cs)}`
+  return [{ s: '● ', tone, part }, { s: cutWords(one(name), Math.max(8, W - 2 - len(after))), tone: 'dim', part }, { s: after, tone: 'dim', part }]
 }
 
 /** A narrow pane's list of clusters, one per line: `● name N`, the one chosen bold in its color. */
@@ -1270,7 +1297,7 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false, terms 
   if (!selectedOf(data, st).chosen) head.push(...wrap(few || narrow ? CAPTION_LIST : CAPTION_MAP, W).map(l => [{ s: l, tone: 'dim' }]))
   const mapped = counted(data)
   const listed = mapped.map(g => g.key)
-  if (few) return { head, graph: [], ...result(listOf({ data, claim, group, chosen, tone, W, byId, st, fresh, narrow, ctx })), claim, group, chosen, narrow, cellRows: 0, listed: true, data, order: listed }
+  if (few) return { head, graph: [], ...result(listOf({ data, claim, group, chosen, tone, W, byId, st, fresh, narrow, ctx, room: H - head.length - 1 - KEYS_ROWS })), claim, group, chosen, narrow, cellRows: 0, listed: true, data, order: listed }
   const top = head.length + 1
   const detail = room => (chosen ? panelOf({ data, claim, group, tone, W, byId, room, st, fresh, narrow, ctx }) : null)
   if (narrow) {

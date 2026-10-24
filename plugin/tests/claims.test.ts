@@ -236,7 +236,10 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   expect(pt).toContain('  ▸ Run 4 failed on the p95 check.    claim 1 of 2  × 1 citation failed  turn 1    ▎ ')
   expect(pt).toContain('p95 check   × failed · citation')
   expect(pt).toContain('◦ Run 9 failed on a timeout.')
-  expect(pt).toContain('◦ The cache was cold.')
+  // every other cluster is one line, a press that chooses it, so the claim's detail leaves the keys on screen
+  expect(pt).toContain('● causes · 1 claim')
+  expect(pt).not.toContain('◦ The cache was cold.')
+  expect(buttons(picked).some(b => /^p\d+:g:k2$/.test(b.key) && textOf(b.children) === '● causes · 1 claim')).toBe(true)
   expect(keysOf(picked)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['p', 'previous cluster'], ['n', 'next cluster'], ['e', 'evidence']])
   await buttons(picked).find(b => b.hotkey === 'j').onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c2' })
@@ -258,8 +261,10 @@ test('a look that fails leaves a gap the pane names; c opens the pane, a short s
   await buttons(picked).find(b => b.hotkey === 'n').onPress()
   expect(paneNow(s).args).toMatchObject({ group: 'k2' })
   expect(paneNow(s).args.claim).toBeUndefined()
-  // a claim of another cluster picks it
-  await buttons(picked).find(b => /^p\d+:n:c3$/.test(b.key)).onPress()
+  // another cluster's line chooses that cluster; a claim of it then picks the claim
+  await buttons(picked).find(b => /^p\d+:g:k2$/.test(b.key)).onPress()
+  expect(paneNow(s).args).toMatchObject({ group: 'k2' })
+  await buttons(await draw(paneNow(s).args)).find(b => /^p\d+:n:c3$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c3' })
   // e: the claim and its evidence, as the citation's card draws it, the list gone; e again closes it
   await buttons(picked).find(b => b.hotkey === 'e').onPress()

@@ -531,3 +531,41 @@ test("a long paragraph's window keeps each row, with its … marks, within the w
     for (const r of pass.rows) assert.ok(rowText(r).length <= n, `${rowText(r).length} > ${n}: ${rowText(r)}`)
   }
 })
+
+test("a short session's list with a claim picked: the other clusters one line each, so the claim's paragraph and first citation leave the keys on screen", () => {
+  const st = emptyStore('s')
+  const long = `${'The copies posted round answers on shared pages while others waited for them. '.repeat(4)}They bumped [the counter to 412](#) when a round ended. ${'Later rounds went the same way on many pages of the wiki. '.repeat(4)}`
+  const md = `${long}\n\nThe gate held for [nine rounds](#). Two admins read the logs. The audit found [three relays](#). Most edits were small.`
+  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: md }], out: { claims: [
+    { quote: 'They bumped the counter to 412 when a round ended', cluster: 'how the copies signaled each other' },
+    { quote: 'The copies posted round answers on shared pages', cluster: 'how the copies signaled each other' },
+    { quote: 'The gate held for nine rounds', cluster: 'whether the gate held' },
+    { quote: 'Two admins read the logs', cluster: 'who watched the wiki' },
+    { quote: 'The audit found three relays', cluster: 'what the audit found' },
+    { quote: 'Most edits were small', cluster: 'what the edits were like' },
+  ] } })
+  const data = paneData(st)
+  const c1 = data.claims.find(c => c.id === 'c1')
+  const at = { w: 72, h: 18, passage: { md, place: c1.said[0] } }
+  const v = graphView(data, { claim: 'c1' }, at)
+  const rows = v.panel.map(rowText)
+  // its cluster whole: the name, the claim with its chips and paragraph, the other claim
+  assert.ok(rows.some(r => r.startsWith('● how the copies signaled each other · 2 claims')))
+  assert.ok(rows.some(r => r.startsWith('  ▸ They bumped the counter to 412')))
+  assert.ok(rows.some(r => /^ {4}▎ /.test(r)))
+  assert.ok(rows.some(r => r.startsWith('  ◦ The copies posted round answers')))
+  // every other cluster one line, its claims left out; a press on it chooses the cluster
+  for (const name of ['whether the gate held · 1 claim', 'who watched the wiki · 1 claim', 'what the audit found · 1 claim', 'what the edits were like · 1 claim']) assert.ok(rows.includes(`● ${name}`), name)
+  assert.ok(!rows.some(r => /Two admins|Most edits/.test(r)))
+  const line = v.panel.find(r => rowText(r) === '● who watched the wiki · 1 claim')
+  assert.ok(line.every(x => x.part === `g:${data.groups.find(g => g.name === 'who watched the wiki').id}`))
+  // the head, the blank row, the list, the rule and the keys fit the pane's rows: its paragraph keeps fewer rows
+  assert.ok(v.head.length + 1 + v.panel.length + 2 <= at.h, `${v.head.length + 1 + v.panel.length + 2} > ${at.h}\n${rows.join('\n')}`)
+  assert.ok(rows.filter(r => /^ {4}▎ /.test(r)).length < 5)
+  // a tall pane keeps the paragraph's five rows
+  const tall = graphView(data, { claim: 'c1' }, { ...at, h: 60 }).panel.map(rowText)
+  assert.equal(tall.filter(r => /^ {4}▎ /.test(r)).length, 5)
+  // nothing picked: every cluster with its claims, as before
+  const rest = graphView(data, {}, at).panel.map(rowText)
+  assert.ok(rest.some(r => r.includes('Two admins read the logs')) && rest.some(r => r.includes('Most edits were small')))
+})
