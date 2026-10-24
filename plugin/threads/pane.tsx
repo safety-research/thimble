@@ -28,9 +28,7 @@
 //                                             card's thread), m (or a click) adds the answer to the main conversation
 //                                             once it answered, and says so after
 //
-// Under the claims pane each question shows the claim it asks about, quoted above it, and the input bar names it. In
-// the answers, the terms that have an explainer this session (explain/seam.ts sessionGlosses) are in the explainers'
-// fill, and a click shows the explainer under the answer.
+// Under the claims pane each question shows the claim it asks about, quoted above it, and the input bar names it.
 //   ─────────────────────────────────         the input bar: Claude Code's prompt box, a rule above and below,
 //   ❯ Ask about Jun 17…              ↵ ask    ❯ and the field between them
 //   ─────────────────────────────────
@@ -45,10 +43,8 @@ import { WORD_MS } from '../hooks/keys'
 import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
-import { sessionGlosses, type SessionGloss } from '../explain/seam'
-import { anchorTerm, findInLink, markColors } from '../explain/place.mjs'
 import { cut, textWidth } from '../core/text.js'
-import { themeLast, themeNow } from '../core/theme'
+import { themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeHeat, citeLook, messageEl, type MarkLook } from '../marks/view'
@@ -136,7 +132,6 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
   const { Box, Text } = els
   const turns = t.turns
   if (!turns.length) return []
-  const glosses = await sessionGlosses($).catch(() => [] as SessionGloss[])
   const out: Any[] = []
   const head = ` ${cut(nameOf(t), w - 8)} `
   out.push(Text({ key: 'conv-head', dimColor: true, wrap: 'truncate-end', children: `──${head}${'─'.repeat(Math.max(2, w - textWidth(head) - 2))}` }))
@@ -170,13 +165,7 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
       out.push(Text({ key: `${k}-sgap`, children: ' ' }))
       out.push(Text({ key: `${k}-steps`, dimColor: true, wrap: 'truncate-end', children: `● ${cut(`${calls.length} step${calls.length === 1 ? '' : 's'} · ${stepWords(calls[calls.length - 1], t.root)}`, w - 4)}` }))
     }
-    if (x.text) {
-      out.push(await answerEl($, els, t, i, x.text, w, `${k}-a`, glosses))
-      // the explainer a click on one of its terms opened, under the answer that holds the term
-      const open = glossOpen.get(t.key)
-      const g = open ? glosses.find(y => `${y.row}|${y.id}` === open) : null
-      if (g && lastHolding(t, g.term) === i) out.push(...explainerEls(els, g, `${k}-x`))
-    }
+    if (x.text) out.push(await answerEl($, els, t, i, x.text, w, `${k}-a`))
     // the cards its fork drew while it answered this question
     for (const meta of await cardsOfTurn($, x.cards)) {
       if (t.scope.card === meta.id) out.push(Text({ key: `${k}-c-${meta.id}`, dimColor: true, wrap: 'truncate-end', children: '  ⎿ drew a new version of this card, shown above' }))
@@ -198,7 +187,7 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
 
 /** An answer of the thread with its citations as main's reply draws them (marks/register.ts): pending while the thread
  *  answers, a turning glyph after each until its verdict arrives, corrected words in place, verified or failed; a press opens a citation's evidence. Its check is the answer's own (threads.mjs answerRow). */
-async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, w: number, key: string, glosses: SessionGloss[] = []): Promise<Any> {
+async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, w: number, key: string): Promise<Any> {
   const row = answerRow(t, i)
   const on = featureOn('marks')
   const reply = on ? await rowMarks($, row).catch(() => null) : null
@@ -216,64 +205,11 @@ async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, 
     return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
   })
   if (marks.length) await themeNow($)
-  const spans = termSpansOf($, t, text, glosses)
-  if (spans.length && !marks.length) await themeNow($)
   const body = messageEl(els, {
-    text, marks, looks, key, cols: w - 2, first: true, spin, ...(spans.length ? { spans } : {}),
+    text, marks, looks, key, cols: w - 2, first: true, spin,
     onMark: async (j: number) => { const n = looks[j]!.n; if (n > 0 && reply) await openPane($, 'evidence', { row, n }, `citation ${n}`) },
   })
   return els.Box({ key, flexDirection: 'column', children: [body] })
-}
-
-// each thread's explainer opened by a click on its term in an answer (`<row>|<id>` of the explainer)
-const glossOpen = new Map<string, string>()
-
-/** Where a term stands in an answer's words: as written or in another form of its words, never in a citation or code. */
-const termAt = (text: string, term: string, taken: { start: number; end: number }[] = []) => {
-  const at = anchorTerm(text, term, taken)
-  // else in a citation's words, as the reply places an explainer there too (explain/place.mjs findInLink)
-  return at && at.how !== 'word' ? at : findInLink(text, term, taken)
-}
-
-/** The index of the thread's last answer that holds the term, else -1. */
-function lastHolding(t: Thread, term: string): number {
-  for (let i = t.turns.length - 1; i >= 0; i--) if (t.turns[i]!.role === 'claude' && termAt(String(t.turns[i]!.text || ''), term)) return i
-  return -1
-}
-
-/** The terms of the session's explainers an answer says, as spans of its words in the explainers' fill: a click shows
- *  the explainer under the answer (again: hides it). */
-function termSpansOf($: Engine, t: Thread, text: string, glosses: SessionGloss[]): Any[] {
-  if (!glosses.length) return []
-  const c = markColors(themeLast())
-  const out: Any[] = []
-  for (const g of glosses) {
-    const at = termAt(text, g.term, out)
-    if (!at) continue
-    const k = `${g.row}|${g.id}`
-    out.push({ start: at.start, end: at.end, look: { backgroundColor: c.glossBg, hoverBg: c.glossFocus }, label: `explain ${g.term}`.slice(0, 120), onPress: () => {
-      if (glossOpen.get(t.key) === k) glossOpen.delete(t.key)
-      else glossOpen.set(t.key, k)
-      $.ui.invalidate('ui.render')
-    } })
-  }
-  return out.sort((a, b) => a.start - b.start)
-}
-
-/** An explainer shown under an answer: its term bold in the explainers' fill, then what it is and where it mattered,
- *  after a dim `▎` as the thread's subject draws one. */
-function explainerEls(els: Any, g: SessionGloss, key: string): Any[] {
-  const { Text } = els
-  const words = (s: string) => String(s || '').replace(/\[([^\]\n]+)\]\([^()\s]*\)/g, '$1').replace(/[`*]/g, '').replace(/\s+/g, ' ').trim()
-  const { Box } = els
-  // each part after a dim ▎, its wrapped lines under its first (the gutter is a column of its own)
-  const bar = (k: string, child: Any) => Box({ key: `${key}-${k}`, flexDirection: 'row', children: [Text({ dimColor: true, children: '  ▎' }), Box({ flexShrink: 1, marginLeft: 1, children: [Text({ wrap: 'wrap', children: [child] })] })] })
-  return [
-    Text({ key: `${key}-gap`, children: ' ' }),
-    bar('t', Text({ children: [Text({ bold: true, backgroundColor: markColors(themeLast()).glossBg, children: g.term }), Text({ dimColor: true, children: '  explainer' })] })),
-    ...(g.body ? [bar('b', Text({ children: words(g.body) }))] : []),
-    ...(g.here ? [bar('h', Text({ dimColor: true, children: words(g.here) }))] : []),
-  ]
 }
 
 /** The thread's last answer: 'send' once it answered and m may send it to main, 'sent' once it did, else null. */

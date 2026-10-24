@@ -21,6 +21,8 @@ test("the manifest's userConfig is the features, each on by default and turned o
     const heads = SWITCHES.find(s => s.lenses?.includes('heads'))
     assert.equal(heads.key, 'details')
     assert.equal(heads.title, 'Heads-ups')
+    // the settings list it under Comments, with the explainers
+    assert.deepEqual(SWITCHES.filter(s => s.group === 'Comments').map(s => s.title), ['Explainers', 'Heads-ups'])
     assert.match(heads.does, /heads-up/)
     setOptions({ details: false })
     assert.equal(featureOn('details'), false)

@@ -8,19 +8,21 @@
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
 // answer view asks trayFocus). While it is open its keys are in the bar, after the busy step:
 //
-//   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed
+//   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. An explainer or a heads-up
+//               also ends in `? ask about this explainer` (or heads-up), the words a card's title row has
 //   c           a citation computed by code: all its code and output in place of the one line, and back
 //   h explain   the explainer (or heads-up) on the citation's words, over it
-//   e expand    an explainer written again at more length, in its place (explain/seam.ts expandExplainer)
-//   o           on a heads-up that offers a check: Claude makes it, in a side thread about the heads-up
-//   2–9         a citation inside an explainer's words, over it (a click on it too), unnamed
+//   2–9         a citation inside an explainer's or a heads-up's words, over it (a click on it too), unnamed. Its
+//               links to a file's lines are citations too, drawn as the answer's: the answer's own citation of those
+//               lines when it has one, else the lines themselves (a `place` frame)
 //   x repair    on a failed citation: a check of that one claim again in the background, which looks in
 //               the records for the right value and corrects the cited words (marks/checker.ts launchRepair), or
 //               for one whose check did not run, its check; the
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
 //               card or the bar too (this module's ui.press hook, so the fork starts inside a hook)
 //   0 close     back to the mark under it, or close
-//   m more      a tray taller than the rows above the bar: its next lines, then from the top (the line under it says)
+//   m more      a citation taller than the rows above the bar: its next lines, then from the top (the line under it
+//               says). An explainer or a heads-up shows whole: its lens keeps it short enough
 //   ] [         the next mark or card, and the one before
 //
 // Each key's words in the tray are a click too: the × in its header closes it, `+ N more lines` (and `− one line`) is
@@ -30,8 +32,8 @@
 // takes the keys (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. A question
 // typed with the tray open is about the mark, and the tray's last line says so before it is sent, with a click that
 // leaves the mark out (`loose`) and one that takes it back: its scope reaches Claude with the prompt (core/tell.ts), the
-// person's prompt shows `▸ about …` under it, and the tray closes. What the person opens reaches main through
-// core/engaged.ts.
+// person's prompt shows `▸ about …` under it, and the tray closes. That is a citation's: Claude reads every explainer
+// and heads-up shown, and which ones the person opened, with the next prompt anyway (explain/seam.ts, core/engaged.ts).
 //
 //   state: tray ({stack, loose?} or null), trayCard (the card ] reached: {row, card}), trayAsked (by turn: what its
 //          prompt was about)
@@ -49,7 +51,9 @@ import { revealCard } from '../cards/draw'
 import { quiet } from '../core/askcell.js'
 import { accent, themeNow } from '../core/theme'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
-import { explainSpans, expandExplainer, type ExplainPart, type Gloss } from '../explain/seam'
+import { explainSpans, type ExplainPart, type Gloss } from '../explain/seam'
+import { placeLines } from '../explain/expand'
+import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, launchRepair, repairOf } from '../marks/checker'
 import { highlighted, wrapCode } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
@@ -59,7 +63,7 @@ import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
-import { askInThread, openThread, threadAsked } from '../threads/seam'
+import { openThread, threadAsked } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
   moreLines, open, pageOf, pageRows, printLine, push, refOf, restStop, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
@@ -69,7 +73,9 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Frame = MarkRef & { open?: 'code' | null; page?: number; skip?: number }
+/** A mark the tray shows, or (`place`) the lines of a file an explainer's or a heads-up's words cite, `id` the place
+ *  as `path:from-to`. */
+export type Frame = (MarkRef | { row: string; kind: 'place'; id: string }) & { open?: 'code' | null; page?: number; skip?: number }
 export type Tray = { stack: Frame[]; loose?: boolean } | null
 type Stop = { row: string; kind?: 'citation' | 'explain' | 'heads'; n?: number; id?: string; at?: number; card?: string }
 type Stand = { row: string; card: string } | null
@@ -80,10 +86,10 @@ const ASKED = { plugin: 'thimble', key: 'trayAsked' } as const
 
 /** The colors of the tray's frame by what it shows, the ones its words are drawn in (explain/place.mjs markColors): a
  *  citation's purple, an explainer's teal and a heads-up's orange, theme keys that follow the person's theme. */
-const TONES = { citation: 'merged', explain: 'planMode', heads: 'claude' } as const
+const TONES = { citation: 'merged', place: 'merged', explain: 'planMode', heads: 'claude' } as const
 
 /** What the tray shows, in the person's words: its header names it, so the colors need no legend. */
-const KINDS = { citation: 'citation', explain: 'explainer', heads: 'heads-up' } as const
+const KINDS = { citation: 'citation', place: 'citation', explain: 'explainer', heads: 'heads-up' } as const
 
 // the question the person typed with the tray open, until main's turn for it starts (then kept by its turn)
 let pendingAbout: string | null = null
@@ -265,11 +271,13 @@ async function infoOf($: Engine, f: Frame): Promise<Info> {
     const item = await itemOf($, f.row, f.n)
     return { begins: withoutMarks(begins), words: item?.shown ?? item?.words ?? '', status: item?.status, failedBy: item?.failedBy, evidence: item?.evidence, ...(item ? { item } : {}) }
   }
+  if (f.kind === 'place') return { begins: withoutMarks(begins) }
   return { begins: withoutMarks(begins), gloss: (await glossOf($, f.row, f.id)) ?? undefined }
 }
 
 /** The mark as core/engaged.ts tells it. */
 function engagedMark(f: Frame, info: Info): Any {
+  if (f.kind === 'place') return null
   if (f.kind === 'citation') return { kind: 'citation', row: f.row, n: f.n, words: info.words ?? '', status: info.status, failedBy: info.failedBy }
   const g = info.gloss
   return f.kind === 'heads' ? { kind: 'heads', row: f.row, term: g?.term ?? '', title: g?.title ?? '' } : { kind: 'explain', row: f.row, term: g?.term ?? '' }
@@ -293,12 +301,37 @@ async function innerOf($: Engine, f: Frame): Promise<Frame | null> {
   return s ? { row: f.row, kind: s.kind, id: s.id } : null
 }
 
-/** The citations inside an explainer's words, each the reply's citation with the same words (marks/register.ts
- *  looksByWords): the frames they open, by their order in the words (0: none). */
-async function linksOf($: Engine, f: Frame, text: string): Promise<{ marks: { start: number; end: number; words: string }[]; looks: Any[] }> {
+/** A citation's evidence (or one of its other places) cites lines of the place `p` of a file; a whole file is no
+ *  citation's. */
+function citesPlace(ev: Any, p: { path: string; from: number | null; to: number | null }): boolean {
+  if (p.from == null) return false
+  const same = (file: string) => !!file && (file === p.path || file.endsWith(`/${p.path}`) || p.path.endsWith(`/${file}`))
+  return [ev, ...(Array.isArray(ev?.more) ? ev.more : [])].some(pl => {
+    if (!same(String(pl?.file ?? ''))) return false
+    const m = /^(\d+)(?:\D+(\d+))?/.exec(String(pl.line ?? ''))
+    return !!m && Number(m[1]) <= (p.to ?? p.from) && Number(m[2] || m[1]) >= p.from
+  })
+}
+
+/** The citations of an explainer's or a heads-up's words, drawn as the answer's (`text`, its links to a file's lines
+ *  made citations, explain/place.mjs citeLinks): each the answer's citation with the same words (marks/register.ts
+ *  looksByWords) or of the same lines, else, for a link to a file's lines, those lines (`opens`: the frame each opens,
+ *  by their order in the words; null: none). */
+async function linksOf($: Engine, f: Frame, raw: string): Promise<{ text: string; marks: { start: number; end: number; words: string }[]; looks: Any[]; opens: (Frame | null)[] }> {
+  const { text, places } = citeLinks(raw) as { text: string; places: ({ path: string; from: number | null; to: number | null } | null)[] }
   const marks = marksIn(text)
   const items = (await rowMarks($, f.row))?.items ?? []
-  return { marks, looks: looksByWords(marks, items, false) }
+  const byWords = looksByWords(marks, items, false)
+  const looks: Any[] = []
+  const opens: (Frame | null)[] = []
+  marks.forEach((_m, k) => {
+    const p = places[k]
+    const it = p ? items.find(x => x.evidence && citesPlace(x.evidence, p)) : null
+    const look = it ? { n: it.n, status: it.status === 'corrected' && it.rewrite ? 'failed' : it.status } : p ? { n: 0, status: 'unchecked' } : byWords[k]
+    looks.push(look)
+    opens.push(look?.n > 0 ? { row: f.row, kind: 'citation', n: look.n } : p ? { row: f.row, kind: 'place', id: `${p.path}${p.from ? `:${p.from}${p.to && p.to !== p.from ? `-${p.to}` : ''}` : ''}` } : null)
+  })
+  return { text, marks, looks, opens }
 }
 
 // ------------------------------------------------------------------------------------------------ what the person does
@@ -400,20 +433,6 @@ async function askAbout($: Engine, f: Frame, byKey = false): Promise<void> {
   if (placed) await setTray($, null)
 }
 
-/** The bar's words for o on a heads-up that offers a check. */
-const OFFER_WORDS = 'o ask Claude to do it'
-
-/** o, or a press on its words: the heads-up's offer, asked at once in a side thread about the heads-up. */
-async function takeOffer($: Engine, f: Frame, byKey = false): Promise<void> {
-  const g = await glossOf($, f.row, f.id)
-  if (!g?.offer) return
-  const scope = { about: aboutOf(f, await infoOf($, f)), mark: refOf(f) as MarkRef }
-  // the question is asked whether or not the pane could open here: the thread list (t) shows it
-  const placed = await openThread($, scope, byKey ? { key: OFFER_WORDS } : {}).catch(() => false)
-  await askInThread($, scope, g.offer)
-  if (placed) await setTray($, null)
-}
-
 /** a, or a press on `a ask`, on the card ] reached: a side thread about it. */
 async function askCard($: Engine, stand: NonNullable<Stand>, byKey = false): Promise<void> {
   const meta = await metaOf($, stand.card)
@@ -432,12 +451,6 @@ async function repair($: Engine, f: Frame, hold: { until: number; cancelled: boo
   const why = typeof r === 'string' ? r : await launchRepair($, r, hold)
   if (why) failNotice($, why, 'tray:repair')
   return true
-}
-
-/** e on an explainer: written again at more length, in its place; the tray shows the longer one when it lands. */
-async function expand($: Engine, f: Frame): Promise<void> {
-  const why = await expandExplainer($, refOf(f) as MarkRef)
-  if (typeof why === 'string' && why) failNotice($, `The longer explainer was not written: ${why}. Press e in the tray to try again.`, 'tray:expand')
 }
 
 // ------------------------------------------------------------------------------------------------ the keys
@@ -496,14 +509,11 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
     }
     return null
   }
+  if (f.kind === 'place') return null
   const g = await glossOf($, f.row, f.id)
-  if (key === 'e' && f.kind === 'explain' && g && !g.expanded) return { later: () => expand($, f) }
-  if (key === 'o' && f.kind === 'heads' && g?.offer) return { later: () => takeOffer($, f, true) }
   if (/^[2-9]$/.test(key) && g) {
-    const { looks } = await linksOf($, f, explainerText(g))
-    const links = looks.filter((l: Any) => l.n > 0).slice(0, 8)
-    const l = links[Number(key) - 2]
-    if (l) return { now: () => pushMark($, { row: f.row, kind: 'citation', n: l.n }) }
+    const to = (await linksOf($, f, explainerText(g))).opens.filter(Boolean).slice(0, 8)[Number(key) - 2]
+    if (to) return { now: () => pushMark($, to) }
   }
   return null
 }
@@ -543,11 +553,6 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
     }
     return out
   }
-  const g = await glossOf($, f.row, f.id)
-  // the longer explainer is a model's call: a press starts it and returns, as the key does (`later`), since Claude Code
-  // skips a press hook that runs past its 10 s and says so in the conversation
-  if (f.kind === 'explain' && g && !g.expanded) out.push({ id: 'tray-e', key: 'e', words: 'expand', focus: true, press: () => { void expand($, f).catch(err => failNotice($, `The longer explainer was not written: ${String((err as Error)?.message || err).slice(0, 160)}. Press e in the tray to try again.`, 'tray:expand')) } })
-  if (f.kind === 'heads' && g?.offer) out.push({ id: 'tray-o', key: 'o', words: OFFER_WORDS.slice(2), focus: true, press: () => takeOffer($, f) })
   out.push({ id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askAbout($, f) }, zero, ...(await steps()))
   return out
 }
@@ -557,7 +562,7 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
 /** What the tray shows on this row, so the row draws it in focus. */
 export async function trayFocus($: Engine, row: string): Promise<MarkRef | null> {
   const f = top(await trayNow($)) as Frame | null
-  return f && f.row === row ? (refOf(f) as MarkRef) : null
+  return f && f.row === row && f.kind !== 'place' ? (refOf(f) as MarkRef) : null
 }
 
 /** A press on a citation opens the tray on it, as in 0.10 (its whole evidence is a click on its place there); a press
@@ -752,6 +757,16 @@ async function fileLinkEl($: Engine, els: Any, f: Frame, m: MarkItem | null): Pr
   return els.Button({ key: 'tray-file', plain: true, label: `open ${label}`, onPress: openIt, children: [els.Text({ dimColor: true, children: label })] })
 }
 
+/** The lines of a file an explainer's or a heads-up's words cite, as a citation of a file shows its evidence: in the
+ *  ruled block, each line on one row, numbered (the title names the file). */
+async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: number): Promise<Unit[]> {
+  const m = /^(.*?)(?::(\d+)(?:-(\d+))?)?$/.exec(f.id)!
+  const from = m[2] ? Number(m[2]) : null
+  const got = await placeLines($, m[1]!, from, m[3] ? Number(m[3]) : from)
+  if (typeof got === 'string') return [{ h: rowsOf(got, w), el: els.Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: got }) }]
+  return got.map((l, i) => ruled(els, cutTitle(`${l.n}  ${l.text}`.replace(/\t/g, '  '), w - 2), [], w, `pl${i}`))
+}
+
 /** The tray, drawn above the bar while it is open: one frame, its title and its kind (citation, explainer, heads-up) on
  *  top (a citation's status beside its kind) and the × that closes it, the mark's card under them, its rows starting
  *  where the title starts, and last what a prompt sent now is about. `room`: the rows it may take, so the bar under it
@@ -776,6 +791,9 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     title = (m?.shown ?? m?.words ?? `citation ${f.n}`).replace(/\*\*|`/g, '')
     status = statusOf(m)
     units = citationBody(els, f, m, inner, await fileLinkEl($, els, f, m), () => toggleCode($))
+  } else if (f.kind === 'place') {
+    title = f.id
+    units = await placeBody($, els, f, inner)
   } else {
     const g = await glossOf($, f.row, f.id)
     const heads = f.kind === 'heads'
@@ -788,31 +806,32 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
       words = { text: lines.join('\n'), start: 0, end: lines.length }
     }
   }
-  // the thread about this mark, once a question was asked in it: a opens it
+  // the thread about this mark, once a question was asked in it: a opens it. Before that, an explainer or a heads-up
+  // ends in the words a card's title row has, `? ask about this explainer`, a click that opens a side thread about it
   const asked = f.open === 'code' ? null : await threadAsked($, { about: '', mark: refOf(f) as MarkRef })
+  if (!asked && (f.kind === 'explain' || f.kind === 'heads')) units.push({ h: 1, el: els.Button({ key: 'ask', plain: true, label: `ask about ${aboutOf(f, await infoOf($, f))}`, hover: quiet('tray-ask'), onPress: () => askAbout($, f), children: [Text({ key: 'ask-t', color: accent(), wrap: 'truncate-end', children: `? ask about this ${KINDS[f.kind]}` })] }) })
   if (asked) units.push({ h: 1, el: els.Button({ key: 'thread', plain: true, label: 'open the thread about this', hover: quiet('tray-thread'), onPress: () => askAbout($, f), children: [Text({ key: 'thread-t', wrap: 'truncate-end', children: [
     Text({ key: 'a', dimColor: true, children: '↳ thread: ' }),
     Text({ key: 'q', children: asked.length > 60 ? asked.slice(0, 59) + '…' : asked }),
     Text({ key: 'b', dimColor: true, children: ' · a opens it' }),
   ] })] }) })
   // what fits above the bar: the frame's two borders and title take three rows, the line that says what the next
-  // prompt is about one, and an explainer's or heads-up's words one more, the blank row messageEl draws above them
-  // (marks/view.ts)
+  // prompt is about one. An explainer or a heads-up shows whole (its lens keeps it short enough for the tray), its
+  // words after the blank row messageEl draws above them (marks/view.ts)
   const gap = words && words.text.trim() ? 1 : 0
-  const fit = room > 0 ? Math.max(3, room - 4 - gap) : 0
+  const fit = room > 0 && !words ? Math.max(3, room - 4 - gap) : 0
   const page = pageOf(units.map(u => u.h), fit, f.page ?? 0, f.skip ?? 0)
   paged = page.next === null ? null : { f, next: page.next, skip: page.nextSkip ?? 0 }
   const shown = units.slice(page.start, page.end)
   let body: Any[]
   if (words) {
     const lines = words.text.split('\n')
-    const text = lines.slice(page.start, Math.min(page.end, lines.length)).join('\n')
-    const { marks, looks } = await linksOf($, f, text)
+    const { text, marks, looks, opens } = await linksOf($, f, lines.slice(page.start, Math.min(page.end, lines.length)).join('\n'))
     const id = (f as { id: string }).id
     body = [
       ...(text.trim() ? [messageEl(els, {
         text, marks, looks, key: `tray-${f.row}-${id}`, cols: inner, first: false, spin: '', gutter: false,
-        onMark: (k: number) => { const n = looks[k]?.n; if (n > 0) void pushMark($, { row: f.row, kind: 'citation', n }) },
+        onMark: (k: number) => { const to = opens[k]; if (to) void pushMark($, to) },
       })] : []),
       ...drawUnits(els, shown.slice(Math.max(0, lines.length - page.start))),
     ]
@@ -849,14 +868,14 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
       close,
     ] }),
   ] })
-  // what a prompt sent now carries (core/tell.ts): the mark, said here before it is sent, with a click that leaves it
-  // out, and one that takes it back
+  // what a prompt sent now carries (core/tell.ts): a citation, said here before it is sent, with a click that leaves
+  // it out, and one that takes it back
   const loose = !!tray.loose
-  const scope = Box({ key: 'tray-scope', flexDirection: 'row', children: [
+  const scope = f.kind !== 'citation' ? null : Box({ key: 'tray-scope', flexDirection: 'row', children: [
     Text({ key: 's', dimColor: true, wrap: 'truncate-end', children: loose ? 'Your next prompt is not about it. ' : `Your next prompt asks about this ${kind}. ` }),
     els.Button({ key: 'tray-loose', plain: true, label: loose ? `ask the next prompt about this ${kind}` : `leave this ${kind} out of the next prompt`, hover: quiet('tray-loose'), onPress: () => setLoose($, !loose), children: [Text({ key: 'b', color: accent(), children: loose ? 'ask about it' : 'leave it out' })] }),
   ] })
-  const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: body }), scope] })
+  const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: body }), ...(scope ? [scope] : [])] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
 }
 
@@ -877,7 +896,7 @@ export const registerTray: Register = on => {
       if (!e.command && !e.isMeta) {
         const tray = await trayNow($)
         const f = top(tray) as Frame | null
-        pendingAbout = f && !tray?.loose ? aboutOf(f, await infoOf($, f)) : null
+        pendingAbout = f && f.kind === 'citation' && !tray?.loose ? aboutOf(f, await infoOf($, f)) : null
         if (f) await writeTray($, null)
       }
     } catch {

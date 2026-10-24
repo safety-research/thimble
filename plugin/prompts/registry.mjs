@@ -58,9 +58,9 @@ export const TEXTS = {
     use: "a section of the look's prompt while Claims is on",
   },
   'explain-expand': {
-    about: 'an explainer written again at more length, over the term, the answer and the files it cites',
+    about: 'an explainer of words the analyst picked, over the words, the answer and the files it cites',
     reader: 'explain/expand.ts',
-    use: 'one model call when the person asks for a longer explainer',
+    use: 'one model call when the person asks what words of an answer mean (/explain, a press on cited words in a pane)',
   },
   squeeze: {
     about: 'an answer rewritten at the levels the person picked on its chips, or a catch-up of the replies they missed',

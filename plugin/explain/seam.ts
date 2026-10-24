@@ -1,4 +1,4 @@
-// seam.ts: the explainers and the important details (heads-ups) on Claude's answers (0.10's explain and heads lenses).
+// seam.ts: the explainers and the heads-ups on Claude's answers (0.10's explain and heads lenses).
 // core/answerview.ts and observer/observer.ts call each function by name, since Claude Code follows `$` only into
 // functions a file declares or imports.
 //
@@ -6,19 +6,18 @@
 // one heads-up (a detail they should know before they rely on the answer). explainMerge places each on the words of the
 // newest message that holds them (place.mjs mergeLook) and keeps it as that message's part `explain`. The row draws
 // each as a press on its words: an explainer highlighted teal, a heads-up orange (place.mjs markColors); a press
-// opens the tray on it (tray/seam.ts openTray), and Claude hears with the next prompt that the analyst opened it
-// (core/engaged.ts). A term is explained once per conversation; the lenses' digests name the terms already explained
-// and the heads-ups already given, which this module keeps in the conversation's folder (explain.json).
+// opens the tray on it (tray/seam.ts openTray). Claude hears with the next prompt the words of each one shown on its
+// answer (tellComments), and which ones the analyst opened (core/engaged.ts). A term is explained once per
+// conversation; the lenses' digests name the terms already explained and the heads-ups already given, which this
+// module keeps in the conversation's folder (explain.json).
 //
 //   explainSpans($, row, text, marks)  the explainers and heads-ups on the words of a row as it shows now (`text`, a
 //                                      squeezed version too: a term is found again there in another form)
-//   explainKey($, key, until)          e: Longer, on the explainer the tray shows
 //   explainState($)                    what the lenses' digests read: {glossed, headsGiven}
 //   explainMerge($, look)              what one look gave for the explain and heads lenses, placed and kept
-//   expandExplainer($, mark)           Longer: the explainer written again at more length, in its place (expand.ts);
-//                                      null when it did, else a sentence that says why not
-//   sessionGlosses($)                  every explainer of this session: the panes highlight their terms (claims, a
-//                                      side thread's answers) and open them in place
+//   tellComments($, rows)              Claude hears the explainers and heads-ups shown on these answers with the next
+//                                      prompt: each one's words
+//   sessionGlosses($)                  every explainer of this session: a pane shows the one of words picked there
 //   explainTerm($, row, term)          on demand: an explainer of words the analyst picked (a citation's words, a term
 //                                      in a pane, /explain), written by the explain-expand call and kept on its message
 //                                      as the look's are; explaining(term) says while it is written
@@ -27,7 +26,7 @@
 //                                      a reply, so typing the words is the way to ask for any of them
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
-// Each lens's switch (settings: Explainers, Heads-ups) also hides what it gave while it is off.
+// Each lens's switch (settings: Comments, its Explainers and Heads-ups) also hides what it gave while it is off.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
@@ -36,25 +35,24 @@ import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
 import { themeNow } from '../core/theme'
 import { tellOpened } from '../core/engaged'
+import { commentsText } from '../core/engaged.mjs'
+import { tellAtNextPrompt } from '../core/tell'
 import { readKept, writeKept } from '../core/env'
-import type { Take } from '../hooks/keys'
 import { sessionKey } from '../hooks/conversation'
 import { withoutMarks } from '../marks/message.js'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
-import { openTray, trayFocus } from '../tray/seam'
-import { askGloss, expandGloss } from './expand'
+import { openTray } from '../tray/seam'
+import { askGloss } from './expand'
 import { anchorTerm, holds, markColors, mergeLook, placeGlosses, termOf } from './place.mjs'
 
 type Engine = EngineInterface
 
-/** An explainer, or (kind `heads`) an important detail, as 0.10's Gloss: the words it stands on as the person reads
- *  them (`term`), what it is (`body`), where it mattered here (`here`), a heads-up's `title`, `bullets` and `offer` (a
- *  check Claude can make), and, once written at more length (`expanded`), the short one kept in `short`. Its words may
+/** An explainer, or (kind `heads`) a heads-up, as 0.10's Gloss: the words it stands on as the person reads them
+ *  (`term`), what it is (`body`), where it mattered here (`here`), a heads-up's `title` and `bullets`. Its words may
  *  link to the lines of a file that show a point, as `[words](path#L12-20)`. */
 export type Gloss = {
-  id: string; term: string; kind?: 'heads'; title?: string; body?: string; here?: string; bullets?: string[]; offer?: string
-  expanded?: boolean; short?: { body: string; here: string }
+  id: string; term: string; kind?: 'heads'; title?: string; body?: string; here?: string; bullets?: string[]
   /** written on demand: the analyst picked its words and asked (explainTerm) */
   asked?: boolean
 }
@@ -107,30 +105,6 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
   })
 }
 
-/** The explainer the tray shows now, on any of the recent rows; null when it shows none. */
-async function trayExplainer($: Engine): Promise<{ row: string; id: string } | null> {
-  const rows = [...new Set([...(await answerRows($)), ...(await textRows($))])].slice(-60).reverse()
-  for (const row of rows) {
-    const f = await trayFocus($, row).catch(() => null)
-    if (f && f.kind !== 'citation') return { row, id: f.id }
-  }
-  return null
-}
-
-export async function explainKey($: Engine, key: string, _until: number): Promise<Take | null> {
-  if (key !== 'e' || !featureOn('explain')) return null
-  const at = await trayExplainer($)
-  if (!at) return null
-  const g = (await partOf<ExplainPart>($, at.row, 'explain'))?.items?.[at.id]
-  if (!g || g.kind === 'heads' || g.expanded) return null
-  return {
-    later: async () => {
-      const why = await expandExplainer($, { row: at.row, kind: 'explain', id: at.id })
-      if (why) failNotice($, why, 'explain')
-    },
-  }
-}
-
 export async function explainState($: Engine): Promise<Record<string, unknown>> {
   const m = await memory($)
   return { glossed: [...m.glossed], headsGiven: [...m.headsGiven] }
@@ -155,13 +129,18 @@ export async function explainMerge($: Engine, look: Look): Promise<void> {
     await writeKept($, FILE, { glossed: m.glossed, headsGiven: m.headsGiven }).catch(() => undefined)
     $.ui.invalidate('ui.render')
   }
+  await tellComments($, Object.keys(r.parts)).catch(() => undefined)
 }
 
-export async function expandExplainer($: Engine, mark: MarkRef): Promise<string | null> {
-  if (mark.kind !== 'explain') return mark.kind === 'heads' ? 'A heads-up is not written at more length.' : 'A citation is not an explainer.'
-  const why = await expandGloss($, mark.row, mark.id)
-  if (!why) $.ui.invalidate('ui.render')
-  return why
+/** Claude hears, with the next prompt, the explainers and heads-ups shown on each of these answers (one text per
+ *  answer, so a later look's replaces it): their words, as core/engaged.mjs commentsText says them. Those a switch
+ *  hides are not shown, so not told. */
+export async function tellComments($: Engine, rows: string[]): Promise<void> {
+  for (const row of rows) {
+    const part = await partOf<ExplainPart>($, row, 'explain')
+    const items = (part?.order ?? Object.keys(part?.items ?? {})).map(id => part?.items?.[id]).filter((g): g is Gloss => !!g && shown(g))
+    await tellAtNextPrompt($, `comments:${row}`, commentsText(items, (await messageOf($, row))?.text ?? ''))
+  }
 }
 
 /** For tests: the module's memory, cleared. */
@@ -235,6 +214,7 @@ export async function explainTerm($: Engine, row: string, term: string): Promise
     m.glossed = [...m.glossed, words].slice(-GLOSSED_KEEP)
     await writeKept($, FILE, { glossed: m.glossed, headsGiven: m.headsGiven }).catch(() => undefined)
     const g = (await partOf<ExplainPart>($, row, 'explain'))?.items?.[got.id]
+    await tellComments($, [row]).catch(() => undefined)
     return g ? { ...g, row } : 'The explainer was written, but its answer is not in this session any more.'
   } finally {
     asking.delete(t)

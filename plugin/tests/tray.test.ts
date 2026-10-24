@@ -435,55 +435,23 @@ const HEADS = {
         'Four of the runs were retried after a timeout, and the summary file counts each try as its own run, so the share of failures reads higher than the share of distinct runs.',
         'The check read the summary file only, so it cannot say which of the tries failed or whether a retry passed later on in the same sweep of runs.',
         'The runs that were not retried all finished inside their budget, so the timeout explains the retries but not the failures among the other runs.',
-      ], offer: 'Count the distinct run ids' },
-      g1: { id: 'g1', term: 'p95', body: 'The time that 95 of 100 checks stay under.' },
+      ] },
+      g1: { id: 'g1', term: 'p95', body: 'The time that 95 of 100 checks stay under.', here: 'The sweep [lists it per run](runs/summary.txt#L4), and [the config sets the limit](conf/limits.toml#L2-3).' },
     },
   },
 }
 
-test('a heads-up on a citation\'s words is one ] away; a tray taller than the room keeps the bar on screen, and m shows the rest', async ($, on) => {
+test('a heads-up on a citation\'s words is one ] away; it shows whole, with no paging, no order to the reader and no line about the next prompt', async ($, on) => {
   const { clock } = await resumed($, on, QUOTED, 's-tray-4', { parts: HEADS })
   // ]: the heads-up first, not the citation under it
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  let drawn = await $.ui.render(above(12))
-  let band = textOf(drawn)
+  const band = textOf(await $.ui.render(above(12)))
   expect(band).toContain('heads-up')
   expect(band).toContain('Retried runs count twice')
+  expect(band).toContain('but not the failures among the other runs.')
+  expect(band).toContain('? ask about this heads-up')
   expect(band).toContain('] next citation')
-  // the band's room is 12 rows: the tray fits in what the bar and the blank rows leave, and says there is more
-  const page = all(drawn).find(n => n.props?.key === 'tray-page')
-  expect(page?.props).toMatchObject({ overflow: 'hidden' })
-  const barRows = all(drawn).filter(n => n.props?.key === 'bar').length
-  expect(page.props.height + 3 + 1 + 2 + barRows).toBeLessThanOrEqual(12)
-  expect(band).toContain('m more · lines 1–')
-  expect(band).not.toContain('Count the distinct run ids')
-  // it counts the rows the page shows of all the rows, not the paragraphs: the title and three bullets are four
-  // paragraphs, over ten rows at this width
-  const [, first, last, total] = /lines (\d+)–(\d+) of (\d+)/.exec(band)!.map(Number)
-  expect(first).toBe(1)
-  expect(last).toBe(page.props.height - 1)
-  expect(total).toBeGreaterThanOrEqual(10)
-  // the fewest rows that show it whole hold all of it and the bar: its 10 lines at this width, the blank row over
-  // them, the frame's three rows and the two blank rows
-  let whole = 12
-  while (textOf(await $.ui.render(above(whole))).includes('m more')) whole++
-  expect(3 + 1 + 10 + 2 + barRows).toBeLessThanOrEqual(whole)
-  await $.ui.render(above(12))
-  // m: the next lines, then from the top
-  await clock.advance(2000)
-  expect(await $.prompt.edit(key('m'))).toEqual({ text: '', cursor: 0 })
-  band = textOf(await $.ui.render(above(12)))
-  expect(band).not.toContain('m more · lines 1–')
-  // a click on the line that says so does what m does: the page after this one
-  const was = /lines (\d+)–/.exec(band)?.[1]
-  const paged = await $.ui.mount(above(12))
-  await paged.press({ key: 'tray-more' })
-  await paged.unmount()
-  expect(Number(/lines (\d+)–/.exec(textOf(await $.ui.render(above(12))))?.[1])).toBeGreaterThan(Number(was))
-  // a tall screen shows it whole
-  band = textOf(await $.ui.render(above(40)))
-  expect(band).toContain('Count the distinct run ids')
-  expect(band).not.toContain('m more')
+  for (const gone of ['m more', 'lines 1–', 'Your next prompt', 'leave it out', 'Claude can do this', 'o ask']) expect(band).not.toContain(gone)
   // ] goes on to the citation, then the explainer after it
   await clock.advance(2000)
   await $.prompt.edit(key(']'))
@@ -493,82 +461,52 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
-test("a heads-up informs and, where it offers a check, o has Claude make it in a side thread about the heads-up", async ($, on) => {
+test('? ask about this heads-up opens a side thread about it, as a card\'s ? ask does; a prompt typed with it open carries nothing of it', async ($, on) => {
   const opens: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.id); return { value: { isPlaced: true } } as never })
   on('ui.close', () => ({ value: undefined }))
-  const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-offer', { parts: HEADS })
-  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  const band = textOf(await $.ui.render(above(40)))
-  expect(band).toContain('Claude can do this for you (o): Count the distinct run ids.')
-  expect(band).toContain('o ask Claude to do it')
-  // o, once its word window closed: the offer is the side thread's question, about the heads-up
-  await clock.advance(2000)
-  expect(await $.prompt.edit(key('o'))).toEqual({ text: '', cursor: 0 })
-  await clock.advance(2000)
-  await new Promise(r => setTimeout(r, 50))
-  const thread = spawns.find(x => String(x.prompt).includes('PROMPT thread'))
-  expect(thread?.prompt).toContain('Count the distinct run ids')
-  expect(thread?.prompt).toContain('Retried runs count twice')
+  const { submitted } = await resumed($, on, QUOTED, 's-tray-ask', { parts: HEADS })
+  await $.prompt.edit(key(']'))
+  const ui = await $.ui.mount(above(40))
+  expect(all(await $.ui.render(above(40))).find(n => n.props?.key === 'ask')?.props.label).toBe('ask about the heads-up "Retried runs count twice"')
+  await ui.press({ key: 'ask' })
+  await ui.unmount()
   expect(opens).toEqual(['thimble'])
+  // a prompt typed with a heads-up open: no scope of it, no `▸ about` (Claude reads it with the comments anyway)
+  await $.prompt.edit(key(']'))
+  await $.prompt.submit({ text: 'what else?', origin: { kind: 'composer' } } as never)
+  const told = (submitted.at(-1).context ?? []).join('\n')
+  expect(told).not.toContain('open in the tray')
 })
 
-test('a heads-up without an offer has no o', async ($, on) => {
-  const plain = { explain: { order: ['h1'], items: { h1: { ...HEADS.explain.items.h1, offer: undefined } } } }
-  await resumed($, on, QUOTED, 's-tray-no-offer', { parts: plain })
-  await $.prompt.edit(key(']'))
+test("an explainer's or a heads-up's links to a file's lines draw as the answer's citations: one of lines the answer cites opens that citation, another the lines themselves", async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-links', { parts: HEADS, kept: { 'conf/limits.toml': '[limits]\np95_ms = 800\ntimeout_s = 30\n' } })
+  // ] heads-up, ] citation, ] explainer
+  for (let i = 0; i < 3; i++) { await clock.advance(2000); await $.prompt.edit(key(']')) }
+  const drawn = all(await $.ui.render(above(40)))
+  const cites = drawn.filter(n => n.type === 'Button' && String(n.props?.label).startsWith('citation '))
+  expect(cites.map(n => n.props.label)).toEqual(['citation 1: lists it per run', 'citation 0: the config sets the limit'])
+  // underlined in the text's color, the citations' tint on hover, as in the answer: no link color
+  const words = all(cites[1]).find(n => n.type === 'Text' && textOf(n) === 'the config sets the limit')
+  expect(words?.props).toMatchObject({ underline: true })
+  expect(words?.props.color).toBe(undefined)
+  expect(drawn.some(n => n.type === 'Markdown' && String(n.props.text).includes('conf/limits.toml'))).toBe(false)
+  // the one of the lines the answer cites opens that citation, over the explainer
+  let ui = await $.ui.mount(above(40))
+  await ui.press({ key: cites[0].props.key })
+  await ui.unmount()
+  expect(textOf(await $.ui.render(above(40)))).toContain('failed: 12')
+  await clock.advance(2000)
+  await $.prompt.edit(key('0'))
+  // the other opens its lines, as a citation of a file shows them; 0 goes back to the explainer
+  ui = await $.ui.mount(above(40))
+  await ui.press({ key: cites[1].props.key })
+  await ui.unmount()
   const band = textOf(await $.ui.render(above(40)))
-  expect(band).toContain('Retried runs count twice')
-  expect(band).not.toContain('Claude can do this for you')
-  expect(band).not.toContain('ask Claude to do it')
-})
-
-test('an explainer paragraph taller than the room shows a room of its rows at a time: m goes on inside it, then from the top', async ($, on) => {
-  const long = `${Array.from({ length: 60 }, (_, i) => `word${i} of a long explainer`).join(' ')}.`
-  const { clock } = await resumed($, on, QUOTED, 's-tray-15', { parts: { explain: { order: ['g1'], items: { g1: { id: 'g1', term: 'p95', body: long } } } } })
-  // ] to the citation, ] to the explainer
-  await $.prompt.edit(key(']'))
+  expect(band).toContain('conf/limits.toml:2-3')
+  expect(band).toContain('2  p95_ms = 800')
+  expect(band).toContain('3  timeout_s = 30')
   await clock.advance(2000)
-  await $.prompt.edit(key(']'))
-  const pageNow = async () => {
-    const drawn = await $.ui.render(above(12))
-    return { body: all(drawn).find(n => n.props?.key === 'tray-page-body'), more: /m (more|from the top) · lines/.exec(textOf(drawn))?.[0] ?? '' }
-  }
-  let p = await pageNow()
-  expect(p.more).toContain('m more')
-  expect(p.body.props.marginTop ?? 0).toBe(0)
-  // each m moves the paragraph up by the rows already shown, until the page says m from the top
-  const tops: number[] = []
-  for (let i = 0; i < 20 && !p.more.startsWith('m from the top'); i++) {
-    await clock.advance(2000)
-    await $.prompt.edit(key('m'))
-    p = await pageNow()
-    tops.push(p.body.props.marginTop ?? 0)
-  }
-  expect(p.more).toContain('m from the top')
-  expect(tops.length).toBeGreaterThan(1)
-  for (let i = 1; i < tops.length; i++) expect(tops[i]).toBeLessThan(tops[i - 1])
-  // and m from the top starts it again
-  await clock.advance(2000)
-  await $.prompt.edit(key('m'))
-  expect((await pageNow()).body.props.marginTop ?? 0).toBe(0)
-})
-
-test("a click on e expand starts the longer explainer and returns, as e does: the press never waits on the model's call", async ($, on) => {
-  let calls = 0
-  let finish: (v: unknown) => void = () => undefined
-  on('model.complete', () => { calls++; return new Promise(r => { finish = r }) as never })
-  const { clock } = await resumed($, on, QUOTED, 's-tray-expand', { parts: { explain: { order: ['g1'], items: { g1: { id: 'g1', term: 'p95', body: 'The time under which 95 of 100 runs finish.' } } } } })
-  await $.prompt.edit(key(']'))
-  await clock.advance(2000)
-  await $.prompt.edit(key(']'))
-  expect(textOf(await $.ui.render(above(20)))).toContain('e expand')
-  // the press settles while the call still runs: Claude Code skips a press hook past its 10 s and says so
-  const band = await $.ui.mount(above(20))
-  const settled = await Promise.race([Promise.resolve(band.press({ key: 'bar-tray-e' })).then(() => 'returned'), new Promise(r => setTimeout(() => r('waits'), 300))])
-  await band.unmount()
-  expect(settled).toBe('returned')
-  await new Promise(r => setTimeout(r, 20))
-  expect(calls).toBe(1)
-  finish({ isAnswered: true, text: '{"body":"A longer one."}' })
+  await $.prompt.edit(key('0'))
+  expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })

@@ -116,8 +116,9 @@ FORMER_PROMPTS = {
     "judgment": ("20b914af87f96860649651e3c44b4a1217752e90",),
     "heads-up": ("af5c7de4b07f80efaa866258cc65be5a34a91981", "f3bce900c61feda9b38b72f34d5e8fdc34e5dec5",
                  "0829a23430817c86bc793d3a14a4cac5f644a93b", "7ad911bc447c64e183a48130f7d7d8857b3c2de4",
-                 "9e461822a6def677feec8fe2461061831bd35234"),
-    "explainers": ("9478d19fb7bf335552308b11f88df81af897e591", "17bb4469222f1f6bb27a4a032a03ac7aaf9dd511"),
+                 "9e461822a6def677feec8fe2461061831bd35234", "bafaba148b11b6a45197bf6fb4112ee3c230f5a7"),
+    "explainers": ("9478d19fb7bf335552308b11f88df81af897e591", "17bb4469222f1f6bb27a4a032a03ac7aaf9dd511",
+                   "3c9a674810ff281086d46d169514db9f0b1650fc"),
 }
 CANVAS = canvas_comments.CANVAS  # the run target of a check over the cards, among `runs` beside the documents' slugs
 CANVAS_NAME = "cards"  # how a line, a chat and main's `checked` event name that target

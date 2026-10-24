@@ -6,7 +6,9 @@
 // so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again with the
 // new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key) when it acts.
 
-/** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `does`:
+/** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `group`:
+ *  the heading the pane lists it under, with the others of its group (Comments: the explainers and heads-ups on an
+ *  answer's words; a key keeps its name, so a saved setting still applies); `does`:
  *  one line on what the person gets and what it costs, the field's description (a test checks). `lenses`: the lenses of
  *  the observer's look it needs (observer/lenses.mjs): the look runs while one such feature is on. */
 export const SWITCHES = [
@@ -27,11 +29,11 @@ export const SWITCHES = [
     does: 's makes an answer shorter or longer, and catches you up on replies you missed. One rewrite each time you ask.',
   },
   {
-    key: 'explain', title: 'Explainers', default: true, lenses: ['explain'],
+    key: 'explain', title: 'Explainers', group: 'Comments', default: true, lenses: ['explain'],
     does: 'Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.',
   },
   {
-    key: 'details', title: 'Heads-ups', default: true, lenses: ['heads'],
+    key: 'details', title: 'Heads-ups', group: 'Comments', default: true, lenses: ['heads'],
     does: 'Marks a detail of an answer that is easy to miss and changes what it means; ] opens its heads-up. A small part of the call after each reply.',
   },
   {

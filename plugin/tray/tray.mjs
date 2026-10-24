@@ -2,7 +2,7 @@
 // parts of panes/tray.js, panes/mark.js, shell.tsx stepWords/replyPlace/trayScope and shell/cards.js drawsHyperlinks).
 //
 // The tray is one small panel above the prompt. It shows one mark at a time: a citation with its evidence, or an
-// explainer or an important detail (a heads-up). What it shows is the top of a stack, so a citation inside an explainer
+// explainer or a heads-up. What it shows is the top of a stack, so a citation inside an explainer
 // opens over it, and 0 returns to the one under it; 0 on the first closes the tray.
 //
 //   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}), with `open: 'code'` while
@@ -193,13 +193,15 @@ export function cutTitle(s, n) {
 const plain = s => String(s || '').replace(/\[([^\]]*)\]\(#\)/g, '$1').replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim()
 const cut = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
-/** What a side thread is about, in words: the citation, explainer or important detail, by the words the person read.
- *  `info`: {words} for a citation, {gloss} for an explainer or a heads-up. */
+/** What a side thread is about, in words: the citation, explainer or heads-up, by the words the person read, or the
+ *  lines of a file an explainer cites (`place`, its `id` the place). `info`: {words} for a citation, {gloss} for an
+ *  explainer or a heads-up. */
 export function aboutOf(f, info = {}) {
   if (!f) return 'this mark'
   // words that open with a quote of their own keep it, never two
   const q = s => (/^["\u201c]/.test(s) ? s : `"${s}"`)
   if (f.kind === 'citation') return `the citation ${q(cut(plain(info.words) || `citation ${f.n}`, 80))}`
+  if (f.kind === 'place') return `the lines ${f.id}`
   const g = info.gloss || {}
   if (f.kind === 'heads') return `the heads-up ${q(cut(plain(g.title || g.term), 80))}`
   return `the explainer of ${q(cut(plain(g.term), 80))}`
@@ -214,35 +216,29 @@ function evidenceWords(ev) {
 }
 
 /**
- * What a question the person asks with the tray open carries for Claude: which mark was open, where it stands, and
- * what it said, so "this" can mean it. `info`: {begins (the reply's first words), words, status, evidence} for a
- * citation, {begins, gloss} for an explainer or a heads-up.
+ * What a question the person asks with a citation open in the tray carries for Claude: which citation, where it
+ * stands, and what its check found, so "this" can mean it. `info`: {begins (the reply's first words), words, status,
+ * evidence}. An explainer or a heads-up carries nothing here: Claude reads every one shown, and which the person
+ * opened, with the next prompt (explain/seam.ts, core/engaged.ts).
  */
 export function scopeText(f, info = {}) {
-  if (!f) return ''
+  if (!f || f.kind !== 'citation') return ''
   const begins = cut(String(info.begins || '').replace(/\s+/g, ' ').trim(), 80)
   const where = begins ? ` in your reply that begins "${begins}"` : ''
-  if (f.kind === 'citation') {
-    const st = info.status === 'corrected' ? ' The check corrected it.' : info.status === 'failed' ? (info.failedBy === 'none' ? ' Its check did not run.' : ' The check flagged it.') : info.status === 'verified' ? ' The check verified it.' : ''
-    return `The analyst asked this with a citation of your reply open in the tray: "${plain(info.words)}"${where}. "This" may mean that value.${st}${evidenceWords(info.evidence)}`
-  }
-  const g = info.gloss || {}
-  if (f.kind === 'heads') {
-    return `The analyst asked this with an important detail of your reply open in the tray: "${plain(g.title || g.term)}", on the words "${plain(g.term)}"${where}. It said: ${(g.bullets || []).map(plain).join(' ')}${g.offer ? ` It offered that Claude can do this: ${plain(g.offer)}.` : ''} "This" or "it" may mean that detail.`
-  }
-  return `The analyst asked this with an explainer of your reply open in the tray: the term "${plain(g.term)}"${where}. The explainer said: ${plain(g.body || g.title)}${g.here ? ` ${plain(g.here)}` : ''} "This" or "it" may mean that term.`
+  const st = info.status === 'corrected' ? ' The check corrected it.' : info.status === 'failed' ? (info.failedBy === 'none' ? ' Its check did not run.' : ' The check flagged it.') : info.status === 'verified' ? ' The check verified it.' : ''
+  return `The analyst asked this with a citation of your reply open in the tray: "${plain(info.words)}"${where}. "This" may mean that value.${st}${evidenceWords(info.evidence)}`
 }
 
 /** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run). */
 export const canRepair = m => !!m && m.status === 'failed'
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where
- *  it mattered here. A heads-up: its title in bold, two to four bullets, and the check Claude offers to make (o). */
+ *  it mattered here. A heads-up: its title in bold, then two to four bullets. */
 export function explainerText(g) {
   if (!g) return ''
   if (g.kind === 'heads') {
     const bullets = (Array.isArray(g.bullets) ? g.bullets : []).filter(x => typeof x === 'string' && x.trim()).slice(0, 4)
-    return [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', bullets.map(x => `- ${x}`).join('\n'), g.offer ? `Claude can do this for you (o): ${String(g.offer).replace(/[.\s]+$/, '')}.` : ''].filter(Boolean).join('\n\n')
+    return [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', bullets.map(x => `- ${x}`).join('\n')].filter(Boolean).join('\n\n')
   }
   return [g.body || g.title || '', g.here || ''].filter(Boolean).join('\n\n')
 }
