@@ -13,7 +13,8 @@
  *  answer's words; a key keeps its name, so a saved setting still applies); `does`: one line on what the person gets
  *  and what it costs, the field's description (a test checks). `choices`: the modes of a feature that has more than on
  *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
- *  look runs while one such feature is on. */
+ *  look runs while one such feature is on. `modeOf`: the feature whose lenses join the look after each reply only in
+ *  this one's `auto` mode (in `on demand`, a look of their own runs when the person asks). */
 export const SWITCHES = [
   {
     key: 'marks', title: 'Citations', default: true,
@@ -41,7 +42,11 @@ export const SWITCHES = [
   },
   {
     key: 'claims', title: 'Claims', default: true, lenses: ['claims'],
-    does: 'c opens what Claude and you claimed in the session, with sources; the bar counts them. The largest part of the call after each reply.',
+    does: 'c opens what Claude and you claimed in the session, with why each holds and its sources; the bar counts them. Claims found says when they are found.',
+  },
+  {
+    key: 'claimsMode', title: 'Claims found', default: 'on demand', choices: ['auto', 'on demand'], modeOf: 'claims',
+    does: 'auto: after each reply, the largest part of the call after it. on demand: when you press f in the Claims pane, which spends fewer tokens.',
   },
   {
     key: 'counts', title: 'Labels and coverage on the bar', default: true,
@@ -94,10 +99,16 @@ export function noteChange(key, value) {
 }
 
 /** Whether a feature acts now: its option when it is a boolean, else its default. `observer` is whether the look after
- *  each reply runs: while a feature one of whose lenses it serves is on. */
+ *  each reply runs: while a feature one of whose lenses it serves is on, and in its mode's `auto` when it has one. */
 export function featureOn(key) {
-  if (key === 'observer') return SWITCHES.some(s => (s.lenses ?? []).length > 0 && switchesFrom(current)(s.key))
+  if (key === 'observer') return SWITCHES.some(s => (s.lenses ?? []).length > 0 && lensesAfterReply(s.key))
   return switchesFrom(current)(key)
+}
+
+/** Whether a feature's lenses join the look after each reply: it is on, and a feature that sets when it acts
+ *  (`modeOf` it) is in its `auto` mode. */
+export function lensesAfterReply(key) {
+  return switchesFrom(current)(key) && SWITCHES.every(m => m.modeOf !== key || valueIn(current, m.key) === 'auto')
 }
 
 /** A feature by its key, or null. */

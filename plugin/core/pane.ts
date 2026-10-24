@@ -14,12 +14,10 @@
 //
 // The way back: the pane keeps a trail of the panes it showed before this one (trail.mjs). A pane opened while the
 // pane is open goes on top of it (a citation opened from a side answer stands over that answer); the row at the top
-// says how to go back (`‹ back · claims › cluster › claim › evidence`), and a click on `‹ back` or on a crumb goes
-// back, as esc does: Claude Code closes a pane on esc (and on its close mark), and while the trail holds a pane the
-// ui.close hook goes back to it instead. On the trail's first pane esc closes the pane.
-//
-// The same row says what main does, at its right (`Claude is working…`, `Claude is waiting on you`, `Claude
-// replied`), so the person can stay in the pane while main works.
+// says where back goes (`‹ back to claim`), and a click on it goes back, as esc does: Claude Code closes a pane on esc
+// (and on its close mark), and while the trail holds a pane the ui.close hook goes back to it instead. On the trail's
+// first pane esc closes the pane. The same row has `× close` at its right, in the look the tray's close has, which
+// closes the pane whatever the trail holds.
 //
 // Docked beside the conversation, the pane keeps its input bar and its key row at its bottom: the drawing above them
 // gets the rows left over (a pane that lays itself out reads them as its `bodyRows`), the side thread's conversation
@@ -41,9 +39,9 @@ import { drawCoverage } from '../panes/coverage'
 import { drawSettings } from '../panes/settings'
 import { drawThreadsPane, threadPaneParts, threadUnderSplit } from '../threads/seam'
 import { quiet } from './askcell.js'
-import { cut, textWidth } from './text.js'
+import { cut } from './text.js'
 import { accent } from './theme'
-import { crumbsLine, nextTrail, treeRows } from './trail.mjs'
+import { crumbOf, nextTrail, treeRows } from './trail.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,8 +49,6 @@ type Any = any
 
 export const PANE_ID = 'thimble'
 const NOW = { plugin: 'thimble', key: 'pane' } as const
-/** What main does now, for the pane's top row: working, waiting for the person, or replied while the pane was open. */
-const MAIN = { plugin: 'thimble', key: 'paneMain' } as const
 
 /** A pane the trail keeps: its kind and arguments, the title it was opened with, the rows it asked for. */
 export type PaneEntry = { kind: string; args: unknown; title: string; rows?: number }
@@ -124,22 +120,6 @@ export async function turnPane($: Engine): Promise<void> {
   if (now && now.kind !== 'settings') await closePane($)
 }
 
-// ------------------------------------------------------------------------------------------------ main's state
-
-type MainState = { s: 'working' | 'asks' | 'replied'; at?: number }
-
-async function mainNow($: Engine): Promise<MainState | null> {
-  return ((await $.state.get(MAIN)).value ?? null) as MainState | null
-}
-
-/** What the top row says of main, at its right: a few words for each state, in a look that tells them apart. */
-export function mainWords(m: MainState | null): { words: string; color?: string; dim?: boolean } | null {
-  if (!m) return null
-  if (m.s === 'working') return { words: 'Claude is working…', dim: true }
-  if (m.s === 'asks') return { words: 'Claude is waiting on you', color: 'warning' }
-  return { words: 'Claude replied', color: 'success' }
-}
-
 // ------------------------------------------------------------------------------------------------ the drawing
 
 /** The kinds whose drawing leaves room for the side thread under it itself (they read threads/seam.ts rowsUnder):
@@ -179,33 +159,20 @@ async function drawKind($: Engine, e: Any, now: PaneNow, els: Any, room: number)
   return els.Text({ dimColor: true, children: `thimble has no pane ${now.kind}.` })
 }
 
-/** The top row: `‹ back` and the crumbs while the trail holds a pane, and main's state at its right; a blank row under
- *  it. None when there is neither. */
-function topRow($: Engine, els: Any, now: PaneNow, W: number, main: MainState | null): Any[] {
+/** The top row: `‹ back to <the pane under this one>` while the trail holds a pane, and `× close` at its right, bold in
+ *  thimble's color as the tray's close is. */
+function topRow($: Engine, els: Any, now: PaneNow, W: number): Any[] {
   const { Box, Button, Text } = els
   const trail = now.trail ?? []
-  const said = mainWords(main)
-  if (!trail.length && !said) return []
-  const left: Any[] = []
-  if (trail.length) {
-    left.push(Button({ key: 'pane-back', plain: true, label: 'back', hover: quiet('pane-back'), onPress: () => paneBack($), children: [Text({ color: accent(), children: '‹ back' })] }))
-    const line = crumbsLine(trail, now, Math.max(8, W - 10 - (said ? textWidth(said.words) + 2 : 0)))
-    left.push(Text({ key: 'crumbs-gap', dimColor: true, children: line.cut ? ' · … › ' : ' · ' }))
-    line.crumbs.forEach((c: { words: string; at: number }, i: number) => {
-      if (i) left.push(Text({ key: `crumb-sep-${i}`, dimColor: true, children: ' › ' }))
-      const words = cut(c.words, 28)
-      if (c.at < 0) left.push(Text({ key: 'crumb-now', bold: true, children: words }))
-      else left.push(Button({ key: `crumb-${c.at}`, plain: true, label: `back to ${c.words}`, hover: quiet(`crumb-${c.at}`), onPress: () => paneBack($, c.at), children: [Text({ dimColor: true, children: words })] }))
-    })
-  }
-  const right = said ? Text({ key: 'main-state', wrap: 'truncate-end', ...(said.color ? { color: said.color } : {}), ...(said.dim ? { dimColor: true } : {}), children: said.words }) : null
-  return [
-    Box({ key: 'pane-top', flexDirection: 'row', justifyContent: 'space-between', width: W, children: [
-      Box({ key: 'pane-top-left', flexDirection: 'row', flexShrink: 1, children: left }),
-      ...(right ? [Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 0, marginLeft: 2, children: [right] })] : []),
-    ] }),
-    Text({ key: 'pane-top-gap', children: ' ' }),
-  ]
+  const under = trail[trail.length - 1]
+  const back = under
+    ? Button({ key: 'pane-back', plain: true, label: 'back', hover: quiet('pane-back'), onPress: () => paneBack($), children: [Text({ color: accent(), wrap: 'truncate-end', children: `‹ back to ${cut(crumbOf(under.kind, under.args).words, Math.max(8, W - 22))}` })] })
+    : null
+  const close = Button({ key: 'pane-close', plain: true, label: 'close the pane', hover: quiet('pane-close'), onPress: () => closePane($), children: [Text({ color: accent(), bold: true, children: '× close' })] })
+  return [Box({ key: 'pane-top', flexDirection: 'row', justifyContent: 'space-between', width: W, children: [
+    Box({ key: 'pane-top-left', flexDirection: 'row', flexShrink: 1, children: back ? [back] : [] }),
+    Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 0, marginLeft: 2, children: [close] }),
+  ] })]
 }
 
 /** The pane's name for its scroll: another pane starts at its top. */
@@ -222,7 +189,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const pinned = e?.props?.placement === 'dock'
     const keys = new Map<string, () => unknown>()
     const kels = noting(els, keys)
-    const top = topRow($, els, now, W, await mainNow($))
+    const top = topRow($, els, now, W)
     const T = top.length ? treeRows(top, W) : 0
     // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
     // and input bar (`under`, kept at the bottom)
@@ -321,34 +288,4 @@ export const registerPanes: Register = on => {
     if (await scrollPane($, e as Any)) return {}
     return next(e)
   }).catch(($, e, next) => next(e))
-
-  // main's state, for the top row: working from its turn's start, waiting while Claude Code asks the person to allow a
-  // call of its, replied at its turn's end (said only when the pane was open then: the person was in it)
-  on('turn.start', { turnId: /\S/ }, async ($, e, next) => {
-    if (e.agentId === undefined) await $.state.set(MAIN, { s: 'working', at: Number(await $.clock.now()) }).catch(() => undefined)
-    return next(e)
-  }).catch(($, e, next) => next(e))
-  on('turn.complete', { turnId: /\S/ }, async ($, e, next) => {
-    const r = await next(e)
-    if (e.agentId === undefined) {
-      const open = !!(await paneNow($)) && (await isOpen($))
-      await $.state.set(MAIN, open ? { s: 'replied', at: Number(await $.clock.now()) } : null).catch(() => undefined)
-    }
-    return r
-  }).catch(($, e, next) => next(e))
-  on('classic.PermissionRequest', async ($, e, next) => {
-    // Claude Code is about to ask the person to allow a call of main's (in auto mode only what its classifier leaves)
-    try {
-      if ((e as Any).agent_id === undefined) await $.state.set(MAIN, { s: 'asks', at: Number(await $.clock.now()) })
-    } catch { /* the row says less */ }
-    return next(e)
-  }).catch(($, e, next) => next(e))
-  // the call ran or was refused: main works on (noted after `next`, never throwing: the call must not run twice)
-  on('tool.call', { tool: /./ }, async ($, e, next) => {
-    const r = await next(e)
-    try {
-      if ((e as Any).agentId === undefined && (await mainNow($))?.s === 'asks') await $.state.set(MAIN, { s: 'working', at: Number(await $.clock.now()) })
-    } catch { /* the row says less */ }
-    return r
-  })
 }

@@ -12,8 +12,6 @@
 //                                     depth takes its place (j and k in a cluster); a shallower one goes back down
 //                                     to it (e closes the evidence: the claim again); a pane that was not open starts
 //                                     a new trail
-//   crumbsLine(trail, now, width)  -> the crumbs as drawn: the earlier ones (each its index in the trail), the one
-//                                     shown now, the ones left out at the start for want of room
 //   treeRows(el, width)            -> about how many rows a drawing takes at `width` cells: what the pane under its
 //                                     input bar has room for, and how far it scrolls
 
@@ -67,16 +65,6 @@ export function nextTrail(was, open, kind, args) {
   let i = trail.length
   while (i > 0 && trail[i - 1].kind === kind && crumbOf(kind, trail[i - 1].args).depth >= d1) i--
   return trail.slice(0, i)
-}
-
-/** The crumbs that fit in `width` cells after `‹ back · `: the trail's last ones and the one shown now, each with ` › `
- *  between; `cut` when earlier ones were left out (drawn `… › ` at the start). */
-export function crumbsLine(trail, now, width) {
-  const all = [...trail.map((t, i) => ({ words: crumbOf(t.kind, t.args).words, at: i })), { words: crumbOf(now.kind, now.args).words, at: -1 }]
-  const len = xs => xs.reduce((n, x, i) => n + textWidth(x.words) + (i ? 3 : 0), 0)
-  let from = 0
-  while (from < all.length - 1 && len(all.slice(from)) + (from ? 4 : 0) > width) from++
-  return { cut: from > 0, crumbs: all.slice(from) }
 }
 
 /** The text of an element, as it reads: its strings and its children's, in order. */

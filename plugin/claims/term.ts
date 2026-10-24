@@ -9,12 +9,16 @@
 //                lit on the bar for the answer only when a claim was corrected (store.js noteFor), as a `claims` part
 //                of that answer (core/answers.ts setPart)
 //   the pane     c (or /claims) opens the Claims pane (core/pane.ts kind `claims`), which takes the keyboard
+//   on demand    unless Claims found is auto, no look after a reply reads the claims: f in the pane finds
+//                those of the answers they have not read (claimsUnread; the store keeps the answers read, `read`), as
+//                a look of the claims lens alone (observer/observer.ts findClaimsNow); claimsToFind says how many
+//                answers wait and how many are being read
 //
 // It registers no model tool and starts no `claude`.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { failCleared, noticeLine } from '../bar/notice'
-import { actingRow, messageOf, partOf, setPart, turnOf, turnsNow } from '../core/answers'
+import { actingRow, messageOf, partOf, setPart, turnOf, turnsNow, type TurnRec } from '../core/answers'
 import { isPersonPrompt } from '../core/answers.mjs'
 import { readKept, writeKept } from '../core/env'
 import { openPane } from '../core/pane'
@@ -51,6 +55,8 @@ const BRIGHT_MS = 1600
  *  apart, and says `new` until the pane is first opened, so a person sees that it appeared. */
 const PULSE = { times: 6, ms: 450 }
 const FIRST = { plugin: 'thimble', key: 'claimsFirst' } as const
+/** The answers a look on demand reads now, and when it began: the pane says the claims are being found. */
+const FINDING = { plugin: 'thimble', key: 'claimsFinding' } as const
 type First = { lit: boolean; opened: boolean }
 const FILE = 'claims.json'
 
@@ -179,6 +185,8 @@ export async function lookClaims($: Engine, look: Look): Promise<void> {
   const at = new Date(Number(await $.clock.now())).toISOString()
   const res: Any = applyTurn(store, { places, out: { claims: look.out.claims, clusters: look.out.clusters }, turn, at, grown })
   for (const m of look.msgs) clearGap(store, m.turnNo)
+  // the answers read, so f does not offer them again (a store kept before it knew them: readRows)
+  store.read = [...new Set([...readRows(store, await turnsNow($)), ...look.msgs.filter(m => m.kind === 'answer').map(m => m.row)])]
   await saveClaims($, store)
   look.log('claims', { turn, given: Array.isArray(look.out.claims) ? look.out.claims.length : 0, added: res.added, restated: res.restated, revised: res.revised, dropped: res.dropped, clusters: res.clusters })
   const note = noteFor(res)
@@ -190,6 +198,38 @@ export async function lookFailed($: Engine, look: Look, why: string): Promise<vo
   const store = await claimsStore($)
   for (const turn of new Set(look.msgs.map(m => m.turnNo))) noteGap(store, turn, why)
   await saveClaims($, store)
+}
+
+// ------------------------------------------------------------------------------------------------ on demand
+
+/** The answers the claims have read: the store's `read`; a store kept before it noted them (each answer was read after
+ *  its reply then) holds every answer up to the last turn it has claims of (a turn whose look failed is not read). */
+function readRows(store: Store, turns: TurnRec[]): string[] {
+  if (Array.isArray(store.read)) return store.read as string[]
+  const gap = new Set((store.gaps || []).map((g: Any) => g.turn))
+  const last = Math.max(-1, ...store.claims.map((c: Any) => (typeof c.turn === 'number' ? c.turn : -1)))
+  return turns.filter(t => t.answer && t.n <= last && !gap.has(t.n)).map(t => t.answer!)
+}
+
+/** Main's answered turns whose answers the claims have not read, oldest first. */
+export async function claimsUnread($: Engine): Promise<TurnRec[]> {
+  const turns = (await turnsNow($)).filter(t => t.answer && t.reason === 'answer')
+  const read = new Set(readRows(await claimsStore($), turns))
+  return turns.filter(t => !read.has(t.answer!))
+}
+
+/** What the pane's line that finds claims says: how many answers wait to be read, and how many a look reads now. */
+export async function claimsToFind($: Engine): Promise<{ answers: number; finding: number }> {
+  const f = (await $.state.get(FINDING)).value as { n: number } | null | undefined
+  return { answers: (await claimsUnread($)).length, finding: f?.n ?? 0 }
+}
+
+/** A look on demand began (n answers) or ended. */
+export async function findStart($: Engine, n: number): Promise<void> {
+  await $.state.set(FINDING, { n, at: Number(await $.clock.now()) })
+}
+export async function findEnd($: Engine): Promise<void> {
+  await $.state.set(FINDING, null)
 }
 
 // ------------------------------------------------------------------------------------------------ the bar and c

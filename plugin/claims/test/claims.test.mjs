@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseAnswer } from '../../observer/reply.mjs'
-import { CAPTION_LIST, CAPTION_MAP, cardOf, checkChips, citationRows, correctionsOf, evidenceOf, explainerRows, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, passageRows, repairable, rowText, snippetOf, wordDiff } from '../graph.js'
+import { CAPTION_LIST, CAPTION_MAP, cardOf, checkChips, citationRows, correctionsOf, evidenceOf, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, reasonOf, repairable, rowText, snippetOf, wordDiff } from '../graph.js'
 import lens from '../lens.mjs'
 import { applyTurn, edgesOf, emptyStore, parseClaims, promptLines, readStore, viewOf } from '../store.js'
 
@@ -24,7 +24,7 @@ test("the lens's claims are read as given: a quote names a claim that gives no w
     ['', 'person', 'c2', null],
     ['A correction', 'person', null, 'c1'],
   ])
-  assert.deepEqual(Object.keys(got[0]).sort(), ['at', 'by', 'cluster', 'links', 'quote', 'revises', 'same', 'text', 'why'])
+  assert.deepEqual(Object.keys(got[0]).sort(), ['at', 'because', 'by', 'cluster', 'links', 'quote', 'revises', 'same', 'text', 'why'])
   // a why is kept only with the claim it corrects
   assert.deepEqual(got.map(x => x.why), [null, null, 'the log shows two editors'])
   assert.equal(parseClaims([{ quote: 'q', why: 'no claim to correct' }])[0].why, null)
@@ -98,7 +98,7 @@ const panel = view => view.panel.map(rowText).join('\n')
 
 const rows = view => [...view.head, ...(view.graph.length ? [[]] : []), ...view.graph, ...view.panel]
 
-test('the map takes the top of the pane; at rest nothing is chosen and no detail shows; a claim picked keeps its list in a window', () => {
+test('the map takes the top of the pane; at rest nothing is chosen and no detail shows; a claim picked shows alone under it', () => {
   const data = paneData(uneven())
   for (const h of [46, 40, 34]) {
     const rest = graphView(data, {}, { w: 136, h })
@@ -121,20 +121,16 @@ test('the map takes the top of the pane; at rest nothing is chosen and no detail
     const sel = graphView(data, { claim: 'c40' }, { w: 136, h })
     assert.equal(sel.claim.id, 'c40')
     assert.ok(rows(sel).length + 2 <= h, `${h}: ${rows(sel).length} rows`)
-    // a claim: the cluster's list stays, the claim ▸ and bold in the cluster's color, the others dim, and under it one
-    // line of chips: its citations' checks and its turn; no evidence until e. A long list keeps a window round it
+    // a claim: its cluster's name and which of its claims it is, then the claim alone, bold in the cluster's color, why
+    // it holds (here its citation alone: no reply to read it from) and its checks; no list of the other claims
     const p = panel(sel)
-    // and under the chips, with its evidence closed, its first citation as its card draws it
-    assert.match(p, /^─+\n● group 5 · \d+ claims\n( {2}↑ \d+ earlier\n)?( {2}– Wiki .*\n)* {2}▸ Wiki 40 had 50 saves\.\n {4}claim \d+ of \d+ {2}× 1 citation failed {2}turn 2\n {4}50 saves {3}× failed · citation\n( {4}.*\n)* {2}– Wiki /)
-    // a list too long for the rows under the map keeps a window round the claim, and says which claims it shows
-    if (sel.windowed) assert.match(p, /\n {2}(↓ \d+ more · )?claims \d+–\d+ of \d+$/)
-    // above a claim the cluster's name is bold and plain, its dot in the color
-    assert.ok(/^c\d$/.test(sel.panel[1][0].tone) && sel.panel[1][1].bold && !sel.panel[1][1].tone)
-    assert.ok(sel.panel[1].every(x => x.part === `g:${sel.group}`))
-    const picked = sel.panel.find(r => rowText(r).includes('▸'))
+    assert.match(p, /^─+\n● group 5 · \d+ of \d+\n\n {2}Wiki 40 had 50 saves\.\n {2}50 saves\n {2}× 1 citation failed · turn 2$/)
+    // the cluster's line is a press that chooses the cluster, its dot in the color
+    assert.ok(/^c\d$/.test(sel.panel[1][0].tone) && sel.panel[1].every(x => x.part === `g:${sel.group}`))
+    const picked = sel.panel.find(r => rowText(r).includes('Wiki 40 had'))
     assert.ok(picked.slice(1).every(x => x.bold && x.tone === sel.panel[1][0].tone))
-    const other = sel.panel.find(r => rowText(r).startsWith('  – '))
-    assert.ok(other.slice(1).every(x => x.tone === 'dim') && other.every(x => /^n:c/.test(x.part)))
+    assert.ok(sel.panel.flat().some(x => x.s === '50 saves' && x.cite === 'failed' && x.part === 'cite:0'))
+    assert.ok(!sel.panel.some(r => rowText(r).startsWith('  – ')))
     // the map stays a graph; its cells are shorter in a short pane, so the list keeps a few rows
     assert.ok(sel.cellRows >= 4 && sel.cellRows <= 7, `${h}: ${sel.cellRows}`)
     assert.ok(sel.graph.some(r => r.some(x => /^d:/.test(x.part || ''))))
@@ -214,18 +210,17 @@ function linkedClaims() {
   return paneData(st)
 }
 
-test("a claim picked: its whole sentence wrapped under its first word, its chips; e opens its citations one at a time as the citation card draws them, the wrong ones first", () => {
+test("a claim picked: its whole sentence wrapped, its citations and checks; e opens its citations one at a time as the citation card draws them, the wrong ones first", () => {
   const data = linkedClaims()
   const rows = graphView(data, { claim: 'c1' }, { w: 110, h: 34 }).panel
-  const at = rows.findIndex(r => rowText(r).startsWith('  ▸ '))
+  const at = rows.findIndex(r => rowText(r).startsWith('  The keys'))
   const said = rows.slice(at, at + 2).map(rowText)
-  assert.match(said[0], /^ {2}▸ The keys \(v, s, \], 1, \{ \}\) need a reply .* returns null when there is no reply$/)
-  assert.equal(said[1], '    yet.')
+  assert.match(said[0], /^ {2}The keys \(v, s, \], 1, \{ \}\) need a reply .* returns null when there is no reply$/)
+  assert.equal(said[1], '  yet.')
   // every line of it is bold in its cluster's color and one press (pane.tsx draws the lines as one Button)
   assert.ok(rows.slice(at, at + 2).every(r => r.every(x => x.part === 'c:c1') && r.filter(x => x.s.trim()).every(x => x.bold && /^c\d$/.test(x.tone))))
-  assert.equal(rowText(rows[at + 2]), '    claim 1 of 6  no citation  turn 1')
-  // why it has none, under its chips
-  assert.equal(rowText(rows[at + 3]), '    The reply cites no record for this claim, so thimble did not check it.')
+  // why it has none, with its turn
+  assert.equal(rowText(rows[at + 2]), '  no citation: the reply cites no record for it · turn 1')
   // computed evidence: the cited words bold in the citation color and the check beside them, the code line that printed
   // the value, then the output line after │, the cited words tinted, and how many output lines more under it; a file's:
   // its place, then the line; then which citation of how many. A press on a citation opens its evidence
@@ -238,21 +233,22 @@ test("a claim picked: its whole sentence wrapped under its first word, its chips
   const d2 = { ...data, claims: [c, ...data.claims.slice(1)] }
   const shut = graphView(d2, { claim: 'c1' }, { w: 110, h: 34 })
   assert.equal(shut.cites, 2)
-  // shut: its chips, then its first citation (the failed one first), its words and check, why, its place and line
-  assert.match(panel(shut), /\n {4}claim 1 of 6 {2}✓ 1 verified {2}× 1 failed {2}turn 1\n {4}When round #5 arrives, answer first {3}× failed · citation\n {4}The file says it once\.\n {4}revisions\.jsonl:412\n {4}│ summary: When round #5 arrives, answer first, then\n {2}◦ Note/)
-  assert.ok(shut.panel.flat().filter(x => x.s.includes('When round #5')).every(x => x.part === 'ev-1'))
-  // the rest of the evidence (the code, the other citations) waits for e
-  assert.doesNotMatch(panel(shut), /print\(|3,752/)
+  // shut: its citations in the reply's look (no reply to read them from: on a line of their own), each a press that
+  // opens it as in the reply, then the checks
+  assert.match(panel(shut), /\n {2}3,752 saves · When round #5 arrives, answer first\n {2}✓ 1 verified +× 1 failed · turn 1$/)
+  assert.deepEqual(shut.panel.flat().filter(x => x.cite).map(x => [x.s, x.cite, x.part]), [['3,752 saves', 'verified', 'cite:0'], ['When round #5 arrives, answer first', 'failed', 'cite:1']])
+  // the evidence itself (the code, the lines) waits for e
+  assert.doesNotMatch(panel(shut), /print\(|revisions\.jsonl/)
   // e: the list goes, the claim stays with its evidence; the failed one comes first; ‹ i of n › under it, ‹ and › a
   // press that steps
   const v = graphView(d2, { claim: 'c1', open: true }, { w: 110, h: 34 })
-  assert.match(panel(v), /turn 1\n\n {4}When round #5 arrives, answer first {3}× failed · citation\n {4}The file says it once\.\n {4}revisions\.jsonl:412\n {4}│ summary: When round #5 arrives, answer first, then\n\n {4}‹ 1 of 2 ›$/)
+  assert.match(panel(v), /turn 1\n\n {2}When round #5 arrives, answer first {3}× failed · citation\n {2}The file says it once\.\n {2}revisions\.jsonl:412\n {2}│ summary: When round #5 arrives, answer first, then\n\n {2}‹ 1 of 2 ›$/)
   assert.deepEqual(v.panel.at(-1).filter(x => x.part && x.s.trim()).map(x => [x.s, x.part]), [['‹', 'cite-prev'], ['›', 'cite-next']])
   assert.doesNotMatch(panel(v), /\?|wrong|problems first/)
   assert.ok(repairable(v.shown))
   assert.ok(v.panel.flat().some(x => x.tint && x.s === 'When round #5 arrives, answer first' && x.part === 'ev-1'))
   const second = graphView(d2, { claim: 'c1', open: true, cite: 1 }, { w: 110, h: 34 })
-  assert.match(panel(second), /turn 1\n\n {4}3,752 saves {3}✓ verified · citation\n {4}print\(f"\{n:,\} saves"\)\n {4}│ 3,752 saves labeled coordination\n {4}│ \+ 2 more lines\n\n {4}‹ 2 of 2 ›$/)
+  assert.match(panel(second), /turn 1\n\n {2}3,752 saves {3}✓ verified · citation\n {2}print\(f"\{n:,\} saves"\)\n {2}│ 3,752 saves labeled coordination\n {2}│ \+ 2 more lines\n\n {2}‹ 2 of 2 ›$/)
   assert.doesNotMatch(panel(second), /said in/)
   assert.ok(!repairable(second.shown))
   const runs = second.panel.flat()
@@ -315,12 +311,12 @@ function corrected(n) {
 test('a corrected claim: a corrected chip; e opens its History, one word-level diff per correction with its reason, then the evidence', () => {
   const data = corrected(2)
   const shut = graphView(data, { claim: 'c3' }, { w: 70, h: 40 })
-  assert.match(panel(shut), /\n {2}▸ All of the admin's deletions came after the edits stopped, from\n {4}June 23 to July 14\.\n {4}claim 3 of 3 {2}no citation {2}corrected ×2 {2}turn 3\n {4}The reply cites no record for this claim, so thimble did not check\n {4}it\.$/)
+  assert.match(panel(shut), /\n {2}▸ All of the admin's deletions came after the edits stopped, from\n {4}June 23 to July 14\.\n {4}no citation: the reply cites no record for it · corrected ×2 ·\n {4}turn 3$/)
   assert.ok(shut.panel.flat().some(x => x.s === 'corrected ×2' && x.tone === 'cite'))
   assert.equal(shut.fixes, 2)
   const open = graphView(data, { claim: 'c3', open: true }, { w: 70, h: 40 })
   const p = panel(open)
-  assert.match(p, /turn 3\n\n {4}History\n {4}turn 1 → turn 2\n {4}The deletions began Most of the admin's deletions came after the\n {4}edits stopped, from June 23 to July 14\.\n {4}reason: 444 of the 5,217 deletions came before June 23\.\n\n {4}turn 2 → turn 3\n {4}Most All of the admin's deletions came after the edits stopped,\n {4}from June 23 to July 14\.\n {4}reason: none came before\.$/)
+  assert.match(p, /3\n\n {2}History\n {2}turn 1 → turn 2\n {2}The deletions began Most of the admin's deletions came after the\n {2}edits stopped, from June 23 to July 14\.\n {2}reason: 444 of the 5,217 deletions came before June 23\.\n\n {2}turn 2 → turn 3\n {2}Most All of the admin's deletions came after the edits stopped, from\n {2}June 23 to July 14\.\n {2}reason: none came before\.$/)
   // deleted words red and struck through, inserted green; a full stop alike stays plain
   const runs = open.panel.flat()
   assert.ok(runs.some(x => x.s === 'The' && x.tone === 'del') && runs.some(x => x.s === 'deletions' && x.tone === 'del'))
@@ -441,7 +437,8 @@ test('a cluster named #N is the cluster of the Nth claim of the same list, never
 test('the head has a caption at rest, the map\'s or the list\'s; once something is chosen the detail takes its rows', () => {
   const big = paneData(uneven())
   assert.equal(rowText(graphView(big, {}, { w: 136, h: 40 }).head[1]), CAPTION_MAP)
-  assert.equal(graphView(big, { claim: 'c40' }, { w: 136, h: 40 }).head.length, 1)
+  // once something is chosen the head goes: the top row's way back says where the person is
+  assert.equal(graphView(big, { claim: 'c40' }, { w: 136, h: 40 }).head.length, 0)
   const few = paneData(withPassage().st)
   assert.equal(rowText(graphView(few, {}, { w: 100, h: 40 }).head[1]), CAPTION_LIST)
 })
@@ -474,31 +471,43 @@ function withPassage() {
   return { st, md }
 }
 
-test("a claim picked shows the paragraph it came from: its own words plain, the citations underlined and a press that explains them", () => {
+test("a claim picked: why it holds under it, the lens's words, its citations in the reply's look and a press that opens each; the session's explainers are not marked", () => {
   const { st, md } = withPassage()
+  const kept = st.claims.find(c => c.id === 'c2')
+  kept.because = 'The copy that finished a round bumped [the counter to 412](#), so the next copy knew it ended.'
+  kept.sources.push({ ref: 'a1@0', row: 'a1', at: md.indexOf('[412 on'), label: '412 on the counter' })
   const data = paneData(st)
   const c2 = data.claims.find(c => c.id === 'c2')
-  const pass = passageRows(md, c2.said[0], 80)
-  assert.deepEqual(pass.words, ['the counter to 412', '412 on the counter'])
-  const t = pass.rows.map(rowText).join('\n')
-  assert.match(t, /^▎ Some copies used a public hit counter as a signal\. They bumped the counter to\n▎ 412 when a round ended/)
-  assert.doesNotMatch(t, /Another paragraph|\]\(#\)/)
-  const runs = pass.rows.flat()
-  assert.ok(runs.some(x => x.underline && x.part === 'w:0' && x.s.includes('412')))
+  const why = reasonOf(c2, { md, place: c2.said[0] })
+  assert.equal(why.text, 'The copy that finished a round bumped the counter to 412, so the next copy knew it ended.')
+  // its link is the claim's source of the same words; the source it does not name follows on a line of its own
+  const cite = why.spans.find(x => x.look.cite)
+  assert.equal(why.text.slice(cite.a, cite.b), 'the counter to 412')
+  assert.equal(cite.look.part, `cite:${c2.sources.findIndex(x => x.label === 'the counter to 412')}`)
+  assert.equal(why.more.text, '412 on the counter')
+  // in the pane (a short session's list): the claim, why, the citation the text does not hold, the checks
+  const v = graphView(data, { claim: 'c2' }, { w: 90, h: 40, passage: { md, place: c2.said[0] } })
+  assert.match(panel(v), /● signals · 2 claims\n {2}◦ Some copies used public hit counters as signals\.\n {2}▸ A copy bumped the counter to 412 when a round ended\.\n {4}The copy that finished a round bumped the counter to 412, so the next copy knew it\n {4}ended\.\n {4}412 on the counter\n {4}.*turn 1$/)
   // the session's explainers are not marked on the claims: the claim's words are its own explainer
-  assert.ok(!runs.some(x => x.bg === 'gloss'))
-  // the claim's own words plain, the rest of the paragraph dim
-  assert.ok(runs.some(x => x.s.startsWith('They bumped') && !x.tone) && runs.some(x => x.s.startsWith('Some copies') && x.tone === 'dim'))
-  // in the pane: under the claim's chips, then the explainer asked for, then its first citation
-  const v = graphView(data, { claim: 'c2', term: 'public hit counter' }, { w: 90, h: 40, passage: { md, place: c2.said[0] }, explainer: { term: 'public hit counter', body: 'A free web page that counts visits.', here: 'Copies [bumped it](revisions.jsonl#L4).' } })
-  assert.match(panel(v), /claim 2 of 2 {2}✓? ?.*turn 1\n {4}▎ Some copies used a public hit counter[\s\S]*\n {4}▎ public hit counter {2}explainer\n {4}▎ A free web page that counts visits\.\n {4}▎ Copies bumped it\.\n {4}the counter to 412/)
+  assert.ok(!v.panel.flat().some(x => x.bg === 'gloss'))
 })
 
-test('an explainer under a claim: written, being written, or why not', () => {
-  assert.deepEqual(explainerRows({ term: 'proxy link', pending: true }, 60).map(rowText), ['▎ proxy link  explainer', '▎ writing an explainer of these words…'])
-  assert.equal(rowText(explainerRows({ term: 'proxy link', why: 'The call failed.' }, 60)[1]), '▎ The call failed.')
-  assert.ok(explainerRows({ term: 'x', why: 'no' }, 60)[1].some(r => r.tone === 'bad'))
-  assert.deepEqual(explainerRows(null, 60), [])
+test("with no reason from the lens: the reply's sentences that said it, with their citations; sentences that only say it again put its citations in its own words", () => {
+  const { st, md } = withPassage()
+  const data = paneData(st)
+  // c2's sentence of the reply says more than the claim: it shows, its citations in place, matched by their offsets
+  const c2 = data.claims.find(c => c.id === 'c2')
+  const why = reasonOf({ ...c2, text: 'The counter showed when a round was over.' }, { md, place: c2.said[0] })
+  assert.match(why.text, /^They bumped the counter to 412 when a round ended, and the next copy read 412 on the counter\.$/)
+  assert.deepEqual(why.spans.map(x => why.text.slice(x.a, x.b)), ['the counter to 412'])
+  assert.equal(why.more.text, '')
+  // the claim said again: no sentence, its citation drawn in the claim's words
+  const same = reasonOf({ ...c2, text: 'They bumped the counter to 412 when a round ended, and the next copy read 412 on the counter.' }, { md, place: c2.said[0] })
+  assert.equal(same.text, '')
+  assert.deepEqual(same.inClaim.map(x => x.look.part), ['cite:0'])
+  // a claim of Claude's with no citation says why under it
+  const c1 = data.claims.find(c => c.id === 'c1')
+  assert.match(panel(graphView(data, { claim: 'c1' }, { w: 90, h: 40, passage: { md, place: c1.said[0] } })), /no citation: the reply cites no record for it · turn 1/)
 })
 
 test('a claim that cites no record: a hollow dot on the map and a hollow marker in the list', () => {
@@ -508,25 +517,19 @@ test('a claim that cites no record: a hollow dot on the map and a hollow marker 
   assert.ok(v.graph.flat().some(x => x.part === 'd:c40' && x.s === '○'))
 })
 
-test("a claim said in a table row: its paragraph is that row, its cells between ·", () => {
+test("a claim said in a table row: why it holds is that row, its cells between ·", () => {
   const md = 'The kinds:\n\n| Kind | Edits |\n|---|---|\n| Shares a task answer | [138](#) |\n| Ordinary edit | 111 |\n'
   const at = md.indexOf('Shares')
-  const pass = passageRows(md, { quote: 'Shares a task answer', start: at, end: at + 20 }, 80)
-  assert.deepEqual(pass.rows.map(rowText), ['▎ Shares a task answer · 138'])
-  assert.deepEqual(pass.words, ['138'])
+  const claim = { id: 'c1', text: 'A third of the edits share answers.', sources: [{ label: '138', row: 'a1', at: md.indexOf('[138]'), status: 'verified' }] }
+  const why = reasonOf(claim, { md, place: { row: 'a1', quote: 'Shares a task answer', start: at, end: at + 20 } })
+  assert.equal(why.text, 'Shares a task answer · 138')
+  assert.deepEqual(why.spans.map(x => [why.text.slice(x.a, x.b), x.look.part]), [['138', 'cite:0']])
+  // two citations of the same words (two replies said them) show once
+  const twice = reasonOf({ id: 'c2', text: 'The admin deleted pages.', sources: [{ label: '5,144 pages', status: 'verified' }, { label: '5,144 pages', status: 'failed' }] })
+  assert.equal(twice.more.text, '5,144 pages')
 })
 
-test("a long paragraph's window keeps each row, with its … marks, within the width it was given", () => {
-  const md = `${'The copies posted round answers on shared pages while others waited for them. '.repeat(6)}They bumped [the counter to 412](#) when a round ended. ${'Later rounds went the same way on many pages of the wiki. '.repeat(6)}`
-  const at = md.indexOf('They bumped')
-  for (const n of [45, 66]) {
-    const pass = passageRows(md, { quote: 'They bumped the counter to 412', start: at, end: at + 30 }, n)
-    assert.ok(pass.rows.length === 5 && rowText(pass.rows[0]).startsWith('▎ … ') && rowText(pass.rows[4]).endsWith(' …'))
-    for (const r of pass.rows) assert.ok(rowText(r).length <= n, `${rowText(r).length} > ${n}: ${rowText(r)}`)
-  }
-})
-
-test("a short session's list with a claim picked: the other clusters one line each, so the claim's paragraph and first citation leave the keys on screen", () => {
+test("a short session's list with a claim picked: the claim and why it holds, the other claims and clusters one line each", () => {
   const st = emptyStore('s')
   const long = `${'The copies posted round answers on shared pages while others waited for them. '.repeat(4)}They bumped [the counter to 412](#) when a round ended. ${'Later rounds went the same way on many pages of the wiki. '.repeat(4)}`
   const md = `${long}\n\nThe gate held for [nine rounds](#). Two admins read the logs. The audit found [three relays](#). Most edits were small.`
@@ -543,23 +546,36 @@ test("a short session's list with a claim picked: the other clusters one line ea
   const at = { w: 72, h: 18, passage: { md, place: c1.said[0] } }
   const v = graphView(data, { claim: 'c1' }, at)
   const rows = v.panel.map(rowText)
-  // its cluster whole: the name, the claim with its chips and paragraph, the other claim
+  // its cluster: the name, the claim (its sentence of the reply only says it again: its citation in its words), the
+  // checks, the other claim on one line
   assert.ok(rows.some(r => r.startsWith('● how the copies signaled each other · 2 claims')))
   assert.ok(rows.some(r => r.startsWith('  ▸ They bumped the counter to 412')))
-  assert.ok(rows.some(r => /^ {4}▎ /.test(r)))
-  assert.ok(rows.some(r => r.startsWith('  ◦ The copies posted round answers')))
+  assert.ok(v.panel.flat().some(x => x.cite && x.s === 'the counter to 412' && x.part === 'cite:0'))
+  assert.ok(rows.some(r => /^ {4}.*turn 1$/.test(r)))
+  assert.ok(rows.includes('  ◦ The copies posted round answers on shared pages.'))
   // every other cluster one line, its claims left out; a press on it chooses the cluster
   for (const name of ['whether the gate held · 1 claim', 'who watched the wiki · 1 claim', 'what the audit found · 1 claim', 'what the edits were like · 1 claim']) assert.ok(rows.includes(`● ${name}`), name)
   assert.ok(!rows.some(r => /Two admins|Most edits/.test(r)))
   const line = v.panel.find(r => rowText(r) === '● who watched the wiki · 1 claim')
   assert.ok(line.every(x => x.part === `g:${data.groups.find(g => g.name === 'who watched the wiki').id}`))
-  // the head, the blank row, the list, the rule and the keys fit the pane's rows: its paragraph keeps fewer rows
   assert.ok(v.head.length + 1 + v.panel.length + 2 <= at.h, `${v.head.length + 1 + v.panel.length + 2} > ${at.h}\n${rows.join('\n')}`)
-  assert.ok(rows.filter(r => /^ {4}▎ /.test(r)).length < 5)
-  // a tall pane keeps the paragraph's five rows
-  const tall = graphView(data, { claim: 'c1' }, { ...at, h: 60 }).panel.map(rowText)
-  assert.equal(tall.filter(r => /^ {4}▎ /.test(r)).length, 5)
   // nothing picked: every cluster with its claims, as before
   const rest = graphView(data, {}, at).panel.map(rowText)
   assert.ok(rest.some(r => r.includes('Two admins read the logs')) && rest.some(r => r.includes('Most edits were small')))
+})
+
+test("a claim keeps the lens's reason it holds (`because`), and a restatement gives one to a claim that had none", () => {
+  const st = emptyStore('s')
+  const md = 'The gate held for [nine rounds](#). Two admins read the logs.'
+  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: md }], out: { claims: [
+    { claim: 'The gate held for nine rounds.', quote: 'The gate held for nine rounds', cluster: 'gate', because: 'No relay got past it in [nine rounds](#).' },
+    { claim: 'Two admins read the logs.', quote: 'Two admins read the logs', cluster: 'gate' },
+  ] } })
+  assert.equal(st.claims[0].because, 'No relay got past it in [nine rounds](#).')
+  assert.equal(st.claims[1].because, undefined)
+  applyTurn(st, { turn: 2, places: [{ row: 'a2', by: 'claude', turn: 2, text: 'As said, two admins read the logs.' }], out: { claims: [
+    { same: 'c2', quote: 'two admins read the logs', because: 'The logs show both of their names.' },
+  ] } })
+  assert.equal(st.claims[1].because, 'The logs show both of their names.')
+  assert.equal(paneData(st).claims[0].because, 'No relay got past it in [nine rounds](#).')
 })

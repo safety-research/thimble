@@ -19,7 +19,11 @@
       "type": "string",
       "title": "Citation checks",
       "description": "auto: a second Claude checks every citation after each reply. on demand: it checks a citation when you open it, which spends fewer tokens. off: no checks.",
-      "options": ["auto", "on demand", "off"],
+      "options": [
+        "auto",
+        "on demand",
+        "off"
+      ],
       "default": "on demand"
     },
     "cards": {
@@ -49,8 +53,18 @@
     "claims": {
       "type": "boolean",
       "title": "Claims",
-      "description": "c opens what Claude and you claimed in the session, with sources; the bar counts them. The largest part of the call after each reply.",
+      "description": "c opens what Claude and you claimed in the session, with why each holds and its sources; the bar counts them. Claims found says when they are found.",
       "default": true
+    },
+    "claimsMode": {
+      "type": "string",
+      "title": "Claims found",
+      "description": "auto: after each reply, the largest part of the call after it. on demand: when you press f in the Claims pane, which spends fewer tokens.",
+      "options": [
+        "auto",
+        "on demand"
+      ],
+      "default": "on demand"
     },
     "counts": {
       "type": "boolean",

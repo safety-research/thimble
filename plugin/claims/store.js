@@ -5,10 +5,11 @@
 // folder (core/env.ts keptDir):
 //
 //   {v: 2, session, updated,
-//    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?, why?,
+//    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?, why?, because?,
 //              links?: [{to, how: supports | contradicts | same topic}]}],
 //    clusters: [{id, name, turn, named, about?}],
-//    gaps: [{turn, why}]}
+//    gaps: [{turn, why}],
+//    read?: [row]}
 //
 //   a name   a cluster's name is kept whole (up to MAX_NAME characters, past that cut after a word); the pane cuts it
 //            only to draw it. A store of v 1 kept names cut at 60 characters, often in a word: read, such a name ends
@@ -20,6 +21,11 @@
 //   a place  {row, by, turn, quote, sentence, start, end}: where a claim was said, the message row, who said it
 //            (claude | person), the words matched and their sentence, as offsets into the row's markdown.
 //   ×N       a claim's said.length: each distinct place it was said.
+//   because  why the claim holds, as the lens gave it: one or two sentences in the message's words, its citation links
+//            `[words](#)` kept. The pane shows it under the claim picked, its citations as the reply draws them.
+//   read     the answers the claims lens has read (each its row), so the pane offers only the others to find claims
+//            in (claims are found on demand, unless Claims found is auto). A store without it was kept
+//            while every answer was read after its reply.
 //   why      on a claim that revises another: why the earlier one was wrong, as the lens gave it. The pane shows it in
 //            the claim's history (e) with what the earlier one said (graph.js correctionsOf); with none, the reason
 //            of the check that failed the earlier one's citation stands for it.
@@ -42,6 +48,7 @@ const MAX_TEXT = 200
 const MAX_QUOTE = 240
 const MAX_SENTENCE = 320
 const MAX_WHY = 240
+const MAX_BECAUSE = 600
 const MAX_ABOUT = 240
 /** A cluster's name is kept up to this many characters (past that, cut after a word). */
 const MAX_NAME = 160
@@ -460,7 +467,7 @@ export function parseClaims(list) {
     // `at`: its place in the lens's list (1 for the first), which a later claim of the same turn revises as "#1"
     const links = (Array.isArray(x.links) ? x.links : []).map(l => ({ to: str(String(l?.to ?? ''), 20), how: howOf(l?.how ?? l?.type) })).filter(l => l.to && l.how).slice(0, 4)
     const revises = str(String(x.revises ?? ''), 20) || null
-    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises, why: (revises && str(x.why, MAX_WHY)) || null, links })
+    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises, why: (revises && str(x.why, MAX_WHY)) || null, because: str(x.because, MAX_BECAUSE) || null, links })
   }
   // every claim the turn gave: a long answer can state many
   return out
@@ -509,6 +516,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     }
     if (target) {
       local.set(it.at, target.id)
+      if (it.because && !target.because) target.because = it.because
       for (const l of it.links) links.push({ from: target.id, ...l })
       if (!target.said.some(p => samePlace(p, where.place))) {
         target.said.push(where.place)
@@ -519,7 +527,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     }
     const id = nextId(store.claims, 'c')
     const ofClaim = /^\s*#(\d+)\s*$/.exec(it.cluster)
-    const claim = { id, text: it.text, by: it.by, cluster: ofClaim ? null : clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources }
+    const claim = { id, text: it.text, by: it.by, cluster: ofClaim ? null : clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources, ...(it.because ? { because: it.because } : {}) }
     if (ofClaim) inClaimsCluster.push({ id, of: Number(ofClaim[1]) })
     const old = it.revises ? store.claims.find(c => c.id === it.revises) : null
     if (old) {

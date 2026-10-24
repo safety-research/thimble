@@ -61,7 +61,7 @@ export function modelWhy(r) {
       ? 'the model answered with no text, as it does when its safeguards refuse the records; a rule (--regex or --code) can label them'
       : 'the model answered with no text'
     case 'aborted': return 'the call was stopped before an answer came (it took too long, or the turn was stopped)'
-    case 'nothing-to-fork': return 'there is no finished turn yet to ask from'
+    case 'nothing-to-fork': return 'Claude has not finished a reply since this session started, so there is nothing to read from yet; try again after its next reply'
     case 'refused': return r.error ? `Claude Code did not send the call: ${String(r.error)}` : 'Claude Code did not send the call'
     default: return r.reason ? `no answer came back (${String(r.reason)})` : 'no answer came back'
   }
