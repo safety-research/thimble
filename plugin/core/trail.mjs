@@ -7,10 +7,11 @@
 //   crumbOf(kind, args)            -> the pane's crumb: its words in the trail (`claims`, `cluster`, `citation 3`) and
 //                                     how deep it stands among the panes of its kind (the claims overview 0, a cluster
 //                                     1, a claim 2, its evidence 3)
-//   nextTrail(was, open, kind, args) -> the trail under a pane about to show: another kind, or a deeper pane of the
-//                                     same kind, goes on top of the one shown now; the same depth takes its place (j
-//                                     and k in a cluster); a shallower one goes back down to it (e closes the
-//                                     evidence: the claim again); a pane that was not open starts a new trail
+//   nextTrail(was, open, kind, args) -> the trail under a pane about to show: another kind, a deeper pane of the
+//                                     same kind, or another side thread, goes on top of the one shown now; the same
+//                                     depth takes its place (j and k in a cluster); a shallower one goes back down
+//                                     to it (e closes the evidence: the claim again); a pane that was not open starts
+//                                     a new trail
 //   crumbsLine(trail, now, width)  -> the crumbs as drawn: the earlier ones (each its index in the trail), the one
 //                                     shown now, the ones left out at the start for want of room
 //   treeRows(el, width)            -> about how many rows a drawing takes at `width` cells: what the pane under its
@@ -45,6 +46,9 @@ export function crumbOf(kind, args) {
   }
 }
 
+/** The kinds whose panes at one depth each go on the trail, and what tells them apart. */
+const OWN = { thread: a => String(a.key ?? '') }
+
 /** A pane as the trail keeps it. */
 export const entryOf = now => ({ kind: now.kind, args: now.args, title: now.title ?? now.kind, ...(now.rows ? { rows: now.rows } : {}) })
 
@@ -55,7 +59,9 @@ export function nextTrail(was, open, kind, args) {
   if (was.kind !== kind) return push()
   const d0 = crumbOf(was.kind, was.args).depth
   const d1 = crumbOf(kind, args).depth
-  if (d1 === d0) return trail
+  // the same depth takes its place (the next claim, value or citation), but another side thread goes on top: its
+  // conversation is the person's own, kept to go back to (a heads-up's offer asked from the tray while a thread shows)
+  if (d1 === d0) return OWN[kind] && OWN[kind](obj(was.args)) !== OWN[kind](obj(args)) ? push() : trail
   if (d1 > d0) return push()
   // shallower: the trail's panes of this kind as deep or deeper go
   let i = trail.length
