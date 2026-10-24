@@ -1,0 +1,75 @@
+// The side pane's way back (core/trail.mjs): which pane goes on the trail, which takes another's place, which goes back
+// down it; the crumbs as drawn; the rows a drawing takes. All data is made up.
+//   node --test plugin/core/test/trail.test.mjs
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+
+import { crumbOf, crumbsLine, nextTrail, TRAIL_MAX, treeRows } from '../trail.mjs'
+
+/** The pane after `kind, args` opens over `was` (open), as core/pane.ts openPane keeps it. */
+const go = (was, kind, args, open = true) => ({ kind, args, title: kind, trail: nextTrail(was, open, kind, args) })
+const words = now => [...(now.trail ?? []).map(t => crumbOf(t.kind, t.args).words), crumbOf(now.kind, now.args).words]
+
+test('claims › cluster › claim › evidence: each step deeper goes on the trail, j and k take the place, e back down', () => {
+  let p = go(null, 'claims', {})
+  assert.deepEqual(p.trail, [])
+  p = go(p, 'claims', { group: 'k1', at: 0 })
+  p = go(p, 'claims', { claim: 'c1', at: 0 })
+  // k and j in the cluster: the claim's place, not a new step
+  p = go(p, 'claims', { claim: 'c2', at: 1 })
+  assert.deepEqual(words(p), ['claims', 'cluster', 'claim'])
+  assert.deepEqual(p.trail.at(-1).args, { group: 'k1', at: 0 })
+  p = go(p, 'claims', { claim: 'c2', at: 1, open: true, cite: 0 })
+  assert.deepEqual(words(p), ['claims', 'cluster', 'claim', 'evidence'])
+  // e closes the evidence: back to the claim, the trail as it was under it
+  p = go(p, 'claims', { claim: 'c2', at: 1 })
+  assert.deepEqual(words(p), ['claims', 'cluster', 'claim'])
+  // the claims' own way back to the cluster
+  p = go(p, 'claims', { group: 'k1', at: 1 })
+  assert.deepEqual(words(p), ['claims', 'cluster'])
+})
+
+test('a pane of another kind goes on top: a citation of a side answer stands over the claim it was asked about', () => {
+  let p = go(null, 'claims', {})
+  p = go(p, 'claims', { claim: 'c1' })
+  p = go(p, 'evidence', { row: 'r1', n: 3 })
+  assert.deepEqual(words(p), ['claims', 'claim', 'citation 3'])
+  assert.deepEqual(p.trail.at(-1), { kind: 'claims', args: { claim: 'c1' }, title: 'claims' })
+  // another citation takes the citation's place
+  p = go(p, 'evidence', { row: 'r1', n: 4 })
+  assert.deepEqual(words(p), ['claims', 'claim', 'citation 4'])
+})
+
+test('a pane opened while none was open starts a new trail; the trail keeps its last panes', () => {
+  let p = go(null, 'claims', {})
+  p = go(p, 'claims', { claim: 'c1' })
+  assert.deepEqual(go(p, 'labels', {}, false).trail, [])
+  // kinds that take turns: each goes on top
+  for (let n = 1; n <= TRAIL_MAX + 5; n++) p = go(p, n % 2 ? 'evidence' : 'threads', { row: 'r1', n })
+  assert.equal(p.trail.length, TRAIL_MAX)
+})
+
+test('the crumbs that fit: the newest kept, `…` where earlier ones were left out, each earlier one with its place', () => {
+  let p = go(null, 'claims', {})
+  p = go(p, 'claims', { group: 'k1' })
+  p = go(p, 'claims', { claim: 'c1' })
+  p = go(p, 'claims', { claim: 'c1', open: true })
+  const all = crumbsLine(p.trail, p, 80)
+  assert.equal(all.cut, false)
+  assert.deepEqual(all.crumbs.map(c => [c.words, c.at]), [['claims', 0], ['cluster', 1], ['claim', 2], ['evidence', -1]])
+  const short = crumbsLine(p.trail, p, 20)
+  assert.equal(short.cut, true)
+  assert.deepEqual(short.crumbs.map(c => c.words), ['claim', 'evidence'])
+})
+
+test("a drawing's rows: a column adds its children, a row takes its tallest, text wraps unless cut, as Claude Code's elements hold their children", () => {
+  const T = (children, props = {}) => ({ type: 'Text', props, children: [children] })
+  const B = (children, props = {}) => ({ type: 'Box', props, children })
+  assert.equal(treeRows(T('a'.repeat(25)), 10), 3)
+  assert.equal(treeRows(T('a'.repeat(25), { wrap: 'truncate-end' }), 10), 1)
+  assert.equal(treeRows(B([T('one'), T('two\nthree')], { flexDirection: 'column' }), 40), 3)
+  assert.equal(treeRows(B([T('left'), B([T('x'), T('y')], { flexDirection: 'column' })]), 40), 2)
+  assert.equal(treeRows(B([T('x')], { flexDirection: 'column', marginTop: 1, borderStyle: 'round' }), 40), 4)
+  // the plain elements of the tests and the fixer's copy hold their children in their props
+  assert.equal(treeRows({ type: 'Box', props: { flexDirection: 'column', children: [{ type: 'Text', props: { children: 'a' } }, { type: 'Input', props: {} }] } }, 40), 2)
+})

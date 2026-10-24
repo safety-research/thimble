@@ -41,13 +41,13 @@ import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
 import { cut, textWidth } from '../core/text.js'
-import { accent, themeNow } from '../core/theme'
+import { themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeHeat, citeLook, messageEl, type MarkLook } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import type { ThreadScope } from './seam'
-import { askThread, cardsOfTurn, isSending, listThreads, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
+import { askThread, cardsOfTurn, isSending, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
 import { aboutOf, answerRow, askWords, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
 
 type Engine = EngineInterface
@@ -410,23 +410,28 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
 
 const column = (els: Any, children: Any[]) => els.Box({ flexDirection: 'column', children })
 
-/** One thread (kind `thread`): what it is on, its conversation, the input bar. */
-async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> {
-  const { Button, Text } = els
+/** One thread (kind `thread`): what it is on and its conversation (`body`), then the key row and the input bar
+ *  (`bottom`), which the docked pane keeps at its bottom (core/pane.ts). The way back to the list it was opened from is
+ *  the pane's own top row. */
+export async function threadParts($: Engine, e: Any, els: Any, args: Any): Promise<{ body: Any[]; bottom: Any[] }> {
+  const { Text } = els
   const key = String(args?.key ?? '')
   await $.state.get({ plugin: 'thimble', key: 'thread', id: key })
   const t = threadOf(key)
-  if (!t) return Text({ dimColor: true, wrap: 'wrap', children: 'This thread is no longer in the session.' })
+  if (!t) return { body: [Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This thread is no longer in the session.' })], bottom: [] }
   const { W, H } = sizeOf(e)
-  const top: Any[] = []
-  // the way back to the list, when the list opened it (esc closes the pane)
-  if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', hover: quiet('thread-back'), onPress: () => listThreads($), children: [Text({ color: accent(), children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
   const subject = await subjectOfPane($, e, els, t, W)
   const pk = paneKeys($, t, subject.keys)
   const keys = keysRow(els, pk)
-  const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - top.length - keys.length))
+  const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - keys.length))
   ringDrawn($, key)
-  return column(els, [...top, subject.el, ...conv, ...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key), pk)])
+  return { body: [subject.el, ...conv], bottom: [...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key), pk)] }
+}
+
+/** One thread (kind `thread`), whole: its parts in one column. */
+async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> {
+  const p = await threadParts($, e, els, args)
+  return column(els, [...p.body, ...p.bottom])
 }
 
 /** The scope of a pane of thimble's, for the thread under it: what it shows, in words. */

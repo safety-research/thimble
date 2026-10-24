@@ -266,8 +266,8 @@ test('the margin of a passage or a card opens its thread; it says asked (↳) on
 
 // Claude Code places a pane at any width only for an open made while the person's press runs: one the press leaves to
 // run after it returned is unasked and waits undrawn below 144 columns. So each press that opens the side pane (the
-// margin of a passage or a card, a row of the thread list, the way back to it) returns the open, and the open is made
-// by the time what it returns settles, as Claude Code calls a press
+// margin of a passage or a card, a row of the thread list) returns the open, and the open is made by the time what it
+// returns settles, as Claude Code calls a press. (The way back to the list is the pane's own top row: core/pane.ts.)
 test('each press that opens the side pane makes the open inside the press', async () => {
   const s = setup()
   const opens: string[] = []
@@ -292,8 +292,6 @@ test('each press that opens the side pane makes the open inside the press', asyn
   await asked
   const list = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'threads', {}, els))
   expect(await pressed(list.find(n => n.type === 'Button' && n.props?.key === 'thread-0-open').props.onPress)).toBe(1)
-  const one = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY, from: 'threads' }, els))
-  expect(await pressed(one.find(n => n.type === 'Button' && n.props?.key === 'back').props.onPress)).toBe(1)
 })
 
 test('the list of threads (t) draws each thread as a press that holds only text, as Claude Code draws a Button', async () => {

@@ -189,6 +189,9 @@ test('a card call keeps the card and answers what it read and what it draws; its
   // a new card needs a title
   const r5 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1e', data: 'runs.json', view: VIEW } as never)) as Any
   expect(String(r5.result)).toContain('`title` is empty')
+  // a call with no argument at all (its input did not parse): it says so, and blames no one field
+  const r6 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1f' } as never)) as Any
+  expect(String(r6.result)).toBe('The card did not draw: the call\'s input was empty or did not parse as JSON. Send the call again, whole.')
 })
 
 test('a new card waits while the run of calls above it is live and draws once it folds; a card drawn before stays when a later run is live', async ($, on) => {

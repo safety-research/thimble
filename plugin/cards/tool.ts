@@ -187,6 +187,11 @@ function failed(id: string, r: Any, update: boolean): string {
 export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const t0 = Date.now()
   const input = e ?? {}
+  // no argument at all: the call's input did not arrive or did not parse (Claude Code says `input JSON failed to
+  // parse`), so no one field is to blame
+  if (!['title', 'data', 'view', 'edits', 'id'].some(k => input[k] != null && String(input[k]).trim() !== '')) {
+    return { result: 'The card did not draw: the call\'s input was empty or did not parse as JSON. Send the call again, whole.' }
+  }
   const toolUseId = String(input.tool_use_id ?? '')
   const given = String(input.id ?? '').trim()
   const update = !!given
@@ -199,7 +204,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // agent's own transcript, where the person never sees a card
   const fork = forkOf(input.agentId)
   const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : fork?.kind === 'thread' ? await threadCardAnchor($, input.agentId, target) : null
-  if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation, the copy that v starts and a side thread draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
+  if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation, the copy v starts and a side thread draw cards (the analyst sees only their calls). Give the rows and the view to the main conversation.' }
   // the designer fork draws its own cards under the answer v was pressed on. A card that does not stand there (main's,
   // whose id the fork read in its copy of the conversation, or one under another answer) is not the fork's to change:
   // its call draws a new card, from that card's view and rows
@@ -208,7 +213,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const before = borrowed ? null : found
   // a version keeps the card's title unless the call gives a new one
   const title = oneLine(String(input.title ?? ''), 120) || found?.title || ''
-  if (!title) return { result: 'The card did not draw: `title` is empty: give the card\'s title, what it shows in a few words.' }
+  if (!title) return { result: 'The card did not draw: `title` is empty. Give the card\'s title in a few words.' }
   const placeWords = (row: string | null) => (row?.startsWith('thread:') ? 'in the side thread, under your answer' : 'under the answer v was pressed on')
   const meta: CardMeta = before ?? {
     id, version: 0, last: 0, lastFile: '', title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
