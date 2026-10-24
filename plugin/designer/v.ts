@@ -239,6 +239,19 @@ export async function turnDesigner($: Engine): Promise<void> {
 }
 
 export const registerDesigner: Register = on => {
+  // a click on the bar's `v card`: what v does, started in this hook, so the plugin's other hooks serve its fork
+  on('ui.press', { element: /^bar-v$/ }, async ($, e, next) => {
+    if (e.plugin !== 'thimble') return next(e)
+    try {
+      const t = await vKey($, 'v', 0)
+      if (!t) return next(e)
+      await t.now()
+    } catch {
+      return next(e)
+    }
+    return { element: e.element }
+  }).catch(($, e, next) => next(e))
+
   // a reload of the plugin, or a resumed session: the answer and the design that runs are known again; a design whose
   // fork is gone ends as failed, and says so
   on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {

@@ -325,6 +325,16 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   expect(textOf(rows[0])).toBe('  ✓ thimble fixed: Bar says read for coverage · tests pass')
   expect(textOf(rows[1])).toBe('    y use it now · d what changed · n later')
   expect(s.notes).toEqual([{ text: 'thimble fixed: Bar says read for coverage · tests pass', title: 'thimble' }])
+  // each key's words are a click that does what the key does: d opens what changed (the d key closes it again)
+  const keyButton = (rs: Any[], k: string): Any => {
+    const walk = (n: Any): Any => (!n || typeof n !== 'object' ? null : Array.isArray(n) ? n.map(walk).find(Boolean) ?? null : n.type === 'Button' && n.props?.key === `fix-key-${k}` ? n : walk(n.props?.children))
+    return walk(rs)
+  }
+  await keyButton(rows, 'd').props.onPress()
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toContain('    Changed     1 file · tests pass')
+  await (await fixKey(s.$, 'd'))!.later()
+  rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows[1])).toBe('    y use it now · d what changed · n later')
   // d: a few lines in the line's place, not a diff
   await (await fixKey(s.$, 'd'))!.later()
   rows = await fixLineRows(s.$, ELS, 110)

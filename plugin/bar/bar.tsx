@@ -63,7 +63,8 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
   if (b) out.push({ id: 'busy', glyph: b.glyph, words: [`${b.word}${b.secs != null ? ` ${b.secs}s` : ''}`, ...b.more].join(' · ') })
   const features = await barLeft($, on, preview)
   if (features.some(x => x.focus)) return [...out, ...features.filter(x => x.focus)]
-  if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'card' })
+  // a click on `v card` starts the designer fork as v does, in the ui.press hook that answers it (designer/v.ts)
+  if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'card', ...(preview ? {} : { press: () => undefined }) })
   out.push(...features)
   return out
 }
