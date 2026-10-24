@@ -38,6 +38,19 @@ test('a sentence runs from the stop or line break before the mark to the next on
   assert.equal(sentenceOf(named, marksIn(named)[0]), 'Late: annotation-platform__underspecified at [87%].')
 })
 
+test("a stop inside a mark's words (a quote of two sentences) ends no sentence: the next mark's sentence holds the quote whole", () => {
+  const t = 'A typical post: ["R2 done at 03:28. Please post R3 here."](#) Later runs asked to [fast-forward their clocks](#) and report back. Then [12 pages](#) went.'
+  const ms = marksIn(t)
+  const both = 'A typical post: ["R2 done at 03:28. Please post R3 here."] Later runs asked to [fast-forward their clocks] and report back.'
+  assert.equal(sentenceOf(t, ms[0]), both)
+  assert.equal(sentenceOf(t, ms[1]), both)
+  assert.equal(sentenceOf(t, ms[2]), 'Then [12 pages] went.')
+  // a rewrite of the second mark's sentence written for one mark cannot stand where the sentence holds two: the reply
+  // stays as written, never cut inside the quote
+  const items = [{ status: 'verified' }, { status: 'corrected', shown: 'clock.wait', rewrite: 'Later runs asked: [clock.wait] the answer.' }, { status: 'verified' }]
+  assert.equal(rewritesIn(t, items).text, t)
+})
+
 test("a sentence a check rewrote stands in place of the reply's, its citations marks again; the rest of the text stays", () => {
   const text = 'First line.\n- On line 29, agent-07 wrote [“yes, that was me”](#) and closed [#118](#). Then it stopped.'
   const out = withRewrites(text, [{ status: 'corrected', rewrite: '- On line 27, agent-07 wrote [“yes, that was me”] and closed [#118].' }])

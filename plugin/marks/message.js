@@ -83,7 +83,7 @@ export function withoutMarks(text) {
 /**
  * The sentence that holds a mark, as the checker reads it and its evidence shows it: from the end of the sentence
  * before the mark to the end of the one it is in (a `.`, `!` or `?`, after any closing quote, bracket or emphasis,
- * then a space), never across a line break; on one line, with no bold, each mark in it written `[words]`.
+ * then a space, outside any mark's words), never across a line break; on one line, with no bold, each mark in it written `[words]`.
  */
 export function sentenceOf(text, mark) {
   const s = String(text || '')
@@ -104,7 +104,10 @@ export function sentenceSpan(text, mark) {
   if (b < 0) b = s.length
   const end = /[.!?]["'\u201d\u2019)*_]*\s/g
   end.lastIndex = a
+  // a mark's words are one claim: a `.` inside them (a quote of two sentences) ends no sentence
+  const marks = marksIn(s)
   for (let e; (e = end.exec(s)) && e.index < b;) {
+    if (marks.some(m => e.index > m.start && e.index < m.end)) continue
     const after = e.index + e[0].length
     if (after <= mark.start) a = after
     else if (e.index >= mark.end - 1) { b = after; break }
