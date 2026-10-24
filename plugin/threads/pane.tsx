@@ -119,7 +119,10 @@ function subjectBlock(els: Any, key: string, title: string, line = '', more: Any
   const { Box, Text } = els
   const rows = [Text({ key: `${key}-t`, wrap: 'truncate-end', children: [Text({ dimColor: true, children: '▎ ' }), Text({ bold: true, children: title })] })]
   if (line) rows.push(Text({ key: `${key}-l`, wrap: 'truncate-end', dimColor: true, children: `▎ ${line}` }))
-  more.forEach((m, i) => rows.push(Text({ key: `${key}-m${i}`, wrap: moreWrap, children: [Text({ dimColor: true, children: '▎ ' }), m] })))
+  // a part that wraps keeps its rows after the gutter, the `▎` a column of its own, as a quote's rows are drawn
+  more.forEach((m, i) => rows.push(moreWrap === 'wrap'
+    ? Box({ key: `${key}-m${i}`, flexDirection: 'row', children: [Text({ dimColor: true, children: '▎ ' }), Box({ flexShrink: 1, children: [Text({ wrap: 'wrap', children: [m] })] })] })
+    : Text({ key: `${key}-m${i}`, wrap: moreWrap, children: [Text({ dimColor: true, children: '▎ ' }), m] })))
   rows.push(Text({ key: `${key}-gap`, children: ' ' }))
   return Box({ key, flexDirection: 'column', children: rows })
 }
@@ -462,8 +465,10 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
   if (s.mark && s.mark.kind !== 'citation') {
     const m = s.mark as { row: string; kind: string; id: string }
     const g = (await partOf<Any>($, m.row, 'explain').catch(() => null))?.items?.[m.id]
-    const more = g ? [g.body, g.here, ...((g.bullets ?? []) as string[]).map(b => `· ${b}`)].filter(Boolean).map(String) : []
-    return { el: subjectBlock(els, 'subject', String(g?.title || g?.term || aboutOf(s)), m.kind === 'heads' ? 'important detail' : 'explainer', more), rows: 3 + more.reduce((n, x) => n + rowsAt(x, W), 0) }
+    // its words as the tray reads them: a link's words without its address
+    const words = (x: unknown) => String(x).replace(/\[([^\]\n]+)\]\([^()\s]*\)/g, '$1').replace(/[`*]/g, '')
+    const more = g ? [g.body, g.here, ...((g.bullets ?? []) as string[]).map(b => `· ${b}`)].filter(Boolean).map(words) : []
+    return { el: subjectBlock(els, 'subject', String(g?.title || g?.term || aboutOf(s)), m.kind === 'heads' ? 'heads-up' : 'explainer', more), rows: 3 + more.reduce((n, x) => n + rowsAt(x, W - 2), 0) }
   }
   if (s.passage) {
     const runs = passageRuns(String(s.passage.text))

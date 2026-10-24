@@ -187,7 +187,7 @@ export function aboutOf(f, info = {}) {
   if (!f) return 'this mark'
   if (f.kind === 'citation') return `the citation "${cut(plain(info.words) || `citation ${f.n}`, 80)}"`
   const g = info.gloss || {}
-  if (f.kind === 'heads') return `the important detail "${cut(plain(g.title || g.term), 80)}"`
+  if (f.kind === 'heads') return `the heads-up "${cut(plain(g.title || g.term), 80)}"`
   return `the explainer of "${cut(plain(g.term), 80)}"`
 }
 

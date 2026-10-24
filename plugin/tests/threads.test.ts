@@ -416,6 +416,32 @@ test("a passage's thread shows the passage as the reply reads, under one label: 
   expect(passageRuns('a [b](#) c', 4).map(r => r.s).join('')).toBe('a b…')
 })
 
+test("a heads-up's thread shows it as the tray does: named a heads-up, its links as words, each point's rows after the gutter", async () => {
+  const s = setup()
+  const mark = { row: 'row-made-up-5', kind: 'heads' as const, id: 'h1' }
+  await s.$.state.set({ plugin: 'thimble', key: 'answerMsg', id: mark.row }, { row: mark.row, turnId: 't5', text: 'Retries rose.', at: 1, parts: { explain: { order: ['h1'], items: { h1: {
+    id: 'h1', kind: 'heads', term: 'Retries rose', title: 'Retried runs count twice',
+    bullets: ['A run that was retried has two rows in [runs.csv](runs.csv#L4-9), so the count of failed runs is too high by about a third.'],
+  } } } } })
+  const scope = { about: 'the heads-up "Retried runs count twice"', mark }
+  const asked = askHere(s.$, scope, 'how many retried?')
+  await settle()
+  s.go()
+  await asked
+  const tree = await drawThreads(s.$, { props: { bodyColumns: 50, scroll: { bodyRows: 40 } } }, 'thread', { key: threadKey(scope) }, els)
+  const subject = nodes(tree).find(n => n.props?.key === 'subject')
+  const shown = textOf(subject)
+  expect(shown).toContain('▎ heads-up')
+  expect(shown).not.toContain('important detail')
+  expect(shown).toContain('two rows in runs.csv, so')
+  expect(shown).not.toContain('](')
+  // the point wraps in a column of its own after the gutter, so its later rows stay under its first
+  const point = subject.props.children.find((n: Any) => n.props?.key === 'subject-m0')
+  expect(point.type).toBe('Box')
+  expect(point.props.flexDirection).toBe('row')
+  expect(textOf(point.props.children[0])).toBe('▎ ')
+})
+
 // The pane reads a running thread's turns every few seconds. A read that started before the fork ended, and ends after
 // the end marked the thread done, leaves it done: else the pane shows it answering for ever, without m
 test("a read of a running thread's turns that the fork's end overtakes leaves the thread done", async () => {
