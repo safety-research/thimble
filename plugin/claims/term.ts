@@ -37,11 +37,11 @@ type Place = { row: string; by: 'person' | 'claude'; turn: number | null; text: 
 /** What c shows for one answer: lit with a note when a look corrected a claim in it. */
 export type ClaimsPart = { lit: true; note: string; claims: string[] }
 /** The pane's arguments: the claim picked, else the cluster chosen (its key: graph.js groupKey), the last turn when it
- *  was chosen; with a claim, `open` while its evidence is open, `cite` the citation shown (from 0), `all` the whole
- *  history, `whole` the citation's code and output whole; `from` the first claim of the list's window, once the person
- *  paged it; `term` the words whose explainer shows under it; with `source`, where that claim was said. */
+ *  was chosen; with a cluster, `cur` its list's current claim (from 0); with a claim, `open` while its evidence
+ *  shows, `cite` its current citation (from 0), `history` its History shown, `whole` the current citation's code and output whole; `term` the words whose
+ *  explainer shows under it; with `source`, where that claim was said. */
 export type ClaimsArgs = {
-  claim?: string | null; group?: string | null; at?: number | null; open?: boolean; cite?: number; all?: boolean; whole?: boolean; from?: number
+  claim?: string | null; group?: string | null; at?: number | null; cur?: number; open?: boolean; cite?: number; history?: boolean; whole?: boolean
   /** the words whose explainer shows under the claim picked */
   term?: string
   source?: string; row?: string
