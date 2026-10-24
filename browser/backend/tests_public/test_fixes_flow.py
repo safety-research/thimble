@@ -234,7 +234,7 @@ async def test_a_fix_runs_in_its_own_chat_in_the_tree_and_main_shows_only_the_me
     # main read the request as the terminal's /thimble-fix gives it, with the person's fixes (none) beside it
     asked = _asked(client)
     assert "make the card count its rows" in asked and "fix_thimble" in asked
-    assert "The person has no thimble fixes yet." in asked
+    assert "for a new fix):\\n\\n(none yet)" in asked
     # the fix's own chat, which the thread tree lists by the fix's name, not its number
     [chat] = _fixer_chats(CORPUS)
     assert chat["kind"] == "agent" and chat["fix"] == 1 and chat["title"] == "fixing make the card count its rows"
@@ -344,11 +344,9 @@ def test_main_reads_each_fix_the_words_may_change_by_its_number_name_and_state()
             {"id": 2, "title": "", "state": "working", "prev": {"state": "on"}},
             {"id": 3, "title": "Old one", "state": "removed"}]
     assert fixes.fixes_context(recs).splitlines() == [
-        "The person's thimble fixes, which they know by name; the number is the handle `fix_thimble` takes (`N <words>` "
-        "to change fix N, `new <words>` for a new fix):",
         '1  "Card counts rows" (on): The card counts its rows.',
         '2  "fix 2" (on, being changed (working))']
-    assert fixes.fixes_context(recs[2:]) == "The person has no thimble fixes yet."
+    assert fixes.fixes_context(recs[2:]) == "(none yet)"
 
 
 async def test_words_in_the_fix_s_thread_go_to_its_fixer_while_it_works(fixing, monkeypatch, analyst):

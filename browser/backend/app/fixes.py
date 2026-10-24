@@ -769,23 +769,21 @@ def words_of(text: str) -> str | None:
 
 
 def fixes_context(recs: list[dict[str, Any]]) -> str:
-    """The person's fixes as main reads them beside their /thimble-fix: one line each, the number as the handle for
-    fix_thimble's `N <words>`, then the name and state (plugin/fix/request.ts fixesContext)."""
+    """The person's fixes as main reads them beside their /thimble-fix (prompts/thimble-fix.md's list): one line each,
+    the number as the handle for fix_thimble's `N <words>`, then the name and state (plugin/fix/request.ts
+    fixesContext); `(none yet)` when they have none."""
     shown = [r for r in recs if r.get("state") in CHANGEABLE][:20]
-    if not shown:
-        return "The person has no thimble fixes yet."
 
     def word(r: dict[str, Any]) -> str:
         prev = r.get("prev") or {}
         return f"on, being changed ({r.get('state')})" if prev.get("state") == "on" and r.get("state") != "on" else \
             str(r.get("state"))
 
-    lines = ["The person's thimble fixes, which they know by name; the number is the handle `fix_thimble` takes "
-             "(`N <words>` to change fix N, `new <words>` for a new fix):"]
+    lines = []
     for r in shown:
         summary = _cut(str(r.get("summary") or ""), 160)
         lines.append(f'{r["id"]}  "{fix_name(r, 80)}" ({word(r)})' + (f": {summary}" if summary else ""))
-    return "\n".join(lines)
+    return "\n".join(lines) or "(none yet)"
 
 
 async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
