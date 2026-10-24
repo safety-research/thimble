@@ -1,9 +1,9 @@
 // A fix of the person's thimble in a real browser, with thimble's own stylesheets and the real chat column
-// (src/chat/ChatPanel.tsx): the fixer runs in the background in a thread of its own, which the tree lists by the fix's
-// name, and main's chat shows the person's message as they typed it and one line that points at that thread. Before,
-// the fixer's transcript was main's subagent: main showed a chip named by the fork's description (`fix 3: 2 can you…`,
-// the `N <words>` form read as the words of a new fix) with the fixer's steps in it, and no message. The page's every
-// request is answered here.
+// (src/chat/ChatPanel.tsx): the fixer is main's subagent, which runs in the background in a thread of its own that the
+// tree lists by the fix's name; main's chat shows the person's message as they typed it, then the fixer's card by the
+// fix's name, with a link to its thread and its steps folded in it. Before, main showed a chip named by the fork's
+// description (`fix 3: 2 can you…`, the `N <words>` form read as the words of a new fix), and no message. The page's
+// every request is answered here.
 import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -70,7 +70,7 @@ async function open(which: keyof typeof PAGES): Promise<Page> {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
   await page.goto(`${ORIGIN}/`)
   await page.addScriptTag({ path: script })
-  await page.waitForSelector('.chat-flow .chat-agent, .chat-flow .chat-fix-started', { timeout: 8000 }).catch(async (e) => {
+  await page.waitForSelector('.chat-flow .chat-agent', { timeout: 8000 }).catch(async (e) => {
     throw new Error(`${e}\n${errors.join('\n')}\n${(await page.evaluate(() => document.body.innerHTML)).slice(0, 3000)}`)
   })
   await page.waitForTimeout(300)
@@ -97,7 +97,7 @@ afterAll(async () => {
   cleanup()
 })
 
-test("the fix is a thread of its own in the tree, by its name; main's chat shows the message as typed and one line, none of the fixer's steps", async () => {
+test("the fix is a thread of its own in the tree, by its name; main's chat shows the message as typed and the fixer's card, its steps folded", async () => {
   const shots = process.env.THIMBLE_FIX_SHOT
   for (const which of ['before', 'after'] as const) {
     const page = await open(which)
@@ -111,14 +111,16 @@ test("the fix is a thread of its own in the tree, by its name; main's chat shows
       tree: [...document.querySelectorAll('.chat-tree [data-id], .chat-tree [data-thread]')].map((e) => e.textContent?.trim()),
       users: [...document.querySelectorAll('.chat-flow .chat-user')].map((e) => e.textContent?.trim()),
       agentChips: document.querySelectorAll('.chat-flow .chat-agent').length,
-      note: document.querySelector('.chat-flow .chat-fix-started')?.textContent?.trim() ?? null,
+      name: document.querySelector('.chat-flow .chat-agent[data-role="fixer"] .chat-agent-name')?.textContent?.trim() ?? null,
+      thread: document.querySelector('.chat-flow .chat-agent[data-role="fixer"] .chat-thread-chip')?.getAttribute('data-thread') ?? null,
       text: document.querySelector('.chat-flow')?.textContent ?? '',
     }))
     if (which === 'after') {
       assert.ok(got.users.some((u) => u?.includes('/thimble-fix 2 can you create a video report type for me?')), JSON.stringify(got.users))
-      assert.equal(got.agentChips, 0, 'no chip of the fixer in main')
-      assert.match(got.note ?? '', /Changing it in the background in.*changing Video report type/)
-      assert.ok(!got.text.includes('CLAUDE.md') && !got.text.includes('Look at the repository layout'), "none of the fixer's steps in main")
+      assert.equal(got.agentChips, 1, "the fixer's card in main")
+      assert.equal(got.name, 'changing Video report type')
+      assert.equal(got.thread, 'f2')
+      assert.ok(!got.text.includes('CLAUDE.md') && !got.text.includes('Look at the repository layout'), "the fixer's steps folded in its card")
     } else {
       assert.equal(got.agentChips, 1, 'before: the fixer was a chip in main')
     }

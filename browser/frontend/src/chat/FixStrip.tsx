@@ -1,13 +1,16 @@
-// thimble fix in the chat (backend fixes.py, chat/fix.ts), in three places:
+// thimble fix in the chat (backend fixes.py, chat/fix.ts):
 //   FixWorking  the row above the composer while Claude fixes the person's thimble and the kernel checks the fix: what it
-//               fixes and for how long so far. The person keeps working.
-//   FixNotice   one notice at the top of the chat once the fix ended. A fix that passed its checks asks: "✓ thimble
+//               fixes and for how long so far. The person keeps working. The fixer itself is main's subagent, a card
+//               where main started it (Rows, AgentCard), whose thread shows its whole run.
+//   FixResult   how the fix ended, a row of main's chat and of the fix's thread at the time it ended (the server's `fix`
+//               chip). The newest row of a fix shows its state now: a fix that passed its checks asks "✓ thimble
 //               fixed: <title> · tests pass" with Use it now, What changed (a few lines, not a diff) and Later. Nothing
 //               goes on by itself: Use it now is the person's click. The server then starts again from the fixed code,
-//               the notice says "Reloading thimble…", and the page loads the new build by itself when nothing typed
-//               would be lost; after it, "✓ <title> is on" with Undo. A fix that did not pass says why, with Redo.
-//   Your fixes  `/thimble-fix` alone: every fix with its state, Use it on a ready one (Later leaves it there), Undo on
-//               one that is on.
+//               the row says "Reloading thimble…", and the page loads the new build by itself when nothing typed would
+//               be lost. A fix that did not pass says why, with Redo. An earlier row, or one the person answered, is a
+//               quiet line of what it said.
+//   FixPage     what the page does for every fix: the reload after the server started again, and Your fixes
+//               (`/thimble-fix` alone: every fix with its state, Use it on a ready one, Undo on one that is on).
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -79,63 +82,77 @@ export function FixWorking() {
   )
 }
 
-/** The notice at the top of the chat for the newest fix that ended, and Your fixes. */
-export function FixNotice({ ws }: { ws: string }) {
-  const restarting = useRef(false)
-  const [held, setHeld] = useState<'reload' | 'typed' | null>(null)
+/** The page after the person's click put a fix on or took it off: once the server is back from its restart, the page
+ * loads the new build, or, while something typed would be lost, the fix's row offers Reload (`fixHeld`). And Your
+ * fixes, which `/thimble-fix` alone opens. */
+export function FixPage({ ws }: { ws: string }) {
+  const restarting = useRef<number | null>(null)
   const [rows, load] = useFixes(() => {
-    if (!restarting.current) return load()
+    const fid = restarting.current
+    if (fid === null) return load()
     // the server came back from the restart the person's click asked for: the page loads its new build
-    restarting.current = false
+    restarting.current = null
     void Promise.all([thisBuild(), servedBuild()]).then(([a, b]) => {
       if (a && b && a !== b) {
         if (!typing()) {
-          setHeld('reload')
+          bus.emit('fixHeld', { id: fid, held: 'reload' })
           window.location.reload()
           return
         }
-        setHeld('typed')
+        bus.emit('fixHeld', { id: fid, held: 'typed' })
       }
       load()
     })
   })
-  const row = rows.find((r) => !working(r)) ?? null
-  if (row && reloading(row)) restarting.current = true
-  const [busy, setBusy] = useState<FixAction | 'dismiss' | null>(null)
-  const [what, setWhat] = useState<number | null>(null)
+  const going = rows.find(reloading)
+  if (going) restarting.current = going.id
+  const [busy, setBusy] = useState(false)
   const [list, setList] = useState(false)
   useEffect(() => bus.on('fixList', (e) => setList(e.open)), [])
+  const use = (r: FixRow) => {
+    if (busy) return
+    const a = r.state === 'on' ? 'undo' : 'use'
+    track('ui-click', { target: `fix:${r.id}`, detail: { action: a } })
+    setBusy(true)
+    ;(a === 'use' ? api.applyFix(r.id) : api.undoFix(r.id))
+      .then(() => {
+        restarting.current = r.id
+        load()
+      })
+      .catch((e: Error) => bus.emit('toast', { text: failText(LABEL[a], e), kind: 'error' }))
+      .finally(() => setBusy(false))
+  }
+  return list ? <YourFixes onClose={() => setList(false)} onUse={use} busy={busy} /> : null
+}
 
-  const run = (r: FixRow, a: FixAction | 'dismiss') => {
+/** A row of how fix `fid` ended, as the server wrote it (`text`, `kind`). The newest row of the fix (`latest`) shows the
+ * fix's state now, with the clicks it takes. */
+export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: number; text: string; kind?: string; latest: boolean }) {
+  const [rows, load] = useFixes()
+  const [held, setHeld] = useState<'reload' | 'typed' | null>(null)
+  useEffect(() => bus.on('fixHeld', (e) => e.id === fid && setHeld(e.held)), [fid])
+  const [busy, setBusy] = useState<FixAction | null>(null)
+  const [what, setWhat] = useState(false)
+  const row = latest ? rows.find((r) => r.id === fid) ?? null : null
+
+  const run = (r: FixRow, a: FixAction) => {
     if (busy) return
     track('ui-click', { target: `fix:${r.id}`, detail: { action: a } })
     if (a === 'what') {
-      setWhat((w) => (w === r.id ? null : r.id))
+      setWhat((w) => !w)
       return
     }
     setBusy(a)
-    const call =
-      a === 'use' ? api.applyFix(r.id) : a === 'undo' ? api.undoFix(r.id) : a === 'redo' ? api.redoFix(ws, r.id) : api.dismissFix(r.id)
+    const call = a === 'use' ? api.applyFix(r.id) : a === 'undo' ? api.undoFix(r.id) : a === 'redo' ? api.redoFix(ws, r.id) : api.dismissFix(r.id)
     call
-      .then(() => {
-        if (a === 'use' || a === 'undo') restarting.current = true
-        load()
-      })
-      .catch((e: Error) => bus.emit('toast', { text: failText(a === 'dismiss' ? 'Dismiss' : LABEL[a], e), kind: 'error' }))
+      .then(() => load())
+      .catch((e: Error) => bus.emit('toast', { text: failText(LABEL[a], e), kind: 'error' }))
       .finally(() => setBusy(null))
   }
 
-  let notice = null
-  if (held === 'reload' || (row && reloading(row))) {
-    notice = (
-      <div className="chat-fix chat-fix-note" role="status" data-kind="reloading" data-fix={row?.id}>
-        <Spinner size={12} className="chat-fix-ico" />
-        <span className="chat-fix-text">Reloading thimble…</span>
-      </div>
-    )
-  } else if (held === 'typed') {
-    notice = (
-      <div className="chat-fix chat-fix-note" role="status" data-kind="reload">
+  if (latest && held === 'typed') {
+    return (
+      <div className="chat-fix" role="status" data-fix={fid} data-kind="reload">
         <Icon name="check" size={13} className="chat-fix-ico" />
         <span className="chat-fix-text">thimble started again with your fix. Reload the page to see it; what you typed stays until you do.</span>
         <Button variant="secondary" size="sm" className="chat-fix-act" onClick={() => window.location.reload()}>
@@ -143,64 +160,67 @@ export function FixNotice({ ws }: { ws: string }) {
         </Button>
       </div>
     )
-  } else if (row) {
-    const kind = row.kind ?? 'problem'
-    const acts = fixActions(row)
-    const said = fixText(row)
-    const lead = said.startsWith(FIXED) ? FIXED : ''
-    const ask = acts.includes('use')
-    const buttons = acts.map((a) => (
-      <Button
-        key={a}
-        variant={a === 'use' ? 'primary' : 'secondary'}
-        size="sm"
-        className="chat-fix-act"
-        data-act={a}
-        aria-expanded={a === 'what' ? what === row.id : undefined}
-        busy={busy === a}
-        disabled={!!busy && busy !== a}
-        onClick={() => run(row, a)}
-      >
-        {LABEL[a]}
-      </Button>
-    ))
-    const dismiss = ask ? null : acts.includes('redo') ? (
-      <Button variant="ghost" size="sm" className="chat-fix-act" disabled={!!busy} onClick={() => run(row, 'dismiss')}>
-        Dismiss
-      </Button>
-    ) : (
-      <Button variant="icon" size="sm" icon="x" title="Dismiss" aria-label="Dismiss" className="chat-fix-x" disabled={!!busy} onClick={() => run(row, 'dismiss')} />
-    )
-    notice = (
-      <div className={`chat-fix chat-fix-note${ask ? ' chat-fix-ask' : ''}`} role="status" data-fix={row.id} data-kind={kind}>
-        <div className="chat-fix-line">
-          <Icon name={ICON[kind]} size={13} className="chat-fix-ico" />
-          <span className="chat-fix-text">
-            {lead && <strong className="chat-fix-lead">{lead}</strong>}
-            {lead ? said.slice(lead.length) : said}
-          </span>
-          {!ask && buttons}
-          {dismiss}
-        </div>
-        {ask && <div className="chat-fix-acts">{buttons}</div>}
-        {ask && what === row.id && (
-          <dl className="chat-fix-what">
-            {changedLines(row).map((l) => (
-              <div key={l.label}>
-                <dt>{l.label}:</dt>
-                <dd>{l.text}</dd>
-              </div>
-            ))}
-          </dl>
-        )}
+  }
+  if (latest && (held === 'reload' || (row && reloading(row)))) {
+    return (
+      <div className="chat-fix" role="status" data-fix={fid} data-kind="reloading">
+        <Spinner size={12} className="chat-fix-ico" />
+        <span className="chat-fix-text">Reloading thimble…</span>
       </div>
     )
   }
+  const acts = row?.kind ? fixActions(row) : []
+  if (!row?.kind || acts.length === 0) {
+    // what the row said when it was written: an earlier row of the fix, or one with nothing left to ask
+    const said = row?.kind ? fixText(row) : text
+    const k = (row?.kind ?? kind ?? 'problem') as keyof typeof ICON
+    return (
+      <div className="chat-row chat-note chat-fix-said" role="status" data-fix={fid} data-kind={k}>
+        <Icon name={ICON[k] ?? 'check'} size={12} className="chat-fix-ico" />
+        <span className="chat-note-text">{said}</span>
+      </div>
+    )
+  }
+  const said = fixText(row)
+  const lead = said.startsWith(FIXED) ? FIXED : ''
+  const ask = acts.includes('use')
+  const buttons = acts.map((a) => (
+    <Button
+      key={a}
+      variant={a === 'use' ? 'primary' : 'secondary'}
+      size="sm"
+      className="chat-fix-act"
+      data-act={a}
+      aria-expanded={a === 'what' ? what : undefined}
+      busy={busy === a}
+      disabled={!!busy && busy !== a}
+      onClick={() => run(row, a)}
+    >
+      {LABEL[a]}
+    </Button>
+  ))
   return (
-    <>
-      {notice && <div className="chat-fix-top">{notice}</div>}
-      {list && <YourFixes onClose={() => setList(false)} onUse={(r) => run(r, r.state === 'on' ? 'undo' : 'use')} busy={!!busy} />}
-    </>
+    <div className={`chat-fix chat-fix-note${ask ? ' chat-fix-ask' : ''}`} role="status" data-fix={fid} data-kind={row.kind}>
+      <div className="chat-fix-line">
+        <Icon name={ICON[row.kind!]} size={13} className="chat-fix-ico" />
+        <span className="chat-fix-text">
+          {lead && <strong className="chat-fix-lead">{lead}</strong>}
+          {lead ? said.slice(lead.length) : said}
+        </span>
+        {!ask && buttons}
+      </div>
+      {ask && <div className="chat-fix-acts">{buttons}</div>}
+      {ask && what && (
+        <dl className="chat-fix-what">
+          {changedLines(row).map((l) => (
+            <div key={l.label}>
+              <dt>{l.label}:</dt>
+              <dd>{l.text}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
   )
 }
 
