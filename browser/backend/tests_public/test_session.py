@@ -341,8 +341,8 @@ def test_a_forks_closing_note_as_the_answer_drops_what_it_made_and_starts_with_a
     """Live check term-fix6, new quirk 3: the `↳` fallback answer read `added a table card. Yes, 23 June…`."""
     assert session.note_answer("added a table card. Yes, 23 June still has the most deletions (473).") == \
         "Yes, 23 June still has the most deletions (473)."
-    assert session.note_answer("added a table card of the 25 deletions from 18:00 to 19:00 UTC on 18 June. MartinHuber "
-                               "made all of them.") == "MartinHuber made all of them."
+    assert session.note_answer("added a table card of the 25 deletions from 18:00 to 19:00 UTC on 18 June. WikiKeeper "
+                               "made all of them.") == "WikiKeeper made all of them."
     assert session.note_answer("I added a table of the deletions per minute and answered in the thread. The 18:21 "
                                "deletion is the first of 25.") == "The 18:21 deletion is the first of 25."
     # a note that is only the clause, or holds none, keeps its words
