@@ -62,7 +62,7 @@ import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../sque
 import { askInThread, openThread, threadAsked } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, hiddenOutput, indexOf, lineWindow,
-  moreLines, open, pageOf, printLine, push, refOf, restStop, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
+  moreLines, open, pageOf, pageRows, printLine, push, refOf, restStop, rowsOf, sameRef, scopeText, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
 } from './tray.mjs'
 
 type Engine = EngineInterface
@@ -818,13 +818,13 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     ]
   } else body = drawUnits(els, shown)
   if (page.next !== null) {
-    const n = units.length
+    const lines = pageRows(units.map(u => u.h), fit, page)
     body = [
       // the body keeps its own height inside the page (no shrinking), so the page cuts a unit it shows only the top of
       // (a unit taller than the page shows from the rows it already showed: the body moves up by them)
       Box({ key: 'tray-page', flexDirection: 'column', height: Math.max(1, fit - 1) + gap, overflow: 'hidden', children: [Box({ key: 'tray-page-body', flexDirection: 'column', flexShrink: 0, ...(page.skip ? { marginTop: -page.skip } : {}), children: body })] }),
       els.Button({ key: 'tray-more', plain: true, label: 'show the next lines', hover: quiet('tray-page'), onPress: () => setPage($, page.next ?? 0, page.nextSkip ?? 0), children: [
-        Text({ key: 'tray-more-t', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 && !page.nextSkip ? 'm from the top' : 'm more'} · lines ${page.start + 1}–${page.end} of ${n}` }),
+        Text({ key: 'tray-more-t', dimColor: true, wrap: 'truncate-end', children: `${page.next === 0 && !page.nextSkip ? 'm from the top' : 'm more'} · lines ${lines.first}–${lines.last} of ${lines.total}` }),
       ] }),
     ]
   }

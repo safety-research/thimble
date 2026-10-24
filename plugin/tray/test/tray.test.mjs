@@ -3,7 +3,7 @@
 //   node --test plugin/tray/test/tray.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { aboutOf, back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, pageOf, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
+import { aboutOf, back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, pageOf, pageRows, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -36,6 +36,18 @@ test('a unit taller than the room shows a room of its rows at a time: m goes on 
   assert.deepEqual(pageOf([9, 1], 4), { start: 0, end: 1, more: 1, next: 0, nextSkip: 3 })
   assert.deepEqual(pageOf([9, 1], 4, 0, 3), { start: 0, end: 1, more: 1, next: 0, skip: 3, nextSkip: 6 })
   assert.deepEqual(pageOf([9, 1], 4, 0, 6), { start: 0, end: 1, more: 1, next: 1, skip: 6 })
+})
+
+test('the line that says there is more counts rows, so a paragraph that wraps counts as the lines it takes', () => {
+  // seven paragraphs, the first five rows tall: a room of 4 shows its first three rows (one row says there is more)
+  const hs = [5, 1, 2, 1, 3, 1, 1]
+  assert.deepEqual(pageRows(hs, 4, pageOf(hs, 4)), { first: 1, last: 3, total: 14 })
+  // m: its last two rows, then the next paragraph
+  assert.deepEqual(pageRows(hs, 4, pageOf(hs, 4, 0, 3)), { first: 4, last: 6, total: 14 })
+  // whole units: rows 6 to 8, the second and third paragraphs
+  assert.deepEqual(pageRows(hs, 4, pageOf(hs, 4, 1)), { first: 6, last: 8, total: 14 })
+  // a cut unit at the end counts the rows of it the page shows
+  assert.deepEqual(pageRows(hs, 5, pageOf(hs, 5, 3)), { first: 9, last: 12, total: 14 })
 })
 
 test('a citation\'s card: why in one sentence, and the one line of evidence that holds the value, cut around it', () => {

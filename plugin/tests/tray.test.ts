@@ -457,6 +457,12 @@ test('a heads-up on a citation\'s words is one ] away; a tray taller than the ro
   expect(page.props.height + 3 + 1 + 2 + barRows).toBeLessThanOrEqual(12)
   expect(band).toContain('m more · lines 1–')
   expect(band).not.toContain('Count the distinct run ids')
+  // it counts the rows the page shows of all the rows, not the paragraphs: the title and three bullets are four
+  // paragraphs, over ten rows at this width
+  const [, first, last, total] = /lines (\d+)–(\d+) of (\d+)/.exec(band)!.map(Number)
+  expect(first).toBe(1)
+  expect(last).toBe(page.props.height - 1)
+  expect(total).toBeGreaterThanOrEqual(10)
   // the fewest rows that show it whole hold all of it and the bar: its 10 lines at this width, the blank row over
   // them, the frame's three rows and the two blank rows
   let whole = 12

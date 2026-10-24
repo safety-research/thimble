@@ -119,6 +119,18 @@ export function pageOf(heights, room, from = 0, skip = 0) {
   return { start, end, more: hs.length - end + start, next: end < hs.length ? end : 0, ...shown }
 }
 
+/** The lines a page of a body shows, as the line that says there is more counts them: {first, last, total}, from 1,
+ *  in rows (`heights` and `room` as pageOf takes them, `page` its result), so a paragraph that wraps to five rows
+ *  counts as five lines. */
+export function pageRows(heights, room, page) {
+  const hs = (heights || []).map(h => Math.max(1, h | 0))
+  const sum = n => hs.slice(0, n).reduce((a, b) => a + b, 0)
+  const total = sum(hs.length)
+  const first = Math.min(total, sum(page.start) + (page.skip || 0) + 1)
+  const last = Math.max(first, Math.min(total, sum(page.end), first - 1 + Math.max(1, room - 1)))
+  return { first, last, total }
+}
+
 /** The rows a line of `width` cells takes when it wraps at words (a line is at least one row). */
 export function rowsOf(line, width) {
   const w = Math.max(8, width | 0)
