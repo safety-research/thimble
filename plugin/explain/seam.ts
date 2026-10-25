@@ -20,7 +20,8 @@
 //   sessionGlosses($)                  every explainer of this session: a pane shows the one of words picked there
 //   explainTerm($, row, term)          on demand: an explainer of words the analyst picked (a citation's words, a term
 //                                      in a pane, the selection), written by the explain-expand call and kept on its message
-//                                      as the look's are; explaining(term) says while it is written
+//                                      as the look's are; explaining(term) says while it is written, and
+//                                      pendingSpans draws its words teal from the press on
 //   explainKey($, key), explainBar     e at an empty prompt, `e explain` on the bar: an explainer of the words the
 //                                      analyst selected with the mouse ($.ui.selection, fullscreen layout only), on
 //                                      the answer they lie in, else the newest answer that holds them, opened in the
@@ -187,9 +188,29 @@ export function glossFor(list: SessionGloss[], term: string): SessionGloss | nul
   return list.find(g => normTerm(g.term) === t) ?? list.find(g => { const at = anchorTerm(t, g.term); return !!at && at.how !== 'word' && at.start === 0 && at.end >= t.length - 1 }) ?? null
 }
 
-// the words being explained on demand now, and why the last try of each failed
+// the words being explained on demand now (and the message each stands on), and why the last try of each failed
 const asking = new Set<string>()
+const askedOn = new Map<string, { row: string; words: string }>()
 const failed = new Map<string, string>()
+
+/** The words of `row` being explained on demand now, drawn teal at once as the explainer will be (core/answerview.ts
+ *  spansFor puts them before the row's other marks, as the explainer covers the marks it overlaps). Nothing opens on a
+ *  press until it is written; a failed one is gone, and its failure line says why. */
+export async function pendingSpans($: Engine, row: string, text: string): Promise<Span[]> {
+  const mine = [...askedOn.entries()].filter(([, a]) => a.row === row)
+  if (!mine.length || !featureOn('explain')) return []
+  const own = (await messageOf($, row))?.text ?? ''
+  const original = text !== own && text !== withoutMarks(own)
+  const items = Object.fromEntries(mine.map(([t, a]) => [`asking:${t}`, { id: `asking:${t}`, term: a.words, asked: true }]))
+  const c = markColors(await themeNow($))
+  return (placeGlosses(text, { items, order: Object.keys(items) }, original) as { id: string; start: number; end: number }[]).map(p => ({
+    id: p.id,
+    start: p.start,
+    end: p.end,
+    look: { backgroundColor: c.glossBg, hoverBg: c.glossFocus },
+    label: `explainer of ${withoutMarks(text.slice(p.start, p.end)).replace(/`/g, '')} being written`.slice(0, 120),
+  }))
+}
 
 /** Whether an explainer of these words is being written now; why the last one was not, else ''. */
 export function explaining(term: string): { pending: boolean; why: string } {
@@ -211,6 +232,7 @@ export async function explainTerm($: Engine, row: string, term: string): Promise
   const t = normTerm(words)
   if (asking.has(t)) return 'That explainer is being written.'
   asking.add(t)
+  askedOn.set(t, { row, words })
   failed.delete(t)
   $.ui.invalidate('ui.render')
   try {
@@ -224,6 +246,7 @@ export async function explainTerm($: Engine, row: string, term: string): Promise
     return g ? { ...g, row } : 'The explainer was written, but its answer is not in this session any more.'
   } finally {
     asking.delete(t)
+    askedOn.delete(t)
     $.ui.invalidate('ui.render')
   }
 }
