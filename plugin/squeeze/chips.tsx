@@ -3,17 +3,16 @@
 // did, and the hooks answer with the chips as they are now.
 //
 //   props: {items: [{id, n, name, levels, level, level0, ends, word, picked}], plus: what is typed after + (null when
-//           nothing is), catchup: {n, replies} (null when the row offers no catch-up), width, ack}
+//           nothing is), width, ack}
 //   in a frame in thimble's color, one row of chips, wrapped to the width: each its digit (a key, drawn as the bar draws its keys), its name, its two ends either
 //   side of its dots, each end and dot a press (`1 Length shorter ○●○○ longer`), and its level in words where it
 //   stands away from the original or is picked (` · as written`), the picked chip in thimble's color, as its frame
-//   and its keys are; then the
-//   catch-up, when replies piled up (`4 Catch up on 2 replies`); then `+`, which adds a chip of the person's own; then
+//   and its keys are; then `+`, which adds a chip of the person's own; then
 //   `s close`, its key drawn as the bar draws its keys, which closes the chips (not while words are typed after +,
 //   where s is a letter)
 //
 // It sends {events: [{n, press}] | [{n, key}]}: a press on a chip's name or level words (`chip-<id>`, `word-<id>`), on
-// one of its dots (`lvl-<id>-<i>`), on the catch-up (`catchup`), on + (`add`), on s close (`close`); and each key while a click has given it the
+// one of its dots (`lvl-<id>-<i>`), on + (`add`), on s close (`close`); and each key while a click has given it the
 // keyboard (Claude Code keeps tab, the arrows, enter and esc in its prompt otherwise; Escape gives the keyboard back). Each post carries every
 // event the hooks have not answered yet, numbered; ui.ts handles each number once and answers the last as `ack`.
 import type { ClientModule, ClientSurface } from 'claude-code'
@@ -64,10 +63,6 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
       ...(c.picked || away ? [press(`word-${c.id}`, `${c.name}: ${c.word}`, [E.Text({ bold: c.picked, ...(c.picked ? { color: keyColor } : {}), children: ` · ${c.word}` })])] : []),
     ] })
   }
-  const cu = props?.catchup && typeof props.catchup === 'object' ? props.catchup : null
-  const catchup = cu ? [E.Box({ key: 'c-catchup', flexDirection: 'row', marginRight: 3, children: [
-    press('catchup', `catch up on ${cu.replies} replies`, [E.Text({ color: keyColor, bold: true, children: `${cu.n} ` }), E.Text({ children: `Catch up on ${cu.replies} replies` })]),
-  ] })] : []
   const add = press('add', 'add a chip of your own', [E.Text(plus != null ? { color: keyColor, bold: true, children: `+ ${plus}▏` } : { dimColor: true, children: '+' })])
   // s close, its key as the bar draws its keys (props.color: core/theme.ts accent()), so leaving is named where the person looks
   const close = plus == null ? [E.Box({ key: 'c-close', flexDirection: 'row', marginLeft: 3, children: [
@@ -76,7 +71,7 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   const width = Number(props?.width) || surface.columns || 80
   // in a frame in thimble's color, so the chips read as a control apart from the answer's text
   return E.Box({ key: 'frame', borderStyle: 'single', borderColor: keyColor, paddingX: 1, width, children: [
-    E.Box({ key: 'chips', flexDirection: 'row', flexWrap: 'wrap', children: [...items.map(chip), ...catchup, add, ...close] }),
+    E.Box({ key: 'chips', flexDirection: 'row', flexWrap: 'wrap', children: [...items.map(chip), add, ...close] }),
   ] })
 }
 

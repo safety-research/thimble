@@ -3,7 +3,8 @@
 // whose tables do not fit fold to one line each). Opening a value folds the other labels to one line each and lists its
 // examples under them, one line each, the words the label matched bold in the value's color; the picked example opens
 // in place with where it is (`path:line`, relative to the session's folder, or with … in its middle outside it) and the
-// check keys. d shows the label's definition whole in place of the examples. The keys stay at the pane's bottom in
+// check keys. d, or a press on the definition's line under a label's name, shows the label's definition whole in place
+// of the examples. The keys stay at the pane's bottom in
 // every state. A click moves too: a label's name or a value opens it (the open one again: back to all the labels), an
 // example picks it (again: closes it), `↑ N earlier` and `↓ N more` page the examples. The person's check of the
 // picked example (a number key, or a press on a value) counts in place of the label's value (labels.ts checkRecord);
@@ -245,6 +246,8 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
     if (kind === 'v') return chosen && label === x && value === y && list.length > 1 ? go({}) : go({ label: String(x), value: String(y) })
     if (kind === 'r') return here({ at: pageAt, sel: a.sel === x ? null : String(x) })
     if (kind === 'c') return check(x == null ? null : String(x))
+    // the definition's line: the definition whole in place of the examples, or (shown already) the examples again
+    if (kind === 'd') return go({ label: String(x), def: !(a.def && label === x) })
     if (part === 'pg-up' && ex) return here({ at: Math.max(0, ex.from - per) })
     if (part === 'pg-down' && ex) return here({ at: ex.last + 1 })
     return undefined

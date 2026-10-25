@@ -472,21 +472,23 @@ test("a heads-up on a citation's words stays on them when the check corrects the
   }, 's-tray-heads-corrected', { text, parts: headsOn('3,103 different usernames') })
   const drawn = all(await $.ui.render(answer('row-t1', text)))
   expect(filledOf(drawn)).toEqual(['3,102 different usernames'])
-  // the words stay the citation's: underlined, and a press on them opens the citation
-  const cite = drawn.find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
-  expect(all(cite).find(n => n.type === 'Text' && textOf(n) === '3,102 different usernames')?.props).toMatchObject({ underline: true })
+  // the words keep the citation's underline, and a press on them opens the heads-up first (] goes on to the citation)
+  const press = drawn.find(n => n.type === 'Button' && all(n).some((t: Any) => t.type === 'Text' && textOf(t) === '3,102 different usernames'))
+  expect(String(press?.props.label)).toMatch(/^heads up/)
+  expect(all(press).find(n => n.type === 'Text' && textOf(n) === '3,102 different usernames')?.props).toMatchObject({ underline: true })
   expect(textOf(drawn)).not.toContain('the check of the citations changed')
 })
 
-test('a heads-up whose words hold a citation covers them all: its fill under the citation\'s underline, each one a press of its own', async ($, on) => {
+test('a heads-up whose words hold a citation covers them all: its fill under the citation\'s underline, every word a press of the heads-up', async ($, on) => {
   const text = 'Answers were shared by [1,212 accounts](#) in June.'
   await resumed($, on, { ...QUOTED, words: '1,212 accounts', start: 23, end: 42, sentence: 'Answers were shared by [1,212 accounts] in June.', shown: '1,212 accounts' }, 's-tray-heads-over', { text, parts: headsOn('by 1,212 accounts') })
   const drawn = all(await $.ui.render(answer('row-t1', text)))
   expect(filledOf(drawn)).toEqual(['by ', '1,212 accounts'])
-  const cite = drawn.find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
-  expect(all(cite).find(n => n.type === 'Text' && textOf(n) === '1,212 accounts')?.props).toMatchObject({ underline: true })
-  // the heads-up's own words open it; ] still reaches it first, then the citation
-  expect(drawn.some(n => n.type === 'Button' && n.props?.label === 'heads up by 1,212 accounts')).toBe(true)
+  const press = drawn.find(n => n.type === 'Button' && all(n).some((t: Any) => t.type === 'Text' && textOf(t) === '1,212 accounts'))
+  expect(all(press).find(n => n.type === 'Text' && textOf(n) === '1,212 accounts')?.props).toMatchObject({ underline: true })
+  // all its words open the heads-up, the citation's too; ] reaches it first, then the citation
+  expect(press?.props.label).toBe('heads up by 1,212 accounts')
+  expect(drawn.some(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))).toBe(false)
   await $.prompt.edit(key(']'))
   expect(textOf(await $.ui.render(above(12)))).toContain('Names are typed in')
 })

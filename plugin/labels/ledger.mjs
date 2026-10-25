@@ -2,8 +2,8 @@
 // page of a value's records (`--records`). No `$`, no elements: pane.tsx draws the rows this returns with Claude Code's
 // own elements, and the tests read them as text.
 //
-//   at rest        each label a short table: its name and what it went over, a plain line of what it means with its
-//                  values (plainLine), then a row per value with its bar, its
+//   at rest        each label a short table: its name and what it went over, its definition on one line (defLine, a
+//                  press that shows it whole), then a row per value with its bar, its
 //                  count and its share of the records. Labels whose tables do not fit fold to one line each: the name,
 //                  a small bar of all values, then each value and its count (wrapped)
 //   a value open   that label's table in its place, the ▸ on the value; every other label one line (cut with …);
@@ -18,7 +18,7 @@
 // A row is a list of runs, or {code} for a code label's definition. A run is {s, tone, bold, italic, part, hotkey}:
 // `tone` dim · accent · err · none (no value yet) · neg (the no of a yes/no label) · track (its bar) · v<i> (the
 // label's i-th value), which pane.tsx turns into colors for the theme; `part` what a press on it does (lP label,
-// vP value, rP record, cP check, pg-up, pg-down; P a JSON list); `hotkey` the key that presses it, which Claude Code
+// vP value, rP record, cP check, dP definition, pg-up, pg-down; P a JSON list); `hotkey` the key that presses it, which Claude Code
 // draws before it (`1: yes`), so a run with one takes width(hotkey) + 2 more cells.
 import { cut, cutWords, textWidth } from '../core/text.js'
 import { howMade } from './use.mjs'
@@ -42,12 +42,13 @@ export const oneLine = (s, trim = true) => { const t = String(s ?? '').replace(/
 
 export const labelPart = name => `l${JSON.stringify([name])}`
 export const valuePart = (name, v) => `v${JSON.stringify([name, v])}`
+export const defPart = name => `d${JSON.stringify([name])}`
 export const recordPart = ref => `r${JSON.stringify([ref])}`
 export const checkPart = v => `c${JSON.stringify([v])}`
 /** What a part names: [kind, ...args], or [part] for one with no arguments (pg-up). */
 export function partOf(part) {
   const s = String(part || '')
-  if (!/^[lvrc]\[/.test(s)) return [s]
+  if (!/^[lvrcd]\[/.test(s)) return [s]
   try { return [s[0], ...JSON.parse(s.slice(1))] } catch { return [s] }
 }
 
@@ -153,18 +154,25 @@ function spread(left, right, w) {
   return [...l, { s: ' '.repeat(Math.max(1, w - runsWidth(l) - rw)) }, ...right]
 }
 
-/** What a label means, in one plain line with its values and their counts: a --prompt label's definition (its first
- *  sentence), how a regex or set label gave its values (code says nothing the values don't), then `— yes 1,607 / no 1,366`. */
-export function plainLine(l) {
-  const rule = oneLine(String(l?.rule || ''))
-  const first = rule.replace(/^(.{12,}?[.?!])\s.*$/, '$1')
-  const how = l?.kind === 'prompt' ? (first || 'Claude read each record and gave it a value')
-    : l?.kind === 'regex' ? `the record's words match ${cut(rule, 60)}`
-      : l?.kind === 'code' ? ''
-        : l?.kind === 'set' ? 'values Claude gave records after reading them'
-          : first
-  const values = partsOf(l).filter(p => p.v !== NONE).map(p => `${p.name} ${num(p.n)}`).join(' / ')
-  return [how, values].filter(Boolean).join(' — ')
+/** A label's definition on one line: how it was made and its rule, as the person would look for it (the regex, a
+ *  --prompt's first sentence; for code, the comment it opens with, which says what it does in words, else the first
+ *  line of its label function's body). */
+export function defLine(l) {
+  const rule = String(l?.rule || '')
+  if (l?.kind === 'code') {
+    const lines = rule.split('\n').map(x => x.trim())
+    const said = []
+    for (const x of lines) { if (/^#/.test(x)) said.push(x.replace(/^#+\s*/, '')); else if (x) break }
+    if (said.join(' ').trim()) return `code: ${said.join(' ').trim()}`
+    const def = lines.findIndex(x => /^def label\b/.test(x))
+    const body = lines.slice(def + 1).find(x => x && !/^(#|"{3}|'{3})/.test(x))
+      ?? lines.find(x => x && !/^(#|def |import |from |@|"{3}|'{3})/.test(x))
+    return body ? `code: ${body}` : 'code'
+  }
+  if (l?.kind === 'regex') return `regex: ${oneLine(rule)}`
+  if (l?.kind === 'prompt') return `prompt: ${oneLine(rule).replace(/^(.{12,}?[.?!])\s.*$/, '$1') || 'Claude read each record and gave it a value'}`
+  if (l?.kind === 'set') return 'values Claude gave records after reading them'
+  return oneLine(rule) ? `${howMade(l?.kind) || String(l?.kind || 'rule')}: ${oneLine(rule)}` : 'no rule: Claude gave each record its value'
 }
 
 /** A label's table: its name and scope, then a row per value: the ▸ on `value`, its name, its bar (its share of the
@@ -172,9 +180,8 @@ export function plainLine(l) {
 function block(l, value, w) {
   const name = String(l.name)
   const rows = [spread([{ s: cut(name, Math.max(8, w - 12)), bold: true, part: labelPart(name) }], [{ s: scopeShort(l), tone: 'dim' }], w)]
-  // what it means, in plain words with its values, on one line (d shows the definition whole)
-  const plain = plainLine(l)
-  if (plain) rows.push([{ s: cut(plain, w), tone: 'dim', part: labelPart(name) }])
+  // its definition on one line, a press that shows it whole (as d does)
+  rows.push([{ s: 'definition ', tone: 'dim', part: defPart(name) }, { s: cut(defLine(l), Math.max(8, w - 11)), part: defPart(name) }])
   const parts = openable(l)
   const all = Number(l.records) || parts.reduce((s, p) => s + p.n, 0)
   const nw = Math.min(Math.max(8, Math.floor(w / 3)), Math.max(8, ...parts.map(p => width(p.name))))

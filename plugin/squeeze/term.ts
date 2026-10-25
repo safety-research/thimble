@@ -368,8 +368,8 @@ export type Pile = { n: number; prompt: { row: string | null; text: string } | n
 
 /**
  * Replies piled up: two or more of Claude's replies (turns it ended with words) came since the person's last prompt
- * and since the newest catch-up of them the person read. Then s offers to catch up on all the replies since that
- * prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not.
+ * and since the newest catch-up of them the person read. Then b (the bar names it) catches up on all the replies
+ * since that prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not.
  */
 export async function pileUp($: Engine, on: (key: string) => boolean = featureOn): Promise<Pile | null> {
   if (!on('squeeze')) return null

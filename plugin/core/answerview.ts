@@ -181,13 +181,16 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
     ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => !(holds && x.focus)),
     ...items(await safe(explainBar($, on, preview), []), preview),
     ...items(await safe(whereBar($, on, preview), []), preview),
-    ...items(await safe(claimsBar($, on, preview), []), preview),
   ]
 }
 
-/** The features' items at the bar's right, before coverage and the labels: the side threads. */
+/** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
+ *  claims and the side threads (the left names what acts on an answer). */
 export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  return items(await safe(threadsBar($, on, preview), []), preview)
+  return [
+    ...items(await safe(claimsBar($, on, preview), []), preview),
+    ...items(await safe(threadsBar($, on, preview), []), preview),
+  ]
 }
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation

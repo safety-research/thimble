@@ -109,21 +109,21 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(back).not.toContain('fresh fetch')
 })
 
-test('with two replies since the last prompt, s opens the chips with a catch-up chip; picked, it writes one catch-up under the newest; 0 brings the replies back', async ($, on) => {
+test('with two replies since the last prompt, the bar names b apart from s; b writes one catch-up under the newest, with the chips open on it; 0 brings the replies back', async ($, on) => {
   const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
   await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
-  expect(await t.bar()).toContain('s squeeze or catch up')
-  // s opens the chips under the newest reply, with no call; the catch-up is the chip after the three
+  expect(await t.bar()).toContain('s squeeze · b catch up on 2 replies')
+  // s opens the chips under the newest reply, with no call and no catch-up among them
   await t.press('s')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(0)
-  expect(await t.bar()).toContain('1–4 chip')
-  const { client, tree } = await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')
-  expect(client?.props.props.catchup).toEqual({ n: 4, replies: 2 })
-  expect(textOf(tree)).toContain('4 Catch up on 2 replies')
-  await t.press('4')
+  expect(await t.bar()).toContain('1–3 chip')
+  expect(textOf((await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).tree)).not.toContain('atch up')
+  await t.press('s')
+  // b writes the catch-up
+  await t.press('b')
   await t.clock.advance(5000)
   expect(String(t.asked[0].prompt)).toContain("Claude's messages since the analyst's last prompt")
   expect(String(t.asked[0].prompt)).toContain('The analyst asked: why did it fail?')
@@ -134,10 +134,12 @@ test('with two replies since the last prompt, s opens the chips with a catch-up 
   expect(host).toContain('Both: the build failed, and the retry passed.')
   await t.press('0')
   expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
-  // a catch-up the person read counts: s opens the chips on the newest reply, with no catch-up chip
+  // a catch-up the person read counts: the bar no longer offers one, and b does nothing
   expect(await t.bar()).not.toContain('catch up')
-  await t.press('s')
-  expect((await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).client?.props.props.catchup).toBe(null)
+  const asked = t.asked.length
+  await t.press('b')
+  await t.clock.advance(5000)
+  expect(t.asked.length).toBe(asked)
 })
 
 test('keys pressed in a row make one rewrite, at the last level, 1 s after the last press; the chips show each level at once', async ($, on) => {
@@ -225,8 +227,7 @@ test("a catch-up's reworded citations: a press acts on the reply's citation with
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'Of the [12 runs](#), [3 failed](#).', { text: 'why did it fail?', by: 'composer' })
   await t.turn('t3', 'The retry passed on the [slow mirror](#).', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
-  await t.press('s')
-  await t.press('4')
+  await t.press('b')
   await t.clock.advance(5000)
   const host = answer('row-t3', 'The retry passed on the [slow mirror](#).')
   const all = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : [n, ...[n.props?.children, n.children].flat(Infinity).flatMap(all)])
@@ -378,7 +379,7 @@ test('the chips draw in one color: the frame, the keys, the picked chip, its dot
     { id: 'length', n: 1, name: 'Length', levels: ['shorter', 'as written', 'longer'], level: 1, level0: 1, word: 'as written', picked: true },
     { id: 'reader', n: 2, name: 'Background', levels: ['new', 'expert'], level: 0, level0: 0, word: 'new', picked: false },
   ]
-  const tree = Chips({ items, plus: 'for a manager', catchup: null, width: 90, color: 'merged' } as never, surface as never)
+  const tree = Chips({ items, plus: 'for a manager', width: 90, color: 'merged' } as never, surface as never)
   const all = nodes(tree)
   expect(all.some(n => n.props?.color === 'warning')).toBe(false)
   expect(tree.props.borderColor).toBe('merged')

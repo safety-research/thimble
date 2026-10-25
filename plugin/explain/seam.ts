@@ -304,6 +304,7 @@ async function markOf($: Engine, row: string, words: string): Promise<(Gloss & {
  *  answer they lie in (else the newest answer that holds them). Words that are an explainer or a heads-up open it. */
 export async function explainSelection($: Engine): Promise<void> {
   const sel = await $.ui.selection().catch(() => undefined)
+  explained = selKey(sel)
   const { words, cut } = pickedWords(sel?.text ?? '')
   if (!words) {
     noticeLine($, fullscreenNow() === false
@@ -317,10 +318,9 @@ export async function explainSelection($: Engine): Promise<void> {
   if (!row) { noticeLine($, 'No answer to explain words in yet: ask Claude something first.', 'explain'); return }
   const mark = await markOf($, row, words)
   if (mark) { await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return }
-  // what is written now, said until the tray opens on it
-  noticeLine($, cut
-    ? `Writing an explainer of the selection's first ${words.length} characters (it is long): “${words.slice(0, 40)}…”.`
-    : `Writing an explainer of “${words.length > 60 ? `${words.slice(0, 59)}…` : words}”.`, 'explain')
+  // the bar's busy line says what is written until the tray opens on it (expand.ts); a line here would say it twice.
+  // Only a cut selection says so, since the busy line names just the words it explains
+  if (cut) noticeLine($, `The selection is long: the explainer covers its first ${words.length} characters.`, 'explain')
   explainOpen($, row, words)
 }
 
@@ -331,10 +331,29 @@ export async function explainKey($: Engine, key: string, _until: number): Promis
   return { later: () => explainSelection($) }
 }
 
-/** `e explain` on the bar, while Explainers is on and an answer exists; a click does what e does. */
+/** The selection e last explained, by its row and words: Claude Code answers the last selection until the person
+ *  selects again or sends their next prompt, so the bar stops naming e once e has explained it. */
+let explained: string | null = null
+const selKey = (sel: { text?: string; requestId?: string } | undefined) => `${sel?.requestId ?? ''}\n${sel?.text ?? ''}`
+
+/** Words selected that e has not explained yet. */
+async function selectionWaits($: Engine): Promise<boolean> {
+  const sel = await $.ui.selection().catch(() => undefined)
+  return !!pickedWords(sel?.text ?? '').words && selKey(sel) !== explained
+}
+
+/** Whether words are selected now (the bar's `w where from` stands while they are, marks/where.ts). */
+export async function wordsSelected($: Engine): Promise<boolean> {
+  return !!pickedWords((await $.ui.selection().catch(() => undefined))?.text ?? '').words
+}
+
+/** `e explain` on the bar while words are selected (Claude Code's fullscreen layout reports a selection; elsewhere
+ *  /explain takes the words, and e at an empty prompt says so) that e has not explained yet, Explainers is on and an
+ *  answer exists; a click does what e does. The settings' preview shows it, as it would show with words selected. */
 export async function explainBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('explain')) return []
   if (preview) return [{ id: 'explain', key: 'e', words: 'explain' }]
+  if (!(await selectionWaits($))) return []
   if (!(await answerRows($).catch(() => [])).length) return []
   return [{ id: 'explain', key: 'e', words: 'explain', press: () => explainSelection($) }]
 }
@@ -347,7 +366,34 @@ export const registerExplain: Register = on => {
     } catch {
       // the panes' presses still explain
     }
+    watchSelection($)
     return r
   }).catch(($, e, next) => next(e))
   on('command.run', { command: /^(thimble:)?explain$/ }, async ($, e) => explainCommand($, String((e as { args?: string }).args ?? '')))
+}
+
+/** How often the selection is read while the bar waits for one (watchSelection). */
+const SELECTION_MS = 300
+let watching = 0
+
+/** The bar names `e explain` and `w where from` only while words are selected, and Claude Code tells no hook when the
+ *  person selects: so while its fullscreen layout is drawn (the only one that reports a selection), the selection is
+ *  read every SELECTION_MS and the bar drawn again when one starts or ends. One watch per load of the plugin; a watch of an
+ *  earlier load stops at its next read. */
+function watchSelection($: Engine): void {
+  const mine = ++watching
+  let had = ''
+  const tick = async () => {
+    if (mine !== watching) return
+    try {
+      if (fullscreenNow() === true && (featureOn('explain') || featureOn('where'))) {
+        const has = `${await selectionWaits($)} ${await wordsSelected($)}`
+        if (has !== had) { had = has; $.ui.invalidate('ui.render') }
+      }
+    } catch {
+      return
+    }
+    $.clock.after(SELECTION_MS, () => { void tick() })
+  }
+  $.clock.after(SELECTION_MS, () => { void tick() })
 }

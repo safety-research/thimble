@@ -32,8 +32,9 @@
 // or not: no line wraps again when a check starts, nor as each verdict arrives.
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
-// explainer highlighted teal or a heads-up orange (a fill behind the words); a mark's words inside a span, or a span
-// inside a mark's words, keep the mark's press and underline, the span's fill behind them at rest. A span's own words are one hover group
+// explainer highlighted teal or a heads-up orange (a fill behind the words); where a span and a mark share words they
+// keep the mark's underline with the span's fill behind them at rest, and take the span's press: an explainer or a
+// heads-up opens before the citation it stands on (] goes on to the citation). A span's own words are one hover group
 // (spanScope), as a citation's are: the pointer over any piece of it (its inline code, its bold words, a line it wraps
 // to) puts its slightly stronger fill (`hoverBg`) behind all of it, never Claude Code's inverse. While the tray shows
 // a mark (`focus`), it is drawn bold on its tint, so the open one is easy to find. `dim` draws the words dim (a rewrite of them runs),
@@ -252,12 +253,19 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   else if (r.tag) p.color = 'error'
   else Object.assign(p, wordsLook(look.status, id))
   // a span on the mark's words (a heads-up, an explainer, inside them or around them): its fill at rest under the
-  // citation's underline, so both show. The citation's tint on hover, its press and hover group, as the rest
+  // citation's underline, so both show. Its words are the span's press and hover group: an explainer or a heads-up
+  // opens first, and ] goes on to the citation (a span comes before the citation it stands on, tray.ts). The
+  // citation's other words keep its press
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
   if (bg) p.backgroundColor = bg
   // the one the tray shows: bold, and its tint kept, so the open one is easy to find
   if (o.focus === r.mark) { p.bold = true; if (!r.tag) p.backgroundColor = tint.backgroundColor }
+  if (sp?.onPress && !r.tag) {
+    const scope = spanScope(o.key, r.span as number)
+    const hover = { scope, inverse: false, ...(sp.look.hoverBg ? { backgroundColor: sp.look.hoverBg } : {}) }
+    return els.Button({ key, plain: true, label: String(sp.label || r.s).slice(0, 120), hover, children: [els.Text(p)], onPress: () => sp.onPress!() })
+  }
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   // no inverse under the pointer (Claude Code inverts a plain Button): the tint shows the hover
   const hover = r.tag ? { scope: tint.scope, inverse: false } : { ...tint, inverse: false }

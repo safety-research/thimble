@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { textWidth } from '../../core/text.js'
-import { chosenOf, definition, examples, isNegative, ledgerTop, partOf, plainLine, rowText, toneOf, valueOrder, whoOf, wrapRuns } from '../ledger.mjs'
+import { chosenOf, definition, examples, isNegative, ledgerTop, partOf, defLine, rowText, toneOf, valueOrder, whoOf, wrapRuns } from '../ledger.mjs'
 
 const W = 74
 const ROWS = 37
@@ -36,8 +36,8 @@ test('at rest each label is a table: its name and records, then each value with 
   assert.equal(rowText(top.head), 'Labels · 5 labels')
   const t = text(top.rows)
   assert.match(t[0], /^stuck {2,}9,921$/)
-  // under its name, what it means in plain words with its values
-  assert.equal(t[1], "the record's words match stuck|blocked — yes 1,175 / no 8,746")
+  // under its name, its definition on one line
+  assert.equal(t[1], 'definition regex: stuck|blocked')
   assert.match(t[2], /^ {2}yes {7}▅+ +1,175 +12%$/)
   assert.match(t[3], /^ {2}no {8}▅+ +8,746 +88%$/)
   // a trial says so; a value with no records shows its 0 with no bar
@@ -70,7 +70,7 @@ test('a value open: its label a table with the ▸, the others one line each, it
   const top = ledgerTop(FIVE, chosen, { w: W, rows: ROWS })
   const t = text(top.rows)
   assert.deepEqual(t.slice(0, 3).map(x => x.split(/\s+/)[0]), ['stuck', '', 'asks_review'])
-  assert.equal(t[3], 'yes 2,165 / no 7,756')
+  assert.equal(t[3], 'definition code: return "yes"')
   assert.match(t[4], /^▸ yes +▅+ +2,165 +22%$/)
   // a label folded to one line is cut with … where its values do not fit
   assert.ok(t.find(x => x.startsWith('post_kind')).endsWith('…'))
@@ -86,8 +86,9 @@ test('a value open: its label a table with the ▸, the others one line each, it
   fits([...top.rows, ...ex.rows])
   // a press: a value row opens it, an example picks it
   assert.deepEqual(partOf(top.rows[4][0].part), ['v', 'asks_review', 'yes'])
-  // the plain line opens its label
-  assert.deepEqual(partOf(top.rows[3][0].part), ['l', 'asks_review'])
+  // the definition's line shows the definition whole; a code label's is its first line that is not the def
+  assert.equal(rowText(top.rows[3]), 'definition code: return "yes"')
+  assert.deepEqual(partOf(top.rows[3][0].part), ['d', 'asks_review'])
   assert.deepEqual(partOf(ex.rows[1][0].part), ['r', 'runs/a/board.jsonl#L1'])
 })
 
@@ -126,7 +127,7 @@ test('one label opens on its first value with records; d shows the definition wh
   assert.deepEqual([chosen.lab.name, chosen.value], ['tone', 'friendly'])
   const t = text(ledgerTop([TONE], chosen, { w: W, rows: ROWS }).rows)
   assert.match(t[0], /^tone +60 of 9,921 at random$/)
-  assert.equal(t[1], 'stuck|blocked — friendly 8 / neutral 46 / terse 6')
+  assert.equal(t[1], 'definition prompt: stuck|blocked')
   assert.match(t[2], /^▸ friendly/)
   assert.equal(t.filter(x => /^[^\s▸]/.test(x)).length, 2)
   // nothing named and more than one label: at rest
@@ -161,8 +162,11 @@ test('a narrow pane: every state still fits its width, names and words cut with 
   fitsIn(definition(long, w).filter(r => Array.isArray(r)))
 })
 
-test("a label's plain line: a --prompt label's definition, its first sentence, then its values and their counts", () => {
+test("a label's definition line: how it was made and its rule, a --prompt's first sentence", () => {
   const timing = { name: 'ask_timing', kind: 'prompt', rule: 'The post asks when the next round comes. Count a post that guesses the time too.', values: ['yes', 'no'], counts: { yes: 1607, no: 1366 } }
-  assert.equal(plainLine(timing), 'The post asks when the next round comes. — yes 1,607 / no 1,366')
-  assert.equal(plainLine({ name: 'x', kind: 'set', values: ['a'], counts: { a: 2 } }), 'values Claude gave records after reading them — a 2')
+  assert.equal(defLine(timing), 'prompt: The post asks when the next round comes.')
+  assert.equal(defLine({ name: 'x', kind: 'set', values: ['a'], counts: { a: 2 } }), 'values Claude gave records after reading them')
+  assert.equal(defLine({ name: 'y', kind: 'code', rule: 'import re\n# the purpose\ndef label(r):\n    return r["kind"]' }), 'code: return r["kind"]')
+  // a code label that opens with a comment: the comment, which says in words what the code does
+  assert.equal(defLine({ name: 'z', kind: 'code', rule: '# Sorts an edit by its topic,\n# from its page name.\nimport re\nTOPICS = [1]\ndef label(r):\n    return "x"' }), 'code: Sorts an edit by its topic, from its page name.')
 })

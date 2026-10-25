@@ -232,9 +232,9 @@ test("a quote of a JSON line shows the line as the file holds it, the cited word
   const walk = (n: Any): void => { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === 'object') { if (n.type === 'Text' && n.props?.bold) bold.push(textOf(n)); walk(n.props?.children) } }
   walk(pane)
   expect(bold).toContain('Paste it fast')
-  expect(buttonsOf(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])).toEqual([['w', 'explain these words']])
+  expect(buttonsOf(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])).toEqual([['e', 'explain these words']])
   // w: the cited words' explainer, written now, shows in the pane
-  buttonsOf(pane).find(b => b.hotkey === 'w').onPress()
+  buttonsOf(pane).find(b => b.hotkey === 'e').onPress()
   await settle()
   const ex = textOf(await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els))
   expect(ex).toContain('Paste it fast  explainer')
@@ -259,14 +259,21 @@ test('e explains the words selected in an answer, on the row the selection lies 
   // no answer yet: e is typed, and the bar names no key
   expect(await explainKey(s.$, 'e', 0)).toBe(null)
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  // the bar names e only while words are selected
+  s.$.ui.selection = async () => undefined
+  expect(await explainBar(s.$, () => true, false)).toEqual([])
+  s.$.ui.selection = async () => ({ text: '  “the client”\n', requestId: 't1-row' })
   expect((await explainBar(s.$, () => true, false)).map(x => `${x.key} ${x.words}`)).toEqual(['e explain'])
   await pressE(s, { text: '  “the client”\n', requestId: 't1-row' })
   expect(s.calls[0].prompt).toContain('The term: the client')
   const part = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!
   const id = part.order.find(x => part.items[x]!.term === 'the client')!
   expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain', id })
-  // the line that said it was being written went when the tray opened
+  // no line says it is being written (the bar's busy line does), and the bar no longer names e for these words
   expect(await failLineNow(s.$)).toBe(null)
+  expect(await explainBar(s.$, () => true, false)).toEqual([])
+  s.$.ui.selection = async () => ({ text: 'uploads', requestId: 't1-row' })
+  expect((await explainBar(s.$, () => true, false)).map(x => x.key)).toEqual(['e'])
   // with Explainers off, e is typed and the bar does not name it
   setOptions({ explain: false })
   expect(await explainKey(s.$, 'e', 0)).toBe(null)
@@ -315,7 +322,7 @@ test('the selected words are trimmed to one line, and a long selection is cut af
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
   s.$.ui.selection = async () => ({ text: long, requestId: 't1-row' })
   await (await explainKey(s.$, 'e', 0))!.later!()
-  expect(String((await failLineNow(s.$))?.text)).toContain("Writing an explainer of the selection's first")
+  expect(String((await failLineNow(s.$))?.text)).toContain('the explainer covers its first')
   await settle()
   // the call failed: the line says why, in red
   expect((await failLineNow(s.$))?.kind).toBe('failed')
@@ -354,8 +361,11 @@ test('with Citations manual, w makes the selected words a citation of their answ
     const s = setup([LOOK])
     const plain = 'Uploads fail after the retry budget runs out: **41 of the 44** failures came 30 seconds after a drop.'
     await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: plain })
-    expect((await whereBar(s.$, k => k === 'where', false)).map(x => `${x.key} ${x.words}`)).toEqual(['w where from'])
+    // the bar names w only while words are selected
+    s.$.ui.selection = async () => undefined
+    expect(await whereBar(s.$, k => k === 'where', false)).toEqual([])
     s.$.ui.selection = async () => ({ text: '41 of the 44 failures', requestId: 't1-row' })
+    expect((await whereBar(s.$, k => k === 'where', false)).map(x => `${x.key} ${x.words}`)).toEqual(['w where from'])
     s.$.ui.open = async () => ({ isPlaced: true })
     const take = await whereKey(s.$, 'w', 0)
     await take!.later!()

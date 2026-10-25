@@ -36,7 +36,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export const SQUEEZE_KEYS = ['s']
+export const SQUEEZE_KEYS = ['s', 'b']
 
 export async function squeezeView($: Engine, row: string, _text: string): Promise<TextView | null> {
   return viewOf($, row)
