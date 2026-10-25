@@ -151,6 +151,36 @@ test('a card shows the labels its turn ran before it; the answer only those no c
   expect(opens).toEqual(['thimble'])
 })
 
+test("a card names only the labels its drawing shows; the turn's other labels go under the answer", async () => {
+  const LIST = [
+    { name: 'topic', kind: 'code', values: ['OECD equity', 'grocery stores', 'other'], records: 40 },
+    { name: 'asks', kind: 'regex', values: ['yes', 'no'], records: 40 },
+    { name: 'tactic', kind: 'regex', values: ['yes', 'no'], records: 40 },
+  ]
+  const w = engine(args => (args[0] === 'label' && args[1] === '--json' ? { out: LIST } : { out: {} }))
+  const [a, b] = ['c00000000000c1', 'c00000000000c2']
+  await w.set('answerTurns', ['t1'])
+  await w.set('answerTurn', {
+    turnId: 't1', n: 1, rows: ['r1'], answer: 'r1', reason: 'answer', startedAt: 1, endedAt: 2, seq: 5,
+    labels: ['topic', 'asks', 'tactic'].map((name, i) => ({ name, args: [], toolUseId: `b${i}`, seq: i + 1, ok: true })),
+    cards: [{ id: a, toolUseId: 'k1', seq: 4 }, { id: b, toolUseId: 'k2', seq: 5 }],
+  }, 't1')
+  await w.set('answerRowTurn', 't1', 'r1')
+  await w.set('card', { id: a, version: 1, title: 'Posts by topic', calls: {} }, a)
+  await w.set('card', { id: b, version: 1, title: 'One task', calls: {} }, b)
+  // card a draws a topic's value, in no color of its own and with a plain "yes" beside it; card b draws none
+  await w.set('cardTree', { gen: 1, width: 60, seq: 1, tree: { t: 'Box', c: [{ t: 'Text', c: ['OECD equity 12 · yes 3'] }] } }, a)
+  await w.set('cardTree', { gen: 1, width: 60, seq: 1, tree: { t: 'Box', c: [{ t: 'Text', c: ['R1 window 5m39s'] }] } }, b)
+  needLabelList(w.$)
+  await w.flush()
+  expect(textOf(await labelsUnderCard(w.$, ELS, a, 80))).toBe('label topic · code · 40 records  ● OECD equity  ● grocery stores  ● other')
+  expect(await labelsUnderCard(w.$, ELS, b, 80)).toEqual([])
+  const answer = textOf(await labelsUnderAnswer(w.$, ELS, 'r1', 80))
+  expect(answer).toContain('asks')
+  expect(answer).toContain('tactic')
+  expect(answer).not.toContain('topic ')
+})
+
 test('a read that fails keeps the rows as last read; a read asked while one runs reads once more after it', async () => {
   const LIST = [{ name: 'spam', kind: 'regex', values: ['yes', 'no'], records: 12 }]
   let fail = false
@@ -159,6 +189,7 @@ test('a read that fails keeps the rows as last read; a read asked while one runs
   await w.set('answerTurns', ['t1'])
   await w.set('answerTurn', { turnId: 't1', n: 1, rows: ['r1'], answer: 'r1', reason: 'answer', startedAt: 1, endedAt: 2, seq: 2, labels: [{ name: 'spam', args: [], toolUseId: 'b1', seq: 1, ok: true }], cards: [{ id: card, toolUseId: 'k1', seq: 2 }] }, 't1')
   await w.set('card', { id: card, version: 1, title: 'Spam', calls: {} }, card)
+  await w.set('cardTree', { gen: 1, width: 60, seq: 1, tree: { t: 'Box', c: [{ t: 'Text', c: ['spam by agent'] }] } }, card)
   needLabelList(w.$)
   await w.flush()
   expect(textOf(await labelsUnderCard(w.$, ELS, card, 80))).toBe('label spam · regex · 12 records  ● yes  ● no')

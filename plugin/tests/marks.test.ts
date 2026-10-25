@@ -495,3 +495,17 @@ test('with Citation checks off, the reply\'s citations wait unchecked, and openi
     setOptions({ citationChecks: 'auto' })
   }
 })
+
+test("a card placed before a reply's first words draws beside no ●: the ● stands beside those words", () => {
+  const text = '[Edits by day](card:c0a1b2c3d4e5)\n\nJune had one burst of edits.'
+  const card = ELS.Box({ children: [ELS.Text({ children: 'CARD' })] })
+  const body = messageEl(ELS, { text, marks: [], looks: [], key: 'k', cols: 100, first: true, spin: '', cards: { c0a1b2c3d4e5: card }, onMark: () => undefined })
+  const rows = body.props.children as Any[]
+  const glyphOf = (row: Any) => textOf(row.props.children[0])
+  expect(textOf(rows[0])).toContain('CARD')
+  expect(glyphOf(rows[0])).toBe(' ')
+  expect(glyphOf(rows[1])).toBe('●')
+  // a reply that is its card alone keeps the ● beside it
+  const alone = messageEl(ELS, { text: '[Edits by day](card:c0a1b2c3d4e5)', marks: [], looks: [], key: 'k', cols: 100, first: true, spin: '', cards: { c0a1b2c3d4e5: card }, onMark: () => undefined })
+  expect(glyphOf((alone.props.children as Any[])[0])).toBe('●')
+})

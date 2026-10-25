@@ -71,6 +71,16 @@ test("a claim's sources are the citations [words](#) in or near its words, by ro
   assert.ok(edgesOf(flat).some(e => e.kind === 'rows'))
 })
 
+test("a claim said without citations of its own takes the ones its reason cites in its paragraph", () => {
+  const st = emptyStore('s')
+  const answer = 'Some runs also used a second channel. A post asks the run ahead to call a counter URL. [Saves on 87 pages](#) mention it, most on [June 17](#). Bots made [3 edits](#).'
+  applyTurn(st, { turn: 1, places: [{ row: 'a1', by: 'claude', turn: 1, text: answer }], out: { claims: [
+    { claim: 'Some runs used a counter URL as a second channel.', quote: 'Some runs also used a second channel', cluster: 'channels',
+      because: 'A post asks the run ahead to call it, and [saves on 87 pages](#) mention it.' },
+  ] } })
+  assert.deepEqual(st.claims[0].sources.map(s => s.label), ['Saves on 87 pages'])
+})
+
 test("a store an earlier version kept leaves out the whole folder's map it held", () => {
   const st = readStore({ claims: [
     { id: 'c1', text: 'The run failed at step 4.', by: 'claude', cluster: 'k1', said: [{ row: 'r1', by: 'claude', quote: 'failed at step 4' }, { by: 'folder', quote: 'step 4' }], folder: { card: 'folder-claims', id: 'a' }, links: [{ to: 'c2', how: 'supports', folder: true }] },

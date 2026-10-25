@@ -20,7 +20,7 @@ test('a rewrite is held to the original: its citations stay as written, and a nu
   const out = checkRewrite(TEXT, 'Fixed in [2 tries](#); it failed [1 run in 9](#), 12% of runs.')
   assert.equal(out.text, 'Fixed in [2 tries](#); it failed [1 run in 9](#), 12% of runs.')
   assert.equal(out.problems.length, 1)
-  assert.match(out.problems[0], /"12" is not in the original/)
+  assert.match(out.problems[0], /this version states "12", which the original answer does not/)
   assert.deepEqual(checkRewrite(TEXT, 'It failed about [1 in 9](#); now it [passed 200 times](#).').problems, [])
   // a link's words count, its target does not
   assert.equal(mapLinks('a [b (c)](#) d', (all, words) => words), 'a b (c) d')
@@ -106,11 +106,14 @@ test('a cited number the rewrite changed is named, though the original states it
   const orig = 'The job ran [26 times](#) in March. It ran 23 times in April.'
   // 23 is in the original, so the plain number check finds nothing; the citation still changed
   const out = checkRewrite(orig, 'The job ran [23 times](#) in March.')
-  assert.deepEqual(out.problems, ['the citation "23 times" stands as "26 times" in the original'])
+  assert.deepEqual(out.problems, ['this version says "23 times" where the original answer says "26 times"'])
   assert.deepEqual(changedCitations(orig, 'It ran [26 times](#), then [23](#) more.'), [{ words: '23', was: null }])
   // a cited value kept, or rounded as a rewrite may round it, is no change
   assert.deepEqual(checkRewrite('Errors fell to [0.369](#) of runs.', 'Errors fell to [37%](#) of runs.').problems, [])
   assert.deepEqual(checkRewrite(orig, 'It ran [26 times](#).').problems, [])
+  // a citation that keeps the original's value and adds one the original states beside it changed nothing
+  const saves = 'Of the 13,704 saves, [13,339 fell in one week, June 16–22](#).'
+  assert.deepEqual(checkRewrite(saves, '[13,339 of 13,704 saves fell in June 16–22](#).').problems, [])
 })
 
 test('each chip names its two ends', () => {

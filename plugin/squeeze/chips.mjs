@@ -673,7 +673,8 @@ const wordSet = w => new Set((String(w).toLowerCase().match(/[a-z][a-z'-]{2,}/g)
 /**
  * The citations of a rewrite whose numbers no citation of the original states: a cited value the rewrite changed
  * (`[23 times](#)` where the original cites `[26 times](#)`). Each as {words, was}, `was` the original's citation with the
- * most words in common, or null.
+ * most words in common, or null. A citation that keeps a value of that one and adds a number the original states
+ * beside it (`[13,339 of 13,704 saves](#)` for `[13,339 saves](#)`) changed nothing.
  */
 export function changedCitations(original, text) {
   const orig = citedIn(original)
@@ -686,9 +687,10 @@ export function changedCitations(original, text) {
     let best = 0
     for (const o of orig) {
       const k = [...wordSet(o.words)].filter(w => mine.has(w)).length
-      if (k > best && o.nums.length) { best = k; was = o.words }
+      if (k > best && o.nums.length) { best = k; was = o }
     }
-    out.push({ words: c.words, was })
+    const kept = was && was.nums.flatMap(roundings).some(n => c.nums.includes(n))
+    if (!kept) out.push({ words: c.words, was: was ? was.words : null })
   }
   return out
 }
@@ -706,10 +708,11 @@ export function checkRewrite(original, text) {
   // share (0.369) as a percent (37, 36.9)
   const have = new Set(numbersIn(original).flatMap(roundings))
   const stray = [...new Set(numbersIn(mapLinks(out, (all, words) => words)).filter(n => !have.has(n)))]
-  if (stray.length) problems.push(`${stray.slice(0, 3).map(n => `"${n}"`).join(', ')} ${stray.length === 1 ? 'is' : 'are'} not in the original`)
+  // each problem is said as the person reads it on the bar, beside the version it is about
+  if (stray.length) problems.push(`this version states ${stray.slice(0, 3).map(n => `"${n}"`).join(', ')}, which the original answer does not`)
   // a cited number the rewrite changed, though the original states it elsewhere
   const changed = changedCitations(original, out).filter(c => !c.words || !stray.some(n => numbersIn(c.words).includes(n)))
-  for (const c of changed.slice(0, 2)) problems.push(c.was ? `the citation "${c.words}" stands as "${c.was}" in the original` : `the citation "${c.words}" cites a number no citation of the original states`)
+  for (const c of changed.slice(0, 2)) problems.push(c.was ? `this version says "${c.words}" where the original answer says "${c.was}"` : `this version cites "${c.words}", which the original answer states but does not cite`)
   return { text: out, problems }
 }
 

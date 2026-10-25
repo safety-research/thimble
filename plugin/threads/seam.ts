@@ -68,6 +68,8 @@ export async function threadsKey($: Engine, key: string, _until: number): Promis
 
 /** `t 2 threads` at the bar's right, while the session has threads: a click lists them, as t does. */
 export async function threadsBar($: Engine, _on: (key: string) => boolean, _preview: boolean): Promise<BarItem[]> {
+  // a drawing made right after a reload (the settings pane's preview, after a switch) reads the kept threads itself
+  await restoreThreads($)
   await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
   const n = threadCount()
   if (!n) return []

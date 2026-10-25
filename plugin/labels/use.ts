@@ -3,7 +3,9 @@
 // name, since Claude Code follows `$` only into functions a file declares or imports.
 //
 // The label rows. Which labels a turn used are the `thimble label` commands its Bash calls ran (core/answers.ts
-// labelsOf); a card's are those its turn ran before the card's call (CardUse.seq). A card gets rows under it: each
+// labelsOf); a card's are those its turn ran before the card's call (CardUse.seq) that its drawing shows (use.mjs
+// labelInTree: the label's name, a value in the card's own color, or a value that names it), since a turn reads
+// many labels and a card shows few. A card gets rows under it: each
 // label's name, how it was made in plain words (regex, code, read by Claude, or values Claude gave: the labels pane's
 // words) and over how many records, and the values its records have, then the records with no value (in the pane's
 // gray), one row per label, its columns lined up: under a card in the colors the card gives them (the label's own
@@ -39,7 +41,7 @@ import { rootHere, runThimble } from '../core/env'
 import { readFeed } from '../core/feed'
 import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
-import { answerChoice, answerNote, askContext, askOf, howMade, NO_VALUE, rowValues, tonesInTree, usedNames } from './use.mjs'
+import { answerChoice, answerNote, askContext, askOf, howMade, labelInTree, NO_VALUE, rowValues, tonesInTree, usedNames } from './use.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -179,6 +181,15 @@ async function cardNames($: Engine, id: string): Promise<string[]> {
   return []
 }
 
+/** The labels a card's row names: of those its turn ran before its call, the ones its drawing shows (use.mjs
+ *  labelInTree). null while the labels are not read yet. */
+async function cardLabels($: Engine, id: string): Promise<{ used: UsedLabel[]; tree: unknown } | null> {
+  const found = await usedOf($, await cardNames($, id))
+  if (!found) return null
+  const tree = (await treeOf($, id))?.tree ?? null
+  return { used: found.filter(l => labelInTree(tree, l)), tree }
+}
+
 export async function labelsUnderAnswer($: Engine, els: Any, row: string, _cols: number): Promise<Any[]> {
   const turn = await turnOfRow($, row)
   if (!turn || turn.answer !== row || !turn.labels?.length) return []
@@ -186,7 +197,7 @@ export async function labelsUnderAnswer($: Engine, els: Any, row: string, _cols:
   const shown: string[] = []
   for (const c of turn.cards ?? []) {
     const meta = await metaOf($, c.id)
-    if (meta && meta.version > 0) shown.push(...usedNames(await labelsOf($, turn.turnId, c.seq)))
+    if (meta && meta.version > 0) shown.push(...((await cardLabels($, c.id))?.used ?? []).map(l => l.name))
   }
   const used = await usedOf($, usedNames(await labelsOf($, turn.turnId), shown))
   const el = used ? labelRowEl(els, used, { key: `lu-${row}`, onOpen: opener($) }) : null
@@ -194,10 +205,9 @@ export async function labelsUnderAnswer($: Engine, els: Any, row: string, _cols:
 }
 
 export async function labelsUnderCard($: Engine, els: Any, id: string, _cols: number): Promise<Any[]> {
-  const found = await usedOf($, await cardNames($, id))
-  if (!found?.length) return []
-  const tree = (await treeOf($, id))?.tree ?? null
-  const used = found.map(l => ({ ...l, tones: tonesInTree(tree, l.values) as Record<string, string> }))
+  const got = await cardLabels($, id)
+  if (!got?.used.length) return []
+  const used = got.used.map(l => ({ ...l, tones: tonesInTree(got.tree, l.values) as Record<string, string> }))
   const el = labelRowEl(els, used, { key: `lu-card-${id}`, onOpen: opener($) })
   return el ? [els.Box({ key: `lu-box-card-${id}`, marginLeft: 2, children: [el] })] : []
 }
