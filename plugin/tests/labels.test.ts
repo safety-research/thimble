@@ -161,18 +161,18 @@ test('the labels pane: a table per label; n opens the first value, j picks its f
   expect(keyRow.every(n => n.props.hover?.inverse === false)).toBe(true)
   await d.press('n')
   // the first value open: its examples one line each, the other label folded to one line; esc goes back to all of
-  // them (the list is under this pane on the trail), so no b names it twice; above the examples, d the definition
+  // them (the list is under this pane on the trail), so no b names it twice; d the definition, with the other keys above the input
   d = await drawn($)
   expect(d.rows.some(r => /^▸ yes +▅+ +2 +67%$/.test(r))).toBe(true)
   expect(d.rows.some(r => /^long {2,}▅+ {2}yes 2 {3}no 1$/.test(r))).toBe(true)
   expect(d.rows.some(r => /^ {2}wren {2}I'm sorry, I broke the build\.$/.test(r))).toBe(true)
-  expect(d.keys).toEqual(['d', 'p', 'n', 'k', 'j'])
+  expect(d.keys).toEqual(['p', 'n', 'k', 'j', 'd'])
   await d.press('j')
   // the first example picked: open in place, where it is, and the check keys
   d = await drawn($)
   expect(d.rows.some(r => /^▸ wren {2}I'm sorry, I broke the build\.$/.test(r))).toBe(true)
   expect(d.rows.some(r => /^ {8}chat\.jsonl:1 +1: yes {2}2: no$/.test(r))).toBe(true)
-  expect(d.keys).toEqual(['d', '1', '2', 'p', 'n', 'k', 'j'])
+  expect(d.keys).toEqual(['1', '2', 'p', 'n', 'k', 'j', 'd'])
   // 2 (no) is the person's check of the picked example; the next one is picked
   await d.tree.find(n => n.type === 'Button' && n.props.hotkey === '2' && n.props.label === 'no').props.onPress()
   expect(ran.find(a => a.includes('--check'))).toEqual(['label', 'sorry', '--check', 'chat.jsonl#L1', 'no', '--json'])
@@ -188,12 +188,13 @@ test('the labels pane: the detail switches between the examples and the definiti
   const $ = paneEngine(ran)
   await openLabels($, { label: 'long' })
   let d = await drawn($)
-  // opened on the label itself: esc closes the pane, so b names the way to all the labels
-  expect(d.keys[0]).toBe('b')
+  // opened on the label itself: esc closes the pane, so b names the way to all the labels; every key in the row
+  // above the input
+  expect(d.keys.slice(-2)).toEqual(['d', 'b'])
   expect(d.tree.find(n => n.type === 'Button' && n.props.hotkey === 'd').props.label).toBe('definition')
   await d.press('d')
   d = await drawn($)
-  // the switch: the definition side bold with how the label was made, the examples side a press that d presses
+  // the switch: the definition side bold with how the label was made, the examples side a click, as d does
   expect(d.tree.some(n => n.type === 'Text' && n.props.bold && n.props.children === 'definition')).toBe(true)
   expect(d.tree.some(n => n.type === 'Text' && n.props.children === ' · code')).toBe(true)
   expect(d.tree.find(n => n.type === 'Code').props.source).toBe('def label(unit):\n    return len(unit["text"]) > 30')

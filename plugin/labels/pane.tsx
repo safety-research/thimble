@@ -200,7 +200,7 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
     await here({ at: pageAt, sel: v === null ? String(r.ref) : (recs[ex.p + 1]?.ref ?? null) })
   }
 
-  // ---- the keys: p n over the values, k j over the examples (d, the detail's switch, stands above the detail)
+  // ---- the keys: p n over the values, k j over the examples; d and b join them below
   const order = valueOrder(list) as [string, string][]
   const at = chosen ? order.findIndex(([l, v]) => l === label && v === value) : -1
   const hop = (d: number) => {
@@ -249,29 +249,28 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
     return undefined
   }
 
-  // ---- the pane: the head (b at its right once a label is open), the labels, the detail's switch and the detail, the
-  // keys at the bottom. b only where esc does not already go back to all the labels (the pane under this one on the
-  // trail is their list), so the way back is named once
+  // ---- the pane: the head, the labels, the detail's switch and the detail, the keys at the bottom. b only where esc
+  // does not already go back to all the labels (the pane under this one on the trail is their list)
   const under = (await paneNow($).catch(() => null))?.trail?.at(-1)
   const escToList = under?.kind === 'labels' && !(under.args as LabelsArgs | undefined)?.label
   const back = chosen && list.length > 1 && !escToList
   const headRow = Box({ key: 'head', flexDirection: 'row', children: [
     rowEl(els, top.head as Run[], 'head-words', press),
-    ...(back ? [
-      Box({ key: 'head-gap', flexGrow: 1, children: [Text({ children: ' ' })] }),
-      Button({ key: 'key-b', plain: true, hotkey: 'b', label: 'all labels', hover: quiet('labels-key-b'), onPress: () => go({}), children: [Text({ key: 'w', dimColor: true, children: 'all labels' })] }),
-    ] : []),
   ] })
-  // the detail's switch: the side shown bold, the other a press that d presses too (Claude Code draws `d:` before it)
+  // the detail's switch: the side shown bold, the other a click; its key, d, stands with the others above the input
   const flip = () => here({ at: a.at, sel: a.sel ?? null, def: !a.def })
   const side = (on: boolean, words: string, more: string, k: string) => (on
     ? Box({ key: `side-${k}`, flexDirection: 'row', children: [Text({ key: 'w', bold: true, children: words }), ...(more ? [Text({ key: 'm', dimColor: true, children: more })] : [])] })
-    : Button({ key: `side-${k}`, plain: true, hotkey: 'd', label: words, hover: quiet(`labels-side-${k}`), onPress: flip, children: [Text({ key: 'w', dimColor: true, children: words })] }))
+    : Button({ key: `side-${k}`, plain: true, label: words, hover: quiet(`labels-side-${k}`), onPress: flip, children: [Text({ key: 'w', dimColor: true, children: words })] }))
   const sides = chosen
     ? Box({ key: 'sides', flexDirection: 'row', children: [
       side(!a.def, 'examples', '', 'ex'), Text({ key: 'sides-gap', children: '   ' }), side(!!a.def, 'definition', ` · ${madeOf(chosen.lab)}`, 'def'),
     ] })
     : null
+  // every key stands in the one row above the input, as in thimble's other panes: d the detail's other side, b back
+  // to all the labels (only where esc does not already go there, so the way back is named once)
+  if (chosen) key('d', a.def ? 'examples' : 'definition', flip)
+  if (back) key('b', 'all labels', () => go({}))
   const body = [...(top.rows as Row[]), ...section]
   const keysWidth = keys.reduce((s, x, i) => s + (i ? x.gap : 0) + textWidth(x.k) + 2 + textWidth(x.label), 0)
   const used = 2 + (sides ? 1 : 0) + body.reduce((s: number, r) => s + (Array.isArray(r) ? 1 : codeRows(r.code, W - 2)), 0) + (keys.length ? 1 + Math.ceil(keysWidth / W) : 0)
