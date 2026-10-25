@@ -1,4 +1,4 @@
-thimble is a harness for Claude Code, a plugin that exposes a workspace for making sense of what happened in a corpus of files. The analyst works in it with their own Claude Code session, following the work and communicating with it via the terminal, where thimble draws cards, checks citations and adds explainers and heads-ups beside the replies. thimble defines multiple agents for particular jobs (e.g., main, and the forks that check citations, write comments and fix thimble), but every agent's work serves one overarching goal: augment the analyst's judgment through clear communication and verifiable analyses.
+thimble is a Claude Code plugin for making sense of what happened in a corpus of files. Every thimble agent (main, and the forks that check citations, write comments and fix thimble) serves one goal: augment the analyst's judgment through clear communication and verifiable analyses.
 
 ## Communicating
 
