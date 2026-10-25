@@ -19,7 +19,8 @@
 //                        evidence shown or hidden (the line in the detail that says so) · h its History (a corrected
 //                        claim) · c the current citation's code and output whole · x repair the current citation
 //                        (the evidence hidden: its first failed one) when it failed (a check of it again in the background, marks/checker.ts
-//                        launchRepair, started in this feature's ui.press hook, seam.ts; while that check runs, x says so)
+//                        launchRepair, started in this feature's ui.press hook, seam.ts; while that check runs, x says so),
+//                        or x check the current citation when it was not checked yet (auto cite, manual: checkOpened)
 //   A focused pane hands a plugin only its Buttons' hotkeys, one letter or digit each, and Claude Code types any other
 //   letter into the prompt, the keyboard going with it; so a key shows while its press can still be expected (x after
 //   a repair began). f at rest finds the claims of the answers not read. The input under the pane asks about what is
@@ -39,13 +40,13 @@ import { openPane, paneNow, scrollsOwn } from '../core/pane'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, themeNow } from '../core/theme'
-import { launchRepair, repairOf } from '../marks/checker'
+import { checkOpened, launchRepair, repairOf } from '../marks/checker'
 import { citeWords } from '../marks/evidence'
 import { citeHeat, wordsLook, type MarkStatus } from '../marks/view'
 import { plainSentence } from '../marks/message.js'
 import { NOT_RUN, rowMarks, type MarkItem } from '../marks/store'
 import { markColors } from '../explain/place.mjs'
-import { evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
+import { checkable, evidenceOf, graphView, groupOf, hopCluster, paneData, repairable, selectedOf, sourceView, threadAbout } from './graph.js'
 import { claimsBright, claimsStore, claimsToFind, placeText, showClaims, type ClaimsArgs } from './term'
 
 type Engine = EngineInterface
@@ -236,6 +237,8 @@ export async function repairShown($: Engine): Promise<boolean> {
   // the evidence shown: the citation it shows; hidden: the claim's first failed citation (the failed ones come first)
   const at = a.open ? Math.max(0, Math.min(cites.length - 1, Number(a.cite) || 0)) : cites.findIndex(repairable)
   const s = cites[at]
+  // a citation not checked yet (auto cite, manual): x checks it, as opening it in the reply does
+  if (a.open && checkable(s)) { await checkOpened($, s.row, s.n); return true }
   if (!repairable(s)) return false
   const r = await repairOf($, s.row, s.n)
   if (r === null) return false
@@ -379,7 +382,8 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     if (a.open && (view.cut || a.whole)) key('c', a.whole ? 'shorter' : 'all code and output', () => onClaim({ whole: !a.whole }))
     // the press is the ui.press hook's (seam.ts), which starts the repair inside a hook; while the check runs again, x
     // says so (a second x is not typed into the prompt)
-    if (a.open ? repairable(shown) : cites.some(repairable)) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
+    if (a.open && checkable(shown)) key('x', 'check', () => undefined, CLAIMS_REPAIR)
+    else if (a.open ? repairable(shown) : cites.some(repairable)) key('x', 'repair', () => undefined, CLAIMS_REPAIR)
     else if (a.open && shown?.repair && shown.status === 'checking') key('x', 'checking again', () => undefined)
   } else if (view.chosen && cs.length) {
     // a cluster chosen: k j move the current claim of its list (the ends hold), e opens it; p n the other clusters

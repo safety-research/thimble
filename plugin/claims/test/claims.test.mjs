@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseAnswer } from '../../observer/reply.mjs'
-import { cardOf, cellSlots, citationRows, correctionsOf, evidenceOf, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, reasonOf, repairable, rowText, rowsCapacity, scrollWindow, snippetOf, wordDiff } from '../graph.js'
+import { cardOf, cellSlots, checkable, citationRows, correctionsOf, evidenceOf, fitClusters, graphView, historyRows, hopCluster, mapCapacity, paneData, reasonOf, repairable, rowText, rowsCapacity, scrollWindow, snippetOf, wordDiff } from '../graph.js'
 import lens from '../lens.mjs'
 import { applyTurn, edgesOf, emptyStore, parseClaims, promptLines, readStore, viewOf } from '../store.js'
 
@@ -669,4 +669,16 @@ test("a claim keeps the lens's reason it holds (`because`), and a restatement gi
   ] } })
   assert.equal(st.claims[1].because, 'The logs show both of their names.')
   assert.equal(paneData(st).claims[0].because, 'No relay got past it in [nine rounds](#).')
+})
+
+test('a citation not checked yet (auto cite) reads "not checked", never "× failed" without a reason; x checks it', () => {
+  const s = { label: '419 and 411', status: 'deferred', row: 'r1', n: 3 }
+  const text = cardOf(s, 60).rows.map(r => r.map(x => x.s).join('')).join('\n')
+  assert.match(text, /not checked/)
+  assert.doesNotMatch(text, /failed/)
+  assert.equal(checkable(s), true)
+  assert.equal(repairable(s), false)
+  // a failed one says why
+  const bad = cardOf({ label: '419', status: 'failed', reason: 'The forge counts 412. The rest match.', row: 'r1', n: 3 }, 60).rows.map(r => r.map(x => x.s).join('')).join('\n')
+  assert.match(bad, /× failed[\s\S]*The forge counts 412\./)
 })

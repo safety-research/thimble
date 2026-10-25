@@ -329,8 +329,11 @@ async function keepRow($: Engine, e: any, next: (e: any) => Promise<any>): Promi
     else if (e.door === 'prompt' && msg.type === 'user' && !msg.isMeta) {
       const p = waiting.find(x => !x.row && sameText(x.text, text)) ?? waiting.findLast(x => !x.row)
       if (p) p.row = row
+      // the row names who sent it: a turn whose words matched no prompt.submit (a subagent's hand-back starts its turn
+      // with words other than its row's) takes the row's sender, so a reply nobody typed is never the person's prompt
+      const by = String((e.origin as { kind?: string } | undefined)?.kind ?? '')
       const now = await mainTurn($)
-      if (now) await editTurn($, now, t => (t.prompt.row ? t : { ...t, prompt: { ...t.prompt, row } }))
+      if (now) await editTurn($, now, t => (t.prompt.row ? t : { ...t, prompt: { ...t.prompt, row, ...(by && t.prompt.by === 'unknown' ? { by } : {}) } }))
     }
   } catch {
     // the row is stored whatever the record makes of it

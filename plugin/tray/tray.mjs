@@ -53,18 +53,20 @@ export const base = tray => (tray && Array.isArray(tray.stack) && tray.stack.len
 /**
  * One row's stops in reading order: its citations (`cites`: [{n, start, words}], n > 0, a citation the check knows) and
  * the features' spans on its words (`spans`: [{id, kind, start, end}], an explainer or a heads-up), by where each
- * starts, then the cards drawn under it (`cards`: their ids, oldest first). A heads-up on a citation's words stops
- * before that citation, so one ] opens it; an explainer there stops after it (the citation's tray offers it with h).
+ * starts, then the cards drawn under it (`cards`: their ids, oldest first). An explainer or a heads-up on a citation's
+ * words, or over them, stops before that citation, as a click on the words opens it first: ] then goes on to the
+ * citation.
  */
 export function stopsOfRow(row, cites, spans, cards) {
   const known = (cites || []).filter(c => c && c.n > 0)
-  const on = s => known.find(c => typeof c.words === 'string' && s.start >= c.start + 1 && s.end <= c.start + 1 + c.words.length)
+  const end = c => (typeof c.end === 'number' ? c.end : c.start + 1 + (typeof c.words === 'string' ? c.words.length : 0))
+  const under = s => known.filter(c => c.start < s.end && s.start < end(c)).map(c => c.start)
   const marks = [
     ...known.map(c => ({ row, kind: 'citation', n: c.n, at: c.start })),
     ...(spans || []).filter(s => s && s.id).map(s => {
       const kind = s.kind === 'heads' ? 'heads' : 'explain'
-      const c = kind === 'heads' ? on(s) : null
-      return { row, kind, id: s.id, at: c ? c.start - 0.5 : s.start }
+      const cs = under(s)
+      return { row, kind, id: s.id, at: cs.length ? Math.min(s.start, ...cs) - 0.5 : s.start }
     }),
   ].sort((a, b) => a.at - b.at || (a.kind === 'citation' ? -1 : 1))
     .map(m => ({ ...m, at: Math.ceil(m.at) }))
@@ -321,27 +323,25 @@ function literalBits(line) {
 }
 
 /**
- * The one line of a check's code that printed an output line: of the lines that print, the one whose own words all
- * stand in that output line (the most of them; the later one on a tie), else the last line that prints, else the
- * last line with code. Trimmed; '' without code.
+ * The one line of a check's code that printed an output line: of the lines that print, the one with the most of its own
+ * words in that output line (the later one on a tie); else, when no such line's words stand there, the last line that
+ * prints values alone (`print(n)`, `echo $x`), which may have printed it; else ''. A line whose own words are not in
+ * the output did not print it, so it is never shown above that output (a script's `print("totals")` above another
+ * print's line, a trailing `echo $TMPDIR` above the script's output).
  */
 export function printLine(code, out) {
   const lines = String(code || '').split('\n')
   const said = String(out || '')
   let best = -1
   let most = 0
-  let last = -1
-  let any = -1
+  let bare = -1
   lines.forEach((l, i) => {
-    if (!l.trim() || /^\s*(#|\/\/)/.test(l)) return
-    any = i
-    if (!PRINTS.test(l)) return
-    last = i
+    if (!l.trim() || /^\s*(#|\/\/)/.test(l) || !PRINTS.test(l)) return
     const bits = literalBits(l)
-    if (!bits.length || bits.some(b => !said.includes(b))) return
-    const n = bits.reduce((a, b) => a + b.length, 0)
-    if (n >= most) { best = i; most = n }
+    if (!bits.length) { bare = i; return }
+    const n = bits.filter(b => said.includes(b)).reduce((a, b) => a + b.length, 0)
+    if (n > 0 && n >= most) { best = i; most = n }
   })
-  const i = best >= 0 ? best : last >= 0 ? last : any
+  const i = best >= 0 ? best : bare
   return i >= 0 ? lines[i].trim() : ''
 }

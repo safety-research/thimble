@@ -163,6 +163,18 @@ test("a typed prompt is the person's though its turn starts while its prompt.sub
   expect((await turnOf(s2.$, 't2'))!.prompt.by).toBe('composer')
   expect((await turnOf(s2.$, 't3'))!.prompt.by).toBe('task-notification')
   expect((await sinceLast(s2.$)).replies).toEqual(['t2-row-0'])
+  // a subagent's hand-back starts its turn with words its prompt.submit never had: its row says who sent it
+  const s3 = setup()
+  await turn(s3, { id: 't1', prompt: 'Count the edits in three background agents', rows: ['Started three agents.'] })
+  await s3.call('prompt.submit', { text: '<task-notification>agent one</task-notification>', origin: { kind: 'task-notification' } })
+  await s3.call('turn.start', { text: '<agent-message from="a1">counted 41</agent-message>', turnId: 't2' })
+  await s3.call('session.append', { door: 'prompt', origin: { kind: 'task-notification' }, message: { type: 'user', content: [{ type: 'text', text: '<task-notification>agent one</task-notification>' }] } }, async () => ({ uuid: 'prompt-t2' }))
+  await s3.call('session.append', { door: 'response', message: { type: 'assistant', content: [{ type: 'text', text: 'Agent one counted 41.' }] } }, async () => ({ uuid: 't2-row-0' }))
+  await s3.call('turn.complete', { turnId: 't2', reason: 'answer', answer: 'Agent one counted 41.' }, async () => ({ text: '' }))
+  await settle()
+  expect((await turnOf(s3.$, 't2'))!.prompt.by).toBe('task-notification')
+  // so the person's last prompt is still t1's, and the hand-back is a reply to catch up on
+  expect((await sinceLast(s3.$)).replies).toEqual(['t1-row-0', 't2-row-0'])
 })
 
 test("each feature keeps its own part of a message, and a resumed session reads the turns and their parts back", async () => {
