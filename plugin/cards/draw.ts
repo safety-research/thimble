@@ -40,6 +40,7 @@ import { askCell, quiet } from '../core/askcell.js'
 import { cut } from '../core/text.js'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
+import { cardRef } from '../marks/message.js'
 import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
@@ -392,7 +393,7 @@ export async function cardText($: Engine, id: string): Promise<string> {
 export async function revealCard($: Engine, id: string, block: 'start' | 'nearest' = 'nearest'): Promise<void> {
   const meta = await metaOf($, id)
   if (!meta || meta.version < 1) return
-  const row = meta.anchorRow ?? meta.toolUseId
+  const row = meta.anchorRow ?? meta.inRow ?? meta.toolUseId
   try {
     void Promise.resolve($.ui.scroll({ to: { requestId: row }, block: meta.anchorRow && block === 'start' ? 'end' : block })).catch(() => undefined)
   } catch { /* nothing moves */ }
@@ -409,6 +410,20 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
   if (metas.length) noteShown($, metas.map(m => m.id), e.props?.onScreen)
   const out: Any[] = []
   for (const meta of metas) out.push(await frame($, e, meta))
+  return out
+}
+
+/** The frames of the cards a reply's text places on lines of their own (marks/message.js cardRef), by id: main's cards
+ *  that have drawn. The marks' drawing of the reply draws each on its line (marks/view.ts messageEl). */
+export async function framesIn($: Engine, e: Any, text: string): Promise<Record<string, Any>> {
+  const out: Record<string, Any> = {}
+  for (const line of String(text ?? '').split('\n')) {
+    const id = cardRef(line)
+    if (!id || out[id]) continue
+    const meta = await metaOf($, id)
+    if (meta && meta.version > 0 && !meta.anchorRow) out[id] = await frame($, e, meta)
+  }
+  if (Object.keys(out).length) noteShown($, Object.keys(out), e.props?.onScreen)
   return out
 }
 

@@ -270,7 +270,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // was pressed on when the designer fork drew it. Where Claude Code cannot draw that place again (the main screen,
   // once main's turn that drew it ended), main's version stands at its own call
   const stays = meta.version > 0 && (!!fork || (await canRedraw($, meta.turn)))
-  const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn } : { toolUseId, anchorRow, turn: fork ? meta.turn : await mainTurn($) }
+  const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn, inRow: meta.inRow ?? null } : { toolUseId, anchorRow, turn: fork ? meta.turn : await mainTurn($), inRow: null }
   const next: CardMeta = {
     ...meta, ...home, version, last: version, lastFile: file, title, keys, read: String(r.summary.read), columns: r.summary.columns, file,
     gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
@@ -333,7 +333,7 @@ async function placeCard($: Engine, meta: CardMeta, toolUseId: string, t0: numbe
   const no = await refused($, { id: meta.id }, null)
   if (no) return { result: `The card did not move: ${no}.` }
   const call: CardCall = { version: meta.version, title: meta.title, file: meta.file, read: meta.read }
-  const next: CardMeta = { ...meta, toolUseId, turn: await mainTurn($), calls: { ...meta.calls, [toolUseId]: call }, at: Date.now() }
+  const next: CardMeta = { ...meta, toolUseId, inRow: null, turn: await mainTurn($), calls: { ...meta.calls, [toolUseId]: call }, at: Date.now() }
   await saveMeta($, next)
   await setFocus($, meta.id)
   void record($, { kind: 'card', feature: 'main', card: meta.id, version: meta.version, placed: true, ms: Date.now() - t0 })
