@@ -9,7 +9,7 @@
 //                                      the person squeezed or stretched, the part of it written in so far, `hidden`
 //                                      for the replies a catch-up covers, `dim` while a rewrite runs; null: the row as
 //                                      Claude wrote it
-//   squeezeRow($, els, row, cols)      the row drawn whole in place of its words, or null: a catch-up, with the rule
+//   squeezeRow($, els, row, cols, cardsIn)  the row drawn whole in place of its words, or null: a catch-up, with the rule
 //                                      down its side and its head line, its words with their marks
 //   squeezeUnder($, els, row, cols)    what stands under the row after its cards: the chips while they are open on it,
 //                                      what a squeeze left out of its cards, why a catch-up failed
@@ -30,7 +30,7 @@ import { featureOn } from '../settings/features.mjs'
 import { restoreCardsShown } from './cards'
 import { ownWords } from './chips.mjs'
 import { promptSent, recOf } from './term'
-import { addOwn, barItems, catchUpEl, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
+import { addOwn, barItems, catchUpEl, type CardsIn, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,8 +42,8 @@ export async function squeezeView($: Engine, row: string, _text: string): Promis
   return viewOf($, row)
 }
 
-export async function squeezeRow($: Engine, els: Any, row: string, cols: number): Promise<Any | null> {
-  return catchUpEl($, els, row, cols)
+export async function squeezeRow($: Engine, els: Any, row: string, cols: number, cardsIn?: CardsIn): Promise<Any | null> {
+  return catchUpEl($, els, row, cols, cardsIn)
 }
 
 export async function squeezeUnder($: Engine, els: Any, row: string, cols: number): Promise<Any[]> {

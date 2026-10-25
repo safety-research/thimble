@@ -41,7 +41,7 @@ import { trayOffRow } from '../tray/seam'
 import { answerCards, applyCards, showCards, type Answer } from './cards'
 import {
   ARRIVE, SCALE, answerText, applyRewrite, cardsAfter, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads,
-  fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, readReply, request, restore, revealStep, rowsOf,
+  fromVersions, isCatchUp, isOriginal, keepCorrections, keepPlacedCards, mustKeep, readReply, request, restore, revealStep, rowsOf,
   setWords, settledNote, shownKey, termsOf,
 } from './chips.mjs'
 
@@ -259,12 +259,14 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, rec.catchup ? drawnAt(rec) : rec.row, setWords(probe) || 'as written') : null
   const cardProblems = answer ? [...reply.cardProblems, ...(changed?.problems ?? [])] : []
   const cards = answer && changed?.done.length ? cardsAfter(answer.orig, rec.row, changed.done) : null
+  // each card the original placed on a line of its own stands on its line in this version too, unless it dropped it
+  const placed = keepPlacedCards(checked.text, original, (changed?.done ?? []).filter((d: Any) => d.op === 'drop').map((d: Any) => d.id))
   if (stale()) return
   // the record as it is now (the person may have added a chip meanwhile)
   const fresh = (await recOf($, id)) || rec
   const fs = (fresh.squeeze ?? {}) as Any
   const next = applyRewrite({ ...fresh, squeeze: { ...fs, own: fs.own ?? s.own } }, {
-    text: checked.text, at: want.at,
+    text: placed.text, at: want.at,
     made: { ms, model: req.model, usage: (r as Any).usage, at: new Date(t0).toISOString(), prompt: 'squeeze' }, problems: [...checked.problems, ...cardProblems],
     cards, origCards: answer ? answer.orig : null,
   }) as Rec
@@ -272,9 +274,9 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   await settled($, id, next, { written: true })
   await log($, {
     row: id, ok: true, ms, model: req.model, effort: req.effort, prompt: 'squeeze', usage: (r as Any).usage, key: keyWords, problems: checked.problems,
-    rows: rowsOf(checked.text, viewCols), of: rowsOf(original, viewCols), ...(original !== rec.text ? { corrected: true } : {}),
+    rows: rowsOf(placed.text, viewCols), of: rowsOf(original, viewCols), ...(original !== rec.text ? { corrected: true } : {}),
     ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}),
-    ...(terms.length ? { terms: terms.length } : {}), ...(rec.catchup ? { catchup: rec.catchup.replies } : {}),
+    ...(terms.length ? { terms: terms.length } : {}), ...(placed.back.length ? { cards_put_back: placed.back } : {}), ...(placed.removed.length ? { card_lines_removed: placed.removed } : {}), ...(rec.catchup ? { catchup: rec.catchup.replies } : {}),
     ...(answer ? { cards: answer.cards.length, asked: reply.cards.map((c: Any) => `${c.op} ${c.id}`), did: (cards?.did ?? []).map((d: Any) => `${d.did} ${d.id}`), card_problems: cardProblems, ...(changed?.unknown.length ? { unknown_cards: changed.unknown } : {}) } : {}),
   })
 }

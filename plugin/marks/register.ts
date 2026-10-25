@@ -201,7 +201,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const els = $.ui.resolve(e) as Any
   if (view.hidden) return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [] })
   // a row a feature draws whole (a catch-up in the newest reply's place), with the lines under its words
-  const whole = await rowDrawing($, els, row, cols)
+  const whole = await rowDrawing($, els, row, cols, async (t, rows) => (featureOn('cards') ? framesIn($, e, t, rows) : {}))
   if (whole) {
     const under = await underText($, els, row, cols)
     return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [whole, ...under] })

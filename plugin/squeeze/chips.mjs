@@ -27,7 +27,8 @@
 // view), and a reply may edit a card (a new version of it, same id), add one (a new view over the rows of a card the
 // request showed), or leave one out (readCards). cards.ts makes those as the person's versions through the card
 // runner; here the record keeps which cards each version shows, so a version seen before, and the original, come back
-// with their cards (cardListsAt).
+// with their cards (cardListsAt). A card the original places on a line of its own (marks/message.js cardRef) keeps
+// that line in each version that shows the card (keepPlacedCards).
 //
 // A record (term.ts builds it from the message and the feature's part of it, core/answers.ts):
 //   {row, text, at, shown, squeeze, catchup?}
@@ -48,6 +49,8 @@
 //   }
 // `shown` holds the text at `at` (null at the original). A citation in it is `[words](#)`, as in Claude's own words:
 // the answer's drawing gives it the look of the checked citation with the same words (marks/register.ts looksByWords).
+
+import { cardRef } from '../marks/message.js'
 
 /** Each Markdown link of a text, in order, as a match: [0] the whole link, [1] its words, [2] its target, `index`.
  *  The words may hold balanced brackets and the target balanced parentheses. */
@@ -602,6 +605,37 @@ export function keepCorrections(text, keep, original = '') {
     back.push([head, ...left.map(s => `- ${s.replace(/\n/g, '\n  ')}`)].join('\n'))
   }
   return { text: back.length ? `${String(text).trimEnd()}\n\n${back.join('\n\n')}` : text, back }
+}
+
+/**
+ * The lines that place cards (marks/message.js cardRef) in a rewrite, as the original placed them: a card the rewrite
+ * dropped (`dropped`, its ids) loses its line, and a card the original placed whose line the rewrite lost gets it
+ * back, after the paragraph at about the same share of the text as in the original. Returns the text, the cards put
+ * back and the lines taken out.
+ */
+export function keepPlacedCards(text, original, dropped = []) {
+  const gone = new Set(dropped)
+  const removed = []
+  const lines = String(text || '').split('\n').filter(l => {
+    const id = cardRef(l)
+    if (id && gone.has(id)) { removed.push(id); return false }
+    return true
+  })
+  const have = new Set(lines.map(cardRef).filter(Boolean))
+  const blocks = lines.join('\n').trim().split(/\n\s*\n/)
+  const orig = String(original || '').trim().split(/\n\s*\n/)
+  const back = []
+  orig.forEach((b, k) => {
+    const line = b.split('\n').find(l => cardRef(l))
+    const id = line ? cardRef(line) : null
+    if (!id || gone.has(id) || have.has(id)) return
+    // after the paragraph at the share of the text the card stood at, never before the first
+    const at = Math.max(1, Math.min(blocks.length, Math.round((k / Math.max(1, orig.length - 1)) * blocks.length)))
+    blocks.splice(at, 0, line.trim())
+    have.add(id)
+    back.push(id)
+  })
+  return { text: back.length || removed.length ? blocks.join('\n\n') : String(text || ''), back, removed }
 }
 
 /** A line that only heads what comes under it: a markdown heading, a bold lead that is no sentence, or a line that
