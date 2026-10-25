@@ -282,11 +282,10 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     const text = a.row ? await placeText($, a.row) : null
     const lines = sourceView(c, text, W) as Run[][]
     key('b', 'back', () => showClaims($, keep))
-    return Box({ flexDirection: 'column', children: [
-      ...lines.map((r, i) => rowEl(els, r, `s${i}`, () => undefined)),
-      rowEl(els, [], 'gap', () => undefined),
-      keysRow(els, keys),
-    ] })
+    const said = lines.map((r, i) => rowEl(els, r, `s${i}`, () => undefined))
+    const keyEls = [rowEl(els, [], 'gap', () => undefined), keysRow(els, keys, W)]
+    const fill = Math.max(0, H - treeRows(said, W) - treeRows(keyEls, W))
+    return Box({ flexDirection: 'column', children: [...said, ...Array.from({ length: fill }, (_, i) => rowEl(els, [], `fill${i}`, () => undefined)), ...keyEls] })
   }
 
   // ---- the map and the detail
@@ -364,8 +363,8 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const shown = view.shown as Any
   if (claim && at) {
     // a claim picked: k j the claim before or after it in its cluster (the ends hold), or with its evidence shown the
-    // citation before or after the current one; e its evidence shown or hidden (on its line in the detail, here when
-    // that line is scrolled away), h its History, c the current citation's code and output whole, x a repair of the
+    // citation before or after the current one; e its evidence shown or hidden (its line in the detail a click too),
+    // h its History, c the current citation's code and output whole, x a repair of the
     // current citation (the evidence hidden: of its first failed one, whose evidence then shows)
     if (a.open && view.cites > 1) {
       key('k', 'previous citation', () => onClaim({ cite: (cite - 1 + view.cites) % view.cites, whole: false }))
@@ -374,7 +373,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
       key('k', 'previous claim', () => pick(cs[Math.max(0, i - 1)]?.id ?? null))
       key('j', 'next claim', () => pick(cs[Math.min(cs.length - 1, i + 1)]?.id ?? null))
     }
-    if (view.cites && !(view.panel as Run[][]).some(r => r[0]?.part === 'evidence')) key('e', a.open ? 'hide evidence' : 'show evidence', toggleEvidence)
+    if (view.cites) key('e', a.open ? 'hide evidence' : 'show evidence', toggleEvidence)
     if (view.fixes) key('h', a.history ? 'hide corrections' : 'corrections', () => onClaim({ history: !a.history }))
     if (a.open && (view.cut || a.whole)) key('c', a.whole ? 'shorter' : 'all code and output', () => onClaim({ whole: !a.whole }))
     // the press is the ui.press hook's (seam.ts), which starts the repair inside a hook; while the check runs again, x
@@ -414,21 +413,29 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   detail = { where, top: sc.top, mark, max: sc.max, room: sc.room }
   // the wheel and the page keys over the pane scroll the detail (core/pane.ts scrollPane), the overview staying
   scrollsOwn(sc.max ? (by: number) => scrollDetail($, Math.abs(by) > 1 ? Math.sign(by) * page() : by) : null)
-  return Box({ flexDirection: 'column', children: [
+  const content = [
     ...(laid.head as Run[][]).map((r, i) => row(r, `h${i}`)),
     ...findRows,
     ...((laid.graph as Run[][]).length ? [row([], 'gap')] : []),
     ...(laid.graph as Run[][]).map((r, i) => row(r, `g${i}`)),
     ...rowEls(els, laid.panel as Run[][], 'p', press, (r, k) => (r[0]?.part === 'evidence' ? evidenceEl(els, r[0]!.s, k, toggleEvidence) : null)),
-    ...(keys.length ? [row([], 'keys-gap'), keysRow(els, keys, W)] : []),
+  ]
+  // the keys stand in the one row above the input, as in thimble's other panes: the rows the drawing leaves are
+  // blank above them
+  const keyEls = keys.length ? [row([], 'keys-gap'), keysRow(els, keys, W)] : []
+  const fill = keys.length ? Math.max(0, H - treeRows(content, W) - treeRows(keyEls, W)) : 0
+  return Box({ flexDirection: 'column', children: [
+    ...content,
+    ...Array.from({ length: fill }, (_, i) => row([], `fill${i}`)),
+    ...keyEls,
   ] })
 }
 
-/** The line that shows a picked claim's evidence, or hides it: a Button e presses (Claude Code draws `e: ` before its
- *  words), in thimble's color. */
+/** The line that shows a picked claim's evidence, or hides it: a click (its key, e, stands in the keys' row), in
+ *  thimble's color. */
 function evidenceEl(els: Any, words: string, key: string, onPress: () => unknown): unknown {
   const { Button, Text } = els
-  return Button({ key: `${key}:evidence`, plain: true, hotkey: 'e', label: words, hover: quiet('claims-evidence'), onPress, children: [Text({ key: 'w', color: accent(), children: words })] })
+  return Button({ key: `${key}:evidence`, plain: true, label: words, hover: quiet('claims-evidence'), onPress, children: [Text({ key: 'w', color: accent(), children: words })] })
 }
 
 /** The address of f's Button: the observer's ui.press hook (observer.ts) runs the claims step on the answers. */

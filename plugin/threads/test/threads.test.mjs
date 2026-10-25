@@ -65,7 +65,10 @@ test("a fork's transcript is the thread's turns: the question after its directiv
 
 
 test('a click on a run of a card names the run and its row; a bar, which has no words, its row', () => {
-  assert.equal(elementPart('managed', 'managed  PRs only   ████   2 merged / 9'), 'managed — managed  PRs only  ████  2 merged / 9')
+  // the row's own label: the row alone, so the label never reads twice; a number in it: the number, then its row
+  assert.equal(elementPart('managed', 'managed  PRs only   ████   2 merged / 9'), 'managed  PRs only  ████  2 merged / 9')
+  assert.equal(elementPart('▸ opus', '▸ opus   ██████ 175 (56 new)'), '▸ opus  ██████ 175 (56 new)')
+  assert.equal(elementPart('2 merged', 'managed  PRs only   ████   2 merged / 9'), '2 merged — managed  PRs only  ████  2 merged / 9')
   assert.equal(elementPart('████', 'managed  PRs only   ████   2 merged / 9'), 'managed  PRs only  ████  2 merged / 9')
   assert.equal(elementPart('Runs by day', 'Runs by day'), 'Runs by day')
   assert.equal(elementPart('   ', ''), '')

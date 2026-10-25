@@ -35,8 +35,8 @@
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
-import { cardAsk, cardHidden, underCard } from '../core/answerview'
-import { askCell, quiet } from '../core/askcell.js'
+import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
+import { quiet } from '../core/askcell.js'
 import { cut } from '../core/text.js'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
@@ -314,8 +314,8 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
   // the title on a line of its own, then the card
   const client = E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) })
-  // the line a click or a key selected (`▸`, the card guide's marker): the margin asks about that part of the card,
-  // beside it, so a click on a bar and one on the ? next to it start a thread about the bar
+  // the line a click or a key selected (`▸`, the card guide's marker): `ask about this card` asks about that part of
+  // the card, so a click on a bar and then on those words start a thread about the bar
   const sel = fault ? null : selectedLine(current?.tree, width)
   const ask = await cardAsk($, meta.id, meta.title, sel?.text ?? '')
   // the title asks about the whole card when clicked, its words underlined under the pointer
@@ -333,13 +333,9 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
-  const titleRows = Math.max(1, Math.ceil(Array.from(meta.title).length / Math.max(1, inside - (askEl ? Array.from(askWords).length + 2 : 0))))
-  const box = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: ask ? 0 : 2, width: inside + 4, children: rows })
-  // the margin left of the frame, in the 2 columns of its indent, beside its title: asks a side thread about the card
-  // (its title and what it shows); the row's keyed Box scopes the ?'s hover, so it shows while the pointer is on the card
-  const framed = ask
-    ? E.Box({ key: `ask-row-${meta.id}`, flexDirection: 'row', children: [E.Box({ width: 2, flexShrink: 0, paddingTop: 1 + (sel ? titleRows + sel.row : 0), children: [askCell(E, { key: `card-ask-${meta.id}`, ...ask, color: accent() })] }), box] })
-    : box
+  // the frame in the 2 columns of its indent; `ask about this card` at its title's right is how a side thread about it
+  // starts, so no ? in the margin asks the same
+  const framed = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: inside + 4, children: rows })
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
   const under = await underCard($, E, meta.id, inside)
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
@@ -403,12 +399,16 @@ export async function revealCard($: Engine, id: string, block: 'start' | 'neares
 }
 
 /** The cards an answer row holds, framed, under it: those still anchored there (on the main screen, a version main
- *  draws of such a card in a later turn stands at main's call: canRedraw). */
+ *  draws of such a card in a later turn stands at main's call: canRedraw). A card the words the row shows place on a
+ *  line of their own (a squeeze's version placing a card v drew) draws on that line instead (framesIn). */
 export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
   const metas: CardMeta[] = []
-  for (const id of await anchoredAt($, e.requestId)) {
+  const ids = await anchoredAt($, e.requestId)
+  const shown = ids.length ? (await textView($, e.requestId, String(e.props?.text ?? ''))).text : ''
+  const placed = new Set(shown.split('\n').map(cardRef).filter(Boolean))
+  for (const id of ids) {
     const meta = await metaOf($, id)
-    if (meta && meta.version > 0 && meta.anchorRow === e.requestId) metas.push(meta)
+    if (meta && meta.version > 0 && meta.anchorRow === e.requestId && !placed.has(id)) metas.push(meta)
   }
   if (metas.length) noteShown($, metas.map(m => m.id), e.props?.onScreen)
   const out: Any[] = []
@@ -426,9 +426,16 @@ export async function framesIn($: Engine, e: Any, text: string, here: string[] =
     const id = cardRef(line)
     if (!id || out[id]) continue
     const meta = await metaOf($, id)
-    if (!meta || meta.version < 1 || meta.anchorRow) continue
+    if (!meta || meta.version < 1) continue
+    // a card drawn under an answer (v, a squeeze's new card) draws on the line a version of that answer places it on;
+    // another row's line points to it
+    if (meta.anchorRow && !here.includes(meta.anchorRow)) {
+      const E = $.ui.resolve(e) as Any
+      out[id] = E.Box({ key: `under-${id}`, children: [E.Text({ dimColor: true, children: `↑ “${cut(meta.title, 60)}” is drawn under an earlier answer` })] })
+      continue
+    }
     // a card stands in one place: the newest row that placed it; an earlier one shows a line that points there
-    if (meta.inRow && !here.includes(meta.inRow)) {
+    if (!meta.anchorRow && meta.inRow && !here.includes(meta.inRow)) {
       const E = $.ui.resolve(e) as Any
       out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” is drawn further down` })] })
       continue

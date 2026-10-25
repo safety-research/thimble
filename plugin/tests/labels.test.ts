@@ -102,7 +102,7 @@ const nodes = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArr
 const words = (n: Any): string => (n == null || n === false ? '' : typeof n === 'string' ? n : Array.isArray(n) ? n.map(words).join('') : n.props?.source ?? n.props?.label ?? words(n.props?.children))
 
 /** An engine for the pane alone: its state, and a `thimble` that answers as the kernel would for a made-up folder. */
-function paneEngine(ran: string[][]): Any {
+function paneEngine(ran: string[][], many = 0): Any {
   const state = new Map<string, unknown>()
   let checked = false
   return {
@@ -122,6 +122,7 @@ function paneEngine(ran: string[][]): Any {
         const l1 = { ref: 'chat.jsonl#L1', i: 0, value: 'yes', by: 'regex', words: "I'm sorry, I broke the build.", meta: 'wren', hit: { before: "I'm ", match: 'sorry', after: ', I broke the build.' } }
         const l3 = { ref: 'chat.jsonl#L3', i: 1, value: 'yes', by: 'regex', words: 'Apologies for the noise.', meta: 'moss' }
         const out = a.includes('--check') ? { ref: a[3], was: 'yes', now: a[4], ...head, checked: 1, agree: 0, changed: [{ ref: a[3], was: 'yes', now: a[4] }] }
+          : a.includes('--records') && many ? { label: head, value: a[3], at: Number(a[5]), total: many, records: Array.from({ length: Math.max(0, Math.min(Number(a[7]), many - Number(a[5]))) }, (_, i) => ({ ...l3, ref: `chat.jsonl#L${Number(a[5]) + i + 1}`, i: Number(a[5]) + i })) }
           : a.includes('--records') ? { label: head, value: a[3], at: 0, total: checked ? 1 : 2, records: checked ? [l3] : [l1, l3] }
             : [head, { ...HEAD, name: 'long', kind: 'code', rule: 'def label(unit):\n    return len(unit["text"]) > 30' }]
         if (a.includes('--check')) checked = true
@@ -132,14 +133,15 @@ function paneEngine(ran: string[][]): Any {
 }
 
 /** The pane drawn at `W` columns: its nodes, and its rows as text (a key Button as Claude Code draws it: `j: next`). */
-async function drawn($: Any, W = 90) {
-  const tree = nodes(await drawLabels($, { props: { bodyColumns: W, scroll: { bodyRows: 40 } } }, (await paneNow($))?.args, ELS))
+async function drawn($: Any, W = 90, H = 40) {
+  const top = await drawLabels($, { props: { bodyColumns: W, scroll: { bodyRows: H } } }, (await paneNow($))?.args, ELS) as Any
+  const tree = nodes(top)
   const shown = (n: Any): string => (n == null || n === false ? '' : typeof n === 'string' ? n : Array.isArray(n) ? n.map(shown).join('')
     : n.type === 'Button' && n.props.hotkey ? `${n.props.hotkey}: ${shown(n.props.children) || n.props.label}` : n.props?.source ?? shown(n.props?.children))
   const rows = tree.filter(n => /^(r\d+|head)$/.test(String(n.props?.key))).map(shown)
   const press = (hotkey: string) => tree.find(n => n.type === 'Button' && n.props.hotkey === hotkey).props.onPress()
   const keys = tree.filter(n => n.type === 'Button' && n.props.hotkey).map(n => n.props.hotkey)
-  return { tree, rows, press, keys }
+  return { top, tree, rows, press, keys }
 }
 
 test('the labels pane: a table per label; n opens the first value, j picks its first example, a number key checks it', async () => {
@@ -218,6 +220,24 @@ test('the labels pane: the detail switches between the examples and the definiti
   d = await drawn($)
   await d.press('p')
   expect((await paneNow($))?.args).toEqual({ label: 'long', value: 'no' })
+})
+
+test('the labels pane keeps its key row in its rows with a long list of examples, wrapped keys and all', async () => {
+  const $ = paneEngine([], 60)
+  // a new generation of the labels, so no read of an earlier test stands for this folder's
+  await $.state.set({ plugin: 'thimble', key: 'labelGen' }, 1000)
+  await openLabels($, { label: 'long' })
+  for (const [W, H] of [[90, 40], [60, 24], [40, 26]]) {
+    const d = await drawn($, W, H)
+    // each child of the pane one row (the examples are cut to one row each), the keys' row wrapped at W, in the rows
+    // the pane has over the side thread's input (threads/pane.tsx rowsUnder: 5 with no conversation)
+    const kids = d.top.props.children as Any[]
+    const keyRow = kids.at(-1)
+    expect(keyRow.props.key).toBe('keys')
+    const keyWidth = (keyRow.props.children as Any[]).reduce((s: number, n: Any) => s + (n.type === 'Button' ? 3 + n.props.label.length : String(n.props.children).length), 0)
+    expect(kids.length - 1 + Math.ceil(keyWidth / W)).toBeLessThanOrEqual(Math.max(12, H - 5))
+    expect(d.keys.slice(-2)).toEqual(['d', 'b'])
+  }
 })
 
 test('the labels pane marks the words a code label matched, cut at words around them, and shows paths short', async () => {
