@@ -168,4 +168,8 @@ test("a label's definition line: how it was made and its rule, a --prompt's firs
   assert.equal(defLine({ name: 'y', kind: 'code', rule: 'import re\n# the purpose\ndef label(r):\n    return r["kind"]' }), 'code: return r["kind"]')
   // a code label that opens with a comment: the comment, which says in words what the code does
   assert.equal(defLine({ name: 'z', kind: 'code', rule: '# Sorts an edit by its topic,\n# from its page name.\nimport re\nTOPICS = [1]\ndef label(r):\n    return "x"' }), 'code: Sorts an edit by its topic, from its page name.')
+  // a rule made with --says: its plain sentence, and the definition holds it above the rule
+  const says = { name: 'stuck', kind: 'regex', rule: '(?i)\\b(stuck|blocked)\\b', says: 'The message says its writer cannot go on.', values: ['yes', 'no'] }
+  assert.equal(defLine(says), 'The message says its writer cannot go on.')
+  assert.deepEqual(definition(says, 80).slice(0, 3).map(rowText), ['  The message says its writer cannot go on.', '', '  (?i)\\b(stuck|blocked)\\b'])
 })

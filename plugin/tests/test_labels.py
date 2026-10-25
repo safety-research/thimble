@@ -78,6 +78,13 @@ def test_a_regex_label_gives_each_record_a_value_and_prints_its_counts(root: Pat
     assert LB.page(st, "short")["records"][0]["words"] == "wiki w · name Notes · n_revs 3"
     # a rule label asks the plugin for nothing
     assert feed(root) == []
+    # --says: the rule in a plain sentence, which the pane reads; the same definition without it keeps it, a new one drops it
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog", "--says", "The writer  apologizes.")
+    assert LB.head(LB.load(st, "sorry"))["says"] == "The writer apologizes."
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
+    assert LB.head(LB.load(st, "sorry"))["says"] == "The writer apologizes."
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry")
+    assert LB.head(LB.load(st, "sorry"))["says"] == ""
 
 
 def test_the_viewer_marks_the_part_a_label_matched(root: Path):

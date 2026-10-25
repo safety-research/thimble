@@ -154,10 +154,11 @@ function spread(left, right, w) {
   return [...l, { s: ' '.repeat(Math.max(1, w - runsWidth(l) - rw)) }, ...right]
 }
 
-/** A label's definition on one line: how it was made and its rule, as the person would look for it (the regex, a
- *  --prompt's first sentence; for code, the comment it opens with, which says what it does in words, else the first
- *  line of its label function's body). */
+/** A label's definition on one line: the plain sentence it was made with (--says), else how it was made and its rule,
+ *  as the person would look for it (the regex, a --prompt's first sentence; for code, the comment it opens with, which
+ *  says what it does in words, else the first line of its label function's body). */
 export function defLine(l) {
+  if (oneLine(l?.says)) return oneLine(l.says)
   const rule = String(l?.rule || '')
   if (l?.kind === 'code') {
     const lines = rule.split('\n').map(x => x.trim())
@@ -476,11 +477,12 @@ export function examples(l, value, page, o) {
 /** How a label was made, as the definition's side of the detail names it (`code`, `regex`, …). */
 export const madeOf = l => howMade(l?.kind) || String(l?.kind || '')
 
-/** The definition, the other side of the examples: the rule whole (a code label's as code), what it went over. The
- *  pane's switch above it names it and how the label was made (madeOf). */
+/** The definition, the other side of the examples: its plain sentence (--says), the rule whole (a code label's as code),
+ *  what it went over. The pane's switch above it names it and how the label was made (madeOf). */
 export function definition(l, w, show = p => p) {
   const rows = []
   const rule = String(l.rule || '').replace(/\s+$/, '')
+  if (oneLine(l.says)) rows.push(...wrapRuns([{ s: oneLine(l.says) }], Math.max(10, w - 2)).map(r => [{ s: '  ' }, ...r]), [])
   if (!rule) rows.push([{ s: '  no rule: Claude gave each record its value', tone: 'dim' }])
   else if (l.kind === 'code') rows.push({ code: rule })
   else for (const ln of rule.split('\n')) rows.push(...wrapRuns([{ s: ln }], Math.max(10, w - 2)).map(r => [{ s: '  ' }, ...r]))

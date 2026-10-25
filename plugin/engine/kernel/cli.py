@@ -138,6 +138,8 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
 
     --values a,b,c      the values, the positive first (default yes,no; --code takes the values it returns, the most
                         common first)
+    --says "SENTENCE"   what the label marks, in one plain sentence, which the analyst reads in place of a --regex
+                        or --code rule
     --where EXPR        only records for which this Python expression is true (r is the record, text its raw text)
     --within L=V        only records the label L gave the value V
     --limit N           a trial: N records at random; the same label without --limit then labels the rest
@@ -366,7 +368,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                 print("no code: pass a file with --code FILE, or the code on stdin, defining label(unit)")
                 return 2
         r = LB.define(st, name, kind, rule, a.glob, a.values.split(",") if a.values else None, a.where,
-                      _parse_within(a.within), a.limit, a.reason, a.seed)
+                      _parse_within(a.within), a.limit, a.reason, a.seed, a.says)
         lab = _load(st, name)
         s = LB.status(lab)
         # a big prompt label asks the person first (estimate.py), unless it is a trial or they said yes to this exact
@@ -560,6 +562,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--code", nargs="?", const="-", metavar="FILE")
     p.add_argument("--prompt", metavar="DEFINITION")
     p.add_argument("--values")
+    p.add_argument("--says", metavar="SENTENCE")
     p.add_argument("--where")
     p.add_argument("--within", metavar="LABEL=VALUE")
     p.add_argument("--limit", type=int)
