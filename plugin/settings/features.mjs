@@ -33,7 +33,7 @@ export const SWITCHES = [
   },
   {
     key: 'squeeze', title: 'Squeeze and catch-up', default: true,
-    does: 's makes an answer shorter or longer, and catches you up on replies you missed. One rewrite each time you ask.',
+    does: 's makes an answer shorter or longer, and b catches you up on replies you missed. One rewrite each time you ask.',
   },
   {
     key: 'explain', title: 'Explainers', group: 'Comments', default: true, lenses: ['explain'],

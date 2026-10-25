@@ -272,8 +272,8 @@ async function told($: Engine, f: Frame): Promise<void> {
   await tellOpened($, engagedMark(f, info), info.begins).catch(() => undefined)
 }
 
-/** The explainer or heads-up on a citation's words, if any: a press on those words opens the citation, so its tray
- *  offers the explainer (h). */
+/** The explainer or heads-up on a citation's words, if any: a press on those words opens it (marks/view.ts markEl),
+ *  and ] goes on to the citation; the citation, reached by ] [ or a press on its other words, offers it (h). */
 async function innerOf($: Engine, f: Frame): Promise<Frame | null> {
   if (f.kind !== 'citation') return null
   const shown = await shownOf($, f.row)

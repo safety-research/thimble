@@ -199,7 +199,7 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
   if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, children: 'checking…' }))
   const me = `${row}:${n}`
   const words = m.shown.replace(/\*\*|`/g, '').trim()
-  // the cited words explained in place (w): the session's explainer, else one being written, else why there is none
+  // the cited words explained in place (e, as e explains words everywhere): the session's explainer, else one being written, else why there is none
   if (explainShown.has(me)) {
     const g = glossFor(await sessionGlosses($).catch(() => []), words)
     const now = explaining(words)
@@ -210,12 +210,12 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     if (g) {
       if (g.body) rows.push(bar('b', Text({ children: plain(g.body) })))
       if (g.here) rows.push(bar('h', Text({ dimColor: true, children: plain(g.here) })))
-    } else rows.push(bar('w', Text({ ...(now.why ? { color: 'error' } : { dimColor: true }), children: now.pending ? 'writing an explainer of these words…' : now.why || 'no explainer yet: press w to ask for one' })))
+    } else rows.push(bar('w', Text({ ...(now.why ? { color: 'error' } : { dimColor: true }), children: now.pending ? 'writing an explainer of these words…' : now.why || 'no explainer yet: press e to ask for one' })))
   }
   if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60) }))
   // the pane's key: explain the cited words
   const keys: { k: string; label: string; press: () => unknown }[] = []
-  if (words) keys.push({ k: 'w', label: explainShown.has(me) ? 'hide the explainer' : 'explain these words', press: () => {
+  if (words) keys.push({ k: 'e', label: explainShown.has(me) ? 'hide the explainer' : 'explain these words', press: () => {
     if (explainShown.has(me)) explainShown.delete(me)
     else {
       explainShown.add(me)

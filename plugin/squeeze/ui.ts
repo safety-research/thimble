@@ -3,13 +3,12 @@
 // seam (seam.ts) hands each to its host (core/answerview.ts).
 //
 // The chips open under the newest answer (core/answers.ts latestAnswer), after its cards: s opens them. With
-// two or more replies since the person's last prompt not yet caught up on, the chips under the newest reply end with
-// one more, `Catch up on N replies` (its digit after the chips'): it writes one catch-up of them, drawn under the newest
-// of them while they draw no text (term.ts catchUp), with the chips open on it. A letter right after s, or after the
-// catch-up's digit, undoes it (hooks/keys.ts word window).
+// two or more replies since the person's last prompt not yet caught up on, the bar also names `b catch up on N
+// replies`: b writes one catch-up of them, drawn under the newest of them while they draw no text (term.ts catchUp),
+// with the chips open on it. A letter right after s or b undoes it (hooks/keys.ts word window).
 // While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey):
 //   [ shorter, ] longer on the picked chip (Length: short · as written · longer · much longer); < > , . the same, unnamed
-//   1–N pick a chip (N+1: the catch-up, when the row offers it) · 0 the original (on a catch-up: the replies again)
+//   1–N pick a chip · 0 the original (on a catch-up: the replies again)
 // Each chip names its two ends either side of its dots (`Interpretation facts ○●○ expert reading`); a press on an end
 // or a dot sets that level. While a rewrite is on its way the old text dims, and the bar's busy line says `rewriting`
 // (term.ts); a version seen before comes back at once.
@@ -202,7 +201,7 @@ async function askOwn($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the catch-up
 
-/** s with replies piled up: one catch-up of every message since the person's last prompt, under the newest of them,
+/** b with replies piled up: one catch-up of every message since the person's last prompt, under the newest of them,
  *  with the chips open on it while its first version is written. An earlier catch-up of some of them goes. Returns its id. */
 export async function catchUpNow($: Engine): Promise<string | null> {
   const pile = await pileUp($)
@@ -218,22 +217,17 @@ export async function catchUpNow($: Engine): Promise<string | null> {
   return id
 }
 
-/** The catch-up the chips offer while they are open on the newest reply and replies piled up since the person's
- *  last prompt: its digit, after the `n` chips drawn, and how many replies it covers; null otherwise. */
-async function catchUpChip($: Engine, open: Open, rec: Rec, n: number): Promise<{ n: number; replies: number } | null> {
-  if (rec.catchup) return null
-  const pile = await pileUp($)
-  return pile && pile.replies.at(-1) === open.id ? { n: n + 1, replies: pile.n } : null
-}
-
-/** The catch-up chip picked: the catch-up written, as s wrote it before; undone, the chips stand as they were. */
-function catchUpTake($: Engine, open: Open): Take {
+/** b: the catch-up written; undone (a letter right after it), it goes and the chips stand as they were. */
+function catchUpTake($: Engine, open: Open | null): Take {
   let made: string | null = null
   return {
     now: async () => { made = await catchUpNow($) },
-    undo: async () => { if (made) await dismissNow($, made, true); await writeOpen($, open) },
+    undo: async () => { if (made) await dismissNow($, made, true); if (open) await writeOpen($, open); else await setOpen($, null) },
   }
 }
+
+/** The key that writes a catch-up, named on the bar while replies piled up (squeeze/seam.ts SQUEEZE_KEYS). */
+export const CATCH_UP_KEY = 'b'
 
 /** A catch-up dismissed (its chips' 0, or undone): the chips close, and the keys go back to the newest reply. */
 export async function dismissNow($: Engine, id: string, undo = false): Promise<void> {
@@ -263,14 +257,15 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
     if (/^[1-9]$/.test(key)) {
       const row = rowOf(rec, (await levelsNow($, rec)).at)
       const c = row[Number(key) - 1]
-      if (c) return { now: () => setOpen($, { focus: c.id, edge: null }) }
-      return (await catchUpChip($, open, rec, row.length))?.n === Number(key) ? catchUpTake($, open) : null
+      return c ? { now: () => setOpen($, { focus: c.id, edge: null }) } : null
     }
     if (key === '0') return { now: () => revert($, open) }
     if (key === '+') return { now: () => askOwn($) }
     if (key === 's') return { now: () => setOpen($, null), undo: () => writeOpen($, open) }
+    if (key === CATCH_UP_KEY && (await pileUp($))) return catchUpTake($, open)
     return null
   }
+  if (key === CATCH_UP_KEY) return (await pileUp($)) ? catchUpTake($, null) : null
   if (key !== 's') return null
   const row = await latestAnswer($)
   if (!row) return null
@@ -330,7 +325,6 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
     if (!open || open.id !== id) continue
     if (typeof ev.key === 'string') { await heldKey($, open, ev.key, !!ev.shift); continue }
     const r = String(ev.press ?? '')
-    if (r === 'catchup') { const rec = await recOf($, id); if (rec && (await catchUpChip($, open, rec, 0))) await catchUpNow($); continue }
     if (r === 'add') { await setOpen($, { typing: '', held: true, edge: null }); continue }
     if (r === 'close') { await setOpen($, null); continue }
     const dot = /^lvl-(.+)-(\d+)$/.exec(r)
@@ -344,8 +338,8 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
 // ------------------------------------------------------------------------------------------------ the bar
 
 /** The chips' keys and lines on the bar while they are open; at rest, s: `s squeeze`, lit with the levels set while
- *  the answer shows a version of the person's (`s ● short · interpret`), `s squeeze or catch up` while replies piled up
- *  (the chips then offer the catch-up). */
+ *  the answer shows a version of the person's (`s ● short · interpret`), and `b catch up on N replies` while replies
+ *  piled up since the person's last prompt. */
 export async function barItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('squeeze')) return []
   if (preview) return [{ id: 'squeeze', key: 's', words: 'squeeze' }]
@@ -358,8 +352,11 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const pile = await pileUp($, on)
   const now = await recOf($, id)
   const lit = now && !now.catchup && typeof now.shown === 'string'
-  const words = lit ? `● ${setWords(now) || 'squeezed'}` : pile ? 'squeeze or catch up' : 'squeeze'
-  return [{ id: 'squeeze', key: 's', words, ...(lit ? { color: accent() } : {}), press: () => openChips($, id) }]
+  const words = lit ? `● ${setWords(now) || 'squeezed'}` : 'squeeze'
+  return [
+    { id: 'squeeze', key: 's', words, ...(lit ? { color: accent() } : {}), press: () => openChips($, id) },
+    ...(pile ? [{ id: 'catchup', key: CATCH_UP_KEY, words: `catch up on ${pile.n} replies`, press: () => catchUpNow($) }] : []),
+  ]
 }
 
 async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
@@ -397,7 +394,7 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
   }
   key('sq-down', '[', down, () => step($, open, focus.id, -1, '['))
   key('sq-up', ']', up, () => step($, open, focus.id, 1, ']'))
-  const n = row.length + ((await catchUpChip($, open, rec, row.length)) ? 1 : 0)
+  const n = row.length
   key('sq-pick', n > 1 ? `1–${Math.min(9, n)}` : '1', 'chip', nextChip)
   if (revertable) key('sq-revert', '0', 'revert', () => revert($, open))
   key('sq-own', '+', 'your own', () => askOwn($))
@@ -406,17 +403,16 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
 
 // ------------------------------------------------------------------------------------------------ the drawing
 
-/** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +,
- *  and the catch-up the row offers ({n, replies}, or null). */
+/** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +. */
 async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   const open = await openNow($)
   const rec = await recOf($, id)
-  if (!open || !rec) return { items: [], plus: null, catchup: null, width, color: accent() }
+  if (!open || !rec) return { items: [], plus: null, width, color: accent() }
   const row = rowOf(rec, (await levelsNow($, rec)).at)
   const focus = row.some((c: Any) => c.id === open.focus) ? open.focus : row[0].id
   return {
     items: row.map((c: Any, i: number) => ({ id: c.id, n: i + 1, name: c.name, levels: c.levels, level: c.level, level0: c.level0, ends: endsOf(c), word: levelWords(c), picked: c.id === focus && open.typing == null })),
-    plus: open.typing, catchup: open.id === id ? await catchUpChip($, open, rec, row.length) : null, width, color: accent(),
+    plus: open.typing, width, color: accent(),
   }
 }
 

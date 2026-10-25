@@ -119,7 +119,7 @@ async function writeExplainer($: Engine, row: string, term: string): Promise<{ b
   const req = { model: 'opus', maxTokens: 6000, timeoutMs: 120000, system: [{ text: system, cache: true }], prompt }
   let r: Any
   try {
-    r = await tracked($, { feature: 'explain', prompt: 'explain-expand', doing: 'writing an explainer you asked for', model: req.model, extra: { row, term } }, async () => {
+    r = await tracked($, { feature: 'explain', prompt: 'explain-expand', doing: `writing an explainer of “${term.length > 40 ? `${term.slice(0, 39)}…` : term}”`, model: req.model, extra: { row, term } }, async () => {
       // the conversation, as the look reads it: the records main read are in it
       const f: Any = await $.model.fork({ prompt: `${system}\n\n${prompt}` })
       return f?.reason === 'nothing-to-fork' ? $.model.complete(req as Any) : f

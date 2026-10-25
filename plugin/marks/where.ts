@@ -5,7 +5,8 @@
 // checkOpened): a second Claude finds where they come from in the files or in what code printed, and the tray shows the
 // evidence, verified, corrected or failed, as for any citation.
 //
-//   WHERE_KEYS, whereKey($, key), whereBar   w at an empty prompt, `w where from` on the bar, beside `e explain`
+//   WHERE_KEYS, whereKey($, key), whereBar   w at an empty prompt, `w where from` on the bar while words are
+//                                            selected, beside `e explain`
 //   whereWords($, row, words)                the citation of these words on that answer: an existing one (Claude's, or
 //                                            one asked before) when the words stand inside it, else a new one; opened
 //   registerWhere                            /where <words>: the same for typed words, in any layout
@@ -15,7 +16,7 @@ import type { BarItem } from '../bar/bar'
 import { failCleared, noticeLine } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
 import { answerRows, messageOf, turnOfRow } from '../core/answers'
-import { pickedWords } from '../explain/seam'
+import { pickedWords, wordsSelected } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeView } from '../squeeze/seam'
@@ -120,6 +121,8 @@ export async function whereKey($: Engine, key: string, _until: number): Promise<
 export async function whereBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('where')) return []
   if (preview) return [{ id: 'where', key: 'w', words: 'where from' }]
+  // while words are selected, as `e explain` (explain/seam.ts watchSelection draws the bar again when that changes)
+  if (!(await wordsSelected($))) return []
   if (!(await answerRows($).catch(() => [])).length) return []
   return [{ id: 'where', key: 'w', words: 'where from', press: () => whereSelection($) }]
 }
