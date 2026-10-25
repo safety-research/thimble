@@ -492,12 +492,17 @@ function layOf(claims, groups, edges, W, h, cols) {
 const STATUS = {
   verified: ['✓ verified', 'good'], corrected: ['✓ verified', 'good'], failed: ['× failed', 'bad'],
   checking: ['checking', 'dim'], gone: ['no longer in the session', 'dim'],
+  // a citation that waits until the person opens it (the setting Citations, auto cite or manual): x checks it
+  deferred: ['not checked', 'dim'],
 }
 // a status without an outcome (no check of it ran) is failed
 const statusKey = s => (STATUS[s.status] ? s.status : 'failed')
 
 /** Whether x can repair a citation: the check could not confirm it, or did not run (tray/tray.mjs canRepair). */
 export const repairable = s => !!s && s.status === 'failed' && !!s.row && !!s.n
+
+/** Whether x checks a citation for the first time: it waits to be opened (`deferred`). */
+export const checkable = s => !!s && s.status === 'deferred' && !!s.row && !!s.n
 
 /** A line with spans of it tinted (the cited words), as runs; `rest` the look of the words outside them. */
 export function tinted(text, spans = [], rest = {}) {
