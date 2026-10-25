@@ -43,8 +43,9 @@ import { WORD_MS } from '../hooks/keys'
 import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
+import { labelEdit } from '../labels/pane'
 import { cut, textWidth } from '../core/text.js'
-import { themeNow } from '../core/theme'
+import { accent, themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeHeat, citeLook, messageEl, type MarkLook } from '../marks/view'
@@ -291,6 +292,28 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
   ]
 }
 
+/** A field a pane edits in its input bar in place of a question (labels/pane.tsx: a label's rule, model or records):
+ *  its name before the `❯`, its value in the field to change, ↵ applies it (esc goes back down the pane's trail). */
+export type PaneEdit = { name: string; value: string; key: string; submit: (text: string) => unknown }
+
+/** The input bar of an edit: the field's name, `❯`, the field with its value; ↵ applies it. */
+function editEntry(els: Any, edit: PaneEdit, w: number): Any[] {
+  const { Box, Text, Input } = els
+  const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
+  return [
+    Text({ key: 'entry-gap', children: ' ' }),
+    rule('entry-top'),
+    Box({ key: 'entry-row', flexDirection: 'row', children: [
+      Box({ flexShrink: 0, children: [Text({ color: accent(), bold: true, children: `${edit.name} ` }), Text({ color: 'text', children: '❯ ' })] }),
+      Box({ flexGrow: 1, flexShrink: 1, children: [Input({
+        key: `edit-${edit.key}`.slice(0, 120), value: edit.value, submitLabel: 'rerun', autoFocus: true,
+        onSubmit: (v: string) => { void Promise.resolve(edit.submit(v)).catch(() => undefined) },
+      })] }),
+    ] }),
+    rule('entry-bottom'),
+  ]
+}
+
 /** A question typed in the input bar: the thread is asked, and the field empties. A question that cannot be asked
  *  says why in the failure line. */
 export async function askHere($: Engine, scope: ThreadScope, text: string): Promise<void> {
@@ -488,6 +511,9 @@ export async function threadUnderParts($: Engine, e: Any, kind: string, args: un
   // the blank row under the pane's drawing stands with the conversation when there is one, else with the input bar: a
   // pane with no conversation opens at its top (core/pane.ts scrolls a conversation to its end)
   const gap = els.Text({ key: 'thread-gap', children: ' ' })
+  // a pane editing one of its fields: the field takes the input bar, and the thread's keys wait
+  const edit = kind === 'labels' ? await labelEdit($, args).catch(() => null) : null
+  if (edit) return { conv: conv.length ? [gap, ...conv] : [], bottom: [...(conv.length ? [] : [gap]), ...editEntry(els, edit, W - 1)] }
   return { conv: conv.length ? [gap, ...conv] : [], bottom: [...(conv.length ? [] : [gap]), ...keysRow(els, pk), ...entry($, els, scope, W - 1, takeAskNext(key), pk, claims?.ask ?? '')] }
 }
 

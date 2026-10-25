@@ -6,20 +6,21 @@
 //                  (defLine), then a row per value with its bar, its
 //                  count and its share of the records. Labels whose tables do not fit fold to one line each: the name,
 //                  a small bar of all values, then each value and its count (wrapped)
-//   a value open   that label's table in its place, the ▸ on the value; every other label one line (cut with …);
-//                  under them the value's examples, one line each: who wrote it, its words around the part the label
-//                  matched (that part bold in the value's color), and on the right the person's check or the model's
-//                  confidence. `↑ N earlier` and `↓ N more` page the list
+//   a value open   that label alone under `Labels › name` and its plain sentence (ledgerTop): its values, the ▸ on the value; under them the value's examples, one
+//                  line each: who wrote it, its words around the part the label matched (that part bold in the
+//                  value's color), and on the right the person's check or the model's confidence. `↑ N earlier` and
+//                  `↓ N more` page the list
 //   an example     the picked one opens in place: its words over up to five lines, then where it is (`path:line`) and
 //   picked         the check keys (1–9 a value, 0 takes a check back), and why its words are not marked, the model's
 //                  reason or the error when there is one
-//   definition     the label's definition whole, the other side of the examples (pane.tsx switches between them with
-//                  d), then what it went over
+//   definition     the other side of a label open (d): each field it was made with, its name in a gray column
+//                  (kind, the rule whole, a prompt label's model, the records it went over and when, its values); the
+//                  rule, the model and the records a press each to edit
 //
 // A row is a list of runs, or {code} for a code label's definition. A run is {s, tone, bold, italic, part, hotkey}:
 // `tone` dim · accent · err · none (no value yet) · neg (the no of a yes/no label) · track (its bar) · v<i> (the
 // label's i-th value), which pane.tsx turns into colors for the theme; `part` what a press on it does (lP label,
-// vP value, rP record, cP check, pg-up, pg-down; P a JSON list); `hotkey` the key that presses it, which Claude Code
+// vP value, rP record, cP check, fP a field of the definition, pg-up, pg-down; P a JSON list); `hotkey` the key that presses it, which Claude Code
 // draws before it (`1: yes`), so a run with one takes width(hotkey) + 2 more cells.
 import { cut, cutWords, textWidth } from '../core/text.js'
 import { howMade } from './use.mjs'
@@ -45,10 +46,11 @@ export const labelPart = name => `l${JSON.stringify([name])}`
 export const valuePart = (name, v) => `v${JSON.stringify([name, v])}`
 export const recordPart = ref => `r${JSON.stringify([ref])}`
 export const checkPart = v => `c${JSON.stringify([v])}`
+export const fieldPart = f => `f${JSON.stringify([f])}`
 /** What a part names: [kind, ...args], or [part] for one with no arguments (pg-up). */
 export function partOf(part) {
   const s = String(part || '')
-  if (!/^[lvrc]\[/.test(s)) return [s]
+  if (!/^[lvrcf]\[/.test(s)) return [s]
   try { return [s[0], ...JSON.parse(s.slice(1))] } catch { return [s] }
 }
 
@@ -425,7 +427,7 @@ export function examples(l, value, page, o) {
   const at = Math.max(0, Number(page?.at) || 0)
   const t = tone(l, value)
   const vname = part?.name ?? value
-  const head = left => spread([{ s: vname, tone: t, bold: true }, { s: ` · ${num(total)}`, tone: 'dim' }], left, w)
+  const head = left => spread([{ s: 'examples', bold: true }, { s: ' · ', tone: 'dim' }, { s: vname, tone: t }, { s: ` ${num(total)}`, tone: 'dim' }], left, w)
   if (!total || !recs.length) return { rows: [head([]), [{ s: '  No record has this value.', tone: 'dim' }]], shown: [], at, from: at, last: at - 1, total, p: -1 }
   const whoW = Math.min(9, Math.max(4, ...recs.map(r => width(whoOf(r)))))
   const x = 2 + whoW + 2
@@ -477,17 +479,55 @@ export function examples(l, value, page, o) {
 /** How a label was made, as the definition's side of the detail names it (`code`, `regex`, …). */
 export const madeOf = l => howMade(l?.kind) || String(l?.kind || '')
 
-/** The definition, the other side of the examples: its plain sentence (--says), the rule whole (a code label's as code),
- *  what it went over. The pane's switch above it names it and how the label was made (madeOf). */
-export function definition(l, w, show = p => p) {
+/** The definition's fields' names, in a gray column this wide. */
+const FIELD_W = 8
+
+/** When a label was made or read, as a clock shows it (`10:43 PM`); `at` in seconds. */
+const clockOf = at => new Date(Number(at) * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+
+/** The rule's field: what the label decides with, named for its kind. */
+export const ruleWord = l => (l?.kind === 'prompt' ? 'prompt' : l?.kind === 'code' ? 'code' : 'rule')
+
+/** The definition, the other side of the examples: every field the label was made with, its name in a gray column:
+ *  kind, the rule whole (a code label's as code), a prompt label's model, the records it went over and when it was
+ *  made (or read), its values with their counts. A press on the rule, the model or the records (`fieldPart`) edits it.
+ *  `o.model`: the model that reads a prompt label whose own is not set; `o.editing`: the field in the input bar;
+ *  `o.clock` formats a time. */
+export function definition(l, w, show = p => p, o = {}) {
   const rows = []
+  const vw = Math.max(10, w - FIELD_W - 1)
+  const name = f => [{ s: pad(f, FIELD_W), tone: 'dim' }, { s: ' ' }]
+  const blank = [{ s: ' '.repeat(FIELD_W + 1) }]
+  /** A field: its name, then its value wrapped under itself; a press on any of its rows edits it when it has `edit`.
+   *  The one in the input bar now (`o.editing`) shows bold, `← editing` after it. */
+  const field = (f, runs, edit) => {
+    const on = !!edit && edit === o.editing
+    const lines = wrapRuns(on ? runs.map(r => ({ ...r, bold: true })) : runs, on ? Math.max(10, vw - 12) : vw)
+    lines.forEach((r, i) => {
+      const row = [...(i ? blank : name(f)), ...r, ...(on && !i ? [{ s: '   ← editing', tone: 'dim' }] : [])]
+      rows.push(edit ? withPart(row, fieldPart(edit)) : row)
+    })
+  }
+  const kind = String(l.kind || '')
+  field('kind', [{ s: kind || madeOf(l) }])
   const rule = String(l.rule || '').replace(/\s+$/, '')
-  if (oneLine(l.says)) rows.push(...wrapRuns([{ s: oneLine(l.says) }], Math.max(10, w - 2)).map(r => [{ s: '  ' }, ...r]), [])
-  if (!rule) rows.push([{ s: '  no rule: Claude gave each record its value', tone: 'dim' }])
-  else if (l.kind === 'code') rows.push({ code: rule })
-  else for (const ln of rule.split('\n')) rows.push(...wrapRuns([{ s: ln }], Math.max(10, w - 2)).map(r => [{ s: '  ' }, ...r]))
-  rows.push([])
-  rows.push(...wrapRuns([{ s: scopeWords(l, show), tone: 'dim' }], w))
+  if (!rule) field(ruleWord(l), [{ s: 'none: Claude gave each record its value', tone: 'dim' }])
+  else if (kind === 'code') { rows.push(withPart(name('code'), fieldPart('rule'))); rows.push({ code: rule }) }
+  else field(ruleWord(l), [{ s: rule }], 'rule')
+  if (kind === 'prompt') field('model', [{ s: String(l.model || o.model || '') }], 'model')
+  field('over', [{ s: l.in ? show(String(l.in)) : 'the records Claude named' }], 'in')
+  if (l.where) field('where', [{ s: oneLine(String(l.where)) }], 'where')
+  if (l.within) field('within', [{ s: `${l.within[0]} = ${l.within[1]}` }], 'within')
+  const clock = o.clock ?? clockOf
+  const n = l.trial ? `${num(l.records)} of ${num(l.matched)} records at random` : `${num(l.records)} record${l.records === 1 ? '' : 's'}`
+  const who = l.by === 'person' ? 'you' : 'Claude'
+  const when = kind === 'prompt' && l.run?.at ? `read by Claude at ${clock(l.run.at)}` : l.made ? `made ${clock(l.made)} by ${who}` : ''
+  field('', [{ s: [n, when, l.checked ? `you checked ${num(l.checked)}` : ''].filter(Boolean).join(' · '), tone: 'dim' }])
+  const parts = openable(l)
+  const all = Number(l.records) || parts.reduce((t, p) => t + p.n, 0)
+  // the values each whole (its name, count and share), three spaces apart, flowing onto more rows when they do not fit
+  const values = parts.flatMap((p, i) => [...(i ? [{ s: '   ' }] : []), { s: p.name, tone: tone(l, p.v) }, { s: ` ${num(p.n)}  ${share100(p.n, all)}`, tone: 'dim' }])
+  flowRuns(values, vw, FIELD_W + 1).forEach((r, i) => rows.push(i ? r : [...name('values'), ...r.slice(1)]))
   return rows
 }
 
@@ -508,26 +548,28 @@ export function valueOrder(list) {
   return list.flatMap(l => openable(l).map(p => [String(l.name), p.v]))
 }
 
-/** The head and the labels: each a table when they all fit in `rows` (with the keys under them), else one line each;
- *  with a label chosen, its table in its place, a blank row around it, and the others one line each. */
+/** The head and the labels: each a table when they all fit in `rows` (with the keys under them), else one line each.
+ *  With a label chosen, the head names it (`Labels › stuck`) and it stands alone: its plain sentence under the head,
+ *  then (o.def false) a row per value; the definition (`definition`) or the value's examples follow. */
 export function ledgerTop(list, chosen, o) {
   const w = o.w
+  if (chosen) {
+    const l = chosen.lab
+    const head = [{ s: 'Labels', bold: true }, { s: ' › ', tone: 'dim' }, { s: cut(String(l.name), Math.max(8, w - 24)), bold: true }]
+    // the sentence once: the plain one it was made with; without one, the examples' side says the rule in short (the
+    // definition's side has it whole)
+    const said = oneLine(l.says) || (o.def ? '' : defLine(l))
+    const rows = said ? [...wrapRuns([{ s: said }], w), []] : []
+    if (!o.def) rows.push(...block(l, chosen.value, w).slice(2), [])
+    return { head, rows }
+  }
   const head = [{ s: 'Labels', bold: true }, { s: ` · ${list.length} label${list.length === 1 ? '' : 's'}`, tone: 'dim' }]
   const nameCol = Math.min(NAME_MAX + 2, Math.max(10, Math.floor(w * 0.3)), Math.max(10, ...list.map(l => width(String(l.name)) + 2)))
   const rows = []
-  if (!chosen) {
-    const tall = list.reduce((s, l) => s + openable(l).length + 3, 0)
-    if (tall - 1 <= o.rows) for (const l of list) rows.push(...block(l, null, w), [])
-    else for (const l of list) rows.push(...line(l, w, nameCol, true))
-    while (rows.length && !rows[rows.length - 1].length) rows.pop()
-    return { head, rows }
-  }
-  list.forEach((l, i) => {
-    if (l !== chosen.lab) { rows.push(...line(l, w, nameCol, false)); return }
-    if (i) rows.push([])
-    rows.push(...block(l, chosen.value, w), [])
-  })
-  if (rows.length && rows[rows.length - 1].length) rows.push([])
+  const tall = list.reduce((s, l) => s + openable(l).length + 3, 0)
+  if (tall - 1 <= o.rows) for (const l of list) rows.push(...block(l, null, w), [])
+  else for (const l of list) rows.push(...line(l, w, nameCol, true))
+  while (rows.length && !rows[rows.length - 1].length) rows.pop()
   return { head, rows }
 }
 

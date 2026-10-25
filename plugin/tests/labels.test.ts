@@ -6,7 +6,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { paneNow } from '../core/pane'
 import { rerunLabel } from '../labels/edit'
-import { drawLabels, openLabels } from '../labels/pane'
+import { drawLabels, labelEdit, openLabels } from '../labels/pane'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -198,49 +198,54 @@ test('the labels pane: a table per label; n opens the first value, j picks its f
   expect(keyRow.length).toBeGreaterThan(0)
   expect(keyRow.every(n => n.props.hover?.inverse === false)).toBe(true)
   await d.press('n')
-  // the first value open: its examples one line each, the other label folded to one line; esc goes back to all of
-  // them (the list is under this pane on the trail), so no b names it twice; d the definition, with the other keys above the input
+  // the first value open: the label alone under its name, its examples one line each; every key in the one row above
+  // the input, e to edit its rule and b back to all the labels among them
   d = await drawn($)
+  expect(d.rows[0]).toBe('Labels › sorry')
   expect(d.rows.some(r => /^▸ yes +▅+ +2 +67%$/.test(r))).toBe(true)
-  expect(d.rows.some(r => /^long {2,}▅+ {2}yes 2 {3}no 1$/.test(r))).toBe(true)
+  expect(d.rows.some(r => r.startsWith('long'))).toBe(false)
   expect(d.rows.some(r => /^ {2}wren {2}I'm sorry, I broke the build\.$/.test(r))).toBe(true)
-  expect(d.keys).toEqual(['p', 'n', 'k', 'j', 'd'])
+  expect(d.keys).toEqual(['d', 'p', 'n', 'k', 'j', 'e', 'b'])
   await d.press('j')
   // the first example picked: open in place, where it is, and the check keys
   d = await drawn($)
   expect(d.rows.some(r => /^▸ wren {2}I'm sorry, I broke the build\.$/.test(r))).toBe(true)
   expect(d.rows.some(r => /^ {8}chat\.jsonl:1 +1: yes {2}2: no$/.test(r))).toBe(true)
-  expect(d.keys).toEqual(['1', '2', 'p', 'n', 'k', 'j', 'd'])
+  expect(d.keys).toEqual(['1', '2', 'd', 'p', 'n', 'k', 'j', 'e', 'b'])
   // 2 (no) is the person's check of the picked example; the next one is picked
   await d.tree.find(n => n.type === 'Button' && n.props.hotkey === '2' && n.props.label === 'no').props.onPress()
   expect(ran.find(a => a.includes('--check'))).toEqual(['label', 'sorry', '--check', 'chat.jsonl#L1', 'no', '--json'])
   d = await drawn($)
   expect(d.rows.some(r => /^▸ moss {2}Apologies for the noise\.$/.test(r))).toBe(true)
-  expect(d.rows.some(r => /^sorry +you checked 1 · 3$/.test(r))).toBe(true)
+  expect(d.rows.some(r => /^ {2}no +▅+ +2 +67%$/.test(r))).toBe(true)
   // Claude hears the label's checks with the next prompt
   expect(Object.values((await $.state.get({ plugin: 'thimble', key: 'tell' })).value)).toEqual(['The analyst checked records of the label sorry in the labels pane. It now holds 1 check: 0 agree with the label and 1 changed a value: chat.jsonl#L1 (the label gave yes, the analyst says no). The checks count in place of the label\'s values; `thimble label sorry` prints the counts now.'])
 })
 
-test('the labels pane: the detail switches between the examples and the definition with d, b goes back where esc does not, a press opens a value and closes it', async () => {
+test('the labels pane: d switches a label between its examples and its definition, esc and b go back to all the labels, a press opens a value and closes it', async () => {
   const ran: string[][] = []
   const $ = paneEngine(ran)
   await openLabels($, { label: 'long' })
   let d = await drawn($)
-  // opened on the label itself: esc closes the pane, so b names the way to all the labels; every key in the row
-  // above the input
-  expect(d.keys.slice(-2)).toEqual(['d', 'b'])
+  // opened on the label itself: all the labels stand under it on the trail, so esc goes back to them, never to it
+  expect((await paneNow($))?.trail?.at(-1)).toEqual({ kind: 'labels', args: {}, title: 'Labels' })
+  // a code label: no e (its code is no one line to edit), every key in the row above the input
+  expect(d.keys).toEqual(['d', 'p', 'n', 'k', 'j', 'b'])
   expect(d.tree.find(n => n.type === 'Button' && n.props.hotkey === 'd').props.label).toBe('definition')
   await d.press('d')
   d = await drawn($)
-  // the switch: the definition side bold with how the label was made, the examples side a click, as d does
-  expect(d.tree.some(n => n.type === 'Text' && n.props.bold && n.props.children === 'definition')).toBe(true)
-  expect(d.tree.some(n => n.type === 'Text' && n.props.children === ' · code')).toBe(true)
+  // the definition: each field in a row, its name in a gray column, the code whole
+  expect(d.rows).toContain('kind     code')
   expect(d.tree.find(n => n.type === 'Code').props.source).toBe('def label(unit):\n    return len(unit["text"]) > 30')
-  expect(d.rows.some(r => /^3 records in chat\.jsonl$/.test(r))).toBe(true)
+  expect(d.rows).toContain('over     chat.jsonl')
+  expect(d.rows.some(r => /^ {9}3 records/.test(r))).toBe(true)
+  expect(d.keys).toEqual(['d', 'p', 'n', 'b'])
   expect(d.tree.find(n => n.type === 'Button' && n.props.hotkey === 'd').props.label).toBe('examples')
+  // moving in the label keeps esc's way back to all the labels
+  expect((await paneNow($))?.trail).toEqual([{ kind: 'labels', args: {}, title: 'Labels' }])
   await d.press('d')
   d = await drawn($)
-  expect(d.rows.some(r => r.startsWith('yes · 2'))).toBe(true)
+  expect(d.rows.some(r => r.startsWith('examples · yes 2'))).toBe(true)
   await d.press('b')
   d = await drawn($)
   expect((await paneNow($))?.args).toEqual({})
@@ -250,12 +255,45 @@ test('the labels pane: the detail switches between the examples and the definiti
   await no().props.onPress()
   expect((await paneNow($))?.args).toEqual({ label: 'sorry', value: 'no' })
   d = await drawn($)
-  await no().props.onPress()
-  expect((await paneNow($))?.args).toEqual({})
+  await d.press('b')
   // p from all the labels: the last value of the last label
   d = await drawn($)
   await d.press('p')
   expect((await paneNow($))?.args).toEqual({ label: 'long', value: 'no' })
+})
+
+test('the labels pane edits a field of the definition in its input bar: e the rule, ↵ applies the label again by the command Claude runs', async () => {
+  const ran: string[][] = []
+  const $ = paneEngine(ran)
+  await $.state.set({ plugin: 'thimble', key: 'labelGen' }, 500)
+  await openLabels($, { label: 'sorry', def: true })
+  let d = await drawn($)
+  expect(d.keys).toEqual(['e', 'd', 'p', 'n', 'b'])
+  expect(d.tree.find(n => n.type === 'Button' && n.props.hotkey === 'e').props.label).toBe('edit rule')
+  // the rule, the records it went over: a press each (a field's rows press it), no underline under the pointer
+  const fields = d.tree.filter(n => n.type === 'Button' && /:f\[/.test(String(n.props.key)))
+  expect(fields.map(n => String(n.props.key).replace(/^r\d+:/, ''))).toEqual(['f["rule"]', 'f["in"]'])
+  expect(fields.every(n => n.props.hover?.underline === false)).toBe(true)
+  await d.press('e')
+  const args = (await paneNow($))?.args
+  expect(args).toEqual({ label: 'sorry', value: 'yes', def: true, edit: 'rule' })
+  d = await drawn($)
+  // editing: the field marked, the keys ↵ and esc; the input bar holds the rule, named
+  expect(d.rows).toContain('rule     (?i)sorry|apolog   ← editing')
+  const said = (n: Any): string => (n == null ? '' : typeof n === 'string' ? n : Array.isArray(n) ? n.map(said).join('') : said(n.props?.children))
+  expect(said(d.tree.find(n => n.props?.key === 'keys'))).toBe('↵ rerun over the same 3 records · esc cancel')
+  const edit = await labelEdit($, args)
+  expect([edit?.name, edit?.value]).toEqual(['rule', '(?i)sorry|apolog'])
+  // ↵: back to the label, and the label applied again with the new rule, everything else as it was
+  await edit!.submit('(?i)sorry')
+  expect((await paneNow($))?.args).toEqual({ label: 'sorry', def: true })
+  expect(ran.find(a => a.includes('--regex'))).toEqual(['label', 'sorry', '--in', 'chat.jsonl', '--regex', '(?i)sorry', '--values', 'yes,no', '--json'])
+  // the same value again changes nothing
+  ran.length = 0
+  await $.state.set({ plugin: 'thimble', key: 'labelGen' }, 501)
+  await openLabels($, { label: 'sorry', def: true, edit: 'in' })
+  await (await labelEdit($, (await paneNow($))?.args))!.submit('chat.jsonl')
+  expect(ran.some(a => a.includes('--regex'))).toBe(false)
 })
 
 test('the labels pane keeps its key row in its rows with a long list of examples, wrapped keys and all', async () => {
@@ -272,7 +310,7 @@ test('the labels pane keeps its key row in its rows with a long list of examples
     expect(keyRow.props.key).toBe('keys')
     const keyWidth = (keyRow.props.children as Any[]).reduce((s: number, n: Any) => s + (n.type === 'Button' ? 3 + n.props.label.length : String(n.props.children).length), 0)
     expect(kids.length - 1 + Math.ceil(keyWidth / W)).toBeLessThanOrEqual(Math.max(12, H - 5))
-    expect(d.keys.slice(-2)).toEqual(['d', 'b'])
+    expect(d.keys.slice(-2)).toEqual(['j', 'b'])
   }
 })
 
@@ -311,5 +349,5 @@ test('the labels pane marks the words a code label matched, cut at words around 
   // the definition: what the label went over, the temp file short
   await d.press('d')
   d = await drawn($, W)
-  expect(d.rows.some(r => r.startsWith('3 records in /made-up/…/thimble/prs.jsonl'))).toBe(true)
+  expect(d.rows).toContain('over     /made-up/…/thimble/prs.jsonl')
 })

@@ -879,6 +879,9 @@ def head(lab: dict[str, Any]) -> dict[str, Any]:
     return {"name": lab["name"], "kind": lab.get("kind"), "rule": str(lab.get("rule") or ""), "values": list(lab["values"]),
             "says": lab.get("says") or "", "in": lab.get("in"), "where": lab.get("where"), "within": lab.get("within"), "trial": bool(lab.get("trial")),
             "limit": lab.get("limit"), "seed": lab.get("seed") or 0, "reason": bool(lab.get("reason")), "model": lab.get("model"),
+            # when this version was made, and whether by the person (from the labels pane) or Claude
+            "made": lab.get("created"),
+            "by": "person" if str((lab.get("sessions") or [""])[-1]).startswith("person-") else "claude",
             "matched": lab.get("matched"), "version": lab.get("version"), "rev": lab.get("rev"), **status(lab)}
 
 

@@ -65,18 +65,20 @@ test('many labels: when the tables do not fit, each label is one line, its value
   fits(top.rows)
 })
 
-test('a value open: its label a table with the ▸, the others one line each, its examples one line each', () => {
+test('a value open: its label alone under `Labels › name`, its sentence, its values with the ▸, its examples one line each', () => {
   const chosen = chosenOf(FIVE, { label: 'asks_review', value: 'yes' })
   const top = ledgerTop(FIVE, chosen, { w: W, rows: ROWS })
+  assert.equal(top.head.map(r => r.s).join(''), 'Labels › asks_review')
   const t = text(top.rows)
-  assert.deepEqual(t.slice(0, 3).map(x => x.split(/\s+/)[0]), ['stuck', '', 'asks_review'])
-  assert.equal(t[3], 'code: return "yes"')
-  assert.match(t[4], /^▸ yes +▅+ +2,165 +22%$/)
-  // a label folded to one line is cut with … where its values do not fit
-  assert.ok(t.find(x => x.startsWith('post_kind')).endsWith('…'))
+  // no other label: the sentence (in short, plain words, no press; a code label's its first line that is not the def)
+  assert.equal(t[0], 'code: return "yes"')
+  assert.equal(top.rows[0].some(r => r.part), false)
+  assert.equal(t[1], '')
+  assert.match(t[2], /^▸ yes +▅+ +2,165 +22%$/)
+  assert.ok(!t.some(x => x.startsWith('stuck') || x.startsWith('post_kind')))
   const ex = examples(ASKS, 'yes', { at: 0, total: 2165, records: recs(30) }, { w: W, rows: 20, sel: null, place })
   const e = text(ex.rows)
-  assert.match(e[0], /^yes · 2,165 +1–18 of 2,165$/)
+  assert.match(e[0], /^examples · yes 2,165 +1–18 of 2,165$/)
   // the match within the first third, the words before it cut at a word's edge
   assert.match(e[1], /^ {2}wren-1 {3}…please take a look, REVIEW WANTED for my change to the…$/)
   assert.equal(e.at(-1), '  ↓ 2,147 more')
@@ -85,10 +87,7 @@ test('a value open: its label a table with the ▸, the others one line each, it
   assert.deepEqual(ex.rows[1].filter(r => r.bold).map(r => [r.s, r.tone]), [['REVIEW WANTED', 'v0']])
   fits([...top.rows, ...ex.rows])
   // a press: a value row opens it, an example picks it
-  assert.deepEqual(partOf(top.rows[4][0].part), ['v', 'asks_review', 'yes'])
-  // the definition in short, plain words and no press; a code label's is its first line that is not the def
-  assert.equal(rowText(top.rows[3]), 'code: return "yes"')
-  assert.equal(top.rows[3].some(r => r.part), false)
+  assert.deepEqual(partOf(top.rows[2][0].part), ['v', 'asks_review', 'yes'])
   assert.deepEqual(partOf(ex.rows[1][0].part), ['r', 'runs/a/board.jsonl#L1'])
 })
 
@@ -122,22 +121,39 @@ test('an example picked opens in place: its words over up to five lines, where i
   assert.ok(mp.some(x => x.trim() === 'the model: says thanks'))
 })
 
-test('one label opens on its first value with records; its definition side holds the rule whole and what it went over', () => {
+test('one label opens on its first value with records; its definition holds every field, aligned, the rule whole', () => {
   const chosen = chosenOf([TONE], {})
   assert.deepEqual([chosen.lab.name, chosen.value], ['tone', 'friendly'])
   const t = text(ledgerTop([TONE], chosen, { w: W, rows: ROWS }).rows)
-  assert.match(t[0], /^tone +60 of 9,921 at random$/)
-  assert.equal(t[1], 'prompt: stuck|blocked')
+  assert.equal(t[0], 'prompt: stuck|blocked')
   assert.match(t[2], /^▸ friendly/)
-  assert.equal(t.filter(x => /^[^\s▸]/.test(x)).length, 2)
+  // the definition's side: no sentence when the label has no plain one (the fields hold the rule whole)
+  assert.deepEqual(ledgerTop([TONE], chosen, { w: W, rows: ROWS, def: true }).rows, [])
   // nothing named and more than one label: at rest
   assert.equal(chosenOf(FIVE, {}), null)
   // a value named that the label does not have: its first with records
   assert.equal(chosenOf(FIVE, { label: 'post_kind', value: 'gone' }).value, 'status')
   const d = definition(ASKS, W)
-  assert.deepEqual(d[0], { code: 'def label(u):\n    return "yes"' })
-  assert.equal(rowText(d.at(-1)), '9,921 records in runs/*/board.jsonl')
-  assert.equal(rowText(definition(STUCK, W)[0]), '  stuck|blocked')
+  assert.equal(rowText(d[0]), 'kind     code')
+  assert.equal(rowText(d[1]), 'code     ')
+  assert.deepEqual(d[2], { code: 'def label(u):\n    return "yes"' })
+  assert.equal(rowText(d[3]), 'over     runs/*/board.jsonl')
+  assert.equal(rowText(d.at(-1)), 'values   yes 2,165  22%   no 7,756  78%')
+  const clock = at => `t${at}`
+  assert.deepEqual(definition({ ...STUCK, made: 5, by: 'person' }, W, p => p, { clock }).map(rowText), [
+    'kind     regex', 'rule     stuck|blocked', 'over     runs/*/board.jsonl', '         9,921 records · made t5 by you', 'values   yes 1,175  12%   no 8,746  88%'])
+  // a prompt label: its prompt wrapped under itself, its model (the reads' own when it names none), when it was read
+  const p = definition({ ...TONE, rule: 'The post is friendly. '.repeat(5).trim(), run: { at: 9 } }, 40, x => x, { model: 'sonnet', clock })
+  const lines = p.map(rowText).slice(1, p.findIndex(r => rowText(r).startsWith('model')))
+  assert.ok(lines[0].startsWith('prompt   The post') && lines.slice(1).every(x => /^ {9}\S/.test(x)) && lines.every(x => textWidth(x) <= 40))
+  assert.equal(lines.map(x => x.slice(9)).join(' '), 'The post is friendly. '.repeat(5).trim())
+  assert.ok(p.map(rowText).includes('model    sonnet'))
+  assert.match(p.map(r => rowText(r).trim()).join(' '), /60 of 9,921 records at random · read by Claude at t9/)
+  // the rule, the model and the records a press each; the one in the input bar bold, `← editing` after it
+  assert.deepEqual([...new Set(p.flat().map(r => r.part).filter(Boolean))].map(x => partOf(x)), [['f', 'rule'], ['f', 'model'], ['f', 'in']])
+  const ed = definition(STUCK, W, x => x, { editing: 'rule' })
+  assert.equal(rowText(ed[1]), 'rule     stuck|blocked   ← editing')
+  assert.ok(ed[1].find(r => r.s === 'stuck|blocked').bold)
 })
 
 test('p n walk every value in reading order; a row names a table row by its key, a line by who wrote it', () => {
@@ -168,10 +184,11 @@ test("a label's definition line: how it was made and its rule, a --prompt's firs
   assert.equal(defLine({ name: 'y', kind: 'code', rule: 'import re\n# the purpose\ndef label(r):\n    return r["kind"]' }), 'code: return r["kind"]')
   // a code label that opens with a comment: the comment, which says in words what the code does
   assert.equal(defLine({ name: 'z', kind: 'code', rule: '# Sorts an edit by its topic,\n# from its page name.\nimport re\nTOPICS = [1]\ndef label(r):\n    return "x"' }), 'code: Sorts an edit by its topic, from its page name.')
-  // a rule made with --says: its plain sentence, and the definition holds it above the rule
+  // a rule made with --says: its plain sentence, once, under the head on either side; the definition holds the rule
   const says = { name: 'stuck', kind: 'regex', rule: '(?i)\\b(stuck|blocked)\\b', says: 'The message says its writer cannot go on.', values: ['yes', 'no'] }
   assert.equal(defLine(says), 'The message says its writer cannot go on.')
-  assert.deepEqual(definition(says, 80).slice(0, 3).map(rowText), ['  The message says its writer cannot go on.', '', '  (?i)\\b(stuck|blocked)\\b'])
+  assert.deepEqual(text(ledgerTop([says], chosenOf([says], {}), { w: 80, rows: ROWS, def: true }).rows), ['The message says its writer cannot go on.', ''])
+  assert.deepEqual(definition(says, 80).slice(0, 2).map(rowText), ['kind     regex', 'rule     (?i)\\b(stuck|blocked)\\b'])
 })
 
 test('a change applies the label again by the command Claude runs, everything else as it was', () => {
