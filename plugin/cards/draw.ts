@@ -417,8 +417,9 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
 }
 
 /** The frames of the cards a reply's text places on lines of their own (marks/message.js cardRef), by id: main's cards
- *  that have drawn. The marks' drawing of the reply draws each on its line (marks/view.ts messageEl). */
-export async function framesIn($: Engine, e: Any, text: string): Promise<Record<string, Any>> {
+ *  that have drawn. The marks' drawing of the reply draws each on its line (marks/view.ts messageEl). `here`: the rows
+ *  the text stands for (a catch-up's replies), where a card placed in one of them draws, not a line pointing to it. */
+export async function framesIn($: Engine, e: Any, text: string, here: string[] = [e.requestId]): Promise<Record<string, Any>> {
   const out: Record<string, Any> = {}
   const drawn: string[] = []
   for (const line of String(text ?? '').split('\n')) {
@@ -427,7 +428,7 @@ export async function framesIn($: Engine, e: Any, text: string): Promise<Record<
     const meta = await metaOf($, id)
     if (!meta || meta.version < 1 || meta.anchorRow) continue
     // a card stands in one place: the newest row that placed it; an earlier one shows a line that points there
-    if (meta.inRow && meta.inRow !== e.requestId) {
+    if (meta.inRow && !here.includes(meta.inRow)) {
       const E = $.ui.resolve(e) as Any
       out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” is drawn further down` })] })
       continue

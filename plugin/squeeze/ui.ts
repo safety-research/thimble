@@ -41,6 +41,9 @@ import { catchUp, catchUpAt, catchUpOn, cuId, drawnAt, dismissCatchUp, partNow, 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
+/** The frames of the cards a text places on lines of their own (cards/draw.ts framesIn), each drawn there as at
+ *  home when the card's line stood in one of `rows`. */
+export type CardsIn = (text: string, rows: string[]) => Promise<Record<string, Any>>
 type At = Record<string, number>
 type Open = { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean }
 
@@ -456,7 +459,7 @@ export async function viewOf($: Engine, row: string): Promise<{ text?: string | 
  *  words, else the same claim in new words), and a press on one acts as a press on that citation in its reply. The
  *  replies' citations are numbered across the catch-up, since each reply numbers its own from 1: so citations of two
  *  replies never share a hover group, and a press finds the reply's citation it stands for. */
-export async function catchUpEl($: Engine, els: Any, row: string, cols: number): Promise<Any | null> {
+export async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn?: CardsIn): Promise<Any | null> {
   if (!featureOn('squeeze')) return null
   const cu = await catchUpAt($, row)
   if (!cu || typeof cu.shown !== 'string') return null
@@ -475,8 +478,10 @@ export async function catchUpEl($: Engine, els: Any, row: string, cols: number):
   const looks = looksByWords(marks, items, await mainRuns($))
   const replies = Number(cu.catchup?.replies) || 0
   const w = Math.max(20, cols - 2)
+  // the cards the replies placed on lines of their own stand on their lines in the catch-up
+  const cards = cardsIn ? await cardsIn(text, cu.catchup?.rows ?? []).catch(() => ({})) : {}
   const body = messageEl(els, {
-    text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: !!ui.running,
+    text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: !!ui.running, cards,
     onMark: async (k: number) => {
       const it = from[(looks[k]?.n ?? 0) - 1]
       if (!it) return

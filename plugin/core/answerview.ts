@@ -104,8 +104,8 @@ export async function spansFor($: Engine, row: string, text: string, marks: { st
 }
 
 /** A row a feature draws whole in place of its words (a catch-up), or null. */
-export async function rowDrawing($: Engine, els: Any, row: string, cols: number): Promise<Any | null> {
-  return safe(squeezeRow($, els, row, cols), null)
+export async function rowDrawing($: Engine, els: Any, row: string, cols: number, cardsIn?: (text: string, rows: string[]) => Promise<Record<string, Any>>): Promise<Any | null> {
+  return safe(squeezeRow($, els, row, cols, cardsIn), null)
 }
 
 /** The citation of the row the tray shows (its number in the reply), or null. */
