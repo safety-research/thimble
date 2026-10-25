@@ -282,7 +282,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
         while (k < run.length) {
           let j = k
           while (j < run.length && run[j] === run[k]) j++
-          out.push({ t: 'Text', p: { color: shades(color)[run.charCodeAt(k) - 0x2591] }, c: ['\u2588'.repeat(j - k)] })
+          out.push({ t: 'Text', p: { color: shades(color)[run.charCodeAt(k) - 0x2591] }, c: ['\u2588'.repeat(j - k)], g: run.slice(k, j) })
           k = j
         }
         at = i + run.length
@@ -545,8 +545,16 @@ const cards = new Map()
 let answered = Date.now() * 1000
 
 /** The text copy of a tree at a width. */
+// The text copy shows the shade glyphs the view wrote (`g`, kept where the light theme draws them as █ in a mixed
+// color, shaded above): the copy has no colors, so a █ there would read as the full shade.
 function copy(tree, width) {
-  return layoutLines(tree, width)
+  return layoutLines(asWritten(tree), width)
+}
+
+function asWritten(n) {
+  if (!n || typeof n !== 'object') return n
+  if (typeof n.g === 'string') return { t: n.t, p: n.p, c: [n.g] }
+  return n.c ? { ...n, c: n.c.map(asWritten) } : n
 }
 
 function load(a) {

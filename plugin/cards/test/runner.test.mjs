@@ -104,6 +104,15 @@ test('the tree holds only what Claude Code draws: a Button of words, and strings
   assert.deepEqual(r3.tree.c[0].c, ['abc d'])
 })
 
+test('on the light theme a shade glyph draws as █ in a mixed color, and the text copy keeps the glyph the view wrote', async () => {
+  const shaded = 'function view(p, s) { const { Text } = s.elements; return Text({ color: s.colors.cat[0], children: "a ░▒ b" }) }'
+  const { r } = await load(shaded, { theme: 'light' })
+  assert.equal(r.ok, true)
+  assert.match(JSON.stringify(r.tree), /"c":\["\u2588"\]/)
+  assert.deepEqual(r.lines, ['a ░▒ b'])
+  await ask('ping', { theme: 'dark' })
+})
+
 test('a file that is an object gives its rows as props.rows and the whole object as props.data; each answer has a newer seq', async () => {
   writeFileSync(join(dir, 'obj.json'), JSON.stringify({ rows: [{ a: 1 }], meta: { total: 9 } }))
   const view = 'function view(p, s) { return s.elements.Text({ children: p.rows.length + " of " + p.data.meta.total }) }'
