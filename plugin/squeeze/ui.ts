@@ -35,7 +35,7 @@ import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { cardDid, cardHidden } from './cards'
-import { atOf, cardNotes, chipsOf, endsOf, isOriginal, levelWords, ownWords, revealCut, rowsOf, setWords, stepAt, withOwn } from './chips.mjs'
+import { atOf, cardNotes, chipsOf, endsOf, isOriginal, levelWords, ownWords, revealCut, rowsOf, stepAt, withOwn } from './chips.mjs'
 import { catchUp, catchUpAt, catchUpOn, cuId, drawnAt, dismissCatchUp, partNow, pileUp, recOf, saveRec, seeView, setLevels, uiOf, wantLevels, type Rec } from './term'
 
 type Engine = EngineInterface
@@ -350,8 +350,8 @@ async function catchUpShown($: Engine): Promise<Rec | null> {
   return cu && typeof cu.shown === 'string' ? cu : null
 }
 
-/** The chips' keys and lines on the bar while they are open; at rest, s: `s squeeze`, lit with the levels set while
- *  the answer shows a version of the person's (`s ● short · interpret`), `b catch up on N replies` while replies
+/** The chips' keys and lines on the bar while they are open; at rest, s: `s squeeze`, the same words whether the
+ *  answer shows its original or a squeezed version (the chips name the levels), `b catch up on N replies` while replies
  *  piled up since the person's last prompt, and `0 show the replies` while a catch-up stands in for them. */
 export async function barItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const squeezing = on('squeezeAnswers')
@@ -364,11 +364,9 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const id = (await catchUpOn($, row)) ? cuId(row) : row
   const pile = await pileUp($, on)
   const now = await recOf($, id)
-  const lit = now && !now.catchup && typeof now.shown === 'string'
-  const words = lit ? `● ${setWords(now) || 'squeezed'}` : 'squeeze'
   const shown = on('catchUp') && now?.catchup && typeof now.shown === 'string' ? now : null
   return [
-    ...(squeezing ? [{ id: 'squeeze', key: 's', words, ...(lit ? { color: accent() } : {}), press: () => openChips($, id) }] : []),
+    ...(squeezing ? [{ id: 'squeeze', key: 's', words: 'squeeze', press: () => openChips($, id) }] : []),
     ...(pile ? [{ id: 'catchup', key: CATCH_UP_KEY, words: `catch up on ${pile.n} replies`, press: () => catchUpNow($) }] : []),
     ...(shown ? [{ id: 'catchup-back', key: '0', words: 'show the replies', press: () => dismissNow($, shown.id) }] : []),
   ]

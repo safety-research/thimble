@@ -93,9 +93,10 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(String(t.asked[0].prompt)).toContain('Length: longer')
   const shown = textOf(await $.ui.render(answer('row-t1', LONG)))
   expect(shown).toContain('on each fresh fetch')
-  // the chips close with s; the bar says the levels set
+  // the chips close with s; the bar says squeeze as before, not the levels set
   await t.press('s')
-  expect(await t.bar()).toContain('● longer')
+  expect(await t.bar()).toContain('s squeeze')
+  expect(await t.bar()).not.toContain('longer')
   const next = await t.ask('and now?')
   expect(String((next.context ?? []).join('\n'))).toContain('now reads, for the analyst, as:')
   // 0 brings the original back, with no call
