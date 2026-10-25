@@ -45,7 +45,7 @@
 import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
 import { accent, themeLast, type Theme } from '../core/theme'
-import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
+import { blocks, cardRef, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -84,6 +84,8 @@ export type MessageOpts = {
   /** the passages a side thread can be asked about: `has` says whether one was asked about already, `ask` starts it
    *  (or opens it). Each row of blocks is a passage, a heading's its whole section */
   passages?: { has: (p: Passage) => boolean; ask: (p: Passage) => unknown } | null
+  /** the cards the reply places on lines of their own (message.js cardRef), drawn there, by the card's id */
+  cards?: Record<string, Any>
 }
 
 /** A passage of a reply: its words, and a few of them that name it. */
@@ -386,12 +388,20 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     a = z
   }
   const laidOut = (k: number) => laid[k]
+  // a line that places a card (message.js cardRef): the card's frame there, a row of its own
+  const placed = (k: number) => (bs[k].type === 'para' ? o.cards?.[cardRef(o.text.slice(bs[k].start, bs[k].end)) ?? ''] : undefined)
   // where passages can be asked about, a run of blocks drawn by Claude Code's Markdown is one passage: it ends at a
   // blank line (but a list's items stay together) and before a heading
   const joins = (a: Any, n: Any) => !o.passages || (n.type !== 'heading' && (!n.gap || (a.type === 'item' && n.type === 'item')))
   let i = 0
   while (i < bs.length) {
     const b = bs[i]
+    const card = placed(i)
+    if (card) {
+      push([card], b.gap && i > 0, passageOf(i, i))
+      i++
+      continue
+    }
     if (laidOut(i)) {
       push(blockLines(els, o, b, `${o.key}-l${i}`, w), b.gap && i > 0, passageOf(i, i))
       i++
@@ -399,7 +409,7 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     }
     // a run of blocks with no mark: Claude Code's own Markdown, whole
     let j = i
-    while (j + 1 < bs.length && !laidOut(j + 1) && joins(bs[j], bs[j + 1])) j++
+    while (j + 1 < bs.length && !laidOut(j + 1) && !placed(j + 1) && joins(bs[j], bs[j + 1])) j++
     push([Markdown({ text: o.text.slice(b.start, bs[j].end) })], b.gap && i > 0, passageOf(i, j))
     i = j + 1
   }

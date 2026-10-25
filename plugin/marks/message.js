@@ -15,6 +15,7 @@
 //   plainSentence(sentence)    -> that sentence as a person reads it: no markdown, a table row's cells joined by ` · `
 //   withoutMarks(text)         -> the text with each mark as its words alone (marks switched off)
 //   blocks(text)               -> the markdown's blocks with their offsets
+//   cardRef(line)              -> the card a line of its own places there (`[title](card:<id>)`), or null
 //   inline(text, from, to, marks) -> one block's content as runs: words with their style, and each mark as one run
 //   wrapRuns(runs, width)      -> the runs cut into lines at spaces, a mark's words as plain words are
 //   tableOf(text, block, marks) -> a table block's cells as runs
@@ -365,6 +366,13 @@ export function blocks(text) {
     i++; gap = false
   }
   return out
+}
+
+/** The id of the card a line places at its spot in the reply: the line is only a link to `card:<id>`, such as
+ *  `[Edits by day](card:c1a2b3c4d5)`, or null. Elsewhere (a copy, the browser) it reads as a link with the card's title. */
+export function cardRef(line) {
+  const m = /^\s*\[[^\]\n]*\]\(card:(c[0-9a-f]{8,16})\)\s*$/.exec(String(line || ''))
+  return m ? m[1] : null
 }
 
 /** The marks that lie inside [from, to), each with its index `i` among all marks (a span, too: {start, end}). */

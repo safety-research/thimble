@@ -28,6 +28,7 @@ import { checkSpans, markFocus, markPressed, passagesFor, rowDrawing, spansFor, 
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
+import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
@@ -222,7 +223,10 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   // the reply says so and opens it
   const lost = text !== words ? lostSpans(words, placed, spans) : []
   const under = await underText($, els, row, cols)
-  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length) {
+  // the cards the text places on lines of their own
+  const cards = featureOn('cards') ? await framesIn($, e, text) : {}
+  const placesCards = Object.keys(cards).length > 0
+  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) {
     return own ? below() : below({ ...e, props: { ...e.props, text } })
   }
   // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations` runs
@@ -247,10 +251,10 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const focus = focusN != null ? looks.findIndex(l => l.n === focusN) : -1
   // the citations' tint is the theme set's (view.ts citeLook)
   if (marks.length) await themeNow($)
-  const body = marks.length || spans.length || view.dim || view.lead
+  const body = marks.length || spans.length || view.dim || view.lead || placesCards
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
-      spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null,
+      spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),
       onMark: async (k: number) => {

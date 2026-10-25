@@ -34,6 +34,7 @@ export type CardMeta = {
   turn?: string // main's turn of that call
   agentId: string | null // the fork that drew the version on screen (a designer's), or null for main
   anchorRow: string | null // the answer a designer fork's card draws under
+  inRow?: string | null // the text row of main's that places the card on a line of its own (marks/message.js cardRef), where it draws instead of under its call
   keys: string[]
   read: string // what the version on screen read from its file, as CardCall says it
   columns: string[]
