@@ -133,7 +133,7 @@ async function usedOf($: Engine, names: string[]): Promise<UsedLabel[] | null> {
  *    labels  coordination · regex · 14,591 records  ● yes  ● no
  *            has_url      · code  · 14,591 records  ● yes  ● no
  *
- *  A row too long for the width wraps between its values. */
+ *  A row too long for the width wraps between its values, each wrapped value under the row's first. */
 export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen: (name: string, value: string | null) => unknown }): Any | null {
   if (!used.length) return null
   const { Box, Button, Text } = els
@@ -145,6 +145,7 @@ export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen
   const recW = widest(records)
   const rows = used.map((l, i) => {
     const kids: Any[] = []
+    const vals: Any[] = []
     const name = Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ key: 'n', bold: true, children: l.name })] })
     kids.push(Box({ key: `${o.key}-w${i}`, flexDirection: 'row', flexShrink: 0, children: [
       Text({ key: 'w', dimColor: true, children: i ? ' '.repeat(lead.length) : lead }), name,
@@ -157,10 +158,16 @@ export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen
       // under a card (`tones`): the color the card gives the value, else the label's own (the labels pane's); under an
       // answer: the label's own. The records with no value: the pane's gray, under a card too
       const color = (l.tones && v !== NO_VALUE ? l.tones[v] : undefined) ?? colorOf(l.values, v)
-      kids.push(Text({ key: `${o.key}-g${i}-${j}`, children: '  ' }))
-      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: v === NO_VALUE ? `the records of ${l.name} with ${name === 'no value' ? 'no value' : 'no value yet'}` : `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: [Text({ key: 'v', color, children: `● ${name}` })] }))
+      vals.push(Box({ key: `${o.key}-g${i}-${j}`, flexDirection: 'row', flexShrink: 0, children: [
+        Text({ key: 'g', children: '  ' }),
+        Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: v === NO_VALUE ? `the records of ${l.name} with ${name === 'no value' ? 'no value' : 'no value yet'}` : `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: [Text({ key: 'v', color, children: `● ${name}` })] }),
+      ] }))
     })
-    return Box({ key: `${o.key}-l${i}`, flexDirection: 'row', flexWrap: 'wrap', children: kids })
+    // the values wrap inside their own column, so a wrapped value lines up under the first one
+    return Box({ key: `${o.key}-l${i}`, flexDirection: 'row', children: [
+      Box({ key: 'head', flexDirection: 'row', flexShrink: 0, children: kids }),
+      Box({ key: 'vals', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: vals }),
+    ] })
   })
   return Box({ key: o.key, flexDirection: 'column', children: rows })
 }

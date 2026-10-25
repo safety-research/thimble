@@ -97,10 +97,22 @@ test('the word label never sits alone on its row: it is one item with the name i
   const first = (row.props.children as Any[])[0]
   expect(first.type).toBe('Box')
   // inside the group, the word and the name are one item that keeps them on one row
-  const word = first.props.children[0]
+  const word = first.props.children[0].props.children[0]
   expect(word.props).toMatchObject({ flexDirection: 'row', flexShrink: 0 })
   expect(word.props.flexWrap).toBeUndefined()
   expect(textOf(word)).toBe('label colluding')
+})
+
+test('a row too long for the width wraps its values in their own column, under its first value, never under `labels`', () => {
+  const values = ['proxy_fetch', 'coordination', 'external_links', 'no_links', 'wiki_links_only', 'other']
+  const row = labelRowEl(ELS, [{ name: 'edit_purpose', kind: 'code', values, records: 14591 }], { key: 'k', onOpen: () => undefined })
+  const [head, vals] = (row.props.children as Any[])[0].props.children
+  // the name, how it was made and the count keep their width; only the values' column shrinks and wraps
+  expect(head.props).toMatchObject({ flexDirection: 'row', flexShrink: 0 })
+  expect(vals.props).toMatchObject({ flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1 })
+  expect(textOf(head)).toBe('label edit_purpose · code · 14,591 records')
+  // each value is one item with the gap before it, so a wrap never splits a dot from its value
+  expect((vals.props.children as Any[]).every(v => v.type === 'Box' && v.props.flexShrink === 0)).toBe(true)
 })
 
 test('a card shows the labels its turn ran before it; the answer only those no card of it shows; a press opens the label', async () => {
