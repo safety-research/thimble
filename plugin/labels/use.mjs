@@ -109,6 +109,28 @@ export function tonesInTree(tree, values) {
   return out
 }
 
+/** Values that say little alone: a card that shows one does not show that it reads a label with it. */
+const GENERIC = new Set(['yes', 'no', 'other', 'none', 'true', 'false', 'unknown', 'unclear', 'mixed', 'n/a'])
+
+/** Whether a card's drawing shows a label: its name, one of its values in a color of the card's own (tonesInTree), or
+ *  a value specific enough to name it (not yes, no or other), each as whole words. A turn's labels are many (a label
+ *  read once for a count is one of them); a card's row names only those its drawing shows. */
+export function labelInTree(tree, label) {
+  if (!tree || !label) return false
+  const text = runsOf(tree).map(c => c.ch).join('')
+  const whole = w => {
+    if (typeof w !== 'string' || !w.trim()) return false
+    for (let i = text.indexOf(w); i >= 0; i = text.indexOf(w, i + 1)) {
+      const before = text[i - 1]
+      const after = text[i + w.length]
+      if (!(before && /[\p{L}\p{N}_]/u.test(before)) && !(after && /[\p{L}\p{N}_]/u.test(after))) return true
+    }
+    return false
+  }
+  const values = (label.values || []).map(String)
+  return whole(label.name) || Object.keys(tonesInTree(tree, values)).length > 0 || values.some(v => !GENERIC.has(v.toLowerCase()) && whole(v))
+}
+
 /** The names of the labels a turn used ([{name}], in order, each once) that `shown` (names) leaves out. */
 export function usedNames(uses, shown = []) {
   const skip = new Set(shown)

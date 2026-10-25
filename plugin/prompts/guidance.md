@@ -42,7 +42,7 @@ Advice:
 - A blank line between a card's sections often makes it easier to read.
 - About 30 rows fit; say which page shows ("rows 1-14 of 28").
 
-After the call, say in a few sentences what the card shows and cite the numbers your reading rests on; do not copy its rows into the reply as a table. When a call fails because of the setup, not the view, try again in a later turn. When the analyst presses v under an answer, thimble draws a card of it in the background and tells you with their next message.
+Lead into a card with what it shows for the question, so the analyst knows what to look for before they read it, and cite the numbers your reading rests on; do not copy its rows into the reply as a table. When a call fails because of the setup, not the view, try again in a later turn. When the analyst presses v under an answer, thimble draws a card of it in the background and tells you with their next message.
 
 ## Labels
 

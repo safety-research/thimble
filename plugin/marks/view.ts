@@ -363,17 +363,19 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     const words = bs[i].type === 'heading' ? sectionOf(o.text, bs, i) : o.text.slice(bs[i].start, bs[j].end)
     return { text: words, label: passageLabel(words) }
   }
-  const push = (content: Any[], gap: boolean, p: Passage) => {
+  // the reply's ● (or its lead) stands beside its first words: a card placed before them draws beside none
+  const push = (content: Any[], gap: boolean, p: Passage, card = false) => {
     const key = `${o.key}-b${k++}`
-    const lead = dot && o.lead
-    const glyph = dot ? '●' : ' '
+    const wait = card && hasWords
+    const lead = dot && !wait && o.lead
+    const glyph = dot && !wait ? '●' : ' '
     const cell = lead
       ? Box({ width: 2, flexShrink: 0, children: [Text({ color: accent(), bold: true, children: o.lead })] })
       : o.passages
         ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph, color: accent() })
         : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
     rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [...(o.gutter === false ? [] : [cell]), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
-    dot = false
+    if (!wait) dot = false
   }
   // a block laid out here: one that holds marks, and every item of a list one of whose items holds marks, so a nested
   // item keeps its indent beside its siblings. A code block never is: its lines stay as written, in Claude Code's
@@ -390,6 +392,7 @@ export function messageEl(els: Any, o: MessageOpts): Any {
   const laidOut = (k: number) => laid[k]
   // a line that places a card (message.js cardRef): the card's frame there, a row of its own
   const placed = (k: number) => (bs[k].type === 'para' ? o.cards?.[cardRef(o.text.slice(bs[k].start, bs[k].end)) ?? ''] : undefined)
+  const hasWords = bs.some((_b: Any, k: number) => !placed(k))
   // where passages can be asked about, a run of blocks drawn by Claude Code's Markdown is one passage: it ends at a
   // blank line (but a list's items stay together) and before a heading
   const joins = (a: Any, n: Any) => !o.passages || (n.type !== 'heading' && (!n.gap || (a.type === 'item' && n.type === 'item')))
@@ -398,7 +401,7 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     const b = bs[i]
     const card = placed(i)
     if (card) {
-      push([card], b.gap && i > 0, passageOf(i, i))
+      push([card], b.gap && i > 0, passageOf(i, i), true)
       i++
       continue
     }
