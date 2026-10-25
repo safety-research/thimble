@@ -46,19 +46,19 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('cards'), true)
     setOptions({})
   }
-  // Citations: auto cite by default; Claude cites in the two auto modes; w is manual's; a value outside them is the default
+  // Citations: auto cite by default; Claude cites in the two auto modes; c on selected words is manual's; a value outside them is the default
   {
     setOptions({})
     assert.equal(choiceOf('citations'), 'auto cite')
     assert.equal(claudeCites(), true)
-    assert.equal(featureOn('where'), false)
+    assert.equal(featureOn('cite'), false)
     setOptions({ citations: 'auto cite + check' })
     assert.equal(claudeCites(), true)
     setOptions({ citations: 'manual' })
     assert.equal(claudeCites(), false)
     assert.equal(featureOn('citations'), true)
-    assert.equal(featureOn('where'), true)
-    assert.equal(switchesFrom({ citations: 'manual' })('where'), true)
+    assert.equal(featureOn('cite'), true)
+    assert.equal(switchesFrom({ citations: 'manual' })('cite'), true)
     setOptions({ citations: 'off' })
     assert.equal(claudeCites(), false)
     assert.equal(featureOn('citations'), false)

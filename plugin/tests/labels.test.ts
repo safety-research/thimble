@@ -151,24 +151,28 @@ test('the labels pane: a table per label; n opens the first value, j picks its f
   expect(d.rows[0]).toBe('Labels · 2 labels')
   expect(d.rows.some(r => /^sorry +3$/.test(r))).toBe(true)
   expect(d.rows.some(r => /^ {2}yes +▅+ +2 +67%$/.test(r))).toBe(true)
-  expect(d.keys).toEqual(['p', 'n', 'k', 'j', 'd'])
+  // under each name its definition in short: plain words, no press, so nothing turns inverse under the pointer
+  expect(d.rows).toContain('regex: (?i)sorry|apolog')
+  expect(d.tree.some(n => n.type === 'Button' && words(n).startsWith('regex: '))).toBe(false)
+  expect(d.keys).toEqual(['p', 'n', 'k', 'j'])
   // the keys' row: under the pointer a key's words brighten, never Claude Code's inverse of a plain Button
   const keyRow = d.tree.filter(n => n.type === 'Button' && /^key-/.test(String(n.props.key)))
   expect(keyRow.length).toBeGreaterThan(0)
   expect(keyRow.every(n => n.props.hover?.inverse === false)).toBe(true)
   await d.press('n')
-  // the first value open: its examples one line each, the other label folded to one line, b back to all of them
+  // the first value open: its examples one line each, the other label folded to one line; esc goes back to all of
+  // them (the list is under this pane on the trail), so no b names it twice; above the examples, d the definition
   d = await drawn($)
   expect(d.rows.some(r => /^▸ yes +▅+ +2 +67%$/.test(r))).toBe(true)
   expect(d.rows.some(r => /^long {2,}▅+ {2}yes 2 {3}no 1$/.test(r))).toBe(true)
   expect(d.rows.some(r => /^ {2}wren {2}I'm sorry, I broke the build\.$/.test(r))).toBe(true)
-  expect(d.keys).toEqual(['b', 'p', 'n', 'k', 'j', 'd'])
+  expect(d.keys).toEqual(['d', 'p', 'n', 'k', 'j'])
   await d.press('j')
   // the first example picked: open in place, where it is, and the check keys
   d = await drawn($)
   expect(d.rows.some(r => /^▸ wren {2}I'm sorry, I broke the build\.$/.test(r))).toBe(true)
   expect(d.rows.some(r => /^ {8}chat\.jsonl:1 +1: yes {2}2: no$/.test(r))).toBe(true)
-  expect(d.keys).toEqual(['b', '1', '2', 'p', 'n', 'k', 'j', 'd'])
+  expect(d.keys).toEqual(['d', '1', '2', 'p', 'n', 'k', 'j'])
   // 2 (no) is the person's check of the picked example; the next one is picked
   await d.tree.find(n => n.type === 'Button' && n.props.hotkey === '2' && n.props.label === 'no').props.onPress()
   expect(ran.find(a => a.includes('--check'))).toEqual(['label', 'sorry', '--check', 'chat.jsonl#L1', 'no', '--json'])
@@ -179,14 +183,19 @@ test('the labels pane: a table per label; n opens the first value, j picks its f
   expect(Object.values((await $.state.get({ plugin: 'thimble', key: 'tell' })).value)).toEqual(['The analyst checked records of the label sorry in the labels pane. It now holds 1 check: 0 agree with the label and 1 changed a value: chat.jsonl#L1 (the label gave yes, the analyst says no). The checks count in place of the label\'s values; `thimble label sorry` prints the counts now.'])
 })
 
-test('the labels pane: d shows the definition in place of the examples, b goes back, a press opens a value and closes it', async () => {
+test('the labels pane: the detail switches between the examples and the definition with d, b goes back where esc does not, a press opens a value and closes it', async () => {
   const ran: string[][] = []
   const $ = paneEngine(ran)
   await openLabels($, { label: 'long' })
   let d = await drawn($)
+  // opened on the label itself: esc closes the pane, so b names the way to all the labels
+  expect(d.keys[0]).toBe('b')
+  expect(d.tree.find(n => n.type === 'Button' && n.props.hotkey === 'd').props.label).toBe('definition')
   await d.press('d')
   d = await drawn($)
-  expect(d.rows.some(r => r === 'definition · code')).toBe(true)
+  // the switch: the definition side bold with how the label was made, the examples side a press that d presses
+  expect(d.tree.some(n => n.type === 'Text' && n.props.bold && n.props.children === 'definition')).toBe(true)
+  expect(d.tree.some(n => n.type === 'Text' && n.props.children === ' · code')).toBe(true)
   expect(d.tree.find(n => n.type === 'Code').props.source).toBe('def label(unit):\n    return len(unit["text"]) > 30')
   expect(d.rows.some(r => /^3 records in chat\.jsonl$/.test(r))).toBe(true)
   expect(d.tree.find(n => n.type === 'Button' && n.props.hotkey === 'd').props.label).toBe('examples')
@@ -196,7 +205,7 @@ test('the labels pane: d shows the definition in place of the examples, b goes b
   await d.press('b')
   d = await drawn($)
   expect((await paneNow($))?.args).toEqual({})
-  expect(d.keys).toEqual(['p', 'n', 'k', 'j', 'd'])
+  expect(d.keys).toEqual(['p', 'n', 'k', 'j'])
   // a press on a value opens it; on the open value again, all the labels
   const no = () => d.tree.find(n => n.type === 'Button' && String(n.props.key).endsWith(':v["sorry","no"]'))
   await no().props.onPress()

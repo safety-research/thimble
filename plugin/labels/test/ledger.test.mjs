@@ -37,7 +37,7 @@ test('at rest each label is a table: its name and records, then each value with 
   const t = text(top.rows)
   assert.match(t[0], /^stuck {2,}9,921$/)
   // under its name, its definition on one line
-  assert.equal(t[1], 'definition regex: stuck|blocked')
+  assert.equal(t[1], 'regex: stuck|blocked')
   assert.match(t[2], /^ {2}yes {7}▅+ +1,175 +12%$/)
   assert.match(t[3], /^ {2}no {8}▅+ +8,746 +88%$/)
   // a trial says so; a value with no records shows its 0 with no bar
@@ -70,7 +70,7 @@ test('a value open: its label a table with the ▸, the others one line each, it
   const top = ledgerTop(FIVE, chosen, { w: W, rows: ROWS })
   const t = text(top.rows)
   assert.deepEqual(t.slice(0, 3).map(x => x.split(/\s+/)[0]), ['stuck', '', 'asks_review'])
-  assert.equal(t[3], 'definition code: return "yes"')
+  assert.equal(t[3], 'code: return "yes"')
   assert.match(t[4], /^▸ yes +▅+ +2,165 +22%$/)
   // a label folded to one line is cut with … where its values do not fit
   assert.ok(t.find(x => x.startsWith('post_kind')).endsWith('…'))
@@ -86,9 +86,9 @@ test('a value open: its label a table with the ▸, the others one line each, it
   fits([...top.rows, ...ex.rows])
   // a press: a value row opens it, an example picks it
   assert.deepEqual(partOf(top.rows[4][0].part), ['v', 'asks_review', 'yes'])
-  // the definition's line shows the definition whole; a code label's is its first line that is not the def
-  assert.equal(rowText(top.rows[3]), 'definition code: return "yes"')
-  assert.deepEqual(partOf(top.rows[3][0].part), ['d', 'asks_review'])
+  // the definition in short, plain words and no press; a code label's is its first line that is not the def
+  assert.equal(rowText(top.rows[3]), 'code: return "yes"')
+  assert.equal(top.rows[3].some(r => r.part), false)
   assert.deepEqual(partOf(ex.rows[1][0].part), ['r', 'runs/a/board.jsonl#L1'])
 })
 
@@ -122,12 +122,12 @@ test('an example picked opens in place: its words over up to five lines, where i
   assert.ok(mp.some(x => x.trim() === 'the model: says thanks'))
 })
 
-test('one label opens on its first value with records; d shows the definition whole and what it went over', () => {
+test('one label opens on its first value with records; its definition side holds the rule whole and what it went over', () => {
   const chosen = chosenOf([TONE], {})
   assert.deepEqual([chosen.lab.name, chosen.value], ['tone', 'friendly'])
   const t = text(ledgerTop([TONE], chosen, { w: W, rows: ROWS }).rows)
   assert.match(t[0], /^tone +60 of 9,921 at random$/)
-  assert.equal(t[1], 'definition prompt: stuck|blocked')
+  assert.equal(t[1], 'prompt: stuck|blocked')
   assert.match(t[2], /^▸ friendly/)
   assert.equal(t.filter(x => /^[^\s▸]/.test(x)).length, 2)
   // nothing named and more than one label: at rest
@@ -135,10 +135,9 @@ test('one label opens on its first value with records; d shows the definition wh
   // a value named that the label does not have: its first with records
   assert.equal(chosenOf(FIVE, { label: 'post_kind', value: 'gone' }).value, 'status')
   const d = definition(ASKS, W)
-  assert.equal(rowText(d[0]), 'definition · code')
-  assert.deepEqual(d[1], { code: 'def label(u):\n    return "yes"' })
+  assert.deepEqual(d[0], { code: 'def label(u):\n    return "yes"' })
   assert.equal(rowText(d.at(-1)), '9,921 records in runs/*/board.jsonl')
-  assert.equal(rowText(definition(STUCK, W)[1]), '  stuck|blocked')
+  assert.equal(rowText(definition(STUCK, W)[0]), '  stuck|blocked')
 })
 
 test('p n walk every value in reading order; a row names a table row by its key, a line by who wrote it', () => {

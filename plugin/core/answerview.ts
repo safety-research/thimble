@@ -14,7 +14,7 @@
 //   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the
 //                                         band has left over the bar
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`,
-//                                         `w where from`)
+//                                         `c cite`)
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
 //                                         no card may take
 //   core/pane.ts       the side pane      the kinds `claims`, `threads` and `thread` (the seams' draws)
@@ -28,7 +28,7 @@ import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
 import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
-import { WHERE_KEYS, whereBar, whereKey } from '../marks/where'
+import { citeBar, citeKey, citeShown } from '../marks/cite'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
@@ -63,7 +63,7 @@ export type MarkRef = { row: string; kind: 'citation'; n: number } | { row: stri
  *  import modules that come back here through the card tool, so a list made as this module loads could read a seam's
  *  keys before its module set them.) */
 export function restoredKeys(): string[] {
-  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...WHERE_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
 }
 
 const safe = async <T>(p: Promise<T>, none: T): Promise<T> => {
@@ -170,7 +170,7 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
   .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}) } : x))
 
-/** The features' items at the bar's left, after v: the tray's steps, s, e, w, then c. While an item of
+/** The features' items at the bar's left, after v: the tray's steps, s, b, e, then c cite. While an item of
  *  what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
@@ -180,22 +180,25 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
     ...tray,
     ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => !(holds && x.focus)),
     ...items(await safe(explainBar($, on, preview), []), preview),
-    ...items(await safe(whereBar($, on, preview), []), preview),
+    ...items(await safe(citeBar($, on, preview), []), preview),
   ]
 }
 
 /** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
- *  claims and the side threads (the left names what acts on an answer). */
+ *  claims and the side threads (the left names what acts on an answer). While c cites the selected words (`c cite` at
+ *  the left), the claims' item shows without its key, so each key is named once. */
 export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  const citing = preview ? on('cite') : await safe(citeShown($), false)
+  const claims = items(await safe(claimsBar($, on, preview), []), preview)
   return [
-    ...items(await safe(claimsBar($, on, preview), []), preview),
+    ...(citing ? claims.map(({ key: _key, ...x }) => x) : claims),
     ...items(await safe(threadsBar($, on, preview), []), preview),
   ]
 }
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
  *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
- *  tray's ] [ at rest, s, { } over the answers, e, c, then t. */
+ *  tray's ] [ at rest, s, { } over the answers, e, c (cite while words wait, else the claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   const tray = await safe(trayHolds($), false)
   const chips = await safe(squeezeHolds($), false)
@@ -205,7 +208,7 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
-    ?? (await safe(whereKey($, key, until), null))
+    ?? (await safe(citeKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
 }

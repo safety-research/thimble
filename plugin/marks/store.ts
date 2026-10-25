@@ -47,7 +47,7 @@ export type Evidence =
  *  such as a translation, which the reply shows as plain words.
  *  `rewrite`: a `corrected` mark whose check rewrote its whole sentence (written as `sentence`, each citation
  *  `[words]`), which the reply shows in place of the old one; `sentence` and `was` keep what Claude wrote.
- *  `asked`: words the analyst selected and asked about (Citations manual, marks/where.ts), not a mark Claude wrote:
+ *  `asked`: words the analyst selected and asked about (Citations manual, marks/cite.ts), not a mark Claude wrote:
  *  `start` and `end` are the words' place in the row's text as Claude wrote it (message.js withAsked). */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string

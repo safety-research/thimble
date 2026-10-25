@@ -8,7 +8,7 @@
 //                claims placed by their words in the looked-at turns' messages, with the citations near them); c is
 //                lit on the bar for the answer only when a claim was corrected (store.js noteFor), as a `claims` part
 //                of that answer (core/answers.ts setPart)
-//   the pane     c (or /claims) opens the Claims pane (core/pane.ts kind `claims`), which takes the keyboard
+//   the pane     c opens the Claims pane (core/pane.ts kind `claims`), which takes the keyboard
 //   on demand    unless Extract claims is auto, no look after a reply reads the claims: f in the pane finds
 //                those of the answers they have not read (claimsUnread; the store keeps the answers read, `read`), as
 //                a look of the claims lens alone (observer/observer.ts findClaimsNow); claimsToFind says how many
@@ -254,18 +254,18 @@ export async function claimsLit($: Engine): Promise<boolean> {
   return !!lit?.note
 }
 
-/** c, /claims or a press on the bar's count: the Claims pane, holding the keyboard. `byKey`: c at the prompt opened it,
- *  which Claude Code places only in a wide terminal (a press or a command at any width, core/pane.ts), so the notice
- *  names the bar's count, a click on which opens it. */
+/** c or a press on the bar's count: the Claims pane, holding the keyboard. `byKey`: c at the prompt opened it, which
+ *  Claude Code places only in a wide terminal (a press at any width, core/pane.ts), so the notice names the bar's
+ *  item, a click on which opens it. */
 export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false): Promise<void> {
   await reloadClaims($)
   await $.state.set(FIRST, { lit: false, opened: true }).catch(() => undefined)
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
-  const n = byKey ? await claimCount($) : 0
-  noticeLine($, n
-    ? `Claude Code opens the side pane from a key only in a wider terminal. Click “c ${await claimsBarWords($)}” in the bar below, or type /claims, to open it here.`
-    : 'Claude Code did not open the Claims pane here. Type /claims to open it.', 'pane:claims')
+  const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'claims'}`
+  noticeLine($, byKey
+    ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${words}” in the bar below to open it here.`
+    : `Claude Code did not open the Claims pane here. Widen the terminal, or click “${words}” in the bar below.`, 'pane:claims')
 }
 
 /** The pane shows other arguments (the person moved in it, by a key or a click), and holds the keyboard: Claude Code
@@ -278,19 +278,10 @@ export async function showClaims($: Engine, args: ClaimsArgs): Promise<void> {
 // ------------------------------------------------------------------------------------------------ hooks
 
 export const registerClaimsTerm: Register = on => {
-  // /claims: the pane; a resumed conversation's claims, held before the bar draws their count
+  // a resumed conversation's claims, held before the bar draws their count
   on('session.start', { cwd: /\// }, async ($, e, next) => {
     const r = await next(e)
     try { await turnClaims($) } catch { /* read from the kept folder when drawn */ }
-    try {
-      await $.command.register({ name: 'claims', description: 'Open the Claims pane (c)', immediate: true })
-    } catch {
-      // c still opens the pane
-    }
     return r
   }).catch(($, e, next) => next(e))
-  on('command.run', { command: /^(thimble:)?claims$/ }, async ($) => {
-    await openClaims($)
-    return {}
-  })
 }

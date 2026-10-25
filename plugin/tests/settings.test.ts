@@ -38,7 +38,7 @@ test('/thimble-settings opens the switches; a press turns one off through Claude
   await pane.unmount()
 })
 
-test('Citations has four modes: auto cite by default, a press on one sets it, the line under the row says what it gives, and manual puts w on the bar', async ($, on) => {
+test('Citations has four modes: auto cite by default, a press on one sets it, the line under the row says what it gives, and manual puts c cite on the bar', async ($, on) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   mock.clock(on, { now: 0 })
   const rows: Record<string, boolean | string> = { citations: 'auto cite', explain: true }
@@ -57,12 +57,15 @@ test('Citations has four modes: auto cite by default, a press on one sets it, th
   expect((await pane.find({ key: 'switch-citations' }))?.text).toContain('Citations')
   for (const mode of ['auto cite + check', 'auto cite', 'manual', 'off']) expect(await pane.find({ key: `mode-citations-${mode}` })).toBeDefined()
   expect((await pane.find({ key: 'says-citations' }))?.text).toContain('checks a citation when you open it')
-  expect(await pane.find({ type: 'Text', text: /where from/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^ claims$/ })).toBeDefined()
   await pane.press({ key: 'mode-citations-manual' })
   expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
-  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('press w')
-  // the bar's preview: w beside e
-  expect(await pane.find({ type: 'Text', text: /where from/ })).toBeDefined()
+  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('press c to cite them')
+  // the bar's preview: c cite beside e explain, and the claims' item without its key, so c is named once
+  expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^ claims$/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^claims$/ })).toBeDefined()
   await pane.press({ key: 'switch-citations' })
   expect(set[1]).toMatchObject({ key: 'thimble@inline.citations', value: 'off' })
   await pane.press({ key: 'switch-citations' })

@@ -3,9 +3,9 @@
 // whose tables do not fit fold to one line each). Opening a value folds the other labels to one line each and lists its
 // examples under them, one line each, the words the label matched bold in the value's color; the picked example opens
 // in place with where it is (`path:line`, relative to the session's folder, or with … in its middle outside it) and the
-// check keys. d, or a press on the definition's line under a label's name, shows the label's definition whole in place
-// of the examples. The keys stay at the pane's bottom in
-// every state. A click moves too: a label's name or a value opens it (the open one again: back to all the labels), an
+// check keys. Under a label's name its definition stands in short, on one line; an open label's detail switches
+// between the value's examples and the definition whole (d, or a click on the side not shown). The keys stay at the
+// pane's bottom in every state. A click moves too: a label's name or a value opens it (the open one again: back to all the labels), an
 // example picks it (again: closes it), `↑ N earlier` and `↓ N more` page the examples. The person's check of the
 // picked example (a number key, or a press on a value) counts in place of the label's value (labels.ts checkRecord);
 // the next example is picked after it.
@@ -20,18 +20,19 @@
 //   keys while the pane holds the keyboard: p n the previous or next value, in reading order over all the labels
 //          (nothing open: n the first, p the last) · k j the previous or next example (none picked: the last or the
 //          first shown), past the page's edge onto the next page · d the definition, or the examples again · b back to
-//          all the labels · 1-9 check the picked example as that value · 0 takes a check back
+//          all the labels (only when esc does not go back to them) · 1-9 check the picked example as that value · 0
+//          takes a check back
 import type { EngineInterface } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { quiet } from '../core/askcell.js'
 import { rootHere, startDir } from '../core/env'
-import { openPane } from '../core/pane'
+import { openPane, paneNow } from '../core/pane'
 import { textWidth } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { rowsUnder } from '../threads/seam'
 import { checkRecord, labelsData } from './labels'
-import { chosenOf, definition, examples, isNegative, ledgerTop, NONE, partOf, partsOf, valueOrder } from './ledger.mjs'
+import { chosenOf, definition, examples, isNegative, ledgerTop, madeOf, NONE, partOf, partsOf, valueOrder } from './ledger.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -199,7 +200,7 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
     await here({ at: pageAt, sel: v === null ? String(r.ref) : (recs[ex.p + 1]?.ref ?? null) })
   }
 
-  // ---- the keys: p n over the values, k j over the examples, d the definition
+  // ---- the keys: p n over the values, k j over the examples (d, the detail's switch, stands above the detail)
   const order = valueOrder(list) as [string, string][]
   const at = chosen ? order.findIndex(([l, v]) => l === label && v === value) : -1
   const hop = (d: number) => {
@@ -229,14 +230,11 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
   const keys: { k: string; label: string; onPress: () => unknown; gap: number }[] = []
   const key = (k: string, words: string, onPress: () => unknown, gap = 3) => keys.push({ k, label: words, onPress, gap })
   if (order.length) {
-    // in pairs, as one key row in every state: p n value · k j example · d definition
+    // in pairs, as one key row in every state: p n value · k j example
     key('p', 'previous', () => hop(-1))
     key('n', 'next value', () => hop(1), 2)
     key('k', 'previous', () => step(-1))
     key('j', 'next example', () => step(1), 2)
-    key('d', a.def && chosen ? 'examples' : 'definition', () => (chosen
-      ? here({ at: a.at, sel: a.sel ?? null, def: !a.def })
-      : go({ label: order[0]![0], value: order[0]![1], def: true })))
   }
 
   // ---- a press on a part of a row
@@ -246,15 +244,17 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
     if (kind === 'v') return chosen && label === x && value === y && list.length > 1 ? go({}) : go({ label: String(x), value: String(y) })
     if (kind === 'r') return here({ at: pageAt, sel: a.sel === x ? null : String(x) })
     if (kind === 'c') return check(x == null ? null : String(x))
-    // the definition's line: the definition whole in place of the examples, or (shown already) the examples again
-    if (kind === 'd') return go({ label: String(x), def: !(a.def && label === x) })
     if (part === 'pg-up' && ex) return here({ at: Math.max(0, ex.from - per) })
     if (part === 'pg-down' && ex) return here({ at: ex.last + 1 })
     return undefined
   }
 
-  // ---- the pane: the head (b at its right once a label is open), the labels, the section, the keys at the bottom
-  const back = chosen && list.length > 1
+  // ---- the pane: the head (b at its right once a label is open), the labels, the detail's switch and the detail, the
+  // keys at the bottom. b only where esc does not already go back to all the labels (the pane under this one on the
+  // trail is their list), so the way back is named once
+  const under = (await paneNow($).catch(() => null))?.trail?.at(-1)
+  const escToList = under?.kind === 'labels' && !(under.args as LabelsArgs | undefined)?.label
+  const back = chosen && list.length > 1 && !escToList
   const headRow = Box({ key: 'head', flexDirection: 'row', children: [
     rowEl(els, top.head as Run[], 'head-words', press),
     ...(back ? [
@@ -262,12 +262,24 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
       Button({ key: 'key-b', plain: true, hotkey: 'b', label: 'all labels', hover: quiet('labels-key-b'), onPress: () => go({}), children: [Text({ key: 'w', dimColor: true, children: 'all labels' })] }),
     ] : []),
   ] })
+  // the detail's switch: the side shown bold, the other a press that d presses too (Claude Code draws `d:` before it)
+  const flip = () => here({ at: a.at, sel: a.sel ?? null, def: !a.def })
+  const side = (on: boolean, words: string, more: string, k: string) => (on
+    ? Box({ key: `side-${k}`, flexDirection: 'row', children: [Text({ key: 'w', bold: true, children: words }), ...(more ? [Text({ key: 'm', dimColor: true, children: more })] : [])] })
+    : Button({ key: `side-${k}`, plain: true, hotkey: 'd', label: words, hover: quiet(`labels-side-${k}`), onPress: flip, children: [Text({ key: 'w', dimColor: true, children: words })] }))
+  const sides = chosen
+    ? Box({ key: 'sides', flexDirection: 'row', children: [
+      side(!a.def, 'examples', '', 'ex'), Text({ key: 'sides-gap', children: '   ' }), side(!!a.def, 'definition', ` · ${madeOf(chosen.lab)}`, 'def'),
+    ] })
+    : null
   const body = [...(top.rows as Row[]), ...section]
   const keysWidth = keys.reduce((s, x, i) => s + (i ? x.gap : 0) + textWidth(x.k) + 2 + textWidth(x.label), 0)
-  const used = 2 + body.reduce((s: number, r) => s + (Array.isArray(r) ? 1 : codeRows(r.code, W - 2)), 0) + (keys.length ? 1 + Math.ceil(keysWidth / W) : 0)
-  const drawn = body.map((r, i) => (Array.isArray(r)
+  const used = 2 + (sides ? 1 : 0) + body.reduce((s: number, r) => s + (Array.isArray(r) ? 1 : codeRows(r.code, W - 2)), 0) + (keys.length ? 1 + Math.ceil(keysWidth / W) : 0)
+  const rowOf = (r: Row, i: number) => (Array.isArray(r)
     ? rowEl(els, r, `r${i}`, press)
-    : Box({ key: `r${i}`, paddingLeft: 2, children: [Code({ key: 'code', source: r.code, language: 'python' })] })))
+    : Box({ key: `r${i}`, paddingLeft: 2, children: [Code({ key: 'code', source: r.code, language: 'python' })] }))
+  const topN = (top.rows as Row[]).length
+  const drawn = [...body.slice(0, topN).map(rowOf), ...(sides ? [sides] : []), ...body.slice(topN).map((r, i) => rowOf(r, topN + i))]
   const keysRow = Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
     ...(i ? [Text({ key: `key-gap-${i}`, children: ' '.repeat(x.gap) })] : []),
     // under the pointer a key's words brighten and underline, never Claude Code's inverse (askcell.js quiet)

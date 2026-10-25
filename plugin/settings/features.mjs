@@ -19,11 +19,11 @@
 export const SWITCHES = [
   {
     key: 'citations', title: 'Citations', default: 'auto cite', choices: ['auto cite + check', 'auto cite', 'manual', 'off'],
-    does: 'auto cite + check: Claude cites each claim you would check, and a second Claude checks every citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press w to find where they come from. off: no citations.',
+    does: 'auto cite + check: Claude cites each claim you would check, and a second Claude checks every citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press c to cite them. off: no citations.',
     says: {
       'auto cite + check': 'Claude cites each claim you would check, and a second Claude checks every citation after each reply.',
       'auto cite': 'Claude cites each claim you would check, and a second Claude checks a citation when you open it, which spends fewer tokens.',
-      'manual': 'Claude cites nothing. Select words in an answer and press w: a second Claude finds where they come from in the files.',
+      'manual': 'Claude cites nothing. Select words in an answer and press c to cite them: a second Claude finds where they come from in the files.',
       'off': 'No citations, and no checks.',
     },
   },
@@ -109,8 +109,8 @@ function valueIn(values, key) {
  *  options. */
 export function switchesFrom(values) {
   return key => {
-    // w, where words come from, is Citations' manual mode
-    if (key === 'where') return valueIn(values, 'citations') === 'manual'
+    // c on selected words, a citation the analyst asks for, is Citations' manual mode
+    if (key === 'cite') return valueIn(values, 'citations') === 'manual'
     const v = valueIn(values, key)
     return typeof v === 'string' ? v !== 'off' : v
   }
