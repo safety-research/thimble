@@ -83,6 +83,9 @@ export function noteViewport(v: { columns?: number; rows?: number; isFullscreen?
   if (typeof v?.isFullscreen === 'boolean') fullscreen = v.isFullscreen
 }
 
+/** Whether the last drawing saw the fullscreen layout (undefined: none said yet). */
+export const fullscreenNow = (): boolean | undefined => fullscreen
+
 /** Whether Claude Code can still draw a card again that main drew in `turn`: always in the fullscreen layout; on the
  *  main screen only while that turn runs, since the main screen says nothing of which rows have scrolled away. */
 export async function canRedraw($: Engine, turn: string | undefined): Promise<boolean> {

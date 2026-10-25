@@ -4,7 +4,8 @@
 //                                    changed, n later, u undo, r redo
 //   v        designer/v.ts vKey      a card of the last answer
 //   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
-//                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers', c, t
+//                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers' (e:
+//                                    the selected words), c, t
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them
 //
