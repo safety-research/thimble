@@ -1,4 +1,4 @@
-Draw an interactive card, or a new version of one in its place. The card appears in the conversation at this call, before the words you write after it; refer to it by its title, not as "below".
+Draw an interactive card, or a new version of one in its place. The card appears in the conversation at this call, before the words you write after it; refer to it by its title, not as "below". A call with a card's `id` alone moves that card, as it is, to the call: draw and fix cards while you work, then, as you write the answer, place each one at the step it explains, between your paragraphs.
 
 Data: a JSON file of rows that your code wrote from the records: a list, JSON Lines, or one object. The call says what the card read.
 

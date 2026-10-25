@@ -194,6 +194,27 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(String(r6.result)).toBe('The card did not draw: the call\'s input was empty or did not parse as JSON. Send the call again, whole.')
 })
 
+test('a call with a card\'s id alone moves the card as it is to that call; the earlier call points down to it', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p1', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const before = w.asked.length
+  const placed = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p2', id } as never)) as Any
+  expect(String(placed.result)).toContain('“Scores” (version 1) is drawn here now')
+  // nothing runs again
+  expect(w.asked.length).toBe(before)
+  expect(elements(await $.ui.render(callRow('toolu_made_up_p2', { id }))).some(n => n.type === 'Client')).toBe(true)
+  expect(elements(await $.ui.render(callRow('toolu_made_up_p1', input))).some(n => n.type === 'Client')).toBe(false)
+  const resultOf = (toolUseId: string) => $.ui.render({ ...(callRow(toolUseId, input) as Any), component: 'ToolResult', props: { tool_use_id: toolUseId, tool: TOOL, output: 'the copy', isExpanded: false } } as never)
+  expect(textOf(await resultOf('toolu_made_up_p1'))).toBe('↓ version 1 · “Scores” is drawn further down')
+  // a later version draws in the new place
+  const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p3', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
+  expect(String(r3.result)).toContain('Version 2 of “Scores” is drawn in place of version 1')
+  expect(elements(await $.ui.render(callRow('toolu_made_up_p2', { id }))).some(n => n.type === 'Client')).toBe(true)
+})
+
 test('a new card waits while the run of calls above it is live and draws once it folds; a card drawn before stays when a later run is live', async ($, on) => {
   world(on)
   on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
