@@ -10,7 +10,9 @@ import { resetEngaged } from '../core/engaged'
 import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
-import { explainState, explaining, explainTerm, glossFor, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { failLineNow } from '../bar/notice'
+import { explainBar, explainKey, explainState, explaining, explainTerm, glossFor, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
@@ -218,4 +220,84 @@ test("a quote of a JSON line shows the line as the file holds it, the cited word
   const ex = textOf(await drawEvidence(s.$, e, { row: 't1-row', n: 1 }, els))
   expect(ex).toContain('Paste it fast  explainer')
   expect(ex).toContain('A page anyone can bump to leave a number for the next copy.')
+})
+
+// ------------------------------------------------------------------------------------------------ e: the selection
+
+/** e at an empty prompt with this selection (Claude Code's $.ui.selection), its explainer written and the tray open. */
+async function pressE(s: ReturnType<typeof setup>, selection: Any) {
+  s.$.ui.selection = async () => selection
+  s.$.ui.open = async () => ({ isPlaced: true })
+  const take = await explainKey(s.$, 'e', 0)
+  expect(take?.later).toBeDefined()
+  await take!.later!()
+  await settle()
+}
+
+test('e explains the words selected in an answer, on the row the selection lies in, and opens them in the tray; the bar names it', async () => {
+  setOptions({})
+  const s = setup([LOOK], { complete: reply({ body: 'The client gives up on an upload.', here: '' }) })
+  // no answer yet: e is typed, and the bar names no key
+  expect(await explainKey(s.$, 'e', 0)).toBe(null)
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  expect((await explainBar(s.$, () => true, false)).map(x => `${x.key} ${x.words}`)).toEqual(['e explain'])
+  await pressE(s, { text: '  “the client”\n', requestId: 't1-row' })
+  expect(s.calls[0].prompt).toContain('The term: the client')
+  const part = (await partOf<ExplainPart>(s.$, 't1-row', 'explain'))!
+  const id = part.order.find(x => part.items[x]!.term === 'the client')!
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain', id })
+  // the line that said it was being written went when the tray opened
+  expect(await failLineNow(s.$)).toBe(null)
+  // with Explainers off, e is typed and the bar does not name it
+  setOptions({ explain: false })
+  expect(await explainKey(s.$, 'e', 0)).toBe(null)
+  expect(await explainBar(s.$, k => k !== 'explain', false)).toEqual([])
+  setOptions({})
+})
+
+test('e with nothing selected says to select words with the mouse first, and how outside the fullscreen layout; nothing is written', async () => {
+  setOptions({})
+  const s = setup([LOOK], { complete: reply({ body: 'never', here: '' }) })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  await pressE(s, undefined)
+  expect(String((await failLineNow(s.$))?.text)).toBe('Select words in an answer with the mouse first, then press e to explain them.')
+  expect((await failLineNow(s.$))?.kind).toBe('notice')
+  await pressE(s, { text: ' " ' })
+  expect(String((await failLineNow(s.$))?.text)).toContain('Select words in an answer with the mouse first')
+  expect(s.calls.length).toBe(0)
+  expect(await trayNow(s.$)).toBe(null)
+})
+
+test('a selection over several rows explains its words on the newest answer that holds them; words that are a heads-up open it, unwritten', async () => {
+  setOptions({})
+  const s = setup([LOOK, reply({ glosses: [], heads: null })], { complete: reply({ body: 'How many tries are left.', here: '' }) })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  await answered(s, { id: 't2', prompt: 'And now?', text: 'Nothing changed since then.' })
+  // no requestId: the selection spans rows; the words stand in t1's answer, not the newest
+  await pressE(s, { text: 'retry budget runs out' })
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain' })
+  expect(s.calls.length).toBe(1)
+  // the heads-up's own words: the tray opens on it, and no explainer is written
+  await pressE(s, { text: '30 seconds after a drop', requestId: 't1-row' })
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'heads', id: 'h1' })
+  expect(s.calls.length).toBe(1)
+})
+
+test('the selected words are trimmed to one line, and a long selection is cut after a whole word, which the line says', async () => {
+  expect(pickedWords('  "hit counter"\n')).toEqual({ words: 'hit counter', cut: false })
+  expect(pickedWords('the\n  retry budget')).toEqual({ words: 'the retry budget', cut: false })
+  const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ')
+  const got = pickedWords(long)
+  expect(got.cut).toBe(true)
+  expect(got.words.length <= 120).toBe(true)
+  expect(long.startsWith(`${got.words} `)).toBe(true)
+  setOptions({})
+  const s = setup([LOOK], { complete: { isAnswered: false, reason: 'aborted' } })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  s.$.ui.selection = async () => ({ text: long, requestId: 't1-row' })
+  await (await explainKey(s.$, 'e', 0))!.later!()
+  expect(String((await failLineNow(s.$))?.text)).toContain("Writing an explainer of the selection's first")
+  await settle()
+  // the call failed: the line says why, in red
+  expect((await failLineNow(s.$))?.kind).toBe('failed')
 })

@@ -13,7 +13,7 @@
 //                                         margin asks: a side thread about it)
 //   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the
 //                                         band has left over the bar
-//   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order
+//   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`)
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
 //                                         no card may take
 //   core/pane.ts       the side pane      the kinds `claims`, `threads` and `thread` (the seams' draws)
@@ -24,7 +24,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
-import { explainSpans } from '../explain/seam'
+import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
@@ -61,7 +61,7 @@ export type MarkRef = { row: string; kind: 'citation'; n: number } | { row: stri
  *  import modules that come back here through the card tool, so a list made as this module loads could read a seam's
  *  keys before its module set them.) */
 export function restoredKeys(): string[] {
-  return [...SQUEEZE_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
 }
 
 const safe = async <T>(p: Promise<T>, none: T): Promise<T> => {
@@ -168,7 +168,7 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
   .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}) } : x))
 
-/** The features' items at the bar's left, after v: the tray's steps, s, then c. While an item of
+/** The features' items at the bar's left, after v: the tray's steps, s, e, then c. While an item of
  *  what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
@@ -176,6 +176,7 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
     ...tray,
     // while the tray holds the keys, the chips' keys (0 [ ]) wait: the bar names each key once
     ...(tray.length ? [] : items(await safe(squeezeBar($, on, preview), []), preview)),
+    ...items(await safe(explainBar($, on, preview), []), preview),
     ...items(await safe(claimsBar($, on, preview), []), preview),
   ]
 }
@@ -187,7 +188,7 @@ export async function barRight($: Engine, on: (key: string) => boolean, preview:
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
  *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
- *  tray's ] [ at rest, s, { } over the answers, c, then t. */
+ *  tray's ] [ at rest, s, { } over the answers, e, c, then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   const tray = await safe(trayHolds($), false)
   const chips = await safe(squeezeHolds($), false)
@@ -196,6 +197,7 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (tray ? null : await safe(trayKey($, key, until), null))
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
+    ?? (await safe(explainKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
 }

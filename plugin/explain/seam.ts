@@ -21,15 +21,19 @@
 //   explainTerm($, row, term)          on demand: an explainer of words the analyst picked (a citation's words, a term
 //                                      in a pane, /explain), written by the explain-expand call and kept on its message
 //                                      as the look's are; explaining(term) says while it is written
-//   registerExplain                    /explain <words>: an explainer of those words in the newest answer that holds
-//                                      them, opened in the tray. Claude Code gives a plugin no selection of the words of
-//                                      a reply, so typing the words is the way to ask for any of them
+//   explainKey($, key), explainBar     e at an empty prompt, `e explain` on the bar: an explainer of the words the
+//                                      analyst selected with the mouse ($.ui.selection, fullscreen layout only), on
+//                                      the answer they lie in, else the newest answer that holds them, opened in the
+//                                      tray; words that already are an explainer or a heads-up open that one
+//   registerExplain                    /explain <words>: the same for typed words, in any layout
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
 // Each lens's switch (settings: Comments, its Explainers and Heads-ups) also hides what it gave while it is off.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { failNotice } from '../bar/notice'
+import type { BarItem } from '../bar/bar'
+import { failCleared, failNotice, noticeLine } from '../bar/notice'
+import { fullscreenNow } from '../cards/draw'
 import { answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
@@ -39,6 +43,7 @@ import { commentsText } from '../core/engaged.mjs'
 import { tellAtNextPrompt } from '../core/tell'
 import { readKept, writeKept } from '../core/env'
 import { sessionKey } from '../hooks/conversation'
+import type { Take } from '../hooks/keys'
 import { withoutMarks } from '../marks/message.js'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
@@ -222,26 +227,111 @@ export async function explainTerm($: Engine, row: string, term: string): Promise
   }
 }
 
-/** /explain <words>: the newest answer that holds the words (else the newest answer) explains them, in the tray. */
-async function explainCommand($: Engine, args: string): Promise<{ text?: string }> {
-  const words = String(args || '').replace(/^["“'‘]+|["”'’]+$/g, '').trim()
-  if (!words) return { text: 'Type the words to explain after /explain, as in /explain hit counter.' }
+/** The newest answer that holds the words, else the newest answer; null with no answer yet. */
+async function rowHolding($: Engine, words: string): Promise<string | null> {
   const rows = (await answerRows($).catch(() => [] as string[])).slice().reverse()
-  if (!rows.length) return { text: 'No answer to explain words in yet: ask Claude something first.' }
-  let row = rows[0]!
   for (const r of rows) {
     const text = (await messageOf($, r))?.text ?? ''
-    if (holds(text, words) || anchorTerm(text, words)) { row = r; break }
+    if (holds(text, words) || anchorTerm(text, words)) return r
   }
+  return rows[0] ?? null
+}
+
+/** The explainer of `words` on `row`, written now when there is none, then opened in the tray; a failure says why. */
+function explainOpen($: Engine, row: string, words: string): void {
   void (async () => {
     const got = await explainTerm($, row, words)
     if (typeof got === 'string') failNotice($, got, 'explain')
     else {
-      await openTray($, { row: got.row, kind: 'explain', id: got.id })
-      await tellOpened($, { kind: 'explain', row: got.row, term: got.term }, (await messageOf($, got.row))?.text ?? '')
+      await failCleared($, 'explain')
+      await openMark($, { row: got.row, kind: 'explain', id: got.id }, got)
     }
   })().catch(err => failNotice($, `The explainer was not written: ${String((err as Error)?.message || err).slice(0, 160)}`, 'explain'))
+}
+
+/** A mark opened in the tray, and main told so (core/engaged.ts). */
+async function openMark($: Engine, mark: MarkRef & { id: string }, g: Gloss): Promise<void> {
+  await openTray($, mark)
+  const kind = g.kind === 'heads' ? 'heads' as const : 'explain' as const
+  await tellOpened($, kind === 'heads' ? { kind, row: mark.row, term: g.term, title: g.title } : { kind, row: mark.row, term: g.term }, (await messageOf($, mark.row))?.text ?? '')
+}
+
+/** /explain <words>: the newest answer that holds the words (else the newest answer) explains them, in the tray. */
+async function explainCommand($: Engine, args: string): Promise<{ text?: string }> {
+  const words = String(args || '').replace(/^["“'‘]+|["”'’]+$/g, '').trim()
+  if (!words) return { text: 'Type the words to explain after /explain, as in /explain hit counter.' }
+  const row = await rowHolding($, words)
+  if (!row) return { text: 'No answer to explain words in yet: ask Claude something first.' }
+  explainOpen($, row, words)
   return { text: `Writing an explainer of “${words}”. It opens under the answer when it is ready.` }
+}
+
+// ------------------------------------------------------------------------------------------------ the selection
+
+/** The bar's key that explains the selected words. */
+export const EXPLAIN_KEYS = ['e']
+/** The most of a selection explained: as long a term as an explainer can stand on (place.mjs anchorTerm). */
+const PICK_MAX = 120
+
+/** The words of a selection to explain: on one line, without the space and quotes around them, at most PICK_MAX
+ *  characters, cut after a whole word (`cut`). */
+export function pickedWords(text: string): { words: string; cut: boolean } {
+  const quotes = /^[\s"“”'‘’`]+|[\s"“”'‘’`]+$/g
+  const all = termOf(String(text ?? '')).replace(/\s+/g, ' ').replace(quotes, '')
+  if (all.length <= PICK_MAX) return { words: all, cut: false }
+  const head = all.slice(0, PICK_MAX + 1)
+  const at = head.lastIndexOf(' ')
+  return { words: (at > PICK_MAX / 2 ? head.slice(0, at) : head.slice(0, PICK_MAX)).replace(quotes, '').replace(/[,;:]$/, ''), cut: true }
+}
+
+/** The explainer or heads-up on `row` whose words these are, if any. */
+async function markOf($: Engine, row: string, words: string): Promise<(Gloss & { id: string }) | null> {
+  const part = await partOf<ExplainPart>($, row, 'explain').catch(() => null)
+  const t = normTerm(words)
+  for (const id of part?.order ?? Object.keys(part?.items ?? {})) {
+    const g = part?.items?.[id]
+    if (g && shown(g) && normTerm(g.term) === t) return { ...g, id }
+  }
+  return null
+}
+
+/** e, or a click on `e explain`: the words the analyst last selected with the mouse, explained in the tray, on the
+ *  answer they lie in (else the newest answer that holds them). Words that are an explainer or a heads-up open it. */
+export async function explainSelection($: Engine): Promise<void> {
+  const sel = await $.ui.selection().catch(() => undefined)
+  const { words, cut } = pickedWords(sel?.text ?? '')
+  if (!words) {
+    noticeLine($, fullscreenNow() === false
+      ? 'Selecting words with the mouse needs Claude Code\'s fullscreen layout. Here, type /explain and the words.'
+      : 'Select words in an answer with the mouse first, then press e to explain them.', 'explain')
+    return
+  }
+  await failCleared($, 'explain')
+  const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
+  const row = own ?? (await rowHolding($, words))
+  if (!row) { noticeLine($, 'No answer to explain words in yet: ask Claude something first.', 'explain'); return }
+  const mark = await markOf($, row, words)
+  if (mark) { await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return }
+  // what is written now, said until the tray opens on it
+  noticeLine($, cut
+    ? `Writing an explainer of the selection's first ${words.length} characters (it is long): “${words.slice(0, 40)}…”.`
+    : `Writing an explainer of “${words.length > 60 ? `${words.slice(0, 59)}…` : words}”.`, 'explain')
+  explainOpen($, row, words)
+}
+
+/** e at an empty prompt, while Explainers is on and an answer exists: after the word window (an e that starts a word
+ *  is typed), the selected words are explained. */
+export async function explainKey($: Engine, key: string, _until: number): Promise<Take | null> {
+  if (!EXPLAIN_KEYS.includes(key) || !featureOn('explain') || !(await answerRows($).catch(() => [])).length) return null
+  return { later: () => explainSelection($) }
+}
+
+/** `e explain` on the bar, while Explainers is on and an answer exists; a click does what e does. */
+export async function explainBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  if (!on('explain')) return []
+  if (preview) return [{ id: 'explain', key: 'e', words: 'explain' }]
+  if (!(await answerRows($).catch(() => [])).length) return []
+  return [{ id: 'explain', key: 'e', words: 'explain', press: () => explainSelection($) }]
 }
 
 export const registerExplain: Register = on => {
