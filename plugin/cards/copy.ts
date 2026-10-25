@@ -1,13 +1,13 @@
 // copy.ts: the cards an answer places on lines of their own, as text in what leaves the terminal. Claude Code's /copy
 // and /export write the answer's words as they are stored, where a placed card is only its link; no hook sees their
 // text on its way. So once the command ran, each file it wrote is read and written again with every placed card as
-// its title and text copy (copy.mjs cardsAsText, draw.ts cardText): /copy's response.md, which is copied again, and
+// its title and text copy (copy.mjs cardsAsText, draw.ts cardText), and each citation as its words: /copy's response.md, which is copied again, and
 // /export's file. An export to the clipboard keeps the links, since nothing of it can be read back.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { startDir } from '../core/env'
 import { featureOn } from '../settings/features.mjs'
-import { cardIdsIn, cardsAsText } from './copy.mjs'
+import { cardIdsIn, cardsAsText, withoutCitations } from './copy.mjs'
 import { cardText } from './draw'
 import { metaOf } from './store'
 
@@ -28,13 +28,12 @@ async function cardsIn($: Engine, text: string, width?: (indent: number) => numb
   return out
 }
 
-/** A file the command wrote since `since`, read, its cards written in as text, and written again. The new text, or
- *  null when it holds no card. */
+/** A file the command wrote since `since`, read, its cards written in as text and its citations as their words alone,
+ *  and written again. The new text, or null when nothing changed. */
 async function rewrite($: Engine, path: string, form: 'markdown' | 'export'): Promise<string | null> {
   const text = await $.fs.read(path)
-  if (!cardIdsIn(text).length) return null
-  const cards = await cardsIn($, text, form === 'export' ? indent => EXPORT_COLUMNS - indent - 2 : undefined)
-  const next = cardsAsText(text, cards, form)
+  const cards = cardIdsIn(text).length ? await cardsIn($, text, form === 'export' ? indent => EXPORT_COLUMNS - indent - 2 : undefined) : {}
+  const next = withoutCitations(cardsAsText(text, cards, form), form)
   if (next === text) return null
   await $.fs.write(path, next)
   return next
@@ -67,7 +66,9 @@ async function exported($: Engine, args: string, since: number): Promise<string 
     for (const p of [path, `${path}.txt`]) if (await $.fs.exists(p)) return p
     return null
   }
-  return newest($, root, since, n => n.endsWith('.txt'))
+  // only a file that reads as Claude Code's export, so no other text file the folder gained just now is touched
+  const hit = await newest($, root, since, n => n.endsWith('.txt'))
+  return hit && /Claude Code v\d/.test((await $.fs.read(hit)).slice(0, 400)) ? hit : null
 }
 
 export const registerCardCopy: Register = on => {

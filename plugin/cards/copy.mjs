@@ -7,6 +7,8 @@
 //                                      its title, then its text copy. `form`: 'markdown' (/copy: `[title](card:<id>)`,
 //                                      the card's lines in a code block) or 'export' (/export: Claude Code's drawing
 //                                      of that link, `title (card:<id>)`, wrapped, the card's lines at its indent)
+//   withoutCitations(text, form)       the text with each citation's words alone: a citation links to `#` (marks), which
+//                                      leads nowhere outside the terminal, so `[words](#)` and `words (#)` read `words`
 
 const ID = /\(card:(c[0-9a-f]{8,16})\)/g
 
@@ -34,4 +36,10 @@ export function cardsAsText(text, cards, form) {
     if (form === 'markdown') return [`**${title}**`, ...(card.text ? ['', '```', ...lines, '```'] : [])].join('\n')
     return [`${lead}${title}`, ...(card.text ? ['', ...lines.map(l => (l ? lead + l : l))] : [])].join('\n')
   }).join('')
+}
+
+/** @param {string} text @param {'markdown' | 'export'} form */
+export function withoutCitations(text, form) {
+  const s = String(text ?? '')
+  return form === 'markdown' ? s.replace(/\[([^\]\n]+)\]\(#\)/g, '$1') : s.replace(/ ?\(#\)/g, '')
 }

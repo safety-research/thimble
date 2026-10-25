@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { cardIdsIn, cardsAsText } from '../copy.mjs'
+import { cardIdsIn, cardsAsText, withoutCitations } from '../copy.mjs'
 
 const cards = { ca1b2c3d4e5: { title: 'Saves per day', text: '06-01  140 ███\n06-02    4 █' } }
 
@@ -25,4 +25,9 @@ test('a link inside a sentence, an unknown card and a card with no text copy', (
   const md = 'As [the card](card:ca1b2c3d4e5) shows, it peaked.\n\n[Gone](card:cffffffff0)'
   assert.equal(cardsAsText(md, cards, 'markdown'), md)
   assert.equal(cardsAsText('[Saves](card:ca1b2c3d4e5)', { ca1b2c3d4e5: { title: 'Saves per day', text: '' } }, 'markdown'), '**Saves per day**')
+})
+
+test('citations read as their words alone', () => {
+  assert.equal(withoutCitations('It peaked in [one week](#), with [13,339 saves](#).', 'markdown'), 'It peaked in one week, with 13,339 saves.')
+  assert.equal(withoutCitations('  in one week (#),\n  with 13,339 saves (#).', 'export'), '  in one week,\n  with 13,339 saves.')
 })
