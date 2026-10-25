@@ -27,8 +27,8 @@
 // view), and a reply may edit a card (a new version of it, same id), add one (a new view over the rows of a card the
 // request showed), or leave one out (readCards). cards.ts makes those as the person's versions through the card
 // runner; here the record keeps which cards each version shows, so a version seen before, and the original, come back
-// with their cards (cardListsAt). A card the original places on a line of its own (marks/message.js cardRef) keeps
-// that line in each version that shows the card (keepPlacedCards).
+// with their cards (cardListsAt). A card the original places on a line of its own (marks/message.js cardRef) draws
+// where a version places its line, and a version that leaves the line out leaves the card out (placedCards).
 //
 // A record (term.ts builds it from the message and the feature's part of it, core/answers.ts):
 //   {row, text, at, shown, squeeze, catchup?}
@@ -608,12 +608,12 @@ export function keepCorrections(text, keep, original = '') {
 }
 
 /**
- * The lines that place cards (marks/message.js cardRef) in a rewrite, as the original placed them: a card the rewrite
- * dropped (`dropped`, its ids) loses its line, and a card the original placed whose line the rewrite lost gets it
- * back, after the paragraph at about the same share of the text as in the original. Returns the text, the cards put
- * back and the lines taken out.
+ * The lines that place cards (marks/message.js cardRef) in a rewrite: the rewrite puts each card where it helps its
+ * version, so a line it moved draws the card there, and a card whose line it left out is left out of the version
+ * (`left`, as a drop: back with 0). A card the rewrite dropped (`dropped`, its ids) loses its line. Returns the text,
+ * the cards left out and the lines taken out.
  */
-export function keepPlacedCards(text, original, dropped = []) {
+export function placedCards(text, original, dropped = []) {
   const gone = new Set(dropped)
   const removed = []
   const lines = String(text || '').split('\n').filter(l => {
@@ -622,20 +622,8 @@ export function keepPlacedCards(text, original, dropped = []) {
     return true
   })
   const have = new Set(lines.map(cardRef).filter(Boolean))
-  const blocks = lines.join('\n').trim().split(/\n\s*\n/)
-  const orig = String(original || '').trim().split(/\n\s*\n/)
-  const back = []
-  orig.forEach((b, k) => {
-    const line = b.split('\n').find(l => cardRef(l))
-    const id = line ? cardRef(line) : null
-    if (!id || gone.has(id) || have.has(id)) return
-    // after the paragraph at the share of the text the card stood at, never before the first
-    const at = Math.max(1, Math.min(blocks.length, Math.round((k / Math.max(1, orig.length - 1)) * blocks.length)))
-    blocks.splice(at, 0, line.trim())
-    have.add(id)
-    back.push(id)
-  })
-  return { text: back.length || removed.length ? blocks.join('\n\n') : String(text || ''), back, removed }
+  const left = [...new Set(String(original || '').split('\n').map(cardRef).filter(id => id && !gone.has(id) && !have.has(id)))]
+  return { text: removed.length ? lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() : String(text || ''), left, removed }
 }
 
 /** A line that only heads what comes under it: a markdown heading, a bold lead that is no sentence, or a line that

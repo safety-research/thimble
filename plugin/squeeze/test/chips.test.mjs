@@ -4,7 +4,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, catchUpText, changedCitations, checkRewrite, chipsOf, endsOf, fromVersions, keepPlacedCards, mapLinks, request, restore, settledNote, shownKey, termsOf } from '../chips.mjs'
+import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, catchUpText, changedCitations, checkRewrite, chipsOf, endsOf, fromVersions, mapLinks, placedCards, request, restore, settledNote, shownKey, termsOf } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -120,21 +120,16 @@ test('each chip names its two ends', () => {
   assert.deepEqual(endsOf({ levels: ['as written', 'a little', 'more', 'fully'] }), ['as written', 'fully'])
 })
 
-test('a card the original placed on a line of its own keeps its line in a version, unless the version drops it', () => {
+test('a version places each card where it puts the card\'s line; a line it leaves out leaves the card out', () => {
   const orig = ['Sales rose in March.', '', '[Sales by week](card:c0a1b2c3d4)', '', 'Most of it came from one shop.', '', 'Returns stayed flat.'].join('\n')
-  // kept: nothing changes
+  // kept, or moved: the text as written, the card drawn where its line is
   const kept = 'Sales rose.\n\n[Sales by week](card:c0a1b2c3d4)\n\nOne shop did it.'
-  assert.deepEqual(keepPlacedCards(kept, orig), { text: kept, back: [], removed: [] })
-  // lost: back after the paragraph at about the same share of the text
-  const lost = keepPlacedCards('Sales rose.\n\nOne shop did it.\n\nReturns were flat.', orig)
-  assert.deepEqual(lost.back, ['c0a1b2c3d4'])
-  assert.equal(lost.text, 'Sales rose.\n\n[Sales by week](card:c0a1b2c3d4)\n\nOne shop did it.\n\nReturns were flat.')
-  // a one-paragraph version: after it, never before the first words
-  assert.equal(keepPlacedCards('Sales rose in March.', orig).text, 'Sales rose in March.\n\n[Sales by week](card:c0a1b2c3d4)')
-  // a line set right under a paragraph, with no blank line, still counts as there
-  const tight = 'Sales rose.\n[Sales by week](card:c0a1b2c3d4)'
-  assert.equal(keepPlacedCards(tight, orig).text, tight)
-  // dropped: its line goes, and does not come back
-  const dropped = keepPlacedCards(kept, orig, ['c0a1b2c3d4'])
-  assert.deepEqual(dropped, { text: 'Sales rose.\n\nOne shop did it.', back: [], removed: ['c0a1b2c3d4'] })
+  assert.deepEqual(placedCards(kept, orig), { text: kept, left: [], removed: [] })
+  const moved = 'Sales rose.\n\nOne shop did it.\n\n[Sales by week](card:c0a1b2c3d4)'
+  assert.deepEqual(placedCards(moved, orig), { text: moved, left: [], removed: [] })
+  // left out: nothing puts it back; the card is left out of this version
+  const short = 'Sales rose in March, most of it in one shop.'
+  assert.deepEqual(placedCards(short, orig), { text: short, left: ['c0a1b2c3d4'], removed: [] })
+  // dropped: its line goes
+  assert.deepEqual(placedCards(kept, orig, ['c0a1b2c3d4']), { text: 'Sales rose.\n\nOne shop did it.', left: [], removed: ['c0a1b2c3d4'] })
 })

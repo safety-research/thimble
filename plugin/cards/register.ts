@@ -63,20 +63,23 @@ export const registerCards: Register = (on, options) => {
     return cardCall($, e)
   }).catch(() => ({ result: 'The card did not draw: thimble failed while it drew the card. Call card again; if it fails again, tell the analyst that cards do not work here.' }))
 
-  // the call's row: the call in short (the view's code only in ctrl+o), then the card under the call that drew its
-  // first version; a later call's result line says where the card stands
+  // the call's row: one line that says what the call did to which card (the call and Claude's text copy only in ctrl+o,
+  // and the line takes the place of the result's), then the card under the call that drew its first version
   on('ui.render', { component: 'ToolUse', props: { tool: 'mcp__thimble__card' } }, async ($, e, next) => {
     noteViewport(e.viewport)
     if (!featureOn('cards')) return next(e)
+    if (e.props.isExpanded) return next(e)
     const input = (e.props.input ?? {}) as Any
     const id = (await callOf($, e.props.tool_use_id)) ?? (input.id ? String(input.id) : cardIdOf(e.props.tool_use_id))
     const meta = await metaOf($, id)
-    const own = e.props.isExpanded ? await next(e) : await next({ ...e, props: { ...e.props, input: { title: String(input.title || meta?.title || ''), ...(input.data ? { data: String(input.data) } : {}) } } })
+    const E = $.ui.resolve(e) as Any
+    const call = meta?.calls[e.props.tool_use_id]
+    const line = callLine(input, meta, e.props.tool_use_id, !!e.props.isRunning)
+    const own = E.Box({ key: 'card-call', children: [E.Text({ key: 'card-call-line', color: call?.error ? 'error' : undefined, dimColor: !call?.error, wrap: 'wrap', children: line })] })
     if (!meta || meta.version < 1) return own
     if (meta.anchorRow || meta.inRow || meta.toolUseId !== e.props.tool_use_id) return own
     // drawn once the run of calls above has folded (draw.ts firstWaits), so the card does not jump up
     if (await firstWaits($, meta)) return own
-    const E = $.ui.resolve(e) as Any
     noteShown($, [meta.id], e.props.onScreen)
     return E.Box({ flexDirection: 'column', children: [own, await frame($, e, meta)] })
   }).catch(($, e, next) => next(e))
@@ -99,32 +102,11 @@ export const registerCards: Register = (on, options) => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // the call's result: the person reads the card, not the text copy Claude got; one line in its place: what the card
-  // read (its version stands under the card's title), or, for a call that drew a version elsewhere (in the card's
-  // place), where the card stands
+  // the call's result: the person reads the card, not the text copy Claude got, and the call's own line says what the
+  // call did (callLine); the copy is in ctrl+o
   on('ui.render', { component: 'ToolResult', props: { tool: 'mcp__thimble__card' } }, async ($, e, next) => {
     if (!featureOn('cards') || e.props.isExpanded) return next(e)
-    const id = await callOf($, e.props.tool_use_id)
-    const meta = id ? await metaOf($, id) : null
-    const call = meta?.calls[e.props.tool_use_id]
-    if (!meta || !call) return next(e)
-    const away = meta.anchorRow || meta.inRow || meta.toolUseId !== e.props.tool_use_id
-    // the card stands at a later call when the screen could not draw it again in its place (canRedraw)
-    const order = Object.keys(meta.calls)
-    const below = !meta.anchorRow && order.indexOf(meta.toolUseId) > order.indexOf(e.props.tool_use_id)
-    const now = call.version < meta.version ? `, now version ${meta.version}` : ''
-    // an error of the view's is Claude's to fix, so it is cut to one line; why no card can draw (the sandbox) and its
-    // fix are the person's, whole
-    const line = call.error
-      ? `did not draw: ${call.down ? call.error : cut(call.error, 160)} · Claude got the error`
-      : !away
-        ? `${meta.read} from ${meta.file.split('/').pop()}`
-        : meta.inRow && !meta.anchorRow
-          ? `↓ version ${call.version} · “${cut(meta.title, 60)}” is drawn in the answer${now}`
-          : below
-          ? `↓ version ${call.version} · “${cut(meta.title, 60)}” is drawn further down${now}`
-          : `↑ version ${call.version} · “${cut(meta.title, 60)}” is drawn in its place ${meta.anchorRow ? 'under the answer v was pressed on' : 'above'}${now}`
-    return next({ ...e, props: { ...e.props, output: line } })
+    return ($.ui.resolve(e) as Any).Box({ key: 'card-result' })
   }).catch(($, e, next) => next(e))
 
   // a text row of main's that places cards on lines of their own (marks/message.js cardRef): each card draws there, and
@@ -177,6 +159,35 @@ async function placeInRow($: EngineInterface, row: string, text: string): Promis
   for (const line of text.split('\n')) {
     const id = cardRef(line)
     const meta = id ? await metaOf($, id) : null
-    if (meta && meta.version > 0 && !meta.anchorRow && meta.inRow !== row) await saveMeta($, { ...meta, inRow: row })
+    if (meta && meta.version > 0 && !meta.anchorRow && meta.inRow !== row) await saveMeta($, { ...meta, inRow: row, callsBeforeRow: Object.keys(meta.calls) })
   }
+}
+
+/** The one line a call of the card tool draws in place of its call and result: what it did (drew, changed, moved the
+ *  card, or failed), to which card, and where the card stands now. Exported for the tests. */
+export function callLine(input: Any, meta: Any, toolUseId: string, running: boolean): string {
+  const call = meta?.calls?.[toolUseId]
+  const title = `“${cut(String(input?.title || call?.title || meta?.title || 'card'), 60)}”`
+  // a call without an id draws a new card
+  const first = !input?.id
+  const moving = !!input?.id && !['title', 'data', 'view'].some(k => String(input?.[k] ?? '').trim() !== '') && !(Array.isArray(input?.edits) && input.edits.length)
+  if (running || !call) return `● ${first ? 'Drawing card' : moving ? 'Moving card' : 'Changing card'} ${title}…`
+  if (call.error) return `● Card ${title} did not draw: ${call.down ? call.error : cut(call.error, 160)} · Claude got the error`
+  const changes: string[] = []
+  const edits = Array.isArray(input?.edits) ? input.edits.length : 0
+  if (!first && input?.title) changes.push('new title')
+  if (!first && input?.data) changes.push('new rows')
+  if (!first && input?.view) changes.push('new view')
+  if (edits) changes.push(`${edits} ${edits === 1 ? 'edit' : 'edits'} to its view`)
+  const did = first ? `Drew card ${title}` : moving ? `Moved card ${title} here` : `Changed card ${title} to version ${call.version}${changes.length ? ` (${changes.join(', ')})` : ''}`
+  const away = meta.anchorRow || meta.inRow || meta.toolUseId !== toolUseId
+  if (!away) return `● ${did}${meta.read && meta.file ? ` · ${meta.read} from ${String(meta.file).split('/').pop()}` : ''}`
+  const order = Object.keys(meta.calls)
+  const below = !meta.anchorRow && order.indexOf(meta.toolUseId) > order.indexOf(toolUseId)
+  const now = call.version < meta.version ? `, now version ${meta.version}` : ''
+  if (meta.inRow && !meta.anchorRow) {
+    const up = Array.isArray(meta.callsBeforeRow) && !meta.callsBeforeRow.includes(toolUseId)
+    return `● ${did} · ${up ? '↑ shown in the answer above' : '↓ shown in the answer'}${now}`
+  }
+  return `● ${did} · ${below ? '↓ shown further down' : `↑ shown in its place ${meta.anchorRow ? 'under the answer v was pressed on' : 'above'}`}${now}`
 }

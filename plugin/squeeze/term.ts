@@ -41,7 +41,7 @@ import { trayOffRow } from '../tray/seam'
 import { answerCards, applyCards, showCards, type Answer } from './cards'
 import {
   ARRIVE, SCALE, answerText, applyRewrite, cardsAfter, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads,
-  fromVersions, isCatchUp, isOriginal, keepCorrections, keepPlacedCards, mustKeep, readReply, request, restore, revealStep, rowsOf,
+  fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, placedCards, readReply, request, restore, revealStep, rowsOf,
   setWords, settledNote, shownKey, termsOf,
 } from './chips.mjs'
 
@@ -258,9 +258,15 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   // (a card a catch-up adds stands under the catch-up, at the row it draws at)
   const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, rec.catchup ? drawnAt(rec) : rec.row, setWords(probe) || 'as written') : null
   const cardProblems = answer ? [...reply.cardProblems, ...(changed?.problems ?? [])] : []
-  const cards = answer && changed?.done.length ? cardsAfter(answer.orig, rec.row, changed.done) : null
-  // each card the original placed on a line of its own stands on its line in this version too, unless it dropped it
-  const placed = keepPlacedCards(checked.text, original, (changed?.done ?? []).filter((d: Any) => d.op === 'drop').map((d: Any) => d.id))
+  // a card the original placed on a line of its own draws where this version places the line; a version that left the
+  // line out left the card out, as a drop
+  const placed = placedCards(checked.text, original, (changed?.done ?? []).filter((d: Any) => d.op === 'drop').map((d: Any) => d.id))
+  const leftOut = answer ? placed.left.flatMap(id => {
+    const c = answer.cards.find(x => x.id === id)
+    return c ? [{ op: 'drop', id, title: c.title }] : []
+  }) : []
+  const done = [...(changed?.done ?? []), ...leftOut]
+  const cards = answer && done.length ? cardsAfter(answer.orig, rec.row, done) : null
   if (stale()) return
   // the record as it is now (the person may have added a chip meanwhile)
   const fresh = (await recOf($, id)) || rec
@@ -276,7 +282,7 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
     row: id, ok: true, ms, model: req.model, effort: req.effort, prompt: 'squeeze', usage: (r as Any).usage, key: keyWords, problems: checked.problems,
     rows: rowsOf(placed.text, viewCols), of: rowsOf(original, viewCols), ...(original !== rec.text ? { corrected: true } : {}),
     ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}),
-    ...(terms.length ? { terms: terms.length } : {}), ...(placed.back.length ? { cards_put_back: placed.back } : {}), ...(placed.removed.length ? { card_lines_removed: placed.removed } : {}), ...(rec.catchup ? { catchup: rec.catchup.replies } : {}),
+    ...(terms.length ? { terms: terms.length } : {}), ...(placed.left.length ? { card_lines_left_out: placed.left } : {}), ...(placed.removed.length ? { card_lines_removed: placed.removed } : {}), ...(rec.catchup ? { catchup: rec.catchup.replies } : {}),
     ...(answer ? { cards: answer.cards.length, asked: reply.cards.map((c: Any) => `${c.op} ${c.id}`), did: (cards?.did ?? []).map((d: Any) => `${d.did} ${d.id}`), card_problems: cardProblems, ...(changed?.unknown.length ? { unknown_cards: changed.unknown } : {}) } : {}),
   })
 }
