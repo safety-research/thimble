@@ -417,13 +417,22 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
  *  that have drawn. The marks' drawing of the reply draws each on its line (marks/view.ts messageEl). */
 export async function framesIn($: Engine, e: Any, text: string): Promise<Record<string, Any>> {
   const out: Record<string, Any> = {}
+  const drawn: string[] = []
   for (const line of String(text ?? '').split('\n')) {
     const id = cardRef(line)
     if (!id || out[id]) continue
     const meta = await metaOf($, id)
-    if (meta && meta.version > 0 && !meta.anchorRow) out[id] = await frame($, e, meta)
+    if (!meta || meta.version < 1 || meta.anchorRow) continue
+    // a card stands in one place: the newest row that placed it; an earlier one shows a line that points there
+    if (meta.inRow && meta.inRow !== e.requestId) {
+      const E = $.ui.resolve(e) as Any
+      out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” is drawn further down` })] })
+      continue
+    }
+    out[id] = await frame($, e, meta)
+    drawn.push(id)
   }
-  if (Object.keys(out).length) noteShown($, Object.keys(out), e.props?.onScreen)
+  if (drawn.length) noteShown($, drawn, e.props?.onScreen)
   return out
 }
 

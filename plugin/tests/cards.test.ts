@@ -229,6 +229,11 @@ test('a line of the reply that holds only a card\'s link draws the card there; i
   expect(elements(await $.ui.render(callRow('toolu_made_up_q1', input))).some(n => n.type === 'Client')).toBe(false)
   const res = await $.ui.render({ ...(callRow('toolu_made_up_q1', input) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_q1', tool: TOOL, output: 'the copy', isExpanded: false } } as never)
   expect(textOf(res)).toBe('↓ version 1 · “Scores” is drawn in the answer')
+  // a later reply that places it again: the card stands there, and the earlier reply points to it
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: `Sorted.\n\n[Scores](card:${id})` }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-made-up-q2' } as never)
+  const again = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up-q', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never)
+  expect(elements(again).some(n => n.type === 'Client')).toBe(false)
+  expect(textOf(again)).toContain('↓ “Scores” is drawn further down')
 })
 
 test('a new card waits while the run of calls above it is live and draws once it folds; a card drawn before stays when a later run is live', async ($, on) => {
