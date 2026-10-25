@@ -12,6 +12,7 @@
 //   client.tsx   the one Client module that draws a card's tree in the terminal
 //   draw.ts      the frame, the drawing at the screen's width, the person's keys and clicks
 //   store.ts     each card in $.state and on disk, for a resumed session
+//   copy.ts      the cards an answer places, as text in what /copy and /export write
 //
 // With the Cards switch off (featureOn('cards')), no tool is registered and nothing is drawn.
 import type { EngineInterface, Register } from 'claude-code'
@@ -23,13 +24,15 @@ import { featureOn } from '../settings/features.mjs'
 import { sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
 import { cardOfKey, cardPost, clientFault, firstWaits, frame, framesUnder, noteRun, noteShown, noteViewport, runFolded } from './draw'
 import { cardRef } from '../marks/message.js'
+import { registerCardCopy } from './copy'
 import { callOf, cardIdOf, metaOf, restoreCards, saveMeta } from './store'
 import { cardCall, registerCardTool } from './tool'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export const registerCards: Register = on => {
+export const registerCards: Register = (on, options) => {
+  registerCardCopy(on, options)
   // the tool, and the cards this conversation drew before (a resumed session, a reload of the plugin)
   on('session.start', { cwd: /^(\/|[A-Za-z]:)/ }, async ($, e, next) => {
     const r = await next(e)

@@ -378,12 +378,12 @@ export async function clientFault($: Engine, key: string, reason: string): Promi
   failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)}`, about(id))
 }
 
-/** A card's text copy as it draws now: what its newest version shows, at the width it is drawn at. */
-export async function cardText($: Engine, id: string): Promise<string> {
+/** A card's text copy as it draws now: what its newest version shows, at the width it is drawn at (or `width`). */
+export async function cardText($: Engine, id: string, width?: number): Promise<string> {
   const meta = await metaOf($, id)
   if (!meta || meta.version < 1) return ''
   const t = await treeOf($, id)
-  const r = await askCard($, meta, 'copy', { width: t?.width ?? cardWidth() })
+  const r = await askCard($, meta, 'copy', { width: width ?? t?.width ?? cardWidth() })
   return r?.ok ? (r.lines as string[]).join('\n') : `(the card did not draw: ${r?.error ?? 'no answer'})`
 }
 
