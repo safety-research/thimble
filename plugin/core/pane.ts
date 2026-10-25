@@ -14,10 +14,9 @@
 //
 // The way back: the pane keeps a trail of the panes it showed before this one (trail.mjs). A pane opened while the
 // pane is open goes on top of it (a citation opened from a side answer stands over that answer); the row at the top
-// says where back goes (`‹ back to claim`), and a click on it goes back, as esc does: Claude Code closes a pane on esc
-// (and on its close mark), and while the trail holds a pane the ui.close hook goes back to it instead. On the trail's
-// first pane esc closes the pane. The same row has `× close` at its right, in the look the tray's close has, which
-// closes the pane whatever the trail holds.
+// names what esc does there, as the bar names a key (`esc back to claim`, on the trail's first pane `esc close`), a click
+// that does the same: Claude Code closes a pane on esc (and on its close mark), and while the trail holds a pane the
+// ui.close hook goes back to it instead.
 //
 // Docked beside the conversation, the pane keeps its input bar and its key row at its bottom: the drawing above them
 // gets the rows left over (a pane that lays itself out reads them as its `bodyRows`), the side thread's conversation
@@ -166,19 +165,21 @@ async function drawKind($: Engine, e: Any, now: PaneNow, els: Any, room: number)
   return els.Text({ dimColor: true, children: `thimble has no pane ${now.kind}.` })
 }
 
-/** The top row: `‹ back to <the pane under this one>` while the trail holds a pane, and `× close` at its right, bold in
- *  thimble's color as the tray's close is. */
+/** The top row, at its right: the pane's close key as the bar draws a key, a click too. esc goes back down the trail
+ *  while it holds a pane (`esc back to <the pane under this one>`), else closes the pane (`esc close`). A pane that did
+ *  not take the keyboard has no esc of its own: its words alone then, a click each. (Claude Code's own close mark, above
+ *  this row, does as esc does: the ui.close hook.) */
 function topRow($: Engine, els: Any, now: PaneNow, W: number): Any[] {
   const { Box, Button, Text } = els
   const trail = now.trail ?? []
   const under = trail[trail.length - 1]
-  const back = under
-    ? Button({ key: 'pane-back', plain: true, label: 'back', hover: quiet('pane-back'), onPress: () => paneBack($), children: [Text({ color: accent(), wrap: 'truncate-end', children: `‹ back to ${cut(crumbOf(under.kind, under.args).words, Math.max(8, W - 22))}` })] })
-    : null
-  const close = Button({ key: 'pane-close', plain: true, label: 'close the pane', hover: quiet('pane-close'), onPress: () => closePane($), children: [Text({ color: accent(), bold: true, children: '× close' })] })
-  return [Box({ key: 'pane-top', flexDirection: 'row', justifyContent: 'space-between', width: W, children: [
-    Box({ key: 'pane-top-left', flexDirection: 'row', flexShrink: 1, children: back ? [back] : [] }),
-    Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 0, marginLeft: 2, children: [close] }),
+  const words = under ? `back to ${cut(crumbOf(under.kind, under.args).words, Math.max(8, W - 16))}` : 'close'
+  const key = now.escape ? [Text({ key: 'k', color: accent(), bold: true, children: 'esc' }), Text({ key: 's', children: ' ' })] : []
+  const btn = Button({ key: under ? 'pane-back' : 'pane-close', plain: true, label: under ? 'back' : 'close the pane', hover: quiet(under ? 'pane-back' : 'pane-close'), onPress: () => (under ? paneBack($) : closePane($)), children: [
+    ...key, Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: words }),
+  ] })
+  return [Box({ key: 'pane-top', flexDirection: 'row', justifyContent: 'flex-end', width: W, children: [
+    Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 1, children: [btn] }),
   ] })]
 }
 

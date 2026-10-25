@@ -6,6 +6,7 @@
 // answered ask back. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { colorOf } from '../labels/pane'
 import { answerAsk, labelAskFromFeed, labelAskNow, labelRowEl, labelsUnderAnswer, labelsUnderCard, needLabelList, resetLabelUse } from '../labels/use'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -76,17 +77,23 @@ function engine(kernel: (args: string[]) => { code?: number; out: unknown } = ()
   return { $, ran, flush, set, state }
 }
 
-test('a row of several labels wraps between labels: each label, with its values, is one group, the word labels with the first', () => {
-  const used = ['sabotage_candidate', 'sabotage', 'sabotage2'].map(name => ({ name, kind: 'regex', values: ['yes', 'no'], records: 20764 }))
+test('several labels: one row each, `labels` once, the names, how each was made and the counts padded so the values line up', () => {
+  const used = [
+    { name: 'sabotage_candidate', kind: 'regex', values: ['yes', 'no'], records: 20764 },
+    { name: 'flag', kind: 'code', values: ['yes', 'no'], records: 412 },
+  ]
   const row = labelRowEl(ELS, used, { key: 'k', onOpen: () => undefined })
-  const groups = (row.props.children as Any[]).filter(n => n.type === 'Box')
-  expect(groups.map(textOf)).toEqual(used.map((l, i) => `${i ? '' : 'labels '}${l.name} · regex · 20,764 records  ● yes  ● no`))
-  expect(textOf(row)).toBe(groups.map(textOf).join('   '))
+  const rows = (row.props.children as Any[]).filter(n => n.type === 'Box')
+  expect(row.props.flexDirection).toBe('column')
+  expect(rows.map(textOf)).toEqual([
+    'labels  sabotage_candidate · regex · 20,764 records  ● yes  ● no',
+    '        flag               · code  ·    412 records  ● yes  ● no',
+  ])
 })
 
 test('the word label never sits alone on its row: it is one item with the name it names, which does not shrink', () => {
   const row = labelRowEl(ELS, [{ name: 'colluding', kind: 'prompt', values: ['yes', 'no'], records: 1286 }], { key: 'k', onOpen: () => undefined })
-  // the row's first item is the label's group, not the word alone
+  // the first item is the label's row, not the word alone
   const first = (row.props.children as Any[])[0]
   expect(first.type).toBe('Box')
   // inside the group, the word and the name are one item that keeps them on one row
@@ -123,7 +130,9 @@ test('a card shows the labels its turn ran before it; the answer only those no c
   await w.flush()
   const under = await labelsUnderCard(w.$, ELS, card, 80)
   expect(textOf(under)).toBe('label spam · read by Claude · 420 records  ● yes  ● no')
-  expect(dots(under)).toEqual([{ value: 'yes', color: '#b2c24f' }, { value: 'no', dim: true }])
+  // each dot in its value's color: the card's where it gives one, else the label's own (the labels pane's), never
+  // one gray for every value
+  expect(dots(under)).toEqual([{ value: 'yes', color: '#b2c24f' }, { value: 'no', color: colorOf(['yes', 'no'], 'no') }])
   const answer = await labelsUnderAnswer(w.$, ELS, 'r2', 80)
   expect(textOf(answer)).toBe('label tone · code · 6 records  ● calm  ● angry')
   // a row that is not the turn's answer gets none

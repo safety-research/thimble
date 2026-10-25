@@ -1,9 +1,9 @@
-// The side pane (core/pane.ts): its trail of the panes it showed, the top row that goes back down it (`‹ back to …`)
-// and closes it (`× close`), esc going back while the trail holds a pane and closing on the first one, and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
+// The side pane (core/pane.ts): its trail of the panes it showed, the top row that names esc, which goes back down it (`esc back to …`)
+// or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { keyedWords } from '../bar/bar'
-import { drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
+import { closePane, drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -57,18 +57,19 @@ const textOf = (node: Any): string => {
 const DOCK = (rows = 30) => ({ requestId: 'thimble', props: { title: 't', isFocused: true, bodyColumns: 70, placement: 'dock', scroll: { offset: 0, bodyRows: rows }, view: {} } })
 const draw = async (s: ReturnType<typeof setup>, rows = 30) => drawPane(s.$, DOCK(rows), await paneNow(s.$), els)
 
-test('the pane keeps a trail: ‹ back goes back down it, esc goes back, and on the first pane esc closes it; × close closes it', async () => {
+test('the pane keeps a trail: esc goes back down it, and on the first pane esc closes it; its top row names that key, a click that does the same', async () => {
   const s = setup()
   await openPane(s.$, 'threads', {}, 'Threads', { focus: true })
-  // the first pane: no way back to show
+  // the first pane: no way back to show, esc closes it
   expect(nodes(await draw(s)).some(n => n.props?.key === 'pane-back')).toBe(false)
+  expect(textOf(nodes(await draw(s)).find(n => n.props?.key === 'pane-top'))).toBe('esc close')
   await openPane(s.$, 'made-up', { n: 1 }, 'Made up', { focus: true })
   await openPane(s.$, 'other', {}, 'Other', { focus: true })
   const tree = nodes(await draw(s))
   const top = tree.find(n => n.props?.key === 'pane-top')
-  expect(textOf(top)).toContain('‹ back to made-up')
-  expect(textOf(top)).toContain('× close')
-  // ‹ back goes back one pane
+  // one key, where it acts: esc goes back, no close beside it
+  expect(textOf(top)).toBe('esc back to made-up')
+  // a click on it goes back one pane
   await tree.find(n => n.props?.key === 'pane-back').props.onPress()
   expect(await paneNow(s.$)).toMatchObject({ kind: 'made-up', args: { n: 1 } })
   await nodes(await draw(s)).find(n => n.props?.key === 'pane-back').props.onPress()
@@ -88,9 +89,9 @@ test('the pane keeps a trail: ‹ back goes back down it, esc goes back, and on 
   await openPane(s.$, 'made-up', { n: 3 }, 'Made up', { focus: true })
   await s.call('ui.close', { id: 'thimble', origin: { kind: 'plugin' } }, async () => { closed += 1 })
   expect(closed).toBe(2)
-  // × close closes the pane with a trail under it, not a step back
+  // a click on `esc close` on the first pane closes it
+  await closePane(s.$)
   await openPane(s.$, 'threads', {}, 'Threads', { focus: true })
-  await openPane(s.$, 'made-up', { n: 4 }, 'Made up', { focus: true })
   await nodes(await draw(s)).find(n => n.props?.key === 'pane-close').props.onPress()
   expect(await paneNow(s.$)).toBeNull()
   expect(s.isOpen()).toBe(false)

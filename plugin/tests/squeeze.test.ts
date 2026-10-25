@@ -203,7 +203,7 @@ test('a citation opened over the open chips takes the keys: the bar names 0 once
   const ui = await $.ui.mount(answer('row-t1', text))
   await ui.press({ key: cite.props.key })
   await ui.unmount()
-  // the tray is open over the chips: the bar names its keys alone, each key once
+  // the tray is open over the chips: its keys in its header, and the bar names none of the chips' keys, each key once
   const open = await t.bar()
   expect(open).toContain('3 failed')
   expect(open.match(/0 (close|back|revert)/g)).toEqual(['0 close'])
