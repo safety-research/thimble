@@ -19,7 +19,7 @@
 //                   chooses a cluster: its dots and name bold in its color, every other in the text color. A press on
 //                   a dot, or on a claim of the cluster's list, picks that claim
 //   the detail      a cluster chosen, under the overview after a rule: its name, bold, its orienting line, then its
-//                   claims one line each (cut with …), the current one (`cur`, k j) whole, marked ▸ and bold in the
+//                   claims one line each, numbered (cut with …), the current one (`cur`, k j) whole, marked ▸ and bold in the
 //                   cluster's color. A claim picked: the overview goes and the detail takes the pane: its cluster's
 //                   name in its color (and its orienting line while all fits), the claim, bold; its description (the
 //                   lens's `because`, else the reply's sentences that said it), plain; then `show evidence (N
@@ -28,7 +28,8 @@
 //                   line each). h shows a corrected claim's History (one
 //                   word-level diff per correction and its reason); c the current citation's code and output whole.
 //                   A detail taller than its room scrolls (scrollWindow: the wheel and d u, pane.tsx), with `↑ N more
-//                   lines` and `↓ N more lines` where rows are out of view; a claim's cluster stays on top
+//                   lines` and `↓ N more lines` where rows are out of view (`N more claims` in a cluster's list); a
+//                   claim's cluster stays on top
 //   where it was said   the message that said the claim, its words marked, and the other places it was said
 //
 // A canvas (canvas()) is a grid of cells: text and dots that are parts (a press on the part; the blank cells beside a
@@ -942,15 +943,20 @@ function aboutRows(about, W) {
 
 /**
  * A cluster chosen, as rows W wide after the rule: its name bold in its color (a press on the cluster) and how many
- * claims, its orienting line, a blank row, then its claims one line each (cut after a whole word, then …), each a press
- * that picks it (`n:<id>`); the current one (`st.cur`, the first when none) whole, wrapped, `▸` and bold in the
- * cluster's color; a new one bold. A list taller than its room scrolls (scrollWindow), the current claim kept in view.
+ * claims, its orienting line, a blank row, then its claims one line each under it, numbered as the claim view counts
+ * them (`1.`, `2.`, the number dim), cut after a whole word, then …, each a press that picks it (`n:<id>`); the current
+ * one (`st.cur`, the first when none) whole, wrapped under its first word, `▸` and bold in the cluster's color; a new
+ * one bold. A list taller than its room scrolls (scrollWindow, counting the claims out of view), the current claim
+ * kept in view.
  * {rows, cur, curRow, curEnd}: the current claim's first and last rows
  */
 function clusterPanel({ g, name, cs, group, tone, W, st, fresh }) {
   const part = `g:${group}`
   const rows = [ruleRow(W), ...headingRows(name, W, { tone, part, after: clusterWords(cs) }), ...aboutRows(g?.about, W), []]
   const cur = Math.max(0, Math.min(cs.length - 1, Number(st.cur) || 0))
+  const numW = String(cs.length).length
+  const lead = 2 + numW + 2
+  const num = i => `${String(i + 1).padStart(numW)}. `
   let curRow = 0, curEnd = 0
   cs.forEach((c, i) => {
     const part = `n:${c.id}`
@@ -958,14 +964,23 @@ function clusterPanel({ g, name, cs, group, tone, W, st, fresh }) {
       // the current claim whole, wrapped under its first word
       const look = { tone, bold: true }
       curRow = rows.length
-      wrap(sentenceOf(c.text), Math.max(8, W - 2)).forEach((l, k) => rows.push([{ s: k ? '  ' : '▸ ', ...look, part }, { s: l, ...look, part }]))
+      wrap(sentenceOf(c.text), Math.max(8, W - lead)).forEach((l, k) => rows.push([{ s: k ? ' '.repeat(lead) : `▸ ${num(i)}`, ...look, part }, { s: l, ...look, part }]))
       curEnd = rows.length - 1
       return
     }
     const look = fresh.has(c.id) ? { bold: true } : {}
-    rows.push([{ s: '  ', ...look, part }, { s: cutWords(sentenceOf(c.text), Math.max(8, W - 2)), ...look, part }])
+    rows.push([{ s: '  ', ...look, part }, { s: num(i), tone: 'dim', ...look, part }, { s: cutWords(sentenceOf(c.text), Math.max(8, W - lead)), ...look, part }])
   })
   return { rows, cur, curRow, curEnd }
+}
+
+/** How many claims of a cluster's list `hidden` rows hold that `shown` rows do not, as `N more claims`; null when they
+ *  hold none (the window counts lines then). */
+const claimsOutOfView = (hidden, shown) => {
+  const ids = rs => new Set(rs.flatMap(r => r.map(x => x.part)).filter(p => /^n:/.test(p || '')))
+  const seen = ids(shown)
+  const n = [...ids(hidden)].filter(id => !seen.has(id)).length
+  return n ? `${n} more claim${n === 1 ? '' : 's'}` : null
 }
 
 const FRAME = { tl: '╭', tr: '╮', bl: '╰', br: '╯', h: '─', v: '│', ml: '├', mr: '┤' }
@@ -1104,7 +1119,7 @@ export function panelOf({ data, claim, group, tone, W, byId = new Map((data.clai
   const gtone = tone(cs[0] || claim || {})
   if (claim) return claimPanel({ claim, W, byId, st, ctx, compact, about, cluster: { g, name, cs, group, tone: gtone } })
   const p = clusterPanel({ g, name, cs, group, tone: gtone, W, st, fresh })
-  return { rows: p.rows, cites: 0, shown: null, cut: false, fixes: 0, curRow: p.curRow, curEnd: p.curEnd }
+  return { rows: p.rows, cites: 0, shown: null, cut: false, fixes: 0, curRow: p.curRow, curEnd: p.curEnd, unit: claimsOutOfView }
 }
 
 /**
@@ -1150,10 +1165,10 @@ function counted(data) {
  * A detail taller than its `room` rows, scrolled: the window from row `top` (clamped), `↑ N more lines` in its first row
  * when rows are above it and `↓ N more lines` in its last when rows are under it, each a press that scrolls a page
  * (`sc:-1`, `sc:1`). `keep`: a row, or [first, last] rows, to bring into view (the current claim or citation), its
- * first row when not all fit. {rows, top, max}: max the
- * furthest top.
+ * first row when not all fit. `unit(hidden, shown)`: what the rows out of view hold, in words (`5 more claims`), or
+ * null for lines. {rows, top, max}: max the furthest top.
  */
-export function scrollWindow(rows, room, top = 0, keep = null) {
+export function scrollWindow(rows, room, top = 0, keep = null, unit = null) {
   const total = rows.length
   if (total <= room) return { rows, top: 0, max: 0 }
   const R = Math.max(3, room)
@@ -1172,10 +1187,11 @@ export function scrollWindow(rows, room, top = 0, keep = null) {
   }
   const [from, to] = span(t)
   const out = []
-  const lines = n => `${n} more line${n === 1 ? '' : 's'}`
-  if (from > 0) out.push([{ s: `↑ ${lines(from)}`, tone: 'dim', part: 'sc:-1' }])
-  out.push(...rows.slice(from, to))
-  if (to < total) out.push([{ s: `↓ ${lines(total - to)}`, tone: 'dim', part: 'sc:1' }])
+  const shown = rows.slice(from, to)
+  const words = hidden => unit?.(hidden, shown) || `${hidden.length} more line${hidden.length === 1 ? '' : 's'}`
+  if (from > 0) out.push([{ s: `↑ ${words(rows.slice(0, from))}`, tone: 'dim', part: 'sc:-1' }])
+  out.push(...shown)
+  if (to < total) out.push([{ s: `↓ ${words(rows.slice(to))}`, tone: 'dim', part: 'sc:1' }])
   return { rows: out, top: t, max }
 }
 
@@ -1225,7 +1241,7 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false, passag
   const order = mapped.map(g => g.key)
   const scrolled = (panel, room) => {
     const fixed = panel.fixed || []
-    const win = scrollWindow(panel.rows, room - fixed.length, st.top, st.follow ? [panel.curRow, panel.curEnd ?? panel.curRow] : null)
+    const win = scrollWindow(panel.rows, room - fixed.length, st.top, st.follow ? [panel.curRow, panel.curEnd ?? panel.curRow] : null, panel.unit)
     return { panel: [...fixed, ...win.rows], scroll: { top: win.top, max: win.max, room: room - fixed.length }, cites: panel.cites, shown: panel.shown, cut: panel.cut, fixes: panel.fixes }
   }
   if (claim) {

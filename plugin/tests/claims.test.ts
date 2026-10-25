@@ -195,12 +195,12 @@ test('a look that fails leaves a gap the pane names; c opens the pane: the map o
   // a press on a cluster's name on the map chooses it
   await buttons(pane).find(b => /^g\d+:g:k2$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ group: 'k2' })
-  // a cluster chosen: its name bold in its color, its claims one line each, the first current
+  // a cluster chosen: its name bold in its color, its claims one line each, numbered, the first current
   const cluster = await draw({ group: 'k1' })
   const ct = textOf(cluster)
   expect(ct).toContain('failures · 2 claims')
-  expect(ct).toContain('▸ Run 4 failed on the p95 check.')
-  expect(ct).toContain('  Run 9 failed on a timeout.')
+  expect(ct).toContain('▸ 1. Run 4 failed on the p95 check.')
+  expect(ct).toContain('  2. Run 9 failed on a timeout.')
   expect(JSON.stringify(cluster)).toMatch(/"color":"#[0-9a-f]{6}","bold":true,"children":"failures"/)
   // its current claim's dot on the map is inverse in the cluster's color, the same ●
   expect(JSON.stringify(cluster)).toMatch(/"color":"#[0-9a-f]{6}","bold":true,"inverse":true,"children":"●"/)
@@ -212,7 +212,7 @@ test('a look that fails leaves a gap the pane names; c opens the pane: the map o
   await buttons(cluster).find(b => b.hotkey === 'k').onPress()
   expect(paneNow(s).args).toMatchObject({ group: 'k1', cur: 0 })
   const second = await draw({ group: 'k1', cur: 1 })
-  expect(textOf(second)).toContain('▸ Run 9 failed on a timeout.')
+  expect(textOf(second)).toContain('▸ 2. Run 9 failed on a timeout.')
   await buttons(second).find(b => b.hotkey === 'e').onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c2' })
   await buttons(cluster).find(b => b.hotkey === 'n').onPress()
