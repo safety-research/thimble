@@ -14,6 +14,7 @@
 //   findTerm / findInLink / findRead    -> {start, end} of a term in a text, or null (above)
 //   anchorTerm(text, term, taken)       -> {start, end, how} in a text that may say the term in another form
 //   placeGlosses(text, part, original)  -> [{id, start, end}] for each item of a part `explain` its text holds
+//   markHolding(text, spans, term)      -> the placed mark the words of a term stand inside (or on), or null
 //   glossesOf(list, text, skip)         -> the look's explainers as a part keeps them, those whose term the text holds
 //   headsOf(item, text)                 -> the look's heads-up as a part keeps it (one at most), or null
 //   mergeLook(msgs, out, memory)        -> what one look adds to each message's part, and the terms it explained
@@ -245,23 +246,41 @@ export function anchorTerm(text, term, taken = []) {
 export const holds = (text, term) => !!(findTerm(text, term) || findInLink(text, term) || findRead(text, term))
 
 /**
- * Where each item of a part `explain` ({items, order}) stands on a text: [{id, start, end}] in text order, the heads-up
- * first, then the explainers in their order. `original`: the text is shown in place of Claude's words (a squeezed
+ * Where each item of a part `explain` ({items, order}) stands on a text: [{id, start, end}] in text order. Placed first
+ * the explainers the analyst asked for (`asked`), the newest first, then the heads-up, then the look's explainers in
+ * their order; words a mark already stands on take no other, so words the analyst picked over or across marks are one
+ * mark, and the marks it covers do not draw. `original`: the text is shown in place of Claude's words (a squeezed
  * version), so a term is also found in another form (anchorTerm). An item whose term the text does not hold gets no
  * place: the part keeps it, and it stands on its words again when a text that holds them shows.
  */
 export function placeGlosses(text, part, original = false) {
   const items = part && typeof part === 'object' && part.items ? part.items : {}
   const order = (Array.isArray(part?.order) ? part.order : Object.keys(items)).filter(id => items[id])
-  const sorted = [...order].sort((x, y) => (items[y].kind === 'heads') - (items[x].kind === 'heads'))
+  const rank = g => (g.asked ? 0 : g.kind === 'heads' ? 1 : 2)
+  const sorted = order.map((id, i) => ({ id, i }))
+    .sort((x, y) => rank(items[x.id]) - rank(items[y.id]) || (items[x.id].asked ? y.i - x.i : x.i - y.i))
+    .map(x => x.id)
   const out = []
+  const find = (term, taken) => (original ? anchorTerm(text, term, taken) : findTerm(text, term, taken)) ?? findInLink(text, term, taken) ?? findRead(text, term, taken)
+  const meet = (a, b) => a.start < b.end && b.start < a.end
   for (const id of sorted) {
     const term = items[id].term
-    const at = original ? anchorTerm(text, term, out) : findTerm(text, term, out)
-    const place = at ?? findInLink(text, term, out) ?? findRead(text, term, out)
-    if (place) out.push({ id, start: place.start, end: place.end })
+    const place = find(term, out)
+    if (!place) continue
+    // the words an asked mark stands over or across: what is left of them beside it is no mark
+    const alone = find(term, [])
+    if (alone && meet(place, alone) && out.some(m => items[m.id].asked && meet(m, alone))) continue
+    out.push({ id, start: place.start, end: place.end })
   }
   return out.sort((a, b) => a.start - b.start)
+}
+
+/** The mark of `spans` ([{id, start, end}], as placeGlosses placed them) that the words of `term` stand inside, or on,
+ *  where the text first holds them; null when they stand outside every mark, or over or across one. */
+export function markHolding(text, spans, term) {
+  const at = findTerm(text, term) ?? findInLink(text, term) ?? findRead(text, term)
+  if (!at) return null
+  return (Array.isArray(spans) ? spans : []).find(m => m.start <= at.start && at.end <= m.end) ?? null
 }
 
 const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()

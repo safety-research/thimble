@@ -11,7 +11,7 @@ import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
 import { failLineNow } from '../bar/notice'
-import { explainBar, explainKey, explainState, explaining, explainTerm, glossFor, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
@@ -37,6 +37,7 @@ function setup(replies: Any[], o: { theme?: string; complete?: Any; noFork?: boo
   registerTell(on, {} as never)
   registerAnswers(on, {} as never)
   registerObserver(on, {} as never)
+  registerExplain(on, {} as never)
   const state = new Map<string, { value: unknown; version: number }>()
   const files = new Map<string, string>()
   const calls: Any[] = []
@@ -315,4 +316,29 @@ test('the selected words are trimmed to one line, and a long selection is cut af
   await settle()
   // the call failed: the line says why, in red
   expect((await failLineNow(s.$))?.kind).toBe('failed')
+})
+
+test('selected words inside a mark open it; words over or across marks get one explainer whose mark covers the marks it overlaps', async () => {
+  setOptions({})
+  const s = setup([LOOK], { complete: reply({ body: 'When the client has used all its tries.', here: '' }) })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  // inside the explainer of "retry budget": that one opens, nothing is written
+  await pressE(s, { text: 'budget', requestId: 't1-row' })
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain', id: 'g1' })
+  expect(s.calls.length).toBe(0)
+  // over it: one new explainer, whose mark covers the selection; the explainer under it no longer draws
+  await pressE(s, { text: 'retry budget runs out', requestId: 't1-row' })
+  expect(s.calls.length).toBe(1)
+  const spans = await spansFor(s.$, 't1-row', ANSWER, [])
+  expect(spans.map(x => [x.id, ANSWER.slice(x.start, x.end)])).toEqual([['a1', 'retry budget runs out'], ['h1', '30 seconds after a drop']])
+  expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain', id: 'a1' })
+  // /explain follows the same rule: words inside the new mark open it
+  await s.call('command.run', { command: 'explain', args: 'budget runs' }, async () => ({}))
+  await settle()
+  expect(s.calls.length).toBe(1)
+  // and words over the heads-up and its neighbor get one explainer of their own, which the heads-up gives way to
+  await s.call('command.run', { command: 'explain', args: 'came 30 seconds' }, async () => ({}))
+  await settle()
+  expect(s.calls.length).toBe(2)
+  expect((await spansFor(s.$, 't1-row', ANSWER, [])).map(x => [x.id, ANSWER.slice(x.start, x.end)])).toEqual([['a1', 'retry budget runs out'], ['a2', 'came 30 seconds']])
 })

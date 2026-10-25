@@ -6,7 +6,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { citeLinks, filePlaces, findInLink, findRead, findTerm, glossesOf, headsOf, mergeLook } from '../place.mjs'
+import { citeLinks, filePlaces, findInLink, findRead, findTerm, glossesOf, headsOf, markHolding, mergeLook, placeGlosses } from '../place.mjs'
 
 const at = (text, p) => (p ? text.slice(p.start, p.end) : null)
 
@@ -61,3 +61,24 @@ test('a look places each explainer in the newest message that holds it, adds to 
   assert.deepEqual(mergeLook(msgs, { glosses: [{ term: 'p95' }], heads: null }, { glossed: ['P95'] }).placed, [])
 })
 
+
+test('words the analyst asked about over or across marks are one mark, which covers the marks it overlaps; words inside a mark are that mark', () => {
+  const text = 'Requests go through [third-party relays](#) before the heads gateway.'
+  const look = { g1: { id: 'g1', term: 'relays' }, h1: { id: 'h1', kind: 'heads', term: 'heads gateway' } }
+  assert.deepEqual(placeGlosses(text, { items: look, order: ['g1', 'h1'] }).map(p => at(text, p)), ['relays', 'heads gateway'])
+  // asked over the explainer's words: the wider mark stands, the explainer under it draws nothing
+  const wide = { ...look, a1: { id: 'a1', term: 'third-party relays', asked: true } }
+  const placed = placeGlosses(text, { items: wide, order: ['g1', 'h1', 'a1'] })
+  assert.deepEqual(placed.map(p => [p.id, at(text, p)]), [['a1', 'third-party relays'], ['h1', 'heads gateway']])
+  // across a heads-up's words too (and, as any mark, over the whole of a citation it touches): what is left of the
+  // heads-up's words beside it is no mark; the newest asked wins over an older one
+  const across = { ...wide, a2: { id: 'a2', term: 'relays before the heads', asked: true } }
+  assert.deepEqual(placeGlosses(text, { items: across, order: ['g1', 'h1', 'a1', 'a2'] }).map(p => [p.id, at(text, p)]), [['a2', '[third-party relays](#) before the heads']])
+  // words inside a mark, or on it, are that mark; words over it, across it or outside every mark are none
+  assert.equal(markHolding(text, placed, 'third-party')?.id, 'a1')
+  assert.equal(markHolding(text, placed, 'third-party relays')?.id, 'a1')
+  assert.equal(markHolding(text, placed, 'gateway')?.id, 'h1')
+  assert.equal(markHolding(text, placed, 'the heads gateway'), null)
+  assert.equal(markHolding(text, placed, 'relays before'), null)
+  assert.equal(markHolding(text, placed, 'Requests go'), null)
+})
