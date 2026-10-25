@@ -19,14 +19,14 @@
 //                                      prompt: each one's words
 //   sessionGlosses($)                  every explainer of this session: a pane shows the one of words picked there
 //   explainTerm($, row, term)          on demand: an explainer of words the analyst picked (a citation's words, a term
-//                                      in a pane, /explain), written by the explain-expand call and kept on its message
+//                                      in a pane, the selection), written by the explain-expand call and kept on its message
 //                                      as the look's are; explaining(term) says while it is written
 //   explainKey($, key), explainBar     e at an empty prompt, `e explain` on the bar: an explainer of the words the
 //                                      analyst selected with the mouse ($.ui.selection, fullscreen layout only), on
 //                                      the answer they lie in, else the newest answer that holds them, opened in the
 //                                      tray. Words inside an explainer or a heads-up (or on it) open that one; words
 //                                      over or across marks get one explainer, whose mark covers those it overlaps
-//   registerExplain                    /explain <words>: the same for typed words, in any layout
+//   registerExplain                    the watch of the selection, which draws the bar again when one starts or ends
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
 // Each lens's switch (settings: Comments, its Explainers and Heads-ups) also hides what it gave while it is off.
@@ -257,18 +257,6 @@ async function openMark($: Engine, mark: MarkRef & { id: string }, g: Gloss): Pr
   await tellOpened($, kind === 'heads' ? { kind, row: mark.row, term: g.term, title: g.title } : { kind, row: mark.row, term: g.term }, (await messageOf($, mark.row))?.text ?? '')
 }
 
-/** /explain <words>: the newest answer that holds the words (else the newest answer) explains them, in the tray. */
-async function explainCommand($: Engine, args: string): Promise<{ text?: string }> {
-  const words = String(args || '').replace(/^["“'‘]+|["”'’]+$/g, '').trim()
-  if (!words) return { text: 'Type the words to explain after /explain, as in /explain hit counter.' }
-  const row = await rowHolding($, words)
-  if (!row) return { text: 'No answer to explain words in yet: ask Claude something first.' }
-  const mark = await markOf($, row, words)
-  if (mark) { await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return {} }
-  explainOpen($, row, words)
-  return { text: `Writing an explainer of “${words}”. It opens under the answer when it is ready.` }
-}
-
 // ------------------------------------------------------------------------------------------------ the selection
 
 /** The bar's key that explains the selected words. */
@@ -308,7 +296,7 @@ export async function explainSelection($: Engine): Promise<void> {
   const { words, cut } = pickedWords(sel?.text ?? '')
   if (!words) {
     noticeLine($, fullscreenNow() === false
-      ? 'Selecting words with the mouse needs Claude Code\'s fullscreen layout. Here, type /explain and the words.'
+      ? 'Selecting words to explain needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).'
       : 'Select words in an answer with the mouse first, then press e to explain them.', 'explain')
     return
   }
@@ -342,13 +330,13 @@ async function selectionWaits($: Engine): Promise<boolean> {
   return !!pickedWords(sel?.text ?? '').words && selKey(sel) !== explained
 }
 
-/** Whether words are selected now (the bar's `w where from` stands while they are, marks/where.ts). */
+/** Whether words are selected now (the bar's `c cite` may stand while they are, marks/cite.ts). */
 export async function wordsSelected($: Engine): Promise<boolean> {
   return !!pickedWords((await $.ui.selection().catch(() => undefined))?.text ?? '').words
 }
 
-/** `e explain` on the bar while words are selected (Claude Code's fullscreen layout reports a selection; elsewhere
- *  /explain takes the words, and e at an empty prompt says so) that e has not explained yet, Explainers is on and an
+/** `e explain` on the bar while words are selected (only Claude Code's fullscreen layout reports a selection; elsewhere
+ *  e at an empty prompt says so) that e has not explained yet, Explainers is on and an
  *  answer exists; a click does what e does. The settings' preview shows it, as it would show with words selected. */
 export async function explainBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('explain')) return []
@@ -361,22 +349,16 @@ export async function explainBar($: Engine, on: (key: string) => boolean, previe
 export const registerExplain: Register = on => {
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const r = await next(e)
-    try {
-      await $.command.register({ name: 'explain', description: 'Explain words of an answer: /explain hit counter', argumentHint: '<words to explain>', immediate: true })
-    } catch {
-      // the panes' presses still explain
-    }
     watchSelection($)
     return r
   }).catch(($, e, next) => next(e))
-  on('command.run', { command: /^(thimble:)?explain$/ }, async ($, e) => explainCommand($, String((e as { args?: string }).args ?? '')))
 }
 
 /** How often the selection is read while the bar waits for one (watchSelection). */
 const SELECTION_MS = 300
 let watching = 0
 
-/** The bar names `e explain` and `w where from` only while words are selected, and Claude Code tells no hook when the
+/** The bar names `e explain` and `c cite` only while words are selected, and Claude Code tells no hook when the
  *  person selects: so while its fullscreen layout is drawn (the only one that reports a selection), the selection is
  *  read every SELECTION_MS and the bar drawn again when one starts or ends. One watch per load of the plugin; a watch of an
  *  earlier load stops at its next read. */
@@ -386,7 +368,7 @@ function watchSelection($: Engine): void {
   const tick = async () => {
     if (mine !== watching) return
     try {
-      if (fullscreenNow() === true && (featureOn('explain') || featureOn('where'))) {
+      if (fullscreenNow() === true && (featureOn('explain') || featureOn('cite'))) {
         const has = `${await selectionWaits($)} ${await wordsSelected($)}`
         if (has !== had) { had = has; $.ui.invalidate('ui.render') }
       }

@@ -29,7 +29,7 @@
 // The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto cite + check`,
 // Claude's marks after each reply; `auto cite` (the default), a reply's marks wait `deferred` (drawn as the reply's own
 // cited words), and opening one (tray.ts openMark) checks that one (checkOpened), as a reply's check would; `manual`,
-// Claude makes none, and words the person selects and asks about (w, marks/where.ts) wait `deferred` until the tray
+// Claude makes none, and words the person selects and asks about (c, marks/cite.ts) wait `deferred` until the tray
 // opens them, as one Claude made; `off`, none.
 //
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no

@@ -19,8 +19,9 @@
 //   squeezeKey($, key, until)          s (and the chips' keys while they are open): a taker as hooks/keys.ts takes it
 //   squeezeBar($, on, preview)         its items at the bar's left (`s squeeze`, lit with the levels set; the chips'
 //                                      keys while they are open)
-//   registerSqueeze                    its own hooks: /squeeze and its autocomplete, the chips' Client, the prompt that
-//                                      carries the version told to Claude, a resumed session's cards
+//   registerSqueeze                    its own hooks: /squeeze (what + writes in the prompt box, hidden from the
+//                                      typeahead) and its autocomplete, the chips' Client, the prompt that carries the
+//                                      version told to Claude, a resumed session's cards
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
@@ -88,6 +89,10 @@ export const registerSqueeze: Register = on => {
     }
     return r
   }).catch(($, e, next) => next(e))
+
+  // /squeeze is not a command people type: + in the chips writes it in the prompt box, and the person's words follow it.
+  // So the typeahead and /help leave it out; it runs when the box sends it
+  on('command.describe', { command: /^(thimble:)?squeeze$/ }, async ($, e, next) => ({ ...(await next(e)), isHidden: true })).catch(($, e, next) => next(e))
 
   // /squeeze [words]: a chip in the person's own words on the message the chips are open on (else the one the keys act
   // on), picked; with no words, the chips open

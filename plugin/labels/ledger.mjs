@@ -2,8 +2,8 @@
 // page of a value's records (`--records`). No `$`, no elements: pane.tsx draws the rows this returns with Claude Code's
 // own elements, and the tests read them as text.
 //
-//   at rest        each label a short table: its name and what it went over, its definition on one line (defLine, a
-//                  press that shows it whole), then a row per value with its bar, its
+//   at rest        each label a short table: its name and what it went over, its definition in short on one line
+//                  (defLine), then a row per value with its bar, its
 //                  count and its share of the records. Labels whose tables do not fit fold to one line each: the name,
 //                  a small bar of all values, then each value and its count (wrapped)
 //   a value open   that label's table in its place, the ▸ on the value; every other label one line (cut with …);
@@ -13,12 +13,13 @@
 //   an example     the picked one opens in place: its words over up to five lines, then where it is (`path:line`) and
 //   picked         the check keys (1–9 a value, 0 takes a check back), and why its words are not marked, the model's
 //                  reason or the error when there is one
-//   definition     d: the label's definition whole in place of the examples, then what it went over
+//   definition     the label's definition whole, the other side of the examples (pane.tsx switches between them with
+//                  d), then what it went over
 //
 // A row is a list of runs, or {code} for a code label's definition. A run is {s, tone, bold, italic, part, hotkey}:
 // `tone` dim · accent · err · none (no value yet) · neg (the no of a yes/no label) · track (its bar) · v<i> (the
 // label's i-th value), which pane.tsx turns into colors for the theme; `part` what a press on it does (lP label,
-// vP value, rP record, cP check, dP definition, pg-up, pg-down; P a JSON list); `hotkey` the key that presses it, which Claude Code
+// vP value, rP record, cP check, pg-up, pg-down; P a JSON list); `hotkey` the key that presses it, which Claude Code
 // draws before it (`1: yes`), so a run with one takes width(hotkey) + 2 more cells.
 import { cut, cutWords, textWidth } from '../core/text.js'
 import { howMade } from './use.mjs'
@@ -42,13 +43,12 @@ export const oneLine = (s, trim = true) => { const t = String(s ?? '').replace(/
 
 export const labelPart = name => `l${JSON.stringify([name])}`
 export const valuePart = (name, v) => `v${JSON.stringify([name, v])}`
-export const defPart = name => `d${JSON.stringify([name])}`
 export const recordPart = ref => `r${JSON.stringify([ref])}`
 export const checkPart = v => `c${JSON.stringify([v])}`
 /** What a part names: [kind, ...args], or [part] for one with no arguments (pg-up). */
 export function partOf(part) {
   const s = String(part || '')
-  if (!/^[lvrcd]\[/.test(s)) return [s]
+  if (!/^[lvrc]\[/.test(s)) return [s]
   try { return [s[0], ...JSON.parse(s.slice(1))] } catch { return [s] }
 }
 
@@ -180,8 +180,8 @@ export function defLine(l) {
 function block(l, value, w) {
   const name = String(l.name)
   const rows = [spread([{ s: cut(name, Math.max(8, w - 12)), bold: true, part: labelPart(name) }], [{ s: scopeShort(l), tone: 'dim' }], w)]
-  // its definition on one line, a press that shows it whole (as d does)
-  rows.push([{ s: 'definition ', tone: 'dim', part: defPart(name) }, { s: cut(defLine(l), Math.max(8, w - 11)), part: defPart(name) }])
+  // its definition in short, on one line: plain words, no press (the open label's d shows it whole)
+  rows.push([{ s: cut(defLine(l), Math.max(8, w)), tone: 'dim' }])
   const parts = openable(l)
   const all = Number(l.records) || parts.reduce((s, p) => s + p.n, 0)
   const nw = Math.min(Math.max(8, Math.floor(w / 3)), Math.max(8, ...parts.map(p => width(p.name))))
@@ -473,9 +473,13 @@ export function examples(l, value, page, o) {
   return { rows, shown: recs.slice(s, last + 1).map(r => r.ref), at, from: at + s, last: at + last, total, p }
 }
 
-/** The definition in place of the examples: its kind, the rule whole (a code label's as code), what it went over. */
+/** How a label was made, as the definition's side of the detail names it (`code`, `regex`, …). */
+export const madeOf = l => howMade(l?.kind) || String(l?.kind || '')
+
+/** The definition, the other side of the examples: the rule whole (a code label's as code), what it went over. The
+ *  pane's switch above it names it and how the label was made (madeOf). */
 export function definition(l, w, show = p => p) {
-  const rows = [[{ s: 'definition', bold: true }, { s: ` · ${howMade(l.kind) || String(l.kind || '')}`, tone: 'dim' }]]
+  const rows = []
   const rule = String(l.rule || '').replace(/\s+$/, '')
   if (!rule) rows.push([{ s: '  no rule: Claude gave each record its value', tone: 'dim' }])
   else if (l.kind === 'code') rows.push({ code: rule })

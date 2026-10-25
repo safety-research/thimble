@@ -122,7 +122,8 @@ test("an answer's claims come in with the citations near their words; c counts t
     reply([{ claim: 'The edits after June 18 were not biased; one editor tilted them.', quote: 'The edits were not biased', revises: 'c2' }]),
   ])
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
-  expect(s.commands).toContain('claims')
+  // the pane opens from c and the bar, with no slash command of its own
+  expect(s.commands).not.toContain('claims')
   await answered(s, { id: 't1', prompt: 'Were the edits after June 18 biased?', rows: ['Alice made [212 edits](#) after June 18.'] })
   const store = await claimsStore(s.$)
   expect(store.claims.map((c: Any) => [c.id, c.by, c.sources.map((x: Any) => [x.row, x.at, x.label])])).toEqual([
@@ -358,7 +359,7 @@ test("a picked claim's sentences of the reply read as the reply does: a figure t
   expect(textOf(await draw({ claim: 'c2' }))).toContain('The admin then spent four weeks')
 })
 
-test('c in a terminal too narrow for the pane says to type /claims; once /claims opens the pane, that line goes', async () => {
+test('c in a terminal too narrow for the pane says to click the bar\'s count; once a press opens the pane, that line goes', async () => {
   setOptions({ claimsMode: 'auto' })
   const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
@@ -367,10 +368,10 @@ test('c in a terminal too narrow for the pane says to type /claims; once /claims
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await (await claimsKey(s.$, 'c', 0))!.later!()
   await settle()
-  expect(await line()).toContain('type /claims')
-  // a command's pane is placed at any width
+  expect(await line()).toContain('Click “c 1 claim” in the bar below')
+  // a press's pane is placed at any width: the bar's count opens it
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
-  await s.call('command.run', { command: 'claims' }, async () => ({}))
+  await openClaims(s.$)
   await settle()
   expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims' })
   expect(await line()).toBe('')

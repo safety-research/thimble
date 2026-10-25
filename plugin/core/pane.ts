@@ -71,7 +71,7 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
   if (r.isPlaced) {
     // the line that said the side pane could not open (a narrow terminal: `pane:<kind>`) goes once it is open, on
-    // whatever it shows (/threads opens a thread a key asked for on its citation's evidence)
+    // whatever it shows
     const line = await failLineNow($)
     if (line?.about?.startsWith('pane:')) await failCleared($, line.about)
     return true

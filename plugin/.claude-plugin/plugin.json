@@ -1,6 +1,6 @@
 {
   "name": "thimble",
-  "description": "thimble for Claude Code: Claude adds a citation to each claim you would check in its replies, and a second Claude checks each one against the files when you open it (Citations can check them after each reply instead, or leave citing to you: select words and press w for their source); a click on a citation opens its evidence. Claude draws interactive cards of the data, and v draws one of the last answer. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s squeezes or stretches a reply, or catches up on several; after each reply an observer explains terms you may not know, points out important details and keeps the session's claims (c); t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read.",
+  "description": "thimble for Claude Code: Claude adds a citation to each claim you would check in its replies, and a second Claude checks each one against the files when you open it (Citations can check them after each reply instead, or leave citing to you: select words and press c to cite them); a click on a citation opens its evidence. Claude draws interactive cards of the data, and v draws one of the last answer. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s squeezes or stretches a reply, and b catches up on several; after each reply an observer explains terms you may not know, points out important details and keeps the session's claims (c); t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read.",
   "author": {
     "name": "Matthew Joerke"
   },
@@ -12,7 +12,7 @@
     "citations": {
       "type": "string",
       "title": "Citations",
-      "description": "auto cite + check: Claude cites each claim you would check, and a second Claude checks every citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press w to find where they come from. off: no citations.",
+      "description": "auto cite + check: Claude cites each claim you would check, and a second Claude checks every citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press c to cite them. off: no citations.",
       "options": [
         "auto cite + check",
         "auto cite",

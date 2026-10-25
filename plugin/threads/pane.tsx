@@ -1,7 +1,7 @@
 // pane.tsx: the side threads in the side pane, drawn with Claude Code's own elements (0.10's panes/threads.js,
 // panes/subject.js, shell/conversation.ts and the input bar of shell/detail.tsx, which ran on the card toolkit).
 //
-//   the list (kind `threads`)    t, a click on the bar's `N threads`, /threads. As 0.9 drew it: a tree with main at its
+//   the list (kind `threads`)    t, a click on the bar's `N threads`. As 0.9 drew it: a tree with main at its
 //                                root and a row per thread, `main/<what it is on>`, the newest first, with how many
 //                                questions it has (or that it is answering) and its last question under it. A row is a
 //                                press (tab walks the rows, ↵ presses): it opens that thread

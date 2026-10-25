@@ -1,6 +1,6 @@
 // seam.ts: where Claims meet the rest of thimble (core/answerview.ts, core/pane.ts and observer/observer.ts
 // call each function by name, since Claude Code follows `$` only into functions a file declares or imports). The
-// feature's modules stand beside this file: term.ts (the store, a look's claims, c, /claims), store.js (the claims as
+// feature's modules stand beside this file: term.ts (the store, a look's claims, c), store.js (the claims as
 // pure functions), graph.js and pane.tsx (the pane), lens.mjs (the observer's claims lens); prompts/lens-claims.md.
 //
 //   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
@@ -18,7 +18,7 @@
 //   claimsThreadScope($, args)         what the side thread under the claims pane is about: the claim selected, the
 //                                      cluster selected, or where a claim was said, with the words its input bar's
 //                                      placeholder names and the claim a side answer answers (threads/pane.tsx)
-//   registerClaims                     its own hooks (/claims; x in the pane, which starts a repair inside its
+//   registerClaims                     its own hooks (x in the pane, which starts a repair inside its
 //                                      ui.press hook, as the tray's does)
 import type { EngineInterface, Register } from 'claude-code'
 

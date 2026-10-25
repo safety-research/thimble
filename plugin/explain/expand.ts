@@ -1,4 +1,4 @@
-// expand.ts: an explainer of words the analyst picked in an answer (a citation's words in a pane, /explain), written on
+// expand.ts: an explainer of words the analyst picked in an answer (a citation's words in a pane, the selection), written on
 // demand. One fork of the conversation (the registry's `explain-expand` prompt), as the look's explainers are written,
 // so it reads the records main read; it is told the words, the person's question, the answer as the person reads it,
 // and the lines of the files the answer points to, and writes a body and a "where it mattered" sentence with links to

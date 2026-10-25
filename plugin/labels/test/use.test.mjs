@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { definition } from '../ledger.mjs'
+import { madeOf } from '../ledger.mjs'
 import { answerChoice, answerNote, askChoices, askContext, askInput, askOf, howMade, rowValues, sampleOffered, usedNames } from '../use.mjs'
 
 test('a row names each label a turn used once, in order, and not those another row shows', () => {
@@ -24,8 +24,7 @@ test('a row names the values its records have, then the records with no value, a
   assert.deepEqual(rowValues({ values: ['a', 'b'] }).map(x => x.name), ['a', 'b'])
   // one set of words for how a label was made, in the row and in the pane's definition
   for (const kind of ['prompt', 'set', 'regex', 'code']) {
-    const pane = definition({ name: 'x', kind, rule: 'r', values: ['yes', 'no'], records: 2 }, 60)[0].map(r => r.s).join('')
-    assert.equal(pane, `definition · ${howMade(kind)}`)
+    assert.equal(madeOf({ name: 'x', kind, rule: 'r', values: ['yes', 'no'], records: 2 }), howMade(kind))
   }
   assert.equal(howMade('prompt'), 'read by Claude')
   assert.equal(howMade('set'), 'values Claude gave')

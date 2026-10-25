@@ -16,7 +16,7 @@ import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { readText, withAsked } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
-import { placeOf, whereBar, whereKey, whereWords } from '../marks/where'
+import { citeBar, citeKey, citeWords, placeOf } from '../marks/cite'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
@@ -342,32 +342,33 @@ test('selected words inside a mark open it; words over or across marks get one e
   const spans = await spansFor(s.$, 't1-row', ANSWER, [])
   expect(spans.map(x => [x.id, ANSWER.slice(x.start, x.end)])).toEqual([['a1', 'retry budget runs out'], ['h1', '30 seconds after a drop']])
   expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain', id: 'a1' })
-  // /explain follows the same rule: words inside the new mark open it
-  await s.call('command.run', { command: 'explain', args: 'budget runs' }, async () => ({}))
+  // words inside the new mark open it
+  await pressE(s, { text: 'budget runs', requestId: 't1-row' })
   await settle()
   expect(s.calls.length).toBe(1)
   // and words over the heads-up and its neighbor get one explainer of their own, which the heads-up gives way to
-  await s.call('command.run', { command: 'explain', args: 'came 30 seconds' }, async () => ({}))
+  await pressE(s, { text: 'came 30 seconds', requestId: 't1-row' })
   await settle()
   expect(s.calls.length).toBe(2)
   expect((await spansFor(s.$, 't1-row', ANSWER, [])).map(x => [x.id, ANSWER.slice(x.start, x.end)])).toEqual([['a1', 'retry budget runs out'], ['a2', 'came 30 seconds']])
 })
 
-// ------------------------------------------------------------------------------------------------ w: where from
+// ------------------------------------------------------------------------------------------------ c: cite
 
-test('with Citations manual, w makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; only then does the bar name w', async () => {
+test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is the claims\' again', async () => {
   setOptions({ citations: 'manual' })
   try {
     const s = setup([LOOK])
     const plain = 'Uploads fail after the retry budget runs out: **41 of the 44** failures came 30 seconds after a drop.'
     await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: plain })
-    // the bar names w only while words are selected
+    // with nothing selected, c is not cite's (the claims take it) and the bar does not name it
     s.$.ui.selection = async () => undefined
-    expect(await whereBar(s.$, k => k === 'where', false)).toEqual([])
+    expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
+    expect(await citeKey(s.$, 'c', 0)).toBe(null)
     s.$.ui.selection = async () => ({ text: '41 of the 44 failures', requestId: 't1-row' })
-    expect((await whereBar(s.$, k => k === 'where', false)).map(x => `${x.key} ${x.words}`)).toEqual(['w where from'])
+    expect((await citeBar(s.$, k => k === 'cite', false)).map(x => `${x.key} ${x.words}`)).toEqual(['c cite'])
     s.$.ui.open = async () => ({ isPlaced: true })
-    const take = await whereKey(s.$, 'w', 0)
+    const take = await citeKey(s.$, 'c', 0)
     await take!.later!()
     await settle()
     const item = (await rowMarks(s.$, 't1-row'))!.items[0]!
@@ -376,17 +377,19 @@ test('with Citations manual, w makes the selected words a citation of their answ
     // the answer reads the words as a citation; squeeze and the claims read them as plain words
     expect(withAsked(plain, [item]).text).toContain('out: [41 of the 44 failures](#) came')
     expect(readText(plain, [item])).toBe(plain.replace('**41 of the 44** failures', '41 of the 44 failures'))
+    // once cited, the same selection no longer waits: c and the bar are the claims' again until words are selected anew
+    expect(await citeKey(s.$, 'c', 0)).toBe(null)
+    expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
+    s.$.ui.selection = async () => ({ text: '41 of the 44', requestId: 't1-row' })
+    expect(await citeKey(s.$, 'c', 0)).not.toBe(null)
     // the same words again open the same citation; words that are not in the answer say so
-    await whereWords(s.$, 't1-row', '41 of the 44')
+    await citeWords(s.$, 't1-row', '41 of the 44')
     expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
-    expect(await whereWords(s.$, 't1-row', 'not in this answer')).toContain('is not in the answer as Claude wrote it')
-    // nothing selected: a hint, and nothing is made
-    s.$.ui.selection = async () => undefined
-    await (await whereKey(s.$, 'w', 0))!.later!()
-    expect(String((await failLineNow(s.$))?.text)).toBe('Select words in an answer with the mouse first, then press w to find where they come from.')
-    // in any other mode, w is typed and the bar does not name it
+    expect(await citeWords(s.$, 't1-row', 'not in this answer')).toContain('is not in the answer as Claude wrote it')
+    // in any other mode, c is the claims' even with words selected
     setOptions({ citations: 'auto cite' })
-    expect(await whereKey(s.$, 'w', 0)).toBe(null)
+    expect(await citeKey(s.$, 'c', 0)).toBe(null)
+    expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
   } finally {
     setOptions({})
   }
