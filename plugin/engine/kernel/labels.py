@@ -523,12 +523,13 @@ def _definition(kind: str, rule: str, glob: str | None, values: list[str], where
 
 def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[str] | None = None,
            where: str | None = None, within: tuple[str, str] | None = None, limit: int | None = None,
-           reason: bool = False, seed: int = 0) -> dict[str, Any]:
+           reason: bool = False, seed: int = 0, says: str | None = None) -> dict[str, Any]:
     """Define a label (or apply the same definition again) and apply it: regex and code at once, prompt as records that
     wait for the model. The same definition again keeps the values it has and applies it only to records it has not
     seen; a changed one is a new version, whose records start again (the person's checks of records that are still in
     it, with a value still on the list, are kept). Code with no `values` takes the values it returns, the most common
-    first, and a None it returns leaves the record outside the label. Returns {label, added, applied, errors}."""
+    first, and a None it returns leaves the record outside the label. `says`: the rule in one plain sentence, which the
+    analyst reads in its place; a changed definition without one has none. Returns {label, added, applied, errors}."""
     if kind not in ("regex", "code", "prompt"):
         raise LabelError(f"a label's predicate is --regex, --code or --prompt, not {kind}")
     given = bool(values) or kind != "code"
@@ -547,7 +548,7 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
     # a prompt label another conversation of the folder made the same: the model's reads it holds are not made again
     reuse = reads_elsewhere(st, name, _definition(kind, rule, glob, values, where, within)) if kind == "prompt" else {}
     job = {"kind": kind, "rule": rule, "glob": glob, "values": values, "given": given, "where": where, "within": within,
-           "limit": limit, "reason": reason, "fn": fn, "rows": rows, "matched": matched, "files": files, "reuse": reuse}
+           "limit": limit, "reason": reason, "says": " ".join((says or "").split()), "fn": fn, "rows": rows, "matched": matched, "files": files, "reuse": reuse}
     old = load(st, name)
     lab, added, errors, same = _apply(st, old, name, job)
     with locked(st, name):
@@ -582,6 +583,8 @@ def _apply(st: Store, old: dict[str, Any] | None, name: str,
     if kind == "code" and (not same or given or "given" not in lab):
         lab["given"] = given
     lab["reason"] = bool(job["reason"]) or bool(lab.get("reason"))
+    if job.get("says"):
+        lab["says"] = job["says"]
     lab["trial"] = bool(job["limit"])
     lab["matched"] = job["matched"]
     lab["files"] = files
@@ -869,7 +872,7 @@ def answer_ask(st: Store, name: str, ask_id: str, choice: str, sample: int, seed
 def head(lab: dict[str, Any]) -> dict[str, Any]:
     """What the label viewer says of a label above its records: its definition, where it applies, its counts."""
     return {"name": lab["name"], "kind": lab.get("kind"), "rule": str(lab.get("rule") or ""), "values": list(lab["values"]),
-            "in": lab.get("in"), "where": lab.get("where"), "within": lab.get("within"), "trial": bool(lab.get("trial")),
+            "says": lab.get("says") or "", "in": lab.get("in"), "where": lab.get("where"), "within": lab.get("within"), "trial": bool(lab.get("trial")),
             "matched": lab.get("matched"), "version": lab.get("version"), "rev": lab.get("rev"), **status(lab)}
 
 
