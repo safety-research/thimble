@@ -51,7 +51,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 
 | What | Where |
 |---|---|
-| the manifest: name, the switches (Citations (its modes), Cards, Squeeze and catch-up, Comments (Explainers, Heads-ups), Claims, Extract claims, Labels and coverage on the bar, Squeeze changes cards); a release commit adds its version (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit) | `plugin/.claude-plugin/plugin.json` |
+| the manifest: name, the switches (Citations (its modes), Cards, Squeeze, Catch-up, Comments (Explainers, Heads-ups), Claims (its modes), Labels, Coverage; the old fields they replaced stay, hidden); a release commit adds its version (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit) | `plugin/.claude-plugin/plugin.json` |
 | the `thimble` command (`label`, `coverage`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
 | the hooks module, its order, the session's PATH and TMPDIR, the command hook that lets Claude read thimble's temp folder without a dialog (`temp_allow.py`), which files Claude read (for coverage), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |

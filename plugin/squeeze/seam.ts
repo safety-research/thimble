@@ -1,4 +1,4 @@
-// seam.ts: where Squeeze and catch-up meet the rest of thimble (core/answerview.ts calls each function by name, since
+// seam.ts: where Squeeze and Catch-up (two settings) meet the rest of thimble (core/answerview.ts calls each function by name, since
 // Claude Code follows `$` only into functions a file declares or imports). The feature's own modules are beside this
 // file: term.ts (the records, the rewrite, the catch-up, what Claude hears), ui.ts (the chips, their keys, the bar, the
 // drawing), cards.ts (the cards a squeeze changes), chips.mjs (pure: the chips, the request, the reply, the checks),
@@ -97,7 +97,7 @@ export const registerSqueeze: Register = on => {
   // /squeeze [words]: a chip in the person's own words on the message the chips are open on (else the one the keys act
   // on), picked; with no words, the chips open
   on('command.run', { command: 'squeeze' }, async ($, e) => {
-    if (!featureOn('squeeze')) return { text: 'Squeeze is off. Turn on "Squeeze and catch-up" in /thimble-settings to use it.' }
+    if (!featureOn('squeezeAnswers')) return { text: 'Squeeze is off. Turn it on in /thimble-settings to use it.' }
     const id = (await openNow($))?.id ?? (await targetNow($))
     if (!id || !(await recOf($, id))) return { text: 'No message to squeeze yet: ask Claude something first.' }
     if (!ownWords(e.args)) { await openChips($, id); return {} }

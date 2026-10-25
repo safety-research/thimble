@@ -1,4 +1,4 @@
-// cards.ts: the cards of an answer that a squeeze may change (the switch "Squeeze changes cards"). The chips belong to
+// cards.ts: the cards of an answer that a squeeze may place, change or leave out. The chips belong to
 // the whole answer: its text and the cards drawn in its turn (core/answers.ts TurnRec.cards) and under it (v's). A
 // rewrite's request shows each card (chips.mjs cardsBlock): its title, columns, first rows, what it draws (draw.ts
 // cardText) and its view, with the card guide its view is written by (cards/tool.ts cardGuide). The reply may

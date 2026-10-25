@@ -109,7 +109,7 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(back).not.toContain('fresh fetch')
 })
 
-test('with two replies since the last prompt, the bar names b apart from s; b writes one catch-up under the newest, with the chips open on it; 0 brings the replies back', async ($, on) => {
+test('with two replies since the last prompt, the bar names b apart from s; b writes one catch-up under the newest, with the chips closed and 0 on the bar; 0 brings the replies back', async ($, on) => {
   const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
@@ -132,6 +132,10 @@ test('with two replies since the last prompt, the bar names b apart from s; b wr
   const host = textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))
   expect(host).toContain('catch-up of the 2 replies since your last message')
   expect(host).toContain('Both: the build failed, and the retry passed.')
+  // the squeeze chips stay closed under a catch-up: the bar names 0, which brings the replies back
+  expect(host).not.toContain('1–')
+  expect(await t.bar()).not.toContain('chip')
+  expect(await t.bar()).toContain('0 show the replies')
   await t.press('0')
   expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
   // a catch-up the person read counts: the bar no longer offers one, and b does nothing

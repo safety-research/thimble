@@ -12,9 +12,9 @@
     "citations": {
       "type": "string",
       "title": "Citations",
-      "description": "auto cite + check: Claude cites each claim you would check, and a second Claude checks every citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press c to cite them. off: no citations.",
+      "description": "auto cite + verify: Claude cites each claim you would check, and a second Claude verifies each citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press c to cite them. off: no citations.",
       "options": [
-        "auto cite + check",
+        "auto cite + verify",
         "auto cite",
         "manual",
         "off"
@@ -27,10 +27,16 @@
       "description": "Claude draws interactive cards, and v draws one of the last answer.",
       "default": true
     },
-    "squeeze": {
+    "squeezeAnswers": {
       "type": "boolean",
-      "title": "Squeeze and catch-up",
-      "description": "s makes an answer shorter or longer, and b catches you up on replies you missed. One rewrite each time you ask.",
+      "title": "Squeeze",
+      "description": "s makes an answer shorter or longer, or writes it for another reader. One rewrite each time you ask.",
+      "default": true
+    },
+    "catchUp": {
+      "type": "boolean",
+      "title": "Catch-up",
+      "description": "After replies to background work pile up, b sums them up in one short note, and 0 shows the replies again. One rewrite each time you ask.",
       "default": true
     },
     "explain": {
@@ -45,32 +51,27 @@
       "description": "Marks a detail of an answer that is easy to miss and changes what it means; ] opens its heads-up. A small part of the call after each reply.",
       "default": true
     },
-    "claims": {
-      "type": "boolean",
-      "title": "Claims",
-      "description": "c opens what Claude and you claimed in the session, with why each holds and its sources; the bar counts them. Extract claims says when they are extracted.",
-      "default": true
-    },
     "claimsMode": {
       "type": "string",
-      "title": "Extract claims",
-      "description": "auto: the claims are extracted after each reply, the largest part of the call after it. on demand: when you press f in the Claims pane, which spends fewer tokens.",
+      "title": "Claims",
+      "description": "c opens what Claude and you claimed in the session, with why each holds and its sources. auto: the claims are extracted after each reply, the largest part of the call after it. on demand: f in the Claims pane extracts them, which spends fewer tokens. off: no Claims pane.",
       "options": [
         "auto",
-        "on demand"
+        "on demand",
+        "off"
       ],
       "default": "on demand"
     },
-    "counts": {
+    "labels": {
       "type": "boolean",
-      "title": "Labels and coverage on the bar",
-      "description": "The bar shows how much of the data Claude has seen and how many labels there are. No model call: thimble counts the files after each turn.",
+      "title": "Labels",
+      "description": "The bar counts the labels Claude made, and l opens them. No model call.",
       "default": true
     },
-    "squeezeCards": {
+    "coverage": {
       "type": "boolean",
-      "title": "Squeeze changes cards (experimental)",
-      "description": "When s makes an answer much shorter or longer, or writes it for another reader, it may edit, add or leave out a card with the text. 0 brings the cards back as they were. Each rewrite also reads the cards.",
+      "title": "Coverage",
+      "description": "The bar shows how much of the data Claude has read, and r opens it by folder. No model call: thimble counts the files after each turn.",
       "default": true
     },
     "marks": {
@@ -89,6 +90,30 @@
         "off"
       ],
       "default": "on demand"
+    },
+    "squeeze": {
+      "type": "boolean",
+      "title": "Squeeze and catch-up (old setting)",
+      "description": "Replaced by Squeeze and Catch-up.",
+      "default": true
+    },
+    "counts": {
+      "type": "boolean",
+      "title": "Labels and coverage on the bar (old setting)",
+      "description": "Replaced by Labels and Coverage.",
+      "default": true
+    },
+    "squeezeCards": {
+      "type": "boolean",
+      "title": "Squeeze changes cards (old setting)",
+      "description": "Removed: a squeeze may move or leave out a card.",
+      "default": true
+    },
+    "claims": {
+      "type": "boolean",
+      "title": "Claims (old setting)",
+      "description": "Replaced by Claims, which has its modes.",
+      "default": true
     }
   }
 }

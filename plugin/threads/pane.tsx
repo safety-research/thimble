@@ -189,7 +189,7 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
  *  answers, a turning glyph after each until its verdict arrives, corrected words in place, verified or failed; a press opens a citation's evidence. Its check is the answer's own (threads.mjs answerRow). */
 async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, w: number, key: string): Promise<Any> {
   const row = answerRow(t, i)
-  // a thread's answer cites as Claude's replies do, while Claude cites (Citations auto cite + check, or auto cite)
+  // a thread's answer cites as Claude's replies do, while Claude cites (Citations auto cite + verify, or auto cite)
   const on = claudeCites()
   const reply = on ? await rowMarks($, row).catch(() => null) : null
   const rewrote = rewritesIn(on ? raw : withoutMarks(raw), reply?.items ?? [])

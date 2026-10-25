@@ -2,10 +2,11 @@
 // says, the catch-up drawn last, under the newest message it covers, and the lines a squeeze puts under an answer and its cards. The
 // seam (seam.ts) hands each to its host (core/answerview.ts).
 //
-// The chips open under the newest answer (core/answers.ts latestAnswer), after its cards: s opens them. With
+// The chips open under the newest answer (core/answers.ts latestAnswer), after its cards: s opens them (Squeeze). With
 // two or more replies since the person's last prompt not yet caught up on, the bar also names `b catch up on N
-// replies`: b writes one catch-up of them, drawn under the newest of them while they draw no text (term.ts catchUp),
-// with the chips open on it. A letter right after s or b undoes it (hooks/keys.ts word window).
+// replies` (Catch-up): b writes one catch-up of them, drawn under the newest of them while they draw no text (term.ts
+// catchUp), and while it shows the bar names `0 show the replies`, which brings them back; the chips stay closed (s
+// opens them on the catch-up). A letter right after s or b undoes it (hooks/keys.ts word window).
 // While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey):
 //   [ shorter, ] longer on the picked chip (Length: short · as written · longer · much longer); < > , . the same, unnamed
 //   1–N pick a chip · 0 the original (on a catch-up: the replies again)
@@ -201,8 +202,8 @@ async function askOwn($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the catch-up
 
-/** b with replies piled up: one catch-up of every message since the person's last prompt, under the newest of them,
- *  with the chips open on it while its first version is written. An earlier catch-up of some of them goes. Returns its id. */
+/** b with replies piled up: one catch-up of every message since the person's last prompt, under the newest of them.
+ *  An earlier catch-up of some of them goes. Returns its id. */
 export async function catchUpNow($: Engine): Promise<string | null> {
   const pile = await pileUp($)
   if (!pile) return null
@@ -211,7 +212,6 @@ export async function catchUpNow($: Engine): Promise<string | null> {
   const id = await catchUp($, { host, rows: pile.rows, replies: pile.n, question: pile.prompt?.text ?? '', prompt: pile.prompt?.row ?? null })
   if (!id) return null
   await pickAnswer($, null)
-  await openChips($, id)
   const cu = await recOf($, id)
   await $.ui.scroll({ to: { key: `ans-${cu ? drawnAt(cu) : host}` }, block: 'nearest' }).catch(() => undefined)
   return id
@@ -239,13 +239,14 @@ export async function dismissNow($: Engine, id: string, undo = false): Promise<v
 
 /** Whether the chips are open: their keys come before the tray's and the label ask's, as in 0.10. */
 export async function chipsHold($: Engine): Promise<boolean> {
-  return featureOn('squeeze') && !!(await keptOpen($))
+  return featureOn('squeezeAnswers') && !!(await keptOpen($))
 }
 
-/** A key at an empty prompt: the chips' keys while they are open; s at rest opens them. */
+/** A key at an empty prompt: the chips' keys while they are open; s at rest opens them, b writes a catch-up, and 0
+ *  shows the replies a catch-up stands for again. */
 export async function squeezeKeyTake($: Engine, key: string): Promise<Take | null> {
-  if (!featureOn('squeeze')) return null
-  const open = await keptOpen($)
+  const squeezing = featureOn('squeezeAnswers')
+  const open = squeezing ? await keptOpen($) : null
   if (open) {
     // a key at the prompt: a click no longer holds the keys in the chips (esc gave them back), so words begun after +
     // there are let go
@@ -266,7 +267,11 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
     return null
   }
   if (key === CATCH_UP_KEY) return (await pileUp($)) ? catchUpTake($, null) : null
-  if (key !== 's') return null
+  if (key === '0') {
+    const cu = await catchUpShown($)
+    return cu ? { now: () => dismissNow($, cu.id) } : null
+  }
+  if (key !== 's' || !squeezing) return null
   const row = await latestAnswer($)
   if (!row) return null
   const id = (await catchUpOn($, row)) ? cuId(row) : row
@@ -337,13 +342,21 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
 
 // ------------------------------------------------------------------------------------------------ the bar
 
+/** The catch-up the newest answer shows now, written and standing, or null: 0 then shows its replies again. */
+async function catchUpShown($: Engine): Promise<Rec | null> {
+  if (!featureOn('catchUp')) return null
+  const row = await latestAnswer($)
+  const cu = row ? await catchUpOn($, row) : null
+  return cu && typeof cu.shown === 'string' ? cu : null
+}
+
 /** The chips' keys and lines on the bar while they are open; at rest, s: `s squeeze`, lit with the levels set while
- *  the answer shows a version of the person's (`s ● short · interpret`), and `b catch up on N replies` while replies
- *  piled up since the person's last prompt. */
+ *  the answer shows a version of the person's (`s ● short · interpret`), `b catch up on N replies` while replies
+ *  piled up since the person's last prompt, and `0 show the replies` while a catch-up stands in for them. */
 export async function barItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  if (!on('squeeze')) return []
-  if (preview) return [{ id: 'squeeze', key: 's', words: 'squeeze' }]
-  const open = await openNow($)
+  const squeezing = on('squeezeAnswers')
+  if (preview) return [...(squeezing ? [{ id: 'squeeze', key: 's', words: 'squeeze' }] : []), ...(on('catchUp') ? [{ id: 'catchup', key: CATCH_UP_KEY, words: 'catch up' }] : [])]
+  const open = squeezing ? await openNow($) : null
   const rec = open ? await recOf($, open.id) : null
   if (open && rec) return openItems($, open, rec)
   const row = await latestAnswer($)
@@ -353,9 +366,11 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const now = await recOf($, id)
   const lit = now && !now.catchup && typeof now.shown === 'string'
   const words = lit ? `● ${setWords(now) || 'squeezed'}` : 'squeeze'
+  const shown = on('catchUp') && now?.catchup && typeof now.shown === 'string' ? now : null
   return [
-    { id: 'squeeze', key: 's', words, ...(lit ? { color: accent() } : {}), press: () => openChips($, id) },
+    ...(squeezing ? [{ id: 'squeeze', key: 's', words, ...(lit ? { color: accent() } : {}), press: () => openChips($, id) }] : []),
     ...(pile ? [{ id: 'catchup', key: CATCH_UP_KEY, words: `catch up on ${pile.n} replies`, press: () => catchUpNow($) }] : []),
+    ...(shown ? [{ id: 'catchup-back', key: '0', words: 'show the replies', press: () => dismissNow($, shown.id) }] : []),
   ]
 }
 
@@ -429,10 +444,11 @@ async function chipsEl($: Engine, els: Any, id: string, cols: number): Promise<A
  *  runs); nothing while a catch-up that covers it shows, unless the catch-up draws at this row (catchUpEl); dim at the
  *  row a catch-up draws at while its first version is being written. */
 export async function viewOf($: Engine, row: string): Promise<{ text?: string | null; hidden?: boolean; dim?: boolean } | null> {
-  if (!featureOn('squeeze')) return null
+  const catching = featureOn('catchUp')
+  if (!featureOn('squeezeAnswers') && !catching) return null
   const part = await partNow($, row)
   // the catch-up this row keeps, else the one that covers it (a row may keep one dismissed before)
-  const cu = (part.cu ? await catchUpOn($, row) : null) ?? (part.inCatchUp ? await catchUpOn($, part.inCatchUp) : null)
+  const cu = !catching ? null : (part.cu ? await catchUpOn($, row) : null) ?? (part.inCatchUp ? await catchUpOn($, part.inCatchUp) : null)
   if (cu && cu.catchup?.rows.includes(row)) {
     const at = drawnAt(cu) === row
     if (typeof cu.shown === 'string') return at ? { dim: true } : { hidden: true }
@@ -442,7 +458,7 @@ export async function viewOf($: Engine, row: string): Promise<{ text?: string | 
   const rec = await recOf($, row)
   const ui = await uiOf($, row)
   const busy = !!ui.running || (!!rec && (await levelsNow($, rec)).pending)
-  if (!part.own || !rec) return busy ? { dim: true } : null
+  if (!featureOn('squeezeAnswers') || !part.own || !rec) return busy ? { dim: true } : null
   const text = typeof rec.shown === 'string' ? (ui.reveal ? revealCut(rec.shown, ui.reveal.n) : rec.shown) : null
   if (text == null && !busy) return null
   return { text, dim: busy }
@@ -456,7 +472,7 @@ export async function viewOf($: Engine, row: string): Promise<{ text?: string | 
  *  replies' citations are numbered across the catch-up, since each reply numbers its own from 1: so citations of two
  *  replies never share a hover group, and a press finds the reply's citation it stands for. */
 export async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn?: CardsIn): Promise<Any | null> {
-  if (!featureOn('squeeze')) return null
+  if (!featureOn('catchUp')) return null
   const cu = await catchUpAt($, row)
   if (!cu || typeof cu.shown !== 'string') return null
   seeView(cols)
@@ -497,12 +513,13 @@ export async function catchUpEl($: Engine, els: Any, row: string, cols: number, 
 /** What stands under a row after its cards: why a catch-up drawn at it failed, what a squeeze left out of its cards,
  *  and the chips while they are open on it or on the catch-up drawn at it (under the whole answer, last). */
 export async function underRow($: Engine, els: Any, row: string, cols: number): Promise<Any[]> {
-  if (!featureOn('squeeze')) return []
+  const squeezing = featureOn('squeezeAnswers')
+  if (!squeezing && !featureOn('catchUp')) return []
   const out: Any[] = []
   const part = await partNow($, row)
   const recs: Rec[] = []
-  if (part.own) { const r = await recOf($, row); if (r) recs.push(r) }
-  const cu = await catchUpAt($, row)
+  if (squeezing && part.own) { const r = await recOf($, row); if (r) recs.push(r) }
+  const cu = featureOn('catchUp') ? await catchUpAt($, row) : null
   if (cu) recs.push(cu)
   if (cu && typeof cu.shown !== 'string') {
     const ui = await uiOf($, cu.id)
@@ -519,12 +536,12 @@ export async function underRow($: Engine, els: Any, row: string, cols: number): 
 
 /** The line under a card a squeeze changed: `edited by squeeze` or `added by squeeze`. */
 export async function underCardLine($: Engine, els: Any, id: string): Promise<Any[]> {
-  if (!featureOn('squeeze')) return []
+  if (!featureOn('squeezeAnswers')) return []
   const did = await cardDid($, id)
   return did ? [els.Text({ key: `sq-did-${id}`, dimColor: true, children: `  ${did} by squeeze` })] : []
 }
 
 /** Whether a card is left out of the version of its answer shown now. */
 export async function hidesCard($: Engine, id: string): Promise<boolean> {
-  return featureOn('squeeze') && cardHidden($, id)
+  return featureOn('squeezeAnswers') && cardHidden($, id)
 }

@@ -35,7 +35,7 @@ import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
-import { drawSettings } from '../panes/settings'
+import { drawSettings, settingsFocus } from '../panes/settings'
 import { drawThreadsPane, threadPaneParts, threadUnderSplit } from '../threads/seam'
 import { quiet } from './askcell.js'
 import { cut } from './text.js'
@@ -124,18 +124,25 @@ export async function turnPane($: Engine): Promise<void> {
 /** The kinds whose drawing leaves room for the side thread under it itself (they read threads/seam.ts rowsUnder):
  *  they get the pane's rows less the top row only. */
 const OWN_ROOM = new Set(['labels', 'coverage'])
+/** The panes that say their name at the left of the top row. */
+const NAMED: Record<string, string> = { settings: 'Settings' }
 /** The kinds with a side thread under them. */
 const THREADED = new Set(['evidence', 'labels', 'coverage', 'claims'])
 
 /** The last drawing's layout, for the ui.scroll hook: which pane, whether its input bar is pinned to its bottom, how
  *  many rows of its drawing do not fit, the keys its Buttons press, and how a drawing that scrolls a part of itself
  *  scrolls it (scrollsOwn). */
-let laid: { id: string; pinned: boolean; over: number; keys: Map<string, () => unknown>; own: ((by: number) => unknown) | null } | null = null
+let laid: { id: string; pinned: boolean; over: number; keys: Map<string, () => unknown>; own: ((by: number) => unknown) | null; arrows?: ((dir: number) => unknown) | null } | null = null
 /** A drawing that fits the pane but scrolls a part of itself (the claims' detail under their overview) names how, while
  *  it draws: the wheel and the page keys then move that part, by `by` rows (a page key by the pane's rows). */
 let own: ((by: number) => unknown) | null = null
 export function scrollsOwn(fn: ((by: number) => unknown) | null): void {
   own = fn
+}
+/** A drawing that moves a pick of its own with ↑ and ↓ (the settings' rows) names how, while it draws: `dir` -1 or 1. */
+let arrows: ((dir: number) => unknown) | null = null
+export function arrowsOwn(fn: ((dir: number) => unknown) | null): void {
+  arrows = fn
 }
 /** How far the drawing above the input bar is scrolled, in the pane it was scrolled in. */
 let scrolled = { id: '', by: 0, conv: 0 }
@@ -174,11 +181,14 @@ function topRow($: Engine, els: Any, now: PaneNow, W: number): Any[] {
   const trail = now.trail ?? []
   const under = trail[trail.length - 1]
   const words = under ? `back to ${cut(crumbOf(under.kind, under.args).words, Math.max(8, W - 16))}` : 'close'
+  // a pane with a name of its own says it at the left (Settings)
+  const name = NAMED[now.kind]
   const key = now.escape ? [Text({ key: 'k', color: accent(), bold: true, children: 'esc' }), Text({ key: 's', children: ' ' })] : []
   const btn = Button({ key: under ? 'pane-back' : 'pane-close', plain: true, label: under ? 'back' : 'close the pane', hover: quiet(under ? 'pane-back' : 'pane-close'), onPress: () => (under ? paneBack($) : closePane($)), children: [
     ...key, Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: words }),
   ] })
-  return [Box({ key: 'pane-top', flexDirection: 'row', justifyContent: 'flex-end', width: W, children: [
+  return [Box({ key: 'pane-top', flexDirection: 'row', justifyContent: name ? 'space-between' : 'flex-end', width: W, children: [
+    ...(name ? [Text({ key: 'pane-name', bold: true, children: name })] : []),
     Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 1, children: [btn] }),
   ] })]
 }
@@ -198,6 +208,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const keys = new Map<string, () => unknown>()
     const kels = noting(els, keys)
     own = null
+    arrows = null
     const top = topRow($, els, now, W)
     const T = top.length ? treeRows(top, W) : 0
     // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
@@ -220,7 +231,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const U = under.length ? treeRows(under, W) : 0
     const id = idOf(now)
     if (!pinned) {
-      laid = { id, pinned: false, over: 0, keys, own }
+      laid = { id, pinned: false, over: 0, keys, own, arrows }
       const parts = [...top, drawn, ...conv, ...under]
       return parts.length === 1 ? drawn : els.Box({ flexDirection: 'column', children: parts })
     }
@@ -234,7 +245,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     if (scrolled.id !== id) scrolled = { id, by: C ? over : 0, conv: C }
     else if (C !== scrolled.conv) scrolled = { id, by: over, conv: C }
     scrolled.by = Math.max(0, Math.min(over, scrolled.by))
-    laid = { id, pinned: true, over, keys, own }
+    laid = { id, pinned: true, over, keys, own, arrows }
     const left = over - scrolled.by
     const cue = over > 0 ? els.Text({ key: 'pane-more', dimColor: true, wrap: 'truncate-end', children: left > 0 ? `↓ ${left} more row${left === 1 ? '' : 's'} · scroll or ↓` : `↑ ${over} row${over === 1 ? '' : 's'} above · scroll or ↑` }) : null
     const body = els.Box({ key: 'pane-body', flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden', children: [
@@ -267,6 +278,10 @@ export async function scrollPane($: Engine, e: { by?: number; origin?: { kind?: 
   if (!l?.pinned) return false
   const by = Number(e?.by) || 0
   const arrow = e?.origin?.kind === 'person' && !e?.pointer && Math.abs(by) === 1
+  if (arrow && l.arrows) {
+    await Promise.resolve(l.arrows(by > 0 ? 1 : -1)).catch(() => undefined)
+    return true
+  }
   if (arrow && l.over === 0) {
     const press = l.keys.get(by > 0 ? 'j' : 'k')
     if (press) await Promise.resolve(press()).catch(() => undefined)
@@ -299,6 +314,12 @@ export const registerPanes: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // the ring moving in the settings pane: within a row it picks that choice, onto another row it lands on its choice set
+  on('ui.focus', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
+    const now = await paneNow($)
+    if (now?.kind !== 'settings') return next(e)
+    return settingsFocus($, e as Any, next as Any)
+  }).catch(($, e, next) => next(e))
   on('ui.scroll', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
     if (await scrollPane($, e as Any)) return {}
     return next(e)

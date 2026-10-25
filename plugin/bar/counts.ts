@@ -101,10 +101,10 @@ async function countLabels($: Engine, root: string): Promise<number> {
   return Array.isArray(v) ? v.length : 0
 }
 
-/** Count again: the bar's coverage and labels, while Labels and coverage is on, each on its own. A count that fails
+/** Count again: the bar's coverage and labels, while Coverage or Labels is on, each on its own. A count that fails
  *  says so on the failure line, and the pane shows its reason above the last count until a count works. */
 export async function recount($: Engine): Promise<void> {
-  if (!featureOn('counts')) return
+  if (!featureOn('coverage') && !featureOn('labels')) return
   asked = true
   const root = await coverageRoot($)
   if (!root) return
@@ -153,7 +153,7 @@ export async function turnCounts($: Engine): Promise<void> {
  *  drawing replaces it, as at a resume (the marks and claims read back, a light theme read for the first time), and
  *  a count asked from there ended `aborted`. */
 export function needCounts($: Engine): void {
-  if (asked || !featureOn('counts')) return
+  if (asked || (!featureOn('coverage') && !featureOn('labels'))) return
   asked = true
   $.clock.after(0, () => { void recount($).catch(() => undefined) })
 }

@@ -7,12 +7,12 @@
 //                          mode (`set`), through Claude Code ($.config.set), which keeps the value and loads the plugin
 //                          again with the new options; a refusal is one line with its fix
 //
-// The fields Citations replaced (features.mjs RETIRED) stay in the manifest, hidden from /config, so a value saved under
-// them reaches the plugin: the first interactive session moves it to Citations and sets them back to their defaults.
-// Setting Citations sets them back too.
+// The fields newer settings replaced (features.mjs RETIRED) stay in the manifest, hidden from /config, so a value saved
+// under them reaches the plugin: the first interactive session moves it to the settings that replaced it and sets them
+// back to their defaults. A setting the person changes moves them first too.
 import type { ConfigRow, EngineInterface, Register } from 'claude-code'
 
-import { RETIRED, SWITCHES, choiceOf, citationsFrom, noteChange, retiredValues, setOptions, switchOf } from './features.mjs'
+import { RENAMED, RETIRED, SWITCHES, currentValues, movedFrom, noteChange, noteSettled, setOptions, switchOf, valueIn } from './features.mjs'
 
 type Engine = EngineInterface
 
@@ -33,11 +33,13 @@ async function configRows($: Engine): Promise<Map<string, ConfigRow>> {
  *  with it. A feature Claude Code lists no value for has the value this load runs with. */
 export async function heldValues($: Engine): Promise<Record<string, boolean | string>> {
   const rows = await configRows($).catch(() => new Map<string, ConfigRow>())
-  return Object.fromEntries(SWITCHES.map(s => {
+  // a value the retired fields saved stands while the setting that replaced it holds its default
+  const values: Record<string, unknown> = currentValues()
+  for (const s of SWITCHES) {
     const r = rows.get(s.key)
-    const kind = s.choices ? s.choices.includes(r?.value as string) : typeof r?.value === 'boolean'
-    return [s.key, r && kind ? r.value : choiceOf(s.key)]
-  }))
+    if (r && (s.choices ? s.choices.includes(r.value as string) : typeof r.value === 'boolean')) values[s.key] = r.value
+  }
+  return Object.fromEntries(SWITCHES.map(s => [s.key, valueIn(values, s.key) as boolean | string]))
 }
 
 /** Turn a feature on or off, or set a feature's mode. A refusal is said in one line with its fix; nothing changes then. */
@@ -48,38 +50,44 @@ export async function settingsAction($: Engine, a: Record<string, unknown>): Pro
   const r = (await configRows($)).get(s.key)
   if (!r) return `× Claude Code has not loaded thimble's settings, so ${s.title} cannot change now. Load thimble again in /plugin, then try once more.`
   if (r.isLocked) return `× ${s.title} is set by your organization's settings, so it cannot change here.`
-  const now = (s.choices ? s.choices.includes(r.value as string) : typeof r.value === 'boolean') ? r.value : choiceOf(s.key)
+  const now = (await heldValues($))[s.key]
   const to = a.do === 'set' ? a.value : s.choices ? s.choices[(s.choices.indexOf(now as string) + 1) % s.choices.length] : !now
   if (s.choices ? !s.choices.includes(to as string) : typeof to !== 'boolean') return `× ${s.title} has no setting "${String(to)}".`
   if (to === now) return
+  // a value the retired fields still hold moves first, so the change stands over it
+  await moveRetired($, currentValues()).catch(() => undefined)
   const res = await $.config.set({ key: r.key, value: to as boolean | string })
   if (res.deny) return `× ${s.title} stayed ${typeof now === 'string' ? now : now ? 'on' : 'off'}: ${res.deny}`
-  if (s.key === 'citations') await retiredToDefaults($, r.key, retiredValues())
   // acted on at once, before the plugin loads again with it
   noteChange(s.key, to)
   $.ui.invalidate('ui.render')
 }
 
-/** A retired field's row key, beside the Citations row's (`<plugin>.citations`). */
-const retiredKey = (citationsKey: string, field: string) => citationsKey.replace(/\.citations$/, `.${field}`)
+/** A retired field's row key, beside a feature's row key (`<plugin>.<field>`). */
+const retiredKey = (featureKey: string, field: string) => featureKey.replace(/\.[^.]+$/, `.${field}`)
 
-/** The retired fields that hold a saved value (`saved`, as this load has them) back to their defaults (a hidden row
- *  still takes $.config.set), so only Citations says how the plugin cites. */
-async function retiredToDefaults($: Engine, citationsKey: string, saved: Record<string, unknown>): Promise<void> {
-  for (const [field, f] of Object.entries(RETIRED)) {
-    if (saved[field] === undefined || saved[field] === f.default) continue
-    await $.config.set({ key: retiredKey(citationsKey, field), value: f.default }).catch(() => undefined)
+/** A value saved under the retired fields (`saved`), moved to the settings that replaced it where those hold their
+ *  defaults, and the retired fields set back to theirs (a hidden row still takes $.config.set), so only the new settings
+ *  say what the plugin does. Once: afterwards the retired fields hold their defaults and nothing moves. */
+async function moveRetired($: Engine, saved: Record<string, unknown>): Promise<void> {
+  const moved = movedFrom(saved) as Record<string, boolean | string>
+  const stale = Object.entries(RETIRED).filter(([field, f]) => saved[field] !== undefined && saved[field] !== f.default)
+  const renamed = (Object.entries(RENAMED) as [string, Record<string, string>][]).filter(([key, names]) => typeof saved[key] === 'string' && names[saved[key] as string])
+  if (!stale.length && !renamed.length) return
+  const rows = await configRows($)
+  const any = rows.values().next().value as ConfigRow | undefined
+  if (!any) return
+  // a mode saved under its old name is saved under its new one
+  for (const [key, names] of renamed) {
+    const r = rows.get(key)
+    if (r && !r.isLocked && names[r.value as string]) await $.config.set({ key: r.key, value: names[r.value as string]! }).catch(() => undefined)
   }
-}
-
-/** A value saved under the retired fields, moved to Citations: once, at the first interactive session that has one. */
-async function moveRetired($: Engine, options: Record<string, unknown>): Promise<void> {
-  const mode = citationsFrom(options)
-  if (!mode) return
-  const r = (await configRows($)).get('citations')
-  if (!r || r.isLocked) return
-  if (r.value === switchOf('citations')!.default) await $.config.set({ key: r.key, value: mode })
-  await retiredToDefaults($, r.key, options)
+  for (const [key, value] of Object.entries(moved)) {
+    const r = rows.get(key)
+    if (r && !r.isLocked && (r.value === undefined || r.value === switchOf(key)?.default)) await $.config.set({ key: r.key, value }).catch(() => undefined)
+  }
+  for (const [field, f] of stale) await $.config.set({ key: retiredKey(any.key, field), value: f.default }).catch(() => undefined)
+  noteSettled()
 }
 
 export const registerSettings: Register = (on, options) => {
@@ -92,7 +100,7 @@ export const registerSettings: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const r = await next(e)
-    await moveRetired($, (options ?? {}) as Record<string, unknown>).catch(() => undefined)
+    await moveRetired($, currentValues()).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 }

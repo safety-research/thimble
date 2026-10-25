@@ -13,7 +13,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
     const manifest = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
     // the fields Citations replaced stay last, so a value saved under them still reaches the plugin
     assert.deepEqual(Object.keys(manifest.userConfig), [...SWITCHES.map(s => s.key), ...Object.keys(RETIRED)])
-    assert.deepEqual(SWITCHES.map(s => s.key), ['citations', 'cards', 'squeeze', 'explain', 'details', 'claims', 'claimsMode', 'counts', 'squeezeCards'])
+    assert.deepEqual(SWITCHES.map(s => s.key), ['citations', 'cards', 'squeezeAnswers', 'catchUp', 'explain', 'details', 'claimsMode', 'labels', 'coverage'])
     for (const s of SWITCHES) {
       const kind = s.choices ? { type: 'string', options: s.choices } : { type: 'boolean' }
       assert.deepEqual(manifest.userConfig[s.key], { ...kind, title: s.title, description: s.does, default: s.default })
@@ -21,7 +21,8 @@ test("the manifest's userConfig is the features, each on by default and turned o
       if (s.choices) assert.deepEqual(Object.keys(s.says), s.choices)
     }
     for (const [k, f] of Object.entries(RETIRED)) assert.deepEqual(manifest.userConfig[k], f)
-    assert.equal(SWITCHES.find(s => s.key === 'claimsMode').title, 'Extract claims')
+    assert.equal(SWITCHES.find(s => s.key === 'claimsMode').title, 'Claims')
+    assert.deepEqual(SWITCHES.find(s => s.key === 'claimsMode').choices, ['auto', 'on demand', 'off'])
   }
   // the heads-ups' switch is named as the tray and the threads name what it gives, and keeps its stored key, so a
   // setting saved under the old name still applies
@@ -52,7 +53,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(choiceOf('citations'), 'auto cite')
     assert.equal(claudeCites(), true)
     assert.equal(featureOn('cite'), false)
-    setOptions({ citations: 'auto cite + check' })
+    setOptions({ citations: 'auto cite + verify' })
     assert.equal(claudeCites(), true)
     setOptions({ citations: 'manual' })
     assert.equal(claudeCites(), false)
@@ -69,7 +70,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
   // a value saved under the retired fields stands while Citations holds its default; a Citations the person sets wins
   {
     assert.equal(citationsFrom({ marks: false, citationChecks: 'auto' }), 'off')
-    assert.equal(citationsFrom({ marks: true, citationChecks: 'auto' }), 'auto cite + check')
+    assert.equal(citationsFrom({ marks: true, citationChecks: 'auto' }), 'auto cite + verify')
     assert.equal(citationsFrom({ marks: true, citationChecks: 'off' }), 'auto cite')
     assert.equal(citationsFrom({ marks: true, citationChecks: 'on demand' }), null)
     setOptions({ citations: 'auto cite', marks: false })
@@ -82,22 +83,34 @@ test("the manifest's userConfig is the features, each on by default and turned o
     setOptions({})
   }
   // the look after each reply runs while a feature one of its lenses serves is on; the claims join it only when Claims
-  // found is auto (on demand by default, a value outside its modes too); a saved Claims switch still turns them off
+  // is auto (on demand by default, a value outside its modes too); Claims off is no claims, and the old Claims switch
+  // saved off stands for it
   {
     setOptions({})
     assert.equal(featureOn('observer'), true)
     assert.equal(choiceOf('claimsMode'), 'on demand')
+    assert.equal(featureOn('claims'), true)
     assert.equal(lensesAfterReply('claims'), false)
     setOptions({ explain: false, details: false })
     assert.equal(featureOn('observer'), false)
     setOptions({ explain: false, details: false, claimsMode: 'auto' })
     assert.equal(featureOn('observer'), true)
     assert.equal(lensesAfterReply('claims'), true)
-    setOptions({ explain: false, details: false, claims: false, claimsMode: 'auto' })
+    setOptions({ explain: false, details: false, claimsMode: 'off' })
     assert.equal(featureOn('observer'), false)
+    assert.equal(featureOn('claims'), false)
+    setOptions({ explain: false, details: false, claims: false, claimsMode: 'on demand' })
+    assert.equal(choiceOf('claims'), 'off')
     assert.equal(featureOn('claims'), false)
     setOptions({ claimsMode: true })
     assert.equal(choiceOf('claimsMode'), 'on demand')
+    setOptions({})
+  }
+  // a mode saved under its old name stands for the new one: auto cite + check is auto cite + verify
+  {
+    setOptions({ citations: 'auto cite + check' })
+    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    assert.equal(claudeCites(), true)
     setOptions({})
   }
 })
