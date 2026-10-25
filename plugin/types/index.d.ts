@@ -62,6 +62,8 @@ declare module 'claude-code' {
       // ---- core (core/)
       /** what the side pane shows, and the trail of panes it showed before, to go back to (core/pane.ts) */
       pane: { kind: string; args: unknown; title?: string; escape?: boolean; rows?: number; trail?: { kind: string; args: unknown; title: string; rows?: number }[] } | null
+      /** the row the settings pane picked (panes/settings.tsx), by its feature's key */
+      settingsRow: string
       /** whether thimble is off in this session (/thimble-off, settings/term.ts) */
       sessionOff: boolean
       /** the id of main's turn that runs, null when none runs (core/turn.ts) */

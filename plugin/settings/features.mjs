@@ -9,60 +9,67 @@
 // choiceOf(key) for a mode, when it acts.
 
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `group`:
- *  the heading the pane lists it under, with the others of its group (Comments: the explainers and heads-ups on an
- *  answer's words; a key keeps its name, so a saved setting still applies); `does`: one line on what the person gets
+ *  the heading the pane lists it under, with the others of its group (Answers, Comments on an answer's words, Panes;
+ *  a key keeps its name, so a saved setting still applies); `does`: one line on what the person gets
  *  and what it costs, the field's description (a test checks). `choices`: the modes of a feature that has more than on
  *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
  *  look runs while one such feature is on. `lensesIn`: the mode in which they join the look after each reply (Claims:
- *  `auto`; in `on demand`, a look of their own runs when the person asks). `says`: for a feature with
- *  modes, what each mode gives, which the settings pane shows under the row for the mode set. */
+ *  `auto`; in `on demand`, a look of their own runs when the person asks). `says`: what each mode
+ *  gives (`on` and `off` for a switch), which the settings pane shows under the row for the one set. */
 export const SWITCHES = [
   {
-    key: 'citations', title: 'Citations', default: 'auto cite', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
+    key: 'citations', title: 'Citations', group: 'Answers', default: 'auto cite', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
     does: 'auto cite + verify: Claude cites each claim you would check, and a second Claude verifies each citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press c to cite them. off: no citations.',
     says: {
-      'auto cite + verify': 'Claude cites each claim you would check, and a second Claude verifies each citation after each reply.',
-      'auto cite': 'Claude cites each claim you would check, and a second Claude checks a citation when you open it, which spends fewer tokens.',
-      'manual': 'Claude cites nothing. Select words in an answer and press c to cite them: a second Claude finds where they come from in the files.',
-      'off': 'No citations, and no checks.',
+      'auto cite + verify': 'Claude cites what its answer rests on; a second Claude verifies each citation right away.',
+      'auto cite': 'Claude cites what its answer rests on; a citation is checked when you open it.',
+      'manual': 'Nothing is cited until you select words and press c.',
+      'off': 'No citations.',
     },
   },
   {
-    key: 'cards', title: 'Cards', default: true,
+    key: 'cards', title: 'Cards', group: 'Answers', default: true,
     does: 'Claude draws interactive cards, and v draws one of the last answer.',
+    says: { on: 'Claude draws charts and tables as cards inside the answer; v draws one of the last answer.', off: 'No cards.' },
   },
   {
-    key: 'squeezeAnswers', title: 'Squeeze', default: true,
+    key: 'squeezeAnswers', title: 'Squeeze', group: 'Answers', default: true,
     does: 's makes an answer shorter or longer, or writes it for another reader. One rewrite each time you ask.',
+    says: { on: 's rewrites an answer shorter, plainer or longer; 0 brings back the original.', off: 'No squeeze.' },
   },
   {
-    key: 'catchUp', title: 'Catch-up', default: true,
+    key: 'catchUp', title: 'Catch-up', group: 'Answers', default: true,
     does: 'After replies to background work pile up, b sums them up in one short note, and 0 shows the replies again. One rewrite each time you ask.',
+    says: { on: 'b sums up the replies that came in while you were away.', off: 'No catch-up.' },
   },
   {
     key: 'explain', title: 'Explainers', group: 'Comments', default: true, lenses: ['explain'],
     does: 'Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.',
+    says: { on: 'Words you may not know get a short explainer; select any words and press e for one.', off: 'No explainers.' },
   },
   {
     key: 'details', title: 'Heads-ups', group: 'Comments', default: true, lenses: ['heads'],
     does: 'Marks a detail of an answer that is easy to miss and changes what it means; ] opens its heads-up. A small part of the call after each reply.',
+    says: { on: 'Words that may mislead get a heads-up.', off: 'No heads-ups.' },
   },
   {
-    key: 'claimsMode', title: 'Claims', default: 'on demand', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
+    key: 'claimsMode', title: 'Claims', group: 'Panes', default: 'on demand', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
     does: 'c opens what Claude and you claimed in the session, with why each holds and its sources. auto: the claims are extracted after each reply, the largest part of the call after it. on demand: f in the Claims pane extracts them, which spends fewer tokens. off: no Claims pane.',
     says: {
-      'auto': 'c opens the claims of the session. They are extracted after each reply, the largest part of the call after it.',
-      'on demand': 'c opens the Claims pane, and f there extracts the claims, which spends fewer tokens.',
-      'off': 'No Claims pane, and no claims on the bar.',
+      'auto': 'c lists the claims of the conversation with their evidence; they are extracted after each answer.',
+      'on demand': 'c lists the claims of the conversation with their evidence; press f in the pane to extract them, which spends fewer tokens.',
+      'off': 'No Claims pane.',
     },
   },
   {
-    key: 'labels', title: 'Labels', default: true,
+    key: 'labels', title: 'Labels', group: 'Panes', default: true,
     does: 'The bar counts the labels Claude made, and l opens them. No model call.',
+    says: { on: 'l opens the labels Claude made, with their values and records.', off: 'No Labels pane.' },
   },
   {
-    key: 'coverage', title: 'Coverage', default: true,
+    key: 'coverage', title: 'Coverage', group: 'Panes', default: true,
     does: 'The bar shows how much of the data Claude has read, and r opens it by folder. No model call: thimble counts the files after each turn.',
+    says: { on: 'r shows which files Claude has read, by folder.', off: 'No Coverage pane.' },
   },
 ]
 

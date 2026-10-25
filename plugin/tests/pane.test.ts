@@ -4,6 +4,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { keyedWords } from '../bar/bar'
 import { closePane, drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
+import { setOptions } from '../settings/features.mjs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -109,6 +110,38 @@ test('docked, the frame takes the pane\'s rows and a row past it, never shown; i
   const inline = await drawPane(s.$, { requestId: 'thimble', props: { bodyColumns: 70, placement: 'inline', scroll: { offset: 0, bodyRows: 24 } } }, await paneNow(s.$), els)
   expect(nodes(inline).some(n => n.props?.key === 'pane-frame')).toBe(false)
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(false)
+})
+
+test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below, and the ring lands on its choice set', async () => {
+  const s = setup()
+  const focused: Any[] = []
+  s.$.ui.focus = async (a: Any) => { focused.push(a.key); return {} }
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  await draw(s)
+  expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('cards')
+  await draw(s)
+  expect(await scrollPane(s.$, { by: -1, origin: { kind: 'person' } })).toBe(true)
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
+  expect(focused).toEqual(['mode-cards-on', 'mode-citations-auto cite'])
+  // the ring moving along the row picked (← →, tab) sets the choice it lands on; onto another row it lands on that
+  // row's choice set, picks that row and changes nothing
+  const set: Any[] = []
+  const rows: Record<string, unknown> = { citations: 'auto cite', claimsMode: 'on demand' }
+  s.$.config = {
+    list: async () => Object.entries(rows).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })),
+    set: async (e: Any) => { set.push(e); rows[String(e.key).split('.').pop()!] = e.value; return {} },
+  }
+  s.$.ui.toast = () => undefined
+  const went: Any[] = []
+  const next = async (e: Any) => { went.push(e.element); return {} }
+  await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-citations-manual', origin: { kind: 'person' } }, next)
+  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
+  await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-claimsMode-auto', origin: { kind: 'person' } }, next)
+  expect(set.length).toBe(1)
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('claimsMode')
+  expect(went).toEqual(['mode-citations-manual', 'mode-claimsMode-on demand'])
+  setOptions({})
 })
 
 test('a key a failure line names is a part of its own, so a click presses it; esc and a key with a modifier are not', async () => {

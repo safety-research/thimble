@@ -10,7 +10,7 @@ type Any = any
 
 const PANE = { plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'thimble settings', isFocused: true, bodyColumns: 80, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} } } as never
 
-test('/thimble-settings opens the switches; a press turns one off through Claude Code, and its items leave the preview', async ($, on) => {
+test('/thimble-settings opens the settings under their headings; a press on a choice sets it through Claude Code, and its items leave the preview', async ($, on) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   mock.clock(on, { now: 0 })
   const rows: Record<string, boolean> = { marks: true, cards: true, coverage: true, labels: true }
@@ -28,12 +28,16 @@ test('/thimble-settings opens the switches; a press turns one off through Claude
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   expect(opened[0]).toMatchObject({ id: 'thimble', focus: true, closeOnEscape: true })
   const pane = await $.ui.mount(PANE)
-  expect((await pane.find({ key: 'switch-coverage' }))?.text).toContain('on')
+  expect((await pane.find({ key: 'switch-coverage' }))?.text).toContain('Coverage')
+  for (const h of ['Settings', 'ANSWERS', 'COMMENTS', 'PANES', '↑↓ setting · ←→ choice']) expect(await pane.find({ type: 'Text', text: h })).toBeDefined()
+  // every row the same: its choices, and what the one set gives under them
+  expect((await pane.find({ key: 'sw-coverage' }))?.text).toMatch(/Coverage\s+on · off/)
+  expect((await pane.find({ key: 'says-coverage' }))?.text).toContain('which files Claude has read')
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeDefined()
 
-  await pane.press({ key: 'switch-coverage' })
+  await pane.press({ key: 'mode-coverage-off' })
   expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.coverage', value: false })])
-  expect((await pane.find({ key: 'switch-coverage' }))?.text).toContain('off')
+  expect((await pane.find({ key: 'says-coverage' }))?.text).toContain('No Coverage pane.')
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeUndefined()
   // Labels is a setting of its own: its item stays
   expect(await pane.find({ type: 'Text', text: /^ labels$/ })).toBeDefined()
@@ -58,21 +62,21 @@ test('Citations has four modes: auto cite by default, a press on one sets it, th
   const pane = await $.ui.mount(PANE)
   expect((await pane.find({ key: 'switch-citations' }))?.text).toContain('Citations')
   for (const mode of ['auto cite + verify', 'auto cite', 'manual', 'off']) expect(await pane.find({ key: `mode-citations-${mode}` })).toBeDefined()
-  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('checks a citation when you open it')
+  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('checked when you open it')
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^ claims$/ })).toBeDefined()
   await pane.press({ key: 'mode-citations-manual' })
   expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
-  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('press c to cite them')
+  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('select words and press c')
   // the bar's preview: c cite beside e explain, and the claims' item without its key, so c is named once
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^ claims$/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^claims$/ })).toBeDefined()
-  await pane.press({ key: 'switch-citations' })
-  expect(set[1]).toMatchObject({ key: 'thimble@inline.citations', value: 'off' })
-  await pane.press({ key: 'switch-citations' })
-  expect(set[2]).toMatchObject({ value: 'auto cite + verify' })
-  expect(rows.citations).toBe('auto cite + verify')
+  // the row picked is the first, marked; a click on a name picks its row, changing nothing (↑ ↓: tests/pane.test.ts)
+  expect((await pane.find({ key: 'sw-citations' }))?.text).toMatch(/^› Citations/)
+  await pane.press({ key: 'switch-claimsMode' })
+  expect((await pane.find({ key: 'sw-claimsMode' }))?.text).toMatch(/^› Claims/)
+  expect(set.length).toBe(1)
   await pane.unmount()
 })
 
