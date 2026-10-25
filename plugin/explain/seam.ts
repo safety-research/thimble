@@ -24,7 +24,8 @@
 //   explainKey($, key), explainBar     e at an empty prompt, `e explain` on the bar: an explainer of the words the
 //                                      analyst selected with the mouse ($.ui.selection, fullscreen layout only), on
 //                                      the answer they lie in, else the newest answer that holds them, opened in the
-//                                      tray; words that already are an explainer or a heads-up open that one
+//                                      tray. Words inside an explainer or a heads-up (or on it) open that one; words
+//                                      over or across marks get one explainer, whose mark covers those it overlaps
 //   registerExplain                    /explain <words>: the same for typed words, in any layout
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
@@ -49,7 +50,7 @@ import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { openTray } from '../tray/seam'
 import { askGloss } from './expand'
-import { anchorTerm, holds, markColors, mergeLook, placeGlosses, termOf } from './place.mjs'
+import { anchorTerm, holds, markColors, markHolding, mergeLook, placeGlosses, termOf } from './place.mjs'
 
 type Engine = EngineInterface
 
@@ -262,6 +263,8 @@ async function explainCommand($: Engine, args: string): Promise<{ text?: string 
   if (!words) return { text: 'Type the words to explain after /explain, as in /explain hit counter.' }
   const row = await rowHolding($, words)
   if (!row) return { text: 'No answer to explain words in yet: ask Claude something first.' }
+  const mark = await markOf($, row, words)
+  if (mark) { await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return {} }
   explainOpen($, row, words)
   return { text: `Writing an explainer of “${words}”. It opens under the answer when it is ready.` }
 }
@@ -284,15 +287,17 @@ export function pickedWords(text: string): { words: string; cut: boolean } {
   return { words: (at > PICK_MAX / 2 ? head.slice(0, at) : head.slice(0, PICK_MAX)).replace(quotes, '').replace(/[,;:]$/, ''), cut: true }
 }
 
-/** The explainer or heads-up on `row` whose words these are, if any. */
+/** The explainer or heads-up on `row` that the words stand inside, or on, as the row draws its marks now; null when
+ *  they stand outside every mark, or over or across one (a new explainer covers those: place.mjs placeGlosses). */
 async function markOf($: Engine, row: string, words: string): Promise<(Gloss & { id: string }) | null> {
   const part = await partOf<ExplainPart>($, row, 'explain').catch(() => null)
-  const t = normTerm(words)
-  for (const id of part?.order ?? Object.keys(part?.items ?? {})) {
-    const g = part?.items?.[id]
-    if (g && shown(g) && normTerm(g.term) === t) return { ...g, id }
-  }
-  return null
+  if (!part?.items) return null
+  const own = (await messageOf($, row))?.text ?? ''
+  const text = (await textView($, row, own)).text ?? own
+  const spans = await explainSpans($, row, text, []).catch(() => [] as Span[])
+  const host = markHolding(text, spans, words) as { id: string } | null
+  const g = host ? part.items[host.id] : null
+  return g ? { ...g, id: host!.id } : null
 }
 
 /** e, or a click on `e explain`: the words the analyst last selected with the mouse, explained in the tray, on the
