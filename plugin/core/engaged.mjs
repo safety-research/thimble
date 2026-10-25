@@ -66,5 +66,5 @@ export function commentsText(items, message = '') {
     return `- ${g.kind === 'heads' ? 'A heads-up' : 'An explainer'} on "${oneLine(g.term, 80)}": ${what}`
   })
   if (!lines.length) return ''
-  return [`thimble showed the analyst these comments${inMessage(message)}, each a highlight on its words that they read when they open it. They tell you what the analyst was told beside your answer; none of them asks anything of you.`, ...lines].join('\n')
+  return [`thimble showed the analyst these comments${inMessage(message)}, each a highlight on its words that they read when they open it. They tell you what the analyst was told beside your answer, so saying it again in your next reply would tell them twice; none of them asks anything of you.`, ...lines].join('\n')
 }

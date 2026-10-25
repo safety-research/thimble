@@ -70,6 +70,7 @@ test('the explainers and heads-ups shown on a message, in words Claude reads: ea
   ], 'Refunds fell 40% in March.')
   assert.match(t, /^thimble showed the analyst these comments in your message that begins "Refunds fell 40% in March\."/)
   assert.match(t, /none of them asks anything of you/)
+  assert.match(t, /would tell them twice/)
   assert.match(t, /\n- A heads-up on "fell 40%": Most of the drop is the short month \[The file ends on Mar 14\]\(refunds\.csv\)\. Per day, refunds fell 12%\./)
   assert.match(t, /\n- An explainer on "chargeback": A refund the bank takes back\. \[Ticket 4471\]\(t\.jsonl#L88\) is one\.$/)
   assert.equal(commentsText([], 'x'), '')
