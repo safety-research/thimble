@@ -14,7 +14,7 @@
 //   store.ts     each card in $.state and on disk, for a resumed session
 //
 // With the Cards switch off (featureOn('cards')), no tool is registered and nothing is drawn.
-import type { Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { askOnce } from '../core/rowhook'
@@ -22,7 +22,8 @@ import { cut } from '../core/text.js'
 import { featureOn } from '../settings/features.mjs'
 import { sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
 import { cardOfKey, cardPost, clientFault, firstWaits, frame, framesUnder, noteRun, noteShown, noteViewport, runFolded } from './draw'
-import { callOf, cardIdOf, metaOf, restoreCards } from './store'
+import { cardRef } from '../marks/message.js'
+import { callOf, cardIdOf, metaOf, restoreCards, saveMeta } from './store'
 import { cardCall, registerCardTool } from './tool'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -69,7 +70,7 @@ export const registerCards: Register = on => {
     const meta = await metaOf($, id)
     const own = e.props.isExpanded ? await next(e) : await next({ ...e, props: { ...e.props, input: { title: String(input.title || meta?.title || ''), ...(input.data ? { data: String(input.data) } : {}) } } })
     if (!meta || meta.version < 1) return own
-    if (meta.anchorRow || meta.toolUseId !== e.props.tool_use_id) return own
+    if (meta.anchorRow || meta.inRow || meta.toolUseId !== e.props.tool_use_id) return own
     // drawn once the run of calls above has folded (draw.ts firstWaits), so the card does not jump up
     if (await firstWaits($, meta)) return own
     const E = $.ui.resolve(e) as Any
@@ -104,7 +105,7 @@ export const registerCards: Register = on => {
     const meta = id ? await metaOf($, id) : null
     const call = meta?.calls[e.props.tool_use_id]
     if (!meta || !call) return next(e)
-    const away = meta.anchorRow || meta.toolUseId !== e.props.tool_use_id
+    const away = meta.anchorRow || meta.inRow || meta.toolUseId !== e.props.tool_use_id
     // the card stands at a later call when the screen could not draw it again in its place (canRedraw)
     const order = Object.keys(meta.calls)
     const below = !meta.anchorRow && order.indexOf(meta.toolUseId) > order.indexOf(e.props.tool_use_id)
@@ -115,10 +116,29 @@ export const registerCards: Register = on => {
       ? `did not draw: ${call.down ? call.error : cut(call.error, 160)} · Claude got the error`
       : !away
         ? `${meta.read} from ${meta.file.split('/').pop()}`
-        : below
+        : meta.inRow && !meta.anchorRow
+          ? `↓ version ${call.version} · “${cut(meta.title, 60)}” is drawn in the answer${now}`
+          : below
           ? `↓ version ${call.version} · “${cut(meta.title, 60)}” is drawn further down${now}`
           : `↑ version ${call.version} · “${cut(meta.title, 60)}” is drawn in its place ${meta.anchorRow ? 'under the answer v was pressed on' : 'above'}${now}`
     return next({ ...e, props: { ...e.props, output: line } })
+  }).catch(($, e, next) => next(e))
+
+  // a text row of main's that places cards on lines of their own (marks/message.js cardRef): each card draws there, and
+  // no longer under its call
+  on('session.append', { door: 'response' }, async ($, e, next) => {
+    const stored = await next(e)
+    try {
+      const msg = e.message as { type?: string; content?: unknown }
+      if (e.agentId !== undefined || msg.type !== 'assistant' || !featureOn('cards')) return stored
+      const blocks = Array.isArray(msg.content) ? (msg.content as { type?: string; text?: string }[]) : []
+      const text = blocks.filter(b => b.type === 'text').map(b => String(b.text || '')).join('\n')
+      const row = String(stored?.uuid || e.uuid || '')
+      if (row && text) await placeInRow($, row, text)
+    } catch {
+      // the row is stored whatever the cards make of it
+    }
+    return stored
   }).catch(($, e, next) => next(e))
 
   // the cards the designer fork drew under this answer, below it (outside the marks' drawing of the answer)
@@ -147,4 +167,13 @@ export const registerCards: Register = on => {
     await clientFault($, String(e.element), String(e.reason ?? ''))
     return next(e)
   }).catch(($, e, next) => next(e))
+}
+
+/** The cards a text row of main's places on lines of their own: each draws in that row from now on. */
+async function placeInRow($: EngineInterface, row: string, text: string): Promise<void> {
+  for (const line of text.split('\n')) {
+    const id = cardRef(line)
+    const meta = id ? await metaOf($, id) : null
+    if (meta && meta.version > 0 && !meta.anchorRow && meta.inRow !== row) await saveMeta($, { ...meta, inRow: row })
+  }
 }

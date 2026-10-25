@@ -40,6 +40,7 @@ import { askCell, quiet } from '../core/askcell.js'
 import { cut } from '../core/text.js'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
+import { cardRef } from '../marks/message.js'
 import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
@@ -395,7 +396,7 @@ export async function cardText($: Engine, id: string): Promise<string> {
 export async function revealCard($: Engine, id: string, block: 'start' | 'nearest' = 'nearest'): Promise<void> {
   const meta = await metaOf($, id)
   if (!meta || meta.version < 1) return
-  const row = meta.anchorRow ?? meta.toolUseId
+  const row = meta.anchorRow ?? meta.inRow ?? meta.toolUseId
   try {
     void Promise.resolve($.ui.scroll({ to: { requestId: row }, block: meta.anchorRow && block === 'start' ? 'end' : block })).catch(() => undefined)
   } catch { /* nothing moves */ }
@@ -412,6 +413,29 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
   if (metas.length) noteShown($, metas.map(m => m.id), e.props?.onScreen)
   const out: Any[] = []
   for (const meta of metas) out.push(await frame($, e, meta))
+  return out
+}
+
+/** The frames of the cards a reply's text places on lines of their own (marks/message.js cardRef), by id: main's cards
+ *  that have drawn. The marks' drawing of the reply draws each on its line (marks/view.ts messageEl). */
+export async function framesIn($: Engine, e: Any, text: string): Promise<Record<string, Any>> {
+  const out: Record<string, Any> = {}
+  const drawn: string[] = []
+  for (const line of String(text ?? '').split('\n')) {
+    const id = cardRef(line)
+    if (!id || out[id]) continue
+    const meta = await metaOf($, id)
+    if (!meta || meta.version < 1 || meta.anchorRow) continue
+    // a card stands in one place: the newest row that placed it; an earlier one shows a line that points there
+    if (meta.inRow && meta.inRow !== e.requestId) {
+      const E = $.ui.resolve(e) as Any
+      out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” is drawn further down` })] })
+      continue
+    }
+    out[id] = await frame($, e, meta)
+    drawn.push(id)
+  }
+  if (drawn.length) noteShown($, drawn, e.props?.onScreen)
   return out
 }
 
