@@ -1,7 +1,9 @@
 // expand.ts: an explainer of words the analyst picked in an answer (a citation's words in a pane, /explain), written on
-// demand. One side call (the registry's `explain-expand` prompt) reads the words, the person's question, the answer as
-// the person reads it, and the lines of the files the answer points to, and writes a body and a "where it mattered"
-// sentence with links to those lines. The message's part `explain` keeps it as it keeps the look's explainers.
+// demand. One fork of the conversation (the registry's `explain-expand` prompt), as the look's explainers are written,
+// so it reads the records main read; it is told the words, the person's question, the answer as the person reads it,
+// and the lines of the files the answer points to, and writes a body and a "where it mattered" sentence with links to
+// those lines. With no conversation to fork (after /clear), one side call reads the same without the records. The
+// message's part `explain` keeps it as it keeps the look's explainers.
 //
 // The files: the places the checker's evidence found for the answer's citations (marks/store.ts MarkItem.evidence),
 // then the files the answer links to. placeLines reads the lines an explainer's link points to, for the tray.
@@ -29,7 +31,7 @@ const str = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0
 
 type Place = { path: string; from: number | null; to: number | null }
 
-/** The lines of the files at `places`, numbered, as the call reads them; at most FILES_BUDGET. */
+/** The lines of the files at `places`, numbered, as the call reads them; at most FILES_BUDGET; '' when none. */
 async function citedFiles($: Engine, places: Place[], roots: string[]): Promise<string> {
   const out: string[] = []
   let used = 0
@@ -52,7 +54,7 @@ async function citedFiles($: Engine, places: Place[], roots: string[]): Promise<
     out.push(piece)
     used += piece.length
   }
-  return out.join('\n\n') || '(no file the explainer cites could be read)'
+  return out.join('\n\n')
 }
 
 const PLACE_LINES = 12 // lines the tray shows of a place an explainer cites
@@ -94,8 +96,8 @@ async function evidencePlaces($: Engine, row: string): Promise<Place[]> {
   return out
 }
 
-/** One side call of the `explain-expand` prompt: the words, the question, the answer they stand in and the files it
- *  cites. {body, here} once written, else a sentence that says why not. */
+/** The `explain-expand` prompt over the conversation (a fork), else in a side call: the words, the question, the
+ *  answer they stand in and the files it cites. {body, here} once written, else a sentence that says why not. */
 async function writeExplainer($: Engine, row: string, term: string): Promise<{ body: string; here: string } | string> {
   const msg = await messageOf($, row)
   if (!msg) return 'That answer is not in this session any more.'
@@ -104,6 +106,7 @@ async function writeExplainer($: Engine, row: string, term: string): Promise<{ b
   const places = [...(await evidencePlaces($, row)), ...filePlaces(answer)]
   const question = await questionOf($, row).catch(() => '')
   const system = await promptText($, 'explain-expand')
+  const files = await citedFiles($, places, roots)
   const prompt = [
     `The term: ${term}`,
     '',
@@ -111,14 +114,16 @@ async function writeExplainer($: Engine, row: string, term: string): Promise<{ b
     '',
     'The answer the term stands in:',
     '<answer>', answer.slice(0, 12000), '</answer>',
-    '',
-    'The files the answer cites, with their line numbers:',
-    await citedFiles($, places, roots),
+    ...(files ? ['', 'The files the answer cites, with their line numbers:', files] : []),
   ].join('\n')
   const req = { model: 'opus', maxTokens: 6000, timeoutMs: 120000, system: [{ text: system, cache: true }], prompt }
   let r: Any
   try {
-    r = await tracked($, { feature: 'explain', prompt: 'explain-expand', doing: 'writing an explainer you asked for', model: req.model, extra: { row, term } }, () => $.model.complete(req as Any))
+    r = await tracked($, { feature: 'explain', prompt: 'explain-expand', doing: 'writing an explainer you asked for', model: req.model, extra: { row, term } }, async () => {
+      // the conversation, as the look reads it: the records main read are in it
+      const f: Any = await $.model.fork({ prompt: `${system}\n\n${prompt}` })
+      return f?.reason === 'nothing-to-fork' ? $.model.complete(req as Any) : f
+    })
   } catch (err) {
     r = { isAnswered: false, reason: 'refused', error: String((err as Error)?.message || err).slice(0, 300) }
   }
