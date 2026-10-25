@@ -14,6 +14,9 @@ import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
+import { readText, withAsked } from '../marks/message.js'
+import { rowMarks } from '../marks/store'
+import { placeOf, whereBar, whereKey, whereWords } from '../marks/where'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
@@ -341,4 +344,48 @@ test('selected words inside a mark open it; words over or across marks get one e
   await settle()
   expect(s.calls.length).toBe(2)
   expect((await spansFor(s.$, 't1-row', ANSWER, [])).map(x => [x.id, ANSWER.slice(x.start, x.end)])).toEqual([['a1', 'retry budget runs out'], ['a2', 'came 30 seconds']])
+})
+
+// ------------------------------------------------------------------------------------------------ w: where from
+
+test('with Citations manual, w makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; only then does the bar name w', async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const plain = 'Uploads fail after the retry budget runs out: **41 of the 44** failures came 30 seconds after a drop.'
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: plain })
+    expect((await whereBar(s.$, k => k === 'where', false)).map(x => `${x.key} ${x.words}`)).toEqual(['w where from'])
+    s.$.ui.selection = async () => ({ text: '41 of the 44 failures', requestId: 't1-row' })
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const take = await whereKey(s.$, 'w', 0)
+    await take!.later!()
+    await settle()
+    const item = (await rowMarks(s.$, 't1-row'))!.items[0]!
+    expect(item).toMatchObject({ n: 1, row: 't1-row', words: '41 of the 44 failures', asked: true, sentence: expect.stringContaining('[41 of the 44 failures]') })
+    expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'citation', n: 1 })
+    // the answer reads the words as a citation; squeeze and the claims read them as plain words
+    expect(withAsked(plain, [item]).text).toContain('out: [41 of the 44 failures](#) came')
+    expect(readText(plain, [item])).toBe(plain.replace('**41 of the 44** failures', '41 of the 44 failures'))
+    // the same words again open the same citation; words that are not in the answer say so
+    await whereWords(s.$, 't1-row', '41 of the 44')
+    expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
+    expect(await whereWords(s.$, 't1-row', 'not in this answer')).toContain('is not in the answer as Claude wrote it')
+    // nothing selected: a hint, and nothing is made
+    s.$.ui.selection = async () => undefined
+    await (await whereKey(s.$, 'w', 0))!.later!()
+    expect(String((await failLineNow(s.$))?.text)).toBe('Select words in an answer with the mouse first, then press w to find where they come from.')
+    // in any other mode, w is typed and the bar does not name it
+    setOptions({ citations: 'auto cite' })
+    expect(await whereKey(s.$, 'w', 0)).toBe(null)
+  } finally {
+    setOptions({})
+  }
+})
+
+test('placeOf finds the words as the analyst read them in the text Claude wrote, across its emphasis, on one line', () => {
+  expect(placeOf('A **bold claim** here.', 'bold claim here')).toEqual({ start: 2, end: 21 })
+  expect(placeOf('A **bold claim** here.', 'bold claim')).toEqual({ start: 4, end: 14 })
+  expect(placeOf('one  two three', 'one two')).toEqual({ start: 0, end: 8 })
+  expect(placeOf('one\ntwo three', 'one two')).toBe(null)
+  expect(placeOf('nothing', 'else')).toBe(null)
 })

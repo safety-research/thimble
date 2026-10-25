@@ -3,9 +3,9 @@
 // then the switches, each named by what the person gets; a group's (Comments: Explainers, Heads-ups) under its
 // heading, indented. ↵ on a switch or a click
 // turns it on or off through Claude Code (settings/term.ts settingsAction), which keeps the value and loads the plugin
-// again with it; the pane and the bar draw the change at once. A feature with modes (Citation checks) names them after
-// its title, the one set in bold: a click on one sets it, ↵ on the row goes to the next. Tab walks the switches, esc
-// closes the pane.
+// again with it; the pane and the bar draw the change at once. A feature with modes (Citations) names them after its
+// title, the one set in bold: a click on one sets it, ↵ on the row goes to the next; a dim line under the row says what
+// the mode set gives (its `says`). Tab walks the switches, esc closes the pane.
 import type { EngineInterface } from 'claude-code'
 
 import { barRows } from '../bar/bar'
@@ -32,6 +32,7 @@ export async function drawSettings($: EngineInterface, e: Any, _args: unknown, e
     const on = typeof v === 'string' ? v !== 'off' : !!v
     const choices: string[] = (s as { choices?: string[] }).choices ?? []
     const group = (s as { group?: string }).group
+    const says = (s as { says?: Record<string, string> }).says
     const opens = group && (SWITCHES[i - 1] as { group?: string } | undefined)?.group !== group
     const head = opens ? [Box({ key: `group-${group}`, marginTop: 1, children: [Text({ bold: true, children: group })] })] : []
     // a feature with modes: each mode after the title, the one set in bold, each a press that sets it
@@ -48,7 +49,9 @@ export async function drawSettings($: EngineInterface, e: Any, _args: unknown, e
         Text({ key: 'title', ...(on ? { bold: true } : { dimColor: true }), children: s.title }),
       ] }),
       ...(modes.length ? [Text({ key: 'gap', children: '   ' }), ...modes] : []),
-    ] })]
+    ] }),
+    // what the mode set gives, under its row
+    ...(says?.[v as string] ? [Box({ key: `says-${s.key}`, marginLeft: IN + (group ? 2 : 0), width: width - IN - (group ? 2 : 0), children: [Text({ dimColor: true, children: says[v as string] })] })] : [])]
   })
   return Box({ flexDirection: 'column', width, children: [
     Box({ key: 'preview', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1, width, children: bar }),

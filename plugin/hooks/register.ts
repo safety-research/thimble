@@ -23,6 +23,7 @@
 //   cards       ../cards/register.ts    the card tool, its runner and its drawing
 //   marks       ../marks/register.ts    the reply's marks, their checker and their evidence; the answer's words as the
 //                                       features show them
+//   where       ../marks/where.ts       /where: where typed words of an answer come from (Citations manual; w too)
 //   labels      ../labels/register.ts   a --prompt label's model reads; the person's checks
 //   labeluse    ../labels/use.ts        the labels an answer or a card used; the ask before a large label run
 //   observer    ../observer/observer.ts one look at each answer, for the explainers, important details and claims
@@ -52,6 +53,7 @@ import { registerGuidance } from '../guidance/guidance'
 import { registerLabels } from '../labels/register'
 import { registerLabelUse } from '../labels/use'
 import { registerMarks } from '../marks/register'
+import { registerWhere } from '../marks/where'
 import { registerObserver } from '../observer/observer'
 import { registerPrompts } from '../prompts/prompts'
 import { registerSettings } from '../settings/term'
@@ -81,6 +83,7 @@ export const register: Register = (on, options) => {
   registerAnswerView(on, options)
   registerCards(on, options)
   registerMarks(on, options)
+  registerWhere(on, options)
   registerLabels(on, options)
   registerLabelUse(on, options)
   registerObserver(on, options)

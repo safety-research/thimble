@@ -17,8 +17,9 @@ import { tempRun } from './stubs'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-// these tests check each reply's citations after the reply (Citation checks: auto); the on-demand test sets its own
-setOptions({ citationChecks: 'auto' })
+// these tests check each reply's citations after the reply (Citations: auto cite + check); the tests of the other modes
+// set their own
+setOptions({ citations: 'auto cite + check' })
 
 const FORK = 'a0f0e0d0c0b0a0901'
 const REPLY = 'Of the [40](#) pull requests, agent-07 merged [15 of 40](#).\n\nIt said ["ship it"](#).'
@@ -452,7 +453,7 @@ test("a repair that cannot start leaves the citation failed and says why, with x
   expect(String((await failLineNow($))?.text)).toContain('The repair did not start (made-up: no agents now). Press x on the citation to try again.')
 })
 
-test('with Citation checks on demand, the default, the reply\'s citations wait unchecked; opening one checks it alone', async () => {
+test('with Citations auto cite, the default, the reply\'s citations wait unchecked; opening one checks it alone', async () => {
   setOptions({})
   try {
     const { $, seen } = engine(VALIDATED)
@@ -477,22 +478,22 @@ test('with Citation checks on demand, the default, the reply\'s citations wait u
     await checkOpened($, 'row-1', 2)
     expect(seen.spawned.length).toBe(1)
   } finally {
-    setOptions({ citationChecks: 'auto' })
+    setOptions({ citations: 'auto cite + check' })
   }
 })
 
-test('with Citation checks off, the reply\'s citations wait unchecked, and opening one checks nothing', async () => {
-  setOptions({ citationChecks: 'off' })
-  try {
-    const { $, seen } = engine(VALIDATED)
-    await noteRow($, 'row-1', REPLY)
-    await startCheck($, { turnId: 't-1', reason: 'answer' })
-    expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'deferred', 'deferred'])
-    await checkOpened($, 'row-1', 2)
-    expect(seen.spawned.length).toBe(0)
-    expect(await drawn($)).toContain('merged 15 of 40.')
-  } finally {
-    setOptions({ citationChecks: 'auto' })
+test('with Citations manual or off, Claude\'s reply keeps no citations and nothing is checked', async () => {
+  for (const mode of ['manual', 'off']) {
+    setOptions({ citations: mode })
+    try {
+      const { $, seen } = engine(VALIDATED)
+      await noteRow($, 'row-1', REPLY)
+      await startCheck($, { turnId: 't-1', reason: 'answer' })
+      expect(await rowMarks($, 'row-1')).toBe(null)
+      expect(seen.spawned.length).toBe(0)
+    } finally {
+      setOptions({ citations: 'auto cite + check' })
+    }
   }
 })
 

@@ -1,6 +1,6 @@
 // pane.tsx: the Claims pane (core/pane.ts kind `claims`), drawn with Claude Code's own elements from what graph.js lays
 // out: at rest the head (how many claims) and the line that finds the claims of the answers not read yet (f, a press
-// the observer's ui.press hook takes: claims are found on demand unless Claims found is auto), the overview of clusters
+// the observer's ui.press hook takes: claims are found on demand unless Extract claims is auto), the overview of clusters
 // on top (the map, or one row per cluster when the map would be too crowded), and with a cluster chosen its claims one
 // line each under it; a claim picked takes the whole pane: its cluster, the claim, its description and its citations as
 // the tray's cards. The keys at the bottom. A click is the main way to move: a cluster's name chooses the cluster, a dot

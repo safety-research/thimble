@@ -73,6 +73,59 @@ export function marksIn(text) {
   return out
 }
 
+/** Words of a text as the analyst read them: without the markdown emphasis between them (`**`, `*`, `` ` ``). */
+export function askedWords(raw) {
+  return String(raw ?? '').replace(/\*\*|\*|`/g, '')
+}
+
+/**
+ * The text with the words the analyst asked about written as marks (`[words](#)`), and the row's marks in the order
+ * the text's marks then stand, so the k-th mark of the text is the k-th of `items`, as for Claude's own marks
+ * (rewritesIn, withCorrections, the looks). An asked mark (store.ts MarkItem `asked`) gives its words' place in the text
+ * as Claude wrote it (`start`, `end`), and its words as the analyst read them there (askedWords: without emphasis),
+ * which the mark is written with; one whose words no longer stand there, that lies in code or across a mark, or whose
+ * words hold a bracket, is left out of the text and of the order.
+ */
+export function withAsked(text, items) {
+  const s = String(text ?? '')
+  const all = Array.isArray(items) ? items : []
+  const asked = all.filter(it => it?.asked)
+  if (!asked.length) return { text: s, items: all }
+  const own = all.filter(it => !it?.asked)
+  const marks = marksIn(s)
+  const code = codeRanges(s)
+  const over = (a, b, x, y) => a < y && b > x
+  const placed = []
+  for (const it of [...asked].sort((x, y) => x.start - y.start)) {
+    const [a, b] = [it.start, it.end]
+    if (!(b > a) || askedWords(s.slice(a, b)) !== it.words || /[[\]\n]/.test(it.words)) continue
+    if (code.some(([x, y]) => over(a, b, x, y)) || marks.some(m => over(a, b, m.start, m.end)) || placed.some(p => over(a, b, p.start, p.end))) continue
+    placed.push(it)
+  }
+  let out = s
+  for (const it of [...placed].reverse()) out = out.slice(0, it.start) + `[${it.words}](#)` + out.slice(it.end)
+  const order = [...marks.map((m, k) => ({ at: m.start, it: own[k] })), ...placed.map(it => ({ at: it.start, it }))].sort((x, y) => x.at - y.at)
+  // a text whose marks would not read back as these leaves the asked words out
+  if (marksIn(out).length !== order.length) return { text: s, items: own }
+  return { text: out, items: order.map(o => o.it) }
+}
+
+/**
+ * A message as the person reads it: each sentence a check rewrote in place of Claude's (rewritesIn), and each
+ * corrected citation's words in place of its own (withCorrections), the words the analyst asked about among them
+ * (withAsked), which then read as plain words again: Claude did not cite them.
+ */
+export function readText(text, items) {
+  const a = withAsked(text, items)
+  const s = withCorrections(rewritesIn(a.text, a.items).text, a.items)
+  const ms = marksIn(s)
+  if (ms.length !== a.items.length) return s
+  let out = ''
+  let at = 0
+  ms.forEach((m, k) => { if (a.items[k]?.asked) { out += s.slice(at, m.start) + m.words; at = m.end } })
+  return out + s.slice(at)
+}
+
 /** The text with each mark as its words alone. */
 export function withoutMarks(text) {
   const s = String(text ?? '')

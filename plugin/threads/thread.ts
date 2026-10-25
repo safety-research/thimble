@@ -41,6 +41,7 @@ import { tellAtNextPrompt } from '../core/tell'
 import { checkAnswer } from '../marks/checker'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
+import { claudeCites } from '../settings/features.mjs'
 import { fieldSettled, fieldShown } from './pane'
 import type { ThreadScope } from './seam'
 import { aboutOf, answerRow, cardPart, display, firstMessage, forkDirective, nextMessage, partAbout, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
@@ -61,6 +62,13 @@ const THREAD = { plugin: 'thimble', key: 'thread' } as const
 const GEN = { plugin: 'thimble', key: 'threadsGen' } as const
 const EARLIER_CHARS = 3000
 const DETAIL_CHARS = 3000
+
+/** thread.md as a thread gets it: while Claude does not cite (Citations manual or off), without its paragraph on
+ *  citing, and its example's citations as plain words. */
+export function threadGuide(text: string, cites: boolean): string {
+  if (cites) return text
+  return text.split('\n\n').filter(p => !p.startsWith('**Cite ')).join('\n\n').replace(/\[([^\]\n]*)\]\(#\)/g, '$1')
+}
 
 // the module's memory: this conversation's threads by key, and which agent is whose
 const threads = new Map<string, Thread>()
@@ -265,7 +273,7 @@ export async function askThread($: Engine, ask: { text: string; scope: ThreadSco
       const earlier = was.turns.map(x => `${x.role === 'person' ? 'Q' : 'A'}: ${x.text}`).join('\n').slice(-EARLIER_CHARS)
       sent = firstMessage({ text, scope, detail: await detailOf($, scope), root }) + (earlier ? `\n\nEarlier in this thread:\n${earlier}` : '')
       const description = `thread · ${aboutOf(scope)}`.slice(0, 60)
-      const guide = await promptText($, 'thread').catch(() => '')
+      const guide = threadGuide(await promptText($, 'thread').catch(() => ''), claudeCites())
       let r = await spawnFork($, { kind: 'thread', prompt: forkDirective(guide, sent), description })
       if (r.deny !== undefined) {
         // where no fork starts, the thread's own type

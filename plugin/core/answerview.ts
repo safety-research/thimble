@@ -13,7 +13,8 @@
 //                                         margin asks: a side thread about it)
 //   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the
 //                                         band has left over the bar
-//   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`)
+//   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`,
+//                                         `w where from`)
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
 //                                         no card may take
 //   core/pane.ts       the side pane      the kinds `claims`, `threads` and `thread` (the seams' draws)
@@ -27,6 +28,7 @@ import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
 import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
+import { WHERE_KEYS, whereBar, whereKey } from '../marks/where'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
@@ -61,7 +63,7 @@ export type MarkRef = { row: string; kind: 'citation'; n: number } | { row: stri
  *  import modules that come back here through the card tool, so a list made as this module loads could read a seam's
  *  keys before its module set them.) */
 export function restoredKeys(): string[] {
-  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...WHERE_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
 }
 
 const safe = async <T>(p: Promise<T>, none: T): Promise<T> => {
@@ -168,7 +170,7 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
   .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}) } : x))
 
-/** The features' items at the bar's left, after v: the tray's steps, s, e, then c. While an item of
+/** The features' items at the bar's left, after v: the tray's steps, s, e, w, then c. While an item of
  *  what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
@@ -178,6 +180,7 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
     ...tray,
     ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => !(holds && x.focus)),
     ...items(await safe(explainBar($, on, preview), []), preview),
+    ...items(await safe(whereBar($, on, preview), []), preview),
     ...items(await safe(claimsBar($, on, preview), []), preview),
   ]
 }
@@ -199,6 +202,7 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
+    ?? (await safe(whereKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
 }

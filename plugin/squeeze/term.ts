@@ -32,7 +32,7 @@ import { keptDir } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
 import { modelWhy } from '../core/why.js'
 import type { ExplainPart } from '../explain/seam'
-import { rewritesIn, withCorrections } from '../marks/message.js'
+import { readText } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
@@ -185,7 +185,7 @@ async function done($: Engine, id: string, gen: number): Promise<void> {
 async function asRead($: Engine, row: string, text: string): Promise<string> {
   const items = (await rowMarks($, row))?.items ?? []
   if (!items.some(it => it.status === 'corrected')) return text
-  return withCorrections(rewritesIn(text, items).text, items)
+  return readText(text, items)
 }
 
 /** The original a record's rewrite starts from: its message as the person reads it (asRead), or, for a catch-up, each
