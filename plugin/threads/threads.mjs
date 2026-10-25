@@ -64,12 +64,14 @@ export function partWords(part = '') {
 }
 
 /** The part of a card a click on one of its runs of words is about (client.tsx): the run, with the row it stands in
- *  when the row says more (a label among numbers); the row alone for a run with no words of its own (a bar). */
+ *  when the row says more (a number among others); the row alone for a run with no words of its own (a bar), or for
+ *  the run the row starts with (its label), which would read twice. */
 export function elementPart(text = '', line = '') {
   const t = String(text).replace(/\s{3,}/g, '  ').trim()
   const l = String(line).replace(/\s{3,}/g, '  ').trim()
   if (!partWords(t)) return l
-  return !l || partWords(t) === partWords(l) ? t : `${t} — ${l}`
+  if (!l || partWords(t) === partWords(l)) return t
+  return `${partWords(l)} `.startsWith(`${partWords(t)} `) ? l : `${t} — ${l}`
 }
 
 /** What a thread on a part of a card is about: the part's words, then the card's `about`. */

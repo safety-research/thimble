@@ -230,7 +230,10 @@ test('a look that fails leaves a gap the pane names; c opens the pane: the map o
   expect(pt).toContain('Run 4 failed on the p95 check.')
   expect(pt).not.toContain('╭─')
   expect(pt).not.toContain('Run 9 failed on a timeout')
-  expect(keysOf(picked)).toEqual([['e', 'show evidence (1 citation)'], ['k', 'previous claim'], ['j', 'next claim']])
+  // every key in the one row above the input, the last of the pane's rows; the evidence line in the detail a click
+  expect(keysOf(picked)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'show evidence']])
+  expect((picked as Any).props.children.at(-1).props.key).toBe('keys')
+  expect(buttons(picked).some(b => !b.hotkey && /:evidence$/.test(b.key) && b.label === 'show evidence (1 citation)')).toBe(true)
   await buttons(picked).find(b => b.hotkey === 'e').onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c1', open: true, cite: 0 })
   // its citation as the tray's card in a frame; its reply has no check in the store: it did not run, so the citation
@@ -241,7 +244,7 @@ test('a look that fails leaves a gap the pane names; c opens the pane: the map o
   expect(st).toContain('The check did not run.')
   expect(buttons(shown).some(b => /^p\d+:ev:0$/.test(b.key) && textOf(b.children).includes('p95 check'))).toBe(true)
   // one citation: k j still the claims; e hides it, back to the claim
-  expect(keysOf(shown)).toEqual([['e', 'hide evidence'], ['k', 'previous claim'], ['j', 'next claim']])
+  expect(keysOf(shown)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'hide evidence']])
   await buttons(shown).find(b => b.hotkey === 'e').onPress()
   expect(paneNow(s).args.open).toBeUndefined()
   await buttons(picked).find(b => b.hotkey === 'j').onPress()
@@ -287,16 +290,16 @@ test('a claim with several citations: e shows them; k j make the next one curren
   expect(textOf(pane)).toContain(`show evidence (${n} citations)`)
   // its evidence shown: k j the citation before or after the current one
   const open = await draw({ claim: 'c1', open: true })
-  expect(keysOf(open).slice(0, 3)).toEqual([['e', 'hide evidence'], ['k', 'previous citation'], ['j', 'next citation']])
+  expect(keysOf(open).slice(0, 3)).toEqual([['k', 'previous citation'], ['j', 'next citation'], ['e', 'hide evidence']])
   await buttons(open).find(b => b.hotkey === 'j').onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c1', open: true, cite: 1 })
   // a short pane: one frame, the current citation whole and the others one line each, a press that makes it current
-  const short = await draw({ claim: 'c1', open: true, cite: 1 }, 18)
+  const short = await draw({ claim: 'c1', open: true, cite: 1 }, 19)
   const lines = buttons(short).filter(b => /:at:\d+$/.test(b.key))
   expect(lines.length).toBe(n - 1)
   await lines[0].onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c1', open: true, cite: 0 })
-  expect(treeRows(short, 60)).toBeLessThanOrEqual(18)
+  expect(treeRows(short, 60)).toBeLessThanOrEqual(19)
   expect(textOf(short)).toContain('├')
   // a detail that fits: no d u; one taller than its room: d u scroll it, the cluster staying on top
   expect(keysOf(pane).map(k => k[0])).not.toContain('d')

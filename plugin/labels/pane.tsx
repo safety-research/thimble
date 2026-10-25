@@ -153,9 +153,18 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
   // the rows this drawing has: the pane's, less the side thread's under it (threads/pane.tsx)
   const room = Math.max(12, H - (await rowsUnder($, e, 'labels', a).catch(() => 5)))
   const topOf = (c: Any) => ledgerTop(list, c, { w: W, rows: room - 4 })
-  /** The examples a value's page holds: the rows under the labels with that value open, less the examples' head. */
-  const perOf = (c: Any) => Math.max(3, room - 4 - topOf(c).rows.length - 1)
   const chosen = chosenOf(list, a) as { lab: Any; value: string } | null
+  // b only where esc does not already go back to all the labels (the pane under this one on the trail is their list)
+  const under = (await paneNow($).catch(() => null))?.trail?.at(-1)
+  const escToList = under?.kind === 'labels' && !(under.args as LabelsArgs | undefined)?.label
+  const back = !!chosen && list.length > 1 && !escToList
+  // the keys' rows at the bottom (their rule and the words, wrapped), kept free of the examples so they stay above
+  // the input: p n k j, d with a value open, b
+  const keyWords = [...(valueOrder(list).length ? ['previous', 'next value', 'previous', 'next example'] : []), ...(chosen ? [a.def ? 'examples' : 'definition'] : []), ...(back ? ['all labels'] : [])]
+  const keyRows = keyWords.length ? 1 + Math.ceil(keyWords.reduce((s, w, i) => s + (i ? 3 : 0) + 3 + textWidth(w), 0) / W) : 0
+  /** The examples a value's page holds: the rows under the labels with that value open, less the pane's head and its
+   *  gap, the detail's switch, the examples' head and the keys. */
+  const perOf = (c: Any) => Math.max(1, room - 4 - topOf(c).rows.length - 1 - keyRows)
   const top = topOf(chosen)
   const label = chosen ? String(chosen.lab.name) : null
   const value = chosen?.value ?? null
@@ -249,11 +258,7 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
     return undefined
   }
 
-  // ---- the pane: the head, the labels, the detail's switch and the detail, the keys at the bottom. b only where esc
-  // does not already go back to all the labels (the pane under this one on the trail is their list)
-  const under = (await paneNow($).catch(() => null))?.trail?.at(-1)
-  const escToList = under?.kind === 'labels' && !(under.args as LabelsArgs | undefined)?.label
-  const back = chosen && list.length > 1 && !escToList
+  // ---- the pane: the head, the labels, the detail's switch and the detail, the keys at the bottom
   const headRow = Box({ key: 'head', flexDirection: 'row', children: [
     rowEl(els, top.head as Run[], 'head-words', press),
   ] })

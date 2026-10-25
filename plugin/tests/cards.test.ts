@@ -447,6 +447,17 @@ test('a card the designer fork drew draws under the answer v was pressed on, als
   expect(w.asked).toContain('draw')
   expect(elements(await answer('row-made-up')).find(n => n.type === 'Client')?.props.props.tree).toEqual(TREE)
   expect(textOf(await answer('another-row'))).not.toContain('Scores')
+  // words of that answer that place it (a squeeze's version) draw it on their line, once, not under the answer too
+  const placing = (requestId: string) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text: 'An answer.\n\n[Scores](card:c0123456789ab)\n\nMore of it.', isFirstOfReply: true } } as never)
+  const there = await placing('row-made-up')
+  expect(elements(there).filter(n => n.type === 'Client').length).toBe(1)
+  expect(textOf(there)).not.toContain('card:')
+  // thimble draws the words, with the card on its line, rather than Claude Code's drawing with the card under it
+  expect(textOf(there)).not.toContain('the engine')
+  // another answer's line points to it
+  const other = await placing('another-row')
+  expect(elements(other).some(n => n.type === 'Client')).toBe(false)
+  expect(textOf(other)).toContain('↑ “Scores” is drawn under an earlier answer')
   // its call's row in the fork draws no second card
   const row = await $.ui.render(callRow('toolu_made_up_3', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(elements(row).some(n => n.type === 'Client')).toBe(false)

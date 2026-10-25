@@ -1,6 +1,6 @@
 // askcell.js: the margin cell that asks a side thread about what stands beside it (0.10's shell/view.ts margin). Pure:
-// no `$`. marks/view.ts draws it left of each passage of a reply, cards/draw.ts left of each card's frame; the threads
-// (threads/seam.ts) say whether the thing has a thread and open it.
+// no `$`. marks/view.ts draws it left of each passage of a reply (a card asks with the words at its title's right);
+// the threads (threads/seam.ts) say whether the thing has a thread and open it.
 //
 //   askCell(els, o)        the 2 columns: a purple ↳ once a side thread was asked about the thing, which opens it; else
 //                          `glyph` (the reply's ● or a blank) with a purple ? over it, shown only while the pointer is
