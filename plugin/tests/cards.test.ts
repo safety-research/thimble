@@ -174,15 +174,19 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(elements(first).some(n => n.type === 'Client')).toBe(true)
   expect(textOf(first)).not.toContain('version 2')
   const resultOf = (toolUseId: string) => $.ui.render({ ...(callRow(toolUseId, input) as Any), component: 'ToolResult', props: { tool_use_id: toolUseId, tool: TOOL, output: 'the copy', isExpanded: false } } as never)
-  expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('↑ version 2 · “Scores” is drawn in its place above')
-  expect(textOf(await resultOf('toolu_made_up_1'))).toBe('2 rows from runs.json')
+  // each call's row is one line that says what it did; the result under it draws nothing (Claude's copy is in ctrl+o)
+  const lineOf = async (toolUseId: string, call: Record<string, unknown>) => textOf(await $.ui.render(callRow(toolUseId, call)))
+  expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('')
+  expect(await lineOf('toolu_made_up_1b', { ...input, id })).toBe('● Changed card “Scores” to version 2 (new title, new rows, new view) · ↑ shown in its place above')
+  expect((await lineOf('toolu_made_up_1', input)).startsWith('● Drew card “Scores” · 2 rows from runs.json')).toBe(true)
 
   // a small change: edits to the view, its rows and title kept (no `view`, no `data`, no `title`)
   const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1c', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
   expect(String(r3.result)).toContain('Version 3 of “Scores” is drawn')
   expect(String(r3.result)).toContain('It read 2 rows from runs.json')
   expect(Object.entries(w.files).find(([p]) => /\/v3\/view\.js$/.test(p))?.[1]).toBe(VIEW.replace('children: "x"', 'children: "y"'))
-  expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('↑ version 2 · “Scores” is drawn in its place above, now version 3')
+  expect(await lineOf('toolu_made_up_1b', { ...input, id })).toBe('● Changed card “Scores” to version 2 (new title, new rows, new view) · ↑ shown in its place above, now version 3')
+  expect(await lineOf('toolu_made_up_1c', { id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] })).toBe('● Changed card “Scores” to version 3 (1 edit to its view) · ↑ shown in its place above')
   // an edit whose text is not in the view draws nothing, and says why
   const r4 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1d', id, edits: [{ old: 'no such text', new: 'z' }] } as never)) as Any
   expect(String(r4.result)).toContain('edit 1: its `old` text is not in the view of your last call')
@@ -208,7 +212,9 @@ test('a call with a card\'s id alone moves the card as it is to that call; the e
   expect(elements(await $.ui.render(callRow('toolu_made_up_p2', { id }))).some(n => n.type === 'Client')).toBe(true)
   expect(elements(await $.ui.render(callRow('toolu_made_up_p1', input))).some(n => n.type === 'Client')).toBe(false)
   const resultOf = (toolUseId: string) => $.ui.render({ ...(callRow(toolUseId, input) as Any), component: 'ToolResult', props: { tool_use_id: toolUseId, tool: TOOL, output: 'the copy', isExpanded: false } } as never)
-  expect(textOf(await resultOf('toolu_made_up_p1'))).toBe('↓ version 1 · “Scores” is drawn further down')
+  expect(textOf(await resultOf('toolu_made_up_p1'))).toBe('')
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_p1', input)))).toBe('● Drew card “Scores” · ↓ shown further down')
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_p2', { id }))).startsWith('● Moved card “Scores” here · 2 rows from runs.json')).toBe(true)
   // a later version draws in the new place
   const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p3', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
   expect(String(r3.result)).toContain('Version 2 of “Scores” is drawn in place of version 1')
@@ -228,12 +234,16 @@ test('a line of the reply that holds only a card\'s link draws the card there; i
   expect(textOf(reply)).not.toContain('card:')
   expect(elements(await $.ui.render(callRow('toolu_made_up_q1', input))).some(n => n.type === 'Client')).toBe(false)
   const res = await $.ui.render({ ...(callRow('toolu_made_up_q1', input) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_q1', tool: TOOL, output: 'the copy', isExpanded: false } } as never)
-  expect(textOf(res)).toBe('↓ version 1 · “Scores” is drawn in the answer')
+  expect(textOf(res)).toBe('')
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_q1', input)))).toBe('● Drew card “Scores” · ↓ shown in the answer')
   // a later reply that places it again: the card stands there, and the earlier reply points to it
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: `Sorted.\n\n[Scores](card:${id})` }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-made-up-q2' } as never)
   const again = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up-q', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never)
   expect(elements(again).some(n => n.type === 'Client')).toBe(false)
   expect(textOf(again)).toContain('↓ “Scores” is drawn further down')
+  // a later call changes it where it stands: its line points up to the answer above
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_q3', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_q3', { id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] })))).toBe('● Changed card “Scores” to version 2 (1 edit to its view) · ↑ shown in the answer above')
 })
 
 test('a new card waits while the run of calls above it is live and draws once it folds; a card drawn before stays when a later run is live', async ($, on) => {
@@ -518,8 +528,8 @@ test('when the sandbox cannot start, no card runs: the call and the failure line
   expect(bar).not.toContain('× Cards cannot draw')
   // no folder is made for a runner that cannot start
   expect(w.runs.some(a => a.some(x => /\/cards-[0-9a-f]+$/.test(x)))).toBe(false)
-  // the call's result row says the whole reason and the fix
-  const result = textOf(await $.ui.render({ ...(callRow('toolu_made_up_8', {}) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_8', tool: TOOL, output: 'the copy', isExpanded: false } } as never))
+  // the call's row says the whole reason and the fix
+  const result = textOf(await $.ui.render(callRow('toolu_made_up_8', { title: 'Scores' })))
   expect(result).toContain('bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap · Claude got the error')
 })
 
