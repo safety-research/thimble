@@ -38,7 +38,8 @@ export function requestFor(template, label, units, cfg = {}) {
     RECORDS: records,
   })
   return {
-    model: String(cfg.model || 'sonnet'),
+    // the label's own model when it names one (the labels pane's edit), else the reads' setting
+    model: String(label.model || cfg.model || 'sonnet'),
     prompt,
     maxTokens: Number(cfg.maxTokens) || 8000,
     ...(cfg.effort ? { effort: String(cfg.effort) } : {}),

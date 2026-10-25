@@ -6,7 +6,9 @@
 //
 //   crumbOf(kind, args)            -> the pane's crumb: its words in the trail (`claims`, `cluster`, `citation 3`) and
 //                                     how deep it stands among the panes of its kind (the claims overview 0, a cluster
-//                                     1, a claim 2, its evidence 3)
+//                                     1, a claim 2, its evidence 3); `back`, what esc says going back to it (`all
+//                                     labels`), and `esc`, what esc says while it shows (`cancel edit`), where these
+//                                     are not `back to <words>`
 //   nextTrail(was, open, kind, args) -> the trail under a pane about to show: another kind, a deeper pane of the
 //                                     same kind, or another side thread, goes on top of the one shown now; the same
 //                                     depth takes its place (j and k in a cluster); a shallower one goes back down
@@ -31,10 +33,12 @@ export function crumbOf(kind, args) {
       if (a.claim) return { words: 'claim', depth: 2 }
       if (a.group != null && a.group !== '') return { words: 'cluster', depth: 1 }
       return { words: 'claims', depth: 0 }
+    // one label is one pane, whichever of its values, examples or definition shows: moving in it takes its place, so
+    // esc never goes back to the label already open, only to all the labels; a field's edit stands over it, esc cancels
     case 'labels':
-      if (a.label && a.value && a.value !== '-') return { words: String(a.value), depth: 2 }
+      if (a.label && a.edit) return { words: 'edit', depth: 2, esc: 'cancel edit' }
       if (a.label) return { words: String(a.label), depth: 1 }
-      return { words: 'labels', depth: 0 }
+      return { words: 'labels', depth: 0, back: 'all labels' }
     case 'evidence': return { words: `citation ${a.n ?? ''}`.trim(), depth: 0 }
     case 'thread': return { words: 'thread', depth: 0 }
     case 'threads': return { words: 'threads', depth: 0 }

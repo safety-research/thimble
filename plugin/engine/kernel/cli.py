@@ -368,7 +368,7 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                 print("no code: pass a file with --code FILE, or the code on stdin, defining label(unit)")
                 return 2
         r = LB.define(st, name, kind, rule, a.glob, a.values.split(",") if a.values else None, a.where,
-                      _parse_within(a.within), a.limit, a.reason, a.seed, a.says)
+                      _parse_within(a.within), a.limit, a.reason, a.seed, a.says, a.model)
         lab = _load(st, name)
         s = LB.status(lab)
         # a big prompt label asks the person first (estimate.py), unless it is a trial or they said yes to this exact
@@ -568,6 +568,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--reason", action="store_true")
+    p.add_argument("--model", help=argparse.SUPPRESS)  # a prompt label's model: the labels pane's edit of it
     p.add_argument("--set", dest="set_values", nargs="*", metavar="REF=VALUE")
     p.add_argument("--wait", nargs="?", type=float, const=600.0, metavar="SECONDS")
     p.add_argument("--again", action="store_true")

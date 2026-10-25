@@ -60,13 +60,17 @@ export type PaneNow = { kind: string; args: unknown; title?: string; escape?: bo
  *  unseen until the terminal grows. Such a pane is closed, and the caller says why. */
 /** Claude Code sets `closeOnEscape` and `rows` anew on each open, so an open that only redraws the pane with other
  *  arguments (a key in it: j, v, a page) keeps those the open pane has; else Esc would stop closing it after one key.
- *  The pane shown before goes on the trail, or this one takes its place (trail.mjs nextTrail). */
-export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean; rows?: number } = {}): Promise<boolean> {
+ *  The pane shown before goes on the trail, or this one takes its place (trail.mjs nextTrail); `under` goes under it. */
+export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean; rows?: number; under?: PaneEntry } = {}): Promise<boolean> {
   const was = await paneNow($)
   const open = was ? await isOpen($) : false
   const escape = Boolean(o.focus || (open && was?.escape))
   const rows = o.rows ?? (open && was?.kind === kind ? was?.rows : undefined)
   const trail = nextTrail(was, open, kind, args) as PaneEntry[]
+  // `under`: the pane esc goes back to, when the trail does not already end on it (a label opened from under an answer
+  // goes back to all the labels)
+  const last = trail[trail.length - 1]
+  if (o.under && !(last?.kind === o.under.kind && JSON.stringify(last.args ?? null) === JSON.stringify(o.under.args ?? null))) trail.push(o.under)
   await $.state.set(NOW, { kind, args, title, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}), ...(trail.length ? { trail } : {}) })
   const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
   if (r.isPlaced) {
@@ -180,7 +184,8 @@ function topRow($: Engine, els: Any, now: PaneNow, W: number): Any[] {
   const { Box, Button, Text } = els
   const trail = now.trail ?? []
   const under = trail[trail.length - 1]
-  const words = under ? `back to ${cut(crumbOf(under.kind, under.args).words, Math.max(8, W - 16))}` : 'close'
+  const back = under ? crumbOf(under.kind, under.args) : null
+  const words = crumbOf(now.kind, now.args).esc ?? (back ? back.back ?? `back to ${cut(back.words, Math.max(8, W - 16))}` : 'close')
   // a pane with a name of its own says it at the left (Settings)
   const name = NAMED[now.kind]
   const key = now.escape ? [Text({ key: 'k', color: accent(), bold: true, children: 'esc' }), Text({ key: 's', children: ' ' })] : []

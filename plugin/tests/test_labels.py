@@ -235,6 +235,23 @@ def test_a_prompt_label_waits_for_the_model_then_takes_its_answers(root: Path):
     assert LB.status(LB.load(st, "apology"))["waiting"] == 2
 
 
+def test_a_label_keeps_how_it_was_applied_so_the_pane_can_apply_it_again_with_one_thing_changed(root: Path):
+    st = Store(root)
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry", "--limit", "4", "--seed", "3")
+    h = LB.head(LB.load(st, "sorry"))
+    assert (h["kind"], h["rule"], h["in"], h["limit"], h["seed"], h["model"], h["trial"]) == ("regex", "(?i)sorry", "chat/*.jsonl", 4, 3, None, True)
+    # a prompt label's model is part of its definition: another model is a new version, its records read again
+    run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.")
+    assert LB.head(LB.load(st, "apology"))["model"] is None and LB.load(st, "apology")["version"] == 1
+    r = run(root, "label", "apology", "--in", "chat/*.jsonl", "--prompt", "The message apologizes.", "--model", "opus")
+    assert r.returncode == 0, r.stdout + r.stderr
+    lab = LB.load(st, "apology")
+    assert lab["model"] == "opus" and lab["version"] == 2 and LB.waiting(st, "apology")["model"] == "opus"
+    # a regex label takes no model
+    run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry", "--model", "opus")
+    assert LB.load(st, "sorry")["model"] is None
+
+
 def test_the_persons_check_stands_over_the_value_and_counts_in_its_place(root: Path):
     run(root, "label", "sorry", "--in", "chat/*.jsonl", "--regex", "(?i)sorry|apolog")
     r = run(root, "label", "sorry", "--check", "chat/room.jsonl#L5", "yes")

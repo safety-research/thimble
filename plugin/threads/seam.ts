@@ -22,6 +22,8 @@
 //   threadUnderSplit($, e, kind, args, els)   the same in two parts: the conversation, and the key row with the input
 //                                      bar, which the docked pane keeps at its bottom (core/pane.ts)
 //   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
+//   PaneEdit                           a field a pane edits in the input bar under it, in place of a question: the
+//                                      labels pane's (labels/pane.tsx labelEdit), its name, its value, what ↵ does
 //   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
 //                                      subject; `has` once a question was asked of it, `ask` opens it (openThread)
 //   threadOnCard($, id, title, line, element)   what a card's margin asks about (cards/draw.ts): the part of the card
@@ -36,7 +38,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts } from './pane'
+import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadsBright } from './thread'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
@@ -105,6 +107,9 @@ export async function threadUnderSplit($: Engine, e: Any, kind: string, args: un
 export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown): Promise<number> {
   return roomUnder($, e, kind, args)
 }
+
+/** A field a pane edits in the input bar under it (labels/pane.tsx labelEdit). */
+export type { PaneEdit }
 
 export async function openThread($: Engine, scope: ThreadScope, o: { key?: string; where?: string } = {}): Promise<boolean> {
   return openThreadOn($, scope, o)
