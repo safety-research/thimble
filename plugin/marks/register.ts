@@ -33,7 +33,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
-import { carrier, marksIn, rewritesIn, withCorrections, withoutMarks } from './message.js'
+import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 
@@ -206,14 +206,19 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     const under = await underText($, els, row, cols)
     return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [whole, ...under] })
   }
-  const marksOn = featureOn('marks')
-  const words = marksOn ? view.text : withoutMarks(view.text)
+  const marksOn = featureOn('citations')
+  const written = marksOn ? view.text : withoutMarks(view.text)
   const reply = marksOn ? await rowMarks($, row) : null
-  const own = words === raw
+  const own = written === raw
+  // the words the analyst asked about (Citations manual) stand as marks in Claude's own words, and the row's marks in
+  // the order the text holds them
+  const asked = own ? withAsked(written, reply?.items ?? []) : { text: written, items: reply?.items ?? [] }
+  const words: string = asked.text
+  const items: MarkItem[] = asked.items
   // Claude's own words as the person reads them: each sentence a check rewrote in place of the one Claude wrote, and
   // each corrected citation's words in place of its own, so the explainers and heads-ups stand on the words shown
-  const rewrote = own ? rewritesIn(words, reply?.items ?? []) : { text: words, placed: new Set<number>() }
-  const text = own ? withCorrections(rewrote.text, reply?.items ?? []) : words
+  const rewrote = own ? rewritesIn(words, items) : { text: words, placed: new Set<number>() }
+  const text = own ? withCorrections(rewrote.text, items) : words
   const marks = marksOn ? marksIn(text) : []
   // the explainers and heads-ups stand on the words Claude wrote, where the look found them, and follow those words
   // into the words shown (a correction's words in place of a citation's)
@@ -239,7 +244,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   // the marks of Claude's own words by their place; those of a text shown in their place by their words
   const looks: MarkLook[] = own
     ? marks.map((_m: Any, k: number) => {
-      const it = reply?.items[k]
+      const it = items[k]
       if (!it) return { n: k + 1, status: waits ? 'pending' : 'failed' }
       // a rewrite that cannot stand in the text leaves Claude's sentence, whose words the check did not confirm: its
       // cited words alone in that sentence would read wrong

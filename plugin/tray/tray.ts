@@ -56,7 +56,7 @@ import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, launchRepair, repairOf } from '../marks/checker'
 import { highlighted, wrapCode } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
-import { marksIn, plainSentence, withoutMarks, withRewrites } from '../marks/message.js'
+import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
@@ -140,24 +140,27 @@ export async function closeTray($: Engine): Promise<void> {
 // ------------------------------------------------------------------------------------------------ marks of a row
 
 /** The text a row shows now (a squeezed version in its place), and its citations; null when it draws nothing. */
-async function shownOf($: Engine, row: string): Promise<{ text: string; marks: { start: number; end: number; words: string }[]; own: boolean } | null> {
+async function shownOf($: Engine, row: string): Promise<{ text: string; marks: { start: number; end: number; words: string }[]; own: boolean; items?: MarkItem[] } | null> {
   const raw = (await messageOf($, row))?.text ?? ''
   if (!raw) return null
   let v: Any = null
   try { v = await squeezeView($, row, raw) } catch { v = null }
   if (v?.hidden) return null
   const shown = typeof v?.text === 'string' ? v.text : raw
-  const marksOn = featureOn('marks')
+  const marksOn = featureOn('citations')
   const text = marksOn ? shown : withoutMarks(shown)
   const own = text === raw
-  // Claude's own words, with each sentence a check rewrote in place of the one Claude wrote (marks/register.ts)
-  const drawn = own && marksOn ? withRewrites(text, (await rowMarks($, row))?.items ?? []) : text
-  return { text: drawn, marks: marksOn ? marksIn(drawn) : [], own }
+  // Claude's own words, with the words the analyst asked about as marks and each sentence a check rewrote in place of
+  // the one Claude wrote (marks/register.ts)
+  const all = marksOn ? (await rowMarks($, row))?.items ?? [] : []
+  const asked = own && marksOn ? withAsked(text, all) : { text, items: all }
+  const drawn = own && marksOn ? withRewrites(asked.text, asked.items) : text
+  return { text: drawn, marks: marksOn ? marksIn(drawn) : [], own, items: asked.items }
 }
 
 /** The row's citations as it shows them: each with its number in the reply (0: one the check does not know). */
-async function citesOf($: Engine, row: string, shown: { text: string; marks: { start: number; end: number; words: string }[]; own: boolean }): Promise<{ n: number; start: number; end: number; words: string }[]> {
-  const items = (await rowMarks($, row))?.items ?? []
+async function citesOf($: Engine, row: string, shown: { text: string; marks: { start: number; end: number; words: string }[]; own: boolean; items?: MarkItem[] }): Promise<{ n: number; start: number; end: number; words: string }[]> {
+  const items = shown.items ?? (await rowMarks($, row))?.items ?? []
   const looks = shown.own ? shown.marks.map((_m, k) => ({ n: items[k]?.n ?? 0 })) : looksByWords(shown.marks, items, false)
   return shown.marks.map((m, k) => ({ ...m, n: looks[k]?.n ?? 0 }))
 }
@@ -325,7 +328,8 @@ async function reveal($: Engine, at: { row: string; card?: string }): Promise<vo
 
 /** Open the tray on a mark (a press on it, ] and [): its answer becomes the one the keys act on. */
 export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}): Promise<void> {
-  // a citation that waits to be checked until it is opened (citationChecks) starts its check: the spawn first
+  // a citation that waits to be checked until it is opened (Citations auto cite, or asked words in manual) starts its
+  // check: the spawn first
   if (f.kind === 'citation') await checkOpened($, f.row, f.n).catch(() => undefined)
   await setTray($, open(f) as Tray)
   const t = await turnOfRow($, f.row)

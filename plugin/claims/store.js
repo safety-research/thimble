@@ -24,7 +24,7 @@
 //   because  why the claim holds, as the lens gave it: one or two sentences in the message's words, its citation links
 //            `[words](#)` kept. The pane shows it under the claim picked, its citations as the reply draws them.
 //   read     the answers the claims lens has read (each its row), so the pane offers only the others to find claims
-//            in (claims are found on demand, unless Claims found is auto). A store without it was kept
+//            in (claims are found on demand, unless Extract claims is auto). A store without it was kept
 //            while every answer was read after its reply.
 //   why      on a claim that revises another: why the earlier one was wrong, as the lens gave it. The pane shows it in
 //            the claim's history (e) with what the earlier one said (graph.js correctionsOf); with none, the reason

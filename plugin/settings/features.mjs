@@ -2,7 +2,7 @@
 // and the tests import it.
 //
 // Each feature is one switch, named by what the person gets (Citations, Cards), never by the part of thimble that makes
-// it; a feature with `choices` is one of a few modes (Citation checks: auto, on demand, off). Each is a field of the
+// it; a feature with `choices` is one of a few modes (Citations: auto cite + check, auto cite, manual, off). Each is a field of the
 // plugin's userConfig (.claude-plugin/plugin.json, with the same key, title and default: a boolean, or a string with its
 // `options`), so Claude Code keeps its value (settings.json, pluginConfigs.thimble.options) and loads the plugin again
 // with the new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key), or
@@ -14,15 +14,18 @@
  *  and what it costs, the field's description (a test checks). `choices`: the modes of a feature that has more than on
  *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
  *  look runs while one such feature is on. `modeOf`: the feature whose lenses join the look after each reply only in
- *  this one's `auto` mode (in `on demand`, a look of their own runs when the person asks). */
+ *  this one's `auto` mode (in `on demand`, a look of their own runs when the person asks). `says`: for a feature with
+ *  modes, what each mode gives, which the settings pane shows under the row for the mode set. */
 export const SWITCHES = [
   {
-    key: 'marks', title: 'Citations', default: true,
-    does: 'Claude adds a citation to each claim you would check, and a second Claude checks it against the files, as Citation checks says.',
-  },
-  {
-    key: 'citationChecks', title: 'Citation checks', default: 'on demand', choices: ['auto', 'on demand', 'off'],
-    does: 'auto: a second Claude checks every citation after each reply. on demand: it checks a citation when you open it, which spends fewer tokens. off: no checks.',
+    key: 'citations', title: 'Citations', default: 'auto cite', choices: ['auto cite + check', 'auto cite', 'manual', 'off'],
+    does: 'auto cite + check: Claude cites each claim you would check, and a second Claude checks every citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press w to find where they come from. off: no citations.',
+    says: {
+      'auto cite + check': 'Claude cites each claim you would check, and a second Claude checks every citation after each reply.',
+      'auto cite': 'Claude cites each claim you would check, and a second Claude checks a citation when you open it, which spends fewer tokens.',
+      'manual': 'Claude cites nothing. Select words in an answer and press w: a second Claude finds where they come from in the files.',
+      'off': 'No citations, and no checks.',
+    },
   },
   {
     key: 'cards', title: 'Cards', default: true,
@@ -42,11 +45,15 @@ export const SWITCHES = [
   },
   {
     key: 'claims', title: 'Claims', default: true, lenses: ['claims'],
-    does: 'c opens what Claude and you claimed in the session, with why each holds and its sources; the bar counts them. Claims found says when they are found.',
+    does: 'c opens what Claude and you claimed in the session, with why each holds and its sources; the bar counts them. Extract claims says when they are extracted.',
   },
   {
-    key: 'claimsMode', title: 'Claims found', default: 'on demand', choices: ['auto', 'on demand'], modeOf: 'claims',
-    does: 'auto: after each reply, the largest part of the call after it. on demand: when you press f in the Claims pane, which spends fewer tokens.',
+    key: 'claimsMode', title: 'Extract claims', default: 'on demand', choices: ['auto', 'on demand'], modeOf: 'claims',
+    does: 'auto: the claims are extracted after each reply, the largest part of the call after it. on demand: when you press f in the Claims pane, which spends fewer tokens.',
+    says: {
+      'auto': 'The claims are extracted after each reply, the largest part of the call after it.',
+      'on demand': 'The claims are extracted when you press f in the Claims pane, which spends fewer tokens.',
+    },
   },
   {
     key: 'counts', title: 'Labels and coverage on the bar', default: true,
@@ -60,6 +67,25 @@ export const SWITCHES = [
 
 const BY_KEY = new Map(SWITCHES.map(s => [s.key, s]))
 
+/** The manifest's fields that Citations replaced, kept so a value saved under them still reaches the plugin: Citations
+ *  (`marks`, on or off) and Citation checks (`citationChecks`). Settings hides them (term.ts), and the first session
+ *  moves a saved one to Citations (citationsFrom), then sets it back to its default. */
+export const RETIRED = {
+  marks: { type: 'boolean', title: 'Citations (old setting)', description: 'Replaced by Citations, which has its modes.', default: true },
+  citationChecks: { type: 'string', title: 'Citation checks (old setting)', description: 'Replaced by Citations, which has its modes.', options: ['auto', 'on demand', 'off'], default: 'on demand' },
+}
+
+/** The Citations mode that the retired fields saved in `values` stand for, or null when they hold their defaults:
+ *  citations off is `off`; checks after each reply are `auto cite + check`; checks off is `auto cite`, since every mode
+ *  that cites checks a citation once it is opened. */
+export function citationsFrom(values) {
+  if (!values || typeof values !== 'object') return null
+  if (values.marks === false) return 'off'
+  if (values.citationChecks === 'auto') return 'auto cite + check'
+  if (values.citationChecks === 'off') return 'auto cite'
+  return null
+}
+
 let current = {}
 
 /** The plugin's options, as register(on, options) received them. */
@@ -72,6 +98,8 @@ export function setOptions(options) {
 function valueIn(values, key) {
   const s = BY_KEY.get(key)
   const v = values ? values[key] : undefined
+  // a Citations at its default, while a retired field still holds a value saved before it, stands for that value
+  if (key === 'citations' && (v === undefined || v === s?.default)) return citationsFrom(values) ?? s.default
   if (s?.choices) return s.choices.includes(v) ? v : s.default
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
@@ -81,6 +109,8 @@ function valueIn(values, key) {
  *  options. */
 export function switchesFrom(values) {
   return key => {
+    // w, where words come from, is Citations' manual mode
+    if (key === 'where') return valueIn(values, 'citations') === 'manual'
     const v = valueIn(values, key)
     return typeof v === 'string' ? v !== 'off' : v
   }
@@ -95,7 +125,10 @@ export function choiceOf(key) {
  *  loads the plugin again with the same value. */
 export function noteChange(key, value) {
   const s = BY_KEY.get(key)
-  if (s && (s.choices ? s.choices.includes(value) : typeof value === 'boolean')) current = { ...current, [key]: value }
+  if (!s || !(s.choices ? s.choices.includes(value) : typeof value === 'boolean')) return
+  current = { ...current, [key]: value }
+  // a Citations the person sets stands over a value the retired fields saved (term.ts sets those back too)
+  if (key === 'citations') current = { ...current, marks: RETIRED.marks.default, citationChecks: RETIRED.citationChecks.default }
 }
 
 /** Whether a feature acts now: its option when it is a boolean, else its default. `observer` is whether the look after
@@ -110,6 +143,13 @@ export function featureOn(key) {
 export function lensesAfterReply(key) {
   return switchesFrom(current)(key) && SWITCHES.every(m => m.modeOf !== key || valueIn(current, m.key) === 'auto')
 }
+
+/** The retired fields' values this load runs with (RETIRED). */
+export const retiredValues = () => Object.fromEntries(Object.keys(RETIRED).map(k => [k, current[k]]))
+
+/** Whether Claude cites its claims (Citations auto cite + check, or auto cite): main reads the citing guidance, and
+ *  the reply's citations are checked, after it or once opened. */
+export const claudeCites = () => ['auto cite + check', 'auto cite'].includes(choiceOf('citations'))
 
 /** A feature by its key, or null. */
 export const switchOf = key => BY_KEY.get(key) ?? null

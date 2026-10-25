@@ -97,7 +97,7 @@ test('a key at an empty prompt reads no state once the plugin has read it: its h
 })
 
 test("the features' letters are thimble's own, so no card takes them", () => {
-  expect(restoredKeys()).toEqual(['s', 'e', 'c', 't'])
+  expect(restoredKeys()).toEqual(['s', 'e', 'w', 'c', 't'])
   for (const k of restoredKeys()) expect(ownKeys()).toContain(k)
 })
 

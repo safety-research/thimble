@@ -6,9 +6,13 @@
 //   settingsAction($, a)   turn a feature on or off (`toggle`; a feature with modes goes to its next mode), or set its
 //                          mode (`set`), through Claude Code ($.config.set), which keeps the value and loads the plugin
 //                          again with the new options; a refusal is one line with its fix
+//
+// The fields Citations replaced (features.mjs RETIRED) stay in the manifest, hidden from /config, so a value saved under
+// them reaches the plugin: the first interactive session moves it to Citations and sets them back to their defaults.
+// Setting Citations sets them back too.
 import type { ConfigRow, EngineInterface, Register } from 'claude-code'
 
-import { SWITCHES, choiceOf, noteChange, setOptions, switchOf } from './features.mjs'
+import { RETIRED, SWITCHES, choiceOf, citationsFrom, noteChange, retiredValues, setOptions, switchOf } from './features.mjs'
 
 type Engine = EngineInterface
 
@@ -50,11 +54,45 @@ export async function settingsAction($: Engine, a: Record<string, unknown>): Pro
   if (to === now) return
   const res = await $.config.set({ key: r.key, value: to as boolean | string })
   if (res.deny) return `× ${s.title} stayed ${typeof now === 'string' ? now : now ? 'on' : 'off'}: ${res.deny}`
+  if (s.key === 'citations') await retiredToDefaults($, r.key, retiredValues())
   // acted on at once, before the plugin loads again with it
   noteChange(s.key, to)
   $.ui.invalidate('ui.render')
 }
 
-export const registerSettings: Register = (_on, options) => {
+/** A retired field's row key, beside the Citations row's (`<plugin>.citations`). */
+const retiredKey = (citationsKey: string, field: string) => citationsKey.replace(/\.citations$/, `.${field}`)
+
+/** The retired fields that hold a saved value (`saved`, as this load has them) back to their defaults (a hidden row
+ *  still takes $.config.set), so only Citations says how the plugin cites. */
+async function retiredToDefaults($: Engine, citationsKey: string, saved: Record<string, unknown>): Promise<void> {
+  for (const [field, f] of Object.entries(RETIRED)) {
+    if (saved[field] === undefined || saved[field] === f.default) continue
+    await $.config.set({ key: retiredKey(citationsKey, field), value: f.default }).catch(() => undefined)
+  }
+}
+
+/** A value saved under the retired fields, moved to Citations: once, at the first interactive session that has one. */
+async function moveRetired($: Engine, options: Record<string, unknown>): Promise<void> {
+  const mode = citationsFrom(options)
+  if (!mode) return
+  const r = (await configRows($)).get('citations')
+  if (!r || r.isLocked) return
+  if (r.value === switchOf('citations')!.default) await $.config.set({ key: r.key, value: mode })
+  await retiredToDefaults($, r.key, options)
+}
+
+export const registerSettings: Register = (on, options) => {
   setOptions(options)
+  // the retired fields stay out of /config
+  on('config.describe', async ($, e, next) => {
+    const m = /^(.+)\.([^.]+)$/.exec(e.key)
+    const ours = m && (m[1] === $.plugin.name || m[1]!.startsWith(`${$.plugin.name}@`))
+    return ours && m![2]! in RETIRED ? next({ ...e, isHidden: true }) : next(e)
+  }).catch(($, e, next) => next(e))
+  on('session.start', { isInteractive: true }, async ($, e, next) => {
+    const r = await next(e)
+    await moveRetired($, (options ?? {}) as Record<string, unknown>).catch(() => undefined)
+    return r
+  }).catch(($, e, next) => next(e))
 }

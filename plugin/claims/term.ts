@@ -9,7 +9,7 @@
 //                lit on the bar for the answer only when a claim was corrected (store.js noteFor), as a `claims` part
 //                of that answer (core/answers.ts setPart)
 //   the pane     c (or /claims) opens the Claims pane (core/pane.ts kind `claims`), which takes the keyboard
-//   on demand    unless Claims found is auto, no look after a reply reads the claims: f in the pane finds
+//   on demand    unless Extract claims is auto, no look after a reply reads the claims: f in the pane finds
 //                those of the answers they have not read (claimsUnread; the store keeps the answers read, `read`), as
 //                a look of the claims lens alone (observer/observer.ts findClaimsNow); claimsToFind says how many
 //                answers wait and how many are being read
@@ -24,7 +24,7 @@ import { readKept, writeKept } from '../core/env'
 import { openPane } from '../core/pane'
 import { sessionKey } from '../hooks/conversation'
 import type { Look } from '../observer/observer'
-import { rewritesIn, withCorrections } from '../marks/message.js'
+import { readText } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { spanOf } from './graph.js'
 import { applyTurn, clearGap, emptyStore, grownClusters, grownLines, noteFor, noteGap, promptLines, readStore } from './store.js'
@@ -158,7 +158,7 @@ export async function placeText($: Engine, row: string, place?: { start?: number
     // it so), unless the claim's own words are among those the check changed
     const items = (await rowMarks($, row).catch(() => null))?.items ?? []
     if (!items.some(it => it.status === 'corrected')) return m.text
-    const read = withCorrections(rewritesIn(m.text, items).text, items) as string
+    const read = readText(m.text, items) as string
     return !place || spanOf(read, place) ? read : m.text
   }
   const t = (await turnsNow($)).find(x => x.prompt.row === row || promptRow(x.turnId) === row)

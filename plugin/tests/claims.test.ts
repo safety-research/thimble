@@ -455,7 +455,7 @@ test('claims on demand: no look reads them after a reply; c shows the pane with 
   const picked = await draw({ claim: 'c1', open: true })
   expect(textOf(picked)).toContain('Its log ends at the p95 check.')
   expect(buttons(picked).some(b => /:ev:0$/.test(b.key) && textOf(b.children).includes('p95 check'))).toBe(true)
-  // Claims found auto: the look after each reply reads them again
+  // Extract claims auto: the look after each reply reads them again
   setOptions({ explain: false, details: false, claimsMode: 'auto' })
   replies.push(reply([]))
   await answered(s, { id: 't3', prompt: 'And run 5?', rows: ['Run 5 passed.'] })

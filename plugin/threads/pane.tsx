@@ -48,7 +48,7 @@ import { themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeHeat, citeLook, messageEl, type MarkLook } from '../marks/view'
-import { featureOn } from '../settings/features.mjs'
+import { claudeCites } from '../settings/features.mjs'
 import type { ThreadScope } from './seam'
 import { askThread, cardsOfTurn, isSending, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
 import { aboutOf, answerRow, askWords, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
@@ -189,7 +189,8 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
  *  answers, a turning glyph after each until its verdict arrives, corrected words in place, verified or failed; a press opens a citation's evidence. Its check is the answer's own (threads.mjs answerRow). */
 async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, w: number, key: string): Promise<Any> {
   const row = answerRow(t, i)
-  const on = featureOn('marks')
+  // a thread's answer cites as Claude's replies do, while Claude cites (Citations auto cite + check, or auto cite)
+  const on = claudeCites()
   const reply = on ? await rowMarks($, row).catch(() => null) : null
   const rewrote = rewritesIn(on ? raw : withoutMarks(raw), reply?.items ?? [])
   const text = withCorrections(rewrote.text, reply?.items ?? [])

@@ -22,8 +22,8 @@
 //                did not show them), or it did not run or gave no answer: red (`error`), underlined, with ` ×`
 //                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
 //                look whatever the cause
-//   deferred     as pending: a citation whose check waits until the person opens it (the setting Citation checks,
-//                on demand), or that no check is for (off)
+//   deferred     as pending: a citation whose check waits until the person opens it (the setting Citations: auto
+//                cite, or words the person asked about in manual)
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //

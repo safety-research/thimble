@@ -18,8 +18,8 @@ import { safeName } from '../core/layout.mjs'
 
 type Engine = EngineInterface
 
-/** `deferred`: a mark that waits to be checked until the person opens it (the setting Citation checks, on demand:
- *  checker.ts checkOpened), or that no check is for (off); drawn as the reply's own cited words. */
+/** `deferred`: a mark that waits to be checked until the person opens it (the setting Citations, auto cite or manual:
+ *  checker.ts checkOpened); drawn as the reply's own cited words. */
 export type MarkStatus = 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed'
 /** A cited place of a file: its path from the folder the session started in, the cited line or range, and those lines
  *  with a line around them, the words found highlighted. */
@@ -46,10 +46,12 @@ export type Evidence =
  *  `narrowed`: a `corrected` mark whose check cites only a part of its words (`shown`): the rest is Claude's own wording,
  *  such as a translation, which the reply shows as plain words.
  *  `rewrite`: a `corrected` mark whose check rewrote its whole sentence (written as `sentence`, each citation
- *  `[words]`), which the reply shows in place of the old one; `sentence` and `was` keep what Claude wrote. */
+ *  `[words]`), which the reply shows in place of the old one; `sentence` and `was` keep what Claude wrote.
+ *  `asked`: words the analyst selected and asked about (Citations manual, marks/where.ts), not a mark Claude wrote:
+ *  `start` and `end` are the words' place in the row's text as Claude wrote it (message.js withAsked). */
 export type MarkItem = {
   n: number; row: string; words: string; start: number; end: number; sentence: string
-  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string
+  status: MarkStatus; shown: string; was?: string; reason?: string; failedBy?: 'check' | 'evidence' | 'none'; evidence?: Evidence; note?: string; repair?: true; narrowed?: true; rewrite?: string; asked?: true
 }
 /** `thread`: the reply is a side thread's answer (threads/thread.ts), by its agent and what it is about. */
 export type Reply = { key: string; turnId: string; rows: string[]; startedAt: number; settledAt: number | null; items: MarkItem[]; thread?: { agentId: string; about: string } }
