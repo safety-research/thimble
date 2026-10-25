@@ -26,7 +26,7 @@
 //                             hook around endCheck's (marks/register.ts): the repair's fork skips the hook that spawned
 //                             it, so its end still reaches endCheck
 //
-// The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto cite + check`,
+// The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto cite + verify`,
 // Claude's marks after each reply; `auto cite` (the default), a reply's marks wait `deferred` (drawn as the reply's own
 // cited words), and opening one (tray.ts openMark) checks that one (checkOpened), as a reply's check would; `manual`,
 // Claude makes none, and words the person selects and asks about (c, marks/cite.ts) wait `deferred` until the tray
@@ -287,7 +287,7 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   const done = async () => { await $.state.set(ROWS, []) }
   const reply = noted.filter(r => r.text.trim())
   if (!reply.length || !claudeCites()) return await done()
-  const later = choiceOf('citations') !== 'auto cite + check'
+  const later = choiceOf('citations') !== 'auto cite + verify'
   const items = itemsOf(reply, later)
   if (!items.length) return await done()
   const now = Number(await $.clock.now())
@@ -345,7 +345,7 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
  *  thread's turn.complete hook, as startCheck. */
 export async function checkAnswer($: Engine, a: { row: string; text: string; turnId: string; agentId: string; about: string; reason: string }): Promise<void> {
   if (!claudeCites() || (await replyOf($, a.row))) return
-  const later = choiceOf('citations') !== 'auto cite + check'
+  const later = choiceOf('citations') !== 'auto cite + verify'
   const items = itemsOf([{ row: a.row, text: a.text }], later)
   if (!items.length) return
   const now = Number(await $.clock.now())

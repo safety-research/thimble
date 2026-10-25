@@ -9,7 +9,7 @@
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
 //                  right their items (barRight: `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
-//                  Labels and coverage is on (a click or the key opens the pane; register.ts says how each closes)
+//                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes)
 //
 // The settings pane draws the same bar as its switches would leave it (`preview`): nothing in it is a press and no
 // work shows.
@@ -49,14 +49,19 @@ const len = textWidth
 const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
 const itemLen = (x: Item) => (x.key ? len(x.key) + 1 : 0) + len(x.words)
 
-/** The bar's items at its right: coverage, then the labels, as the counts last stood. */
+/** The bar's items at its right: coverage, then the labels, as the counts last stood, each while its setting is on. */
 async function countItems($: Engine, on: (key: string) => boolean, presses: BarPresses | null, preview = false): Promise<Item[]> {
-  if (!on('counts')) return []
+  if (!on('coverage') && !on('labels')) return []
   const c = await countsNow($)
   const out: Item[] = []
-  if (c?.coverage) out.push({ id: 'coverage', key: 'r', words: `coverage ${c.coverage}`, ...(presses ? { press: () => presses.pane('coverage') } : {}) })
-  else if (preview) out.push({ id: 'coverage', key: 'r', words: 'coverage' })
-  if (c?.labels) out.push({ id: 'labels', key: 'l', words: `${c.labels.toLocaleString('en-US')} label${c.labels === 1 ? '' : 's'}`, ...(presses ? { press: () => presses.pane('labels') } : {}) })
+  if (on('coverage')) {
+    if (c?.coverage) out.push({ id: 'coverage', key: 'r', words: `coverage ${c.coverage}`, ...(presses ? { press: () => presses.pane('coverage') } : {}) })
+    else if (preview) out.push({ id: 'coverage', key: 'r', words: 'coverage' })
+  }
+  if (on('labels')) {
+    if (c?.labels) out.push({ id: 'labels', key: 'l', words: `${c.labels.toLocaleString('en-US')} label${c.labels === 1 ? '' : 's'}`, ...(presses ? { press: () => presses.pane('labels') } : {}) })
+    else if (preview) out.push({ id: 'labels', key: 'l', words: 'labels' })
+  }
   return out
 }
 
@@ -80,9 +85,9 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
 /** The keys the bar names now (r and l act only while they show), from the counts as last kept (counts.ts keptCounts):
  *  a key press reads no state. */
 export async function barKeys($: Engine): Promise<Set<string>> {
-  if (!featureOn('counts')) return new Set()
+  if (!featureOn('coverage') && !featureOn('labels')) return new Set()
   const c = await keptCounts($)
-  return new Set([...(c?.coverage ? ['r'] : []), ...(c?.labels ? ['l'] : [])])
+  return new Set([...(featureOn('coverage') && c?.coverage ? ['r'] : []), ...(featureOn('labels') && c?.labels ? ['l'] : [])])
 }
 
 /** The bar's rows: the failure line (when there is one) and the bar, `width` cells wide. */

@@ -20,7 +20,7 @@ import { claudeCites, featureOn } from '../settings/features.mjs'
 type Engine = EngineInterface
 
 /** The `## ` section of guidance.md that teaches each feature a person can switch off; `cites`: Claude cites its
- *  claims (Citations auto cite + check, or auto cite). */
+ *  claims (Citations auto cite + verify, or auto cite). */
 const SECTIONS: Record<string, string> = { cites: 'Citing claims', cards: 'Cards' }
 
 /** Whether a feature of SECTIONS is on now. */

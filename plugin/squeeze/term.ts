@@ -220,8 +220,8 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   // the terms of the explainers on its words are named in the request
   const terms: string[] = []
   for (const r of rows) for (const t of termsOf(await partOf<ExplainPart>($, r, 'explain'))) if (!terms.includes(t)) terms.push(t)
-  // the answer's cards, which a version may change (with the switch on)
-  const answer: Answer | null = featureOn('squeezeCards') ? await answerCards($, rec).catch(() => null) : null
+  // the answer's cards, which a version may place, change or leave out
+  const answer: Answer | null = await answerCards($, rec).catch(() => null)
   const req = request(probe, {
     system, toolkit: answer?.guide ?? '', question, keep, terms: terms.slice(0, 8), cards: answer?.cards ?? [],
     // a request that shows the cards asks for more thought: whether a card changes, and its view, if one does
@@ -372,7 +372,7 @@ export type Pile = { n: number; prompt: { row: string | null; text: string } | n
  * since that prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not.
  */
 export async function pileUp($: Engine, on: (key: string) => boolean = featureOn): Promise<Pile | null> {
-  if (!on('squeeze')) return null
+  if (!on('catchUp')) return null
   const since = await sinceLast($)
   let from = 0
   for (let i = since.replies.length - 1; i >= 0; i--) {

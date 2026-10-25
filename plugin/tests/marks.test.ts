@@ -17,9 +17,9 @@ import { tempRun } from './stubs'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-// these tests check each reply's citations after the reply (Citations: auto cite + check); the tests of the other modes
+// these tests check each reply's citations after the reply (Citations: auto cite + verify); the tests of the other modes
 // set their own
-setOptions({ citations: 'auto cite + check' })
+setOptions({ citations: 'auto cite + verify' })
 
 const FORK = 'a0f0e0d0c0b0a0901'
 const REPLY = 'Of the [40](#) pull requests, agent-07 merged [15 of 40](#).\n\nIt said ["ship it"](#).'
@@ -478,7 +478,7 @@ test('with Citations auto cite, the default, the reply\'s citations wait uncheck
     await checkOpened($, 'row-1', 2)
     expect(seen.spawned.length).toBe(1)
   } finally {
-    setOptions({ citations: 'auto cite + check' })
+    setOptions({ citations: 'auto cite + verify' })
   }
 })
 
@@ -492,7 +492,7 @@ test('with Citations manual or off, Claude\'s reply keeps no citations and nothi
       expect(await rowMarks($, 'row-1')).toBe(null)
       expect(seen.spawned.length).toBe(0)
     } finally {
-      setOptions({ citations: 'auto cite + check' })
+      setOptions({ citations: 'auto cite + verify' })
     }
   }
 })

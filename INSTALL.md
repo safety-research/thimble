@@ -164,7 +164,7 @@ The browser workbench:
 
 ## Settings
 
-- **The plugin's features.** Citations, Cards (with `v`), and Labels and coverage on the bar can each be turned on or
+- **The plugin's features.** Citations, Cards (with `v`), Squeeze, Catch-up, Labels and Coverage can each be turned on or
   off: click `thimble` at the left of the bar or run `/thimble-settings`. Claude Code keeps the values in its settings
   (`pluginConfigs`). With Citations off, the checker makes no model call.
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other

@@ -55,7 +55,7 @@ export const TEXTS = {
   'lens-claims': {
     about: "the turn's claims, each placed by a quote, in a cluster, with why it holds",
     reader: 'observer/observer.ts',
-    use: "a section of the look's prompt after each reply while Extract claims is auto, else of a look of its own when f in the Claims pane asks",
+    use: "a section of the look's prompt after each reply while Claims is auto, else of a look of its own when f in the Claims pane asks",
   },
   'explain-expand': {
     about: 'an explainer of words the analyst picked, over the conversation, the words, the answer and the files it cites',

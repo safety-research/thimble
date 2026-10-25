@@ -29,7 +29,7 @@
 //
 // Switches (settings/features.mjs): each lens belongs to a feature (explain, details, claims); the observer runs while
 // one of them is on, and a lens whose feature is off has no section in the prompt, no key in the reply and no merge.
-// A lens whose feature has a mode (the claims: Extract claims) joins the look after each reply only in its `auto` mode;
+// A lens whose feature has a mode (Claims: auto, on demand, off) joins the look after each reply only in its `auto` mode;
 // else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims have not read,
 // for a look of that lens alone.
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
@@ -148,7 +148,7 @@ export function messagesText(msgs: LookMsg[]): string {
 }
 
 /** The keys above the analyst's prompt, as the features leave them. */
-const rowKeys = () => [['cards', 'v card'], ['squeeze', 's squeeze'], ['claims', 'c claims']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
+const rowKeys = () => [['cards', 'v card'], ['squeezeAnswers', 's squeeze'], ['claims', 'c claims']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
 
 /** The look's step on the bar's busy line: `adding explainers, details, claims`. */
 export function lookWord(lenses: string[]): string {

@@ -160,8 +160,11 @@ test('each switch takes its items off the bar, and v waits while a design runs',
   const all = (on: (k: string) => boolean) => barRows(stateOnly(state), ELS, 100, { on, preview: true }).then(textOf)
   expect(await all(() => true)).toContain('v card')
   expect(await all(() => true)).toContain('r coverage 43% (3/7 files) · l 2 labels')
-  expect(await all(k => k !== 'counts')).not.toContain('coverage')
-  expect(await all(k => k !== 'counts')).not.toContain('labels')
+  // Coverage and Labels each take their own item off the bar
+  expect(await all(k => k !== 'coverage')).not.toContain('coverage')
+  expect(await all(k => k !== 'coverage')).toContain('l 2 labels')
+  expect(await all(k => k !== 'labels')).not.toContain('labels')
+  expect(await all(k => k !== 'labels')).toContain('r coverage 43% (3/7 files)')
   expect(await all(k => k !== 'cards')).not.toContain('v card')
   // outside a preview, v shows only while no design runs
   state.designNow = 'd1'
