@@ -25,7 +25,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
-import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans } from '../explain/seam'
+import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { citeBar, citeKey, citeShown } from '../marks/cite'
@@ -98,9 +98,10 @@ export function checkSpans(given: unknown, text: string, marks: { start: number;
   return out.sort((a, b) => a.start - b.start)
 }
 
-/** The features' spans on a row's words (the explainers and heads-ups), checked (checkSpans). */
+/** The features' spans on a row's words (the explainers and heads-ups, and first the words being explained on demand,
+ *  which cover the marks they overlap), checked (checkSpans). */
 export async function spansFor($: Engine, row: string, text: string, marks: { start: number; end: number; words: string }[]): Promise<Span[]> {
-  const given = await safe(explainSpans($, row, text, marks), [] as Span[])
+  const given = [...await safe(pendingSpans($, row, text), [] as Span[]), ...await safe(explainSpans($, row, text, marks), [] as Span[])]
   const focus = await safe(trayFocus($, row), null)
   return checkSpans(given, text, marks, focus && focus.kind !== 'citation' ? focus.id : null)
 }

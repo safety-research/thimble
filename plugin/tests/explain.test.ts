@@ -11,7 +11,7 @@ import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
 import { failLineNow } from '../bar/notice'
-import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { readText, withAsked } from '../marks/message.js'
@@ -211,6 +211,27 @@ test('on demand: words the analyst picked get an explainer from the explain-expa
   await answered(side, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
   expect(await explainTerm(side.$, 't1-row', 'the client')).toMatchObject({ term: 'the client', body: 'The program that sends the uploads.' })
   expect(side.calls[0]).toMatchObject({ side: true, system: [{ text: 'PROMPT explain-expand' }] })
+})
+
+test("words asked for an explainer draw teal at once, before it is written; a failed one leaves no teal words", async () => {
+  setOptions({})
+  for (const ok of [true, false]) {
+    let done: (v: Any) => void = () => undefined
+    const s = setup([LOOK], { complete: new Promise(r => { done = r }) })
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+    const text = 'Uploads fail after the retry budget runs out: 41 of the 44 failures came 30 seconds after a drop.'
+    const asked = explainTerm(s.$, 't1-row', 'failures came')
+    await settle()
+    const now = await pendingSpans(s.$, 't1-row', text)
+    expect(now.map(p => text.slice(p.start, p.end))).toEqual(['failures came'])
+    // the explainer's own teal, and nothing to open yet
+    expect(now[0]!.look.backgroundColor).toBeTruthy()
+    expect(now[0]!.onPress).toBe(undefined)
+    expect(await pendingSpans(s.$, 't2-row', text)).toEqual([])
+    done(ok ? reply({ body: 'The failed uploads.', here: '' }) : { isAnswered: false, reason: 'aborted' })
+    await asked
+    expect(await pendingSpans(s.$, 't1-row', text)).toEqual([])
+  }
 })
 
 test("a quote of a JSON line shows the line as the file holds it, the cited words highlighted in it; w explains the cited words in place", async () => {
