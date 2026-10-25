@@ -32,6 +32,8 @@ import { textWidth } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { rowsUnder } from '../threads/seam'
 import { checkRecord, labelsData } from './labels'
+// a label applied again with one field changed (edit.ts), for the definition's fields
+export { rerunLabel } from './edit'
 import { chosenOf, definition, examples, isNegative, ledgerTop, madeOf, NONE, partOf, partsOf, valueOrder } from './ledger.mjs'
 
 type Engine = EngineInterface

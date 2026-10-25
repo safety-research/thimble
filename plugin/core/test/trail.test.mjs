@@ -51,6 +51,19 @@ test("another side thread goes on top of the thread shown: the earlier conversat
   assert.deepEqual(p.trail.at(-1).args, { key: 'card-c1', from: 'pane' })
 })
 
+test("one label is one pane: its values, examples and definition take its place, so esc never goes back to the label open", () => {
+  // opened on the label from the row under an answer: d and p n move in it, and esc closes (no trail)
+  let p = go(null, 'labels', { label: 'stuck' })
+  p = go(p, 'labels', { label: 'stuck', value: 'yes', def: true })
+  p = go(p, 'labels', { label: 'stuck', value: 'no', at: 0, sel: 'runs/a.jsonl#L3' })
+  assert.deepEqual(p.trail, [])
+  // opened on all the labels: a label goes on top, and moving in it keeps esc's way back to all the labels
+  p = go(null, 'labels', {})
+  p = go(p, 'labels', { label: 'stuck', value: 'yes' })
+  p = go(p, 'labels', { label: 'stuck', value: 'yes', def: true })
+  assert.deepEqual(words(p), ['labels', 'stuck'])
+})
+
 test('a pane opened while none was open starts a new trail; the trail keeps its last panes', () => {
   let p = go(null, 'claims', {})
   p = go(p, 'claims', { claim: 'c1' })

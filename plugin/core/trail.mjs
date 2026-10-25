@@ -31,8 +31,9 @@ export function crumbOf(kind, args) {
       if (a.claim) return { words: 'claim', depth: 2 }
       if (a.group != null && a.group !== '') return { words: 'cluster', depth: 1 }
       return { words: 'claims', depth: 0 }
+    // one label is one pane, whichever of its values, examples or definition shows: moving in it takes its place, so
+    // esc never goes back to the label already open (only to all the labels, when the pane opened on them)
     case 'labels':
-      if (a.label && a.value && a.value !== '-') return { words: String(a.value), depth: 2 }
       if (a.label) return { words: String(a.label), depth: 1 }
       return { words: 'labels', depth: 0 }
     case 'evidence': return { words: `citation ${a.n ?? ''}`.trim(), depth: 0 }

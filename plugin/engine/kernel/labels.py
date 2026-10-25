@@ -516,20 +516,22 @@ def _as_value(lab: dict[str, Any], got: Any) -> tuple[str | None, float | None]:
 
 
 def _definition(kind: str, rule: str, glob: str | None, values: list[str], where: str | None,
-                within: tuple[str, str] | None) -> dict[str, Any]:
+                within: tuple[str, str] | None, model: str | None = None) -> dict[str, Any]:
+    # a prompt label's model is part of what it is: another model's reads are other reads (none: the plugin's own)
     return {"kind": kind, "rule": rule, "in": glob, "values": values, "where": where,
-            "within": list(within) if within else None}
+            "within": list(within) if within else None, "model": (model or None) if kind == "prompt" else None}
 
 
 def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[str] | None = None,
            where: str | None = None, within: tuple[str, str] | None = None, limit: int | None = None,
-           reason: bool = False, seed: int = 0, says: str | None = None) -> dict[str, Any]:
+           reason: bool = False, seed: int = 0, says: str | None = None, model: str | None = None) -> dict[str, Any]:
     """Define a label (or apply the same definition again) and apply it: regex and code at once, prompt as records that
     wait for the model. The same definition again keeps the values it has and applies it only to records it has not
     seen; a changed one is a new version, whose records start again (the person's checks of records that are still in
     it, with a value still on the list, are kept). Code with no `values` takes the values it returns, the most common
     first, and a None it returns leaves the record outside the label. `says`: the rule in one plain sentence, which the
-    analyst reads in its place; a changed definition without one has none. Returns {label, added, applied, errors}."""
+    analyst reads in its place; a changed definition without one has none. `model`: the model that reads a prompt
+    label's records, part of its definition (none: the plugin's own). Returns {label, added, applied, errors}."""
     if kind not in ("regex", "code", "prompt"):
         raise LabelError(f"a label's predicate is --regex, --code or --prompt, not {kind}")
     given = bool(values) or kind != "code"
@@ -546,9 +548,9 @@ def define(st: Store, name: str, kind: str, rule: str, glob: str, values: list[s
     # the values are computed outside the lock, which other writers wait on; when one of them changed the label
     # meanwhile, they are computed again on its newer state, under the lock
     # a prompt label another conversation of the folder made the same: the model's reads it holds are not made again
-    reuse = reads_elsewhere(st, name, _definition(kind, rule, glob, values, where, within)) if kind == "prompt" else {}
+    reuse = reads_elsewhere(st, name, _definition(kind, rule, glob, values, where, within, model)) if kind == "prompt" else {}
     job = {"kind": kind, "rule": rule, "glob": glob, "values": values, "given": given, "where": where, "within": within,
-           "limit": limit, "reason": reason, "says": " ".join((says or "").split()), "fn": fn, "rows": rows, "matched": matched, "files": files, "reuse": reuse}
+           "model": model, "limit": limit, "seed": seed, "reason": reason, "says": " ".join((says or "").split()), "fn": fn, "rows": rows, "matched": matched, "files": files, "reuse": reuse}
     old = load(st, name)
     lab, added, errors, same = _apply(st, old, name, job)
     with locked(st, name):
@@ -565,7 +567,7 @@ def _apply(st: Store, old: dict[str, Any] | None, name: str,
     errors, whether the definition is the same)."""
     kind, rule, values, given, fn = job["kind"], job["rule"], job["values"], job["given"], job["fn"]
     rows, files = job["rows"], job["files"]
-    d = _definition(kind, rule, job["glob"], values, job["where"], job["within"])
+    d = _definition(kind, rule, job["glob"], values, job["where"], job["within"], job.get("model"))
     # code may add values it found; the same definition keeps them
     same = bool(old) and all(old.get(k) == d[k] for k in d if k != "values") \
         and list(old.get("values") or [])[:len(values)] == values
@@ -586,6 +588,9 @@ def _apply(st: Store, old: dict[str, Any] | None, name: str,
     if job.get("says"):
         lab["says"] = job["says"]
     lab["trial"] = bool(job["limit"])
+    # how it was applied, so it can be applied again the same way with one thing changed (the labels pane's edit)
+    lab["limit"] = job["limit"]
+    lab["seed"] = job.get("seed") or 0
     lab["matched"] = job["matched"]
     lab["files"] = files
     units = lab["units"]
@@ -704,7 +709,7 @@ def waiting(st: Store, name: str, cut: int = UNIT_CHARS, first: int | None = Non
         keep = {r for b in bs for r in b}
         units = [u for u in units if u["ref"] in keep]
     return {"name": lab["name"], "version": lab.get("version"), "definition": lab.get("rule") or "", "values": lab["values"],
-            "reason": bool(lab.get("reason")), "units": units, "waiting": total, "gone": gone, "batches": bs}
+            "reason": bool(lab.get("reason")), "model": lab.get("model"), "units": units, "waiting": total, "gone": gone, "batches": bs}
 
 
 def batches(units: list[dict[str, Any]], items: int = BATCH_ITEMS, chars: int = BATCH_CHARS) -> list[list[str]]:
@@ -873,6 +878,7 @@ def head(lab: dict[str, Any]) -> dict[str, Any]:
     """What the label viewer says of a label above its records: its definition, where it applies, its counts."""
     return {"name": lab["name"], "kind": lab.get("kind"), "rule": str(lab.get("rule") or ""), "values": list(lab["values"]),
             "says": lab.get("says") or "", "in": lab.get("in"), "where": lab.get("where"), "within": lab.get("within"), "trial": bool(lab.get("trial")),
+            "limit": lab.get("limit"), "seed": lab.get("seed") or 0, "reason": bool(lab.get("reason")), "model": lab.get("model"),
             "matched": lab.get("matched"), "version": lab.get("version"), "rev": lab.get("rev"), **status(lab)}
 
 

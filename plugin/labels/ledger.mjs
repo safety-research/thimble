@@ -536,3 +536,35 @@ export function rowText(row) {
   if (!Array.isArray(row)) return row?.code ?? ''
   return row.map(r => (r.hotkey ? `${r.hotkey}: ${r.s}` : r.s)).join('')
 }
+
+// ------------------------------------------------------------------------------------------------ a change, applied
+
+/** What a label is and how it was applied, as the pane can show and change it: its kind, its rule, the plain sentence,
+ *  the records it goes over, its values, its model (a prompt label's; null: the reads' own), the trial's size. */
+export const EDITABLE = ['rule', 'says', 'in', 'values', 'where', 'within', 'model', 'limit']
+
+/** The `thimble label` command that applies the label `l` (as `thimble label --json` gives it) again with `change`
+ *  (fields of EDITABLE; null clears where, within, model or limit): the command Claude runs, so the label's versions,
+ *  checks and records stay right. A code label's code goes on stdin. Null when it cannot be applied again (no kind
+ *  with a rule, or no records named). */
+export function rerunArgs(l, change = {}) {
+  const now = { rule: l?.rule, says: l?.says, in: l?.in, values: l?.values, where: l?.where, within: l?.within, model: l?.model, limit: l?.limit, ...change }
+  const kind = l?.kind
+  const rule = String(now.rule ?? '')
+  if (!['regex', 'code', 'prompt'].includes(kind) || !rule.trim() || !String(now.in ?? '').trim()) return null
+  const args = ['label', String(l.name), '--in', String(now.in)]
+  let stdin
+  if (kind === 'code') { args.push('--code', '-'); stdin = rule } else args.push(`--${kind}`, rule)
+  const values = Array.isArray(now.values) ? now.values : String(now.values ?? '').split(',')
+  // a code label that found its own values keeps finding them: its values go only when changed
+  if (values.filter(v => String(v).trim()).length && (kind !== 'code' || 'values' in change)) args.push('--values', values.map(v => String(v).trim()).filter(Boolean).join(','))
+  if (oneLine(now.says)) args.push('--says', oneLine(now.says))
+  if (now.where) args.push('--where', String(now.where))
+  if (now.within) args.push('--within', Array.isArray(now.within) ? now.within.join('=') : String(now.within))
+  if (kind === 'prompt' && now.model) args.push('--model', String(now.model))
+  if (Number(now.limit) > 0) args.push('--limit', String(Math.floor(Number(now.limit))))
+  if (Number(l?.seed) && Number(now.limit) > 0) args.push('--seed', String(l.seed))
+  if (l?.reason) args.push('--reason')
+  args.push('--json')
+  return stdin == null ? { args } : { args, stdin }
+}

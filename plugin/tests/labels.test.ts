@@ -5,6 +5,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { paneNow } from '../core/pane'
+import { rerunLabel } from '../labels/edit'
 import { drawLabels, openLabels } from '../labels/pane'
 import { promptStub, tempRun } from './stubs'
 
@@ -92,6 +93,41 @@ test('a label line starts the reads: the busy line names the label, and Claude h
   const told = w.context.join('\n')
   expect(told).toContain("thimble's report")
   expect(told).toContain('The model finished reading the records of the label apology (1 call). apology: 2 of 2 records have a value (1 yes, 1 no).')
+})
+
+test("a label changed in the pane is applied again by Claude's command, its reads start, and Claude hears what changed", async () => {
+  const ran: string[][] = []
+  const state = new Map<string, unknown>()
+  let person = ''
+  let started = 0
+  const PERSON = '/made-up/th/events/person-s-edit.jsonl'
+  const $ = {
+    env: { get: async (name: string) => ({ THIMBLE_HOME: '/made-up/th' } as Any)[name] },
+    plugin: { root: '/made-up/plugin', name: 'thimble' },
+    session: { id: async () => 's-edit', cwd: async () => '/made-up/data', root: async () => '/made-up/data', messages: async () => [] },
+    fs: { exists: async () => false, stat: async (p: string) => (p === PERSON ? { kind: 'file', size: person.length } : { kind: 'other', size: 0 }), read: async (p: string) => (p === PERSON ? person : '') },
+    state: { get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }), set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true } } },
+    ui: { invalidate: () => undefined, toast: () => undefined },
+    // the reads are asked for (labels.ts labelFromFeed), and wait: a moment later never comes
+    clock: { after: () => { started++; return { cancel() {} } } },
+    process: {
+      run: async (argv: string[]) => {
+        ran.push(argv)
+        const out = (o: unknown) => ({ exitCode: 0, stdout: typeof o === 'string' ? o : JSON.stringify(o), stderr: '' })
+        if (argv[0] === 'tail') return out(person.slice(Number(argv[2]!.slice(1)) - 1))
+        person += `${JSON.stringify({ t: 2, session: 'person-s-edit', root: '/made-up/data', kind: 'label', name: 'apology' })}\n`
+        return out({ name: 'apology', records: 2, valued: 0, waiting: 2, failed: 0, counts: {} })
+      },
+    },
+  } as Any
+  const label = { name: 'apology', kind: 'prompt', rule: 'The message apologizes.', values: ['yes', 'no'], in: 'chat.jsonl', model: null, limit: null, seed: 0 }
+  expect(await rerunLabel($, '/made-up/data', label, { model: 'opus' })).toBe(null)
+  const cmd = ran.find(a => a[0]!.endsWith('/bin/thimble'))!
+  expect(cmd.slice(1)).toEqual(['label', 'apology', '--in', 'chat.jsonl', '--prompt', 'The message apologizes.', '--values', 'yes,no', '--model', 'opus', '--json'])
+  // the line it wrote in the person's feed was read and acted on, as Claude's are: the reads were asked for
+  expect(started).toBe(1)
+  // Claude hears what changed with the next prompt
+  expect(JSON.stringify([...state.values()])).toContain('The analyst changed the model of the label apology in the labels pane and applied it again')
 })
 
 const HEAD = { name: 'sorry', kind: 'regex', rule: '(?i)sorry|apolog', values: ['yes', 'no'], in: 'chat.jsonl', records: 3, valued: 3, waiting: 0, failed: 0, checked: 0, agree: 0, disagree: 0, counts: { yes: 2, no: 1 } }

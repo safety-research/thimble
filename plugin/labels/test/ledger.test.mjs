@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { textWidth } from '../../core/text.js'
-import { chosenOf, definition, examples, isNegative, ledgerTop, partOf, defLine, rowText, toneOf, valueOrder, whoOf, wrapRuns } from '../ledger.mjs'
+import { chosenOf, definition, examples, isNegative, ledgerTop, partOf, defLine, rerunArgs, rowText, toneOf, valueOrder, whoOf, wrapRuns } from '../ledger.mjs'
 
 const W = 74
 const ROWS = 37
@@ -172,4 +172,22 @@ test("a label's definition line: how it was made and its rule, a --prompt's firs
   const says = { name: 'stuck', kind: 'regex', rule: '(?i)\\b(stuck|blocked)\\b', says: 'The message says its writer cannot go on.', values: ['yes', 'no'] }
   assert.equal(defLine(says), 'The message says its writer cannot go on.')
   assert.deepEqual(definition(says, 80).slice(0, 3).map(rowText), ['  The message says its writer cannot go on.', '', '  (?i)\\b(stuck|blocked)\\b'])
+})
+
+test('a change applies the label again by the command Claude runs, everything else as it was', () => {
+  const stuck = { ...STUCK, says: 'The writer cannot go on.', where: null, within: null, model: null, limit: null, seed: 0 }
+  assert.deepEqual(rerunArgs(stuck, { rule: 'stuck|blocked|waiting on' }).args,
+    ['label', 'stuck', '--in', 'runs/*/board.jsonl', '--regex', 'stuck|blocked|waiting on', '--values', 'yes,no', '--says', 'The writer cannot go on.', '--json'])
+  // a prompt label: its model, its trial and its seed stay; null clears the model
+  const kind = { ...KIND, rule: 'What the post is for.', model: 'opus', limit: 40, seed: 7, reason: true, within: ['stuck', 'yes'] }
+  assert.deepEqual(rerunArgs(kind, { in: 'runs/a/board.jsonl' }).args,
+    ['label', 'post_kind', '--in', 'runs/a/board.jsonl', '--prompt', 'What the post is for.', '--values', 'status,review,claim,question,other', '--within', 'stuck=yes', '--model', 'opus', '--limit', '40', '--seed', '7', '--reason', '--json'])
+  assert.ok(!rerunArgs(kind, { model: null, limit: null }).args.includes('--model'))
+  // a code label's code on stdin, its own values found again unless changed
+  const r = rerunArgs({ ...ASKS, values: ['yes', 'no'] }, { rule: 'def label(u):\n    return "no"' })
+  assert.deepEqual(r.args, ['label', 'asks_review', '--in', 'runs/*/board.jsonl', '--code', '-', '--json'])
+  assert.equal(r.stdin, 'def label(u):\n    return "no"')
+  // nothing to apply: no rule, or no records named
+  assert.equal(rerunArgs({ ...STUCK, rule: '' }), null)
+  assert.equal(rerunArgs(STUCK, { in: '' }), null)
 })

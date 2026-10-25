@@ -82,13 +82,20 @@ export async function rootHere($: Engine): Promise<string | null> {
 
 export type Ran = { code: number; stdout: string; stderr: string }
 
+/** The session the person's own `thimble` commands run under (runThimble): its records are never Claude's, and its
+ *  change feed is its own (core/feed.ts withPersonFeed). */
+const personOf = (key: string) => `person-${key.slice(0, 8)}`
+export async function personSession($: Engine): Promise<string> {
+  return personOf(await sessionKey($))
+}
+
 /** `thimble …` in `root`, as the person's own command, over this conversation's labels. `stdin`: what it reads (the
  *  secret of a key press, the model's answers); `session`: the session its records go under (coverage counts Claude's
  *  own session). A run that gives no result (stopped, past its time, not started) throws why in words (core/why.js). */
 export async function runThimble($: Engine, root: string, args: string[], o: { stdin?: string; session?: string; timeoutMs?: number } = {}): Promise<Ran> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   const key = await sessionKey($)
-  const session = o.session ?? `person-${key.slice(0, 8)}`
+  const session = o.session ?? personOf(key)
   const r = await $.process.run([`${dir}/bin/thimble`, ...args], {
     cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: session, THIMBLE_CONVERSATION: key }, timeoutMs: o.timeoutMs ?? 120000,
     ...(o.stdin != null ? { stdin: o.stdin } : {}),
