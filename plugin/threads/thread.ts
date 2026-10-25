@@ -415,10 +415,10 @@ export function takeAskNext(key: string): boolean {
 }
 
 /** The thread about `scope`: an existing one, or a new one with no turns yet, opened in the side pane, its input bar
- *  taking the keys. `key`: a key at the prompt opened it, and these are the bar's words a click on which opens it
- *  where the key cannot: Claude Code places a pane at any width only for the person's press or command, never for a
- *  key at the prompt (core/pane.ts). */
-export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string } = {}): Promise<boolean> {
+ *  taking the keys. `key`: a key at the prompt opened it, and these are the words a click on which opens it where the
+ *  key cannot, `where` they are (the bar below by default): Claude Code places a pane at any width only for the
+ *  person's press or command, never for a key at the prompt (core/pane.ts). */
+export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string; where?: string } = {}): Promise<boolean> {
   await restoreThreads($)
   // a card: the line it selects now, which the pane shows in place of the whole card
   if (scope.card && !scope.part) {
@@ -443,7 +443,7 @@ export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: str
   if (!placed) {
     pendingKey = key
     noticeLine($, o.key
-      ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${o.key}” in the bar below, or type /threads, to open it here.`
+      ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${o.key}” ${o.where ?? 'in the bar below'}, or type /threads, to open it here.`
       : 'Claude Code did not open the side pane here. Type /threads to open it.', 'pane:threads')
   }
   return placed

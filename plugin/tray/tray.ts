@@ -6,10 +6,11 @@
 // step through the answers' citations, explainers, heads-ups and cards (drawn inline at Claude's calls, or under an
 // answer by v), in reading order (a heads-up on a citation's words before the citation), and open the tray on the one
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
-// answer view asks trayFocus). While it is open its keys are in the bar, after the busy step:
+// answer view asks trayFocus). While it is open its keys are in its header, at the right, each where it acts (the bar
+// keeps its own):
 //
-//   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. `a ask` in the tray's header
-//               too, beside `× close`; with a thread about it already, a opens that thread
+//   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
+//               already, a opens that thread
 //   + −         a citation computed by code: all its code and output in place of the one line (+ expand all), and
 //               the one line again (- collapse)
 //   h explain   the explainer (or heads-up) on the citation's words, over it
@@ -20,11 +21,11 @@
 //               the records for the right value and corrects the cited words (marks/checker.ts launchRepair), or
 //               for one whose check did not run, its check; the
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
-//               card or the bar too (this module's ui.press hook, so the fork starts inside a hook)
+//               card too (this module's ui.press hook, so the fork starts inside a hook)
 //   0 close     back to the mark under it, or close
 //   ] [         the next mark or card, and the one before
 //
-// Each key's words in the tray are a click too: `a ask` in its header asks, `× close` closes it, `+ expand all` (and `− collapse`)
+// Each key's words in the tray are a click too: the header's keys, `x repair` in the card, `+ expand all` (and `− collapse`)
 // under the evidence is + (and -); a click on the citation's words, in the tray's title as in the
 // reply, closes it, as a second click on the open mark in the reply does.
 //
@@ -394,13 +395,13 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
 }
 
 /** The bar's words that open a side thread where the a key cannot: Claude Code places the pane at any width only for a
- *  press (`a ask` in the bar), never for a key at the prompt. */
+ *  press (`a ask` in the bar, or in the tray's header), never for a key at the prompt. */
 const ASK_WORDS = 'a ask'
 
 /** a, or a press on `a ask`: a side thread about the mark the tray shows; the tray gives way to it when it opened. */
 async function askAbout($: Engine, f: Frame, byKey = false): Promise<void> {
   const info = await infoOf($, f)
-  const placed = await openThread($, { about: aboutOf(f, info), mark: refOf(f) as MarkRef }, byKey ? { key: ASK_WORDS } : {})
+  const placed = await openThread($, { about: aboutOf(f, info), mark: refOf(f) as MarkRef }, byKey ? { key: ASK_WORDS, where: 'in the tray' } : {})
   if (placed) await setTray($, null)
 }
 
@@ -487,8 +488,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
 
 // ------------------------------------------------------------------------------------------------ the bar
 
-/** The tray's items at the bar's left: while it is open (or a card ] reached holds the keys), its keys, as `focus`
- *  items, so the bar names only those; at rest none. */
+/** The tray's items at the bar's left: while a card ] reached holds the keys, its keys, as `focus` items, so the bar
+ *  names only those; an open tray's keys are in its header; at rest none. */
 export async function trayBar($: Engine, _on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (preview) return []
   const tray = await trayNow($)
@@ -501,30 +502,25 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
       { id: 'tray-0', key: '0', words: 'back', focus: true, press: () => writeStand($, null) },
     ]
   }
-  const f = top(tray) as Frame | null
-  if (!tray || !f) return []
-  const out: BarItem[] = []
-  const zero: BarItem = { id: 'tray-0', key: '0', words: f.open || tray.stack.length > 1 ? 'back' : 'close', focus: true, press: () => goBack($) }
+  // an open tray names its keys in its header (trayKeys), so the bar keeps its own
+  return []
+}
+
+/** An open tray's keys, in its header at the right, each a click that does what its key does: ] (or [) the next mark,
+ *  h the explainer on a citation's words, a ask, 0 back or close. x repair and + expand all (− collapse) are in the
+ *  citation's card, where they act, and 2–9 are its links in an explainer's words. */
+async function trayKeys($: Engine, tray: NonNullable<Tray>, f: Frame): Promise<BarItem[]> {
+  const out: BarItem[] = (await stepEnds($).then(ends => stepWords(ends))).map((s: Any) => ({ id: `tray-${s.key}`, key: s.key, words: s.words, press: () => stepMark($, s.key === ']' ? 1 : -1) }))
   if (f.kind === 'citation') {
-    const m = await itemOf($, f.row, f.n)
-    out.push({ id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askAbout($, f) })
-    // a click is the ui.press hook's (registerTray), which starts the repair inside a hook
-    if (canRepair(m)) out.push({ id: 'tray-x', key: 'x', words: 'repair', focus: true, press: () => undefined })
-    if (m?.evidence?.kind === 'computed') {
-      out.push(f.open === 'code'
-        ? { id: 'tray-collapse', key: '-', words: 'collapse', focus: true, press: () => showCode($, false) }
-        : { id: 'tray-expand', key: '+', words: 'expand all', focus: true, press: () => showCode($, true) })
-    }
-    out.push(zero, ...(await steps()))
     const inner = await innerOf($, f)
     if (inner) {
       const g = inner.kind !== 'citation' ? await glossOf($, inner.row, inner.id) : null
       const term = String(g?.term ?? '')
-      out.push({ id: 'tray-h', key: 'h', words: inner.kind === 'heads' ? 'heads-up' : `explain ${term.length > 24 ? `${term.slice(0, 23)}…` : term}`, focus: true, press: () => pushMark($, inner) })
+      out.push({ id: 'tray-h', key: 'h', words: inner.kind === 'heads' ? 'heads-up' : `explain ${term.length > 24 ? `${term.slice(0, 23)}…` : term}`, press: () => pushMark($, inner) })
     }
-    return out
   }
-  out.push({ id: 'tray-a', key: 'a', words: 'ask', focus: true, press: () => askAbout($, f) }, zero, ...(await steps()))
+  out.push({ id: 'tray-a', key: 'a', words: 'ask', press: () => askAbout($, f) })
+  out.push({ id: 'tray-0', key: '0', words: f.open || tray.stack.length > 1 ? 'back' : 'close', press: () => goBack($) })
   return out
 }
 
@@ -738,7 +734,7 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
 }
 
 /** The tray, drawn above the bar while it is open: one frame, its title (a citation's words, drawn and clicked as in
- *  the reply) on top, a citation's status and `× close` at its right, then the mark's card, its rows starting where the
+ *  the reply) on top, a citation's status and its keys at its right (trayKeys), then the mark's card, its rows starting where the
  *  title starts. All of it shows: a tray taller than the band's rows scrolls in the band (Claude Code's). */
 export async function trayBand($: Engine, els: Any, width: number, _room = 0): Promise<Any[]> {
   const tray = await trayNow($)
@@ -784,9 +780,13 @@ export async function trayBand($: Engine, els: Any, width: number, _room = 0): P
     ]
   } else body = drawUnits(els, units)
   const tone = TONES[f.kind]
-  const right = status ? status.word : ''
-  const avail = inner - 14
-  const roomT = title.length + right.length + 3 <= avail ? title.length : Math.max(8, avail - Math.min(right.length, Math.floor(avail / 2)) - 3)
+  // its keys at the right, after a citation's status, each drawn as the bar draws a key and a click that presses it
+  const keys = await trayKeys($, tray, f)
+  const keysLen = keys.reduce((n, k) => n + (n ? 3 : 0) + `${k.key} ${k.words}`.length, 0)
+  const rightLen = (status ? status.word.length + 2 : 0) + keysLen
+  // the title and the keys on one row when both fit, else the title on a row of its own above them
+  const oneRow = title.length + 2 + rightLen <= inner
+  const roomT = oneRow ? title.length : inner
   // the title is the marked words, drawn as the reply draws the open mark (marks/view.ts markEl: bold on its tint, a
   // citation underlined; an explainer's or a heads-up's words on their stronger fill), and a click on
   // them closes the tray, as a second click on the open mark in the reply does
@@ -796,19 +796,20 @@ export async function trayBand($: Engine, els: Any, width: number, _room = 0): P
   const titleEl = els.Button({ key: 'tray-title', plain: true, label: 'close the tray', hover: { inverse: false, ...(look.hover ? { scope: look.hover.scope } : {}) }, onPress: () => closeTray($), children: [
     Text({ key: 't', ...look, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
   ] })
-  const close = els.Button({ key: 'tray-close', plain: true, label: 'close the tray', hover: quiet('tray-close'), onPress: () => closeTray($), children: [Text({ key: 'x', bold: true, color: accent(), children: '× close' })] })
-  // `a ask` beside `× close`, its key drawn as the bar draws one: a side thread about the mark, as a does (the thread
-  // about it when one was asked already)
-  const ask = els.Button({ key: 'ask', plain: true, label: `ask about ${aboutOf(f, await infoOf($, f))}`, hover: quiet('tray-ask'), onPress: () => askAbout($, f), children: [
-    Text({ key: 'ask-k', color: accent(), bold: true, children: 'a' }), Text({ key: 'ask-t', dimColor: true, children: ' ask' }),
-  ] })
-  const head = Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [
-    Box({ key: 'l', flexShrink: 1, children: [titleEl] }),
-    Box({ key: 'r', flexDirection: 'row', flexShrink: 0, children: [
-      ...(status ? [Text({ key: 's', ...(status.color ? { color: status.color } : { dimColor: true }), children: status.word }), Text({ key: 'gap', children: '  ' })] : []),
-      ask, Text({ key: 'gap-ask', children: '  ' }), close,
+  const about = aboutOf(f, await infoOf($, f))
+  const keyEls = keys.flatMap((k, i) => [
+    ...(i ? [Text({ key: `ksep${i}`, dimColor: true, children: ' · ' })] : []),
+    els.Button({ key: k.id, plain: true, label: k.key === 'a' ? `ask about ${about}` : `${k.key} ${k.words}`, hover: quiet(k.id), onPress: k.press, children: [
+      Text({ key: 'k', color: accent(), bold: true, children: k.key }), Text({ key: 'w', dimColor: true, children: ` ${k.words}` }),
     ] }),
+  ])
+  const rightEl = Box({ key: 'r', flexDirection: 'row', ...(oneRow ? { flexShrink: 0 } : { flexShrink: 1, flexWrap: 'wrap', justifyContent: 'flex-end' }), children: [
+    ...(status ? [Text({ key: 's', ...(status.color ? { color: status.color } : { dimColor: true }), children: status.word }), Text({ key: 'gap', children: '  ' })] : []),
+    ...keyEls,
   ] })
+  const head = oneRow
+    ? Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [Box({ key: 'l', flexShrink: 1, children: [titleEl] }), rightEl] })
+    : Box({ key: 'tray-head', flexDirection: 'column', children: [titleEl, Box({ key: 'r-row', flexDirection: 'row', justifyContent: 'flex-end', width: inner, children: [rightEl] })] })
   const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: body })] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
 }

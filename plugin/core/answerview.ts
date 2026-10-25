@@ -172,10 +172,11 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
  *  what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
+  // while the tray holds the keys (its own in its header), the open chips' keys (0 [ ]) wait: each key shows once
+  const holds = tray.length > 0 || (!preview && (await safe(trayHolds($), false)))
   return [
     ...tray,
-    // while the tray holds the keys, the chips' keys (0 [ ]) wait: the bar names each key once
-    ...(tray.length ? [] : items(await safe(squeezeBar($, on, preview), []), preview)),
+    ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => !(holds && x.focus)),
     ...items(await safe(claimsBar($, on, preview), []), preview),
   ]
 }

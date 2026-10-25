@@ -3,11 +3,11 @@
 // name, since Claude Code follows `$` only into functions a file declares or imports.
 //
 // The label rows. Which labels a turn used are the `thimble label` commands its Bash calls ran (core/answers.ts
-// labelsOf); a card's are those its turn ran before the card's call (CardUse.seq). A card gets one row under it: each
+// labelsOf); a card's are those its turn ran before the card's call (CardUse.seq). A card gets rows under it: each
 // label's name, how it was made in plain words (regex, code, read by Claude, or values Claude gave: the labels pane's
 // words) and over how many records, and the values its records have, then the records with no value (in the pane's
-// gray): under a card in the colors the card gives them (a plain dim dot where it gives none, so the row never shows
-// a color the card does not use), under an answer in the label's own colors (the labels pane's). An answer gets a row
+// gray), one row per label, its columns lined up: under a card in the colors the card gives them (the label's own
+// where it gives none), under an answer in the label's own colors (the labels pane's). An answer gets a row
 // only for the labels its turn used that none of its cards shows. A press on the name opens the label in the labels
 // pane; a press on a value opens it on that value's records. The labels are read from hooks, never from a drawing
 // (`thimble label --json`, the person's read): at each load of the plugin, after each of main's turns, after a
@@ -124,33 +124,43 @@ async function usedOf($: Engine, names: string[]): Promise<UsedLabel[] | null> {
 
 // ------------------------------------------------------------------------------------------------ the rows
 
-/** The row under a card or an answer: `label has-link · regex · 412 records  ● yes  ● no`, each name and value a
- *  press. Each label is one group, so a row too long for the width wraps between labels, never inside one; the word
- *  `label` (`labels`) is one item with the first name, so a wrap never leaves it alone on its row. */
+/** The rows under a card or an answer, one per label: `label has-link · regex · 412 records  ● yes  ● no`, each name
+ *  and value a press. With several labels `labels` shows once, on the first row, and each column (the names, how each
+ *  was made, how many records) is as wide as its longest, so the columns and the values line up:
+ *
+ *    labels  coordination · regex · 14,591 records  ● yes  ● no
+ *            has_url      · code  · 14,591 records  ● yes  ● no
+ *
+ *  A row too long for the width wraps between its values. */
 export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen: (name: string, value: string | null) => unknown }): Any | null {
   if (!used.length) return null
   const { Box, Button, Text } = els
-  const row: Any[] = []
-  used.forEach((l, i) => {
-    if (i) row.push(Text({ key: `${o.key}-s${i}`, dimColor: true, children: '   ' }))
+  const lead = used.length === 1 ? 'label ' : 'labels  '
+  const records = (l: UsedLabel) => (typeof l.records === 'number' ? `${l.records.toLocaleString('en-US')} ${l.records === 1 ? 'record' : 'records'}` : '')
+  const widest = (f: (l: UsedLabel) => string) => Math.max(...used.map(l => f(l).length))
+  const nameW = widest(l => l.name)
+  const howW = widest(l => howMade(l.kind) || '')
+  const recW = widest(records)
+  const rows = used.map((l, i) => {
     const kids: Any[] = []
     const name = Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ key: 'n', bold: true, children: l.name })] })
-    kids.push(i ? name : Box({ key: `${o.key}-w`, flexDirection: 'row', flexShrink: 0, children: [Text({ key: 'w', dimColor: true, children: used.length === 1 ? 'label ' : 'labels ' }), name] }))
-    const how = howMade(l.kind)
-    if (how) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${how}` }))
-    if (typeof l.records === 'number') kids.push(Text({ key: `${o.key}-d${i}`, dimColor: true, children: ` · ${l.records.toLocaleString('en-US')} ${l.records === 1 ? 'record' : 'records'}` }))
+    kids.push(Box({ key: `${o.key}-w${i}`, flexDirection: 'row', flexShrink: 0, children: [
+      Text({ key: 'w', dimColor: true, children: i ? ' '.repeat(lead.length) : lead }), name,
+      ...(used.length > 1 && l.name.length < nameW ? [Text({ key: 'p', children: ' '.repeat(nameW - l.name.length) })] : []),
+    ] }))
+    const how = howMade(l.kind) || ''
+    if (howW) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${how.padEnd(howW)}` }))
+    if (recW) kids.push(Text({ key: `${o.key}-d${i}`, dimColor: true, children: ` · ${records(l).padStart(recW)}` }))
     ;(l.shown ?? l.values.map(v => ({ v, name: v }))).slice(0, VALUES_SHOWN).forEach(({ v, name }, j) => {
-      // under a card (`tones`): the color the card gives the value, or a plain dim dot where it gives none; under an
-      // answer: the label's own colors. The records with no value: the pane's gray, under a card too
-      const none = v === NO_VALUE
-      const color = none ? colorOf(l.values, v) : l.tones ? l.tones[v] : colorOf(l.values, v)
-      const words = color ? [Text({ key: 'v', color, children: `● ${name}` })] : [Text({ key: 'd', dimColor: true, children: '●' }), Text({ key: 'v', children: ` ${name}` })]
+      // under a card (`tones`): the color the card gives the value, else the label's own (the labels pane's); under an
+      // answer: the label's own. The records with no value: the pane's gray, under a card too
+      const color = (l.tones && v !== NO_VALUE ? l.tones[v] : undefined) ?? colorOf(l.values, v)
       kids.push(Text({ key: `${o.key}-g${i}-${j}`, children: '  ' }))
-      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: none ? `the records of ${l.name} with ${name === 'no value' ? 'no value' : 'no value yet'}` : `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: words }))
+      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: v === NO_VALUE ? `the records of ${l.name} with ${name === 'no value' ? 'no value' : 'no value yet'}` : `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: [Text({ key: 'v', color, children: `● ${name}` })] }))
     })
-    row.push(Box({ key: `${o.key}-l${i}`, flexDirection: 'row', flexWrap: 'wrap', children: kids }))
+    return Box({ key: `${o.key}-l${i}`, flexDirection: 'row', flexWrap: 'wrap', children: kids })
   })
-  return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: row })
+  return Box({ key: o.key, flexDirection: 'column', children: rows })
 }
 
 /** What a press on a row's label name (value null) or value does: open the labels pane on it. The open is returned, so

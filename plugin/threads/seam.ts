@@ -104,7 +104,7 @@ export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown):
   return roomUnder($, e, kind, args)
 }
 
-export async function openThread($: Engine, scope: ThreadScope, o: { key?: string } = {}): Promise<boolean> {
+export async function openThread($: Engine, scope: ThreadScope, o: { key?: string; where?: string } = {}): Promise<boolean> {
   return openThreadOn($, scope, o)
 }
 

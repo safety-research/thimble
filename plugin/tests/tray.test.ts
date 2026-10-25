@@ -84,13 +84,13 @@ const QUOTED = {
 test('] opens the tray on a citation with its evidence; a question asked with it open carries nothing of it; 0 closes it', async ($, on) => {
   const { submitted, clock } = await resumed($, on, QUOTED)
   // a resumed session: the answer and its checked citation are read back
-  // ]: the tray above the bar, on the citation, its keys in the bar
+  // ]: the tray above the bar, on the citation, its keys in its header
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('12 of 40')
-  // the header's right: the status, then a ask and a bold purple × close (no kind word); verified says no reason; then the
-  // file's place, dim, and the one line that holds the value, after a rule
-  expect(band).toContain('✓ verified  a ask  × close')
+  // the header's right: the status, then its keys as the bar draws keys (no kind word); verified says no reason; then
+  // the file's place, dim, and the one line that holds the value, after a rule
+  expect(band).toContain('✓ verified  a ask · 0 close')
   expect(band).not.toContain('· citation')
   expect(band).not.toContain('Line 4 says')
   expect(band).toContain('runs/summary.txt:4│failed: 12')
@@ -101,9 +101,10 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   const drawnBand = all(await $.ui.render(above()))
   expect(drawnBand.some(n => n.type === 'Text' && n.props?.backgroundColor === undefined && (n.hover ?? n.props?.hover)?.backgroundColor === citeTint() && n.props?.underline === true && n.props?.bold === true && textOf(n) === '12')).toBe(true)
   expect(drawnBand.find(n => n.type === 'Text' && textOf(n) === 'runs/summary.txt:4')?.props).toMatchObject({ dimColor: true })
-  expect(band).toContain('a ask')
-  expect(band).toContain('0 close')
-  expect(band).not.toContain('v card')
+  // each key once: the bar under it keeps its own keys and names none of the tray's
+  expect(band.match(/a ask/g)).toEqual(['a ask'])
+  expect(band.match(/0 close/g)).toEqual(['0 close'])
+  expect(band).toContain('s squeeze')
   // the citation draws in focus in the answer
   const drawn = await $.ui.render(answer('row-t1', TEXT))
   const cite = all(drawn).find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))
@@ -172,7 +173,6 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   band = textOf(open)
   expect(band).toContain('│runs: 40│failed: 11│passed: 29')
   expect(band).not.toContain('expand all')
-  expect(band).toContain('- collapse')
   expect(band).toContain('− collapse')
   expect(band).not.toContain('Output of the code')
   expect(band).not.toContain('The code')
@@ -185,7 +185,7 @@ test('a corrected value computed by code: purple in the reply; the line that pri
   expect(band).toContain('failed: 11')
 })
 
-test('each key of the tray is a click too: + expand all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and × close closes it', async ($, on) => {
+test('each key of the tray is a click too: + expand all and − collapse as + and -, a click on the citation in the reply or in the tray\'s title closes it, and 0 close in its header closes it', async ($, on) => {
   await resumed($, on, {
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
     evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nprint(f"failed: {bad}")', output: 'runs: 40\nfailed: 12\npassed: 28', highlight: [[17, 19]] },
@@ -223,15 +223,17 @@ test('each key of the tray is a click too: + expand all and − collapse as + an
   await reply.press({ key: cite.props.key })
   await reply.unmount()
   expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
-  // again open; × close in its header closes it, bold in thimble's purple
+  // again open; `0 close` in its header closes it, its key bold in thimble's purple as the bar draws a key
   reply = await $.ui.mount(answer('row-t1', TEXT))
   await reply.press({ key: cite.props.key })
   await reply.unmount()
-  const x = all(await $.ui.render(above())).find(n => n.type === 'Text' && textOf(n) === '× close')
-  expect(x?.props).toMatchObject({ bold: true })
-  expect(typeof x?.props?.color).toBe('string')
+  const zero = all(await $.ui.render(above())).find(n => n.type === 'Button' && n.props?.key === 'tray-0')
+  expect(textOf(zero)).toBe('0 close')
+  const k = all(zero).find(n => n.type === 'Text' && textOf(n) === '0')
+  expect(k?.props).toMatchObject({ bold: true })
+  expect(typeof k?.props?.color).toBe('string')
   tray = await $.ui.mount(above())
-  await tray.press({ key: 'tray-close' })
+  await tray.press({ key: 'tray-0' })
   await tray.unmount()
   expect(textOf(await $.ui.render(above()))).not.toContain('failed: 12')
 })
@@ -241,7 +243,7 @@ test('a citation the check found false: × failed in the header, as any failed o
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
-  expect(band).toContain('× failed  a ask  × close')
+  expect(band).toContain('× failed  a ask · 0 close')
   expect(band).not.toContain('wrong')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === '× failed')?.props?.color).toBe('error')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'Line 4 counts 12 failed, but 3 were retried.')?.props).toMatchObject({ dimColor: true })
@@ -305,7 +307,7 @@ test('a citation whose check did not run is failed: × in the reply, × failed i
   await $.prompt.edit(key(']'))
   const drawn = all(await $.ui.render(above()))
   const band = textOf(drawn)
-  expect(band).toContain('× failed  a ask  × close')
+  expect(band).toContain('× failed  ] next citation · a ask · 0 close')
   expect(band).not.toContain('not checked')
   expect(drawn.find(n => n.type === 'Text' && textOf(n) === 'The check did not run.')?.props).toMatchObject({ dimColor: true })
   expect(band).not.toContain('gave no evidence')
@@ -316,7 +318,7 @@ test('a citation whose check did not run is failed: × in the reply, × failed i
   await $.prompt.edit(key(']'))
   const ended = textOf(await $.ui.render(above()))
   expect(ended).toContain('p95 check')
-  expect(ended).toContain('× failed  a ask  × close')
+  expect(ended).toContain('× failed  [ previous citation · a ask · 0 close')
   expect(ended).toContain('The check did not run.')
   expect(ended).not.toContain('session ended')
   expect(ended).toContain('x repair')
@@ -442,7 +444,7 @@ test('a heads-up on a citation\'s words is one ] away; it shows whole, with no p
   // ]: the heads-up first, not the citation under it
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   const band = textOf(await $.ui.render(above(12)))
-  expect(band).toContain('a ask  × close')
+  expect(band).toContain('a ask · 0 close')
   expect(band).toContain('Retried runs count twice')
   expect(band).toContain('but not the failures among the other runs.')
   expect(band).not.toContain('? ask about this heads-up')
@@ -489,7 +491,7 @@ test('a heads-up whose words hold a citation covers them all: its fill under the
   expect(textOf(await $.ui.render(above(12)))).toContain('Names are typed in')
 })
 
-test('`a ask` beside `× close` in the tray\'s header opens a side thread about the heads-up; a prompt typed with it open carries nothing of it', async ($, on) => {
+test('`a ask` in the tray\'s header opens a side thread about the heads-up; a prompt typed with it open carries nothing of it', async ($, on) => {
   const opens: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.id); return { value: { isPlaced: true } } as never })
   on('ui.close', () => ({ value: undefined }))
@@ -497,9 +499,9 @@ test('`a ask` beside `× close` in the tray\'s header opens a side thread about 
   await $.prompt.edit(key(']'))
   const ui = await $.ui.mount(above(40))
   const head = all(await $.ui.render(above(40))).find(n => n.props?.key === 'tray-head')
-  expect(textOf(head)).toMatch(/a ask {2}× close$/)
-  expect(all(head).find(n => n.props?.key === 'ask')?.props.label).toBe('ask about the heads-up "Retried runs count twice"')
-  await ui.press({ key: 'ask' })
+  expect(textOf(head)).toMatch(/] next citation · a ask · 0 close$/)
+  expect(all(head).find(n => n.props?.key === 'tray-a')?.props.label).toBe('ask about the heads-up "Retried runs count twice"')
+  await ui.press({ key: 'tray-a' })
   await ui.unmount()
   expect(opens).toEqual(['thimble'])
   // a prompt typed with a heads-up open: no scope of it, no `▸ about` (Claude reads it with the comments anyway)

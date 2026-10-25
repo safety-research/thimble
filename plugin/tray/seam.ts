@@ -9,7 +9,8 @@
 //   trayHolds($)                       whether it holds the keys now (open, or a card ] reached stands): its keys then
 //                                      come before every other feature's
 //   trayBand($, els, width, room)      the tray, drawn above the bar while it is open, in at most `room` rows
-//   trayBar($, on, preview)            its items at the bar's left (`] next citation`)
+//   trayBar($, on, preview)            its items at the bar's left while a card ] reached holds the keys (an open
+//                                      tray's keys are in its header)
 //   trayFocus($, row)                  what the tray shows on this row, so the row draws it in focus: a citation by its
 //                                      number (MarkRef kind `citation`), or an explainer's or heads-up's span by its id
 //   markPressed($, row, n)             a press on citation `n` of the row: true when the tray took it (else the
