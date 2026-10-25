@@ -184,20 +184,22 @@ test('a cluster chosen: its name bold, its orienting line, then its claims one l
   assert.equal(p[1], 'topic 0 · 12 claims')
   assert.equal(p[2], 'Whether the facts of topic 0 hold, and what they say about the runs.')
   assert.equal(p[3], '')
-  // the current one (the first when none was chosen) whole, wrapped under its first word; the others one line each,
-  // cut after a whole word with …
+  // every claim numbered as the claim view counts them, the list under the cluster's words: the current one (the first
+  // when none was chosen) whole, wrapped under its first word; the others one line each, cut after a whole word with …
   const list = p.slice(4)
   assert.equal(list.length, 13)
-  assert.equal(list.slice(0, 2).join(' ').replace(/^▸ /, '').replace(/ {3}/, ' '), 'Fact 0-0 holds for every run of the sweep that the agents made on the shared wiki pages over the weeks.')
-  assert.match(list[1], /^ {2}\S/)
-  assert.ok(list.slice(2).every(l => l.length <= 72 && / …$/.test(l) && l.startsWith('  Fact 0-')), list.join('\n'))
-  // the current one bold in the cluster's color; each line a press that picks its claim; the name a press on the cluster
+  assert.equal(list.slice(0, 2).join(' ').replace(/^▸ {2}1\. /, '').replace(/ {7}/, ' '), 'Fact 0-0 holds for every run of the sweep that the agents made on the shared wiki pages over the weeks.')
+  assert.match(list[1], /^ {6}\S/)
+  assert.ok(list.slice(2).every((l, i) => l.length <= 72 && / …$/.test(l) && l.startsWith(`  ${String(i + 2).padStart(2)}. Fact 0-`)), list.join('\n'))
+  // the current one bold in the cluster's color; the others' numbers dim; each line a press that picks its claim; the
+  // name a press on the cluster
   assert.ok(v.panel.slice(4, 6).every(r => r.every(x => x.bold && x.tone === 'c1' && x.part === 'n:c1')))
-  assert.ok(v.panel[6].every(x => !x.bold && !x.tone && x.part === 'n:c2'))
+  assert.ok(v.panel[6].every(x => !x.bold && x.part === 'n:c2'))
+  assert.deepEqual(v.panel[6].map(x => x.tone ?? null), [null, 'dim', null])
   assert.ok(v.panel[1][0].bold && v.panel[1][0].tone === 'c1' && v.panel[1].every(x => x.part === `g:${key}`))
   assert.doesNotMatch(panel(v), /verified|failed|citation/)
   // k j move the current claim (`cur`)
-  assert.match(panel(graphView(data, { group: key, cur: 3 }, { w: 72, h: 50 })).split('\n')[7], /^▸ Fact 0-3/)
+  assert.match(panel(graphView(data, { group: key, cur: 3 }, { w: 72, h: 50 })).split('\n')[7], /^▸ {2}4\. Fact 0-3/)
   // its name on the map bold in its color; every other name and dot plain (the text color)
   const names = v.graph.flatMap(r => r.filter(x => /^g:/.test(x.part || '') && x.s.trim()))
   for (const nm of names) assert.equal(nm.tone === 'plain', nm.part !== `g:${key}`, nm.s)
@@ -213,7 +215,7 @@ test('a cluster chosen: its name bold, its orienting line, then its claims one l
   assert.equal(hopCluster(data, keys.at(-1), 1), keys[0])
 })
 
-test('a detail taller than its room scrolls: a window with ↑ N earlier and ↓ N more lines, the current claim kept in view', () => {
+test('a detail taller than its room scrolls: a window with ↑ N and ↓ N more claims in a cluster list (more lines elsewhere), the current claim kept in view', () => {
   const data = sized([44, 3])
   const key = String(data.groups[0].id)
   for (const [w, h] of [[70, 44], [50, 34]]) {
@@ -222,17 +224,19 @@ test('a detail taller than its room scrolls: a window with ↑ N earlier and ↓
     assert.ok(first.scroll.max > 0, `${w}×${h}`)
     assert.ok(rows(first).length + 2 <= h, `${w}×${h}: ${rows(first).length + 2}`)
     const p = first.panel.map(rowText)
-    assert.match(p.at(-1), /^↓ \d+ more lines$/)
+    assert.match(p.at(-1), /^↓ \d+ more claims$/)
+    // the claims under the window, each one line
+    assert.equal(Number(p.at(-1).match(/\d+/)[0]), 44 - p.filter(l => /^(▸| ) +\d+\. Fact/.test(l)).length)
     assert.equal(first.panel.at(-1)[0].part, 'sc:1')
     assert.ok(!p.some(l => /earlier/.test(l)))
     // the current claim far down: the window follows it, with the way back up
     const deep = at(40).panel.map(rowText)
-    assert.match(deep[0], /^↑ \d+ more lines$/)
-    assert.ok(deep.some(l => l.startsWith('▸ Fact 0-40 ')), deep.join('\n'))
+    assert.match(deep[0], /^↑ \d+ more claims$/)
+    assert.ok(deep.some(l => l.startsWith('▸ 41. Fact 0-40 ')), deep.join('\n'))
     // the last claim: the window ends with it, nothing more under it
     const last = at(43)
     assert.equal(last.scroll.top, last.scroll.max)
-    assert.ok(rowText(last.panel.at(-1)).startsWith('▸ Fact 0-43'))
+    assert.ok(rowText(last.panel.at(-1)).startsWith('▸ 44. Fact 0-43'))
     // scrolled by the wheel (`top`, not following): the window moves, the current claim may leave it
     const moved = at(0, 5, false)
     assert.equal(moved.scroll.top, 5)
@@ -444,7 +448,7 @@ test('a narrow pane (fewer than 40 columns): the clusters one row each over the 
   const v = graphView(data, { group: String(data.groups[0].id) }, { w: 36, h: 30 })
   assert.ok(v.narrow && v.rowsView)
   assert.deepEqual(v.graph.map(rowText), [' topic 0  ● ● ● ● ●', ' topic 1  ● ● ●'])
-  assert.match(panel(v), /^─+\ntopic 0 · 5 claims\n\n▸ Fact 0-0 holds\./)
+  assert.match(panel(v), /^─+\ntopic 0 · 5 claims\n\n▸ 1\. Fact 0-0 holds\.\n {2}2\. Fact 0-1/)
 })
 
 /** A claim corrected n times, each in its own turn, with a reason each time. */
@@ -573,7 +577,7 @@ test("a cluster's orienting line: the lens gives it by the new cluster's name or
   applyTurn(st, { turn: 2, places: [], out: { claims: [], clusters: [{ id: 'k1', about: 'How copies passed answers on.' }] } })
   assert.equal(st.clusters[0].about, 'How copies passed answers on.')
   const data = paneData(st)
-  assert.match(panel(graphView(data, { group: 'k1' }, { w: 80, h: 30 })), /^─+\nhow copies shared answers · 1 claim\nHow copies passed answers on\.\n\n▸ Copies left/)
+  assert.match(panel(graphView(data, { group: 'k1' }, { w: 80, h: 30 })), /^─+\nhow copies shared answers · 1 claim\nHow copies passed answers on\.\n\n▸ 1\. Copies left/)
   // at rest nothing shows under the map
   assert.deepEqual(graphView(data, {}, { w: 80, h: 30 }).panel, [])
 })

@@ -7,7 +7,8 @@
 // or a claim of the list picks that claim (its dot again, nothing); a citation's card opens as a press on it in the
 // reply does (the tray; else its evidence pane), and a citation's line makes it the current one. Tab and Enter reach
 // the same Buttons. A detail taller than its room scrolls with the wheel (core/pane.ts scrollsOwn; ↑ ↓ press k j) and
-// d u, which show in the keys only then; `↑ N more lines` and `↓ N more lines` each a press that scrolls a page.
+// d u, which show in the keys only then; `↑ N more lines` and `↓ N more lines` (`N more claims` in a cluster's list)
+// each a press that scrolls a page.
 //
 //   keys while the pane holds the keyboard, each once:
 //     at rest            n the first cluster, in reading order of the map as drawn (row by row, left to right)

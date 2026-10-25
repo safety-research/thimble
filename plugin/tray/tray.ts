@@ -8,8 +8,8 @@
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
 // answer view asks trayFocus). While it is open its keys are in the bar, after the busy step:
 //
-//   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. `ask` in the tray's header
-//               too, beside `× close`
+//   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. `a ask` in the tray's header
+//               too, beside `× close`; with a thread about it already, a opens that thread
 //   + −         a citation computed by code: all its code and output in place of the one line (+ expand all), and
 //               the one line again (- collapse)
 //   h explain   the explainer (or heads-up) on the citation's words, over it
@@ -24,8 +24,8 @@
 //   0 close     back to the mark under it, or close
 //   ] [         the next mark or card, and the one before
 //
-// Each key's words in the tray are a click too: `ask` in its header asks, `× close` closes it, `+ expand all` (and `− collapse`)
-// under the evidence is + (and -), the thread line is a; a click on the citation's words, in the tray's title as in the
+// Each key's words in the tray are a click too: `a ask` in its header asks, `× close` closes it, `+ expand all` (and `− collapse`)
+// under the evidence is + (and -); a click on the citation's words, in the tray's title as in the
 // reply, closes it, as a second click on the open mark in the reply does.
 //
 // The tray shows all of its body. When it is taller than the rows Claude Code gives the band above the prompt, the band
@@ -61,7 +61,7 @@ import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
-import { openThread, threadAsked } from '../threads/seam'
+import { openThread } from '../threads/seam'
 import {
   aboutOf, back, base, canRepair, cutTitle, drawsHyperlinks, evidenceLine, explainerText, fileHref, firstSentence, indexOf, lineWindow,
   open, printLine, push, refOf, restStop, rowsOf, sameRef, stepFrom, stepWords, stopWhat, stopsOfRow, stopsOfTurn, top,
@@ -769,13 +769,6 @@ export async function trayBand($: Engine, els: Any, width: number, _room = 0): P
     if (!g) units = [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: `This ${heads ? 'heads-up' : 'explainer'} is no longer in the session.` }) }]
     else words = { text: explainerText(g) }
   }
-  // the thread about this mark, once a question was asked in it: a opens it
-  const asked = f.open === 'code' ? null : await threadAsked($, { about: '', mark: refOf(f) as MarkRef })
-  if (asked) units.push({ h: 1, el: els.Button({ key: 'thread', plain: true, label: 'open the thread about this', hover: quiet('tray-thread'), onPress: () => askAbout($, f), children: [Text({ key: 'thread-t', wrap: 'truncate-end', children: [
-    Text({ key: 'a', dimColor: true, children: '↳ thread: ' }),
-    Text({ key: 'q', children: asked.length > 60 ? asked.slice(0, 59) + '…' : asked }),
-    Text({ key: 'b', dimColor: true, children: ' · a opens it' }),
-  ] })] }) })
   let body: Any[]
   if (words) {
     // an explainer's or a heads-up's words, drawn as the reply draws its words (marks/view.ts messageEl): its citations,
@@ -804,8 +797,11 @@ export async function trayBand($: Engine, els: Any, width: number, _room = 0): P
     Text({ key: 't', ...look, wrap: 'truncate-end', children: cutTitle(title, roomT) }),
   ] })
   const close = els.Button({ key: 'tray-close', plain: true, label: 'close the tray', hover: quiet('tray-close'), onPress: () => closeTray($), children: [Text({ key: 'x', bold: true, color: accent(), children: '× close' })] })
-  // `ask` beside `× close`: a side thread about the mark, as a does
-  const ask = els.Button({ key: 'ask', plain: true, label: `ask about ${aboutOf(f, await infoOf($, f))}`, hover: quiet('tray-ask'), onPress: () => askAbout($, f), children: [Text({ key: 'ask-t', color: accent(), children: 'ask' })] })
+  // `a ask` beside `× close`, its key drawn as the bar draws one: a side thread about the mark, as a does (the thread
+  // about it when one was asked already)
+  const ask = els.Button({ key: 'ask', plain: true, label: `ask about ${aboutOf(f, await infoOf($, f))}`, hover: quiet('tray-ask'), onPress: () => askAbout($, f), children: [
+    Text({ key: 'ask-k', color: accent(), bold: true, children: 'a' }), Text({ key: 'ask-t', dimColor: true, children: ' ask' }),
+  ] })
   const head = Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [
     Box({ key: 'l', flexShrink: 1, children: [titleEl] }),
     Box({ key: 'r', flexDirection: 'row', flexShrink: 0, children: [
