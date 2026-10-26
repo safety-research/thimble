@@ -26,7 +26,6 @@ import type { BarItem } from '../bar/bar'
 import { markPressed, spansOver } from '../core/answerview'
 import { latestAnswer, pickAnswer } from '../core/answers'
 import { openPane } from '../core/pane'
-import { treeRows } from '../core/trail.mjs'
 import { accent } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import type { Take } from '../hooks/keys'
@@ -479,12 +478,10 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
       await openPane($, 'evidence', { row: it.row, n: it.n }, `citation ${it.n}`)
     },
   })
+  // the rule: a Client as tall as the catch-up, which draws one ▎ per row it is given (rule.tsx), so it ends where the
+  // catch-up ends, whatever its text and cards lay out to
+  const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, children: [els.Client({ key: `cu-rule-${row}`, module: './rule.tsx', width: 2, height: '100%', props: { color: accent() } })] })
   const head = els.Text({ key: 'cu-head', children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} above` })] })
-  // the rule: longer than the head and the drawn body can be (its text and the cards it places, at their reported
-  // heights), cut at the catch-up's own height. A count of rows is an estimate (markdown lays out blank lines, lists
-  // and marks its own way), so the rule is drawn twice that and more: a rule cut short shows, one cut long does not
-  const tall = 2 * treeRows(body, w) + 20
-  const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, overflow: 'hidden', flexDirection: 'column', children: [els.Text({ color: accent(), children: Array.from({ length: tall }, () => '▎').join('\n') })] })
   return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [
     els.Box({ key: 'cu-ruled', flexDirection: 'column', paddingLeft: 2, children: [rule, head, body] }),
   ] })
