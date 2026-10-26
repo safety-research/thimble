@@ -29,7 +29,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { failCleared, failNotice, noticeLine } from '../bar/notice'
+import { failCleared, failNotice, hintLine, noticeLine } from '../bar/notice'
 import { cardText, revealCard } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { partOf } from '../core/answers'
@@ -449,7 +449,7 @@ export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: str
   // open: a notice that a key could not open it goes
   if (placed) await failCleared($, 'pane:threads')
   if (!placed) {
-    noticeLine($, o.key
+    hintLine($, o.key
       ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${o.key}” ${o.where ?? 'in the bar below'} to open it here.`
       : 'Claude Code did not open the side pane here. Widen the terminal and ask again.', 'pane:threads')
   }
@@ -462,7 +462,7 @@ export async function listThreads($: Engine, o: { fromKey?: boolean } = {}): Pro
   const placed = await openPane($, 'threads', {}, 'Threads', { focus: true })
   if (placed) await failCleared($, 'pane:threads')
   if (!placed && o.fromKey) {
-    noticeLine($, `Claude Code opens the side pane from a key only in a wider terminal. Click “${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” in the bar below to open it here.`, 'pane:threads')
+    hintLine($, `Claude Code opens the side pane from a key only in a wider terminal. Click “${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” in the bar below to open it here.`, 'pane:threads')
   }
   return placed
 }

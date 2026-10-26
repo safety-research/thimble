@@ -50,7 +50,7 @@ import { modelWhy } from '../core/why.js'
 import { explainMerge, explainState } from '../explain/seam'
 import { sessionKey } from '../hooks/conversation'
 import { promptText, type PromptName } from '../prompts/prompts'
-import { featureOn, lensesAfterReply, minimalOn } from '../settings/features.mjs'
+import { featureOn, lensesAfterReply } from '../settings/features.mjs'
 import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf, skeletonOf } from './compose.mjs'
 import { LENSES } from './lenses.mjs'
@@ -232,7 +232,7 @@ export async function findClaimsNow($: Engine): Promise<number> {
   return turns.length
 }
 
-/** h while Minimal is on (explain/seam.ts headsKey): the answer at `row` queued for a look of the heads lens alone.
+/** h while Heads-ups is on demand (explain/seam.ts headsKey): the answer at `row` queued for a look of the heads lens alone.
  *  Answers whether it was queued: Heads-ups is on, a person is here, and `row` is an answer. */
 export async function headsUpsNow($: Engine, row: string): Promise<boolean> {
   if (!featureOn('details') || S.person !== 'now') return false
@@ -247,9 +247,8 @@ export async function headsUpsNow($: Engine, row: string): Promise<boolean> {
  *  with its words as what the analyst reads below `row`, the newest message it covers, where what they give is kept
  *  (explain/seam.ts explainMerge) and the catch-up's drawing finds it (explainSpansOf). */
 export async function lookAtCatchUp($: Engine, row: string, text: string): Promise<void> {
-  // Minimal: nothing is marked by itself, a catch-up's words neither
-  if (minimalOn()) return
-  const only = (LENSES as Lens[]).filter(l => (l.name === 'explain' || l.name === 'heads') && featureOn(l.option)).map(l => l.name)
+  // a lens on demand marks nothing by itself, a catch-up's words neither
+  const only = (LENSES as Lens[]).filter(l => (l.name === 'explain' || l.name === 'heads') && lensesAfterReply(l.option)).map(l => l.name)
   if (!only.length || S.person !== 'now' || !text.trim()) return
   const t = await turnOfRow($, row)
   const m = t ? await msgOf($, t, row, 'answer') : null

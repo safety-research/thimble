@@ -12,7 +12,7 @@
     "minimal": {
       "type": "boolean",
       "title": "Minimal",
-      "description": "Everything on demand: nothing runs after a reply and nothing is marked by itself. Select words and press e to explain them or c to cite them, h gives heads-ups on the last answer, and f in Evidence finds the claims. Claude still draws cards, and v visualizes the last answer. The settings below come back when it is off.",
+      "description": "No background tokens. Cards are enabled, while explainers, citations, heads-up, and claims only appear when you request them.",
       "default": false
     },
     "citations": {
@@ -46,16 +46,26 @@
       "default": true
     },
     "explain": {
-      "type": "boolean",
+      "type": "string",
       "title": "Explainers",
-      "description": "Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.",
-      "default": true
+      "description": "auto: marks the terms you may not know after each reply, a small part of the call after it; ] opens what each one means here. on demand: select words and press e for one. off: no explainers.",
+      "options": [
+        "auto",
+        "on demand",
+        "off"
+      ],
+      "default": "auto"
     },
     "details": {
-      "type": "boolean",
+      "type": "string",
       "title": "Heads-ups",
-      "description": "Marks a detail of an answer that is easy to miss and changes what it means; ] opens its heads-up. A small part of the call after each reply.",
-      "default": true
+      "description": "auto: marks a detail of an answer that is easy to miss and changes what it means, a small part of the call after each reply; ] opens its heads-up. on demand: h gives heads-ups on the last answer. off: no heads-ups.",
+      "options": [
+        "auto",
+        "on demand",
+        "off"
+      ],
+      "default": "auto"
     },
     "claimsMode": {
       "type": "string",

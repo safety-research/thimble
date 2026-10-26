@@ -8,6 +8,9 @@
 // with the new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key), or
 // choiceOf(key) for a mode, when it acts.
 
+/** What Minimal does, as the settings pane says it under its row. */
+const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers, citations, heads-up, and claims only appear when you request them.'
+
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `group`:
  *  the heading the pane lists it under, with the others of its group (Answers, Comments on an answer's words, Panes;
  *  a key keeps its name, so a saved setting still applies); Minimal, first, has none: it stands over the others; `does`: one line on what the person gets
@@ -19,8 +22,8 @@
 export const SWITCHES = [
   {
     key: 'minimal', title: 'Minimal', default: false,
-    does: 'Everything on demand: nothing runs after a reply and nothing is marked by itself. Select words and press e to explain them or c to cite them, h gives heads-ups on the last answer, and f in Evidence finds the claims. Claude still draws cards, and v visualizes the last answer. The settings below come back when it is off.',
-    says: { on: 'Everything on demand: nothing runs after a reply; you ask with e, c and h on an answer, f in Evidence.', off: 'Each feature works as set below.' },
+    does: MINIMAL_SAYS,
+    says: { on: MINIMAL_SAYS, off: MINIMAL_SAYS },
   },
   {
     key: 'citations', title: 'Citations', group: 'Answers', default: 'manual', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
@@ -48,14 +51,22 @@ export const SWITCHES = [
     says: { on: 'b sums up the replies that came in while you were away.', off: 'No catch-up.' },
   },
   {
-    key: 'explain', title: 'Explainers', group: 'Comments', default: true, lenses: ['explain'],
-    does: 'Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.',
-    says: { on: 'Words you may not know get a short explainer; select any words and press e for one.', off: 'No explainers.' },
+    key: 'explain', title: 'Explainers', group: 'Comments', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['explain'], lensesIn: 'auto',
+    does: 'auto: marks the terms you may not know after each reply, a small part of the call after it; ] opens what each one means here. on demand: select words and press e for one. off: no explainers.',
+    says: {
+      'auto': 'Words you may not know get a short explainer; select any words and press e for one.',
+      'on demand': 'Select words and press e for a short explainer.',
+      'off': 'No explainers.',
+    },
   },
   {
-    key: 'details', title: 'Heads-ups', group: 'Comments', default: true, lenses: ['heads'],
-    does: 'Marks a detail of an answer that is easy to miss and changes what it means; ] opens its heads-up. A small part of the call after each reply.',
-    says: { on: 'Words that may mislead get a heads-up.', off: 'No heads-ups.' },
+    key: 'details', title: 'Heads-ups', group: 'Comments', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['heads'], lensesIn: 'auto',
+    does: 'auto: marks a detail of an answer that is easy to miss and changes what it means, a small part of the call after each reply; ] opens its heads-up. on demand: h gives heads-ups on the last answer. off: no heads-ups.',
+    says: {
+      'auto': 'Words that may mislead get a heads-up.',
+      'on demand': 'h gives heads-ups on the last answer.',
+      'off': 'No heads-ups.',
+    },
   },
   {
     key: 'claimsMode', title: 'Evidence', group: 'Panes', default: 'on demand', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
@@ -98,7 +109,15 @@ export const RETIRED = {
 
 /** Modes renamed since a value was saved under their old name, by feature: the old name stands for the new one, and
  *  the first session saves the new one (term.ts). */
-export const RENAMED = { citations: { 'auto cite + check': 'auto cite + verify' } }
+export const RENAMED = {
+  citations: { 'auto cite + check': 'auto cite + verify' },
+  // a switch until 0.10.4, now modes: on is auto, off is off
+  explain: { true: 'auto', false: 'off' },
+  details: { true: 'auto', false: 'off' },
+}
+
+/** A mode saved under its old name (or as the switch it was), by its new name; undefined when it has none. */
+export const renamedTo = (key, saved) => (typeof saved === 'string' || typeof saved === 'boolean' ? RENAMED[key]?.[String(saved)] : undefined)
 
 /** Defaults that moved, and the hidden field that says a person's settings have had them: the installer saves every
  *  field's default, so a value at an old default cannot tell whether the person chose it. While `defaultsAt` is not
@@ -150,7 +169,7 @@ export function movedFrom(values) {
 export function settled(values) {
   const base = values && typeof values === 'object' ? values : {}
   const moved = Object.fromEntries(Object.keys(movedFrom(base)).map(k => [k, valueIn(base, k)]))
-  const renamed = Object.fromEntries(Object.entries(RENAMED).filter(([k, names]) => names[base[k]]).map(([k, names]) => [k, names[base[k]]]))
+  const renamed = Object.fromEntries(Object.keys(RENAMED).filter(k => renamedTo(k, base[k])).map(k => [k, renamedTo(k, base[k])]))
   return { ...base, ...renamed, ...moved, ...Object.fromEntries(Object.entries(RETIRED).map(([k, f]) => [k, f.default])) }
 }
 
@@ -166,7 +185,7 @@ export function setOptions(options) {
 export function valueIn(values, key) {
   const s = BY_KEY.get(key)
   const saved = values ? values[key] : undefined
-  const v = RENAMED[key]?.[saved] ?? saved
+  const v = renamedTo(key, saved) ?? saved
   // a setting at its default, while a retired field still holds a value saved before it, stands for that value
   const moved = movedFrom(values)
   if (s && key in moved && atDefault(key, v)) return moved[key]
@@ -174,26 +193,12 @@ export function valueIn(values, key) {
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
 
-/** What Minimal holds a mode at while it is on, by feature: a mode that acts after each reply waits to be asked
- *  (Citations' auto modes are manual; Claims' auto is on demand). Explainers and Heads-ups stay on, so e and h ask for
- *  them, but their lenses leave the look after each reply (lensesAfterReply). */
-const MINIMAL = { citations: { 'auto cite + verify': 'manual', 'auto cite': 'manual' }, claimsMode: { auto: 'on demand' } }
+/** Minimal: the modes it sets, so nothing runs after a reply and each of these waits to be asked. Turning it on saves
+ *  them (settings/term.ts), and the rows show them; a row changed away from them turns it off. */
+export const PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
 
-/** A feature's value as it acts: its value in `values`, or what Minimal holds it at while Minimal is on. */
-export function actingIn(values, key) {
-  const v = valueIn(values, key)
-  return key !== 'minimal' && valueIn(values, 'minimal') === true ? MINIMAL[key]?.[v] ?? v : v
-}
-
-/** The features Minimal changes while it is on, by feature: what each does then, in the settings pane's words. Empty
- *  while Minimal is off. */
-export function heldByMinimal(values) {
-  if (valueIn(values, 'minimal') !== true) return {}
-  const out = {}
-  for (const key of Object.keys(MINIMAL)) if (actingIn(values, key) !== valueIn(values, key)) out[key] = actingIn(values, key)
-  for (const s of SWITCHES) if (s.lenses && !s.lensesIn && valueIn(values, s.key) === true) out[s.key] = 'on demand'
-  return out
-}
+/** Whether `values` hold Minimal's modes. */
+export const atPreset = values => Object.entries(PRESET).every(([k, v]) => valueIn(values, k) === v)
 
 /** The features as `values` holds them, as a function of a key: whether each is on (a feature with modes is on unless
  *  its mode is `off`), as Minimal leaves it. The settings pane asks it with the values Claude Code holds now; featureOn
@@ -201,18 +206,17 @@ export function heldByMinimal(values) {
 export function switchesFrom(values) {
   return key => {
     // c on selected words, a citation the analyst asks for, is Citations' manual mode
-    if (key === 'cite') return actingIn(values, 'citations') === 'manual'
-    // h, heads-ups on an answer the person asks for, is Minimal's, while Heads-ups is on
-    if (key === 'heads') return valueIn(values, 'minimal') === true && valueIn(values, 'details') === true
-    const v = actingIn(values, ALIAS[key] ?? key)
+    if (key === 'cite') return valueIn(values, 'citations') === 'manual'
+    // h, heads-ups on an answer the person asks for, is Heads-ups' on demand
+    if (key === 'heads') return valueIn(values, 'details') === 'on demand'
+    const v = valueIn(values, ALIAS[key] ?? key)
     return typeof v === 'string' ? v !== 'off' : v
   }
 }
 
-/** A feature's mode, for a feature with `choices` (`on demand`), as Minimal leaves it; its value as a boolean for any
- *  other. */
+/** A feature's mode, for a feature with `choices` (`on demand`); its value as a boolean for any other. */
 export function choiceOf(key) {
-  return actingIn(current, ALIAS[key] ?? key)
+  return valueIn(current, ALIAS[key] ?? key)
 }
 
 /** A change the settings pane just made through Claude Code: this activation acts on it at once, while Claude Code
@@ -245,12 +249,10 @@ export function featureOn(key) {
 /** Whether a feature's lenses join the look after each reply: it is on, and in its `lensesIn` mode when it has one. */
 export function lensesAfterReply(key) {
   const s = BY_KEY.get(ALIAS[key] ?? key)
-  // Minimal: nothing joins the look after each reply; each lens waits to be asked
-  if (valueIn(current, 'minimal') === true) return false
   return switchesFrom(current)(key) && (!s?.lensesIn || valueIn(current, s.key) === s.lensesIn)
 }
 
-/** Whether Minimal is on: every feature waits to be asked. */
+/** Whether Minimal is on: the modes it set (PRESET) stand. */
 export const minimalOn = () => valueIn(current, 'minimal') === true
 
 /** The values this load runs with now, the retired fields' included. */

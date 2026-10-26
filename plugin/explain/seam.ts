@@ -40,7 +40,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failCleared, failNotice, noticeLine } from '../bar/notice'
+import { failCleared, failNotice, hintLine } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
 import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
@@ -369,7 +369,7 @@ export async function explainSelection($: Engine): Promise<void> {
   await selectionUsed($, 'explain', sel)
   const { words, cut } = pickedWords(sel?.text ?? '')
   if (!words) {
-    noticeLine($, fullscreenNow() === false
+    hintLine($, fullscreenNow() === false
       ? 'Selecting words to explain needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).'
       : 'Select words in an answer with the mouse first, then press e to explain them.', 'explain')
     return
@@ -377,12 +377,12 @@ export async function explainSelection($: Engine): Promise<void> {
   await failCleared($, 'explain')
   const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
   const row = own ?? (await rowHolding($, words))
-  if (!row) { noticeLine($, 'No answer to explain words in yet: ask Claude something first.', 'explain'); return }
+  if (!row) { hintLine($, 'No answer to explain words in yet: ask Claude something first.', 'explain'); return }
   const mark = await markOf($, row, words)
   if (mark) { await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return }
   // the bar's busy line says what is written until the tray opens on it (expand.ts); a line here would say it twice.
   // Only a cut selection says so, since the busy line names just the words it explains
-  if (cut) noticeLine($, `The selection is long: the explainer covers its first ${words.length} characters.`, 'explain')
+  if (cut) hintLine($, `The selection is long: the explainer covers its first ${words.length} characters.`, 'explain')
   explainOpen($, row, words)
 }
 
@@ -436,7 +436,7 @@ async function askHeadsNow($: Engine, row: string): Promise<void> {
   $.ui.invalidate('ui.render')
   if (!(await headsUpsNow($, row).catch(() => false))) {
     headsAsked.delete(row)
-    noticeLine($, 'thimble could not ask for heads-ups on this answer now. Press h to try again.', 'heads')
+    failNotice($, 'thimble could not ask for heads-ups on this answer now. Press h to try again.', 'heads')
   }
 }
 

@@ -3,8 +3,8 @@
 // a preview in a frame: nothing in it presses), then Minimal, then the settings under their headings (Answers,
 // Comments, Panes), every row the same: the name in a column of its own, its choices (`on · off` for a switch; the one
 // set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). Minimal reads
-// `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); while it is on, a row it
-// changes says so after its choices (`→ on demand`); its own setting stays, and comes back then. The row picked is
+// `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); turning it on sets the rows
+// it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
 // tinted across the pane, with no mark of its own (a `›` there read as a row that opens).
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
@@ -17,7 +17,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { barRows } from '../bar/bar'
 import { arrowsOwn, PANE_ID } from '../core/pane'
-import { SWITCHES, heldByMinimal, switchesFrom } from '../settings/features.mjs'
+import { SWITCHES, switchesFrom } from '../settings/features.mjs'
 import { heldValues, settingsAction } from '../settings/term'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -101,7 +101,6 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
   const at = ROWS.findIndex(s => s.key === picked)
   arrowsOwn(dir => pick($, ROWS[Math.max(0, Math.min(ROWS.length - 1, at + dir))]!))
   const bar = await barRows($, els, width - 4, { on: switchesFrom(values), preview: true })
-  const held = heldByMinimal(values) as Record<string, string>
   const rows = ROWS.flatMap((s, i) => {
     const set = shownOf(s, values[s.key])
     const here = s.key === picked
@@ -114,9 +113,8 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
         Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: c }),
       ] }),
     ])
-    // Minimal stands over the rows as a heading would, what it does under it; a row it holds says so after its choices
+    // Minimal stands over the rows as a heading would, what it does under it
     const minimal = s.key === 'minimal'
-    const by = held[s.key]
     const says = minimal ? s.says?.on : s.says?.[set]
     const at = minimal ? 2 + MINIMAL_TITLE.length + 1 : IN
     return [...head, Box({ key: `sw-${s.key}`, flexDirection: 'column', width, ...(here ? { backgroundColor: SEL_TINT } : {}), children: [
@@ -128,7 +126,6 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
         Text({ key: 'gap', children: ' ' }),
         Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: [
           ...choices,
-          ...(by ? [Text({ key: 'held', dimColor: true, children: `  → ${by}` })] : []),
         ] }),
       ] }),
       ...(says ? [Box({ key: `says-${s.key}`, marginLeft: at, width: width - at, children: [Text({ dimColor: true, wrap: 'wrap', children: says })] })] : []),

@@ -15,7 +15,7 @@ import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
 import { introDone, introRow } from './intro'
-import { noticeLine, promptTyped } from './notice'
+import { hintLine, promptTyped } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,13 +43,13 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void>
     // the words the bar shows for it, which a click opens
     const n = (await countsNow($))?.labels ?? 0
     const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
-    noticeLine($, `Claude Code opens the ${kind} pane from a key only in a wider terminal. Click “${shown}” in the bar below to open it here.`, `pane:${kind}`)
+    hintLine($, `Claude Code opens the ${kind} pane from a key only in a wider terminal. Click “${shown}” in the bar below to open it here.`, `pane:${kind}`)
   }
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */
 export async function openSettings($: Engine): Promise<void> {
-  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) noticeLine($, 'Claude Code did not open the settings pane here. Type /thimble-settings to open it.')
+  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) hintLine($, 'Claude Code did not open the settings pane here. Type /thimble-settings to open it.')
 }
 
 /** r or l at an empty prompt, while the bar names it: its pane opens or closes once the word window closed. */

@@ -27,7 +27,7 @@
 // is empty too.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { failNotice } from '../bar/notice'
+import { failNotice, hintsGone } from '../bar/notice'
 import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'
 import { HEAD_KEYS, headKey } from '../cards/head'
@@ -95,6 +95,8 @@ async function wordOf(now: number, key: string): Promise<string> {
  *  thimble had taken. `live`: whether the edit still waits for this hook; once Claude Code went on without it (the
  *  hook ran past its budget and its .catch typed the key), the key is not taken. */
 async function press($: Engine, key: string, now: number, live: () => boolean): Promise<true | string> {
+  // a hint showing goes at the next key (bar/notice.ts)
+  await hintsGone($).catch(() => undefined)
   const w = windowAt(now)
   let t: Take | null = null
   try {

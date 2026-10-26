@@ -17,7 +17,7 @@
 // It registers no model tool and starts no `claude`.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { failCleared, noticeLine } from '../bar/notice'
+import { failCleared, hintLine } from '../bar/notice'
 import { actingRow, messageOf, partOf, setPart, turnOf, turnsNow, type TurnRec } from '../core/answers'
 import { isPersonPrompt } from '../core/answers.mjs'
 import { readKept, writeKept } from '../core/env'
@@ -263,7 +263,7 @@ export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
   const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'claims'}`
-  noticeLine($, byKey
+  hintLine($, byKey
     ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${words}” in the bar below to open it here.`
     : `Claude Code did not open the Claims pane here. Widen the terminal, or click “${words}” in the bar below.`, 'pane:claims')
 }

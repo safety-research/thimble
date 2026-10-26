@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { DEFAULTS, DEFAULTS_FIELD, RETIRED, defaultsFrom, SWITCHES, choiceOf, citationsFrom, claudeCites, featureOn, heldByMinimal, lensesAfterReply, minimalOn, noteChange, noteDefaults, setOptions, switchesFrom } from '../features.mjs'
+import { DEFAULTS, DEFAULTS_FIELD, RETIRED, defaultsFrom, SWITCHES, choiceOf, citationsFrom, claudeCites, featureOn, lensesAfterReply, minimalOn, PRESET, atPreset, currentValues, noteChange, noteDefaults, setOptions, switchesFrom } from '../features.mjs'
 
 test("the manifest's userConfig is the features, each on by default and turned off by an option; the observer's look runs while a feature one of its lenses serves is on", () => {
   // the manifest's userConfig is the features: one boolean each, with its name, its words and its default
@@ -130,35 +130,38 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(choiceOf('citations'), 'auto cite')
     setOptions({})
   }
-  // Minimal: off by default; on, nothing joins the look after each reply (so no look runs), Claude does not cite, the
-  // claims wait for f, h asks for heads-ups; each setting keeps its own value, which acts again once Minimal is off
+  // Minimal is a preset: its modes (PRESET) keep every lens from the look after each reply, Claude from citing, and the
+  // claims waiting for f; h acts while Heads-ups is on demand. Explainers and Heads-ups saved as the switches they were
+  // read as auto (on) and off (off)
   {
     setOptions({})
     assert.equal(minimalOn(), false)
+    assert.equal(choiceOf('explain'), 'auto')
     assert.equal(featureOn('heads'), false)
-    assert.deepEqual(heldByMinimal({}), {})
-    const set = { minimal: true, citations: 'auto cite + verify', claimsMode: 'auto' }
-    setOptions(set)
+    assert.equal(atPreset({}), false)
+    setOptions({ minimal: true, ...PRESET })
     assert.equal(minimalOn(), true)
+    assert.equal(atPreset(currentValues()), true)
     assert.equal(featureOn('observer'), false)
     assert.equal(lensesAfterReply('explain'), false)
     assert.equal(lensesAfterReply('claims'), false)
-    assert.equal(choiceOf('citations'), 'manual')
     assert.equal(claudeCites(), false)
     assert.equal(featureOn('cite'), true)
-    assert.equal(choiceOf('claims'), 'on demand')
     assert.equal(featureOn('explain'), true)
     assert.equal(featureOn('heads'), true)
     assert.equal(featureOn('cards'), true)
-    assert.deepEqual(heldByMinimal(set), { citations: 'manual', claimsMode: 'on demand', explain: 'on demand', details: 'on demand' })
-    // what is off stays off, and Heads-ups off has no h
-    assert.deepEqual(heldByMinimal({ ...set, citations: 'off', claimsMode: 'off', explain: false, details: false }), {})
-    setOptions({ ...set, details: false })
+    // h is Heads-ups' on demand, Minimal or not
+    setOptions({ details: 'on demand' })
+    assert.equal(featureOn('heads'), true)
+    assert.equal(lensesAfterReply('details'), false)
+    assert.equal(lensesAfterReply('explain'), true)
+    setOptions({ details: 'auto' })
     assert.equal(featureOn('heads'), false)
-    setOptions({ ...set, minimal: false })
-    assert.equal(choiceOf('citations'), 'auto cite + verify')
-    assert.equal(lensesAfterReply('claims'), true)
-    assert.equal(featureOn('heads'), false)
+    assert.equal(lensesAfterReply('details'), true)
+    setOptions({ explain: true, details: false })
+    assert.equal(choiceOf('explain'), 'auto')
+    assert.equal(choiceOf('details'), 'off')
+    assert.equal(featureOn('details'), false)
     setOptions({})
   }
   // a mode saved under its old name stands for the new one: auto cite + check is auto cite + verify

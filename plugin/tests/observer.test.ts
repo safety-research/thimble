@@ -124,8 +124,8 @@ test('with every feature it serves off, no look runs; one lens off has no sectio
   setOptions({})
 })
 
-test('with Minimal on, no look runs after a reply; h asks for one look of the heads lens alone at the answer, once', async () => {
-  setOptions({ minimal: true, claimsMode: 'auto' })
+test('with Explainers, Heads-ups and Evidence on demand (as Minimal sets them), no look runs after a reply; h asks for one look of the heads lens alone at the answer, once', async () => {
+  setOptions({ minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' })
   try {
     const s = setup([{ isAnswered: true, text: '{"heads": null}', usage: { input_tokens: 10, output_tokens: 5 } }])
     s.$.ui = { invalidate: () => undefined }
@@ -145,7 +145,7 @@ test('with Minimal on, no look runs after a reply; h asks for one look of the he
     // once per answer: h is typed afterwards, and the bar no longer names it
     expect(await headsKey(s.$, 'h', 0)).toBe(null)
     expect(await headsBar(s.$, () => true, false)).toEqual([])
-    // Minimal off: h is not thimble's, the look runs after each reply again
+    // Heads-ups auto: h is not thimble's, the look runs after each reply again
     setOptions({ claimsMode: 'auto' })
     expect(await headsKey(s.$, 'h', 0)).toBe(null)
   } finally {

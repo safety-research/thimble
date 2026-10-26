@@ -92,20 +92,19 @@ test("with citations off, the Citing claims section is left out and the other ex
   expect(text).toContain('## Cards')
 })
 
-test('with Citations manual, the guidance ends with one sentence that says how the analyst cites', { options: { citations: 'manual' } }, async ($, on) => {
+test('with Citations manual, the guidance ends with one sentence that says what comes only when the analyst asks', { options: { citations: 'manual' } }, async ($, on) => {
   const text = await thimbleText($, world(on))
   expect(text).not.toContain('## Citing claims')
-  expect(text.endsWith('Citations are manual: the analyst cites words by selecting them and pressing c.')).toBe(true)
+  expect(text.endsWith('These come only when the analyst asks: citations (they select words and press c).')).toBe(true)
 })
 
-test('with Minimal on, the guidance ends with one sentence that says nothing runs after a reply and names the keys', { options: { minimal: true, citations: 'auto cite' } }, async ($, on) => {
+test('with Minimal on, the guidance ends with one sentence that says nothing runs after a reply and names what the analyst asks for', { options: { minimal: true, citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' } }, async ($, on) => {
   const text = await thimbleText($, world(on))
-  expect(text.endsWith('Minimal mode is on: nothing runs after your replies; the analyst asks with keys (e explain, c cite, h heads-ups).')).toBe(true)
-  expect(text).not.toContain('Citations are manual')
+  expect(text.endsWith('Minimal mode is on: nothing runs after your replies. These come only when the analyst asks: citations (they select words and press c), explainers (e) and heads-ups (h).')).toBe(true)
 })
 
-test('with Citations auto cite and Minimal off, the guidance adds no sentence of modes', { options: { citations: 'auto cite' } }, async ($, on) => {
+test('with every mode after each reply, the guidance adds no sentence of modes', { options: { citations: 'auto cite' } }, async ($, on) => {
   const text = await thimbleText($, world(on))
-  expect(text).not.toContain('Citations are manual')
+  expect(text).not.toContain('These come only')
   expect(text).not.toContain('Minimal mode')
 })

@@ -5,8 +5,8 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
 import { busyWhile } from '../bar/busy'
-import { INTRO } from '../bar/intro'
-import { failNotice, noticeLine, promptTyped } from '../bar/notice'
+import { INTRO, INTRO_MS } from '../bar/intro'
+import { failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -234,6 +234,49 @@ test('the first session starts with one plain line above the bar that says where
   // a reload or a new session keeps it gone: it is kept for the install, not the session
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test('the line at the first session goes by itself after a few seconds, and stays gone after a reload', async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  expect(textOf(await $.ui.render(BAND))).toContain(INTRO)
+  await w.clock.advance(INTRO_MS - 1000)
+  expect(textOf(await $.ui.render(BAND))).toContain(INTRO)
+  await w.clock.advance(1000)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test('a hint above the bar goes by itself after a few seconds, or at the next key thimble takes; a failure stays', async () => {
+  const state: Record<string, unknown> = {}
+  let now = 0
+  const timers: { at: number; fn: () => void }[] = []
+  const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined } }
+  $.clock = { now: async () => now, after: (ms: number, fn: () => void) => { timers.push({ at: now + ms, fn }); return { cancel() {} } } }
+  const advance = async (ms: number) => {
+    now += ms
+    for (const t of timers.splice(0).filter(t => t.at <= now || !timers.push(t))) t.fn()
+    await new Promise(r => setTimeout(r, 5))
+  }
+  const shown = async () => textOf(await barRows($, ELS, 100, { on: () => true }))
+  hintLine($, 'Select words in an answer with the mouse first, then press e to explain them.', 'explain')
+  await advance(0)
+  expect(await shown()).toContain('Select words in an answer')
+  await advance(HINT_MS - 1000)
+  expect(await shown()).toContain('Select words in an answer')
+  await advance(1000)
+  expect(await shown()).not.toContain('Select words in an answer')
+  hintLine($, 'Nothing to step to yet.', 'tray')
+  await advance(0)
+  expect(await shown()).toContain('Nothing to step to yet.')
+  await hintsGone($)
+  expect(await shown()).not.toContain('Nothing to step to yet.')
+  failNotice($, 'The card did not draw.')
+  await advance(HINT_MS * 2)
+  await hintsGone($)
+  expect(await shown()).toContain('The card did not draw.')
 })
 
 test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {

@@ -14,7 +14,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failCleared, noticeLine } from '../bar/notice'
+import { failCleared, hintLine } from '../bar/notice'
 import { answerRows, messageOf, turnOfRow } from '../core/answers'
 import { answerSelection, selectionUsed, usedBy } from '../core/selection'
 import { pickedWords } from '../explain/seam'
@@ -95,13 +95,13 @@ export async function citeSelection($: Engine): Promise<void> {
   const sel = await answerSelection($)
   await selectionUsed($, 'cite', sel)
   const { words } = pickedWords(sel?.text ?? '')
-  if (!words) { noticeLine($, 'Select words in an answer with the mouse first, then press c to cite them.', 'cite'); return }
+  if (!words) { hintLine($, 'Select words in an answer with the mouse first, then press c to cite them.', 'cite'); return }
   await failCleared($, 'cite')
   const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
   const row = own ?? (await rowHolding($, words))
-  if (!row) { noticeLine($, 'No answer to cite words in yet: ask Claude something first.', 'cite'); return }
+  if (!row) { hintLine($, 'No answer to cite words in yet: ask Claude something first.', 'cite'); return }
   const why = await citeWords($, row, words)
-  if (why) noticeLine($, why, 'cite')
+  if (why) hintLine($, why, 'cite')
 }
 
 /** Whether c cites now: Citations is manual, an answer exists, and words are selected that c has not cited yet (Claude

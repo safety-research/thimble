@@ -39,13 +39,17 @@ export function guidanceFor(text: string, on: (feature: string) => boolean, mode
   return modes.length ? `${out}\n\n${modes.join(' ')}` : out
 }
 
-/** One sentence for each mode on now that changes what the analyst does, so Claude can say how thimble works now. */
+/** One sentence on what comes only when the analyst asks for it, so Claude can say how thimble works now; with
+ *  Minimal on, that nothing runs after Claude's replies. */
 export function modesNow(): string[] {
-  if (minimalOn()) {
-    const keys = [featureOn('explain') && 'e explain', choiceOf('citations') !== 'off' && 'c cite', featureOn('details') && 'h heads-ups'].filter(Boolean)
-    return [`Minimal mode is on: nothing runs after your replies; the analyst asks with keys${keys.length ? ` (${keys.join(', ')})` : ''}.`]
-  }
-  return choiceOf('citations') === 'manual' ? ['Citations are manual: the analyst cites words by selecting them and pressing c.'] : []
+  const asked = [
+    choiceOf('citations') === 'manual' && 'citations (they select words and press c)',
+    choiceOf('explain') === 'on demand' && 'explainers (e)',
+    choiceOf('details') === 'on demand' && 'heads-ups (h)',
+  ].filter(Boolean) as string[]
+  if (!asked.length) return []
+  const list = asked.length > 1 ? `${asked.slice(0, -1).join(', ')} and ${asked.at(-1)}` : asked[0]
+  return [`${minimalOn() ? 'Minimal mode is on: nothing runs after your replies. ' : ''}These come only when the analyst asks: ${list}.`]
 }
 
 /** Whether the conversation's next request already holds this text (as context the engine framed around it). */

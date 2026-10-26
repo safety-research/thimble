@@ -5,7 +5,9 @@
 //   heldValues($)          each feature's value as Claude Code holds it now (a change made a moment ago included)
 //   settingsAction($, a)   turn a feature on or off (`toggle`; a feature with modes goes to its next mode), or set its
 //                          mode (`set`), through Claude Code ($.config.set), which keeps the value and loads the plugin
-//                          again with the new options; a refusal is one line with its fix
+//                          again with the new options; a refusal is one line with its fix. Minimal is a preset: on, it
+//                          sets its rows' modes (features.mjs PRESET), keeping theirs (store: beforeMinimal); off puts
+//                          them back; one of its rows changed away from its mode turns it off
 //
 // The fields newer settings replaced (features.mjs RETIRED) stay in the manifest, hidden from /config, so a value saved
 // under them reaches the plugin: the first interactive session moves it to the settings that replaced it and sets them
@@ -14,7 +16,7 @@
 // says it was done.
 import type { ConfigRow, EngineInterface, Register } from 'claude-code'
 
-import { DEFAULTS, DEFAULTS_FIELD, RENAMED, RETIRED, SWITCHES, atDefault, currentValues, movedFrom, noteChange, noteDefaults, noteSettled, setOptions, switchOf, valueIn } from './features.mjs'
+import { DEFAULTS, DEFAULTS_FIELD, PRESET, RENAMED, RETIRED, SWITCHES, atDefault, atPreset, currentValues, movedFrom, noteChange, noteDefaults, noteSettled, renamedTo, setOptions, switchOf, valueIn } from './features.mjs'
 
 type Engine = EngineInterface
 
@@ -51,9 +53,6 @@ export async function settingsAction($: Engine, a: Record<string, unknown>): Pro
   if ((a.do !== 'toggle' && a.do !== 'set') || typeof a.key !== 'string') return false
   const s = switchOf(a.key)
   if (!s) return `× thimble has no feature "${a.key}".`
-  const r = (await configRows($)).get(s.key)
-  if (!r) return `× Claude Code has not loaded thimble's settings, so ${s.title} cannot change now. Load thimble again in /plugin, then try once more.`
-  if (r.isLocked) return `× ${s.title} is set by your organization's settings, so it cannot change here.`
   const now = (await heldValues($))[s.key]
   const to = a.do === 'set' ? a.value : s.choices ? s.choices[(s.choices.indexOf(now as string) + 1) % s.choices.length] : !now
   if (s.choices ? !s.choices.includes(to as string) : typeof to !== 'boolean') return `× ${s.title} has no setting "${String(to)}".`
@@ -61,11 +60,65 @@ export async function settingsAction($: Engine, a: Record<string, unknown>): Pro
   // a value the retired fields still hold, and a default that moved, are saved first, so the change stands over them
   await moveRetired($, currentValues()).catch(() => undefined)
   await moveDefaults($).catch(() => undefined)
-  const res = await $.config.set({ key: r.key, value: to as boolean | string })
-  if (res.deny) return `× ${s.title} stayed ${typeof now === 'string' ? now : now ? 'on' : 'off'}: ${res.deny}`
-  // acted on at once, before the plugin loads again with it
-  noteChange(s.key, to)
+  const held = await heldValues($)
+  if (s.key === 'minimal') return to ? minimalOn($, held) : minimalOff($, held)
+  const denied = await setRow($, s.key, to as boolean | string)
+  if (denied) return denied
+  // a row of Minimal's changed away from it: Minimal is off, and this row's new mode stays
+  if (held.minimal === true && s.key in PRESET && to !== (PRESET as Record<string, string>)[s.key]) {
+    await $.store.set(BEFORE, null)
+    await setRow($, 'minimal', false)
+  }
+}
+
+/** The modes of Minimal's rows from before it went on (store), which turning it off puts back. */
+const BEFORE = 'beforeMinimal'
+
+/** Set one feature through Claude Code; this load acts on it at once, before the plugin loads again with it. A
+ *  refusal is its line; nothing changes then. */
+async function setRow($: Engine, key: string, to: boolean | string): Promise<string | void> {
+  const s = switchOf(key)!
+  const r = (await configRows($)).get(key)
+  if (!r) return `× Claude Code has not loaded thimble's settings, so ${s.title} cannot change now. Load thimble again in /plugin, then try once more.`
+  if (r.isLocked) return `× ${s.title} is set by your organization's settings, so it cannot change here.`
+  if (r.value === to) { noteChange(key, to); return }
+  const res = await $.config.set({ key: r.key, value: to })
+  if (res.deny) return `× ${s.title} did not change: ${res.deny}`
+  noteChange(key, to)
   $.ui.invalidate('ui.render')
+}
+
+/** Minimal on: the modes of its rows now are kept, its modes set (PRESET), then Minimal. */
+async function minimalOn($: Engine, held: Record<string, boolean | string>): Promise<string | void> {
+  if (!atPreset(held)) await $.store.set(BEFORE, Object.fromEntries(Object.keys(PRESET).map(k => [k, held[k]])))
+  for (const [k, v] of Object.entries(PRESET)) {
+    const denied = await setRow($, k, v)
+    if (denied) return denied
+  }
+  return setRow($, 'minimal', true)
+}
+
+/** Minimal off: the modes its rows had before it went on come back (their defaults when none were kept), where a row
+ *  still holds Minimal's mode. */
+async function minimalOff($: Engine, held: Record<string, boolean | string>): Promise<string | void> {
+  const denied = await setRow($, 'minimal', false)
+  if (denied) return denied
+  const kept = ((await $.store.get(BEFORE)) ?? {}) as Record<string, boolean | string>
+  for (const [k, v] of Object.entries(PRESET)) {
+    if (held[k] !== v) continue
+    const back = valueIn(kept, k)
+    if (back !== v) await setRow($, k, back as boolean | string)
+  }
+  await $.store.set(BEFORE, null)
+}
+
+/** Minimal saved on while its rows hold other modes: from before it was a preset (0.10.4), its modes are set once,
+ *  what the rows held kept; once it was (the modes kept), a row changed elsewhere (/config) turns it off. */
+export async function settleMinimal($: Engine): Promise<void> {
+  const held = await heldValues($)
+  if (held.minimal !== true || atPreset(held)) return
+  if ((await $.store.get(BEFORE)) == null) await minimalOn($, held)
+  else { await $.store.set(BEFORE, null); await setRow($, 'minimal', false) }
 }
 
 /** A retired field's row key, beside a feature's row key (`<plugin>.<field>`). */
@@ -77,15 +130,16 @@ const retiredKey = (featureKey: string, field: string) => featureKey.replace(/\.
 async function moveRetired($: Engine, saved: Record<string, unknown>): Promise<void> {
   const moved = movedFrom(saved) as Record<string, boolean | string>
   const stale = Object.entries(RETIRED).filter(([field, f]) => saved[field] !== undefined && saved[field] !== f.default)
-  const renamed = (Object.entries(RENAMED) as [string, Record<string, string>][]).filter(([key, names]) => typeof saved[key] === 'string' && names[saved[key] as string])
+  const renamed = Object.keys(RENAMED).filter(key => renamedTo(key, saved[key]))
   if (!stale.length && !renamed.length) return
   const rows = await configRows($)
   const any = rows.values().next().value as ConfigRow | undefined
   if (!any) return
   // a mode saved under its old name is saved under its new one
-  for (const [key, names] of renamed) {
+  for (const key of renamed) {
     const r = rows.get(key)
-    if (r && !r.isLocked && names[r.value as string]) await $.config.set({ key: r.key, value: names[r.value as string]! }).catch(() => undefined)
+    const to = renamedTo(key, r?.value)
+    if (r && !r.isLocked && to) await $.config.set({ key: r.key, value: to }).catch(() => undefined)
   }
   for (const [key, value] of Object.entries(moved)) {
     const r = rows.get(key)
@@ -125,6 +179,7 @@ export const registerSettings: Register = (on, options) => {
     const r = await next(e)
     await moveRetired($, currentValues()).catch(() => undefined)
     await moveDefaults($).catch(() => undefined)
+    await settleMinimal($).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 }
