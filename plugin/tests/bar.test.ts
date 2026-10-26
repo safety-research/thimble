@@ -5,7 +5,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
 import { busyWhile } from '../bar/busy'
-import { introKeys } from '../bar/intro'
+import { INTRO } from '../bar/intro'
 import { failNotice, noticeLine, promptTyped } from '../bar/notice'
 import { promptStub } from './stubs'
 
@@ -220,26 +220,25 @@ test('a long busy step keeps the bar to one row: its other steps go, then its wo
   alive = false
 })
 
-test('a session starts with a line above the bar that names the keys of the features on and where the settings are; the first prompt takes it, and a click on its thimble opens the settings', async ($, on) => {
-  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+test('the first session starts with one plain line above the bar that says where the settings are and names no key; the first prompt takes it, and no later session or reload shows it again', async ($, on) => {
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   const band = textOf(await $.ui.render(BAND))
-  expect(band).toContain('v visualize · e explain')
-  expect(band).not.toContain('thimble · v visualize')
-  expect(band).toContain('s rewrite · click thimble for settings')
-  // its thimble opens the settings, as the bar's does
-  const ui = await $.ui.mount(BAND)
-  await ui.press({ key: 'intro-thimble' })
-  await ui.unmount()
-  expect(w.opened).toEqual(['thimble'])
-  // the person's first prompt: the line goes, and a resumed session does not show it again
+  expect(band).toContain(INTRO)
+  // the keys are the bar's alone: the line repeats none of them
+  expect(band).not.toContain('v visualize · e explain')
+  expect(band).not.toContain('c cite')
   await $.prompt.submit({ text: 'which runs failed?', origin: { kind: 'composer' } } as never)
-  expect(textOf(await $.ui.render(BAND))).not.toContain('click thimble for settings')
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+  // a reload or a new session keeps it gone: it is kept for the install, not the session
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  expect(textOf(await $.ui.render(BAND))).not.toContain('click thimble for settings')
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
 })
 
-test('the line at a session\'s start names a key only while its feature is on', async () => {
-  expect(introKeys(() => true)).toEqual([['v', 'visualize'], ['e', 'explain'], ['c', 'cite'], ['s', 'rewrite']])
-  expect(introKeys(k => k !== 'cards' && k !== 'cite')).toEqual([['e', 'explain'], ['s', 'rewrite']])
+test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on, { introDone: true })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
 })

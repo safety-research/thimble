@@ -2,7 +2,7 @@
 //
 //   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
 //                aboveBar). /thimble-settings and a click on `thimble` open the
-//                settings; the person's next prompt takes the failure line and the line at the session's start (intro.ts); the counts at each load of the plugin and
+//                settings; the person's next prompt takes the failure line and the line at the first session's start (intro.ts); the counts at each load of the plugin and
 //                after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Each pane takes the keys its key row names (coverage's j k ↵ and r, the labels' number keys that
@@ -98,8 +98,8 @@ export const registerBar: Register = on => {
       const els = $.ui.resolve(e) as Any
       const presses: BarPresses = { settings: () => openSettings($), pane: kind => togglePane($, kind) }
       const width = Math.max(20, e.props.bodyColumns)
-      // the line at a session's start that says what the keys do (intro.ts), right above the bar
-      const intro = await introRow($, els, presses).catch(() => null)
+      // the line at the first session's start that says where the settings are (intro.ts), right above the bar
+      const intro = await introRow($, els).catch(() => null)
       const rows = [...(intro ? [intro] : []), ...(await barRows($, els, width, { presses }))]
       // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
       // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off

@@ -1,49 +1,29 @@
-// intro.ts: the line above the bar at a session's start, which says what thimble's keys do and where its settings
-// are: `v visualize · e explain · c cite · s rewrite · click thimble for settings`, each key only while its
-// feature is on. It goes at the person's first prompt, and a resumed session does not show it again.
+// intro.ts: the line above the bar at the first session thimble runs in, a plain dim sentence that says where its
+// settings are. It names no keys: the bar below names them. It goes at the person's first prompt, and no later
+// session or reload shows it again.
 //
-//   introRow($, els, presses)   the line, or null once it went
-//   introDone($)                the person's first prompt: the line goes
+//   introRow($, els)   the line, or null once it went
+//   introDone($)       the person's first prompt: the line goes
 //
-//   state: introDone (the session whose line went)
+//   store: introDone (true once the line went)
 import type { EngineInterface } from 'claude-code'
-
-import { accent } from '../core/theme'
-import { featureOn } from '../settings/features.mjs'
-import type { BarPresses } from './bar'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-const DONE = { plugin: 'thimble', key: 'introDone' } as const
+const DONE = 'introDone'
 
-/** The keys the line names, each while its feature is on. */
-export function introKeys(on: (key: string) => boolean = featureOn): [string, string][] {
-  return ([['cards', 'v', 'visualize'], ['explain', 'e', 'explain'], ['cite', 'c', 'cite'], ['squeezeAnswers', 's', 'rewrite']] as const)
-    .filter(([f]) => on(f)).map(([, k, w]) => [k, w])
-}
+export const INTRO = "Click thimble below for thimble's settings."
 
-async function sessionOf($: Engine): Promise<string> {
-  try { return String(await $.session.id()) } catch { return '' }
-}
-
-export async function introRow($: Engine, els: Any, presses?: BarPresses): Promise<Any | null> {
-  const id = await sessionOf($)
-  if ((await $.state.get(DONE)).value === id) return null
-  // the bar's own `thimble` stands right under it, so the line names the keys first and thimble once, at its end
-  const parts: Any[] = introKeys().map(([k, w]) => els.Text({ key: `intro-${k}`, children: [els.Text({ key: 'k', bold: true, color: accent(), children: k }), els.Text({ key: 'w', dimColor: true, children: ` ${w} · ` })] }))
-  const name = els.Text({ key: 'intro-name', bold: true, color: accent(), children: 'thimble' })
-  parts.push(els.Text({ key: 'intro-click', dimColor: true, children: 'click ' }))
-  parts.push(presses ? els.Button({ key: 'intro-thimble', plain: true, label: 'thimble settings', onPress: presses.settings, children: [name] }) : name)
-  parts.push(els.Text({ key: 'intro-settings', dimColor: true, children: ' for settings' }))
-  return els.Box({ key: 'intro', flexDirection: 'row', flexWrap: 'wrap', children: parts })
+export async function introRow($: Engine, els: Any): Promise<Any | null> {
+  if ((await $.store.get(DONE)) === true) return null
+  return els.Text({ key: 'intro', dimColor: true, wrap: 'wrap', children: INTRO })
 }
 
 export async function introDone($: Engine): Promise<void> {
-  const id = await sessionOf($)
-  if ((await $.state.get(DONE)).value !== id) {
-    await $.state.set(DONE, id)
+  if ((await $.store.get(DONE)) !== true) {
+    await $.store.set(DONE, true)
     $.ui.invalidate('ui.render')
   }
 }
