@@ -3,8 +3,8 @@
 // a preview in a frame: nothing in it presses), then Minimal, then the settings under their headings (Answers,
 // Comments, Panes), every row the same: `›` on the row picked, the name in a column of its own, its choices (`on · off`
 // for a switch; the one set green and bold, the others gray), and under them, gray, what the one set gives (its
-// `says`). While Minimal is on, a row it changes says so after its choices (`→ on demand`), and under them what it does
-// until Minimal is off; its own setting stays, and comes back then. The row picked is tinted across the pane.
+// `says`). Minimal reads `MINIMAL MODE  on · off`, with no line under it; while it is on, a row it changes says so after
+// its choices (`→ on demand`); its own setting stays, and comes back then. The row picked is tinted across the pane.
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
@@ -103,13 +103,15 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
         Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: c }),
       ] }),
     ])
+    // Minimal stands over the rows as a heading would, with no line under it; a row it holds says so after its choices
+    const minimal = s.key === 'minimal'
     const by = held[s.key]
-    const says = by ? `Minimal: ${by} until Minimal is off.` : s.says?.[set]
+    const says = minimal ? undefined : s.says?.[set]
     return [...head, Box({ key: `sw-${s.key}`, flexDirection: 'column', width, ...(here ? { backgroundColor: SEL_TINT } : {}), children: [
       Box({ key: 'line', flexDirection: 'row', children: [
         Text({ key: 'mark', children: here ? '› ' : '  ' }),
         Button({ key: `switch-${s.key}`, plain: true, label: `${s.title}: ${set}`, onPress: () => pick($, s), children: [
-          Text({ key: 'title', bold: true, children: s.title.padEnd(NAME) }),
+          Text({ key: 'title', bold: true, children: minimal ? 'MINIMAL MODE ' : s.title.padEnd(NAME) }),
         ] }),
         Text({ key: 'gap', children: ' ' }),
         Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: [
