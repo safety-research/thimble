@@ -53,7 +53,8 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
   on('prompt.fill', () => ({ isFilled: true }) as never)
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   on('prompt.change', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
-  on('model.fork', () => ({ value: { isAnswered: true, text: lookReply } }))
+  const forks: Any[] = []
+  on('model.fork', (_$: unknown, e: Any) => { forks.push(e); return { value: { isAnswered: true, text: lookReply } } })
   on('model.complete', async (_$: unknown, e: Any) => { asked.push(e); return { value: { isAnswered: true, text: `<text>\n${(await replies.shift()) ?? 'Short.'}\n</text>`, usage: {} } } })
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
@@ -73,7 +74,7 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
   }
   const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
   const bar = async () => textOf(await $.ui.render(above))
-  return { clock, asked, ask, say, turn, press, bar, files }
+  return { clock, asked, forks, ask, say, turn, press, bar, files }
 }
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
@@ -249,6 +250,24 @@ test("a catch-up shows its replies' explainers on its words, and a card it place
   expect(nodes(host).some(n => n.type === 'Button' && String(n.props.label).startsWith('explain slow mirror'))).toBe(true)
   // the card moved down into the catch-up: its reply points to it
   expect(textOf(await $.ui.render(answer('row-t2', two)))).toContain('“Runs” is in the catch-up below')
+})
+
+// The catch-up is read for explainers and heads-ups as an answer is: the look reads its words as what the analyst
+// reads, and a term only it says gets an explainer on its words, kept on the newest reply it covers
+test('a catch-up is read for explainers as any answer is: a term only it says gets one, on its words', async ($, on) => {
+  const t = await setup($, on, ['Both: lockfile drift broke the build, and the retry passed.'])
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', 'The retry passed.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.clock.advance(1000)
+  lookReply = '{"glosses": [{"term": "lockfile drift", "body": "The lockfile no longer matches what the project asks for."}], "heads": null, "claims": []}'
+  const before = t.forks.length
+  await t.press('b')
+  await t.clock.advance(5000)
+  const read = t.forks.slice(before).map(f => String(f.prompt))
+  expect(read.some(p => p.includes('a catch-up thimble wrote') && p.includes('lockfile drift broke the build'))).toBe(true)
+  const host = await $.ui.render(answer('row-t3', 'The retry passed.'))
+  expect(nodes(host).some(n => n.type === 'Button' && String(n.props.label).startsWith('explain lockfile drift'))).toBe(true)
 })
 
 // A catch-up words the replies' citations anew, and each reply numbers its citations from 1. Each citation of the

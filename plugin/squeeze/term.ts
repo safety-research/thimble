@@ -34,6 +34,7 @@ import { modelWhy } from '../core/why.js'
 import type { ExplainPart } from '../explain/seam'
 import { readText } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
+import { lookAtCatchUp } from '../observer/observer'
 import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
 import { tracked } from '../telemetry/telemetry'
@@ -300,6 +301,12 @@ async function settled($: Engine, id: string, rec: Rec, o: { written: boolean })
   await trayOffRow($, id.replace(/#cu$/, ''))
   const was = before ? shownOf(before) : ''
   const now = shownOf(rec)
+  if (rec.catchup && typeof rec.shown === 'string' && now !== was) {
+    // a catch-up's first version: the view goes to it, below the replies it covers; each version is read for
+    // explainers and heads-ups as an answer is
+    if (typeof before?.shown !== 'string') await $.ui.scroll({ to: { key: `cu-${drawnAt(rec)}` }, block: 'start' }).catch(() => undefined)
+    void lookAtCatchUp($, drawnAt(rec), rec.shown).catch(() => undefined)
+  }
   if (now !== was && o.written) { await writeIn($, id, now.length); return }
   // a write-in still running for the version before stops: this one shows whole
   if (revealing.has(id) || (await uiOf($, id)).reveal) { revealing.delete(id); await setUi($, id, { reveal: null }) }
