@@ -165,10 +165,12 @@ export async function explainMerge($: Engine, look: Look): Promise<void> {
   const m = await memory($)
   const msgs = []
   for (const x of look.msgs) {
-    // what the person reads of it: Claude's words, and the version shown in their place (squeezed), or the catch-up
-    // drawn below it (an explainer of the catch-up's words is kept on this message, where the catch-up finds it)
-    const shownText = x.catchUp ?? (await textView($, x.row, x.text)).text
+    // what the person reads of it: Claude's words, and the version shown in their place (squeezed); or a catch-up drawn
+    // below it, whose words alone the look read (what it gives stands on them, kept on this message, where the
+    // catch-up finds it)
     const part = await partOf<ExplainPart>($, x.row, 'explain')
+    if (x.catchUp) { msgs.push({ row: x.row, text: x.catchUp, part }); continue }
+    const shownText = (await textView($, x.row, x.text)).text
     msgs.push({ row: x.row, text: shownText === x.text ? x.text : `${x.text}\n\n${shownText}`, part })
   }
   const r = mergeLook(msgs, look.out, { glossed: m.glossed }) as { parts: Record<string, ExplainPart>; placed: string[]; heads: string[] }

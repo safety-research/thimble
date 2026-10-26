@@ -263,14 +263,16 @@ test('a catch-up is read for explainers as any answer is: a term only it says ge
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
   await t.turn('t3', 'The retry passed.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
   await t.clock.advance(1000)
-  lookReply = '{"glosses": [{"term": "lockfile drift", "body": "The lockfile no longer matches what the project asks for."}], "heads": null, "claims": []}'
+  lookReply = '{"glosses": [{"term": "lockfile drift", "body": "The lockfile no longer matches what the project asks for."}, {"term": "three runs", "body": "Words only a reply says."}], "heads": null, "claims": []}'
   const before = t.forks.length
   await t.press('b')
   await t.clock.advance(5000)
   const read = t.forks.slice(before).map(f => String(f.prompt))
-  expect(read.some(p => p.includes('a catch-up thimble wrote') && p.includes('lockfile drift broke the build'))).toBe(true)
+  expect(read.some(p => p.includes('A catch-up thimble wrote') && p.includes('lockfile drift broke the build'))).toBe(true)
   const host = await $.ui.render(answer('row-t3', 'The retry passed.'))
   expect(nodes(host).some(n => n.type === 'Button' && String(n.props.label).startsWith('explain lockfile drift'))).toBe(true)
+  // the look read the catch-up's words alone: words only a reply says get no explainer from it
+  expect(nodes(await $.ui.render(answer('row-t2', 'The build failed on three runs.'))).some(n => n.type === 'Button' && String(n.props.label).startsWith('explain three runs'))).toBe(false)
 })
 
 // A catch-up words the replies' citations anew, and each reply numbers its citations from 1. Each citation of the
