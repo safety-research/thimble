@@ -29,7 +29,8 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
-import { failCleared, failNotice, hintLine, noticeLine } from '../bar/notice'
+import { howTo, hintUsed } from '../bar/hints'
+import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { cardText, revealCard } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { partOf } from '../core/answers'
@@ -447,11 +448,10 @@ export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: str
   if (scope.card) await revealCard($, scope.card, 'start')
   const placed = await showThread($, key, { ask: true })
   // open: a notice that a key could not open it goes
-  if (placed) await failCleared($, 'pane:threads')
+  if (placed) { await failCleared($, 'pane:threads'); await hintUsed($, 'ask') }
   if (!placed) {
-    hintLine($, o.key
-      ? `click “${o.key}”${o.where ? ` ${o.where}` : ''} to open it here.`
-      : 'Claude Code did not open the side pane here; widen the terminal and ask again.', 'pane:threads')
+    if (o.key) await howTo($, 'ask', `click “${o.key}”${o.where ? ` ${o.where}` : ''}; ${o.key.split(' ')[0]} needs a wider terminal.`, 'pane:threads')
+    else failNotice($, 'Claude Code did not open the side thread here.', 'pane:threads')
   }
   return placed
 }
@@ -462,7 +462,7 @@ export async function listThreads($: Engine, o: { fromKey?: boolean } = {}): Pro
   const placed = await openPane($, 'threads', {}, 'Threads', { focus: true })
   if (placed) await failCleared($, 'pane:threads')
   if (!placed && o.fromKey) {
-    hintLine($, `click “t ${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” on the right to open it here.`, 'pane:threads')
+    await howTo($, 'pane:threads', `click “t ${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}”; t needs a wider terminal.`, 'pane:threads')
   }
   return placed
 }

@@ -23,6 +23,7 @@
 import { update, type EngineInterface } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
+import { hintUsed } from '../bar/hints'
 import { markPressed, spansOver } from '../core/answerview'
 import { latestAnswer, pickAnswer } from '../core/answers'
 import { openPane } from '../core/pane'
@@ -99,6 +100,7 @@ export async function targetNow($: Engine): Promise<string | null> {
 /** The chips open on a record, its first chip picked; scrolled into view. */
 export async function openChips($: Engine, id: string, focus = 'length'): Promise<void> {
   await writeOpen($, { id, focus, edge: null, typing: null, held: false, hint: false })
+  await hintUsed($, 'rewrite')
   await $.ui.scroll({ to: { key: `sq-${id}` }, block: 'nearest' }).catch(() => undefined)
 }
 

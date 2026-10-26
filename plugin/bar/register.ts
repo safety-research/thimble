@@ -15,7 +15,8 @@ import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
 import { introDone, introHint } from './intro'
-import { hintLine, promptTyped } from './notice'
+import { howTo, remindAfterAnswer } from './hints'
+import { failNotice, promptTyped } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,27 +36,28 @@ async function paneShows($: Engine, kind: string): Promise<boolean> {
 /** Coverage or the labels: open, or closed when the pane shows it. Each takes the keys, so the keys its key row names
  *  act in it, not in the prompt (coverage.tsx, labels/pane.tsx), and esc closes it. A pane a key opened that
  *  Claude Code did not place (a narrow terminal, core/pane.ts) is said in the bar, with the click that opens it. */
-async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void> {
+async function togglePane($: Engine, kind: 'coverage' | 'labels', byKey = false): Promise<void> {
   if (await paneShows($, kind)) { await closePane($); return }
   if (kind === 'coverage') void recount($).catch(() => undefined)
   const placed = kind === 'labels' ? await openLabels($) : await openPane($, kind, {}, TITLES[kind], { focus: true })
-  if (!placed) {
-    // the words the bar shows for it, which a click opens
-    const n = (await countsNow($))?.labels ?? 0
-    const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
-    hintLine($, `click “${kind === 'labels' ? 'l' : 'r'} ${shown}” on the right to open it here.`, `pane:${kind}`)
-  }
+  if (placed) return
+  const name = TITLES[kind]
+  if (!byKey) { failNotice($, `Claude Code did not open the ${name} pane here.`, `pane:${kind}`); return }
+  // the words the bar shows for it, which a click opens
+  const n = (await countsNow($))?.labels ?? 0
+  const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
+  await howTo($, `pane:${kind}`, `click “${kind === 'labels' ? 'l' : 'r'} ${shown}”; ${kind === 'labels' ? 'l' : 'r'} needs a wider terminal.`, `pane:${kind}`)
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */
 export async function openSettings($: Engine): Promise<void> {
-  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) hintLine($, 'type /thimble-settings to open the settings.')
+  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) failNotice($, 'Claude Code did not open the settings here. Type /thimble-settings to open them.', 'pane:settings')
 }
 
 /** r or l at an empty prompt, while the bar names it: its pane opens or closes once the word window closed. */
 export async function barKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
   if (!BAR_KEYS.includes(k) || !(await barKeys($)).has(k)) return null
-  return { later: () => togglePane($, k === 'r' ? 'coverage' : 'labels') }
+  return { later: () => togglePane($, k === 'r' ? 'coverage' : 'labels', true) }
 }
 
 export const registerBar: Register = on => {
@@ -81,6 +83,8 @@ export const registerBar: Register = on => {
     const r = await next(e)
     if (e.agentId === undefined) {
       $.clock.after(0, () => { void recount($).catch(() => undefined) })
+      // one reminder of a feature asked for on demand that the session has not used yet (hints.ts)
+      $.clock.after(0, () => { void remindAfterAnswer($).catch(() => undefined) })
     }
     return r
   }).catch(($, e, next) => next(e))

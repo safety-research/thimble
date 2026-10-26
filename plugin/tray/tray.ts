@@ -39,7 +39,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failNotice, hintLine } from '../bar/notice'
+import { failNotice } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
 import { tellOpened } from '../core/engaged'
@@ -395,7 +395,7 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
     const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
     next = restStop(pool, dir) as Stop | null
   }
-  if (!next) { hintLine($, 'nothing to step to yet.', 'tray'); return }
+  if (!next) return
   if (next.card) await standOn($, next.row, next.card)
   else await openMark($, refOf(next) as Frame, { reveal: true })
 }
@@ -446,6 +446,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   const stand = tray ? null : k.stand
   if (key === ']' || key === '[') {
     if (!tray && !stand && (await chipsOpen($))) return null
+    // with nothing to step to, ] and [ are the prompt's
+    if (!tray && !stand && !(await allStops($)).length) return null
     return { now: () => stepMark($, key === ']' ? 1 : -1) }
   }
   if (stand) {
@@ -708,7 +710,7 @@ function drawUnits(els: Any, units: Unit[]): Any[] {
 export function evidenceOpener($: Engine, f: { row: string; n: number }): () => Promise<void> {
   return async () => {
     const placed = await openPane($, 'evidence', { row: f.row, n: f.n }, `citation ${f.n}`).catch(() => true)
-    if (!placed) hintLine($, 'Claude Code did not open the side pane here; the tray above still shows the cited line.', 'tray')
+    if (!placed) failNotice($, 'Claude Code did not open the citation\'s evidence here; the tray above still shows the cited line.', 'tray')
   }
 }
 

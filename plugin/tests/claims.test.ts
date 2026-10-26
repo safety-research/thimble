@@ -371,7 +371,7 @@ test('c in a terminal too narrow for the pane says to click the bar\'s count; on
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await (await claimsKey(s.$, 'c', 0))!.later!()
   await settle()
-  expect(await line()).toContain('click “c 1 claim” on the right')
+  expect(await line()).toContain('click “c 1 claim”; c needs a wider terminal.')
   // a press's pane is placed at any width: the bar's count opens it
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
   await openClaims(s.$)
@@ -424,7 +424,7 @@ test('c in a narrow terminal before any claims names the bar\'s item by the bar\
   expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'evidence']])
   s.$.ui.open = async () => ({ isPlaced: false })
   await openClaims(s.$, {}, true)
-  expect(String((await failLineNow(s.$))?.text)).toContain('click “c evidence” on the right')
+  expect(String((await failLineNow(s.$))?.text)).toContain('click “c evidence”; c needs a wider terminal.')
   setOptions({})
 })
 

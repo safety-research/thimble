@@ -30,6 +30,7 @@
 // imports, so a list of draws that take `$` cannot be called from here.)
 import type { EngineInterface, Register } from 'claude-code'
 
+import { hintUsed } from '../bar/hints'
 import { failCleared, failLineNow } from '../bar/notice'
 import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
@@ -75,6 +76,7 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   await $.state.set(NOW, { kind, args, title, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}), ...(trail.length ? { trail } : {}) })
   const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
   if (r.isPlaced) {
+    await hintUsed($, `pane:${kind}`)
     // the line that said the side pane could not open (a narrow terminal: `pane:<kind>`) goes once it is open, on
     // whatever it shows
     const line = await failLineNow($)

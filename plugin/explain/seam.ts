@@ -40,6 +40,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
+import { howTo, hintUsed } from '../bar/hints'
 import { failCleared, failNotice, hintLine } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
 import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
@@ -319,6 +320,7 @@ function explainOpen($: Engine, row: string, words: string): void {
     if (typeof got === 'string') failNotice($, got, 'explain')
     else {
       await failCleared($, 'explain')
+      await hintUsed($, 'explain')
       await openMark($, { row: got.row, kind: 'explain', id: got.id }, got)
     }
   })().catch(err => failNotice($, `The explainer was not written: ${String((err as Error)?.message || err).slice(0, 160)}`, 'explain'))
@@ -369,20 +371,19 @@ export async function explainSelection($: Engine): Promise<void> {
   await selectionUsed($, 'explain', sel)
   const { words, cut } = pickedWords(sel?.text ?? '')
   if (!words) {
-    hintLine($, fullscreenNow() === false
-      ? 'selecting words needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).'
-      : 'select words in an answer and press e to explain them.', 'explain')
+    if (fullscreenNow() === false) hintLine($, 'selecting a passage needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).', 'explain')
+    else await howTo($, 'explain', 'select a passage in an answer and press e to explain it.', 'explain')
     return
   }
   await failCleared($, 'explain')
   const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
   const row = own ?? (await rowHolding($, words))
-  if (!row) { hintLine($, 'ask Claude something, then select words in its answer and press e to explain them.', 'explain'); return }
+  if (!row) { await howTo($, 'explain', 'ask Claude something, then select a passage in its answer and press e to explain it.', 'explain'); return }
   const mark = await markOf($, row, words)
-  if (mark) { await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return }
+  if (mark) { await hintUsed($, 'explain'); await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return }
   // the bar's busy line says what is written until the tray opens on it (expand.ts); a line here would say it twice.
   // Only a cut selection says so, since the busy line names just the words it explains
-  if (cut) hintLine($, `the selection is long: the explainer covers its first ${words.length} characters.`, 'explain')
+  if (cut) hintLine($, `the passage is long: the explainer covers its first ${words.length} characters.`, 'explain')
   explainOpen($, row, words)
 }
 
@@ -437,7 +438,7 @@ async function askHeadsNow($: Engine, row: string): Promise<void> {
   if (!(await headsUpsNow($, row).catch(() => false))) {
     headsAsked.delete(row)
     failNotice($, 'thimble could not ask for heads-ups on this answer now. Press h to try again.', 'heads')
-  }
+  } else await hintUsed($, 'heads')
 }
 
 /** h at an empty prompt, while Minimal is on and an answer has no heads-ups asked for yet. */

@@ -14,6 +14,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
+import { howTo, hintUsed } from '../bar/hints'
 import { failCleared, hintLine } from '../bar/notice'
 import { answerRows, messageOf, turnOfRow } from '../core/answers'
 import { answerSelection, selectionUsed, usedBy } from '../core/selection'
@@ -59,9 +60,9 @@ async function rowHolding($: Engine, words: string): Promise<string | null> {
 export async function citeWords($: Engine, row: string, words: string): Promise<string | void> {
   const raw = (await messageOf($, row))?.text ?? ''
   const v = await squeezeView($, row, raw).catch(() => null)
-  if (typeof v?.text === 'string' && v.text !== raw) return 'c cites Claude\'s own words: press 0 on the answer to see them as written, then select again.'
+  if (typeof v?.text === 'string' && v.text !== raw) return 'c cites Claude\'s own words: press 0 to see the answer as written, then select again.'
   const at = placeOf(raw, words)
-  if (!at) return `“${words.length > 50 ? `${words.slice(0, 49)}…` : words}” is not in the answer as Claude wrote it. Select words of the answer's text.`
+  if (!at) return `“${words.length > 50 ? `${words.slice(0, 49)}…` : words}” isn't in the answer as Claude wrote it; select words of its text.`
   const key = (await replyKeyOf($, row)) ?? row
   const reply = await replyOf($, key)
   const items = (reply?.items ?? []).filter(m => m.row === row)
@@ -72,8 +73,8 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
     ? (items.filter(m => !m.asked)[hit]?.n ?? null)
     : (items.find(m => m.asked && at.start < m.end && at.end > m.start)?.n ?? null)
   if (n != null) { await openTray($, { row, kind: 'citation', n }); return }
-  if (hit >= 0) return 'Those words are part of a citation whose check is not ready yet. Try again in a moment.'
-  if (codeRanges(raw).some(([a, b]) => at.start < b && at.end > a)) return 'Those words are code, which has no source to find. Select words of the answer\'s text.'
+  if (hit >= 0) return 'those words are in a citation still being checked; try again in a moment.'
+  if (codeRanges(raw).some(([a, b]) => at.start < b && at.end > a)) return 'those words are code, which has no source; select words of the answer\'s text.'
   const text = askedWords(raw.slice(at.start, at.end))
   const next = Math.max(0, ...(reply?.items ?? []).map(m => m.n)) + 1
   const marked = raw.slice(0, at.start) + `[${text}](#)` + raw.slice(at.end)
@@ -95,13 +96,14 @@ export async function citeSelection($: Engine): Promise<void> {
   const sel = await answerSelection($)
   await selectionUsed($, 'cite', sel)
   const { words } = pickedWords(sel?.text ?? '')
-  if (!words) { hintLine($, 'select words in an answer and press c to cite them.', 'cite'); return }
+  if (!words) { await howTo($, 'cite', 'select a passage in an answer and press c to verify the claim.', 'cite'); return }
   await failCleared($, 'cite')
   const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
   const row = own ?? (await rowHolding($, words))
-  if (!row) { hintLine($, 'ask Claude something, then select words in its answer and press c to cite them.', 'cite'); return }
+  if (!row) { await howTo($, 'cite', 'ask Claude something, then select a passage in its answer and press c to verify the claim.', 'cite'); return }
   const why = await citeWords($, row, words)
   if (why) hintLine($, why, 'cite')
+  else await hintUsed($, 'cite')
 }
 
 /** Whether c cites now: Citations is manual, an answer exists, and words are selected that c has not cited yet (Claude

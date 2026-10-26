@@ -17,7 +17,8 @@
 // It registers no model tool and starts no `claude`.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { failCleared, hintLine } from '../bar/notice'
+import { howTo } from '../bar/hints'
+import { failCleared, failNotice } from '../bar/notice'
 import { actingRow, messageOf, partOf, setPart, turnOf, turnsNow, type TurnRec } from '../core/answers'
 import { isPersonPrompt } from '../core/answers.mjs'
 import { readKept, writeKept } from '../core/env'
@@ -263,9 +264,8 @@ export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
   const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
-  hintLine($, byKey
-    ? `click “${words}” on the right to open it here.`
-    : `Claude Code did not open the Evidence pane here; widen the terminal, or click “${words}” on the right.`, 'pane:claims')
+  if (byKey) await howTo($, 'pane:claims', `click “${words}”; c needs a wider terminal.`, 'pane:claims')
+  else failNotice($, 'Claude Code did not open the Evidence pane here.', 'pane:claims')
 }
 
 /** The pane shows other arguments (the person moved in it, by a key or a click), and holds the keyboard: Claude Code

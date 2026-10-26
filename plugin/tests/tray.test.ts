@@ -354,7 +354,7 @@ for (const [how, env] of [['a button', {}], ['a file link', { FORCE_HYPERLINK: '
     await ui.press(place.type === 'Markdown' ? { key: 'tray-file', link: { href: place.props.pressableLinks[0] } } : { key: 'tray-file' })
     await ui.unmount()
     expect(opens).toEqual(['thimble'])
-    expect(textOf(await $.ui.render(above()))).not.toContain('did not open the side pane')
+    expect(textOf(await $.ui.render(above()))).not.toContain("didn't open here")
   })
 }
 // Claude Code places a pane at any width only for an open made while the person's press runs; an open the handler
@@ -389,8 +389,8 @@ test("the tray's file place where no pane can open: the notice does not send the
   await evidenceOpener($, { row: 'row-t1', n: 1 })()
   await new Promise(r => setTimeout(r, 1))
   const line = state.get('failLine') as Any
-  expect(line?.kind).toBe('notice')
-  expect(String(line?.text)).toContain('did not open the side pane')
+  expect(line?.kind).toBe('failed')
+  expect(String(line?.text)).toContain("Claude Code did not open the citation's evidence here")
   expect(String(line?.text)).not.toContain('citation in the reply')
 })
 
@@ -415,7 +415,7 @@ test('a on a card at a narrow terminal: the bar names the click on a ask, and th
   }
   expect(opens).toEqual(['thimble'])
   const band = textOf(await $.ui.render(above()))
-  expect(band).toContain('Hint: click “a ask” to open it here.')
+  expect(band).toContain('Hint: click “a ask”; a needs a wider terminal.')
   expect(band).toContain('a ask')
   // the press on a ask in the bar: Claude Code places it
   wide = true
@@ -549,9 +549,10 @@ test("an explainer's or a heads-up's links to a file's lines draw as the answer'
 })
 
 test("with Citations manual, ] passes the citations Claude wrote (they draw as plain words); a click on their words still opens one", { options: { citations: 'manual' } }, async ($, on) => {
+  // the answer's only citation is Claude's: nothing for ] to open, so ] is the prompt's and types
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   await resumed($, on, QUOTED)
-  // the answer's only citation is Claude's: nothing for ] to open
-  await $.prompt.edit(key(']'))
+  expect((await $.prompt.edit(key(']')) as Any)?.text).toBe(']')
   expect(textOf(await $.ui.render(above()))).not.toContain('12 of 40')
   // the reply draws it as plain words, underlined under the pointer, and a press still opens it
   const cite = all(await $.ui.render(answer('row-t1', TEXT))).find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))

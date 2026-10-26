@@ -308,10 +308,10 @@ test('e with nothing selected says to select words with the mouse first, and how
   const s = setup([LOOK], { complete: reply({ body: 'never', here: '' }) })
   await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
   await pressE(s, undefined)
-  expect(String((await failLineNow(s.$))?.text)).toBe('select words in an answer and press e to explain them.')
+  expect(String((await failLineNow(s.$))?.text)).toBe('select a passage in an answer and press e to explain it.')
   expect((await failLineNow(s.$))?.kind).toBe('notice')
   await pressE(s, { text: ' " ' })
-  expect(String((await failLineNow(s.$))?.text)).toContain('select words in an answer and press e')
+  expect(String((await failLineNow(s.$))?.text)).toContain('select a passage in an answer and press e')
   expect(s.calls.length).toBe(0)
   expect(await trayNow(s.$)).toBe(null)
 })
@@ -326,7 +326,7 @@ test('words selected outside Claude\'s answers (a setting\'s name in the pane) a
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
     await pressE(s, { text: 'MINIMAL' })
-    expect(String((await failLineNow(s.$))?.text)).toContain('select words in an answer')
+    expect(String((await failLineNow(s.$))?.text)).toContain('select a passage in an answer')
     expect(s.calls.length).toBe(0)
     // words of the answer selected in the pane: e takes them while it is open, not once it has closed
     s.$.ui.close = async () => ({})
@@ -461,7 +461,7 @@ test('with Citations manual, c makes the selected words a citation of their answ
     // the same words again open the same citation; words that are not in the answer say so
     await citeWords(s.$, 't1-row', '41 of the 44')
     expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
-    expect(await citeWords(s.$, 't1-row', 'not in this answer')).toContain('is not in the answer as Claude wrote it')
+    expect(await citeWords(s.$, 't1-row', 'not in this answer')).toContain("isn't in the answer as Claude wrote it")
     // in any other mode, c is the claims' even with words selected
     setOptions({ citations: 'auto cite' })
     expect(await citeKey(s.$, 'c', 0)).toBe(null)

@@ -6,7 +6,9 @@ import { expect, mock, test } from 'claude-code/testing'
 import { barRows } from '../bar/bar'
 import { busyWhile } from '../bar/busy'
 import { INTRO, INTRO_MS } from '../bar/intro'
-import { failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
+import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
+import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
+import { setOptions } from '../settings/features.mjs'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -220,6 +222,25 @@ test('a long busy step keeps the bar to one row: its other steps go, then its wo
   alive = false
 })
 
+test('while a busy step shows, a long hint and the busy step give way before the right loses its words', async () => {
+  let now = 0
+  const state: Record<string, unknown> = { counts: { coverage: '43% (3/7 files)', labels: 0, gen: 1, error: null } }
+  const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined }, clock: { now: async () => now, after: () => ({ cancel() {} }) } }
+  let alive = true
+  await busyWhile($, 'adding explainers', async () => alive)
+  now = 5000
+  hintLine($, 'select words in an answer and press e to explain them.', 'explain')
+  await new Promise(r => setTimeout(r, 5))
+  const rows = await barRows($, ELS, 90, { on: () => true })
+  expect(rows.length).toBe(1)
+  const band = textOf(rows)
+  expect(band).toContain('Hint: select')
+  expect(band).toContain('…')
+  expect(band).toContain('r coverage 43% (3/7 files)')
+  expect(band.length).toBeLessThanOrEqual(90)
+  alive = false
+})
+
 test('the first session starts with one plain line above the bar that says where the settings are and names no key; the first prompt takes it, and no later session or reload shows it again', async ($, on) => {
   world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   mock.store(on)
@@ -318,4 +339,55 @@ test('a session after the one whose first prompt took the line starts without it
   mock.store(on, { introDone: true })
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test('a how-to hint shows until the session used its feature; then it stays away', async () => {
+  const state: Record<string, unknown> = {}
+  const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined } }
+  await howTo($, 'explain', 'select a passage in an answer and press e to explain it.', 'explain')
+  await new Promise(r => setTimeout(r, 5))
+  expect(String((await failLineNow($))?.text)).toBe('select a passage in an answer and press e to explain it.')
+  await hintsGone($)
+  await hintUsed($, 'explain')
+  await howTo($, 'explain', 'select a passage in an answer and press e to explain it.', 'explain')
+  await new Promise(r => setTimeout(r, 5))
+  expect(await failLineNow($)).toBe(null)
+  // another feature's hint still shows
+  await howTo($, 'pane:coverage', 'click “r coverage”; r needs a wider terminal.', 'pane:coverage')
+  await new Promise(r => setTimeout(r, 5))
+  expect(String((await failLineNow($))?.text)).toContain('click “r coverage”')
+})
+
+test('after each answer one reminder of a feature on demand the session has not used; each once a session, none for auto or off', async () => {
+  const state: Record<string, unknown> = {}
+  const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined } }
+  const answer = async (): Promise<string | null> => {
+    await hintsGone($)
+    await remindAfterAnswer($)
+    await new Promise(r => setTimeout(r, 5))
+    const line = await failLineNow($)
+    return line ? String(line.text) : null
+  }
+  setOptions({ explain: 'on demand', details: 'on demand', citations: 'manual', squeezeAnswers: true })
+  try {
+    expect(await answer()).toBe('select a passage in an answer and press e to explain it.')
+    // h is used before its turn comes: the next answer skips it
+    await hintUsed($, 'heads')
+    expect(await answer()).toBe('select a passage in an answer and press c to verify the claim.')
+    expect(await answer()).toBe('press s to rewrite the last answer shorter or longer, more novice or more expert.')
+    // each was reminded once: no more this session
+    expect(await answer()).toBe(null)
+    // a failure showing stays; no reminder replaces it
+    for (const k of Object.keys(state)) delete state[k]
+    failNotice($, 'The card did not draw.')
+    await remindAfterAnswer($)
+    expect(String((await failLineNow($))?.text)).toBe('The card did not draw.')
+    // auto and off: nothing to remind of but the rewrite
+    for (const k of Object.keys(state)) delete state[k]
+    setOptions({ explain: 'auto', details: 'off', citations: 'auto cite', squeezeAnswers: true })
+    expect(await answer()).toBe('press s to rewrite the last answer shorter or longer, more novice or more expert.')
+    expect(await answer()).toBe(null)
+  } finally {
+    setOptions({})
+  }
 })

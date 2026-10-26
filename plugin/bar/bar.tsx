@@ -110,17 +110,25 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // a narrow bar: the labels' count goes first, then coverage's file counts, then coverage. The preview shows every
   // item the switches leave on, its right part on a line of its own when it does not fit
   const room = () => width - 9 - left.reduce((n, x) => n + itemLen(x) + 3, 0) - right.reduce((n, x) => n + itemLen(x) + 3, 0)
-  // a hint is cut before the right gives way, as a hint may point at it
+  // a hint is cut before the right gives way, as a hint may point at it, and so is the busy step beside it
   const h = left.findIndex(x => x.id === 'hint')
-  const cutHint = (least: number) => { if (h >= 0 && room() < 0) left[h] = { ...left[h]!, words: cut(left[h]!.words, Math.max(least, len(left[h]!.words) + room())) } }
-  if (!preview) cutHint(24)
-  if (!preview && room() < 0) right = right.filter(x => x.id !== 'labels')
-  if (!preview && room() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
-  if (!preview && room() < 0) right = []
-  // then the busy item's other steps go, and its words are cut, so the bar keeps to one row
+  // the room the row has left as drawn: ` · ` between items, two cells between the left and the right
+  const spare = () => width - 9 - left.reduce((n, x, i) => n + itemLen(x) + (i ? 3 : 0), 0) - right.reduce((n, x, i) => n + itemLen(x) + (i ? 3 : 0), 0) - (right.length ? 2 : 0)
+  // with a hint the row is measured as drawn, so the right keeps its words while they fit
+  const rowRoom = () => (h >= 0 ? spare() : room())
+  const cutHint = (least: number) => { if (h >= 0 && spare() < 0) left[h] = { ...left[h]!, words: cut(left[h]!.words, Math.max(least, len(left[h]!.words) + spare())) } }
+  // the busy item's other steps go, and its words are cut, so the bar keeps to one row
   const b = left.findIndex(x => x.id === 'busy')
-  if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: left[b]!.words.split(' · ')[0]! }
-  if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: cut(left[b]!.words, Math.max(8, len(left[b]!.words) + room())) }
+  const cutBusy = () => {
+    if (!preview && b >= 0 && rowRoom() < 0) left[b] = { ...left[b]!, words: left[b]!.words.split(' · ')[0]! }
+    if (!preview && b >= 0 && rowRoom() < 0) left[b] = { ...left[b]!, words: cut(left[b]!.words, Math.max(8, len(left[b]!.words) + rowRoom())) }
+  }
+  // with a hint, the left gives way first: the busy step, then the hint, which the person's key just asked for
+  if (!preview && h >= 0) { cutBusy(); cutHint(4) }
+  if (!preview && rowRoom() < 0) right = right.filter(x => x.id !== 'labels')
+  if (!preview && rowRoom() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
+  if (!preview && rowRoom() < 0) right = []
+  cutBusy()
   // the hint takes back the room the right gave up
   if (!preview && h >= 0) { left[h] = { ...left[h]!, words: hint! }; cutHint(4) }
 
