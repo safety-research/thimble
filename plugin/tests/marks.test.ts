@@ -453,8 +453,8 @@ test("a repair that cannot start leaves the citation failed and says why, with x
   expect(String((await failLineNow($))?.text)).toContain('The repair did not start (made-up: no agents now). Press x on the citation to try again.')
 })
 
-test('with Citations auto cite, the default, the reply\'s citations wait unchecked; opening one checks it alone', async () => {
-  setOptions({})
+test('with Citations auto cite, the reply\'s citations wait unchecked; opening one checks it alone', async () => {
+  setOptions({ citations: 'auto cite' })
   try {
     const { $, seen } = engine(VALIDATED)
     await noteRow($, 'row-1', REPLY)

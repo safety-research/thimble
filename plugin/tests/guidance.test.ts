@@ -63,7 +63,7 @@ async function thimbleText($: Any, w: World): Promise<string> {
   return carried[0]
 }
 
-test("the first prompt carries guidance.md's text beside it, the next prompts do not carry it again, and the first after a compaction does, once", async ($, on) => {
+test("the first prompt carries guidance.md's text beside it, the next prompts do not carry it again, and the first after a compaction does, once", { options: { citations: 'auto cite' } }, async ($, on) => {
   const w = world(on)
   expect(await thimbleText($, w)).toBe(GUIDANCE.trim())
   expect(await ask($, w, 'And why?')).toEqual([])
@@ -74,7 +74,7 @@ test("the first prompt carries guidance.md's text beside it, the next prompts do
   expect(await ask($, w, 'Show me one.')).toEqual([])
 })
 
-test('a resumed conversation that holds the copy gets no second one', async ($, on) => {
+test('a resumed conversation that holds the copy gets no second one', { options: { citations: 'auto cite' } }, async ($, on) => {
   const w = world(on)
   w.messages = [
     { role: 'user', content: [{ type: 'text', text: 'Which runs failed?' }, { type: 'text', text: `<system-reminder>\nprompt.submit hook additional context: ${GUIDANCE.trim()}\n</system-reminder>` }] },

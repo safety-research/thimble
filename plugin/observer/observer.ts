@@ -33,7 +33,8 @@
 // one of them is on, and a lens whose feature is off has no section in the prompt, no key in the reply and no merge.
 // A lens whose feature has a mode (Claims: auto, on demand, off) joins the look after each reply only in its `auto` mode;
 // else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims have not read,
-// for a look of that lens alone.
+// for a look of that lens alone. While Minimal is on no lens joins the look after each reply; h asks for a look of the
+// heads lens alone at one answer (headsUpsNow).
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -49,7 +50,7 @@ import { modelWhy } from '../core/why.js'
 import { explainMerge, explainState } from '../explain/seam'
 import { sessionKey } from '../hooks/conversation'
 import { promptText, type PromptName } from '../prompts/prompts'
-import { featureOn, lensesAfterReply } from '../settings/features.mjs'
+import { featureOn, lensesAfterReply, minimalOn } from '../settings/features.mjs'
 import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf, skeletonOf } from './compose.mjs'
 import { LENSES } from './lenses.mjs'
@@ -231,10 +232,23 @@ export async function findClaimsNow($: Engine): Promise<number> {
   return turns.length
 }
 
+/** h while Minimal is on (explain/seam.ts headsKey): the answer at `row` queued for a look of the heads lens alone.
+ *  Answers whether it was queued: Heads-ups is on, a person is here, and `row` is an answer. */
+export async function headsUpsNow($: Engine, row: string): Promise<boolean> {
+  if (!featureOn('details') || S.person !== 'now') return false
+  const t = await turnOfRow($, row)
+  if (!t || t.answer !== row) return false
+  const msgs = await answerMsgs($, t)
+  for (const m of msgs) await enqueue($, { ...m, only: ['heads'] })
+  return msgs.length > 0
+}
+
 /** A catch-up's version shown (squeeze/term.ts settled): the explain and heads lenses read it as they read an answer,
  *  with its words as what the analyst reads below `row`, the newest message it covers, where what they give is kept
  *  (explain/seam.ts explainMerge) and the catch-up's drawing finds it (explainSpansOf). */
 export async function lookAtCatchUp($: Engine, row: string, text: string): Promise<void> {
+  // Minimal: nothing is marked by itself, a catch-up's words neither
+  if (minimalOn()) return
   const only = (LENSES as Lens[]).filter(l => (l.name === 'explain' || l.name === 'heads') && featureOn(l.option)).map(l => l.name)
   if (!only.length || S.person !== 'now' || !text.trim()) return
   const t = await turnOfRow($, row)

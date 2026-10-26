@@ -118,12 +118,16 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   s.$.ui.focus = async (a: Any) => { focused.push(a.key); return {} }
   await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
   await draw(s)
+  // Minimal first, then Citations and Cards
+  expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
+  await draw(s)
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('cards')
   await draw(s)
   expect(await scrollPane(s.$, { by: -1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
-  expect(focused).toEqual(['mode-cards-on', 'mode-citations-auto cite'])
+  expect(focused).toEqual(['mode-citations-manual', 'mode-cards-on', 'mode-citations-manual'])
   // the ring moving along the row picked (← →, tab) sets the choice it lands on; onto another row it lands on that
   // row's choice set, picks that row and changes nothing
   const set: Any[] = []
@@ -136,9 +140,10 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   const went: Any[] = []
   const next = async (e: Any) => { went.push(e.element); return {} }
   await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-citations-manual', origin: { kind: 'person' } }, next)
-  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
+  // (the first change saves 0.10.4's moved default first, settings/term.ts moveDefaults)
+  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
   await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-claimsMode-auto', origin: { kind: 'person' } }, next)
-  expect(set.length).toBe(1)
+  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(1)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('claimsMode')
   expect(went).toEqual(['mode-citations-manual', 'mode-claimsMode-on demand'])
   setOptions({})

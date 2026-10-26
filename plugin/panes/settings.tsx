@@ -1,9 +1,10 @@
 // settings.tsx: the settings pane (core/pane.ts kind `settings`): /thimble-settings, or a click on `thimble` in the
 // bar, opens it. Its top row says `Settings` (core/pane.ts); under it the bar as the settings leave it (bar.tsx, drawn as
-// a preview in a frame: nothing in it presses), then the settings under their headings (Answers, Comments, Panes),
-// every row the same: `›` on the row picked, the name in a column of its own, its choices (`on · off` for a switch;
-// the one set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). The row
-// picked is tinted across the pane.
+// a preview in a frame: nothing in it presses), then Minimal, then the settings under their headings (Answers,
+// Comments, Panes), every row the same: `›` on the row picked, the name in a column of its own, its choices (`on · off`
+// for a switch; the one set green and bold, the others gray), and under them, gray, what the one set gives (its
+// `says`). While Minimal is on, a row it changes says so after its choices (`→ on demand`), and under them what it does
+// until Minimal is off; its own setting stays, and comes back then. The row picked is tinted across the pane.
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
@@ -14,7 +15,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { barRows } from '../bar/bar'
 import { arrowsOwn, PANE_ID } from '../core/pane'
-import { SWITCHES, switchesFrom } from '../settings/features.mjs'
+import { SWITCHES, heldByMinimal, switchesFrom } from '../settings/features.mjs'
 import { heldValues, settingsAction } from '../settings/term'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -89,6 +90,7 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
   const at = ROWS.findIndex(s => s.key === picked)
   arrowsOwn(dir => pick($, ROWS[Math.max(0, Math.min(ROWS.length - 1, at + dir))]!))
   const bar = await barRows($, els, width - 4, { on: switchesFrom(values), preview: true })
+  const held = heldByMinimal(values) as Record<string, string>
   const rows = ROWS.flatMap((s, i) => {
     const set = shownOf(s, values[s.key])
     const here = s.key === picked
@@ -101,7 +103,8 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
         Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: c }),
       ] }),
     ])
-    const says = s.says?.[set]
+    const by = held[s.key]
+    const says = by ? `Minimal: ${by} until Minimal is off.` : s.says?.[set]
     return [...head, Box({ key: `sw-${s.key}`, flexDirection: 'column', width, ...(here ? { backgroundColor: SEL_TINT } : {}), children: [
       Box({ key: 'line', flexDirection: 'row', children: [
         Text({ key: 'mark', children: here ? '› ' : '  ' }),
@@ -109,7 +112,10 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
           Text({ key: 'title', bold: true, children: s.title.padEnd(NAME) }),
         ] }),
         Text({ key: 'gap', children: ' ' }),
-        Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: choices }),
+        Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: [
+          ...choices,
+          ...(by ? [Text({ key: 'held', dimColor: true, children: `  → ${by}` })] : []),
+        ] }),
       ] }),
       ...(says ? [Box({ key: `says-${s.key}`, marginLeft: IN, width: width - IN, children: [Text({ dimColor: true, wrap: 'wrap', children: says })] })] : []),
     ] })]

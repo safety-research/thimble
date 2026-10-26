@@ -28,7 +28,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import { framesIn, noteFrames } from '../cards/draw'
 import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
-import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, pendingSpans } from '../explain/seam'
+import { EXPLAIN_KEYS, HEADS_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, headsBar, headsKey, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { citeBar, citeKey, citeShown } from '../marks/cite'
@@ -66,7 +66,7 @@ export type MarkRef = { row: string; kind: 'citation'; n: number } | { row: stri
  *  import modules that come back here through the card tool, so a list made as this module loads could read a seam's
  *  keys before its module set them.) */
 export function restoredKeys(): string[] {
-  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...HEADS_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
 }
 
 const safe = async <T>(p: Promise<T>, none: T): Promise<T> => {
@@ -186,6 +186,7 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
     ...tray,
     ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => !(holds && x.focus)),
     ...items(await safe(explainBar($, on, preview), []), preview),
+    ...items(await safe(headsBar($, on, preview), []), preview),
     ...items(await safe(citeBar($, on, preview), []), preview),
   ]
 }
@@ -214,6 +215,7 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
+    ?? (await safe(headsKey($, key, until), null))
     ?? (await safe(citeKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))

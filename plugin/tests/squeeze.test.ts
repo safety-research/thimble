@@ -81,7 +81,7 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
 
-test('s opens the chips; ] writes a longer version in place, Claude hears it with the next prompt, and 0 brings the original back with no call', async ($, on) => {
+test('s opens the chips; ] writes a longer version in place, Claude hears it with the next prompt, and 0 brings the original back with no call', { options: { citations: 'auto cite' } }, async ($, on) => {
   const t = await setup($, on, ['The build failed on [3 of 12](#) runs: the cache key changed with the lockfile, and the mirror timed out on each fresh fetch.'])
   await t.turn('t1', LONG)
   expect(await t.bar()).toContain('s rewrite')
@@ -204,7 +204,7 @@ async function chipsDrawn($: Any, row: string, text: string, override: Any = {})
   return { client, tree: Chips({ ...client?.props.props, ...override } as never, surface as never), posts }
 }
 
-test('a citation opened over the open chips takes the keys: the bar names 0 once, 0 closes the tray and keeps the version, then the chips take 0 again', async ($, on) => {
+test('a citation opened over the open chips takes the keys: the bar names 0 once, 0 closes the tray and keeps the version, then the chips take 0 again', { options: { citations: 'auto cite' } }, async ($, on) => {
   const text = 'Of the [12 runs](#), [3 failed](#) on the [slow mirror](#).'
   const t = await setup($, on, ['Of all [12 nightly runs](#), exactly [3 of them failed](#), each on the [slow package mirror](#).'])
   await t.turn('t1', text)
@@ -287,7 +287,7 @@ test('a catch-up is read for explainers as any answer is: a term only it says ge
 // A catch-up words the replies' citations anew, and each reply numbers its citations from 1. Each citation of the
 // catch-up stands for the reply's citation that states the same claim: a press on a reworded one acts on that citation
 // (the tray stands on it), and citations of two replies light apart, each in its own hover group
-test("a catch-up's reworded citations: a press acts on the reply's citation with the same claim, and two replies' citations light apart", async ($, on) => {
+test("a catch-up's reworded citations: a press acts on the reply's citation with the same claim, and two replies' citations light apart", { options: { citations: 'auto cite' } }, async ($, on) => {
   const t = await setup($, on, ['Of all [12 nightly runs](#), [3 of them failed](#); the retry then passed on [the slow package mirror](#).'])
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'Of the [12 runs](#), [3 failed](#).', { text: 'why did it fail?', by: 'composer' })
@@ -316,7 +316,7 @@ test("a catch-up's reworded citations: a press acts on the reply's citation with
 })
 
 // A person opened an explainer of an older reply and the chips then opened under it: s squeezes the newest reply alone
-test('s opens the chips under the newest reply, after a mark of an older one was opened or { picked an older one', async ($, on) => {
+test('s opens the chips under the newest reply, after a mark of an older one was opened or { picked an older one', { options: { citations: 'auto cite' } }, async ($, on) => {
   const t = await setup($, on, [])
   await t.turn('t1', LONG)
   await t.turn('t2', 'The retry passed on the [slow mirror](#).')

@@ -121,7 +121,8 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const name = Text({ key: 'name', color: accent(), bold: true, children: 'thimble' })
   const label = presses ? Button({ key: 'bar-thimble', plain: true, label: 'thimble settings', onPress: presses.settings, children: [name] }) : name
   const bar = Box({ key: 'bar', flexDirection: 'row', justifyContent: 'space-between', width, ...(preview ? { flexWrap: 'wrap' } : {}), children: [
-    Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
+    // the preview wraps its items whole, as many as the switches leave on
+    Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, ...(preview ? { flexWrap: 'wrap' } : {}), children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
     ...(right.length ? [Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: joined(right, left.length) })] : []),
   ] })
   // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's

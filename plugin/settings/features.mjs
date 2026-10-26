@@ -10,7 +10,7 @@
 
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `group`:
  *  the heading the pane lists it under, with the others of its group (Answers, Comments on an answer's words, Panes;
- *  a key keeps its name, so a saved setting still applies); `does`: one line on what the person gets
+ *  a key keeps its name, so a saved setting still applies); Minimal, first, has none: it stands over the others; `does`: one line on what the person gets
  *  and what it costs, the field's description (a test checks). `choices`: the modes of a feature that has more than on
  *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
  *  look runs while one such feature is on. `lensesIn`: the mode in which they join the look after each reply (Claims:
@@ -18,7 +18,12 @@
  *  gives (`on` and `off` for a switch), which the settings pane shows under the row for the one set. */
 export const SWITCHES = [
   {
-    key: 'citations', title: 'Citations', group: 'Answers', default: 'auto cite', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
+    key: 'minimal', title: 'Minimal', default: false,
+    does: 'Everything on demand: nothing runs after a reply and nothing is marked by itself. Select words and press e to explain them or c to cite them, h gives heads-ups on the last answer, and f in Evidence finds the claims. Claude still draws cards, and v draws one. The settings below come back when it is off.',
+    says: { on: 'Everything on demand: no call after a reply; e, c and h on an answer, f in Evidence.', off: 'Each feature works as set below.' },
+  },
+  {
+    key: 'citations', title: 'Citations', group: 'Answers', default: 'manual', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
     does: 'auto cite + verify: Claude cites each claim you would check, and a second Claude verifies each citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press c to cite them. off: no citations.',
     says: {
       'auto cite + verify': 'Claude cites what its answer rests on; a second Claude verifies each citation right away.',
@@ -33,9 +38,9 @@ export const SWITCHES = [
     says: { on: 'Claude draws charts and tables as cards inside the answer; v draws one of the last answer.', off: 'No cards.' },
   },
   {
-    key: 'squeezeAnswers', title: 'Squeeze', group: 'Answers', default: true,
+    key: 'squeezeAnswers', title: 'Rewrite', group: 'Answers', default: true,
     does: 's makes an answer shorter or longer, or writes it for another reader. One rewrite each time you ask.',
-    says: { on: 's rewrites an answer shorter, plainer or longer; 0 brings back the original.', off: 'No squeeze.' },
+    says: { on: 's rewrites an answer shorter, plainer or longer; 0 brings back the original.', off: 'No rewrites.' },
   },
   {
     key: 'catchUp', title: 'Catch-up', group: 'Answers', default: true,
@@ -53,12 +58,12 @@ export const SWITCHES = [
     says: { on: 'Words that may mislead get a heads-up.', off: 'No heads-ups.' },
   },
   {
-    key: 'claimsMode', title: 'Claims', group: 'Panes', default: 'on demand', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
-    does: 'c opens what Claude and you claimed in the session, with why each holds and its sources. auto: the claims are extracted after each reply, the largest part of the call after it. on demand: f in the Claims pane extracts them, which spends fewer tokens. off: no Claims pane.',
+    key: 'claimsMode', title: 'Evidence', group: 'Panes', default: 'on demand', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
+    does: 'c opens what Claude and you claimed in the session, with why each holds and its sources. auto: the claims are extracted after each reply, the largest part of the call after it. on demand: f in the Evidence pane extracts them, which spends fewer tokens. off: no Evidence pane.',
     says: {
       'auto': 'c lists the claims of the conversation with their evidence; they are extracted after each answer.',
       'on demand': 'c lists the claims of the conversation with their evidence; press f in the pane to extract them, which spends fewer tokens.',
-      'off': 'No Claims pane.',
+      'off': 'No Evidence pane.',
     },
   },
   {
@@ -94,6 +99,24 @@ export const RETIRED = {
 /** Modes renamed since a value was saved under their old name, by feature: the old name stands for the new one, and
  *  the first session saves the new one (term.ts). */
 export const RENAMED = { citations: { 'auto cite + check': 'auto cite + verify' } }
+
+/** Defaults that moved, and the hidden field that says a person's settings have had them: the installer saves every
+ *  field's default, so a value at an old default cannot tell whether the person chose it. While `defaultsAt` is not
+ *  `DEFAULTS.at`, the first interactive session saves the new default where the old one stands and sets `defaultsAt`
+ *  (term.ts); a value the person sets afterwards stays. 0.10.4: Citations is manual (Claude cites only what
+ *  the person asks it to). */
+export const DEFAULTS = { at: '0.10.4', moved: { citations: { from: 'auto cite', to: 'manual' } } }
+export const DEFAULTS_FIELD = { defaultsAt: { type: 'string', title: 'Defaults seen (internal)', description: 'The thimble version whose defaults these settings have had.', default: '' } }
+
+/** The values the moved defaults change in `values`, by feature: {} once `defaultsAt` says they were applied. */
+export function defaultsFrom(values) {
+  if (!values || typeof values !== 'object' || values.defaultsAt === DEFAULTS.at) return {}
+  return Object.fromEntries(Object.entries(DEFAULTS.moved).filter(([k, m]) => values[k] === m.from).map(([k, m]) => [k, m.to]))
+}
+
+/** Whether a setting's value is its default: today's, or the one it had before it moved (DEFAULTS), which the
+ *  installer may have saved. */
+export const atDefault = (key, v) => v === undefined || v === BY_KEY.get(key)?.default || v === DEFAULTS.moved[key]?.from
 
 /** Names modules ask featureOn by, for a feature kept under another key: Claims (`claims`) is the field `claimsMode`. */
 const ALIAS = { claims: 'claimsMode' }
@@ -146,26 +169,50 @@ export function valueIn(values, key) {
   const v = RENAMED[key]?.[saved] ?? saved
   // a setting at its default, while a retired field still holds a value saved before it, stands for that value
   const moved = movedFrom(values)
-  if (s && key in moved && (v === undefined || v === s.default)) return moved[key]
+  if (s && key in moved && atDefault(key, v)) return moved[key]
   if (s?.choices) return s.choices.includes(v) ? v : s.default
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
 
+/** What Minimal holds a mode at while it is on, by feature: a mode that acts after each reply waits to be asked
+ *  (Citations' auto modes are manual; Claims' auto is on demand). Explainers and Heads-ups stay on, so e and h ask for
+ *  them, but their lenses leave the look after each reply (lensesAfterReply). */
+const MINIMAL = { citations: { 'auto cite + verify': 'manual', 'auto cite': 'manual' }, claimsMode: { auto: 'on demand' } }
+
+/** A feature's value as it acts: its value in `values`, or what Minimal holds it at while Minimal is on. */
+export function actingIn(values, key) {
+  const v = valueIn(values, key)
+  return key !== 'minimal' && valueIn(values, 'minimal') === true ? MINIMAL[key]?.[v] ?? v : v
+}
+
+/** The features Minimal changes while it is on, by feature: what each does then, in the settings pane's words. Empty
+ *  while Minimal is off. */
+export function heldByMinimal(values) {
+  if (valueIn(values, 'minimal') !== true) return {}
+  const out = {}
+  for (const key of Object.keys(MINIMAL)) if (actingIn(values, key) !== valueIn(values, key)) out[key] = actingIn(values, key)
+  for (const s of SWITCHES) if (s.lenses && !s.lensesIn && valueIn(values, s.key) === true) out[s.key] = 'on demand'
+  return out
+}
+
 /** The features as `values` holds them, as a function of a key: whether each is on (a feature with modes is on unless
- *  its mode is `off`). The settings pane asks it with the values Claude Code holds now; featureOn is it with the plugin's
- *  options. */
+ *  its mode is `off`), as Minimal leaves it. The settings pane asks it with the values Claude Code holds now; featureOn
+ *  is it with the plugin's options. */
 export function switchesFrom(values) {
   return key => {
     // c on selected words, a citation the analyst asks for, is Citations' manual mode
-    if (key === 'cite') return valueIn(values, 'citations') === 'manual'
-    const v = valueIn(values, ALIAS[key] ?? key)
+    if (key === 'cite') return actingIn(values, 'citations') === 'manual'
+    // h, heads-ups on an answer the person asks for, is Minimal's, while Heads-ups is on
+    if (key === 'heads') return valueIn(values, 'minimal') === true && valueIn(values, 'details') === true
+    const v = actingIn(values, ALIAS[key] ?? key)
     return typeof v === 'string' ? v !== 'off' : v
   }
 }
 
-/** A feature's mode, for a feature with `choices` (`on demand`); its value as a boolean for any other. */
+/** A feature's mode, for a feature with `choices` (`on demand`), as Minimal leaves it; its value as a boolean for any
+ *  other. */
 export function choiceOf(key) {
-  return valueIn(current, ALIAS[key] ?? key)
+  return actingIn(current, ALIAS[key] ?? key)
 }
 
 /** A change the settings pane just made through Claude Code: this activation acts on it at once, while Claude Code
@@ -175,7 +222,12 @@ export function noteChange(key, value) {
   if (!s || !(s.choices ? s.choices.includes(value) : typeof value === 'boolean')) return
   // a value the retired fields saved moves first, so the setting the person changes stands over it (term.ts moves
   // them too)
-  current = { ...settled(current), [key]: value }
+  current = { ...settled(current), defaultsAt: DEFAULTS.at, [key]: value }
+}
+
+/** The moved defaults saved in this load's copy, after term.ts saved them in Claude Code's. */
+export function noteDefaults() {
+  current = { ...current, ...defaultsFrom(current), defaultsAt: DEFAULTS.at }
 }
 
 /** The retired fields' values moved in this load's copy, after term.ts moved them in Claude Code's. */
@@ -193,8 +245,13 @@ export function featureOn(key) {
 /** Whether a feature's lenses join the look after each reply: it is on, and in its `lensesIn` mode when it has one. */
 export function lensesAfterReply(key) {
   const s = BY_KEY.get(ALIAS[key] ?? key)
+  // Minimal: nothing joins the look after each reply; each lens waits to be asked
+  if (valueIn(current, 'minimal') === true) return false
   return switchesFrom(current)(key) && (!s?.lensesIn || valueIn(current, s.key) === s.lensesIn)
 }
+
+/** Whether Minimal is on: every feature waits to be asked. */
+export const minimalOn = () => valueIn(current, 'minimal') === true
 
 /** The values this load runs with now, the retired fields' included. */
 export const currentValues = () => ({ ...current })

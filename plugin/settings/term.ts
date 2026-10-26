@@ -9,10 +9,12 @@
 //
 // The fields newer settings replaced (features.mjs RETIRED) stay in the manifest, hidden from /config, so a value saved
 // under them reaches the plugin: the first interactive session moves it to the settings that replaced it and sets them
-// back to their defaults. A setting the person changes moves them first too.
+// back to their defaults. A setting the person changes moves them first too. A default that moved (features.mjs
+// DEFAULTS) is saved the same way, once: a value at the old default takes the new one, and the hidden field defaultsAt
+// says it was done.
 import type { ConfigRow, EngineInterface, Register } from 'claude-code'
 
-import { RENAMED, RETIRED, SWITCHES, currentValues, movedFrom, noteChange, noteSettled, setOptions, switchOf, valueIn } from './features.mjs'
+import { DEFAULTS, DEFAULTS_FIELD, RENAMED, RETIRED, SWITCHES, atDefault, currentValues, movedFrom, noteChange, noteDefaults, noteSettled, setOptions, switchOf, valueIn } from './features.mjs'
 
 type Engine = EngineInterface
 
@@ -39,7 +41,9 @@ export async function heldValues($: Engine): Promise<Record<string, boolean | st
     const r = rows.get(s.key)
     if (r && (s.choices ? s.choices.includes(r.value as string) : typeof r.value === 'boolean')) values[s.key] = r.value
   }
-  return Object.fromEntries(SWITCHES.map(s => [s.key, valueIn(values, s.key) as boolean | string]))
+  // with defaultsAt, so the values read again (the bar's preview, Minimal's rows) read a moved default as these do
+  const at = typeof values.defaultsAt === 'string' ? { defaultsAt: values.defaultsAt } : {}
+  return { ...Object.fromEntries(SWITCHES.map(s => [s.key, valueIn(values, s.key) as boolean | string])), ...at }
 }
 
 /** Turn a feature on or off, or set a feature's mode. A refusal is said in one line with its fix; nothing changes then. */
@@ -54,8 +58,9 @@ export async function settingsAction($: Engine, a: Record<string, unknown>): Pro
   const to = a.do === 'set' ? a.value : s.choices ? s.choices[(s.choices.indexOf(now as string) + 1) % s.choices.length] : !now
   if (s.choices ? !s.choices.includes(to as string) : typeof to !== 'boolean') return `× ${s.title} has no setting "${String(to)}".`
   if (to === now) return
-  // a value the retired fields still hold moves first, so the change stands over it
+  // a value the retired fields still hold, and a default that moved, are saved first, so the change stands over them
   await moveRetired($, currentValues()).catch(() => undefined)
+  await moveDefaults($).catch(() => undefined)
   const res = await $.config.set({ key: r.key, value: to as boolean | string })
   if (res.deny) return `× ${s.title} stayed ${typeof now === 'string' ? now : now ? 'on' : 'off'}: ${res.deny}`
   // acted on at once, before the plugin loads again with it
@@ -84,23 +89,42 @@ async function moveRetired($: Engine, saved: Record<string, unknown>): Promise<v
   }
   for (const [key, value] of Object.entries(moved)) {
     const r = rows.get(key)
-    if (r && !r.isLocked && (r.value === undefined || r.value === switchOf(key)?.default)) await $.config.set({ key: r.key, value }).catch(() => undefined)
+    if (r && !r.isLocked && atDefault(key, r.value)) await $.config.set({ key: r.key, value }).catch(() => undefined)
   }
   for (const [field, f] of stale) await $.config.set({ key: retiredKey(any.key, field), value: f.default }).catch(() => undefined)
   noteSettled()
 }
 
+/** A default that moved, saved once where the setting holds the old default (and no retired field's value stands for
+ *  it), then defaultsAt set, so a value the person sets afterwards stays. */
+async function moveDefaults($: Engine): Promise<void> {
+  const saved = currentValues()
+  if (saved.defaultsAt === DEFAULTS.at) return
+  const rows = await configRows($)
+  const any = rows.values().next().value as ConfigRow | undefined
+  if (!any) return
+  const moved = movedFrom(saved) as Record<string, unknown>
+  for (const [key, m] of Object.entries(DEFAULTS.moved)) {
+    const r = rows.get(key)
+    // this load's copy says what stands now (a value the retired fields saved has just moved into it)
+    if (r && !r.isLocked && saved[key] === m.from && r.value === m.from && !(key in moved)) await $.config.set({ key: r.key, value: m.to }).catch(() => undefined)
+  }
+  await $.config.set({ key: retiredKey(any.key, 'defaultsAt'), value: DEFAULTS.at }).catch(() => undefined)
+  noteDefaults()
+}
+
 export const registerSettings: Register = (on, options) => {
   setOptions(options)
-  // the retired fields stay out of /config
+  // the retired fields, and defaultsAt, stay out of /config
   on('config.describe', async ($, e, next) => {
     const m = /^(.+)\.([^.]+)$/.exec(e.key)
     const ours = m && (m[1] === $.plugin.name || m[1]!.startsWith(`${$.plugin.name}@`))
-    return ours && m![2]! in RETIRED ? next({ ...e, isHidden: true }) : next(e)
+    return ours && (m![2]! in RETIRED || m![2]! in DEFAULTS_FIELD) ? next({ ...e, isHidden: true }) : next(e)
   }).catch(($, e, next) => next(e))
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const r = await next(e)
     await moveRetired($, currentValues()).catch(() => undefined)
+    await moveDefaults($).catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
 }
