@@ -26,7 +26,7 @@ export const SWITCHES = [
     says: { on: MINIMAL_SAYS, off: MINIMAL_SAYS },
   },
   {
-    key: 'citations', title: 'Citations', group: 'Answers', default: 'manual', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
+    key: 'citations', title: 'Citations', group: 'Answers', default: 'auto cite + verify', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
     does: 'auto cite + verify: Claude cites what each answer rests on, and a second Claude verifies each citation after each answer. auto cite: Claude cites, and a citation is verified when you open it, which spends fewer tokens. manual: select words and press c to cite them. off: no citations.',
     says: {
       'auto cite + verify': 'Claude cites what each answer rests on, and a second Claude verifies each citation.',
@@ -69,7 +69,7 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'claimsMode', title: 'Evidence', group: 'Panes', default: 'on demand', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
+    key: 'claimsMode', title: 'Evidence', group: 'Panes', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
     does: 'Press c to see the conversation\'s claims and their evidence. auto: claims are found after each answer, the largest part of the call after it. on demand: press f in the pane to find them, which spends fewer tokens. off: no Evidence pane.',
     says: {
       'auto': 'Press c to see the conversation\'s claims and their evidence. Claims are found after each answer.',
@@ -122,9 +122,10 @@ export const renamedTo = (key, saved) => (typeof saved === 'string' || typeof sa
 /** Defaults that moved, and the hidden field that says a person's settings have had them: the installer saves every
  *  field's default, so a value at an old default cannot tell whether the person chose it. While `defaultsAt` is not
  *  `DEFAULTS.at`, the first interactive session saves the new default where the old one stands and sets `defaultsAt`
- *  (term.ts); a value the person sets afterwards stays. 0.10.4: Citations is manual (Claude cites only what
- *  the person asks it to). */
-export const DEFAULTS = { at: '0.10.4', moved: { citations: { from: 'auto cite', to: 'manual' } } }
+ *  (term.ts); a value the person sets afterwards stays. None moves now: a value saved at an old default stays, so
+ *  no one's settings change under them. `formerly`: the defaults a release had before (0.10.3: Citations auto cite,
+ *  Evidence on demand), which the installer may have saved, so a value at one still counts as unset (atDefault). */
+export const DEFAULTS = { at: '0.10.4', moved: {}, formerly: { citations: ['auto cite'], claimsMode: ['on demand'] } }
 export const DEFAULTS_FIELD = { defaultsAt: { type: 'string', title: 'Defaults seen (internal)', description: 'The thimble version whose defaults these settings have had.', default: '' } }
 
 /** The values the moved defaults change in `values`, by feature: {} once `defaultsAt` says they were applied. */
@@ -133,9 +134,9 @@ export function defaultsFrom(values) {
   return Object.fromEntries(Object.entries(DEFAULTS.moved).filter(([k, m]) => values[k] === m.from).map(([k, m]) => [k, m.to]))
 }
 
-/** Whether a setting's value is its default: today's, or the one it had before it moved (DEFAULTS), which the
- *  installer may have saved. */
-export const atDefault = (key, v) => v === undefined || v === BY_KEY.get(key)?.default || v === DEFAULTS.moved[key]?.from
+/** Whether a setting's value is its default: today's, or one it had before (DEFAULTS), which the installer may have
+ *  saved. */
+export const atDefault = (key, v) => v === undefined || v === BY_KEY.get(key)?.default || v === DEFAULTS.moved[key]?.from || (DEFAULTS.formerly[key] ?? []).includes(v)
 
 /** Names modules ask featureOn by, for a feature kept under another key: Claims (`claims`) is the field `claimsMode`. */
 const ALIAS = { claims: 'claimsMode' }

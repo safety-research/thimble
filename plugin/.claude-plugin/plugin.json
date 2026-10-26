@@ -25,7 +25,7 @@
         "manual",
         "off"
       ],
-      "default": "manual"
+      "default": "auto cite + verify"
     },
     "cards": {
       "type": "boolean",
@@ -76,7 +76,7 @@
         "on demand",
         "off"
       ],
-      "default": "on demand"
+      "default": "auto"
     },
     "labels": {
       "type": "boolean",

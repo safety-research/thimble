@@ -49,12 +49,13 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('cards'), true)
     setOptions({})
   }
-  // Citations: manual by default (c on selected words); Claude cites in the two auto modes; a value outside them is the default
+  // Citations: auto cite + verify by default; Claude cites in the two auto modes, c on selected words in manual; a value
+  // outside them is the default
   {
     setOptions({})
-    assert.equal(choiceOf('citations'), 'manual')
-    assert.equal(claudeCites(), false)
-    assert.equal(featureOn('cite'), true)
+    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    assert.equal(claudeCites(), true)
+    assert.equal(featureOn('cite'), false)
     setOptions({ citations: 'auto cite' })
     assert.equal(claudeCites(), true)
     assert.equal(featureOn('cite'), false)
@@ -69,7 +70,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(claudeCites(), false)
     assert.equal(featureOn('citations'), false)
     setOptions({ citations: 'sometimes' })
-    assert.equal(choiceOf('citations'), 'manual')
+    assert.equal(choiceOf('citations'), 'auto cite + verify')
     setOptions({})
   }
   // a value saved under the retired fields stands while Citations holds its default; a Citations the person sets wins
@@ -81,22 +82,26 @@ test("the manifest's userConfig is the features, each on by default and turned o
     setOptions({ citations: 'auto cite', marks: false })
     assert.equal(choiceOf('citations'), 'off')
     setOptions({ citations: 'auto cite + verify', marks: false })
-    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    assert.equal(choiceOf('citations'), 'off')
+    setOptions({ citations: 'manual', marks: false })
+    assert.equal(choiceOf('citations'), 'manual')
     setOptions({ marks: false })
     noteChange('citations', 'auto cite')
     assert.equal(choiceOf('citations'), 'auto cite')
     setOptions({})
   }
   // the look after each reply runs while a feature one of its lenses serves is on; the claims join it only when Claims
-  // is auto (on demand by default, a value outside its modes too); Claims off is no claims, and the old Claims switch
-  // saved off stands for it
+  // is auto (auto by default, a value outside its modes too); Claims off is no claims, and the old Claims switch saved
+  // off stands for it
   {
     setOptions({})
     assert.equal(featureOn('observer'), true)
-    assert.equal(choiceOf('claimsMode'), 'on demand')
+    assert.equal(choiceOf('claimsMode'), 'auto')
     assert.equal(featureOn('claims'), true)
+    assert.equal(lensesAfterReply('claims'), true)
+    setOptions({ claimsMode: 'on demand' })
     assert.equal(lensesAfterReply('claims'), false)
-    setOptions({ explain: false, details: false })
+    setOptions({ explain: false, details: false, claimsMode: 'on demand' })
     assert.equal(featureOn('observer'), false)
     setOptions({ explain: false, details: false, claimsMode: 'auto' })
     assert.equal(featureOn('observer'), true)
@@ -108,26 +113,22 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(choiceOf('claims'), 'off')
     assert.equal(featureOn('claims'), false)
     setOptions({ claimsMode: true })
-    assert.equal(choiceOf('claimsMode'), 'on demand')
+    assert.equal(choiceOf('claimsMode'), 'auto')
     setOptions({})
   }
-  // a default that moved: the installer saved every default, so auto cite saved before 0.10.4 moves to manual once,
-  // when the first session saves it (term.ts) and notes it here; auto cite set afterwards stays, and so does any other
-  // mode, and a setting the person changes before the move counts as set
+  // no default moves now: a value saved at an old default (auto cite, 0.10.3's) stays, before and after the first
+  // session notes the defaults; and a value at an old default still counts as unset for a retired field's move
   {
-    assert.deepEqual(defaultsFrom({ citations: 'auto cite' }), { citations: 'manual' })
-    assert.deepEqual(defaultsFrom({ citations: 'auto cite', defaultsAt: DEFAULTS.at }), {})
-    assert.deepEqual(defaultsFrom({ citations: 'auto cite + verify' }), {})
+    assert.deepEqual(defaultsFrom({ citations: 'auto cite' }), {})
+    assert.deepEqual(defaultsFrom({ claimsMode: 'on demand' }), {})
     setOptions({ citations: 'auto cite' })
     noteDefaults()
-    assert.equal(choiceOf('citations'), 'manual')
-    setOptions({ citations: 'auto cite', defaultsAt: DEFAULTS.at })
-    noteDefaults()
     assert.equal(choiceOf('citations'), 'auto cite')
-    setOptions({ citations: 'off' })
-    noteChange('citations', 'auto cite')
+    setOptions({ claimsMode: 'on demand' })
     noteDefaults()
-    assert.equal(choiceOf('citations'), 'auto cite')
+    assert.equal(choiceOf('claimsMode'), 'on demand')
+    setOptions({ claimsMode: 'on demand', claims: false })
+    assert.equal(choiceOf('claimsMode'), 'off')
     setOptions({})
   }
   // Minimal is a preset: its modes (PRESET) keep every lens from the look after each reply, Claude from citing, and the

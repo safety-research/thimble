@@ -47,7 +47,7 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels', byKey = false)
   const n = (await countsNow($))?.labels ?? 0
   const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
   const key = kind === 'labels' ? 'l' : 'r'
-  failNotice($, `${key} needs a wider terminal: click “${key} ${shown}” to open it here.`, `pane:${kind}`)
+  failNotice($, `${key} needs a wider terminal: widen the window to show the side pane, or click “${key} ${shown}”.`, `pane:${kind}`)
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */

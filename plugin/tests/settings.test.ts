@@ -231,15 +231,15 @@ test('a mode saved under the old fields moves to Citations at the first session,
   await call('session.start', { isInteractive: true })
   expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['citations', 'auto cite + verify'], ['claimsMode', 'off'], ['claims', true], ['defaultsAt', DEFAULTS.at]])
   expect(choiceOf('citations')).toBe('auto cite + verify')
-  // 0.10.4's default: auto cite, which the installer saved as the default before, is manual once, and defaultsAt, hidden
-  // from /config, says so; auto cite saved after that stays
+  // no default moves: auto cite, which the installer saved as 0.10.3's default, stays; the first session only sets
+  // defaultsAt, hidden from /config
   set.length = 0
   Object.assign(rows, { citations: 'auto cite' })
   for (const k of Object.keys(hooks)) delete hooks[k]
   registerSettings(on, { citations: 'auto cite', defaultsAt: '' } as never)
   await call('session.start', { isInteractive: true })
-  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['citations', 'manual'], ['defaultsAt', DEFAULTS.at]])
-  expect(choiceOf('citations')).toBe('manual')
+  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['defaultsAt', DEFAULTS.at]])
+  expect(choiceOf('citations')).toBe('auto cite')
   expect((await call('config.describe', { key: 'thimble@inline.defaultsAt', label: 'x', isHidden: false })).isHidden).toBe(true)
   set.length = 0
   for (const k of Object.keys(hooks)) delete hooks[k]

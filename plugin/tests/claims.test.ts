@@ -371,7 +371,7 @@ test('c in a terminal too narrow for the pane fails in red with the click on the
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await (await claimsKey(s.$, 'c', 0))!.later!()
   await settle()
-  expect(await line()).toBe('c needs a wider terminal: click “c 1 claim” to open it here.')
+  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c 1 claim”.')
   expect(((await failLineNow(s.$)) as Any)?.kind).toBe('failed')
   // a press's pane is placed at any width: the bar's count opens it
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
@@ -383,7 +383,7 @@ test('c in a terminal too narrow for the pane fails in red with the click on the
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await openClaims(s.$, {}, true)
   await settle()
-  expect(await line()).toBe('c needs a wider terminal: click “c 1 claim” to open it here.')
+  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c 1 claim”.')
 })
 
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
@@ -430,13 +430,13 @@ test('c in a narrow terminal before any claims names the bar\'s item by the bar\
   expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'evidence']])
   s.$.ui.open = async () => ({ isPlaced: false })
   await openClaims(s.$, {}, true)
-  expect(String((await failLineNow(s.$))?.text)).toBe('c needs a wider terminal: click “c evidence” to open it here.')
+  expect(String((await failLineNow(s.$))?.text)).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c evidence”.')
   setOptions({})
 })
 
 test('claims on demand: no look reads them after a reply; c shows the pane with f, which finds the claims of the answers not read, alone', async () => {
   // the explainers and heads-ups off, so a look after a reply would be the claims' alone
-  setOptions({ explain: false, details: false })
+  setOptions({ explain: false, details: false, claimsMode: 'on demand' })
   const replies = [reply([{ claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures', because: 'Its log ends at the [p95 check](#).' }])]
   const s = setup(replies)
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
