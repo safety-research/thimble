@@ -17,6 +17,9 @@ export default defineConfig({
     include: ['tests/public/**/*.test.{ts,tsx}', '../plugin/hooks/*.test.ts'],
     exclude: ['tests/public/browser/**', '**/node_modules/**'],
     environment: 'node',
+    // Node 25 and later have a localStorage of their own, which holds nothing without --localstorage-file and stands in
+    // front of jsdom's: the component tests read and write jsdom's
+    execArgv: ['--no-experimental-webstorage'],
     // a component test that waits on React or DOMPurify finishes in well under a second; a hang fails fast
     testTimeout: 10_000,
   },
