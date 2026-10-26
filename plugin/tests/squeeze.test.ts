@@ -6,9 +6,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { cardWidth } from '../cards/draw'
+import { treeRows } from '../core/trail.mjs'
 import { resetSqueeze } from '../squeeze/term'
 import Chips from '../squeeze/chips.tsx'
-import Rule from '../squeeze/rule.tsx'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -255,13 +255,19 @@ test("a catch-up shows its replies' explainers on its words, and a card it place
   // columns at the right free
   expect(textOf(await $.ui.render(answer('row-t2', two)))).toContain('“Runs” is in the catch-up below')
   expect(nodes(host).find(n => n.type === 'Client' && String(n.props.module).endsWith('/client.tsx'))?.props.width).toBe(cardWidth(VIEW.columns - 4))
-  // its rule is a Client given the catch-up's whole height, which draws one ▎ per row of it, in a box that cuts it at
-  // the catch-up's last row
-  const rule = nodes(host).find(n => n.type === 'Client' && String(n.props.module).endsWith('/rule.tsx'))
-  expect(rule?.props.height).toBe('100%')
-  expect(nodes(host).find(n => n.props?.key === 'cu-rule')?.props.overflow).toBe('hidden')
-  const lines = (rows: number) => textOf(Rule({ color: 'purple' }, { elements: { Text: (p: Any) => ({ type: 'Text', props: p }) }, rows } as never)).split('\n')
-  expect(lines(7)).toEqual(Array(7).fill('▎'))
+  // its rule is drawn row by row, nothing placed absolutely (a box placed so kept a stale height after the width
+  // changed and drew past the catch-up): beside each row of its text, one ▎ per row the row takes, its gap too
+  const cu = nodes(host).find(n => n.props?.key === 'cu-row-t3')
+  expect(cu).toBeDefined()
+  expect(nodes(cu).some(n => n.props?.position === 'absolute')).toBe(false)
+  const ruled = nodes(cu).filter(n => n.type === 'Box' && n.props?.flexDirection === 'row' && String(n.props?.key ?? '').startsWith('cu-row-t3-b'))
+  expect(ruled.length).toBeGreaterThan(0)
+  for (const r of ruled) {
+    const [gutter, body] = [r.props?.children, r.children].find(Array.isArray) as Any[]
+    const w = Number(body.props.width)
+    expect(textOf(gutter).split('\n').every((l: string) => l === '▎')).toBe(true)
+    expect(textOf(gutter).split('\n').length).toBe(Math.max(1, treeRows(body, w)))
+  }
 })
 
 // The catch-up is read for explainers and heads-ups as an answer is: the look reads its words as what the analyst

@@ -19,7 +19,7 @@
 export const SWITCHES = [
   {
     key: 'minimal', title: 'Minimal', default: false,
-    does: 'Everything on demand: nothing runs after a reply and nothing is marked by itself. Select words and press e to explain them or c to cite them, h gives heads-ups on the last answer, and f in Evidence finds the claims. Claude still draws cards, and v draws one. The settings below come back when it is off.',
+    does: 'Everything on demand: nothing runs after a reply and nothing is marked by itself. Select words and press e to explain them or c to cite them, h gives heads-ups on the last answer, and f in Evidence finds the claims. Claude still draws cards, and v visualizes the last answer. The settings below come back when it is off.',
     says: { on: 'Everything on demand: no call after a reply; e, c and h on an answer, f in Evidence.', off: 'Each feature works as set below.' },
   },
   {
@@ -34,13 +34,13 @@ export const SWITCHES = [
   },
   {
     key: 'cards', title: 'Cards', group: 'Answers', default: true,
-    does: 'Claude draws interactive cards, and v draws one of the last answer.',
-    says: { on: 'Claude draws charts and tables as cards inside the answer; v draws one of the last answer.', off: 'No cards.' },
+    does: 'Claude draws interactive cards, and v visualizes the last answer as a card.',
+    says: { on: 'Claude draws charts and tables as cards inside the answer; v visualizes the last answer as a card.', off: 'No cards.' },
   },
   {
     key: 'squeezeAnswers', title: 'Rewrite', group: 'Answers', default: true,
-    does: 's makes an answer shorter or longer, or writes it for another reader. One rewrite each time you ask.',
-    says: { on: 's rewrites an answer shorter, plainer or longer; 0 brings back the original.', off: 'No rewrites.' },
+    does: 's rewrites an answer shorter or longer, for a reader more novice or more expert, or in your own words. One rewrite each time you ask.',
+    says: { on: 's rewrites an answer shorter or longer, more novice or more expert; 0 brings back the original.', off: 'No rewrites.' },
   },
   {
     key: 'catchUp', title: 'Catch-up', group: 'Answers', default: true,
@@ -90,10 +90,10 @@ const BY_KEY = new Map(SWITCHES.map(s => [s.key, s]))
 export const RETIRED = {
   marks: { type: 'boolean', title: 'Citations (old setting)', description: 'Replaced by Citations, which has its modes.', default: true },
   citationChecks: { type: 'string', title: 'Citation checks (old setting)', description: 'Replaced by Citations, which has its modes.', options: ['auto', 'on demand', 'off'], default: 'on demand' },
-  squeeze: { type: 'boolean', title: 'Squeeze and catch-up (old setting)', description: 'Replaced by Squeeze and Catch-up.', default: true },
+  squeeze: { type: 'boolean', title: 'Squeeze and catch-up (old setting)', description: 'Replaced by Rewrite and Catch-up.', default: true },
   counts: { type: 'boolean', title: 'Labels and coverage on the bar (old setting)', description: 'Replaced by Labels and Coverage.', default: true },
   squeezeCards: { type: 'boolean', title: 'Squeeze changes cards (old setting)', description: 'Removed: a squeeze may move or leave out a card.', default: true },
-  claims: { type: 'boolean', title: 'Claims (old setting)', description: 'Replaced by Claims, which has its modes.', default: true },
+  claims: { type: 'boolean', title: 'Claims (old setting)', description: 'Replaced by Evidence, which has its modes.', default: true },
 }
 
 /** Modes renamed since a value was saved under their old name, by feature: the old name stands for the new one, and

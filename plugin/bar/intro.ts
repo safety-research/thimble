@@ -1,5 +1,5 @@
 // intro.ts: the line above the bar at a session's start, which says what thimble's keys do and where its settings
-// are: `thimble · v visualize · e explain · c cite · s rewrite · click thimble for settings`, each key only while its
+// are: `v visualize · e explain · c cite · s rewrite · click thimble for settings`, each key only while its
 // feature is on. It goes at the person's first prompt, and a resumed session does not show it again.
 //
 //   introRow($, els, presses)   the line, or null once it went
@@ -31,10 +31,12 @@ async function sessionOf($: Engine): Promise<string> {
 export async function introRow($: Engine, els: Any, presses?: BarPresses): Promise<Any | null> {
   const id = await sessionOf($)
   if ((await $.state.get(DONE)).value === id) return null
+  // the bar's own `thimble` stands right under it, so the line names the keys first and thimble once, at its end
+  const parts: Any[] = introKeys().map(([k, w]) => els.Text({ key: `intro-${k}`, children: [els.Text({ key: 'k', bold: true, color: accent(), children: k }), els.Text({ key: 'w', dimColor: true, children: ` ${w} · ` })] }))
   const name = els.Text({ key: 'intro-name', bold: true, color: accent(), children: 'thimble' })
-  const parts: Any[] = [presses ? els.Button({ key: 'intro-thimble', plain: true, label: 'thimble settings', onPress: presses.settings, children: [name] }) : name]
-  for (const [k, w] of introKeys()) parts.push(els.Text({ key: `intro-${k}`, children: [els.Text({ key: 'dot', dimColor: true, children: ' · ' }), els.Text({ key: 'k', bold: true, color: accent(), children: k }), els.Text({ key: 'w', dimColor: true, children: ` ${w}` })] }))
-  parts.push(els.Text({ key: 'intro-settings', dimColor: true, children: ' · click thimble for settings' }))
+  parts.push(els.Text({ key: 'intro-click', dimColor: true, children: 'click ' }))
+  parts.push(presses ? els.Button({ key: 'intro-thimble', plain: true, label: 'thimble settings', onPress: presses.settings, children: [name] }) : name)
+  parts.push(els.Text({ key: 'intro-settings', dimColor: true, children: ' for settings' }))
   return els.Box({ key: 'intro', flexDirection: 'row', flexWrap: 'wrap', children: parts })
 }
 

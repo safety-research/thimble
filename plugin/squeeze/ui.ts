@@ -470,7 +470,7 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
   const cards = cardsIn ? await cardsIn(text, [cu.id], { indent: 2 }).catch(() => ({})) : {}
   const spans = await spansOver($, cu.catchup?.rows ?? [], text, marks)
   const body = messageEl(els, {
-    text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: !!ui.running, cards, spans,
+    text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: !!ui.running, cards, spans, rule: accent(),
     onMark: async (k: number) => {
       const it = from[(looks[k]?.n ?? 0) - 1]
       if (!it) return
@@ -478,14 +478,14 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
       await openPane($, 'evidence', { row: it.row, n: it.n }, `citation ${it.n}`)
     },
   })
-  // the rule: a Client as tall as the catch-up, which draws one ▎ per row it is given (rule.tsx), so it ends where the
-  // catch-up ends, whatever its text and cards lay out to; its box cuts it there, since the rows the Client was given
-  // last can be more than the catch-up has now (a row below it changed, and Claude Code has not called it again yet)
-  const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, overflow: 'hidden', children: [els.Client({ key: `cu-rule-${row}`, module: './rule.tsx', width: 2, height: '100%', props: { color: accent() } })] })
-  const head = els.Text({ key: 'cu-head', children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} above` })] })
-  return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [
-    els.Box({ key: 'cu-ruled', flexDirection: 'column', paddingLeft: 2, children: [rule, head, body] }),
+  // the rule down its left side: one ▎ per row, beside its head line and in each row of its text (view.ts messageEl
+  // `rule`), counted from what the catch-up draws at this width; nothing is placed absolutely, so it ends where the
+  // catch-up ends, whatever width it is drawn at
+  const head = els.Box({ key: 'cu-head', flexDirection: 'row', children: [
+    els.Box({ width: 2, flexShrink: 0, children: [els.Text({ color: accent(), children: '▎' })] }),
+    els.Text({ children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} above` })] }),
   ] })
+  return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [head, body] })
 }
 
 /** What stands under a row after its cards: the catch-up drawn below it, or why it failed, what a squeeze left out of

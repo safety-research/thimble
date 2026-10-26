@@ -1,6 +1,6 @@
 {
   "name": "thimble",
-  "description": "thimble for Claude Code: Claude adds a citation to each claim you would check in its replies, and a second Claude checks each one against the files when you open it (Citations can check them after each reply instead, or leave citing to you: select words and press c to cite them); a click on a citation opens its evidence. Claude draws interactive cards of the data, and v draws one of the last answer. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s squeezes or stretches a reply, and b catches up on several; after each reply an observer explains terms you may not know, points out important details and keeps the session's claims (c); t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read.",
+  "description": "thimble for Claude Code: select words in a reply and press c to cite them (a second Claude finds and checks their source), or set Citations to have Claude cite each claim you would check; a click on a citation opens its evidence. Claude draws interactive cards of the data, and v visualizes the last answer as a card. ] and [ step through a reply's citations, explainers and cards in a tray above the prompt; s rewrites a reply shorter or longer, more novice or more expert, and b catches up on several; after each reply an observer explains terms you may not know and points out important details; c lists the session's evidence; t lists the side threads asked about a citation, card or pane. Labels sort records into values, and coverage says what Claude read. Minimal makes everything on demand.",
   "author": {
     "name": "Matthew Joerke"
   },
@@ -12,7 +12,7 @@
     "minimal": {
       "type": "boolean",
       "title": "Minimal",
-      "description": "Everything on demand: nothing runs after a reply and nothing is marked by itself. Select words and press e to explain them or c to cite them, h gives heads-ups on the last answer, and f in Evidence finds the claims. Claude still draws cards, and v draws one. The settings below come back when it is off.",
+      "description": "Everything on demand: nothing runs after a reply and nothing is marked by itself. Select words and press e to explain them or c to cite them, h gives heads-ups on the last answer, and f in Evidence finds the claims. Claude still draws cards, and v visualizes the last answer. The settings below come back when it is off.",
       "default": false
     },
     "citations": {
@@ -30,13 +30,13 @@
     "cards": {
       "type": "boolean",
       "title": "Cards",
-      "description": "Claude draws interactive cards, and v draws one of the last answer.",
+      "description": "Claude draws interactive cards, and v visualizes the last answer as a card.",
       "default": true
     },
     "squeezeAnswers": {
       "type": "boolean",
       "title": "Rewrite",
-      "description": "s makes an answer shorter or longer, or writes it for another reader. One rewrite each time you ask.",
+      "description": "s rewrites an answer shorter or longer, for a reader more novice or more expert, or in your own words. One rewrite each time you ask.",
       "default": true
     },
     "catchUp": {
@@ -100,7 +100,7 @@
     "squeeze": {
       "type": "boolean",
       "title": "Squeeze and catch-up (old setting)",
-      "description": "Replaced by Squeeze and Catch-up.",
+      "description": "Replaced by Rewrite and Catch-up.",
       "default": true
     },
     "counts": {
@@ -118,7 +118,7 @@
     "claims": {
       "type": "boolean",
       "title": "Claims (old setting)",
-      "description": "Replaced by Claims, which has its modes.",
+      "description": "Replaced by Evidence, which has its modes.",
       "default": true
     },
     "defaultsAt": {

@@ -224,7 +224,8 @@ test('a session starts with a line above the bar that names the keys of the feat
   const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   const band = textOf(await $.ui.render(BAND))
-  expect(band).toContain('thimble · v visualize · e explain')
+  expect(band).toContain('v visualize · e explain')
+  expect(band).not.toContain('thimble · v visualize')
   expect(band).toContain('s rewrite · click thimble for settings')
   // its thimble opens the settings, as the bar's does
   const ui = await $.ui.mount(BAND)
