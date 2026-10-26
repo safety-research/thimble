@@ -14,7 +14,8 @@
 //   explainSpans($, row, text, marks)  the explainers and heads-ups on the words of a row as it shows now (`text`, a
 //                                      squeezed version too: a term is found again there in another form)
 //   explainSpansOf($, rows, text)      the explainers and heads-ups of those messages on the words of a text that stands
-//                                      for them (a catch-up), each opening on its own message
+//                                      for them (a catch-up), where it says their terms as written, each opening on its
+//                                      own message
 //   explainState($)                    what the lenses' digests read: {glossed, headsGiven}
 //   explainMerge($, look)              what one look gave for the explain and heads lenses, placed and kept
 //   tellComments($, rows)              Claude hears the explainers and heads-ups shown on these answers with the next
@@ -115,8 +116,9 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
 }
 
 /** The explainers and heads-ups of the messages `rows` on the words of a text that stands for them (a catch-up of
- *  those replies): each where the text says its term, in another form too (place.mjs anchorTerm); a press opens it on
- *  its own message, as a press on it there does. */
+ *  those replies): each where the text says its term as written (place.mjs findTerm: a term found again in another form,
+ *  as a squeezed version of one message does, would stand on loose words of a text that sums up several); a press
+ *  opens it on its own message, as a press on it there does. */
 export async function explainSpansOf($: Engine, rows: string[], text: string): Promise<Span[]> {
   const items: Record<string, Gloss> = {}
   const order: string[] = []
@@ -134,7 +136,7 @@ export async function explainSpansOf($: Engine, rows: string[], text: string): P
   }
   if (!order.length) return []
   const c = markColors(await themeNow($))
-  return (placeGlosses(text, { items, order }, true) as { id: string; start: number; end: number }[]).map(p => {
+  return (placeGlosses(text, { items, order }) as { id: string; start: number; end: number }[]).map(p => {
     const g = items[p.id]!
     const { row, id } = from[p.id]!
     const heads = g.kind === 'heads'
