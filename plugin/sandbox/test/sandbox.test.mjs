@@ -182,7 +182,9 @@ test('setup.mjs names the fix of what keeps the sandbox from installing or start
     assert.doesNotMatch(other.fix, /AppArmor|sysctl/)
     const userns = withFailingBwrap('bwrap: setting up uid map: Permission denied')
     assert.equal(userns.ok, false)
-    const restricted = readFileSync('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', { encoding: 'utf8', flag: 'r' }).trim() === '1'
+    // a kernel without Ubuntu's AppArmor setting (Arch, Fedora) has no such file: not restricted, as setup.mjs reads it
+    const sysctl = '/proc/sys/kernel/apparmor_restrict_unprivileged_userns'
+    const restricted = existsSync(sysctl) && readFileSync(sysctl, { encoding: 'utf8', flag: 'r' }).trim() === '1'
     if (restricted) assert.equal(userns.fix, 'AppArmor keeps bubblewrap from making its namespaces. Allow them: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0')
   }
   // npm that cannot reach its registry: the fix says how to see why, and the command that tries again
