@@ -3,17 +3,20 @@
 // the screen and take keys. Each host calls one function here, and this calls each feature's seam by name (Claude Code
 // follows `$` only into functions a file declares or imports, so a list of handlers that take `$` cannot be called):
 //
-//   marks/register.ts  AssistantMessage   textView (the text a row shows), rowDrawing (a row a feature draws whole: a
-//                                         catch-up), spansFor (explainers and heads-ups on its words), markFocus (the
+//   marks/register.ts  AssistantMessage   textView (the text a row shows), spansFor (explainers and heads-ups on its
+//                                         words), markFocus (the
 //                                         citation the tray shows), underText (lines under the row's words),
 //                                         markPressed (a press on a citation), passagesFor (what the margin of
 //                                         each passage asks: a side thread about it)
-//   registerAnswerView AssistantMessage   underAll: lines under a row after the cards drawn under it (the chips)
+//   registerAnswerView AssistantMessage   underAll: lines under a row after the cards drawn under it (the catch-up
+//                                         of the replies it ends, the chips)
+//   squeeze/ui.ts      a catch-up         spansOver: the explainers and heads-ups of its replies on its words
 //   cards/draw.ts      a card's frame     underCard: lines under one card (its label row); cardAsk (what its
 //                                         margin asks: a side thread about it)
-//   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray, the label ask), in the rows the
+//   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the
 //                                         band has left over the bar
-//   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order
+//   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`,
+//                                         `c cite`)
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
 //                                         no card may take
 //   core/pane.ts       the side pane      the kinds `claims`, `threads` and `thread` (the seams' draws)
@@ -23,11 +26,14 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
+import { framesIn } from '../cards/draw'
 import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
-import { explainKey, explainSpans } from '../explain/seam'
+import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
-import { labelAskBand, labelAskBar, labelAskKey, labelsUnderAnswer, labelsUnderCard } from '../labels/use'
-import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
+import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
+import { citeBar, citeKey, citeShown } from '../marks/cite'
+import { featureOn } from '../settings/features.mjs'
+import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
@@ -38,8 +44,7 @@ type Engine = EngineInterface
 type Any = any
 
 /** What a row of Claude's shows in place of the words Claude wrote (squeeze/seam.ts squeezeView). `text`: the words
- *  shown (null: Claude's own); `hidden`: the row draws nothing (a catch-up covers it); `dim`: drawn dim (a rewrite
- *  runs). */
+ *  shown (null: Claude's own); `hidden`: the row draws nothing; `dim`: drawn dim (a rewrite runs). */
 export type TextView = { text?: string | null; hidden?: boolean; dim?: boolean }
 
 /** How a span of a row's words is drawn: the props of its Text. */
@@ -49,8 +54,8 @@ export type TextView = { text?: string | null; hidden?: boolean; dim?: boolean }
 export type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; italic?: boolean; underline?: boolean; tint?: string; hoverBg?: string }
 
 /** Words of a row drawn as a press of a feature's (explain/seam.ts explainSpans): [start, end) are offsets into the
- *  text the row shows, on plain words (a span inside a citation's words is drawn with the citation, whose press it
- *  keeps). `id` names it to the tray (MarkRef); `focus`: how it looks while the tray shows it. */
+ *  text the row shows, on plain words (a citation's words inside it, or around it, are drawn with the citation, whose
+ *  press they keep). `id` names it to the tray (MarkRef); `focus`: how it looks while the tray shows it. */
 export type Span = { id: string; start: number; end: number; look: SpanLook; focus?: SpanLook; label: string; onPress?: () => unknown }
 
 /** A mark of a row, as the tray and the explainers name it: a citation by its number in the reply (marks/store.ts
@@ -61,7 +66,7 @@ export type MarkRef = { row: string; kind: 'citation'; n: number } | { row: stri
  *  import modules that come back here through the card tool, so a list made as this module loads could read a seam's
  *  keys before its module set them.) */
 export function restoredKeys(): string[] {
-  return [...SQUEEZE_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
 }
 
 const safe = async <T>(p: Promise<T>, none: T): Promise<T> => {
@@ -80,32 +85,34 @@ export async function textView($: Engine, row: string, text: string): Promise<{ 
 }
 
 /**
- * Spans as drawn: each inside the text, on words that are not a citation's link syntax, either inside one citation's
- * words or outside every citation; one that overlaps an earlier one is left out. The span the tray shows (`focus`, its
- * id) has its focus look. In order of their start.
+ * Spans as drawn: each inside the text, inside one citation's words or over whole citations, never over part of a
+ * citation's link syntax; one that overlaps an earlier one is left out. The span the tray shows (`focus`, its id) has
+ * its focus look. In order of their start.
  */
 export function checkSpans(given: unknown, text: string, marks: { start: number; end: number; words: string }[], focus: string | null): Span[] {
   const out: Span[] = []
   for (const s of Array.isArray(given) ? (given as Span[]) : []) {
     if (!s || typeof s.id !== 'string' || !(s.start >= 0) || !(s.end > s.start) || s.end > text.length) continue
     const inside = marks.find(m => s.start >= m.start + 1 && s.end <= m.start + 1 + m.words.length)
-    const crosses = !inside && marks.some(m => s.start < m.end && s.end > m.start)
+    const crosses = !inside && marks.some(m => s.start < m.end && s.end > m.start && !(s.start <= m.start && s.end >= m.end))
     if (crosses || out.some(o => s.start < o.end && s.end > o.start)) continue
     out.push(focus === s.id && s.focus ? { ...s, look: { ...s.look, ...s.focus } } : s)
   }
   return out.sort((a, b) => a.start - b.start)
 }
 
-/** The features' spans on a row's words (the explainers and heads-ups), checked (checkSpans). */
+/** The features' spans on a row's words (the explainers and heads-ups, and first the words being explained on demand,
+ *  which cover the marks they overlap), checked (checkSpans). */
 export async function spansFor($: Engine, row: string, text: string, marks: { start: number; end: number; words: string }[]): Promise<Span[]> {
-  const given = await safe(explainSpans($, row, text, marks), [] as Span[])
+  const given = [...await safe(pendingSpans($, row, text), [] as Span[]), ...await safe(explainSpans($, row, text, marks), [] as Span[])]
   const focus = await safe(trayFocus($, row), null)
   return checkSpans(given, text, marks, focus && focus.kind !== 'citation' ? focus.id : null)
 }
 
-/** A row a feature draws whole in place of its words (a catch-up), or null. */
-export async function rowDrawing($: Engine, els: Any, row: string, cols: number): Promise<Any | null> {
-  return safe(squeezeRow($, els, row, cols), null)
+/** The explainers and heads-ups of the messages `rows` on the words of a text that stands for them (a catch-up),
+ *  checked (checkSpans). */
+export async function spansOver($: Engine, rows: string[], text: string, marks: { start: number; end: number; words: string }[]): Promise<Span[]> {
+  return checkSpans(await safe(explainSpansOf($, rows, text), [] as Span[]), text, marks, null)
 }
 
 /** The citation of the row the tray shows (its number in the reply), or null. */
@@ -127,9 +134,10 @@ export async function passagesFor($: Engine, row: string): Promise<{ has: (p: { 
   return { has: x => { try { return !!p.has(x) } catch { return false } }, ask: x => { try { return p.ask(x) } catch { return undefined } } }
 }
 
-/** What the margin of a card's frame asks: a side thread about the card. Null when the threads cannot say. */
-export async function cardAsk($: Engine, id: string, title: string, line = ''): Promise<{ label: string; has: boolean; press: () => unknown } | null> {
-  const a = await safe(threadOnCard($, id, title, line), null)
+/** What the margin of a card's frame asks: a side thread about the card; with `element`, about a run of its words a
+ *  click asked about. Null when the threads cannot say. */
+export async function cardAsk($: Engine, id: string, title: string, line = '', element?: { text: string; line: string }): Promise<{ label: string; has: boolean; press: () => unknown } | null> {
+  const a = await safe(threadOnCard($, id, title, line, element), null)
   return a && typeof a.label === 'string' && typeof a.press === 'function' ? { label: a.label, has: !!a.has, press: a.press } : null
 }
 
@@ -138,9 +146,10 @@ export async function underText($: Engine, els: Any, row: string, cols: number):
   return els0(await safe(labelsUnderAnswer($, els, row, cols), []))
 }
 
-/** The lines under a row after the cards drawn under it: the squeeze chips, a catch-up's tail. */
-export async function underAll($: Engine, els: Any, row: string, cols: number): Promise<Any[]> {
-  return els0(await safe(squeezeUnder($, els, row, cols), []))
+/** The lines under a row after the cards drawn under it: the catch-up of the replies it ends, the squeeze chips.
+ *  `cardsIn`: the frames of the cards a text places on lines of its own (cards/draw.ts framesIn). */
+export async function underAll($: Engine, els: Any, row: string, cols: number, cardsIn?: (text: string, rows: string[], o?: { indent?: number }) => Promise<Record<string, Any>>): Promise<Any[]> {
+  return els0(await safe(squeezeUnder($, els, row, cols, cardsIn), []))
 }
 
 /** Whether a card is left out of what its answer shows now (a squeeze's version that leaves it out): its frame draws
@@ -156,12 +165,10 @@ export async function underCard($: Engine, els: Any, id: string, cols: number): 
 
 // ------------------------------------------------------------------------------------------------ above the prompt
 
-/** What stands above the bar: the tray while it is open, then a large label run's ask while it waits. `room`: the rows
- *  they may take, so the bar under them stays on screen (0: no limit); the tray fits in what the ask leaves. */
+/** What stands above the bar: the tray while it is open. `room`: the rows it may take, so the bar under it stays on
+ *  screen (0: no limit). */
 export async function aboveBar($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
-  const ask = els0(await safe(labelAskBand($, els, width), []))
-  const left = room > 0 ? Math.max(1, room - ask.length) : 0
-  return [...els0(await safe(trayBand($, els, width, left), [])), ...ask]
+  return els0(await safe(trayBand($, els, width, room > 0 ? Math.max(1, room) : 0), []))
 }
 
 /** A seam's bar items, checked; in the settings pane's preview none is a press. */
@@ -169,38 +176,45 @@ const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ?
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
   .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}) } : x))
 
-/** The features' items at the bar's left, after v: the ask's choices, the tray's steps, s, then c. While an item of
+/** The features' items at the bar's left, after v: the tray's steps, s, b, e, then c cite. While an item of
  *  what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
 export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
+  // while the tray holds the keys (its own in its header), the open chips' keys (0 [ ]) wait: each key shows once
+  const holds = tray.length > 0 || (!preview && (await safe(trayHolds($), false)))
   return [
-    ...items(await safe(labelAskBar($, on, preview), []), preview),
     ...tray,
-    // while the tray holds the keys, the chips' keys (0 [ ]) wait: the bar names each key once
-    ...(tray.length ? [] : items(await safe(squeezeBar($, on, preview), []), preview)),
-    ...items(await safe(claimsBar($, on, preview), []), preview),
+    ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => !(holds && x.focus)),
+    ...items(await safe(explainBar($, on, preview), []), preview),
+    ...items(await safe(citeBar($, on, preview), []), preview),
   ]
 }
 
-/** The features' items at the bar's right, before coverage and the labels: the side threads. */
+/** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
+ *  claims and the side threads (the left names what acts on an answer). While c cites the selected words (`c cite` at
+ *  the left), the claims' item shows without its key, so each key is named once. */
 export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  return items(await safe(threadsBar($, on, preview), []), preview)
+  const citing = preview ? on('cite') : await safe(citeShown($), false)
+  const claims = items(await safe(claimsBar($, on, preview), []), preview)
+  return [
+    ...(citing ? claims.map(({ key: _key, ...x }) => x) : claims),
+    ...items(await safe(threadsBar($, on, preview), []), preview),
+  ]
 }
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
  *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
- *  tray's ] [ at rest, a large label run's ask while it waits, s, { } over the answers, the explainers' keys, c, then
- *  t. */
+ *  tray's ] [ at rest, s, { } over the answers, e, c (cite while words wait, else the claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   const tray = await safe(trayHolds($), false)
   const chips = await safe(squeezeHolds($), false)
   return (tray ? await safe(trayKey($, key, until), null) : null)
     ?? (chips ? await safe(squeezeKey($, key, until), null) : null)
     ?? (tray ? null : await safe(trayKey($, key, until), null))
-    ?? (await safe(labelAskKey($, key, until), null))
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
+    ?? (await safe(citeKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
 }
@@ -216,7 +230,7 @@ export const registerAnswerView: Register = on => {
       const r = await below()
       if (e.props.isSummary) return r
       const els = $.ui.resolve(e) as Any
-      const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3))
+      const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3), async (t, rows, o) => (featureOn('cards') ? framesIn($, e, t, rows, o) : {}))
       return tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
     } catch {
       return below()

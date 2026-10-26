@@ -29,6 +29,9 @@ export type Events = {
   fix: { id: number; state: string }
   /** `/thimble-fix` alone: Your fixes opens (chat/FixStrip.tsx) */
   fixList: { open: boolean }
+  /** the server is back from the restart a click on fix `id` asked for: the page reloads, or, while something typed
+   * would be lost, the fix's row offers Reload (chat/FixStrip.tsx) */
+  fixHeld: { id: number; held: 'reload' | 'typed' }
   /** `rows` false: the label's rows stayed as they were (turned on or off, recoloured, a filter set) */
   concepts: { concept: string; what: string; rows?: boolean }
   filter: { scope: FilterScope; concept?: string; value?: string }

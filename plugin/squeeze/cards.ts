@@ -1,4 +1,4 @@
-// cards.ts: the cards of an answer that a squeeze may change (the switch "Squeeze changes cards"). The chips belong to
+// cards.ts: the cards of an answer that a squeeze may place, change or leave out. The chips belong to
 // the whole answer: its text and the cards drawn in its turn (core/answers.ts TurnRec.cards) and under it (v's). A
 // rewrite's request shows each card (chips.mjs cardsBlock): its title, columns, first rows, what it draws (draw.ts
 // cardText) and its view, with the card guide its view is written by (cards/tool.ts cardGuide). The reply may
@@ -12,15 +12,19 @@
 // version draws again each card whose copy on screen differs. A card someone else drew since (Claude, v) stays as they
 // drew it.
 //
+// A catch-up stands below the replies it covers, which still show: it hides none of their cards, and a card its version
+// places on a line of its own moves down into it (placeCatchUpCards; the reply keeps a line that points to it).
+//
 //   state squeezeCards: {shown: {card: {copy, v}}, hidden: [card], did: {card: 'edited' | 'added'}}, kept as
 //   squeeze-cards.json
 import { update, type EngineInterface } from 'claude-code'
 
-import { turnOfRow } from '../core/answers'
+import { messageOf, turnOfRow } from '../core/answers'
 import { keptDir, readKept, writeKept } from '../core/env'
 import { cardText } from '../cards/draw'
-import { anchoredAt, cardIdOf, metaOf, versionDir } from '../cards/store'
+import { anchoredAt, cardIdOf, metaOf, saveMeta, versionDir } from '../cards/store'
 import { cardGuide, personVersion } from '../cards/tool'
+import { cardRef } from '../marks/message.js'
 import { cardListsAt, cardNotes, cardsKnown } from './chips.mjs'
 import type { Rec } from './term'
 
@@ -182,7 +186,8 @@ export async function showCards($: Engine, rec: Rec): Promise<string[]> {
   const shown: Shown['shown'] = {}
   for (const c of cardsKnown(rec) as { id: string }[]) {
     const w = wanted.find(x => x.id === c.id)
-    if (!w) { hide.push(c.id); continue }
+    // a catch-up's replies still show, so a card its version leaves out stays in its reply
+    if (!w) { if (!rec.catchup) hide.push(c.id); continue }
     show.push(c.id)
     const meta = await metaOf($, c.id)
     if (!meta) continue
@@ -204,6 +209,25 @@ export async function showCards($: Engine, rec: Rec): Promise<string[]> {
     return { shown: { ...s.shown, ...shown }, hidden: [...s.hidden.filter(id => !show.includes(id)), ...hide.filter(id => !s.hidden.includes(id))], did }
   })
   return problems
+}
+
+/** A catch-up's cards: a card the version shown places on a line of its own moves down into the catch-up (the reply
+ *  that placed it keeps a line that points there, cards/draw.ts framesIn), and one it placed before but places no
+ *  more goes back to the newest of its replies that places it. A card a later answer placed stays there. */
+export async function placeCatchUpCards($: Engine, rec: Rec): Promise<void> {
+  const cu = rec.catchup
+  if (!cu) return
+  const refs = (t: string) => t.split('\n').map(cardRef).filter((x): x is string => !!x)
+  const placed = new Set(cu.dismissed || typeof rec.shown !== 'string' ? [] : refs(rec.shown))
+  const inReply: Record<string, string> = {}
+  for (const r of cu.rows) for (const id of refs((await messageOf($, r))?.text ?? '')) inReply[id] = r
+  for (const id of new Set([...placed, ...Object.keys(inReply)])) {
+    const meta = await metaOf($, id)
+    if (!meta || meta.version < 1 || meta.anchorRow) continue
+    const ours = meta.inRow == null || meta.inRow === rec.id || cu.rows.includes(meta.inRow)
+    const to = placed.has(id) ? rec.id : (inReply[id] ?? null)
+    if (ours && meta.inRow !== to) await saveMeta($, { ...meta, inRow: to, callsBeforeRow: Object.keys(meta.calls) })
+  }
 }
 
 /** Whether a card is left out of the version shown now of the answer it belongs to. */

@@ -10,6 +10,8 @@
 //   wrapText(text, cols, mode) a text's rows: wrapped at words, or cut with …
 //   buttonText(p, c)          what a Button shows: `[ label ]`, or the label alone when plain
 //   pressAt(tree, width, x, y) the Button around lines (a Box with onPress) that a click on a cell presses
+//   textAt(tree, width, x, y)  the words a click on a cell falls on: {text, line}, the Text there and its line
+//   rowOf(tree, width, path)   the line the node at `path` (child indices from the root) starts on, or -1
 //
 // The layout is flexbox as Yoga computes it, for the props the card tool names: Box flexDirection (row by default, as
 // in Claude Code), flexGrow, flexShrink (1 by default), flexWrap, width and height as cells or percent, min sizes,
@@ -203,7 +205,7 @@ function build(n) {
   if (Array.isArray(n)) return build({ t: 'Box', p: {}, c: n })
   const p = n.p && typeof n.p === 'object' ? n.p : {}
   if (p.display === 'none') return null
-  if (n.t === 'Text') return { kind: 'text', p: {}, text: flatText(n.c), wrap: p.wrap || 'wrap' }
+  if (n.t === 'Text') return { kind: 'text', p: {}, text: flatText(n.c), wrap: p.wrap || 'wrap', ...(p.__at ? { at: true } : {}) }
   // Claude Code draws a Button as a Box that neither shrinks nor stretches, around its text
   if (n.t === 'Button') return build({ t: 'Box', p: { flexShrink: 0, alignSelf: 'flex-start' }, c: [{ t: 'Text', p: {}, c: [buttonText(p, n.c)] }] })
   const kids = (Array.isArray(n.c) ? n.c : n.c == null ? [] : [n.c]).map(build).filter(Boolean)
@@ -494,6 +496,61 @@ export function pressAt(tree, width, x, y) {
     for (const k of node.kids) if (k.lay) walk(k, bx, by)
   }
   if (tree) walk(laidOut(tree, Math.max(1, Math.floor(width))), 0, 0)
+  return found
+}
+
+/** The words a click on the cell (x, y) of the tree laid out at `width` falls on: `text`, those of the Text (or string)
+ *  that holds the cell, and `line`, the line it stands on; null on a cell no words hold. Places round as paint() rounds
+ *  them. */
+export function textAt(tree, width, x, y) {
+  if (!tree) return null
+  const cols = Math.max(1, Math.floor(width))
+  const root = laidOut(tree, cols)
+  let found = null
+  const walk = (node, x0, y0) => {
+    const text = node.kind === 'text'
+    const cell = text ? v => Math.floor(v + 1e-6) : Math.round
+    const bx = x0 + cell(node.lay.x || 0)
+    const by = y0 + cell(node.lay.y || 0)
+    if (x < bx || y < by || x >= bx + cell(node.lay.w) || y >= by + cell(node.lay.h)) return
+    if (text) { if (node.text.trim()) found = node.text; return }
+    for (const k of node.kids) if (k.lay) walk(k, bx, by)
+  }
+  walk(root, 0, 0)
+  if (!found) return null
+  const g = grid(cols)
+  g.height(Math.round(root.lay.h))
+  paint(root, g, 0, 0, null)
+  return { text: found, line: (g.rows[y] || []).join('').replace(/\s+$/, '') }
+}
+
+/** The line the node at `path` starts on (its child indices from the root, as client.tsx walks the tree), in the tree
+ *  laid out at `width`; -1 when no node is there. */
+export function rowOf(tree, width, path) {
+  if (!tree || !Array.isArray(path)) return -1
+  // a copy of the tree with the node marked, a string as the Text it draws as
+  const mark = (n, rest) => {
+    if (!rest.length) return typeof n === 'string' || typeof n === 'number' ? { t: 'Text', p: { __at: true }, c: [String(n)] } : n && typeof n === 'object' ? { ...n, p: { ...(n.p || {}), __at: true } } : n
+    if (!n || typeof n !== 'object' || !Array.isArray(n.c) || !(rest[0] in n.c)) return null
+    const c = n.c.slice()
+    const k = mark(c[rest[0]], rest.slice(1))
+    if (k === null) return null
+    c[rest[0]] = k
+    return { ...n, c }
+  }
+  const marked = mark(tree, path.map(Number))
+  if (!marked) return -1
+  const root = laidOut(marked, Math.max(1, Math.floor(width)))
+  let found = -1
+  const walk = (node, x0, y0) => {
+    const text = node.kind === 'text'
+    const cell = text ? v => Math.floor(v + 1e-6) : Math.round
+    const by = y0 + cell(node.lay.y || 0)
+    const bx = x0 + cell(node.lay.x || 0)
+    if (found < 0 && (text ? node.at : node.p.__at)) { found = by; return }
+    if (!text) for (const k of node.kids) if (k.lay) walk(k, bx, by)
+  }
+  walk(root, 0, 0)
   return found
 }
 

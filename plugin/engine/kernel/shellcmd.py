@@ -102,6 +102,13 @@ def pipelines(cmd: str) -> list[list[dict]]:
             while j < n and cmd[j] != '"':
                 if cmd[j] == "\\" and j + 1 < n:
                     j += 1
+                elif cmd.startswith("$(", j):
+                    # a command substitution in the quotes (`echo "$d: $(sqlite3 $d/forge.db 'select …')"`) is a command
+                    # of its own, whose output the word holds: its pipelines go before this one
+                    k = _subst_end(cmd, j + 2)
+                    pipes[-1:-1] = pipelines(cmd[j + 2:k - 1])
+                    j = k
+                    continue
                 word.append(cmd[j])
                 j += 1
             has, i = True, j + 1
@@ -177,6 +184,29 @@ def pipelines(cmd: str) -> list[list[dict]]:
         i += 1
     end_stage(True)
     return [p for p in pipes if p]
+
+
+def _subst_end(cmd: str, i: int) -> int:
+    """The index after the `)` that closes a command substitution whose text starts at `i`: parentheses nest, and
+    quoted text holds none that count."""
+    depth, n = 1, len(cmd)
+    while i < n:
+        c = cmd[i]
+        if c == "\\":
+            i += 2
+            continue
+        if c in "'\"":
+            j = cmd.find(c, i + 1)
+            i = n if j < 0 else j + 1
+            continue
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if not depth:
+                return i + 1
+        i += 1
+    return n
 
 
 def program(words: list[str]) -> tuple[str, list[str]]:
@@ -586,8 +616,13 @@ def named(text: str, known: "Known | Iterable[str]", root: str, cwd: str | None 
     files: set[str] = set()
     folders: set[str] = set()
     tokens: set[str] = set()
-    # a heredoc's body is not shell (no `values`): a `$` in it only ends a word
-    for t in (_TOKEN if values is None else _SHELL_TOKEN).findall(text):
+    # a heredoc's body is not shell (no `values`): a `$` in it only ends a word; in code, a word right after an
+    # interpolation (`f"{d}/forge.db"`, `` `${run}/a.json` ``) is a path whose start the code fills in, which stands for
+    # any one folder or name, as a shell variable the command did not set does
+    for m in (_TOKEN if values is None else _SHELL_TOKEN).finditer(text):
+        t = m.group(0)
+        if values is None and m.start() and text[m.start() - 1] == "}" and t[:1] in "/._-":
+            t = "*" + t
         tokens.update(_expand(t, values) if values is not None and "$" in t else [t])
     for t in tokens:
         t = t.strip("'\"")

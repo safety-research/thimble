@@ -179,6 +179,20 @@ def test_a_video_or_a_pdf_a_decoder_went_over_is_computed_not_only_listed() -> N
     assert [how for _, how, _, _ in SH.shows("ls -la P3/recording.mp4", files, "/data", "/data", lambda f: 10)] == ["listed"]
 
 
+def test_a_database_code_opens_by_a_path_it_fills_in_or_a_query_inside_quotes_is_computed() -> None:
+    from kernel import shellcmd as SH
+
+    files = ["runs/a/forge.db", "runs/b/forge.db", "runs/a/manifest.json", "notes.md"]
+    # code that fills in the start of a path (an f-string, a template): every file the rest of the path can name
+    got = SH.shows("cd runs; python3 -I - <<'PY'\nimport glob, sqlite3\nfor d in glob.glob('*'):\n    sqlite3.connect(f'{d}/forge.db')\nPY",
+                   files, "/data", "/data", lambda f: 10)
+    assert sorted((f, how) for f, how, _, _ in got) == [("runs/a/forge.db", "computed"), ("runs/b/forge.db", "computed")]
+    # a query in a command substitution inside quotes is a command of its own, and goes over the database
+    got = SH.shows('cd runs; for d in */; do echo "$d | $(sqlite3 $d/forge.db "select count(*) from prs" | tr \'\\n\' \' \')"; done',
+                   files, "/data", "/data", lambda f: 10)
+    assert sorted((f, how, by) for f, how, _, by in got) == [("runs/a/forge.db", "computed", "sqlite3"), ("runs/b/forge.db", "computed", "sqlite3")]
+
+
 def made_up_village(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A made-up export: an event log, a table of agents, notes, and three days of screenshots."""
     d = tmp_path / "village"

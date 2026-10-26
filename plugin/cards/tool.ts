@@ -61,11 +61,11 @@ const SCHEMA = {
       description: 'with `id`: changes to the view of your last call of that card (also one that failed), in order; each `old` occurs once in it',
       items: { type: 'object', required: ['old', 'new'], properties: { old: { type: 'string' }, new: { type: 'string' } } },
     },
-    id: { type: 'string', description: 'the id of a card you drew, for a new version in its place' },
+    id: { type: 'string', description: 'the id of a card you drew: alone, to move the card as it is to this call; with `edits`, `view` or `data`, for a new version in its place' },
     actions: {
       type: 'array',
       description: 'keys and clicks to try in order; each returns a text copy, then the card goes back',
-      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'the words on a Button, or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
+      items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'words the card shows (a click there, as the analyst clicks), or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
     },
   },
 }
@@ -187,19 +187,27 @@ function failed(id: string, r: Any, update: boolean): string {
 export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const t0 = Date.now()
   const input = e ?? {}
+  // no argument at all: the call's input did not arrive or did not parse (Claude Code says `input JSON failed to
+  // parse`), so no one field is to blame
+  if (!['title', 'data', 'view', 'edits', 'id'].some(k => input[k] != null && String(input[k]).trim() !== '')) {
+    return { result: 'The card did not draw: the call\'s input was empty or did not parse as JSON. Send the call again, whole.' }
+  }
   const toolUseId = String(input.tool_use_id ?? '')
   const given = String(input.id ?? '').trim()
   const update = !!given
   const target = update ? given : cardIdOf(toolUseId)
   const found = isCardId(target) ? await metaOf($, target) : null
   if (update && !found) return { result: `There is no card "${oneLine(given, 40)}" to replace. Leave out \`id\` to draw a new card.` }
+  // `id` alone: the card, as it is, moves to where this call stands (placeCard)
+  const placing = update && !input.agentId && !['title', 'data', 'view'].some(k => String(input[k] ?? '').trim() !== '') && !(Array.isArray(input.edits) && input.edits.length)
+  if (placing) return placeCard($, found!, toolUseId, t0)
 
   // a card stands at a call of main's, under the answer the running designer fork draws for, or in the side thread
   // whose fork drew it (`thread:<key>`, under that thread's answer in its pane); another agent's call stands in that
   // agent's own transcript, where the person never sees a card
   const fork = forkOf(input.agentId)
   const anchorRow = fork?.kind === 'designer' ? await designAnchor($, input.agentId) : fork?.kind === 'thread' ? await threadCardAnchor($, input.agentId, target) : null
-  if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation, the copy that v starts and a side thread draw cards, since a card stands at its call and the analyst sees only those calls. Give the rows and the view to the main conversation instead.' }
+  if (input.agentId && !anchorRow) return { result: 'The card did not draw: only the main conversation, the copy v starts and a side thread draw cards (the analyst sees only their calls). Give the rows and the view to the main conversation.' }
   // the designer fork draws its own cards under the answer v was pressed on. A card that does not stand there (main's,
   // whose id the fork read in its copy of the conversation, or one under another answer) is not the fork's to change:
   // its call draws a new card, from that card's view and rows
@@ -208,7 +216,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   const before = borrowed ? null : found
   // a version keeps the card's title unless the call gives a new one
   const title = oneLine(String(input.title ?? ''), 120) || found?.title || ''
-  if (!title) return { result: 'The card did not draw: `title` is empty: give the card\'s title, what it shows in a few words.' }
+  if (!title) return { result: 'The card did not draw: `title` is empty. Give the card\'s title in a few words.' }
   const placeWords = (row: string | null) => (row?.startsWith('thread:') ? 'in the side thread, under your answer' : 'under the answer v was pressed on')
   const meta: CardMeta = before ?? {
     id, version: 0, last: 0, lastFile: '', title, toolUseId, agentId: input.agentId ? String(input.agentId) : null, anchorRow,
@@ -262,7 +270,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // was pressed on when the designer fork drew it. Where Claude Code cannot draw that place again (the main screen,
   // once main's turn that drew it ended), main's version stands at its own call
   const stays = meta.version > 0 && (!!fork || (await canRedraw($, meta.turn)))
-  const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn } : { toolUseId, anchorRow, turn: fork ? meta.turn : await mainTurn($) }
+  const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn, inRow: meta.inRow ?? null } : { toolUseId, anchorRow, turn: fork ? meta.turn : await mainTurn($), inRow: null }
   const next: CardMeta = {
     ...meta, ...home, version, last: version, lastFile: file, title, keys, read: String(r.summary.read), columns: r.summary.columns, file,
     gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
@@ -313,6 +321,23 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
   void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0 })
   return { result: out.join('\n') }
+}
+
+/** A call with a card's `id` alone: the card main drew, as it is (its version, rows, view and the person's state), is
+ *  drawn where this call stands from now on, and each earlier call of it shows one line that points here (register.ts
+ *  ToolResult). Nothing runs again. So Claude draws and fixes a card while it works, and places it at its step while it
+ *  writes the answer. A later version draws in this new place. */
+async function placeCard($: Engine, meta: CardMeta, toolUseId: string, t0: number): Promise<{ result: string }> {
+  if (meta.anchorRow) return { result: `The card did not move: “${meta.title}” stands under an answer, not at a call of yours. Draw a new card with its view and rows.` }
+  if (meta.version < 1) return { result: `The card did not move: “${meta.title}” has not drawn yet. Fix it with \`id\` and \`edits\` first.` }
+  const no = await refused($, { id: meta.id }, null)
+  if (no) return { result: `The card did not move: ${no}.` }
+  const call: CardCall = { version: meta.version, title: meta.title, file: meta.file, read: meta.read }
+  const next: CardMeta = { ...meta, toolUseId, inRow: null, turn: await mainTurn($), calls: { ...meta.calls, [toolUseId]: call }, at: Date.now() }
+  await saveMeta($, next)
+  await setFocus($, meta.id)
+  void record($, { kind: 'card', feature: 'main', card: meta.id, version: meta.version, placed: true, ms: Date.now() - t0 })
+  return { result: `“${meta.title}” (version ${meta.version}) is drawn here now, where this call stands, above the words you write after it. Its earlier place shows one line that points here.` }
 }
 
 /**

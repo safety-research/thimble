@@ -41,6 +41,7 @@ import { tellAtNextPrompt } from '../core/tell'
 import { checkAnswer } from '../marks/checker'
 import { rowMarks } from '../marks/store'
 import { promptText } from '../prompts/prompts'
+import { claudeCites } from '../settings/features.mjs'
 import { fieldSettled, fieldShown } from './pane'
 import type { ThreadScope } from './seam'
 import { aboutOf, answerRow, cardPart, display, firstMessage, forkDirective, nextMessage, partAbout, sentNote, shownAbout, subjectOf, threadKey, turnsOf } from './threads.mjs'
@@ -61,6 +62,13 @@ const THREAD = { plugin: 'thimble', key: 'thread' } as const
 const GEN = { plugin: 'thimble', key: 'threadsGen' } as const
 const EARLIER_CHARS = 3000
 const DETAIL_CHARS = 3000
+
+/** thread.md as a thread gets it: while Claude does not cite (Citations manual or off), without its paragraph on
+ *  citing, and its example's citations as plain words. */
+export function threadGuide(text: string, cites: boolean): string {
+  if (cites) return text
+  return text.split('\n\n').filter(p => !p.startsWith('**Cite ')).join('\n\n').replace(/\[([^\]\n]*)\]\(#\)/g, '$1')
+}
 
 // the module's memory: this conversation's threads by key, and which agent is whose
 const threads = new Map<string, Thread>()
@@ -265,7 +273,7 @@ export async function askThread($: Engine, ask: { text: string; scope: ThreadSco
       const earlier = was.turns.map(x => `${x.role === 'person' ? 'Q' : 'A'}: ${x.text}`).join('\n').slice(-EARLIER_CHARS)
       sent = firstMessage({ text, scope, detail: await detailOf($, scope), root }) + (earlier ? `\n\nEarlier in this thread:\n${earlier}` : '')
       const description = `thread · ${aboutOf(scope)}`.slice(0, 60)
-      const guide = await promptText($, 'thread').catch(() => '')
+      const guide = threadGuide(await promptText($, 'thread').catch(() => ''), claudeCites())
       let r = await spawnFork($, { kind: 'thread', prompt: forkDirective(guide, sent), description })
       if (r.deny !== undefined) {
         // where no fork starts, the thread's own type
@@ -415,10 +423,10 @@ export function takeAskNext(key: string): boolean {
 }
 
 /** The thread about `scope`: an existing one, or a new one with no turns yet, opened in the side pane, its input bar
- *  taking the keys. `key`: a key at the prompt opened it, and these are the bar's words a click on which opens it
- *  where the key cannot: Claude Code places a pane at any width only for the person's press or command, never for a
- *  key at the prompt (core/pane.ts). */
-export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string } = {}): Promise<boolean> {
+ *  taking the keys. `key`: a key at the prompt opened it, and these are the words a click on which opens it where the
+ *  key cannot, `where` they are (the bar below by default): Claude Code places a pane at any width only for the
+ *  person's press or command, never for a key at the prompt (core/pane.ts). */
+export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: string; where?: string } = {}): Promise<boolean> {
   await restoreThreads($)
   // a card: the line it selects now, which the pane shows in place of the whole card
   if (scope.card && !scope.part) {
@@ -441,53 +449,31 @@ export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: str
   // open: a notice that a key could not open it goes
   if (placed) await failCleared($, 'pane:threads')
   if (!placed) {
-    pendingKey = key
     noticeLine($, o.key
-      ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${o.key}” in the bar below, or type /threads, to open it here.`
-      : 'Claude Code did not open the side pane here. Type /threads to open it.', 'pane:threads')
+      ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${o.key}” ${o.where ?? 'in the bar below'} to open it here.`
+      : 'Claude Code did not open the side pane here. Widen the terminal and ask again.', 'pane:threads')
   }
   return placed
 }
 
-/** The thread list in the side pane (t, a click on the bar's count, /threads). */
+/** The thread list in the side pane (t, a click on the bar's count). */
 export async function listThreads($: Engine, o: { fromKey?: boolean } = {}): Promise<boolean> {
   await restoreThreads($)
   const placed = await openPane($, 'threads', {}, 'Threads', { focus: true })
   if (placed) await failCleared($, 'pane:threads')
   if (!placed && o.fromKey) {
-    pendingKey = ''
-    noticeLine($, `Claude Code opens the side pane from a key only in a wider terminal. Click “${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” in the bar below, or type /threads, to open it here.`, 'pane:threads')
+    noticeLine($, `Claude Code opens the side pane from a key only in a wider terminal. Click “${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” in the bar below to open it here.`, 'pane:threads')
   }
   return placed
 }
 
-// what a key could not open (a narrow terminal), which /threads opens: a thread's key, '' for the list
-let pendingKey: string | null = null
-
 export const registerThreads: Register = on => {
-  // a resumed conversation's threads, so the bar counts them and t lists them; /threads
+  // a resumed conversation's threads, so the bar counts them and t lists them
   on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
     const r = await next(e)
     try { await restoreThreads($) } catch { /* the next question reads them */ }
-    try {
-      await $.command.register({ name: 'threads', description: "List this session's side threads in the side pane, or open the one a key could not open", immediate: true })
-    } catch {
-      // t and the bar's count still list them
-    }
     return r
   }).catch(($, e, next) => next(e))
-
-  // /threads: the side pane on what a key could not open there (the terminal too narrow for it then), else the list of
-  // the session's side threads. A command's pane is placed at any width.
-  on('command.run', { command: 'threads' }, async $ => {
-    await restoreThreads($).catch(() => undefined)
-    const p = pendingKey
-    pendingKey = null
-    if (p && threads.has(p)) { await showThread($, p, { ask: true }); return {} }
-    if (!threadCount()) return { text: 'No side threads yet.' }
-    await listThreads($)
-    return {}
-  })
 
   // the thread's own type is offered only while a question is asked (a resume checks the offer again)
   on('agent.offer', { agent: TYPE }, async () => ({ isOffered: inFlight > 0 })).catch(($, e, next) => next(e))
@@ -539,5 +525,4 @@ export function resetThreads(): void {
   poll = null
   restoredFor = ''
   askNext = null
-  pendingKey = null
 }

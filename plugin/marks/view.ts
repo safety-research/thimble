@@ -22,6 +22,8 @@
 //                did not show them), or it did not run or gave no answer: red (`error`), underlined, with ` ×`
 //                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
 //                look whatever the cause
+//   deferred     as pending: a citation whose check waits until the person opens it (the setting Citations: auto
+//                cite, or words the person asked about in manual)
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //
@@ -30,8 +32,9 @@
 // or not: no line wraps again when a check starts, nor as each verdict arrives.
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
-// explainer highlighted teal or a heads-up orange (a fill behind the words); a span inside a mark's words keeps the
-// mark's press and look, its fill behind them in place of the citation's tint. A span's own words are one hover group
+// explainer highlighted teal or a heads-up orange (a fill behind the words); where a span and a mark share words they
+// keep the mark's underline with the span's fill behind them at rest, and take the span's press: an explainer or a
+// heads-up opens before the citation it stands on (] goes on to the citation). A span's own words are one hover group
 // (spanScope), as a citation's are: the pointer over any piece of it (its inline code, its bold words, a line it wraps
 // to) puts its slightly stronger fill (`hoverBg`) behind all of it, never Claude Code's inverse. While the tray shows
 // a mark (`focus`), it is drawn bold on its tint, so the open one is easy to find. `dim` draws the words dim (a rewrite of them runs),
@@ -43,7 +46,7 @@
 import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
 import { accent, themeLast, type Theme } from '../core/theme'
-import { blocks, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
+import { blocks, cardRef, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -53,7 +56,7 @@ type SpanLook = { color?: string; backgroundColor?: string; bold?: boolean; ital
 export type ViewSpan = { start: number; end: number; look: SpanLook; label: string; onPress?: () => unknown }
 type Mark = { start: number; end: number; words: string }
 
-export type MarkStatus = 'pending' | 'checking' | 'verified' | 'corrected' | 'failed' | 'unchecked'
+export type MarkStatus = 'pending' | 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed' | 'unchecked'
 export type MarkLook = { n: number; status: MarkStatus; shown?: string; narrowed?: boolean }
 
 export type MessageOpts = {
@@ -82,6 +85,8 @@ export type MessageOpts = {
   /** the passages a side thread can be asked about: `has` says whether one was asked about already, `ask` starts it
    *  (or opens it). Each row of blocks is a passage, a heading's its whole section */
   passages?: { has: (p: Passage) => boolean; ask: (p: Passage) => unknown } | null
+  /** the cards the reply places on lines of their own (message.js cardRef), drawn there, by the card's id */
+  cards?: Record<string, Any>
 }
 
 /** A passage of a reply: its words, and a few of them that name it. */
@@ -247,13 +252,20 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   if (r.tag === 'spin') p.color = accent()
   else if (r.tag) p.color = 'error'
   else Object.assign(p, wordsLook(look.status, id))
-  // a span inside the mark's words (a heads-up, an explainer): its fill at rest and no underline, as a span never has
-  // one; the citation's other words keep theirs. The citation's tint on hover, its press and hover group, as the rest
+  // a span on the mark's words (a heads-up, an explainer, inside them or around them): its fill at rest under the
+  // citation's underline, so both show. Its words are the span's press and hover group: an explainer or a heads-up
+  // opens first, and ] goes on to the citation (a span comes before the citation it stands on, tray.ts). The
+  // citation's other words keep its press
   const sp = r.span !== undefined ? o.spans?.[r.span] : undefined
   const bg = sp?.look.backgroundColor ?? sp?.look.tint
-  if (bg) { p.backgroundColor = bg; delete p.underline }
+  if (bg) p.backgroundColor = bg
   // the one the tray shows: bold, and its tint kept, so the open one is easy to find
   if (o.focus === r.mark) { p.bold = true; if (!r.tag) p.backgroundColor = tint.backgroundColor }
+  if (sp?.onPress && !r.tag) {
+    const scope = spanScope(o.key, r.span as number)
+    const hover = { scope, inverse: false, ...(sp.look.hoverBg ? { backgroundColor: sp.look.hoverBg } : {}) }
+    return els.Button({ key, plain: true, label: String(sp.label || r.s).slice(0, 120), hover, children: [els.Text(p)], onPress: () => sp.onPress!() })
+  }
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   // no inverse under the pointer (Claude Code inverts a plain Button): the tint shows the hover
   const hover = r.tag ? { scope: tint.scope, inverse: false } : { ...tint, inverse: false }
@@ -359,17 +371,19 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     const words = bs[i].type === 'heading' ? sectionOf(o.text, bs, i) : o.text.slice(bs[i].start, bs[j].end)
     return { text: words, label: passageLabel(words) }
   }
-  const push = (content: Any[], gap: boolean, p: Passage) => {
+  // the reply's ● (or its lead) stands beside its first words: a card placed before them draws beside none
+  const push = (content: Any[], gap: boolean, p: Passage, card = false) => {
     const key = `${o.key}-b${k++}`
-    const lead = dot && o.lead
-    const glyph = dot ? '●' : ' '
+    const wait = card && hasWords
+    const lead = dot && !wait && o.lead
+    const glyph = dot && !wait ? '●' : ' '
     const cell = lead
       ? Box({ width: 2, flexShrink: 0, children: [Text({ color: accent(), bold: true, children: o.lead })] })
       : o.passages
         ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph, color: accent() })
         : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
     rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [...(o.gutter === false ? [] : [cell]), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
-    dot = false
+    if (!wait) dot = false
   }
   // a block laid out here: one that holds marks, and every item of a list one of whose items holds marks, so a nested
   // item keeps its indent beside its siblings. A code block never is: its lines stay as written, in Claude Code's
@@ -384,12 +398,21 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     a = z
   }
   const laidOut = (k: number) => laid[k]
+  // a line that places a card (message.js cardRef): the card's frame there, a row of its own
+  const placed = (k: number) => (bs[k].type === 'para' ? o.cards?.[cardRef(o.text.slice(bs[k].start, bs[k].end)) ?? ''] : undefined)
+  const hasWords = bs.some((_b: Any, k: number) => !placed(k))
   // where passages can be asked about, a run of blocks drawn by Claude Code's Markdown is one passage: it ends at a
   // blank line (but a list's items stay together) and before a heading
   const joins = (a: Any, n: Any) => !o.passages || (n.type !== 'heading' && (!n.gap || (a.type === 'item' && n.type === 'item')))
   let i = 0
   while (i < bs.length) {
     const b = bs[i]
+    const card = placed(i)
+    if (card) {
+      push([card], b.gap && i > 0, passageOf(i, i), true)
+      i++
+      continue
+    }
     if (laidOut(i)) {
       push(blockLines(els, o, b, `${o.key}-l${i}`, w), b.gap && i > 0, passageOf(i, i))
       i++
@@ -397,7 +420,7 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     }
     // a run of blocks with no mark: Claude Code's own Markdown, whole
     let j = i
-    while (j + 1 < bs.length && !laidOut(j + 1) && joins(bs[j], bs[j + 1])) j++
+    while (j + 1 < bs.length && !laidOut(j + 1) && !placed(j + 1) && joins(bs[j], bs[j + 1])) j++
     push([Markdown({ text: o.text.slice(b.start, bs[j].end) })], b.gap && i > 0, passageOf(i, j))
     i = j + 1
   }

@@ -21,8 +21,10 @@ thimble file pr ID: the same text as a pull request on the public repository, wi
 own GitHub account through the gh command. It says first that this is public, shows the title, the text, the files
 and the privacy check, and asks y/N (--yes skips the question, for scripts). The scan takes the person's details out of
 the title and the text; a detail of theirs in the code cannot be taken out without changing the code, so it refuses
-and names each one. It forks the repository when the person cannot push to it, makes one commit with the fix's change
-on the release commit in a temporary repository under $THIMBLE_HOME/fixes/pr/ (removed after), pushes it as the
+and names each one. It forks the repository when the person cannot push to it, makes one commit with the fix's own
+change on the newest thimble, the commit main's tip is on the repository (fetched before the preview, so that a dev
+install whose checkout is ahead of main or apart from it sends only the fix; a change that does not apply there is
+refused with the reason), in a temporary repository under $THIMBLE_HOME/fixes/pr/ (removed after), pushes it as the
 branch thimble-fix-<id>-<slug> (a free name), opens the pull request against main, and keeps its link on the fix's record and in
 share/<id>/pr.json. THIMBLE_GH, THIMBLE_GIT and THIMBLE_FIX_PUSH_URL (fixes.py) replace gh, the git that pushes, and
 where it pushes ({owner}, {login}, {name}), for tests.
@@ -344,21 +346,66 @@ def _pr_ready(fid: int | str) -> dict[str, Any]:
     return rec
 
 
+MAIN_REF = "refs/thimble/upstream/main"  # in live: main's tip as `thimble file pr` last fetched it
+
+
+def _main_tip() -> dict[str, str]:
+    """The newest thimble, which a pull request goes onto: the commit main's tip is on thimble's repository (update_url),
+    fetched into live, {commit, version}. Its version is the release tag at that commit, else the plugin's version
+    there, else the commit."""
+    live, url = FX.live_dir(), FX.update_url()
+    p = FX.run(["git", "fetch", "-q", "--no-tags", url, f"+refs/heads/main:{MAIN_REF}"], cwd=live, check=False,
+               timeout=600)
+    if p.returncode != 0:
+        err = (p.stderr or p.stdout).strip().splitlines()
+        raise FX.FixError(f"thimble could not read main from {url} ({err[-1] if err else 'no message'}); a pull "
+                          "request goes onto it, so check the network, then try again")
+    tip = FX.git("rev-parse", f"{MAIN_REF}^{{commit}}", cwd=live)
+    version = ""
+    try:
+        latest = FX.latest_release()
+        if latest["commit"] == tip:
+            version = latest["version"]
+    except FX.FixError:
+        pass
+    return {"commit": tip, "version": version or FX._version_at(live, tip) or tip[:7]}
+
+
+def _applies(base: str, diff: str) -> bool:
+    """Whether the fix's change applies to the tree of `base`, checked in an index of its own (live is not changed)."""
+    with tempfile.TemporaryDirectory(prefix="pr-check-", dir=FX.home()) as d:
+        (Path(d) / "fix.patch").write_text(diff)
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(d) / "index")}
+        FX.git("read-tree", base, cwd=FX.live_dir(), env=env)
+        return FX.run(["git", "apply", "--cached", "--check", str(Path(d) / "fix.patch")], cwd=FX.live_dir(), env=env,
+                      check=False).returncode == 0
+
+
 def pr_preview(fid: int | str, st: Store | None = None) -> dict[str, Any]:
     """What `thimble file pr ID` would send, through the scan: the title and the text (the scan's placeholders in them),
-    the files with their counts, the branch, and the details of the person's that the code holds. Nothing is sent."""
+    the files with their counts, the branch, and the details of the person's that the code holds. Nothing is sent. The
+    fix's own change goes onto the newest thimble (_main_tip), not onto the thimble the person runs: on a dev install
+    that is their checkout, which can be ahead of main, and a pull request against main would then carry every commit
+    of it too."""
     rec = _pr_ready(fid)
     n = rec["id"]
     if st is None:
         st = _store_of(rec)
-    rel = FX.release()
-    base = rel.get("base") or rec.get("base") or ""
-    version = rel.get("version") or base[:7] or "?"
     diff = _code_of(rec)
     if not diff.strip():
         raise FX.FixError(f"fix {n} changes nothing in the code; thimble file issue {n} posts it as a GitHub issue")
     if re.search(r"^Binary files ", diff, re.M):
         raise FX.FixError(f"fix {n} changes a binary file; a pull request from thimble holds text changes only")
+    tip = _main_tip()
+    base, version = tip["commit"], tip["version"]
+    if not _applies(base, diff):
+        mine = FX.release().get("base") or ""
+        if mine and not _applies(mine, diff):
+            raise FX.FixError(f"fix {n}'s change does not apply to thimble {FX.release_name()} alone: it builds on another "
+                              "of your fixes. Ask /thimble-fix to make it work on the release by itself")
+        raise FX.FixError(f"fix {n}'s change does not apply to the newest thimble ({version}, {base[:7]} on main), "
+                          "which a pull request goes onto: the lines it changes are different there. Ask /thimble-fix "
+                          f"to make it work on the newest thimble (thimble update moves you to it), then try again")
     d, _src = _given(rec, None)
     title = FX.short(d["title"] or rec["title"], 72)
     body = (_body(rec, d) + f"\nOpened with `thimble file pr`, on thimble {version} "
@@ -373,7 +420,7 @@ def pr_preview(fid: int | str, st: Store | None = None) -> dict[str, Any]:
 
 
 def _commit(r: dict[str, Any], user: dict[str, Any], tmp: Path) -> str:
-    """One commit with the fix's change on the release commit, authored by the person's GitHub noreply address, in a
+    """One commit with the fix's change on main's tip (r["base"], _main_tip), authored by the person's GitHub noreply address, in a
     repository of its own under tmp that borrows live's objects. live, and the person's own clones, are not changed."""
     live = FX.live_dir()
     objects = Path(FX.git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=live)) / "objects"

@@ -6,7 +6,7 @@ declare module 'claude-code' {
       // ---- marks (marks/)
       /** a reply's marks and their checks, by the reply's key, its last text row (a session.append uuid of main's; the
        *  AssistantMessage's requestId): { key, turnId, rows, startedAt, settledAt, items: [{ n, row, words, start, end,
-       *  sentence, status: 'checking' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
+       *  sentence, status: 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed', shown, was?, reason?,
        *  failedBy?: 'check' | 'evidence' | 'none', evidence?, note?, repair?, narrowed?, rewrite? }] } (marks/store.ts Reply), kept on disk too */
       marks: StateFamily<unknown>
       /** the reply each text row with marks belongs to, by the row: the reply's key */
@@ -57,11 +57,15 @@ declare module 'claude-code' {
       labelGen: number
       /** the ask before a large label run that waits for the person's choice (labels/use.ts): { root, name, ask, text,
        *  meta, units, sample, rest }, or null */
-      labelAsk: { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean } | null
+      labelAsk: { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean; calls?: number } | null
 
       // ---- core (core/)
-      /** what the side pane shows (core/pane.ts) */
-      pane: { kind: string; args: unknown } | null
+      /** what the side pane shows, and the trail of panes it showed before, to go back to (core/pane.ts) */
+      pane: { kind: string; args: unknown; title?: string; escape?: boolean; rows?: number; trail?: { kind: string; args: unknown; title: string; rows?: number }[] } | null
+      /** the row the settings pane picked (panes/settings.tsx), by its feature's key */
+      settingsRow: string
+      /** whether thimble is off in this session (/thimble-off, settings/term.ts) */
+      sessionOff: boolean
       /** the id of main's turn that runs, null when none runs (core/turn.ts) */
       mainTurn: string | null
       /** which agents are thimble's forks, and their kind (core/forks.ts) */
@@ -83,7 +87,7 @@ declare module 'claude-code' {
       answerMsg: StateFamily<unknown>
       /** the turn a text row belongs to, by the row */
       answerRowTurn: StateFamily<string>
-      /** the answer the person picked for the keys with { and }, or null: the newest */
+      /** the answer the person picked for the keys with { and } or by opening one of its marks, or null: the newest */
       answerSel: string | null
 
       // ---- the tray (tray/tray.ts)
@@ -91,8 +95,6 @@ declare module 'claude-code' {
       tray: { stack: unknown[] } | null
       /** the card ] reached, which holds the keys: { row, card } */
       trayCard: { row: string; card: string } | null
-      /** by main's turn: what its prompt was about when the person asked it with the tray open (`the citation "…"`) */
-      trayAsked: StateFamily<string>
 
       // ---- side threads (threads/)
       /** a side thread, by its key (threads/thread.ts Thread): { id, key, agentId, scope, subject, root, status, asks,
@@ -136,10 +138,15 @@ declare module 'claude-code' {
       squeezeCards: { shown: Record<string, { copy: string; v: number }>; hidden: string[]; did: Record<string, string> }
 
       // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
-      /** { v, session, updated, claims, clusters, gaps } (claims/store.js) */
+      /** { v, session, updated, claims, clusters, gaps, read } (claims/store.js) */
       claims: unknown
       /** when the count of claims last went up: the bar's count is bold for a moment after (claims/term.ts) */
       claimsBright: number | null
+      /** the session's first claims: the bar's count pulses (`lit` while on) and says `new` until the pane is opened
+       *  (claims/term.ts) */
+      claimsFirst: { lit: boolean; opened: boolean } | null
+      /** a look on demand for the claims: how many answers it reads, and when it began (claims/term.ts) */
+      claimsFinding: { n: number; at: number } | null
     }
   }
 }

@@ -7,7 +7,8 @@ import { expect, test } from 'claude-code/testing'
 import { registerForks } from '../core/forks'
 import { registerTell } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
-import { askHere, drawThreads, passageRuns } from '../threads/pane'
+import { askHere, drawThreads, passageRuns, threadUnder, threadUnderParts } from '../threads/pane'
+import { keptDir } from '../core/env'
 import { openThread, threadCardAnchor, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { threadKey } from '../threads/threads.mjs'
@@ -209,15 +210,16 @@ test('where no fork starts, the thread\'s own agent type answers; a card its age
   expect(dropped.drop).toContain('thread')
 })
 
-test('a key that cannot open a thread in a narrow terminal says to type /threads; once /threads opens it, that line goes', async () => {
+test('a thread the side pane cannot open says what to do, with no slash command; once it opens, that line goes', async () => {
   const s = setup()
   const line = async () => String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text ?? '')
   s.$.ui.open = async () => ({ isPlaced: false })
   expect(await openThread(s.$, SCOPE)).toBe(false)
-  expect(await line()).toContain('Type /threads to open it')
-  // a command's pane is placed at any width: it opens the thread on the citation's evidence
+  expect(await line()).toContain('Widen the terminal and ask again')
+  expect(await line()).not.toContain('/threads')
+  // asked again where the pane opens: the thread opens and the line goes
   s.$.ui.open = async () => ({ isPlaced: true })
-  await s.call('command.run', { command: 'threads' }, async () => ({}))
+  expect(await openThread(s.$, SCOPE)).toBe(true)
   await settle()
   expect(await line()).toBe('')
 })
@@ -256,12 +258,18 @@ test('the margin of a passage or a card opens its thread; it says asked (↳) on
   const key = threadKey({ about: '', card: 'c00000000000b1', part: '▸ Tuesday  ██ 41' })
   expect(key).not.toBe('card-c00000000000b1')
   expect(threadOf(key)!.scope).toEqual({ about: '"Tuesday 41" in the card "Runs per day"', card: 'c00000000000b1', part: '▸ Tuesday  ██████ 41' })
+  // a click on a bar the view drew, with nothing selected: a thread about that bar's row, of its own
+  const clicked = await threadOnCard(s.$, 'c00000000000b1', 'Runs per day', '', { text: '███', line: '  Monday   ███ 12' })
+  expect(clicked.label).toBe('"Monday 12" in the card "Runs per day"')
+  clicked.press()
+  await settle()
+  expect(threadOf(threadKey({ about: '', card: 'c00000000000b1', part: 'Monday  ███ 12' }))!.scope.part).toBe('Monday  ███ 12')
 })
 
 // Claude Code places a pane at any width only for an open made while the person's press runs: one the press leaves to
 // run after it returned is unasked and waits undrawn below 144 columns. So each press that opens the side pane (the
-// margin of a passage or a card, a row of the thread list, the way back to it) returns the open, and the open is made
-// by the time what it returns settles, as Claude Code calls a press
+// margin of a passage or a card, a row of the thread list) returns the open, and the open is made by the time what it
+// returns settles, as Claude Code calls a press. (The way back to the list is the pane's own top row: core/pane.ts.)
 test('each press that opens the side pane makes the open inside the press', async () => {
   const s = setup()
   const opens: string[] = []
@@ -286,8 +294,6 @@ test('each press that opens the side pane makes the open inside the press', asyn
   await asked
   const list = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'threads', {}, els))
   expect(await pressed(list.find(n => n.type === 'Button' && n.props?.key === 'thread-0-open').props.onPress)).toBe(1)
-  const one = nodes(await drawThreads(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, 'thread', { key: KEY, from: 'threads' }, els))
-  expect(await pressed(one.find(n => n.type === 'Button' && n.props?.key === 'back').props.onPress)).toBe(1)
 })
 
 test('the list of threads (t) draws each thread as a press that holds only text, as Claude Code draws a Button', async () => {
@@ -335,10 +341,10 @@ test('the thread pane: its steps without the folders they ran in, and m drawn on
   expect(textOf(steps)).toBe('● 1 step · python3 count.py')
   expect(all.some(n => typeof n.props?.children === 'string' && n.props.children.includes('/made-up'))).toBe(false)
   // m in the keys' row above the input bar, dim at rest as a key's hint; the Button draws its key and label itself
-  // (`m: send this answer to Claude`): no second key or label inside it
+  // (`m: add this answer to the main conversation`): no second key or label inside it
   const m = all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-m')
   expect(m.props.hotkey).toBe('m')
-  expect(m.props.label).toBe('send this answer to Claude')
+  expect(m.props.label).toBe('add this answer to the main conversation')
   expect(m.props.dimColor).toBe(true)
   expect(m.props.children).toBe(undefined)
   // under the pointer its words brighten, never Claude Code's inverse of a plain Button
@@ -365,9 +371,23 @@ test("a card's thread shows the card collapsed, its title and the line asked abo
   expect(all.some(n => n.type === 'Client')).toBe(false)
   const e = all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-e')
   expect(e.props.label).toBe('show the card')
-  e.props.onPress()
+  // e typed into the input bar, which holds the ring: a question that starts with e types as usual
+  const later: Array<() => void> = []
+  s.$.clock.after = ((_ms: number, f: () => void) => { later.push(f); return { cancel() {} } }) as Any
+  const field = () => all.find(n => n.type === 'Input')
+  field().props.onInput('e')
+  field().props.onInput('ex')
+  later.splice(0).forEach(f => f())
+  all = nodes(await draw())
+  expect(all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-e').props.label).toBe('show the card')
+  field().props.onInput('')
+  // e alone presses the key, as a click does, and the field starts empty again
+  const before = field().props.key
+  field().props.onInput('e')
+  later.splice(0).forEach(f => f())
   all = nodes(await draw())
   expect(all.find(n => n.type === 'Button' && n.props?.key === 'thread-key-e').props.label).toBe('hide the card')
+  expect(field().props.key).not.toBe(before)
   // whole: the conversation's drawing (as wide as main's), cut at the pane's edge, so no row of it wraps
   const cut = all.find(n => n.props?.key === 'cut')
   const client = all.find(n => n.type === 'Client')
@@ -397,6 +417,32 @@ test("a passage's thread shows the passage as the reply reads, under one label: 
   expect(passageRuns('a [b](#) c', 4).map(r => r.s).join('')).toBe('a b…')
 })
 
+test("a heads-up's thread shows it as the tray does: named a heads-up, its links as words, each point's rows after the gutter", async () => {
+  const s = setup()
+  const mark = { row: 'row-made-up-5', kind: 'heads' as const, id: 'h1' }
+  await s.$.state.set({ plugin: 'thimble', key: 'answerMsg', id: mark.row }, { row: mark.row, turnId: 't5', text: 'Retries rose.', at: 1, parts: { explain: { order: ['h1'], items: { h1: {
+    id: 'h1', kind: 'heads', term: 'Retries rose', title: 'Retried runs count twice',
+    bullets: ['A run that was retried has two rows in [runs.csv](runs.csv#L4-9), so the count of failed runs is too high by about a third.'],
+  } } } } })
+  const scope = { about: 'the heads-up "Retried runs count twice"', mark }
+  const asked = askHere(s.$, scope, 'how many retried?')
+  await settle()
+  s.go()
+  await asked
+  const tree = await drawThreads(s.$, { props: { bodyColumns: 50, scroll: { bodyRows: 40 } } }, 'thread', { key: threadKey(scope) }, els)
+  const subject = nodes(tree).find(n => n.props?.key === 'subject')
+  const shown = textOf(subject)
+  expect(shown).toContain('▎ heads-up')
+  expect(shown).not.toContain('important detail')
+  expect(shown).toContain('two rows in runs.csv, so')
+  expect(shown).not.toContain('](')
+  // the point wraps in a column of its own after the gutter, so its later rows stay under its first
+  const point = subject.props.children.find((n: Any) => n.props?.key === 'subject-m0')
+  expect(point.type).toBe('Box')
+  expect(point.props.flexDirection).toBe('row')
+  expect(textOf(point.props.children[0])).toBe('▎ ')
+})
+
 // The pane reads a running thread's turns every few seconds. A read that started before the fork ended, and ends after
 // the end marked the thread done, leaves it done: else the pane shows it answering for ever, without m
 test("a read of a running thread's turns that the fork's end overtakes leaves the thread done", async () => {
@@ -421,4 +467,44 @@ test("a read of a running thread's turns that the fork's end overtakes leaves th
   release!()
   await settle()
   expect(threadOf(KEY)!.status).toBe('done')
+})
+
+test('under the claims pane the input names what it asks about, each question shows its claim quoted above it, and m says the answer went to the main conversation', async () => {
+  const s = setup()
+  const store = { v: 2, session: 's-threads', updated: null, gaps: [],
+    claims: [{ id: 'c1', text: 'Run 4 failed on the p95 check.', by: 'claude', cluster: 'k1', turn: 1, said: [{ row: 'r1', by: 'claude', turn: 1, quote: 'Run 4 failed', sentence: 'Run 4 failed on the p95 check.' }], sources: [] }],
+    clusters: [{ id: 'k1', name: 'failures', turn: 1, named: 1 }] }
+  s.files[`${await keptDir(s.$)}/claims.json`] = JSON.stringify(store)
+  const e = { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }
+  const input = async (args: Any) => nodes(await threadUnder(s.$, e, 'claims', args, els)).find(n => n.type === 'Input')
+  expect((await input({ claim: 'c1' })).props.placeholder).toBe('Ask about this claim…')
+  expect((await input({ group: 'k1' })).props.placeholder).toBe('Ask about the whole cluster “failures”…')
+  expect((await input({})).props.placeholder).toBe('Ask about all the claims…')
+  // no conversation yet: nothing scrolls with the pane's drawing, so the pane opens at its top (core/pane.ts); the
+  // blank row under the drawing stands with the input bar
+  const bare = await threadUnderParts(s.$, e, 'claims', { claim: 'c1' }, els)
+  expect(bare.conv).toEqual([])
+  expect(bare.bottom[0].props.key).toBe('thread-gap')
+  // a question about the claim: the claim quoted above it once answered, in place of `about this claim`
+  const scope = { about: 'the claim', pane: { kind: 'claims', args: { claim: 'c1' } } }
+  const asked = askHere(s.$, scope as Any, 'why the p95?')
+  await settle()
+  s.go()
+  await asked
+  s.answer('agent-1', 'The p95 check failed because two requests timed out.')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  const parts = await threadUnderParts(s.$, e, 'claims', { claim: 'c1' }, els)
+  expect(parts.conv[0].props.key).toBe('thread-gap')
+  expect(parts.bottom.some((n: Any) => n.props?.key === 'thread-gap')).toBe(false)
+  const under = nodes(await threadUnder(s.$, e, 'claims', { claim: 'c1' }, els))
+  const t = textOf({ props: { children: under } })
+  expect(t).toContain('▎ “Run 4 failed on the p95 check.”❯ why the p95?')
+  expect(t).not.toContain('about this claim')
+  const m = under.find(n => n.type === 'Button' && n.props?.key === 'thread-key-m')
+  expect(m.props.label).toBe('add this answer to the main conversation')
+  const key = threadList()[0]!.key
+  expect(await sendToMain(s.$, key)).toBe(true)
+  const after = nodes(await threadUnder(s.$, e, 'claims', { claim: 'c1' }, els))
+  expect(textOf({ props: { children: after } })).toContain('✓ added to the main conversation: Claude reads it there and replies to it')
+  expect(after.find(n => n.type === 'Button' && n.props?.key === 'thread-key-m').props.label).toBe('added to the main conversation')
 })

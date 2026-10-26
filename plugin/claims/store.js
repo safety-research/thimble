@@ -5,18 +5,27 @@
 // folder (core/env.ts keptDir):
 //
 //   {v: 2, session, updated,
-//    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?, why?,
+//    claims: [{id, text, by, cluster, turn, said: [place], sources: [source], revises?, revised_by?, why?, because?,
 //              links?: [{to, how: supports | contradicts | same topic}]}],
-//    clusters: [{id, name, turn, named}],
-//    gaps: [{turn, why}]}
+//    clusters: [{id, name, turn, named, about?}],
+//    gaps: [{turn, why}],
+//    read?: [row]}
 //
 //   a name   a cluster's name is kept whole (up to MAX_NAME characters, past that cut after a word); the pane cuts it
 //            only to draw it. A store of v 1 kept names cut at 60 characters, often in a word: read, such a name ends
 //            after its last whole word, then …
 //
+//   about    a cluster's orienting line, as the lens gave it: what its question is and why it matters, for a reader new
+//            to the data. The pane shows it under the cluster's name.
+//
 //   a place  {row, by, turn, quote, sentence, start, end}: where a claim was said, the message row, who said it
 //            (claude | person), the words matched and their sentence, as offsets into the row's markdown.
 //   ×N       a claim's said.length: each distinct place it was said.
+//   because  why the claim holds, as the lens gave it: one or two sentences in the message's words, its citation links
+//            `[words](#)` kept. The pane shows it under the claim picked, its citations as the reply draws them.
+//   read     the answers the claims lens has read (each its row), so the pane offers only the others to find claims
+//            in (claims are found on demand, unless Claims is auto). A store without it was kept
+//            while every answer was read after its reply.
 //   why      on a claim that revises another: why the earlier one was wrong, as the lens gave it. The pane shows it in
 //            the claim's history (e) with what the earlier one said (graph.js correctionsOf); with none, the reason
 //            of the check that failed the earlier one's citation stands for it.
@@ -39,6 +48,8 @@ const MAX_TEXT = 200
 const MAX_QUOTE = 240
 const MAX_SENTENCE = 320
 const MAX_WHY = 240
+const MAX_BECAUSE = 600
+const MAX_ABOUT = 240
 /** A cluster's name is kept up to this many characters (past that, cut after a word). */
 const MAX_NAME = 160
 /** The length a store of v 1 cut every cluster name at. */
@@ -258,13 +269,16 @@ export function findQuote(md, quote) {
   return best ? { start: best.start, end: best.end, exact: false } : null
 }
 
+const plainWords = t => String(t || '').replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+
 const numbersIn = t => new Set((String(t || '').match(/\d[\d,.]*/g) || []).map(x => x.replace(/[,.]+$/, '').replace(/,/g, '')))
 
 /** The citations in or near [start, end): those in its own words, else those in its sentence (a sentence can hold
  *  several claims, each with its citations); with none there, those of its block (a paragraph, a list item, a table
  *  row) whose words hold a number the claim states (`text`), so a sentence with no citation of its own borrows only one
- *  that shows the same value. At most four, each {at, label}: the citation's offset in the markdown and its words. */
-export function sourcesNear(md, start, end, text = '') {
+ *  that shows the same value, or that its reason (`because`, which keeps the reply's citation links) cites. At most
+ *  four, each {at, label}: the citation's offset in the markdown and its words. */
+export function sourcesNear(md, start, end, text = '', because = '') {
   const s = String(md || '')
   const marks = marksIn(s).map(m => ({ ...m, label: m.words }))
   if (!marks.length) return []
@@ -272,7 +286,8 @@ export function sourcesNear(md, start, end, text = '') {
   const own = marks.filter(m => m.start < end && m.end > start)
   let got = own.length ? own : marks.filter(m => m.start >= sent.start && m.end <= Math.max(sent.end, end))
   const want = numbersIn(text)
-  if (!got.length && want.size) {
+  const said = new Set(marksIn(String(because || '')).map(m => plainWords(m.words)))
+  if (!got.length && (want.size || said.size)) {
     const b = blocks(s).find(x => start >= x.start && start <= x.end)
     if (b) {
       let from = b.start
@@ -281,7 +296,9 @@ export function sourcesNear(md, start, end, text = '') {
         const row = (b.rows || []).find(r => start >= r.start && start <= r.end)
         if (row) { from = row.start; to = row.end }
       }
-      got = marks.filter(m => m.start >= from && m.end <= to && [...numbersIn(m.label)].some(n => want.has(n))).sort((x, y) => Math.abs(x.start - start) - Math.abs(y.start - start)).slice(0, 2)
+      const inBlock = marks.filter(m => m.start >= from && m.end <= to)
+      const cited = inBlock.filter(m => said.has(plainWords(m.label)))
+      got = cited.length ? cited : inBlock.filter(m => [...numbersIn(m.label)].some(n => want.has(n))).sort((x, y) => Math.abs(x.start - start) - Math.abs(y.start - start)).slice(0, 2)
     }
   }
   const out = []
@@ -326,7 +343,7 @@ export function wordsIn(md, start, end) {
  * Claude's messages, newest first; then any). A place is {row, by, turn, text}; returns the place as the store keeps
  * it, with the sources near it, or null when the quote is in none of them.
  */
-export function locate(quote, places, by = 'claude', text = '') {
+export function locate(quote, places, by = 'claude', text = '', because = '') {
   const list = Array.isArray(places) ? places : []
   const mine = list.filter(p => (p.by || 'claude') === by).reverse()
   const rest = list.filter(p => (p.by || 'claude') !== by).reverse()
@@ -341,7 +358,7 @@ export function locate(quote, places, by = 'claude', text = '') {
         sentence: cutTo(wordsIn(p.text, sent.start, sent.end), MAX_SENTENCE),
         start: hit.start, end: hit.end,
       },
-      sources: sourcesNear(p.text, hit.start, hit.end, text).map(x => citationSource(p.row, x)),
+      sources: sourcesNear(p.text, hit.start, hit.end, text, because).map(x => citationSource(p.row, x)),
       exact: hit.exact,
     }
   }
@@ -383,10 +400,16 @@ export function grownClusters(store) {
   return out
 }
 
-/** The lens's renames and splits: {id, name} renames a cluster; {split, name, claims} moves those claims of the split
- *  cluster to a new cluster of that name. A cluster offered as grown is counted as named at its size now. */
+/** The lens's renames, splits and orienting lines: {id, name} renames a cluster; {split, name, claims} moves those
+ *  claims of the split cluster to a new cluster of that name; an `about` on any of them, or on {id} or {name} alone (a
+ *  cluster named by a claim of this turn), is that cluster's orienting line. A cluster offered as grown is counted as
+ *  named at its size now. */
 function applyClusters(store, list, grown, turn) {
   const done = []
+  const aboutOf = (c, x) => {
+    const about = str(x.about, MAX_ABOUT)
+    if (c && about && about !== c.about) { c.about = about; done.push({ about: c.id }) }
+  }
   for (const x of Array.isArray(list) ? list : []) {
     if (!x || typeof x !== 'object') continue
     if (x.split) {
@@ -396,15 +419,22 @@ function applyClusters(store, list, grown, turn) {
       const moving = store.claims.filter(c => from && c.cluster === from.id && ids.has(c.id))
       if (!from || !name || !moving.length || moving.length === sizeOf(store, from.id)) continue
       const id = nextId(store.clusters, 'k')
-      store.clusters.push({ id, name, turn, named: moving.length, split: from.id })
+      const made = { id, name, turn, named: moving.length, split: from.id }
+      store.clusters.push(made)
       for (const c of moving) c.cluster = id
       done.push({ split: from.id, into: id, name, claims: moving.map(c => c.id) })
+      aboutOf(made, x)
     } else if (x.id) {
       const c = store.clusters.find(k => k.id === String(x.id))
+      if (!c) continue
+      aboutOf(c, x)
       const name = nameOf(x.name)
-      if (!c || !name || name === c.name) continue
+      if (!name || name === c.name) continue
       done.push({ renamed: c.id, from: c.name, to: name })
       c.name = name
+    } else if (x.name) {
+      const name = nameOf(x.name).toLowerCase()
+      aboutOf(store.clusters.find(k => String(k.name).toLowerCase() === name), x)
     }
   }
   for (const g of grown || []) {
@@ -443,7 +473,7 @@ export function parseClaims(list) {
     // `at`: its place in the lens's list (1 for the first), which a later claim of the same turn revises as "#1"
     const links = (Array.isArray(x.links) ? x.links : []).map(l => ({ to: str(String(l?.to ?? ''), 20), how: howOf(l?.how ?? l?.type) })).filter(l => l.to && l.how).slice(0, 4)
     const revises = str(String(x.revises ?? ''), 20) || null
-    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises, why: (revises && str(x.why, MAX_WHY)) || null, links })
+    out.push({ at: i + 1, text, quote, by, cluster: x.cluster == null ? '' : String(x.cluster), same: same || null, revises, why: (revises && str(x.why, MAX_WHY)) || null, because: str(x.because, MAX_BECAUSE) || null, links })
   }
   // every claim the turn gave: a long answer can state many
   return out
@@ -480,7 +510,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     if (it.revises && /^#\d+$/.test(it.revises)) it.revises = local.get(Number(it.revises.slice(1))) || null
     if (it.same && /^#\d+$/.test(it.same)) it.same = local.get(Number(it.same.slice(1))) || null
     const known = it.same ? store.claims.find(c => c.id === it.same) : null
-    const where = locate(it.quote, places, it.by, it.text || known?.text || '')
+    const where = locate(it.quote, places, it.by, it.text || known?.text || '', it.because || '')
     if (!where) { res.dropped.push({ claim: it.text || it.same, why: `its words "${cutTo(it.quote, 60)}" are not in this turn's messages` }); continue }
     let target = it.same && !it.revises ? known : null
     if (it.same && !it.revises && !target && !it.text) { res.dropped.push({ claim: it.same, why: `no claim ${it.same} so far` }); continue }
@@ -492,6 +522,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     }
     if (target) {
       local.set(it.at, target.id)
+      if (it.because && !target.because) target.because = it.because
       for (const l of it.links) links.push({ from: target.id, ...l })
       if (!target.said.some(p => samePlace(p, where.place))) {
         target.said.push(where.place)
@@ -502,7 +533,7 @@ export function applyTurn(store, { places = [], out = {}, turn = null, at = null
     }
     const id = nextId(store.claims, 'c')
     const ofClaim = /^\s*#(\d+)\s*$/.exec(it.cluster)
-    const claim = { id, text: it.text, by: it.by, cluster: ofClaim ? null : clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources }
+    const claim = { id, text: it.text, by: it.by, cluster: ofClaim ? null : clusterFor(store, it.cluster, turn), turn, at, said: [where.place], sources: where.sources, ...(it.because ? { because: it.because } : {}) }
     if (ofClaim) inClaimsCluster.push({ id, of: Number(ofClaim[1]) })
     const old = it.revises ? store.claims.find(c => c.id === it.revises) : null
     if (old) {
@@ -569,7 +600,7 @@ export function promptLines(store, max = 120) {
     const flags = [c.by === 'person' ? 'the analyst' : '', c.revised_by ? `corrected by ${c.revised_by}` : '', c.said.length > 1 ? `×${c.said.length}` : ''].filter(Boolean)
     return `- ${c.id} · ${c.cluster || '-'} · ${c.text}${flags.length ? ` (${flags.join(', ')})` : ''}`
   })
-  const clusters = store.clusters.filter(k => sizeOf(store, k.id)).map(k => `- ${k.id} · ${k.name} · ${sizeOf(store, k.id)} claim${sizeOf(store, k.id) === 1 ? '' : 's'}`)
+  const clusters = store.clusters.filter(k => sizeOf(store, k.id)).map(k => `- ${k.id} · ${k.name} · ${sizeOf(store, k.id)} claim${sizeOf(store, k.id) === 1 ? '' : 's'} · ${k.about || '(no orienting line yet)'}`)
   return {
     claims: lines.length ? (store.claims.length > claims.length ? `(${store.claims.length - claims.length} older claims not shown)\n` : '') + lines.join('\n') : '(none yet)',
     clusters: clusters.length ? clusters.join('\n') : '(none yet)',

@@ -3,7 +3,7 @@
 //   node --test plugin/tray/test/tray.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, pageOf, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
+import { aboutOf, back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printLine, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -31,11 +31,12 @@ test('a row\'s stops: its citations and explainers by where they stand, then its
   assert.deepEqual(stops.map(stopWhat), ['citation', 'heads up', 'explainer', 'citation', 'card'])
 })
 
-test('a unit taller than the room shows a room of its rows at a time: m goes on in it, then to the next unit', () => {
-  assert.equal(pageOf([9, 1], 4).end, 1)
-  assert.deepEqual(pageOf([9, 1], 4), { start: 0, end: 1, more: 1, next: 0, nextSkip: 3 })
-  assert.deepEqual(pageOf([9, 1], 4, 0, 3), { start: 0, end: 1, more: 1, next: 0, skip: 3, nextSkip: 6 })
-  assert.deepEqual(pageOf([9, 1], 4, 0, 6), { start: 0, end: 1, more: 1, next: 1, skip: 6 })
+test('an explainer or a heads-up on a citation\'s words, or over them, stops before it: a click opens it first, ] goes on to the citation', () => {
+  const cites = [{ n: 1, start: 10, words: 'build fails' }, { n: 2, start: 50, words: '41 runs' }]
+  // g1 inside the first citation's words, h1 over the second citation and the words beside it
+  const stops = stopsOfRow('r2', cites, [{ id: 'g1', kind: 'explain', start: 11, end: 22 }, { id: 'h1', kind: 'heads', start: 44, end: 70 }], ['c9'])
+  assert.deepEqual(stops.map(s => s.card ?? (s.kind === 'citation' ? `c${s.n}` : s.id)), ['g1', 'c1', 'h1', 'c2', 'c9'])
+  assert.deepEqual(stops.map(stopWhat).slice(0, 2), ['explainer', 'citation'])
 })
 
 test('a citation\'s card: why in one sentence, and the one line of evidence that holds the value, cut around it', () => {
@@ -77,3 +78,20 @@ test('a citation\'s card: why in one sentence, and the one line of evidence that
   assert.equal(lineWindow({ text: said, spans: [[0, 4]] }, 30).text, 'Each open ticket waits for a …')
 })
 
+
+test('what a side thread is about quotes the words once: words that open with a quote keep their own', () => {
+  assert.equal(aboutOf({ kind: 'heads', row: 'r1', id: 'h1' }, { gloss: { title: '"Cheated" is their own word' } }), 'the heads-up "Cheated" is their own word')
+  assert.equal(aboutOf({ kind: 'heads', row: 'r1', id: 'h1' }, { gloss: { title: 'March is half a month' } }), 'the heads-up "March is half a month"')
+  assert.equal(aboutOf({ kind: 'citation', row: 'r1', n: 2 }, { words: '“please post R3”' }), 'the citation “please post R3”')
+})
+
+test('the line of code above a citation\'s output is one that printed it: never a print whose words the output lacks', () => {
+  // a script with a print of its own words, then a shell echo after it
+  const script = "python3 - <<'EOF'\nfor r in runs:\n    print(r, 'issues' if r.i else 'prs-only', 'h merged=', r.n)\nEOF\necho $TMPDIR"
+  assert.equal(printLine(script, 'run-7 prs-only 8 h merged= 223'), "print(r, 'issues' if r.i else 'prs-only', 'h merged=', r.n)")
+  // two prints with words: the one whose words the line holds, not the last
+  assert.equal(printLine("print('gateway', a, 'of', b)\nprint('poverty revs times', t)", 'gateway 3 of 238'), "print('gateway', a, 'of', b)")
+  // no print's words in the line: a print of values alone may have printed it; else none
+  assert.equal(printLine("print('totals')\nprint(n)", '41'), 'print(n)')
+  assert.equal(printLine("print('totals')", '41'), '')
+})

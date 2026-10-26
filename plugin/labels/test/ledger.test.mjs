@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { textWidth } from '../../core/text.js'
-import { chosenOf, definition, examples, isNegative, ledgerTop, partOf, rowText, toneOf, valueOrder, whoOf, wrapRuns } from '../ledger.mjs'
+import { chosenOf, definition, examples, isNegative, ledgerTop, partOf, defLine, rerunArgs, rowText, toneOf, valueOrder, whoOf, wrapRuns } from '../ledger.mjs'
 
 const W = 74
 const ROWS = 37
@@ -36,8 +36,10 @@ test('at rest each label is a table: its name and records, then each value with 
   assert.equal(rowText(top.head), 'Labels · 5 labels')
   const t = text(top.rows)
   assert.match(t[0], /^stuck {2,}9,921$/)
-  assert.match(t[1], /^ {2}yes {7}▅+ +1,175 +12%$/)
-  assert.match(t[2], /^ {2}no {8}▅+ +8,746 +88%$/)
+  // under its name, its definition on one line
+  assert.equal(t[1], 'regex: stuck|blocked')
+  assert.match(t[2], /^ {2}yes {7}▅+ +1,175 +12%$/)
+  assert.match(t[3], /^ {2}no {8}▅+ +8,746 +88%$/)
   // a trial says so; a value with no records shows its 0 with no bar
   assert.ok(t.some(x => /^post_kind +120 of 9,921 at random$/.test(x)))
   assert.ok(t.some(x => /^ {2}question {9} +0 +0%$/.test(x)))
@@ -47,7 +49,7 @@ test('at rest each label is a table: its name and records, then each value with 
   assert.equal(toneOf(['yes', 'no'], 'no'), 'neg')
   assert.equal(toneOf(['merged', 'closed'], 'closed'), 'v1')
   assert.equal(isNegative(['no', 'maybe'], 'no'), false)
-  const no = top.rows[2]
+  const no = top.rows[3]
   assert.deepEqual([no.find(r => r.s.startsWith('no'))?.tone, no.find(r => r.s.startsWith('▅'))?.tone], ['neg', 'track'])
 })
 
@@ -63,17 +65,20 @@ test('many labels: when the tables do not fit, each label is one line, its value
   fits(top.rows)
 })
 
-test('a value open: its label a table with the ▸, the others one line each, its examples one line each', () => {
+test('a value open: its label alone under `Labels › name`, its sentence, its values with the ▸, its examples one line each', () => {
   const chosen = chosenOf(FIVE, { label: 'asks_review', value: 'yes' })
   const top = ledgerTop(FIVE, chosen, { w: W, rows: ROWS })
+  assert.equal(top.head.map(r => r.s).join(''), 'Labels › asks_review')
   const t = text(top.rows)
-  assert.deepEqual(t.slice(0, 3).map(x => x.split(/\s+/)[0]), ['stuck', '', 'asks_review'])
-  assert.match(t[3], /^▸ yes +▅+ +2,165 +22%$/)
-  // a label folded to one line is cut with … where its values do not fit
-  assert.ok(t.find(x => x.startsWith('post_kind')).endsWith('…'))
+  // no other label: the sentence (in short, plain words, no press; a code label's its first line that is not the def)
+  assert.equal(t[0], 'code: return "yes"')
+  assert.equal(top.rows[0].some(r => r.part), false)
+  assert.equal(t[1], '')
+  assert.match(t[2], /^▸ yes +▅+ +2,165 +22%$/)
+  assert.ok(!t.some(x => x.startsWith('stuck') || x.startsWith('post_kind')))
   const ex = examples(ASKS, 'yes', { at: 0, total: 2165, records: recs(30) }, { w: W, rows: 20, sel: null, place })
   const e = text(ex.rows)
-  assert.match(e[0], /^yes · 2,165 +1–18 of 2,165$/)
+  assert.match(e[0], /^examples · yes 2,165 +1–18 of 2,165$/)
   // the match within the first third, the words before it cut at a word's edge
   assert.match(e[1], /^ {2}wren-1 {3}…please take a look, REVIEW WANTED for my change to the…$/)
   assert.equal(e.at(-1), '  ↓ 2,147 more')
@@ -82,7 +87,7 @@ test('a value open: its label a table with the ▸, the others one line each, it
   assert.deepEqual(ex.rows[1].filter(r => r.bold).map(r => [r.s, r.tone]), [['REVIEW WANTED', 'v0']])
   fits([...top.rows, ...ex.rows])
   // a press: a value row opens it, an example picks it
-  assert.deepEqual(partOf(top.rows[3][0].part), ['v', 'asks_review', 'yes'])
+  assert.deepEqual(partOf(top.rows[2][0].part), ['v', 'asks_review', 'yes'])
   assert.deepEqual(partOf(ex.rows[1][0].part), ['r', 'runs/a/board.jsonl#L1'])
 })
 
@@ -116,22 +121,39 @@ test('an example picked opens in place: its words over up to five lines, where i
   assert.ok(mp.some(x => x.trim() === 'the model: says thanks'))
 })
 
-test('one label opens on its first value with records; d shows the definition whole and what it went over', () => {
+test('one label opens on its first value with records; its definition holds every field, aligned, the rule whole', () => {
   const chosen = chosenOf([TONE], {})
   assert.deepEqual([chosen.lab.name, chosen.value], ['tone', 'friendly'])
   const t = text(ledgerTop([TONE], chosen, { w: W, rows: ROWS }).rows)
-  assert.match(t[0], /^tone +60 of 9,921 at random$/)
-  assert.match(t[1], /^▸ friendly/)
-  assert.equal(t.filter(x => /^[^\s▸]/.test(x)).length, 1)
+  assert.equal(t[0], 'prompt: stuck|blocked')
+  assert.match(t[2], /^▸ friendly/)
+  // the definition's side: no sentence when the label has no plain one (the fields hold the rule whole)
+  assert.deepEqual(ledgerTop([TONE], chosen, { w: W, rows: ROWS, def: true }).rows, [])
   // nothing named and more than one label: at rest
   assert.equal(chosenOf(FIVE, {}), null)
   // a value named that the label does not have: its first with records
   assert.equal(chosenOf(FIVE, { label: 'post_kind', value: 'gone' }).value, 'status')
   const d = definition(ASKS, W)
-  assert.equal(rowText(d[0]), 'definition · code')
-  assert.deepEqual(d[1], { code: 'def label(u):\n    return "yes"' })
-  assert.equal(rowText(d.at(-1)), '9,921 records in runs/*/board.jsonl')
-  assert.equal(rowText(definition(STUCK, W)[1]), '  stuck|blocked')
+  assert.equal(rowText(d[0]), 'kind     code')
+  assert.equal(rowText(d[1]), 'code     ')
+  assert.deepEqual(d[2], { code: 'def label(u):\n    return "yes"' })
+  assert.equal(rowText(d[3]), 'over     runs/*/board.jsonl')
+  assert.equal(rowText(d.at(-1)), 'values   yes 2,165  22%   no 7,756  78%')
+  const clock = at => `t${at}`
+  assert.deepEqual(definition({ ...STUCK, made: 5, by: 'person' }, W, p => p, { clock }).map(rowText), [
+    'kind     regex', 'rule     stuck|blocked', 'over     runs/*/board.jsonl', '         9,921 records · made t5 by you', 'values   yes 1,175  12%   no 8,746  88%'])
+  // a prompt label: its prompt wrapped under itself, its model (the reads' own when it names none), when it was read
+  const p = definition({ ...TONE, rule: 'The post is friendly. '.repeat(5).trim(), run: { at: 9 } }, 40, x => x, { model: 'sonnet', clock })
+  const lines = p.map(rowText).slice(1, p.findIndex(r => rowText(r).startsWith('model')))
+  assert.ok(lines[0].startsWith('prompt   The post') && lines.slice(1).every(x => /^ {9}\S/.test(x)) && lines.every(x => textWidth(x) <= 40))
+  assert.equal(lines.map(x => x.slice(9)).join(' '), 'The post is friendly. '.repeat(5).trim())
+  assert.ok(p.map(rowText).includes('model    sonnet'))
+  assert.match(p.map(r => rowText(r).trim()).join(' '), /60 of 9,921 records at random · read by Claude at t9/)
+  // the rule, the model and the records a press each; the one in the input bar bold, `← editing` after it
+  assert.deepEqual([...new Set(p.flat().map(r => r.part).filter(Boolean))].map(x => partOf(x)), [['f', 'rule'], ['f', 'model'], ['f', 'in']])
+  const ed = definition(STUCK, W, x => x, { editing: 'rule' })
+  assert.equal(rowText(ed[1]), 'rule     stuck|blocked   ← editing')
+  assert.ok(ed[1].find(r => r.s === 'stuck|blocked').bold)
 })
 
 test('p n walk every value in reading order; a row names a table row by its key, a line by who wrote it', () => {
@@ -153,4 +175,36 @@ test('a narrow pane: every state still fits its width, names and words cut with 
   for (const l of list) fitsIn(ledgerTop(list, chosenOf(list, { label: l.name }), { w, rows: ROWS }).rows)
   for (const sel of [null, 'runs/a/board.jsonl#L2']) fitsIn(examples(ASKS, 'yes', { at: 3, total: 2165, records: recs(12) }, { w, rows: 14, sel, place }).rows)
   fitsIn(definition(long, w).filter(r => Array.isArray(r)))
+})
+
+test("a label's definition line: how it was made and its rule, a --prompt's first sentence", () => {
+  const timing = { name: 'ask_timing', kind: 'prompt', rule: 'The post asks when the next round comes. Count a post that guesses the time too.', values: ['yes', 'no'], counts: { yes: 1607, no: 1366 } }
+  assert.equal(defLine(timing), 'prompt: The post asks when the next round comes.')
+  assert.equal(defLine({ name: 'x', kind: 'set', values: ['a'], counts: { a: 2 } }), 'values Claude gave records after reading them')
+  assert.equal(defLine({ name: 'y', kind: 'code', rule: 'import re\n# the purpose\ndef label(r):\n    return r["kind"]' }), 'code: return r["kind"]')
+  // a code label that opens with a comment: the comment, which says in words what the code does
+  assert.equal(defLine({ name: 'z', kind: 'code', rule: '# Sorts an edit by its topic,\n# from its page name.\nimport re\nTOPICS = [1]\ndef label(r):\n    return "x"' }), 'code: Sorts an edit by its topic, from its page name.')
+  // a rule made with --says: its plain sentence, once, under the head on either side; the definition holds the rule
+  const says = { name: 'stuck', kind: 'regex', rule: '(?i)\\b(stuck|blocked)\\b', says: 'The message says its writer cannot go on.', values: ['yes', 'no'] }
+  assert.equal(defLine(says), 'The message says its writer cannot go on.')
+  assert.deepEqual(text(ledgerTop([says], chosenOf([says], {}), { w: 80, rows: ROWS, def: true }).rows), ['The message says its writer cannot go on.', ''])
+  assert.deepEqual(definition(says, 80).slice(0, 2).map(rowText), ['kind     regex', 'rule     (?i)\\b(stuck|blocked)\\b'])
+})
+
+test('a change applies the label again by the command Claude runs, everything else as it was', () => {
+  const stuck = { ...STUCK, says: 'The writer cannot go on.', where: null, within: null, model: null, limit: null, seed: 0 }
+  assert.deepEqual(rerunArgs(stuck, { rule: 'stuck|blocked|waiting on' }).args,
+    ['label', 'stuck', '--in', 'runs/*/board.jsonl', '--regex', 'stuck|blocked|waiting on', '--values', 'yes,no', '--says', 'The writer cannot go on.', '--json'])
+  // a prompt label: its model, its trial and its seed stay; null clears the model
+  const kind = { ...KIND, rule: 'What the post is for.', model: 'opus', limit: 40, seed: 7, reason: true, within: ['stuck', 'yes'] }
+  assert.deepEqual(rerunArgs(kind, { in: 'runs/a/board.jsonl' }).args,
+    ['label', 'post_kind', '--in', 'runs/a/board.jsonl', '--prompt', 'What the post is for.', '--values', 'status,review,claim,question,other', '--within', 'stuck=yes', '--model', 'opus', '--limit', '40', '--seed', '7', '--reason', '--json'])
+  assert.ok(!rerunArgs(kind, { model: null, limit: null }).args.includes('--model'))
+  // a code label's code on stdin, its own values found again unless changed
+  const r = rerunArgs({ ...ASKS, values: ['yes', 'no'] }, { rule: 'def label(u):\n    return "no"' })
+  assert.deepEqual(r.args, ['label', 'asks_review', '--in', 'runs/*/board.jsonl', '--code', '-', '--json'])
+  assert.equal(r.stdin, 'def label(u):\n    return "no"')
+  // nothing to apply: no rule, or no records named
+  assert.equal(rerunArgs({ ...STUCK, rule: '' }), null)
+  assert.equal(rerunArgs(STUCK, { in: '' }), null)
 })

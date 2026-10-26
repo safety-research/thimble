@@ -131,6 +131,18 @@ test("a drawing never starts a count, since Claude Code stops a drawing's calls 
   expect(counted()).toBe(1)
 })
 
+test('an empty folder: the count ends well with nothing to count, so the bar names no coverage and no failure line shows', async ($, on) => {
+  // the kernel printed nothing and ended well
+  const w = world(on, { ok: true, out: '' })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(100)
+  expect(w.ran.some(a => a.includes('coverage'))).toBe(true)
+  const line = textOf(await $.ui.render(BAND))
+  expect(line).toContain('l 2 labels')
+  expect(line).not.toContain('coverage')
+  expect(line).not.toContain('could not be counted')
+})
+
 /** Elements as plain data, for drawing the bar without a surface. */
 const ELS = { Box: (p: Any) => ({ type: 'Box', props: p }), Text: (p: Any) => ({ type: 'Text', props: p }), Button: (p: Any) => ({ type: 'Button', props: p }) }
 
@@ -148,8 +160,11 @@ test('each switch takes its items off the bar, and v waits while a design runs',
   const all = (on: (k: string) => boolean) => barRows(stateOnly(state), ELS, 100, { on, preview: true }).then(textOf)
   expect(await all(() => true)).toContain('v card')
   expect(await all(() => true)).toContain('r coverage 43% (3/7 files) · l 2 labels')
-  expect(await all(k => k !== 'counts')).not.toContain('coverage')
-  expect(await all(k => k !== 'counts')).not.toContain('labels')
+  // Coverage and Labels each take their own item off the bar
+  expect(await all(k => k !== 'coverage')).not.toContain('coverage')
+  expect(await all(k => k !== 'coverage')).toContain('l 2 labels')
+  expect(await all(k => k !== 'labels')).not.toContain('labels')
+  expect(await all(k => k !== 'labels')).toContain('r coverage 43% (3/7 files)')
   expect(await all(k => k !== 'cards')).not.toContain('v card')
   // outside a preview, v shows only while no design runs
   state.designNow = 'd1'

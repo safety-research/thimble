@@ -12,6 +12,20 @@
 // Under the evidence, labels, coverage and claims panes stands the pane's side thread (threads/seam.ts threadUnder):
 // its conversation and an input bar that asks it about what the pane shows, as 0.10's side panel had under each pane.
 //
+// The way back: the pane keeps a trail of the panes it showed before this one (trail.mjs). A pane opened while the
+// pane is open goes on top of it (a citation opened from a side answer stands over that answer); the row at the top
+// names what esc does there, as the bar names a key (`esc back to claim`, on the trail's first pane `esc close`), a click
+// that does the same: Claude Code closes a pane on esc (and on its close mark), and while the trail holds a pane the
+// ui.close hook goes back to it instead.
+//
+// Docked beside the conversation, the pane keeps its input bar and its key row at its bottom: the drawing above them
+// gets the rows left over (a pane that lays itself out reads them as its `bodyRows`), the side thread's conversation
+// follows it, and when the two are taller than that room they scroll in it with the wheel and ↑ ↓ (the ui.scroll
+// hook), the end shown when the conversation grows. In a pane whose drawing fits, ↑ and ↓ press the
+// pane's k and j (the previous and next claim, the coverage row above or below): Claude Code gives a plugin no arrow
+// keys of its own, but sends ↑ and ↓ in a pane that can scroll as scrolls, and a row under the frame that is never
+// shown keeps the pane scrollable.
+//
 // (Each kind's draw is imported and called by name: Claude Code follows `$` only into functions a file declares or
 // imports, so a list of draws that take `$` cannot be called from here.)
 import type { EngineInterface, Register } from 'claude-code'
@@ -21,8 +35,12 @@ import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
-import { drawSettings } from '../panes/settings'
-import { drawThreadsPane, threadUnder } from '../threads/seam'
+import { drawSettings, settingsFocus } from '../panes/settings'
+import { drawThreadsPane, threadPaneParts, threadUnderSplit } from '../threads/seam'
+import { quiet } from './askcell.js'
+import { cut } from './text.js'
+import { accent } from './theme'
+import { crumbOf, nextTrail, treeRows } from './trail.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -31,29 +49,57 @@ type Any = any
 export const PANE_ID = 'thimble'
 const NOW = { plugin: 'thimble', key: 'pane' } as const
 
+/** A pane the trail keeps: its kind and arguments, the title it was opened with, the rows it asked for. */
+export type PaneEntry = { kind: string; args: unknown; title: string; rows?: number }
+export type PaneNow = { kind: string; args: unknown; title?: string; escape?: boolean; rows?: number; trail?: PaneEntry[] }
+
 /** `focus`: the person opened it (a key, a click, a command), so it takes the keyboard and Esc closes it. Answers
  *  whether the pane is on screen; once it is, the notice that said the side pane could not open (`pane:…`) goes.
  *  Claude Code places a pane at any width only when the person's own command, prompt or click opened it; a key at the
  *  prompt is none of these, so below 144 columns (110 once the person opened the pane before) the pane would wait
  *  unseen until the terminal grows. Such a pane is closed, and the caller says why. */
 /** Claude Code sets `closeOnEscape` and `rows` anew on each open, so an open that only redraws the pane with other
- *  arguments (a key in it: j, v, a page) keeps those the open pane has; else Esc would stop closing it after one key. */
-export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean; rows?: number } = {}): Promise<boolean> {
+ *  arguments (a key in it: j, v, a page) keeps those the open pane has; else Esc would stop closing it after one key.
+ *  The pane shown before goes on the trail, or this one takes its place (trail.mjs nextTrail); `under` goes under it. */
+export async function openPane($: Engine, kind: string, args: unknown, title: string, o: { focus?: boolean; rows?: number; under?: PaneEntry } = {}): Promise<boolean> {
   const was = await paneNow($)
   const open = was ? await isOpen($) : false
   const escape = Boolean(o.focus || (open && was?.escape))
   const rows = o.rows ?? (open && was?.kind === kind ? was?.rows : undefined)
-  await $.state.set(NOW, { kind, args, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}) })
+  const trail = nextTrail(was, open, kind, args) as PaneEntry[]
+  // `under`: the pane esc goes back to, when the trail does not already end on it (a label opened from under an answer
+  // goes back to all the labels)
+  const last = trail[trail.length - 1]
+  if (o.under && !(last?.kind === o.under.kind && JSON.stringify(last.args ?? null) === JSON.stringify(o.under.args ?? null))) trail.push(o.under)
+  await $.state.set(NOW, { kind, args, title, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}), ...(trail.length ? { trail } : {}) })
   const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
   if (r.isPlaced) {
     // the line that said the side pane could not open (a narrow terminal: `pane:<kind>`) goes once it is open, on
-    // whatever it shows (/threads opens a thread a key asked for on its citation's evidence)
+    // whatever it shows
     const line = await failLineNow($)
     if (line?.about?.startsWith('pane:')) await failCleared($, line.about)
     return true
   }
   await closePane($)
   return false
+}
+
+/** Back down the trail: to its pane `to` (an index into it; the last one when left out), the panes over it gone. False
+ *  when the trail is empty (the pane is on its first pane). The pane takes the keyboard: the person moves in it. */
+export async function paneBack($: Engine, to?: number, o: { later?: boolean } = {}): Promise<boolean> {
+  const now = await paneNow($)
+  const trail = now?.trail ?? []
+  if (!now || !trail.length) return false
+  const i = to == null ? trail.length - 1 : Math.max(0, Math.min(trail.length - 1, to))
+  const e = trail[i]!
+  const rest = trail.slice(0, i)
+  await $.state.set(NOW, { kind: e.kind, args: e.args, title: e.title, escape: true, ...(e.rows ? { rows: e.rows } : {}), ...(rest.length ? { trail: rest } : {}) })
+  const open = () => $.ui.open({ id: PANE_ID, title: e.title, focus: true, closeOnEscape: true, ...(e.rows ? { rows: e.rows } : {}) })
+  // inside Claude Code's close (esc) the pane is closing, so the open that retitles it and gives it the keyboard back
+  // waits until that close was refused
+  if (o.later) $.clock.after(0, () => { void open().catch(() => undefined) })
+  else await open()
+  return true
 }
 
 /** Whether thimble's pane is open (the person may have closed it); open when Claude Code cannot say. */
@@ -66,8 +112,6 @@ export async function closePane($: Engine): Promise<void> {
   await $.ui.close({ id: PANE_ID })
 }
 
-export type PaneNow = { kind: string; args: unknown; escape?: boolean; rows?: number }
-
 export async function paneNow($: Engine): Promise<PaneNow | null> {
   return ((await $.state.get(NOW)).value ?? null) as PaneNow | null
 }
@@ -79,28 +123,145 @@ export async function turnPane($: Engine): Promise<void> {
   if (now && now.kind !== 'settings') await closePane($)
 }
 
-/** A pane's drawing with its side thread under it (threads/seam.ts threadUnder); the drawing alone when the thread
- *  cannot be drawn. */
-async function withThread($: Engine, e: Any, now: { kind: string; args: unknown }, els: Any, drawn: unknown): Promise<unknown> {
-  let under: unknown[] = []
-  try { under = await threadUnder($, e, now.kind, now.args, els) } catch { under = [] }
-  return under.length ? els.Box({ flexDirection: 'column', children: [drawn, ...under] }) : drawn
+// ------------------------------------------------------------------------------------------------ the drawing
+
+/** The kinds whose drawing leaves room for the side thread under it itself (they read threads/seam.ts rowsUnder):
+ *  they get the pane's rows less the top row only. */
+const OWN_ROOM = new Set(['labels', 'coverage'])
+/** The panes that say their name at the left of the top row. */
+const NAMED: Record<string, string> = { settings: 'Settings' }
+/** The kinds with a side thread under them. */
+const THREADED = new Set(['evidence', 'labels', 'coverage', 'claims'])
+
+/** The last drawing's layout, for the ui.scroll hook: which pane, whether its input bar is pinned to its bottom, how
+ *  many rows of its drawing do not fit, the keys its Buttons press, and how a drawing that scrolls a part of itself
+ *  scrolls it (scrollsOwn). */
+let laid: { id: string; pinned: boolean; over: number; keys: Map<string, () => unknown>; own: ((by: number) => unknown) | null; arrows?: ((dir: number) => unknown) | null } | null = null
+/** A drawing that fits the pane but scrolls a part of itself (the claims' detail under their overview) names how, while
+ *  it draws: the wheel and the page keys then move that part, by `by` rows (a page key by the pane's rows). */
+let own: ((by: number) => unknown) | null = null
+export function scrollsOwn(fn: ((by: number) => unknown) | null): void {
+  own = fn
 }
+/** A drawing that moves a pick of its own with ↑ and ↓ (the settings' rows) names how, while it draws: `dir` -1 or 1. */
+let arrows: ((dir: number) => unknown) | null = null
+export function arrowsOwn(fn: ((dir: number) => unknown) | null): void {
+  arrows = fn
+}
+/** How far the drawing above the input bar is scrolled, in the pane it was scrolled in. */
+let scrolled = { id: '', by: 0, conv: 0 }
 
 /** The pane's columns at its last drawing, or 0 before one: the width a copy of it is drawn at (paneDrawing). */
 let paneColumns = 0
+
+/** `els` whose Buttons note their hotkeys and presses in `keys`, so ↑ and ↓ can press k and j. */
+function noting(els: Any, keys: Map<string, () => unknown>): Any {
+  const Button = (p: Any) => {
+    if (p && typeof p.hotkey === 'string' && typeof p.onPress === 'function') keys.set(p.hotkey, p.onPress)
+    return els.Button(p)
+  }
+  // over an object of its own: Claude Code's table is frozen, and the fixer's plain elements make any name an element
+  return new Proxy({}, { get: (_t, k) => (k === 'Button' ? Button : els[k]) })
+}
+
+/** The kind's own drawing, in `room` rows. */
+async function drawKind($: Engine, e: Any, now: PaneNow, els: Any, room: number): Promise<unknown> {
+  const er = { ...e, props: { ...(e?.props ?? {}), scroll: { ...(e?.props?.scroll ?? {}), bodyRows: room } } }
+  if (now.kind === 'evidence') return drawEvidence($, er, now.args, els)
+  if (now.kind === 'labels') return drawLabels($, er, now.args, els)
+  if (now.kind === 'coverage') return drawCoverage($, er, now.args, els)
+  if (now.kind === 'settings') return drawSettings($, er, now.args, els)
+  if (now.kind === 'claims') return drawClaimsPane($, er, now.args, els)
+  if (now.kind === 'threads' || now.kind === 'thread') return drawThreadsPane($, er, now.kind, now.args, els)
+  return els.Text({ dimColor: true, children: `thimble has no pane ${now.kind}.` })
+}
+
+/** The top row, at its right: the pane's close key as the bar draws a key, a click too. esc goes back down the trail
+ *  while it holds a pane (`esc back to <the pane under this one>`), else closes the pane (`esc close`). A pane that did
+ *  not take the keyboard has no esc of its own: its words alone then, a click each. (Claude Code's own close mark, above
+ *  this row, does as esc does: the ui.close hook.) */
+function topRow($: Engine, els: Any, now: PaneNow, W: number): Any[] {
+  const { Box, Button, Text } = els
+  const trail = now.trail ?? []
+  const under = trail[trail.length - 1]
+  const back = under ? crumbOf(under.kind, under.args) : null
+  const words = crumbOf(now.kind, now.args).esc ?? (back ? back.back ?? `back to ${cut(back.words, Math.max(8, W - 16))}` : 'close')
+  // a pane with a name of its own says it at the left (Settings)
+  const name = NAMED[now.kind]
+  const key = now.escape ? [Text({ key: 'k', color: accent(), bold: true, children: 'esc' }), Text({ key: 's', children: ' ' })] : []
+  const btn = Button({ key: under ? 'pane-back' : 'pane-close', plain: true, label: under ? 'back' : 'close the pane', hover: quiet(under ? 'pane-back' : 'pane-close'), onPress: () => (under ? paneBack($) : closePane($)), children: [
+    ...key, Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: words }),
+  ] })
+  return [Box({ key: 'pane-top', flexDirection: 'row', justifyContent: name ? 'space-between' : 'flex-end', width: W, children: [
+    ...(name ? [Text({ key: 'pane-name', bold: true, children: name })] : []),
+    Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 1, children: [btn] }),
+  ] })]
+}
+
+/** The pane's name for its scroll: another pane starts at its top. */
+const idOf = (now: PaneNow) => `${now.kind}:${JSON.stringify(now.args ?? null)}`
 
 /** What the pane shows now, drawn with `els`: Claude Code's elements when it draws the pane, or plain ones when the
  *  fixer gets a text copy of the screen (fix/screen.ts). */
 export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any): Promise<unknown> {
   try {
-    if (now?.kind === 'evidence') return withThread($, e, now, els, await drawEvidence($, e, now.args, els))
-    if (now?.kind === 'labels') return withThread($, e, now, els, await drawLabels($, e, now.args, els))
-    if (now?.kind === 'coverage') return withThread($, e, now, els, await drawCoverage($, e, now.args, els))
-    if (now?.kind === 'settings') return await drawSettings($, e, now.args, els)
-    if (now?.kind === 'claims') return withThread($, e, now, els, await drawClaimsPane($, e, now.args, els))
-    if (now?.kind === 'threads' || now?.kind === 'thread') return await drawThreadsPane($, e, now.kind, now.args, els)
-    return els.Text({ dimColor: true, children: now ? `thimble has no pane ${now.kind}.` : 'Nothing is open here.' })
+    if (!now) return els.Text({ dimColor: true, children: 'Nothing is open here.' })
+    const W = Math.max(20, Number(e?.props?.bodyColumns) || 80)
+    const H = Math.max(8, Number(e?.props?.scroll?.bodyRows) || 40)
+    // docked, the frame is the pane's whole height and the input bar stays at its bottom; inline the frame fits the tree
+    const pinned = e?.props?.placement === 'dock'
+    const keys = new Map<string, () => unknown>()
+    const kels = noting(els, keys)
+    own = null
+    arrows = null
+    const top = topRow($, els, now, W)
+    const T = top.length ? treeRows(top, W) : 0
+    // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
+    // and input bar (`under`, kept at the bottom)
+    let under: Any[] = []
+    let conv: Any[] = []
+    let drawn: unknown
+    if (now.kind === 'thread') {
+      // a thread's own key row and input bar stand where a pane's thread's do
+      const p = await threadPaneParts($, { ...e, props: { ...(e?.props ?? {}), scroll: { ...(e?.props?.scroll ?? {}), bodyRows: Math.max(4, H - T) } } }, now.args, kels)
+      under = p.bottom as Any[]
+      conv = p.body.slice(1) as Any[]
+      drawn = p.body[0] ?? null
+    } else {
+      if (THREADED.has(now.kind)) {
+        try { ({ conv, bottom: under } = (await threadUnderSplit($, e, now.kind, now.args, kels)) as { conv: Any[]; bottom: Any[] }) } catch { under = []; conv = [] }
+      }
+      drawn = await drawKind($, e, now, kels, Math.max(4, H - T - (OWN_ROOM.has(now.kind) ? 0 : treeRows(under, W))))
+    }
+    const U = under.length ? treeRows(under, W) : 0
+    const id = idOf(now)
+    if (!pinned) {
+      laid = { id, pinned: false, over: 0, keys, own, arrows }
+      const parts = [...top, drawn, ...conv, ...under]
+      return parts.length === 1 ? drawn : els.Box({ flexDirection: 'column', children: parts })
+    }
+    // the rows above the input bar, and how far the drawing and the conversation reach past them
+    const space = Math.max(1, H - T - U)
+    const C = conv.length ? treeRows(conv, W) : 0
+    const tall = treeRows(drawn, W) + C
+    // a drawing taller than the room loses a row of it to the line that says how much more there is
+    const over = tall > space ? tall - (space - 1) : 0
+    // a pane opened again, or a conversation that grew (a question, an answer), shows its end, as a chat does
+    if (scrolled.id !== id) scrolled = { id, by: C ? over : 0, conv: C }
+    else if (C !== scrolled.conv) scrolled = { id, by: over, conv: C }
+    scrolled.by = Math.max(0, Math.min(over, scrolled.by))
+    laid = { id, pinned: true, over, keys, own, arrows }
+    const left = over - scrolled.by
+    const cue = over > 0 ? els.Text({ key: 'pane-more', dimColor: true, wrap: 'truncate-end', children: left > 0 ? `↓ ${left} more row${left === 1 ? '' : 's'} · scroll or ↓` : `↑ ${over} row${over === 1 ? '' : 's'} above · scroll or ↑` }) : null
+    const body = els.Box({ key: 'pane-body', flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden', children: [
+      els.Box({ key: 'pane-body-in', flexDirection: 'column', flexShrink: 0, ...(scrolled.by ? { position: 'relative', top: -scrolled.by } : {}), children: [drawn, ...conv] }),
+    ] })
+    return els.Box({ flexDirection: 'column', children: [
+      els.Box({ key: 'pane-frame', flexDirection: 'column', height: H, children: [...top, body, ...(cue ? [cue] : []), ...(under.length ? [els.Box({ key: 'pane-under', flexDirection: 'column', flexShrink: 0, children: under })] : [])] }),
+      // a row past the frame, never shown (this hook takes every scroll of the pane): Claude Code sends ↑ and ↓ as
+      // scrolls only to a pane that can scroll
+      els.Text({ key: 'pane-past', children: ' ' }),
+    ] })
   } catch (err) {
     return els.Text({ color: 'error', wrap: 'wrap', children: `This pane could not be drawn (${String((err as Error)?.message || err).slice(0, 160)}). Press esc, then open it again.` })
   }
@@ -114,6 +275,36 @@ export async function paneDrawing($: Engine, els: Any): Promise<{ kind: string; 
   return { kind: now.kind, drawn: await drawPane($, e, now, els) }
 }
 
+/** A scroll of the docked pane: the drawing above its input bar moves in its room, or, where it fits, ↑ and ↓ press
+ *  k and j and the wheel and the page keys move the part the drawing scrolls itself (scrollsOwn). Claude Code's own
+ *  window stays where it is (the frame fills it). False for a pane drawn inline. */
+export async function scrollPane($: Engine, e: { by?: number; origin?: { kind?: string }; pointer?: unknown }): Promise<boolean> {
+  const l = laid
+  if (!l?.pinned) return false
+  const by = Number(e?.by) || 0
+  const arrow = e?.origin?.kind === 'person' && !e?.pointer && Math.abs(by) === 1
+  if (arrow && l.arrows) {
+    await Promise.resolve(l.arrows(by > 0 ? 1 : -1)).catch(() => undefined)
+    return true
+  }
+  if (arrow && l.over === 0) {
+    const press = l.keys.get(by > 0 ? 'j' : 'k')
+    if (press) await Promise.resolve(press()).catch(() => undefined)
+    return true
+  }
+  // a drawing that fits and scrolls a part of itself: the wheel and the page keys move that part
+  if (by && !l.over && l.own) {
+    await Promise.resolve(l.own(by)).catch(() => undefined)
+    return true
+  }
+  if (!by || !l.over) return true
+  // a page key moves by the pane's rows, Home and End to the ends (clamped)
+  const was = scrolled.id === l.id ? scrolled.by : 0
+  scrolled = { ...scrolled, id: l.id, by: Math.max(0, Math.min(l.over, was + by)) }
+  if (scrolled.by !== was) $.ui.invalidate('ui.render')
+  return true
+}
+
 export const registerPanes: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
     const els = $.ui.resolve(e) as Any
@@ -121,4 +312,21 @@ export const registerPanes: Register = on => {
     if (cols > 0) paneColumns = cols
     return drawPane($, e, await paneNow($), els)
   })
+
+  // esc, or the pane's close mark: back down the trail while it holds a pane, else closed
+  on('ui.close', { id: PANE_ID }, async ($, e, next) => {
+    if (e.origin?.kind === 'person' && (await paneBack($, undefined, { later: true }).catch(() => false))) return undefined
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // the ring moving in the settings pane: within a row it picks that choice, onto another row it lands on its choice set
+  on('ui.focus', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
+    const now = await paneNow($)
+    if (now?.kind !== 'settings') return next(e)
+    return settingsFocus($, e as Any, next as Any)
+  }).catch(($, e, next) => next(e))
+  on('ui.scroll', { component: 'Pane', requestId: PANE_ID }, async ($, e, next) => {
+    if (await scrollPane($, e as Any)) return {}
+    return next(e)
+  }).catch(($, e, next) => next(e))
 }

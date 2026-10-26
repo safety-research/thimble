@@ -36,9 +36,11 @@ PROMPTS_DIR = Path(os.environ.get("THIMBLE_PROMPTS_DIR") or REPO_ROOT / "prompts
 # (the view reviewer's registered prompt, its `review` section), dev-view-review (a review run's prompt), dev-view-task
 # (a view build's prompt), dev-view-repair (what a repair's builder gets besides it), dev-view-change (a change to a
 # view, sent to its builder), dev-ticket-task (a code ticket's agent's prompt), file-viewer (the proposal of a viewer for
-# a file type, views.suggest) and view-fit (whether an extension's view fits a corpus, view_fit.py).
+# a file type, views.suggest), view-fit (whether an extension's view fits a corpus, view_fit.py) and thimble-fix (what
+# main reads of the person's /thimble-fix, fixes.ask).
 PROMPT_NAMES = ("main", "shared", "tools", "dev", "labels", "context", "card-check", "view-review", "dev-view-review",
-                "dev-view-task", "dev-view-repair", "dev-view-change", "dev-ticket-task", "file-viewer", "view-fit")
+                "dev-view-task", "dev-view-repair", "dev-view-change", "dev-ticket-task", "file-viewer", "view-fit",
+                "thimble-fix")
 # Agent definitions, in a plugin agent's form, that Claude Code gets with --agents instead of from plugin/agents/, where
 # main would also see them: the writer and the report check.
 AGENT_FILES = ("writer", "check")

@@ -50,17 +50,17 @@ export const TEXTS = {
   'lens-heads': {
     about: 'an important detail of the answer: an orange mark that opens a heads-up card',
     reader: 'observer/observer.ts',
-    use: "a section of the look's prompt while Important details is on",
+    use: "a section of the look's prompt while Heads-ups is on",
   },
   'lens-claims': {
-    about: "the turn's claims, each placed by a quote, in a cluster",
+    about: "the turn's claims, each placed by a quote, in a cluster, with why it holds",
     reader: 'observer/observer.ts',
-    use: "a section of the look's prompt while Claims is on",
+    use: "a section of the look's prompt after each reply while Claims is auto, else of a look of its own when f in the Claims pane asks",
   },
   'explain-expand': {
-    about: 'an explainer written again at more length, over the term, the answer and the files it cites',
+    about: 'an explainer of words the analyst picked, over the conversation, the words, the answer and the files it cites',
     reader: 'explain/expand.ts',
-    use: 'one model call when the person asks for a longer explainer',
+    use: 'one fork of the conversation when the person asks what words of an answer mean (e on selected words, a press on cited words in a pane)',
   },
   squeeze: {
     about: 'an answer rewritten at the levels the person picked on its chips, or a catch-up of the replies they missed',

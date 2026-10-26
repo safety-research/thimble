@@ -1,6 +1,6 @@
 // seam.ts: where Claims meet the rest of thimble (core/answerview.ts, core/pane.ts and observer/observer.ts
 // call each function by name, since Claude Code follows `$` only into functions a file declares or imports). The
-// feature's modules stand beside this file: term.ts (the store, a look's claims, c, /claims), store.js (the claims as
+// feature's modules stand beside this file: term.ts (the store, a look's claims, c), store.js (the claims as
 // pure functions), graph.js and pane.tsx (the pane), lens.mjs (the observer's claims lens); prompts/lens-claims.md.
 //
 //   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
@@ -11,10 +11,14 @@
 //   claimsMerge($, look)               what one look of the observer gave for the claims lens (look.out.claims,
 //                                      look.out.clusters), placed by their words in the look's messages
 //   claimsLookFailed($, look, why)     a look that gave nothing: the turn's claims are missing, and why
+//   claimsUnread($)                    the answered turns whose answers the claims have not read (found on demand)
+//   claimsFindStart($, n), claimsFindEnd($)   a look on demand for the claims of n answers began, or ended
+//   CLAIMS_FIND                        the address of f's Button in the pane (the observer's ui.press hook finds)
 //   drawClaimsPane($, e, args, els)    the side pane of kind `claims` (core/pane.ts)
 //   claimsThreadScope($, args)         what the side thread under the claims pane is about: the claim selected, the
-//                                      cluster selected, or where a claim was said (threads/pane.tsx)
-//   registerClaims                     its own hooks (/claims; x in the pane, which starts a repair inside its
+//                                      cluster selected, or where a claim was said, with the words its input bar's
+//                                      placeholder names and the claim a side answer answers (threads/pane.tsx)
+//   registerClaims                     its own hooks (x in the pane, which starts a repair inside its
 //                                      ui.press hook, as the tray's does)
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -24,14 +28,16 @@ import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
-import { CLAIMS_REPAIR, claimsThreadScope as threadScope, drawClaims, repairShown } from './pane'
-import { claimCount, claimsBarWords, claimsBright, claimsDigest, claimsLit, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
+import type { TurnRec } from '../core/answers'
+import { CLAIMS_FIND as FIND, CLAIMS_REPAIR, claimsThreadScope as threadScope, drawClaims, repairShown } from './pane'
+import { claimCount, claimsBarWords, claimsBright, claimsDigest, claimsFresh, claimsLit, claimsToFind, claimsUnread as unread, findEnd, findStart, lookClaims, lookFailed, openClaims, registerClaimsTerm } from './term'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
 export const CLAIMS_KEYS = ['c']
+export const CLAIMS_FIND = FIND
 
 export async function claimsKey($: Engine, key: string, _until: number): Promise<Take | null> {
   if (key !== 'c' || !featureOn('claims')) return null
@@ -42,12 +48,14 @@ export async function claimsKey($: Engine, key: string, _until: number): Promise
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('claims')) return []
   if (preview) return [{ id: 'claims', key: 'c', words: 'claims' }]
-  // no claims yet: nothing to open, so the bar shows no claims item until the first claim
-  if (!(await claimCount($))) return []
+  // no claims yet: the pane finds them on demand, so the item shows, without a count, once an answer waits for it
+  if (!(await claimCount($))) return (await claimsToFind($)).answers ? [{ id: 'claims', key: 'c', words: 'claims', press: () => openClaims($) }] : []
   const words = await claimsBarWords($)
-  // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims
-  const look = await claimsLit($) ? { color: accent() } : {}
-  return [{ id: 'claims', key: 'c', words, ...look, ...(await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
+  // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims. The session's
+  // first claims: the count pulses, and says `new` until the pane is first opened
+  const first = await claimsFresh($)
+  const look = first.lit || await claimsLit($) ? { color: accent() } : {}
+  return [{ id: 'claims', key: 'c', words: first.fresh ? `${words} · new` : words, ...look, ...(first.lit || await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
 }
 
 export async function claimsState($: Engine): Promise<Record<string, unknown>> {
@@ -62,11 +70,23 @@ export async function claimsLookFailed($: Engine, look: Look, why: string): Prom
   await lookFailed($, look, why)
 }
 
+export async function claimsUnread($: Engine): Promise<TurnRec[]> {
+  return unread($)
+}
+
+export async function claimsFindStart($: Engine, n: number): Promise<void> {
+  await findStart($, n)
+}
+
+export async function claimsFindEnd($: Engine): Promise<void> {
+  await findEnd($)
+}
+
 export async function drawClaimsPane($: Engine, e: Any, args: unknown, els: Any): Promise<unknown> {
   return drawClaims($, e, args, els)
 }
 
-export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: unknown }> {
+export async function claimsThreadScope($: Engine, args: unknown): Promise<{ about: string; args: unknown; ask: string; quote?: string }> {
   return threadScope($, args)
 }
 

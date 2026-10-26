@@ -67,6 +67,19 @@ test('v at an empty prompt spawns the designer fork with designer.md once the wo
   expect(w.spawns[0].description).toBe('card of the last answer (v)')
 })
 
+test('a click on the bar\'s `v card` spawns the designer fork, as v does', async ($, on) => {
+  const w = world(on)
+  await start($)
+  await answer($)
+  const bar = await $.ui.mount(BAND)
+  expect(textOf(await bar.drawn())).toContain('v card')
+  await bar.press({ key: 'bar-v' })
+  await bar.unmount()
+  await w.clock.advance(400)
+  expect(w.spawns.length).toBe(1)
+  expect(w.spawns[0].description).toBe('card of the last answer (v)')
+})
+
 test('a v whose prompt cannot be made types v, says why, and the next v works', async ($, on) => {
   const w = world(on, { unreadable: 1 })
   await start($)

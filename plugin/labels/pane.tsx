@@ -1,36 +1,45 @@
 // pane.tsx: the labels pane (core/pane.ts kind `labels`), drawn with Claude Code's own elements from what ledger.mjs
 // lays out. At rest each label is a short table of its values: a bar, the count and the share of the records (labels
-// whose tables do not fit fold to one line each). Opening a value folds the other labels to one line each and lists its
-// examples under them, one line each, the words the label matched bold in the value's color; the picked example opens
-// in place with where it is (`path:line`, relative to the session's folder, or with … in its middle outside it) and the
-// check keys. d shows the label's definition whole in place of the examples. The keys stay at the pane's bottom in
-// every state. A click moves too: a label's name or a value opens it (the open one again: back to all the labels), an
-// example picks it (again: closes it), `↑ N earlier` and `↓ N more` page the examples. The person's check of the
-// picked example (a number key, or a press on a value) counts in place of the label's value (labels.ts checkRecord);
-// the next example is picked after it.
+// whose tables do not fit fold to one line each). A label open stands alone under `Labels › name` and its plain
+// sentence: its values with their bars and the open value's examples, one line each, the words the label matched bold
+// in the value's color; the picked example opens in place with where it is (`path:line`, relative to the session's
+// folder, or with … in its middle outside it) and the check keys. d turns the detail to the label's definition: every
+// field it was made with in aligned rows. A press on the rule, a prompt label's model or the records it went over (or
+// e, for the rule) puts that field in the pane's input bar to change (labelEdit, which threads/pane.tsx draws there):
+// ↵ applies the label again with it, by the command Claude runs (edit.ts), esc cancels. The keys stay in one row above
+// the input in every state. A click moves too: a label's name or a value opens it (the open one again: back to all the
+// labels), an example picks it (again: closes it), `↑ N earlier` and `↓ N more` page the examples. The person's check
+// of the picked example (a number key, or a press on a value) counts in place of the label's value (labels.ts
+// checkRecord); the next example is picked after it. esc goes back to all the labels from a label, however it opened.
 //
 //   openLabels($, args)   opens the pane and gives it the keyboard (the bar's l, a click on its label count): all
 //                         the labels, or one label
 //   showLabels($, args)   what the pane shows next, as the person moves in it
 //   colorOf(values, v)    a value's color in the theme drawn now (labels/use.ts colors the label rows with it)
+//   labelEdit($, args)    the field the pane's arguments edit in the input bar, or null (threads/pane.tsx)
 //
 //   args: {label: the label open, value: the value whose examples show ('-': no value yet), at: the first example of
-//          the page, sel: the ref of the example picked, def: the definition in place of the examples}
+//          the page, sel: the ref of the example picked, def: the definition in place of the examples, edit: the
+//          field of the definition in the input bar}
 //   keys while the pane holds the keyboard: p n the previous or next value, in reading order over all the labels
-//          (nothing open: n the first, p the last) · k j the previous or next example (none picked: the last or the
-//          first shown), past the page's edge onto the next page · d the definition, or the examples again · b back to
-//          all the labels · 1-9 check the picked example as that value · 0 takes a check back
+//          (nothing open: n the first, p the last; the definition: the previous or next label) · k j the previous or
+//          next example (none picked: the last or the first shown), past the page's edge onto the next page · d the
+//          definition, or the examples again · e edit the rule · b back to all the labels · 1-9 check the picked
+//          example as that value · 0 takes a check back
 import type { EngineInterface } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { quiet } from '../core/askcell.js'
 import { rootHere, startDir } from '../core/env'
-import { openPane } from '../core/pane'
+import { busy } from '../bar/busy'
+import { openPane, paneBack } from '../core/pane'
 import { textWidth } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
-import { rowsUnder } from '../threads/seam'
+import { rowsUnder, type PaneEdit } from '../threads/seam'
+import { rerunLabel } from './edit'
+import { SETTINGS } from './labelreads.mjs'
 import { checkRecord, labelsData } from './labels'
-import { chosenOf, definition, examples, isNegative, ledgerTop, NONE, partOf, partsOf, valueOrder } from './ledger.mjs'
+import { chosenOf, definition, examples, isNegative, ledgerTop, NONE, partOf, partsOf, ruleWord, valueOrder } from './ledger.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,7 +47,7 @@ type Any = any
 type Run = { s: string; tone?: string; bold?: boolean; italic?: boolean; part?: string; hotkey?: string }
 type Row = Run[] | { code: string }
 
-export type LabelsArgs = { label?: string; value?: string; at?: number; sel?: string | null; def?: boolean }
+export type LabelsArgs = { label?: string; value?: string; at?: number; sel?: string | null; def?: boolean; edit?: string }
 
 /** The values' colors, the first value's first: for a dark background, and darker ones that read on a light one. */
 const DARK = ['#5aa2e6', '#cfae7e', '#3cc2b9', '#e384b2', '#b2c24f', '#8fa1bd', '#e0906a', '#7cc48a', '#d6bf5a', '#a0a0a0']
@@ -96,8 +105,11 @@ export function placeOf(ref: string, show: (path: string) => string = p => p): s
 
 const titleOf = (args: LabelsArgs) => (args.label ? `Label ${args.label}` : 'Labels')
 
+/** All the labels, as esc goes back to them from a label. */
+const ALL = { kind: 'labels', args: {}, title: 'Labels' }
+
 export async function openLabels($: Engine, args: LabelsArgs = {}): Promise<boolean> {
-  return openPane($, 'labels', args, titleOf(args), { focus: true, rows: 28 })
+  return openPane($, 'labels', args, titleOf(args), { focus: true, rows: 28, ...(args.label ? { under: ALL } : {}) })
 }
 
 export async function showLabels($: Engine, args: LabelsArgs): Promise<void> {
@@ -125,12 +137,17 @@ function rowEl(els: Any, row: Run[], key: string, press: (part: string) => unkno
     const hotkey = runs[0]!.hotkey
     kids.push(Button({
       key: `${key}:${part}`, plain: true, ...(hotkey ? { hotkey, label: runs.map(r => r.s).join('') } : {}),
+      // a field of the definition: no underline, so it does not read as a citation; under the pointer it lights up
+      ...(part.startsWith('f[') ? { hover: quiet(`labels-${key}:${part}`, { underline: false, inverse: true }) } : {}),
       onPress: () => press(part), children: runs.map((r, k) => span(r, i + k)),
     }))
     i = j
   }
   return Box({ key, flexDirection: 'row', children: kids })
 }
+
+/** Where a code label's code stands: under the definition's values, past their names (ledger.mjs definition). */
+const CODE_X = 9
 
 /** The rows a definition's code takes when Claude Code wraps it in `w` cells. */
 const codeRows = (code: string, w: number) => code.split('\n').reduce((s, l) => s + Math.max(1, Math.ceil(textWidth(l) / Math.max(10, w))), 0)
@@ -150,27 +167,54 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
 
   // the rows this drawing has: the pane's, less the side thread's under it (threads/pane.tsx)
   const room = Math.max(12, H - (await rowsUnder($, e, 'labels', a).catch(() => 5)))
-  const topOf = (c: Any) => ledgerTop(list, c, { w: W, rows: room - 4 })
-  /** The examples a value's page holds: the rows under the labels with that value open, less the examples' head. */
-  const perOf = (c: Any) => Math.max(3, room - 4 - topOf(c).rows.length - 1)
+  const topOf = (c: Any) => ledgerTop(list, c, { w: W, rows: room - 4, def: !!a.def || !!a.edit })
   const chosen = chosenOf(list, a) as { lab: Any; value: string } | null
-  const top = topOf(chosen)
   const label = chosen ? String(chosen.lab.name) : null
   const value = chosen?.value ?? null
   const go = (b: LabelsArgs) => showLabels($, b)
   const here = (b: LabelsArgs = {}) => go({ label: label!, value: value!, ...b })
+  const editable = !!chosen && chosen.lab.kind !== 'code' && !!String(chosen.lab.rule || '').trim()
 
-  // ---- under the labels: the definition, or the value's examples
+  // ---- the keys, in the one row above the input: each pushed with its words, in the order they stand
+  const keys: { k: string; label: string; onPress: () => unknown }[] = []
+  const key = (k: string, words: string, onPress: () => unknown) => keys.push({ k, label: words, onPress })
+  const order = valueOrder(list) as [string, string][]
+  const at = chosen ? order.findIndex(([l, v]) => l === label && v === value) : -1
+  const hop = (d: number) => {
+    if (!order.length) return undefined
+    const [l, v] = order[at < 0 ? (d > 0 ? 0 : order.length - 1) : (at + d + order.length) % order.length]!
+    return go({ label: l, value: v })
+  }
+  /** The definition's p n: the previous or next label, its definition too. */
+  const hopLabel = (d: number) => {
+    const i = list.findIndex((l: Any) => l.name === label)
+    return go({ label: String(list[(i + d + list.length) % list.length].name), def: true })
+  }
+  const flip = () => here({ at: a.at, sel: a.sel ?? null, def: !a.def })
+  const editRule = () => here({ def: true, edit: 'rule' })
+  // the rows the keys take, for the examples' page: their rule and the words, wrapped (` · ` between keys)
+  const keyRows = (n: number, words: number) => (n ? 1 + Math.ceil((words + 3 * (n - 1)) / W) : 0)
+  const plan: [string, string][] = !chosen
+    ? (order.length ? [['p', 'previous'], ['n', 'next value'], ['k', 'previous'], ['j', 'next example']] : [])
+    : a.edit ? [] : a.def ? [...(editable ? [['e', `edit ${ruleWord(chosen.lab)}`]] as [string, string][] : []), ['d', 'examples'], ['p', 'previous'], ['n', 'next label'], ['b', 'all labels']]
+      : [['d', 'definition'], ['p', 'previous'], ['n', 'next value'], ['k', 'previous'], ['j', 'next example'], ...(editable ? [['e', `edit ${ruleWord(chosen.lab)}`]] as [string, string][] : []), ['b', 'all labels']]
+  const planRows = a.edit ? 2 : keyRows(plan.length, plan.reduce((t, [k, w]) => t + textWidth(k) + 2 + textWidth(w), 0))
+  /** The examples a value's page holds: the rows under the label with that value open, less the pane's head and its
+   *  gap, the examples' head and the keys. */
+  const perOf = (c: Any) => Math.max(1, room - 3 - topOf(c).rows.length - 1 - planRows)
+  const top = topOf(chosen)
+
+  // ---- under the label: its definition, or the value's examples
   let section: Row[] = []
   let ex: Any = null
   let page: Any = null
   const per = chosen ? perOf(chosen) : 0
   if (chosen) {
-    if (a.def) section = definition(chosen.lab, W, show) as Row[]
+    if (a.def || a.edit) section = definition(chosen.lab, W, show, { model: SETTINGS.model, editing: a.edit ?? null }) as Row[]
     else {
       const count = partsOf(chosen.lab).find((p: Any) => p.v === value)?.n ?? 0
-      const at = Math.max(0, Math.min(Number(a.at) || 0, Math.max(0, count - 1)))
-      page = count ? await labelsData($, { root, label: label!, value: value!, at, n: per }) : { at: 0, total: 0, records: [] }
+      const first = Math.max(0, Math.min(Number(a.at) || 0, Math.max(0, count - 1)))
+      page = count ? await labelsData($, { root, label: label!, value: value!, at: first, n: per }) : { at: 0, total: 0, records: [] }
       if (!Array.isArray(page?.records)) section = [[{ s: `× The examples could not be read: ${String(page?.error || 'no answer')}`, tone: 'err' }]]
       else {
         ex = examples(chosen.lab, value, page, { w: W, rows: per + 1, sel: a.sel ?? null, place: (r: Any) => placeOf(String(r.ref), show) })
@@ -198,24 +242,15 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
     await here({ at: pageAt, sel: v === null ? String(r.ref) : (recs[ex.p + 1]?.ref ?? null) })
   }
 
-  // ---- the keys: p n over the values, k j over the examples, d the definition
-  const order = valueOrder(list) as [string, string][]
-  const at = chosen ? order.findIndex(([l, v]) => l === label && v === value) : -1
-  const hop = (d: number) => {
-    if (!order.length) return undefined
-    const [l, v] = order[at < 0 ? (d > 0 ? 0 : order.length - 1) : (at + d + order.length) % order.length]!
-    return go({ label: l, value: v })
-  }
   const step = async (d: number) => {
     // no examples shown: the first example of the value open (nothing open: the first value's), or the last one's last
-    if (!chosen || (!ex && !a.def)) {
+    if (!chosen || !ex) {
       const [l, v] = chosen ? [label!, value!] : ((d > 0 ? order[0] : order[order.length - 1]) ?? [])
       if (!l || v == null) return undefined
       const n = countOf(l, v)
       const i = d > 0 ? 0 : n - 1
       return go({ label: l, value: v, at: d > 0 ? 0 : Math.max(0, i - perOf(chosenOf(list, { label: l, value: v })) + 1), sel: n ? await refAt(l, v, i) : null })
     }
-    if (a.def) return here({ at: a.at, sel: a.sel ?? (await refAt(label!, value!, d > 0 ? 0 : countOf(label!, value!) - 1)) })
     if (!recs.length || !total) return undefined
     const p = ex.p as number
     if (p < 0) return here({ at: pageAt, sel: d > 0 ? ex.shown[0] : ex.shown[ex.shown.length - 1] })
@@ -225,18 +260,11 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
     const i = (pageAt + j + total) % total
     return here({ at: d > 0 ? i : Math.max(0, i - per + 1), sel: await refAt(label!, value!, i) })
   }
-  const keys: { k: string; label: string; onPress: () => unknown; gap: number }[] = []
-  const key = (k: string, words: string, onPress: () => unknown, gap = 3) => keys.push({ k, label: words, onPress, gap })
-  if (order.length) {
-    // in pairs, as one key row in every state: p n value · k j example · d definition
-    key('p', 'previous', () => hop(-1))
-    key('n', 'next value', () => hop(1), 2)
-    key('k', 'previous', () => step(-1))
-    key('j', 'next example', () => step(1), 2)
-    key('d', a.def && chosen ? 'examples' : 'definition', () => (chosen
-      ? here({ at: a.at, sel: a.sel ?? null, def: !a.def })
-      : go({ label: order[0]![0], value: order[0]![1], def: true })))
+  const does: Record<string, () => unknown> = {
+    p: () => (chosen && a.def ? hopLabel(-1) : hop(-1)), n: () => (chosen && a.def ? hopLabel(1) : hop(1)),
+    k: () => step(-1), j: () => step(1), d: flip, e: editRule, b: () => go({}),
   }
+  for (const [k, w] of plan) key(k, w, does[k]!)
 
   // ---- a press on a part of a row
   const press = (part: string) => {
@@ -245,36 +273,69 @@ export async function drawLabels($: Engine, e: Any, args: unknown, els: Any): Pr
     if (kind === 'v') return chosen && label === x && value === y && list.length > 1 ? go({}) : go({ label: String(x), value: String(y) })
     if (kind === 'r') return here({ at: pageAt, sel: a.sel === x ? null : String(x) })
     if (kind === 'c') return check(x == null ? null : String(x))
+    // a field of the definition: into the input bar to change (the one being changed already is)
+    if (kind === 'f') return a.edit === x ? undefined : here({ def: true, edit: String(x) })
     if (part === 'pg-up' && ex) return here({ at: Math.max(0, ex.from - per) })
     if (part === 'pg-down' && ex) return here({ at: ex.last + 1 })
     return undefined
   }
 
-  // ---- the pane: the head (b at its right once a label is open), the labels, the section, the keys at the bottom
-  const back = chosen && list.length > 1
-  const headRow = Box({ key: 'head', flexDirection: 'row', children: [
-    rowEl(els, top.head as Run[], 'head-words', press),
-    ...(back ? [
-      Box({ key: 'head-gap', flexGrow: 1, children: [Text({ children: ' ' })] }),
-      Button({ key: 'key-b', plain: true, hotkey: 'b', label: 'all labels', hover: quiet('labels-key-b'), onPress: () => go({}), children: [Text({ key: 'w', dimColor: true, children: 'all labels' })] }),
-    ] : []),
-  ] })
+  // ---- the pane: the head, the label (or the labels) and the detail, the keys at the bottom
+  const headRow = Box({ key: 'head', flexDirection: 'row', children: [rowEl(els, top.head as Run[], 'head-words', press)] })
   const body = [...(top.rows as Row[]), ...section]
-  const keysWidth = keys.reduce((s, x, i) => s + (i ? x.gap : 0) + textWidth(x.k) + 2 + textWidth(x.label), 0)
-  const used = 2 + body.reduce((s: number, r) => s + (Array.isArray(r) ? 1 : codeRows(r.code, W - 2)), 0) + (keys.length ? 1 + Math.ceil(keysWidth / W) : 0)
-  const drawn = body.map((r, i) => (Array.isArray(r)
+  const keyLook = { color: accent(), bold: true }
+  const keysRow = a.edit && chosen
+    // editing: ↵ (the input's own) applies the change over the same records, esc (or a click here) cancels
+    ? Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: [
+      Text({ key: 'k-enter', ...keyLook, children: '↵' }), Text({ key: 'w-enter', dimColor: true, children: ` rerun over the same ${Number(chosen.lab.records || 0).toLocaleString('en-US')} records` }),
+      Text({ key: 'sep', dimColor: true, children: ' · ' }),
+      Button({ key: 'key-esc', plain: true, label: 'cancel the edit', hover: quiet('labels-key-esc'), onPress: () => paneBack($), children: [Text({ key: 'k', ...keyLook, children: 'esc' }), Text({ key: 'w', dimColor: true, children: ' cancel' })] }),
+    ] })
+    : Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
+      ...(i ? [Text({ key: `key-gap-${i}`, dimColor: true, children: ' · ' })] : []),
+      // under the pointer a key's words brighten and underline, never Claude Code's inverse (askcell.js quiet)
+      Button({ key: `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, hover: quiet(`labels-key-${x.k}`), onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: x.label })] }),
+    ]) })
+  const hasKeys = !!(a.edit && chosen) || keys.length > 0
+  // a code label's code stands under the field's value, CODE_X in, and wraps there
+  const used = 2 + body.reduce((t: number, r) => t + (Array.isArray(r) ? 1 : codeRows(r.code, W - CODE_X - 2)), 0) + (hasKeys ? planRows : 0)
+  const rowOf = (r: Row, i: number) => (Array.isArray(r)
     ? rowEl(els, r, `r${i}`, press)
-    : Box({ key: `r${i}`, paddingLeft: 2, children: [Code({ key: 'code', source: r.code, language: 'python' })] })))
-  const keysRow = Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
-    ...(i ? [Text({ key: `key-gap-${i}`, children: ' '.repeat(x.gap) })] : []),
-    // under the pointer a key's words brighten and underline, never Claude Code's inverse (askcell.js quiet)
-    Button({ key: `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, hover: quiet(`labels-key-${x.k}`), onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: x.label })] }),
-  ]) })
+    : Box({ key: `r${i}`, paddingLeft: CODE_X, children: [Code({ key: 'code', source: r.code, language: 'python' })] }))
   return Box({ flexDirection: 'column', children: [
     headRow,
     Text({ key: 'gap', children: ' ' }),
-    ...drawn,
+    ...body.map(rowOf),
     ...Array.from({ length: Math.max(0, room - used) }, (_, i) => Text({ key: `fill${i}`, children: ' ' })),
-    ...(keys.length ? [Text({ key: 'rule', dimColor: true, children: '─'.repeat(W) }), keysRow] : []),
+    ...(hasKeys ? [Text({ key: 'rule', dimColor: true, children: '─'.repeat(W) }), keysRow] : []),
   ] })
+}
+
+// ------------------------------------------------------------------------------------------------ editing a field
+
+/** A field's name in the input bar, by the field the definition's press names. */
+const fieldWord = (lab: Any, f: string) => (f === 'rule' ? ruleWord(lab) : f === 'in' ? 'over' : f)
+
+/** What the pane's arguments edit: the field of the open label in the input bar (threads/pane.tsx draws it in place of
+ *  the question), its value as the label holds it; ↵ goes back to the label and applies it again with the new value,
+ *  unless it is the same. */
+export async function labelEdit($: Engine, args: unknown): Promise<PaneEdit | null> {
+  const a = (args && typeof args === 'object' ? args : {}) as LabelsArgs
+  if (!a.label || !a.edit) return null
+  const root = (await rootHere($)) ?? (await startDir($))
+  const list = await labelsData($, { root })
+  const lab = Array.isArray(list) ? list.find((l: Any) => l.name === a.label) : null
+  if (!lab) return null
+  const f = a.edit
+  const now = f === 'within' ? (lab.within ? lab.within.join('=') : '') : f === 'model' ? String(lab.model || SETTINGS.model) : String(lab[f] ?? '')
+  return {
+    name: fieldWord(lab, f), value: now, key: `${lab.name}-${f}-${lab.rev ?? 0}`,
+    submit: async (text: string) => {
+      const v = String(text ?? '').trim()
+      await paneBack($)
+      if (v === now.trim() || (!v && (f === 'rule' || f === 'in'))) return
+      const bad = await busy($, `applying ${lab.name} again`, () => rerunLabel($, root, lab, { [f]: v || null }))
+      if (bad) failNotice($, bad)
+    },
+  }
 }

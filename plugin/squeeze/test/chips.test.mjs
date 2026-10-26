@@ -4,7 +4,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, catchUpText, checkRewrite, chipsOf, fromVersions, mapLinks, request, restore, settledNote, shownKey, termsOf } from '../chips.mjs'
+import { MEANS, applyRewrite, cardListsAt, cardNotes, cardsAfter, catchUpText, changedCitations, checkRewrite, chipsOf, endsOf, fromVersions, mapLinks, placedCards, request, restore, settledNote, shownKey, termsOf } from '../chips.mjs'
 
 // a made-up report, as a long reply takes it
 const TEXT = [
@@ -20,7 +20,7 @@ test('a rewrite is held to the original: its citations stay as written, and a nu
   const out = checkRewrite(TEXT, 'Fixed in [2 tries](#); it failed [1 run in 9](#), 12% of runs.')
   assert.equal(out.text, 'Fixed in [2 tries](#); it failed [1 run in 9](#), 12% of runs.')
   assert.equal(out.problems.length, 1)
-  assert.match(out.problems[0], /"12" is not in the original/)
+  assert.match(out.problems[0], /this version states "12", which the original answer does not/)
   assert.deepEqual(checkRewrite(TEXT, 'It failed about [1 in 9](#); now it [passed 200 times](#).').problems, [])
   // a link's words count, its target does not
   assert.equal(mapLinks('a [b (c)](#) d', (all, words) => words), 'a b (c) d')
@@ -96,8 +96,43 @@ test('Claude hears the version the person settled on once, the original only aft
   assert.equal(settledNote(restore(rec), 'orig'), '')
   assert.match(settledNote(restore(rec), shownKey(rec)), /reads again, for the analyst, as you wrote it/)
   const cu = { row: 'r3', text: catchUpText(['First reply.', 'Second reply.']), shown: 'Both, short.', squeeze: { at: { length: 0 }, scale: 4 }, catchup: { host: 'r3', rows: ['r2', 'r3'], replies: 2, question: 'q' } }
-  assert.match(settledNote(cu, 'orig'), /caught up on your 2 replies since their last prompt\. In place of those messages \("First reply\."; "Second reply\."\)/)
-  assert.match(settledNote({ ...cu, catchup: { ...cu.catchup, dismissed: true } }, shownKey(cu)), /went back to reading your 2 replies/)
+  assert.match(settledNote(cu, 'orig'), /caught up on your 2 replies since their last prompt\. Below those messages \("First reply\."; "Second reply\."\), which still show/)
+  assert.match(settledNote({ ...cu, catchup: { ...cu.catchup, dismissed: true } }, shownKey(cu)), /closed the catch-up of your 2 replies/)
   // the terms of a message's explainers, not its heads-ups
   assert.deepEqual(termsOf({ items: { a: { id: 'a', term: 'hydrate' }, b: { id: 'b', term: 'the cache', kind: 'heads' } }, order: ['a', 'b'] }), ['hydrate'])
+})
+
+test('a cited number the rewrite changed is named, though the original states it elsewhere', () => {
+  const orig = 'The job ran [26 times](#) in March. It ran 23 times in April.'
+  // 23 is in the original, so the plain number check finds nothing; the citation still changed
+  const out = checkRewrite(orig, 'The job ran [23 times](#) in March.')
+  assert.deepEqual(out.problems, ['this version says "23 times" where the original answer says "26 times"'])
+  assert.deepEqual(changedCitations(orig, 'It ran [26 times](#), then [23](#) more.'), [{ words: '23', was: null }])
+  // a cited value kept, or rounded as a rewrite may round it, is no change
+  assert.deepEqual(checkRewrite('Errors fell to [0.369](#) of runs.', 'Errors fell to [37%](#) of runs.').problems, [])
+  assert.deepEqual(checkRewrite(orig, 'It ran [26 times](#).').problems, [])
+  // a citation that keeps the original's value and adds one the original states beside it changed nothing
+  const saves = 'Of the 13,704 saves, [13,339 fell in one week, June 16–22](#).'
+  assert.deepEqual(checkRewrite(saves, '[13,339 of 13,704 saves fell in June 16–22](#).').problems, [])
+})
+
+test('each chip names its two ends', () => {
+  const chips = chipsOf({ text: 'x', squeeze: {} })
+  assert.deepEqual(chips.map(endsOf), [['shorter', 'longer'], ['facts', 'expert reading'], ['new', 'expert']])
+  // a chip of the person's own runs from as written to fully
+  assert.deepEqual(endsOf({ levels: ['as written', 'a little', 'more', 'fully'] }), ['as written', 'fully'])
+})
+
+test('a version places each card where it puts the card\'s line; a line it leaves out leaves the card out', () => {
+  const orig = ['Sales rose in March.', '', '[Sales by week](card:c0a1b2c3d4)', '', 'Most of it came from one shop.', '', 'Returns stayed flat.'].join('\n')
+  // kept, or moved: the text as written, the card drawn where its line is
+  const kept = 'Sales rose.\n\n[Sales by week](card:c0a1b2c3d4)\n\nOne shop did it.'
+  assert.deepEqual(placedCards(kept, orig), { text: kept, left: [], removed: [] })
+  const moved = 'Sales rose.\n\nOne shop did it.\n\n[Sales by week](card:c0a1b2c3d4)'
+  assert.deepEqual(placedCards(moved, orig), { text: moved, left: [], removed: [] })
+  // left out: nothing puts it back; the card is left out of this version
+  const short = 'Sales rose in March, most of it in one shop.'
+  assert.deepEqual(placedCards(short, orig), { text: short, left: ['c0a1b2c3d4'], removed: [] })
+  // dropped: its line goes
+  assert.deepEqual(placedCards(kept, orig, ['c0a1b2c3d4']), { text: 'Sales rose.\n\nOne shop did it.', left: [], removed: ['c0a1b2c3d4'] })
 })

@@ -1,7 +1,7 @@
 // pane.tsx: the side threads in the side pane, drawn with Claude Code's own elements (0.10's panes/threads.js,
 // panes/subject.js, shell/conversation.ts and the input bar of shell/detail.tsx, which ran on the card toolkit).
 //
-//   the list (kind `threads`)    t, a click on the bar's `N threads`, /threads. As 0.9 drew it: a tree with main at its
+//   the list (kind `threads`)    t, a click on the bar's `N threads`. As 0.9 drew it: a tree with main at its
 //                                root and a row per thread, `main/<what it is on>`, the newest first, with how many
 //                                questions it has (or that it is answering) and its last question under it. A row is a
 //                                press (tab walks the rows, ↵ presses): it opens that thread
@@ -24,8 +24,11 @@
 //
 //     [a card it drew]
 //                                             a question at work: the bar says `⠋ answering: <thread>` (bar/busy.ts)
-//   e: show the card · m: send this answer…   the keys' row, as other panes draw keys: e the card whole or not (a
-//                                             card's thread), m (or a click) sends the answer to main once it answered
+//   e: show the card · m: add this answer…    the keys' row, as other panes draw keys: e the card whole or not (a
+//                                             card's thread), m (or a click) adds the answer to the main conversation
+//                                             once it answered, and says so after
+//
+// Under the claims pane each question shows the claim it asks about, quoted above it, and the input bar names it.
 //   ─────────────────────────────────         the input bar: Claude Code's prompt box, a rule above and below,
 //   ❯ Ask about Jun 17…              ↵ ask    ❯ and the field between them
 //   ─────────────────────────────────
@@ -36,17 +39,19 @@ import { failNotice } from '../bar/notice'
 import { cardWidth, frame } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { quiet } from '../core/askcell.js'
+import { WORD_MS } from '../hooks/keys'
 import { openPane, PANE_ID } from '../core/pane'
 import { partOf } from '../core/answers'
 import { claimsThreadScope } from '../claims/seam'
+import { labelEdit } from '../labels/pane'
 import { cut, textWidth } from '../core/text.js'
 import { accent, themeNow } from '../core/theme'
 import { blocks, inline, marksIn, rewritesIn, tableOf, withCorrections, withoutMarks } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
 import { citeHeat, citeLook, messageEl, type MarkLook } from '../marks/view'
-import { featureOn } from '../settings/features.mjs'
+import { claudeCites } from '../settings/features.mjs'
 import type { ThreadScope } from './seam'
-import { askThread, cardsOfTurn, isSending, listThreads, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
+import { askThread, cardsOfTurn, isSending, sendToMain, showThread, takeAskNext, threadList, threadOf, type Thread } from './thread'
 import { aboutOf, answerRow, askWords, nameOf, rowsOf, stepWords, threadKey } from './threads.mjs'
 
 type Engine = EngineInterface
@@ -111,7 +116,10 @@ function subjectBlock(els: Any, key: string, title: string, line = '', more: Any
   const { Box, Text } = els
   const rows = [Text({ key: `${key}-t`, wrap: 'truncate-end', children: [Text({ dimColor: true, children: '▎ ' }), Text({ bold: true, children: title })] })]
   if (line) rows.push(Text({ key: `${key}-l`, wrap: 'truncate-end', dimColor: true, children: `▎ ${line}` }))
-  more.forEach((m, i) => rows.push(Text({ key: `${key}-m${i}`, wrap: moreWrap, children: [Text({ dimColor: true, children: '▎ ' }), m] })))
+  // a part that wraps keeps its rows after the gutter, the `▎` a column of its own, as a quote's rows are drawn
+  more.forEach((m, i) => rows.push(moreWrap === 'wrap'
+    ? Box({ key: `${key}-m${i}`, flexDirection: 'row', children: [Text({ dimColor: true, children: '▎ ' }), Box({ flexShrink: 1, children: [Text({ wrap: 'wrap', children: [m] })] })] })
+    : Text({ key: `${key}-m${i}`, wrap: moreWrap, children: [Text({ dimColor: true, children: '▎ ' }), m] })))
   rows.push(Text({ key: `${key}-gap`, children: ' ' }))
   return Box({ key, flexDirection: 'column', children: rows })
 }
@@ -121,7 +129,7 @@ const rowsAt = (s: string, w: number) => String(s).split('\n').reduce((n, l) => 
 
 /** The thread's conversation: its newest turns that fit in about `room` rows, with a dim row on top saying how many
  *  are above them. */
-async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, room: number): Promise<Any[]> {
+async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, room: number, quote = ''): Promise<Any[]> {
   const { Box, Text } = els
   const turns = t.turns
   if (!turns.length) return []
@@ -145,9 +153,11 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     if (x.role === 'person') {
       // the question on the prompt's background, as Claude Code draws the person's prompt; what it is about after it
       out.push(Text({ key: `${k}-gap`, children: ' ' }))
+      // under the claims pane: the claim it asks about, quoted above it, in place of `about this claim`
+      if (quote) out.push(Text({ key: `${k}-quote`, wrap: 'wrap', children: [Text({ dimColor: true, children: '▎ ' }), Text({ dimColor: true, italic: true, children: `“${quote.replace(/\s+/g, ' ').trim()}”` })] }))
       out.push(Text({ key: `${k}-q`, wrap: 'wrap', children: [
         Text({ backgroundColor: 'userMessageBackground', color: 'text', children: `❯ ${x.text}` }),
-        ...(x.about ? [Text({ dimColor: true, children: `   about ${cut(String(x.about), 40)}` })] : []),
+        ...(x.about && !quote ? [Text({ dimColor: true, children: `   about ${cut(String(x.about), 40)}` })] : []),
       ] }))
       continue
     }
@@ -168,10 +178,10 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
     out.push(Text({ key: 'conv-fail-gap', children: ' ' }))
     out.push(Text({ key: 'conv-fail', color: 'error', wrap: 'wrap', children: `  ⎿ × ${String(t.error || 'the thread stopped')} · ask again` }))
   }
-  // the answer sent to main (m in the keys' row sends it)
+  // the answer added to the main conversation (m in the keys' row adds it): where it went and what comes of it
   if (answerToSend(t) === 'sent') {
     out.push(Text({ key: 'conv-m-gap', children: ' ' }))
-    out.push(Text({ key: 'conv-m', dimColor: true, wrap: 'truncate-end', children: '  ✓ sent to Claude' }))
+    out.push(Text({ key: 'conv-m', dimColor: true, wrap: 'wrap', children: '  ✓ added to the main conversation: Claude reads it there and replies to it' }))
   }
   return out
 }
@@ -180,7 +190,8 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
  *  answers, a turning glyph after each until its verdict arrives, corrected words in place, verified or failed; a press opens a citation's evidence. Its check is the answer's own (threads.mjs answerRow). */
 async function answerEl($: Engine, els: Any, t: Thread, i: number, raw: string, w: number, key: string): Promise<Any> {
   const row = answerRow(t, i)
-  const on = featureOn('marks')
+  // a thread's answer cites as Claude's replies do, while Claude cites (Citations auto cite + verify, or auto cite)
+  const on = claudeCites()
   const reply = on ? await rowMarks($, row).catch(() => null) : null
   const rewrote = rewritesIn(on ? raw : withoutMarks(raw), reply?.items ?? [])
   const text = withCorrections(rewrote.text, reply?.items ?? [])
@@ -212,16 +223,21 @@ function answerToSend(t: Thread): 'send' | 'sent' | null {
 
 type PaneKey = { k: string; label: string; onPress: () => unknown }
 
-/** The keys' row above the input bar, ` · ` between keys, as the other panes draw theirs: each a plain Button its key
- *  presses, drawn dim at rest (Claude Code draws its key, lit, then a colon, and the label). m sends the last answer to
- *  main once the thread answered (then `already sent`); `more` are the pane's own (e on a card). The ring stays on the
- *  input bar as m comes (fieldSettled). */
-function keysRow($: Engine, els: Any, t: Thread | null, more: PaneKey[] = []): Any[] {
-  const { Box, Button, Text } = els
+/** The keys of the keys' row: m sends the last answer to main once the thread answered (then `already sent`); `more`
+ *  are the pane's own (e on a card). */
+function paneKeys($: Engine, t: Thread | null, more: PaneKey[] = []): PaneKey[] {
   const keys = [...more]
-  if (t && answerToSend(t) === 'send') keys.push({ k: 'm', label: 'send this answer to Claude', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach Claude: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } })
-  // sent: m stays, saying so, so a second m is not typed into the prompt
-  else if (t && answerToSend(t) === 'sent') keys.push({ k: 'm', label: 'already sent', onPress: () => undefined })
+  if (t && answerToSend(t) === 'send') keys.push({ k: 'm', label: 'add this answer to the main conversation', onPress: () => { void sendToMain($, t.key).catch(err => failNotice($, `The answer did not reach the main conversation: ${String((err as Error)?.message || err).slice(0, 160)}`, 'thread')) } })
+  // added: m stays, saying so, so a second m is not typed into the prompt
+  else if (t && answerToSend(t) === 'sent') keys.push({ k: 'm', label: 'added to the main conversation', onPress: () => undefined })
+  return keys
+}
+
+/** The keys' row above the input bar, ` · ` between keys, as the other panes draw theirs: each a plain Button its key
+ *  presses, drawn dim at rest (Claude Code draws its key, lit, then a colon, and the label). The ring stays on the
+ *  input bar as m comes (fieldSettled), so a key typed there presses it too (keyTyped). */
+function keysRow(els: Any, keys: PaneKey[]): Any[] {
+  const { Box, Button, Text } = els
   if (!keys.length) return []
   return [
     Text({ key: 'keys-gap', children: ' ' }),
@@ -234,9 +250,26 @@ function keysRow($: Engine, els: Any, t: Thread | null, more: PaneKey[] = []): A
   ]
 }
 
+/** A key of the keys' row typed into the empty input bar: the ring stays on the field, so Claude Code types the letter
+ *  there and not to the key's Button. Alone for WORD_MS, it presses the key and the field starts empty again; a letter
+ *  after it within that time is a question that starts with it, as at the prompt (hooks/keys.ts). */
+function keyTyped($: Engine, key: string, v: string, keys: PaneKey[]): void {
+  const k = keys.find(x => x.k === v)
+  if (!k) return
+  $.clock.after(WORD_MS, () => {
+    if ((typed.get(key) ?? '') !== v) return
+    typed.delete(key)
+    carried.delete(key)
+    fieldGen.set(key, (fieldGen.get(key) ?? 0) + 1)
+    ringAfterDraw.add(key)
+    void Promise.resolve(k.onPress()).catch(() => undefined)
+    $.ui.invalidate('ui.render')
+  })
+}
+
 /** The input bar: Claude Code's prompt box in the pane, a blank row, a rule, `❯` and the field, a rule. ↵ asks the
- *  thread about `scope`. */
-function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean): Any[] {
+ *  thread about `scope`; a key of the keys' row typed alone into the empty field presses it (keyTyped). */
+function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolean, keys: PaneKey[] = [], ask = ''): Any[] {
   const { Box, Text, Input } = els
   const key = threadKey(scope)
   const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
@@ -247,12 +280,34 @@ function entry($: Engine, els: Any, scope: ThreadScope, w: number, focus: boolea
     Box({ key: 'entry-row', flexDirection: 'row', children: [
       Box({ width: 2, flexShrink: 0, children: [Text({ color: 'text', children: '❯ ' })] }),
       Box({ flexGrow: 1, flexShrink: 1, children: [Input({
-        key: fieldKey(key), placeholder: `Ask about ${what}${what.endsWith('…') ? '' : '…'}`, submitLabel: 'ask',
+        key: fieldKey(key), placeholder: ask ? cut(ask, Math.max(20, w - 12)) : `Ask about ${what}${what.endsWith('…') ? '' : '…'}`, submitLabel: 'ask',
         ...(focus ? { autoFocus: true } : {}),
         ...(carried.has(key) ? { value: carried.get(key) } : {}),
-        onInput: (v: string) => { typed.set(key, v) },
+        onInput: (v: string) => { const was = typed.get(key) ?? ''; typed.set(key, v); if (!was) keyTyped($, key, v, keys) },
         // the question stays in the field while its thread's fork starts: a second ↵ then asks nothing more
         onSubmit: (v: string) => { void askHere($, scope, v) },
+      })] }),
+    ] }),
+    rule('entry-bottom'),
+  ]
+}
+
+/** A field a pane edits in its input bar in place of a question (labels/pane.tsx: a label's rule, model or records):
+ *  its name before the `❯`, its value in the field to change, ↵ applies it (esc goes back down the pane's trail). */
+export type PaneEdit = { name: string; value: string; key: string; submit: (text: string) => unknown }
+
+/** The input bar of an edit: the field's name, `❯`, the field with its value; ↵ applies it. */
+function editEntry(els: Any, edit: PaneEdit, w: number): Any[] {
+  const { Box, Text, Input } = els
+  const rule = (k: string) => Text({ key: k, color: 'promptBorder', wrap: 'truncate-end', children: '─'.repeat(Math.max(4, w)) })
+  return [
+    Text({ key: 'entry-gap', children: ' ' }),
+    rule('entry-top'),
+    Box({ key: 'entry-row', flexDirection: 'row', children: [
+      Box({ flexShrink: 0, children: [Text({ color: accent(), bold: true, children: `${edit.name} ` }), Text({ color: 'text', children: '❯ ' })] }),
+      Box({ flexGrow: 1, flexShrink: 1, children: [Input({
+        key: `edit-${edit.key}`.slice(0, 120), value: edit.value, submitLabel: 'rerun', autoFocus: true,
+        onSubmit: (v: string) => { void Promise.resolve(edit.submit(v)).catch(() => undefined) },
       })] }),
     ] }),
     rule('entry-bottom'),
@@ -370,8 +425,10 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
   if (s.mark && s.mark.kind !== 'citation') {
     const m = s.mark as { row: string; kind: string; id: string }
     const g = (await partOf<Any>($, m.row, 'explain').catch(() => null))?.items?.[m.id]
-    const more = g ? [g.body, g.here, ...((g.bullets ?? []) as string[]).map(b => `· ${b}`)].filter(Boolean).map(String) : []
-    return { el: subjectBlock(els, 'subject', String(g?.title || g?.term || aboutOf(s)), m.kind === 'heads' ? 'important detail' : 'explainer', more), rows: 3 + more.reduce((n, x) => n + rowsAt(x, W), 0) }
+    // its words as the tray reads them: a link's words without its address
+    const words = (x: unknown) => String(x).replace(/\[([^\]\n]+)\]\([^()\s]*\)/g, '$1').replace(/[`*]/g, '')
+    const more = g ? [g.body, g.here, ...((g.bullets ?? []) as string[]).map(b => `· ${b}`)].filter(Boolean).map(words) : []
+    return { el: subjectBlock(els, 'subject', String(g?.title || g?.term || aboutOf(s)), m.kind === 'heads' ? 'heads-up' : 'explainer', more), rows: 3 + more.reduce((n, x) => n + rowsAt(x, W - 2), 0) }
   }
   if (s.passage) {
     const runs = passageRuns(String(s.passage.text))
@@ -387,22 +444,30 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
 
 const column = (els: Any, children: Any[]) => els.Box({ flexDirection: 'column', children })
 
-/** One thread (kind `thread`): what it is on, its conversation, the input bar. */
-async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> {
-  const { Button, Text } = els
+/** One thread (kind `thread`): what it is on and its conversation (`body`), then the key row and the input bar
+ *  (`bottom`), which the docked pane keeps at its bottom (core/pane.ts). The way back to the list it was opened from is
+ *  the pane's own top row. */
+export async function threadParts($: Engine, e: Any, els: Any, args: Any): Promise<{ body: Any[]; bottom: Any[] }> {
+  const { Text } = els
   const key = String(args?.key ?? '')
   await $.state.get({ plugin: 'thimble', key: 'thread', id: key })
   const t = threadOf(key)
-  if (!t) return Text({ dimColor: true, wrap: 'wrap', children: 'This thread is no longer in the session.' })
+  if (!t) return { body: [Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: 'This thread is no longer in the session.' })], bottom: [] }
   const { W, H } = sizeOf(e)
-  const top: Any[] = []
-  // the way back to the list, when the list opened it (esc closes the pane)
-  if (args?.from === 'threads') top.push(Button({ key: 'back', plain: true, label: 'back to the threads', hover: quiet('thread-back'), onPress: () => listThreads($), children: [Text({ color: accent(), children: '‹ threads' })] }), Text({ key: 'back-gap', children: ' ' }))
   const subject = await subjectOfPane($, e, els, t, W)
-  const keys = keysRow($, els, t, subject.keys)
-  const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - top.length - keys.length))
+  const pk = paneKeys($, t, subject.keys)
+  const keys = keysRow(els, pk)
+  const pane = (t.scope as Any).pane as { kind?: string; args?: unknown } | undefined
+  const quote = pane?.kind === 'claims' ? (await claimsThreadScope($, pane.args).catch(() => null))?.quote ?? '' : ''
+  const conv = await conversation($, e, els, t, W - 1, Math.max(4, H - subject.rows - 6 - keys.length), quote)
   ringDrawn($, key)
-  return column(els, [...top, subject.el, ...conv, ...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key))])
+  return { body: [subject.el, ...conv], bottom: [...keys, ...entry($, els, t.scope, W - 1, takeAskNext(key), pk)] }
+}
+
+/** One thread (kind `thread`), whole: its parts in one column. */
+async function drawThread($: Engine, e: Any, els: Any, args: Any): Promise<Any> {
+  const p = await threadParts($, e, els, args)
+  return column(els, [...p.body, ...p.bottom])
 }
 
 /** The scope of a pane of thimble's, for the thread under it: what it shows, in words. */
@@ -425,15 +490,31 @@ async function paneScope($: Engine, kind: string, args: Any): Promise<ThreadScop
 /** The thread under a pane of thimble's (core/pane.ts): its conversation and the input bar, about what the pane
  *  shows. */
 export async function threadUnder($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<Any[]> {
+  const p = await threadUnderParts($, e, kind, args, els)
+  return [...p.conv, ...p.bottom]
+}
+
+/** The thread under a pane in two parts: its conversation (`conv`), which scrolls with the pane's drawing, and the key
+ *  row with the input bar (`bottom`), which the docked pane keeps at its bottom (core/pane.ts). */
+export async function threadUnderParts($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: Any[]; bottom: Any[] }> {
   const scope = await paneScope($, kind, args)
   const key = threadKey(scope)
   await $.state.get({ plugin: 'thimble', key: 'thread', id: key })
   const { W, H } = sizeOf(e)
   const t = threadOf(key)
+  // under the claims pane: the placeholder names the claim or the cluster asked about, and each question shows its claim
+  const claims = kind === 'claims' ? await claimsThreadScope($, args).catch(() => null) : null
   // two fifths of the pane for the conversation, as 0.10's panel gave it
-  const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4))) : []
+  const conv = t ? await conversation($, e, els, t, W - 1, Math.max(4, Math.floor(H * 0.4)), claims?.quote ?? '') : []
   ringDrawn($, key)
-  return [els.Text({ key: 'thread-gap', children: ' ' }), ...conv, ...keysRow($, els, t), ...entry($, els, scope, W - 1, takeAskNext(key))]
+  const pk = paneKeys($, t)
+  // the blank row under the pane's drawing stands with the conversation when there is one, else with the input bar: a
+  // pane with no conversation opens at its top (core/pane.ts scrolls a conversation to its end)
+  const gap = els.Text({ key: 'thread-gap', children: ' ' })
+  // a pane editing one of its fields: the field takes the input bar, and the thread's keys wait
+  const edit = kind === 'labels' ? await labelEdit($, args).catch(() => null) : null
+  if (edit) return { conv: conv.length ? [gap, ...conv] : [], bottom: [...(conv.length ? [] : [gap]), ...editEntry(els, edit, W - 1)] }
+  return { conv: conv.length ? [gap, ...conv] : [], bottom: [...(conv.length ? [] : [gap]), ...keysRow(els, pk), ...entry($, els, scope, W - 1, takeAskNext(key), pk, claims?.ask ?? '')] }
 }
 
 /** About how many rows threadUnder takes under a pane: the gap and the input bar, and with a conversation its share of

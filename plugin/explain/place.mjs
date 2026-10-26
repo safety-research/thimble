@@ -4,7 +4,7 @@
 //
 // A term stands where it first stands outside links and code (findTerm), else in a link's words (findInLink, drawn
 // inside the link: a citation's words keep its press and take the fill), else in the words as the person reads them
-// (findRead: across a link or a code span, on the longest part outside them). A text shown in place of Claude's words
+// (findRead: across a link or a code span, each one whole: a mark may cover a citation, which keeps its press). A text shown in place of Claude's words
 // (a squeezed version) may say a term in another form, so it is found again there (anchorTerm). The heads-up is placed
 // first: its words are often a longer phrase that holds an explainer's term, and the explainer then stands where its
 // term is said again.
@@ -14,10 +14,13 @@
 //   findTerm / findInLink / findRead    -> {start, end} of a term in a text, or null (above)
 //   anchorTerm(text, term, taken)       -> {start, end, how} in a text that may say the term in another form
 //   placeGlosses(text, part, original)  -> [{id, start, end}] for each item of a part `explain` its text holds
+//   markHolding(text, spans, term)      -> the placed mark the words of a term stand inside (or on), or null
 //   glossesOf(list, text, skip)         -> the look's explainers as a part keeps them, those whose term the text holds
 //   headsOf(item, text)                 -> the look's heads-up as a part keeps it (one at most), or null
 //   mergeLook(msgs, out, memory)        -> what one look adds to each message's part, and the terms it explained
 //   markColors(theme)                   -> the explainers' and heads-ups' highlights, a fill per theme, and their frames' keys
+//   citeLinks(text)                     -> its links to a file's lines as citations, so the tray draws them as the answer's
+//   filePlaces(text)                    -> the file places its links point to
 import { codeRanges, marksIn } from '../marks/message.js'
 
 const inside = (ranges, a, b) => ranges.some(([x, y]) => a < y && b > x)
@@ -143,8 +146,9 @@ export function readable(md) {
 /**
  * Where a term stands in the words as the person reads them, when the markdown says them with a link in between ("5 of
  * the 13 files in plugin/prompts" is `[5](#) of the 13 files in \`plugin/prompts\``): the term is found in
- * readable(text) and mapped back. A mark never stands on a link or on another mark, so it takes the longest part of the
- * match outside them, with each code span it touches whole. Null when no such part holds a word.
+ * readable(text) and mapped back, with each link and code span it touches whole, so a mark may cover a citation (the
+ * citation keeps its press inside it). A mark never stands on another mark, so it takes the longest part of the match
+ * outside them. Null when no such part holds a word.
  */
 export function findRead(text, term, taken = []) {
   const t = termOf(term)
@@ -153,7 +157,7 @@ export function findRead(text, term, taken = []) {
   const r = readable(s)
   const code = codeRanges(s)
   const blocked = taken.map(m => [m.start, m.end])
-  for (const l of linksOf(s)) blocked.push([l.start, l.end])
+  const whole = [...code, ...linksOf(s).map(l => [l.start, l.end])]
   const body = t.split(/\s+/).map(escapeRe).join('\\s+')
   for (const flags of ['gu', 'giu']) {
     const re = new RegExp('(?<![\\p{L}\\p{N}_])' + body + '(?![\\p{L}\\p{N}_])', flags)
@@ -169,9 +173,9 @@ export function findRead(text, term, taken = []) {
       const spans = parts.map(p => {
         let a = p.a
         let b = p.b
-        for (const [x, y] of code) if (a < y && b > x) { a = Math.min(a, x); b = Math.max(b, y) }
         while (a < b && /[\s,.;:!?()\-–—]/.test(s[a])) a++
         while (b > a && /[\s,.;:!?()\-–—]/.test(s[b - 1])) b--
+        for (const [x, y] of whole) if (a < y && b > x) { a = Math.min(a, x); b = Math.max(b, y) }
         return { start: a, end: b, n: p.n }
       }).filter(p => p.end > p.start && /[\p{L}\p{N}]/u.test(s.slice(p.start, p.end)) && !inside(blocked, p.start, p.end))
       if (spans.length) {
@@ -242,23 +246,41 @@ export function anchorTerm(text, term, taken = []) {
 export const holds = (text, term) => !!(findTerm(text, term) || findInLink(text, term) || findRead(text, term))
 
 /**
- * Where each item of a part `explain` ({items, order}) stands on a text: [{id, start, end}] in text order, the heads-up
- * first, then the explainers in their order. `original`: the text is shown in place of Claude's words (a squeezed
+ * Where each item of a part `explain` ({items, order}) stands on a text: [{id, start, end}] in text order. Placed first
+ * the explainers the analyst asked for (`asked`), the newest first, then the heads-up, then the look's explainers in
+ * their order; words a mark already stands on take no other, so words the analyst picked over or across marks are one
+ * mark, and the marks it covers do not draw. `original`: the text is shown in place of Claude's words (a squeezed
  * version), so a term is also found in another form (anchorTerm). An item whose term the text does not hold gets no
  * place: the part keeps it, and it stands on its words again when a text that holds them shows.
  */
 export function placeGlosses(text, part, original = false) {
   const items = part && typeof part === 'object' && part.items ? part.items : {}
   const order = (Array.isArray(part?.order) ? part.order : Object.keys(items)).filter(id => items[id])
-  const sorted = [...order].sort((x, y) => (items[y].kind === 'heads') - (items[x].kind === 'heads'))
+  const rank = g => (g.asked ? 0 : g.kind === 'heads' ? 1 : 2)
+  const sorted = order.map((id, i) => ({ id, i }))
+    .sort((x, y) => rank(items[x.id]) - rank(items[y.id]) || (items[x.id].asked ? y.i - x.i : x.i - y.i))
+    .map(x => x.id)
   const out = []
+  const find = (term, taken) => (original ? anchorTerm(text, term, taken) : findTerm(text, term, taken)) ?? findInLink(text, term, taken) ?? findRead(text, term, taken)
+  const meet = (a, b) => a.start < b.end && b.start < a.end
   for (const id of sorted) {
     const term = items[id].term
-    const at = original ? anchorTerm(text, term, out) : findTerm(text, term, out)
-    const place = at ?? findInLink(text, term, out) ?? findRead(text, term, out)
-    if (place) out.push({ id, start: place.start, end: place.end })
+    const place = find(term, out)
+    if (!place) continue
+    // the words an asked mark stands over or across: what is left of them beside it is no mark
+    const alone = find(term, [])
+    if (alone && meet(place, alone) && out.some(m => items[m.id].asked && meet(m, alone))) continue
+    out.push({ id, start: place.start, end: place.end })
   }
   return out.sort((a, b) => a.start - b.start)
+}
+
+/** The mark of `spans` ([{id, start, end}], as placeGlosses placed them) that the words of `term` stand inside, or on,
+ *  where the text first holds them; null when they stand outside every mark, or over or across one. */
+export function markHolding(text, spans, term) {
+  const at = findTerm(text, term) ?? findInLink(text, term) ?? findRead(text, term)
+  if (!at) return null
+  return (Array.isArray(spans) ? spans : []).find(m => m.start <= at.start && at.end <= m.end) ?? null
 }
 
 const norm = s => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
@@ -286,7 +308,7 @@ export function headsOf(item, text, id = 'h1') {
   const term = str(termOf(item.term))
   const bullets = (Array.isArray(item.bullets) ? item.bullets : []).map(b => str(b)).filter(Boolean)
   if (!term || !bullets.length || !holds(text, term)) return null
-  return { id, kind: 'heads', term, title: str(item.title) || term, bullets, todo: str(item.todo) }
+  return { id, kind: 'heads', term, title: str(item.title) || term, bullets }
 }
 
 /**
@@ -342,16 +364,42 @@ export function markColors(theme) {
 
 /** The file places a text links to (`[words](path#L12-20)`, `[words](path:12)`), as {path, from, to}; no web link, no
  *  citation `(#)`. */
+/** A file's place a link points to (`path#L12-20`, `path:12-20` or a path), as {path, from, to}; null for a citation
+ *  `#`, a web address or an anchor. */
+function placeOf(target) {
+  if (target === '#' || /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith('#')) return null
+  const hit = /^(.*?)#L(\d+)(?:-L?(\d+))?$/.exec(target) || /^(.*?):(\d+)(?:-(\d+))?$/.exec(target)
+  return hit ? { path: hit[1], from: Number(hit[2]), to: Number(hit[3] || hit[2]) } : { path: target.replace(/#.*$/, ''), from: null, to: null }
+}
+
+/**
+ * An explainer's or a heads-up's words with each link to a file's lines made a citation (`[words](#)`), so they draw
+ * as the answer's citations do: {text, places}, where places[k] is the file place of the text's k-th citation
+ * (marks/message.js marksIn), or null for one that was a citation already. Links inside code stay as they are.
+ */
+export function citeLinks(text) {
+  const s = String(text || '')
+  const code = codeRanges(s)
+  let out = ''
+  let at = 0
+  const starts = new Map()
+  for (const m of s.matchAll(/\[([^\]\n]+)\]\(<?([^()\s<>\n]+)>?\)/g)) {
+    const p = placeOf(m[2])
+    if (!p || inside(code, m.index, m.index + m[0].length)) continue
+    out += s.slice(at, m.index)
+    starts.set(out.length, p)
+    out += `[${m[1]}](#)`
+    at = m.index + m[0].length
+  }
+  out += s.slice(at)
+  return { text: out, places: marksIn(out).map(k => starts.get(k.start) ?? null) }
+}
+
 export function filePlaces(text) {
   const out = []
   for (const m of String(text || '').matchAll(/\[[^\]\n]+\]\(<?([^()\s<>\n]+)>?\)/g)) {
-    const target = m[1]
-    if (target === '#' || /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith('#')) continue
-    const hash = /^(.*?)#L(\d+)(?:-L?(\d+))?$/.exec(target)
-    const colon = /^(.*?):(\d+)(?:-(\d+))?$/.exec(target)
-    const hit = hash || colon
-    if (hit) out.push({ path: hit[1], from: Number(hit[2]), to: Number(hit[3] || hit[2]) })
-    else out.push({ path: target.replace(/#.*$/, ''), from: null, to: null })
+    const p = placeOf(m[1])
+    if (p) out.push(p)
   }
   return out
 }

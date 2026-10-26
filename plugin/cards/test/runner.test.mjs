@@ -67,6 +67,8 @@ test('a key, a press and a click reach the view, and the state comes back to kee
   assert.deepEqual(JSON.parse(r.state), { n: 11 })
   r = await ask('pointer', { id, down: { x: 2, y: 1 }, up: { x: 2, y: 1 } })
   assert.equal(r.handled, true)
+  // a view that reads clicks by cell says so in its tree, so the Client leaves its clicks to it (client.tsx)
+  assert.equal(r.tree.p.cells, true)
   r = await ask('copy', { id, width: 40 })
   assert.equal(r.lines[0], 'count 11 clicked 2,1')
 })
@@ -102,6 +104,15 @@ test('the tree holds only what Claude Code draws: a Button of words, and strings
   assert.deepEqual(r3.tree.c[0].c, ['abc d'])
 })
 
+test('on the light theme a shade glyph draws as █ in a mixed color, and the text copy keeps the glyph the view wrote', async () => {
+  const shaded = 'function view(p, s) { const { Text } = s.elements; return Text({ color: s.colors.cat[0], children: "a ░▒ b" }) }'
+  const { r } = await load(shaded, { theme: 'light' })
+  assert.equal(r.ok, true)
+  assert.match(JSON.stringify(r.tree), /"c":\["\u2588"\]/)
+  assert.deepEqual(r.lines, ['a ░▒ b'])
+  await ask('ping', { theme: 'dark' })
+})
+
 test('a file that is an object gives its rows as props.rows and the whole object as props.data; each answer has a newer seq', async () => {
   writeFileSync(join(dir, 'obj.json'), JSON.stringify({ rows: [{ a: 1 }], meta: { total: 9 } }))
   const view = 'function view(p, s) { return s.elements.Text({ children: p.rows.length + " of " + p.data.meta.total }) }'
@@ -116,6 +127,24 @@ test('a file that is an object gives its rows as props.rows and the whole object
   assert.deepEqual([r2.ok, r2.lines, r2.summary.other, r2.summary.hasRows, r2.summary.read], [true, ['0 2 1'], ['hist', 'growth'], false, 'an object with hist (2), growth (1)'])
 })
 
+test('a runner started again answers with a newer seq than the runner before it, so the hooks keep its drawings', async () => {
+  // the hooks keep a card's drawing from the newest answer (store.ts withDrawing): a runner started again after a reload
+  // of the plugin must not answer with seqs the earlier runner already gave
+  const { id } = await load(COUNTER)
+  let last = 0
+  for (let i = 0; i < 5; i++) last = (await ask('key', { id, key: '+' })).seq
+  const again = await startRunner(dir)
+  try {
+    const r = await again.ask('load', { id, version: 1, title: 'Scores', view: COUNTER, rows: join(dir, 'rows.json'), width: 40, state: { n: 5 } })
+    assert.equal(r.ok, true)
+    assert.ok(r.seq > last, `the new runner's seq ${r.seq} is not newer than ${last}`)
+    const k = await again.ask('key', { id, key: '+' })
+    assert.deepEqual([JSON.parse(k.state), k.seq > r.seq], [{ n: 6 }, true])
+  } finally {
+    again.stop()
+  }
+})
+
 test('a card loads again with the state it kept', async () => {
   const { r } = await load(COUNTER, { state: { n: 7 } })
   assert.deepEqual(r.lines.slice(0, 2), ['count 7', 'cleo 1'])
@@ -127,7 +156,7 @@ test('actions give a copy after each, then the card is as it was', async () => {
   const r = await ask('act', { id, width: 40, actions: [{ key: '+' }, { click: 'add ten' }, { click: [0, 0] }, { click: 'no such button' }, { key: 'x' }] })
   assert.equal(r.ok, true)
   assert.deepEqual(r.copies.map(c => c.lines?.[0]), ['count 2', 'count 12', 'count 12 clicked 0,0', 'count 12 clicked 0,0', 'count 12 clicked 0,0'])
-  assert.match(r.copies[3].note, /no Button shows "no such button"/)
+  assert.match(r.copies[3].note, /no line shows "no such button"/)
   assert.deepEqual(JSON.parse(r.state), { n: 1 })
 })
 
@@ -289,4 +318,54 @@ test("a view's stray rejected promise or async error does not take the runner do
   // the runner still answers after every one of these
   assert.equal((await ask('ping', {})).ok, true)
   assert.deepEqual((await load(COUNTER)).r.lines, ['count 0', 'ada 3', 'bram 5', 'cleo 1', '[ add ten ]'])
+})
+
+// A day chart drawn as Text runs that j and k step through, the day shown marked ▸ (the card guide's marker), and the
+// day's details under it, also marked ▸. A click on a day's bar selects that day, as the keys would; a click on words
+// no key selects (the title, the details) names the words, which the hooks ask a side thread about.
+const DAYS = `const keys = "jk"
+function onKey(k, s, p) { const i = s.state?.i ?? 0; const n = p.rows.length; if (k === 'j') s.setState({ i: Math.min(n - 1, i + 1) }); if (k === 'k') s.setState({ i: Math.max(0, i - 1) }) }
+function view(props, surface) {
+  const { Box, Text } = surface.elements
+  const i = surface.state?.i ?? 0
+  return Box({ flexDirection: 'column', children: [
+    Text({ bold: true, children: 'Scores by name' }),
+    ...props.rows.map((r, k) => Box({ children: [Text({ children: (k === i ? '▸ ' : '  ') + r.name.padEnd(5) }), Text({ children: '█'.repeat(r.score) }), Text({ children: ' ' + r.score }) ] })),
+    Text({ children: '▸ ' + props.rows[i].name + ' scored ' + props.rows[i].score }),
+  ] })
+}`
+
+test('a click on an item of a card that steps with j and k selects it as the keys do; a click on other words names them', async () => {
+  const { id, r: loaded } = await load(DAYS)
+  assert.deepEqual(loaded.lines, ['Scores by name', '▸ ada  ███ 3', '  bram █████ 5', '  cleo █ 1', '▸ ada scored 3'])
+  // cleo's bar, two rows down: j twice
+  let r = await ask('pointer', { id, down: { x: 8, y: 3 }, up: { x: 8, y: 3 } })
+  assert.equal(r.handled, true)
+  assert.deepEqual(JSON.parse(r.state), { i: 2 })
+  // bram, above it: k, as j stops at the end
+  r = await ask('pointer', { id, down: { x: 3, y: 2 }, up: { x: 3, y: 2 } })
+  assert.deepEqual(JSON.parse(r.state), { i: 1 })
+  // the item already selected: it stays, and nothing is asked
+  r = await ask('pointer', { id, down: { x: 3, y: 2 }, up: { x: 3, y: 2 } })
+  assert.equal(r.handled, true)
+  assert.deepEqual(JSON.parse(r.state), { i: 1 })
+  // the details (▸ in every state) and the title are no item: the click names the words, the state stays
+  r = await ask('pointer', { id, down: { x: 4, y: 4 }, up: { x: 4, y: 4 } })
+  assert.equal(r.handled, false)
+  assert.deepEqual(r.run, { text: '▸ bram scored 5', line: '▸ bram scored 5' })
+  assert.deepEqual(JSON.parse(r.state), { i: 1 })
+  r = await ask('pointer', { id, down: { x: 1, y: 0 }, up: { x: 1, y: 0 } })
+  assert.deepEqual(r.run, { text: 'Scores by name', line: 'Scores by name' })
+  // a click on a run (the Client's Button, by the run's place in the tree): cleo's bar, then the title, on no item
+  r = await ask('pick', { id, path: [3, 1] })
+  assert.equal(r.handled, true)
+  assert.deepEqual(JSON.parse(r.state), { i: 2 })
+  r = await ask('pick', { id, path: [0] })
+  assert.equal(r.handled, false)
+  r = await ask('pointer', { id, down: { x: 3, y: 2 }, up: { x: 3, y: 2 } })
+  // the tool's own test of a click at a cell does what a live click does
+  r = await ask('act', { id, width: 40, actions: [{ click: [8, 3] }, { click: 'bram' }, { click: 'Scores by' }] })
+  assert.equal(r.copies[0].lines[3], '▸ cleo █ 1')
+  assert.equal(r.copies[1].lines[2], '▸ bram █████ 5')
+  assert.match(r.copies[2].note, /asks the analyst's side thread/)
 })

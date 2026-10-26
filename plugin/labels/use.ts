@@ -3,11 +3,13 @@
 // name, since Claude Code follows `$` only into functions a file declares or imports.
 //
 // The label rows. Which labels a turn used are the `thimble label` commands its Bash calls ran (core/answers.ts
-// labelsOf); a card's are those its turn ran before the card's call (CardUse.seq). A card gets one row under it: each
+// labelsOf); a card's are those its turn ran before the card's call (CardUse.seq) that its drawing shows (use.mjs
+// labelInTree: the label's name, a value in the card's own color, or a value that names it), since a turn reads
+// many labels and a card shows few. A card gets rows under it: each
 // label's name, how it was made in plain words (regex, code, read by Claude, or values Claude gave: the labels pane's
 // words) and over how many records, and the values its records have, then the records with no value (in the pane's
-// gray): under a card in the colors the card gives them (a plain dim dot where it gives none, so the row never shows
-// a color the card does not use), under an answer in the label's own colors (the labels pane's). An answer gets a row
+// gray), one row per label, its columns lined up: under a card in the colors the card gives them (the label's own
+// where it gives none), under an answer in the label's own colors (the labels pane's). An answer gets a row
 // only for the labels its turn used that none of its cards shows. A press on the name opens the label in the labels
 // pane; a press on a value opens it on that value's records. The labels are read from hooks, never from a drawing
 // (`thimble label --json`, the person's read): at each load of the plugin, after each of main's turns, after a
@@ -16,35 +18,30 @@
 // `aborted` and leave the rows empty.
 //
 // The ask. A --prompt label over more than a sample of records (engine/kernel/estimate.py) does not start: the kernel
-// writes a `label_ask` line in the change feed (core/feed.ts hands it to labelAskFromFeed), and the ask waits above
-// the bar with its choices, each a press, and in the bar as its keys: 1 run all (run the rest, after a sample),
-// 2 run on a sample, 0 cancel. A key acts once the word window closed with no letter after it (a letter makes it the
-// start of a word, and nothing runs); the choices leave the screen at once, and come back when the key began a word.
-// The choice runs as the person (`thimble label NAME --answer all|sample|cancel --ask ID`), the model's reads start
-// beside the session (labels.ts labelFromFeed), and Claude hears the choice with the next prompt (core/tell.ts).
+// writes a `label_ask` line in the change feed (core/feed.ts hands it to labelAskFromFeed). After the Bash call that
+// made it, Claude reads the ask as the input of Claude Code's own question tool (use.mjs askContext: run all, or the
+// rest after a sample; run on a sample; cancel; each with its model calls and about how long they take), and asks the
+// person with it. Their answer in that tool's result is the choice (use.mjs answerChoice): it runs as the person
+// (`thimble label NAME --answer all|sample|cancel --ask ID`, an id Claude never sees), the model's reads start beside
+// the session (labels.ts labelFromFeed), and Claude reads what was chosen after the tool's result. An answer in the
+// person's own words starts nothing; the same command again asks again.
 //
 //   labelsUnderAnswer($, els, row, cols)   the row under an answer
 //   labelsUnderCard($, els, id, cols)      the row under a card
-//   labelAskKey($, key, until)             the ask's keys while it waits
-//   labelAskBand($, els, width)            the ask, drawn above the bar while it waits
-//   labelAskBar($, on, preview)            its keys at the bar's left while it waits
 //   labelAskFromFeed($, ev)                a `label_ask` line of the kernel's change feed
-//   answerAsk($, choice, ask?)             the person's choice, as a press or a key gives it
+//   answerAsk($, choice, ask?)             the person's choice; what Claude reads of it
 //   registerLabelUse                       the reads of the labels (session.start, turn.complete, a `thimble label`
-//                                          command); the feed, the keys and the drawings call in
+//                                          command), the ask after that command, and the person's answer to it
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { BarItem } from '../bar/bar'
 import { failNotice } from '../bar/notice'
 import { metaOf, treeOf } from '../cards/store'
 import { labelsOf, turnOfRow, turnsNow } from '../core/answers'
 import { rootHere, runThimble } from '../core/env'
-import { tellAtNextPrompt } from '../core/tell'
-import { accent } from '../core/theme'
-import type { Take } from '../hooks/keys'
+import { readFeed } from '../core/feed'
 import { labelFromFeed, labelsChanged } from './labels'
 import { colorOf, openLabels } from './pane'
-import { ASK_KEYS, answerNote, askChoices, askOf, howMade, NO_VALUE, rowValues, sampleOffered, tonesInTree, usedNames } from './use.mjs'
+import { answerChoice, answerNote, askContext, askOf, howMade, labelInTree, NO_VALUE, rowValues, tonesInTree, usedNames } from './use.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,7 +52,7 @@ type Any = any
  *  of `values` when not given. `tones`, set only under a card: the colors the card gives its values. */
 export type UsedLabel = { name: string; values: string[]; shown?: { v: string; name: string }[]; kind?: string; records?: number; tones?: Record<string, string> }
 /** The ask that waits for the person's choice. */
-export type LabelAsk = { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean }
+export type LabelAsk = { root: string; name: string; ask: string; text: string; meta: string; units: number; sample: number; rest: boolean; calls?: number }
 type Choice = 'all' | 'sample' | 'cancel'
 
 const LABELASK = { plugin: 'thimble', key: 'labelAsk' } as const
@@ -129,31 +126,50 @@ async function usedOf($: Engine, names: string[]): Promise<UsedLabel[] | null> {
 
 // ------------------------------------------------------------------------------------------------ the rows
 
-/** The row under a card or an answer: `label has-link · regex · 412 records  ● yes  ● no`, each name and value a
- *  press. Each label is one group, so a row too long for the width wraps between labels, never inside one. */
+/** The rows under a card or an answer, one per label: `label has-link · regex · 412 records  ● yes  ● no`, each name
+ *  and value a press. With several labels `labels` shows once, on the first row, and each column (the names, how each
+ *  was made, how many records) is as wide as its longest, so the columns and the values line up:
+ *
+ *    labels  coordination · regex · 14,591 records  ● yes  ● no
+ *            has_url      · code  · 14,591 records  ● yes  ● no
+ *
+ *  A row too long for the width wraps between its values, each wrapped value under the row's first. */
 export function labelRowEl(els: Any, used: UsedLabel[], o: { key: string; onOpen: (name: string, value: string | null) => unknown }): Any | null {
   if (!used.length) return null
   const { Box, Button, Text } = els
-  const row: Any[] = [Text({ key: `${o.key}-w`, dimColor: true, children: used.length === 1 ? 'label ' : 'labels ' })]
-  used.forEach((l, i) => {
-    if (i) row.push(Text({ key: `${o.key}-s${i}`, dimColor: true, children: '   ' }))
+  const lead = used.length === 1 ? 'label ' : 'labels  '
+  const records = (l: UsedLabel) => (typeof l.records === 'number' ? `${l.records.toLocaleString('en-US')} ${l.records === 1 ? 'record' : 'records'}` : '')
+  const widest = (f: (l: UsedLabel) => string) => Math.max(...used.map(l => f(l).length))
+  const nameW = widest(l => l.name)
+  const howW = widest(l => howMade(l.kind) || '')
+  const recW = widest(records)
+  const rows = used.map((l, i) => {
     const kids: Any[] = []
-    kids.push(Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ key: 'n', bold: true, children: l.name })] }))
-    const how = howMade(l.kind)
-    if (how) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${how}` }))
-    if (typeof l.records === 'number') kids.push(Text({ key: `${o.key}-d${i}`, dimColor: true, children: ` · ${l.records.toLocaleString('en-US')} ${l.records === 1 ? 'record' : 'records'}` }))
+    const vals: Any[] = []
+    const name = Button({ key: `${o.key}-n${i}`, plain: true, label: `open the label ${l.name}`, onPress: () => o.onOpen(l.name, null), children: [Text({ key: 'n', bold: true, children: l.name })] })
+    kids.push(Box({ key: `${o.key}-w${i}`, flexDirection: 'row', flexShrink: 0, children: [
+      Text({ key: 'w', dimColor: true, children: i ? ' '.repeat(lead.length) : lead }), name,
+      ...(used.length > 1 && l.name.length < nameW ? [Text({ key: 'p', children: ' '.repeat(nameW - l.name.length) })] : []),
+    ] }))
+    const how = howMade(l.kind) || ''
+    if (howW) kids.push(Text({ key: `${o.key}-h${i}`, dimColor: true, children: ` · ${how.padEnd(howW)}` }))
+    if (recW) kids.push(Text({ key: `${o.key}-d${i}`, dimColor: true, children: ` · ${records(l).padStart(recW)}` }))
     ;(l.shown ?? l.values.map(v => ({ v, name: v }))).slice(0, VALUES_SHOWN).forEach(({ v, name }, j) => {
-      // under a card (`tones`): the color the card gives the value, or a plain dim dot where it gives none; under an
-      // answer: the label's own colors. The records with no value: the pane's gray, under a card too
-      const none = v === NO_VALUE
-      const color = none ? colorOf(l.values, v) : l.tones ? l.tones[v] : colorOf(l.values, v)
-      const words = color ? [Text({ key: 'v', color, children: `● ${name}` })] : [Text({ key: 'd', dimColor: true, children: '●' }), Text({ key: 'v', children: ` ${name}` })]
-      kids.push(Text({ key: `${o.key}-g${i}-${j}`, children: '  ' }))
-      kids.push(Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: none ? `the records of ${l.name} with ${name === 'no value' ? 'no value' : 'no value yet'}` : `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: words }))
+      // under a card (`tones`): the color the card gives the value, else the label's own (the labels pane's); under an
+      // answer: the label's own. The records with no value: the pane's gray, under a card too
+      const color = (l.tones && v !== NO_VALUE ? l.tones[v] : undefined) ?? colorOf(l.values, v)
+      vals.push(Box({ key: `${o.key}-g${i}-${j}`, flexDirection: 'row', flexShrink: 0, children: [
+        Text({ key: 'g', children: '  ' }),
+        Button({ key: `${o.key}-v${i}-${j}`, plain: true, label: v === NO_VALUE ? `the records of ${l.name} with ${name === 'no value' ? 'no value' : 'no value yet'}` : `the records of ${l.name} that are ${v}`, onPress: () => o.onOpen(l.name, v), children: [Text({ key: 'v', color, children: `● ${name}` })] }),
+      ] }))
     })
-    row.push(Box({ key: `${o.key}-l${i}`, flexDirection: 'row', flexWrap: 'wrap', children: kids }))
+    // the values wrap inside their own column, so a wrapped value lines up under the first one
+    return Box({ key: `${o.key}-l${i}`, flexDirection: 'row', children: [
+      Box({ key: 'head', flexDirection: 'row', flexShrink: 0, children: kids }),
+      Box({ key: 'vals', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: vals }),
+    ] })
   })
-  return Box({ key: o.key, flexDirection: 'row', flexWrap: 'wrap', children: row })
+  return Box({ key: o.key, flexDirection: 'column', children: rows })
 }
 
 /** What a press on a row's label name (value null) or value does: open the labels pane on it. The open is returned, so
@@ -172,6 +188,15 @@ async function cardNames($: Engine, id: string): Promise<string[]> {
   return []
 }
 
+/** The labels a card's row names: of those its turn ran before its call, the ones its drawing shows (use.mjs
+ *  labelInTree). null while the labels are not read yet. */
+async function cardLabels($: Engine, id: string): Promise<{ used: UsedLabel[]; tree: unknown } | null> {
+  const found = await usedOf($, await cardNames($, id))
+  if (!found) return null
+  const tree = (await treeOf($, id))?.tree ?? null
+  return { used: found.filter(l => labelInTree(tree, l)), tree }
+}
+
 export async function labelsUnderAnswer($: Engine, els: Any, row: string, _cols: number): Promise<Any[]> {
   const turn = await turnOfRow($, row)
   if (!turn || turn.answer !== row || !turn.labels?.length) return []
@@ -179,7 +204,7 @@ export async function labelsUnderAnswer($: Engine, els: Any, row: string, _cols:
   const shown: string[] = []
   for (const c of turn.cards ?? []) {
     const meta = await metaOf($, c.id)
-    if (meta && meta.version > 0) shown.push(...usedNames(await labelsOf($, turn.turnId, c.seq)))
+    if (meta && meta.version > 0) shown.push(...((await cardLabels($, c.id))?.used ?? []).map(l => l.name))
   }
   const used = await usedOf($, usedNames(await labelsOf($, turn.turnId), shown))
   const el = used ? labelRowEl(els, used, { key: `lu-${row}`, onOpen: opener($) }) : null
@@ -187,10 +212,9 @@ export async function labelsUnderAnswer($: Engine, els: Any, row: string, _cols:
 }
 
 export async function labelsUnderCard($: Engine, els: Any, id: string, _cols: number): Promise<Any[]> {
-  const found = await usedOf($, await cardNames($, id))
-  if (!found?.length) return []
-  const tree = (await treeOf($, id))?.tree ?? null
-  const used = found.map(l => ({ ...l, tones: tonesInTree(tree, l.values) as Record<string, string> }))
+  const got = await cardLabels($, id)
+  if (!got?.used.length) return []
+  const used = got.used.map(l => ({ ...l, tones: tonesInTree(got.tree, l.values) as Record<string, string> }))
   const el = labelRowEl(els, used, { key: `lu-card-${id}`, onOpen: opener($) })
   return el ? [els.Box({ key: `lu-box-card-${id}`, marginLeft: 2, children: [el] })] : []
 }
@@ -213,24 +237,27 @@ export async function labelAskNow($: Engine): Promise<LabelAsk | null> {
   return ((await $.state.get(LABELASK)).value ?? null) as LabelAsk | null
 }
 
-/** Show an ask again, or (null) take it off the screen at once, before its answer runs. */
+/** The ask that waits (null: none). */
 export async function setLabelAsk($: Engine, a: LabelAsk | null): Promise<void> {
   await $.state.set(LABELASK, a)
-  $.ui.invalidate('ui.render')
 }
+
+/** The asks the feed brought since the last Bash call took them (askContext tells Claude of each). */
+let fresh: LabelAsk[] = []
 
 export async function labelAskFromFeed($: Engine, ev: unknown): Promise<void> {
   const a = askOf(ev) as LabelAsk | null
   if (!a || asksSeen.has(a.ask)) return
   asksSeen.add(a.ask)
+  fresh.push(a)
   await setLabelAsk($, a)
 }
 
 /** The person's choice for the ask: run all, run on a sample, or cancel, as their own command. The reads start here,
- *  beside the session, and Claude hears the choice with the next prompt. */
-export async function answerAsk($: Engine, choice: Choice, given?: LabelAsk): Promise<void> {
+ *  beside the session. Returns what Claude reads of it, or null when the choice did not run (a failure line says why). */
+export async function answerAsk($: Engine, choice: Choice, given?: LabelAsk): Promise<string | null> {
   const a = given ?? (await labelAskNow($))
-  if (!a) return
+  if (!a) return null
   await setLabelAsk($, null)
   const about = `label-ask:${a.root}|${a.name}`
   let out = ''
@@ -245,50 +272,14 @@ export async function answerAsk($: Engine, choice: Choice, given?: LabelAsk): Pr
   let got: Any = null
   try { got = JSON.parse(out) } catch { got = null }
   if (!ok || !got) {
-    failNotice($, `× The label ${a.name} did not start: ${out.split('\n').slice(-1)[0]?.replace(/^thimble label: /, '').slice(0, 200) || 'thimble label gave nothing'}. Ask Claude to run it again.`, about)
-    return
+    const why = out.split('\n').slice(-1)[0]?.replace(/^thimble label: /, '').slice(0, 200) || 'thimble label gave nothing'
+    failNotice($, `× The label ${a.name} did not start: ${why}. Ask Claude to run it again.`, about)
+    return `The analyst's choice for the label ${a.name} did not run: ${why}. Run the same \`thimble label\` command again to ask them again.`
   }
-  await tellAtNextPrompt($, about, answerNote(a, choice, got))
   await labelsChanged($)
   needLabelList($)
   if (choice !== 'cancel') labelFromFeed($, { name: a.name, root: a.root, t: `${a.ask}-${choice}` })
-}
-
-export async function labelAskKey($: Engine, key: string, _until: number): Promise<Take | null> {
-  const choice = (ASK_KEYS as Record<string, Choice>)[key]
-  if (!choice) return null
-  const a = await labelAskNow($)
-  if (!a || (choice === 'sample' && !sampleOffered(a))) return null
-  return {
-    // the choices leave the bar and the band at once; a letter after the key shows them again, and nothing runs
-    now: () => setLabelAsk($, null),
-    undo: () => setLabelAsk($, a),
-    later: () => answerAsk($, choice, a),
-  }
-}
-
-/** A large label run's ask above the bar: what the run reads, the choices, each a press, and under them the one exact
- *  number, its model calls, dim. */
-export async function labelAskBand($: Engine, els: Any, _width: number): Promise<Any[]> {
-  const a = await labelAskNow($)
-  if (!a) return []
-  const { Box, Text, Button } = els
-  const choice = (c: { key: string; words: string; choice: Choice }) =>
-    Box({ key: `ask-${c.choice}`, marginRight: 3, children: [Button({ key: 'b', plain: true, label: c.words, onPress: () => { void answerAsk($, c.choice, a) }, children: [Text({ key: 'k', color: accent(), bold: true, children: c.key }), Text({ key: 'w', children: ` ${c.words}` })] })] })
-  return [Box({ key: 'label-ask', flexDirection: 'column', children: [
-    Text({ key: 'ask-text', wrap: 'wrap', children: [Text({ key: 'n', dimColor: true, children: `label ${a.name}  ` }), `${a.text}?`] }),
-    Box({ key: 'ask-keys', flexDirection: 'row', flexWrap: 'wrap', children: askChoices(a).map(choice) }),
-    ...(a.meta ? [Text({ key: 'ask-meta', dimColor: true, children: a.meta })] : []),
-  ] })]
-}
-
-/** The ask's keys at the bar's left while it waits: `1 run all · 2 run on a sample of 300 · 0 cancel`. */
-export async function labelAskBar($: Engine, _on: (key: string) => boolean, _preview: boolean): Promise<BarItem[]> {
-  const a = await labelAskNow($)
-  if (!a) return []
-  return askChoices(a).map((c: { key: string; words: string; choice: Choice }) => ({
-    id: `label-ask-${c.choice}`, key: c.key, words: c.words, focus: true, press: () => answerAsk($, c.choice, a),
-  }))
+  return answerNote(a, choice, got)
 }
 
 /** A Bash command of Claude's that runs `thimble label` (labels/register.ts reads it alike). */
@@ -307,11 +298,27 @@ export const registerLabelUse: Register = on => {
     if (e.agentId === undefined) needLabelList($)
     return r
   }).catch(($, e, next) => next(e))
-  // a `thimble label` command of Claude's (main's or a fork's) may change a label
+  // a `thimble label` command of Claude's (main's or a fork's) may change a label, or make an ask: Claude reads the ask
+  // after the command's output, as the question to ask the person
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const r = await next(e)
-    if (LABEL_COMMAND.test(String((e as { command?: unknown }).command || ''))) needLabelList($)
-    return r
+    if (!LABEL_COMMAND.test(String((e as { command?: unknown }).command || ''))) return r
+    needLabelList($)
+    await readFeed($)
+    const asks = fresh
+    fresh = []
+    if (!asks.length || 'deny' in r) return r
+    return { ...r, context: [...(r.context ?? []), ...asks.map(a => askContext(a))] }
+  }).catch(($, e, next) => next(e))
+  // the person's answer to Claude's question about an ask: their choice runs, and Claude reads what it started
+  on('tool.call', { tool: 'AskUserQuestion' }, async ($, e, next) => {
+    const r = await next(e)
+    const a = await labelAskNow($)
+    if (!a || 'deny' in r) return r
+    const choice = answerChoice(a, e, (r as { result?: unknown }).result) as Choice | null
+    if (!choice) return r
+    const note = await answerAsk($, choice, a)
+    return note ? { ...r, context: [...(r.context ?? []), note] } : r
   }).catch(($, e, next) => next(e))
 }
 
@@ -321,4 +328,5 @@ export function resetLabelUse(): void {
   reading.clear()
   again.clear()
   asksSeen.clear()
+  fresh = []
 }

@@ -108,3 +108,12 @@ test('step 3, a file picked: its detail in its own unit, the tree scrolled to ke
   fits(v, 66)
 })
 
+
+test('a folder with no files: the head says so, and nothing else', () => {
+  const v = coverageView({ root: '/made-up/empty', total: { files: 0, touched_files: 0, seen_files: 0 }, groups: [], files: [], untouched: {} }, null, DIMS)
+  const t = textOf(v).split('\n')
+  assert.match(t[0], /^Coverage +no files$/)
+  assert.ok(t.some(l => l === 'This folder holds no files, so there is nothing to cover yet.'))
+  assert.equal(v.keys.length, 0)
+  fits(v, 66)
+})

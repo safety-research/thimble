@@ -2,12 +2,14 @@
 // acts on: a `label` whose records wait for the model (labels/labels.ts), a `label_ask` whose large run waits for the
 // person's choice (labels/use.ts). The feed is read after each Bash call (main's or a subagent's), each second while one runs (`thimble label … --prompt … && thimble label … --wait` waits on the
 // model's reads, which start from the feed), and at the end of each turn. Lines the kernel wrote before this session
-// started are not acted on. The telemetry's lines share the file, and nothing acts on their kinds.
+// started are not acted on. The telemetry's lines share the file, and nothing acts on their kinds. A command the person
+// ran (a label changed in the labels pane) writes to the person's own feed, read once after it (withPersonFeed).
 import type { EngineInterface, Register } from 'claude-code'
 
 import { sessionKey } from '../hooks/conversation'
 import { labelFromFeed } from '../labels/labels'
 import { labelAskFromFeed } from '../labels/use'
+import { personSession } from './env'
 import { thimbleHome } from './home'
 import { eventsFile } from './layout.mjs'
 
@@ -58,6 +60,11 @@ async function readOnce($: Engine): Promise<void> {
   // whole lines only: a line being written is read whole by the next read
   const whole = text.slice(0, text.lastIndexOf('\n') + 1)
   await $.state.set(READ, { file, bytes: was.bytes + utf8Bytes(whole) })
+  await act($, whole)
+}
+
+/** Each whole line of feed text, acted on: a `label` starts the model's reads, a `label_ask` asks the person. */
+async function act($: Engine, whole: string): Promise<void> {
   for (const line of whole.split('\n').filter(Boolean)) {
     let ev: Any
     try { ev = JSON.parse(line) } catch { continue }
@@ -68,6 +75,19 @@ async function readOnce($: Engine): Promise<void> {
       // each module says its own failure
     }
   }
+}
+
+/** A `thimble` command the person ran (core/env.ts runThimble) writes its lines to the person's own feed, which no
+ *  read follows: `run` runs it, and the lines it wrote are acted on as the conversation's are. */
+export async function withPersonFeed<T>($: Engine, run: () => Promise<T>): Promise<T> {
+  const file = eventsFile(await thimbleHome($), await personSession($))
+  const from = await size($, file)
+  const out = await run()
+  if ((await size($, file)) > from) {
+    const text = await tail($, file, from)
+    await act($, text.slice(0, text.lastIndexOf('\n') + 1))
+  }
+  return out
 }
 
 /** Read what the feed holds since it was last read, one read at a time. */

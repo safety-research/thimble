@@ -106,7 +106,7 @@ function firstMessage(fix: Fix, earlier: string | null, task: string, by: Asker,
     task.trim(),
     '',
     by === 'claude'
-      ? `Claude, in the conversation above, saw thimble misbehave and asked for this change to the person's thimble:`
+      ? `Claude, in the conversation above, saw thimble misbehave and offered this change to the person's thimble, and the person said yes:`
       : `The person asked for this change to their thimble:`,
     '',
     asked,

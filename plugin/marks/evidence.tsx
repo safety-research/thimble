@@ -5,6 +5,9 @@
 //              the check ran
 //   quote      each cited place: `path:line` on top (the terminal opens it), the cited lines with a line around them,
 //   code       the substring highlighted
+//
+// Under the sentence, `w` (or a click) explains the cited words in place: the session's explainer of them, else one
+// written now (explain/seam.ts explainTerm), which their reply then shows too.
 //   card       the card's title, then the header over the cited row, the cited cell marked (or the card's printed
 //              lines around the words)
 //
@@ -16,7 +19,10 @@
 // pane reads the reply's marks in the state, so it draws again when the check settles.
 import type { EngineInterface } from 'claude-code'
 
-import { themeNow } from '../core/theme'
+import { quiet } from '../core/askcell.js'
+import { themeLast, themeNow } from '../core/theme'
+import { explaining, explainTerm, glossFor, sessionGlosses } from '../explain/seam'
+import { markColors } from '../explain/place.mjs'
 import { plainSentence } from './message.js'
 import { type Evidence, type EvidenceTable, type MarkItem, type Place, rowMarks } from './store'
 import { tableLines } from './table.mjs'
@@ -134,6 +140,9 @@ export function tableRows(els: Any, t: EvidenceTable, width: number, key = 'tb')
   ]
 }
 
+// the citations whose cited words' explainer shows
+const explainShown = new Set<string>()
+
 function evidenceRows(els: Any, ev: Evidence, width: number): Any[] {
   const { Box, Code, Text } = els
   if (ev.kind === 'card') {
@@ -188,6 +197,38 @@ export async function drawEvidence($: EngineInterface, e: Any, args: unknown, el
     sentence.slice(0, at), Text({ key: 'mw', bold: true, children: sentence.slice(at, at + cited.length) }), sentence.slice(at + cited.length),
   ] }))
   if (m.status === 'checking') rows.push(Text({ key: 'wait', dimColor: true, children: 'checking…' }))
+  const me = `${row}:${n}`
+  const words = m.shown.replace(/\*\*|`/g, '').trim()
+  // the cited words explained in place (e, as e explains words everywhere): the session's explainer, else one being written, else why there is none
+  if (explainShown.has(me)) {
+    const g = glossFor(await sessionGlosses($).catch(() => []), words)
+    const now = explaining(words)
+    // each part after a dim ▎, its wrapped lines under its first (the gutter is a column of its own)
+    const bar = (k: string, child: Any) => Box({ key: `x-${k}`, flexDirection: 'row', children: [Text({ dimColor: true, children: '▎' }), Box({ flexShrink: 1, marginLeft: 1, children: [Text({ wrap: 'wrap', children: [child] })] })] })
+    rows.push(Text({ key: 'x-gap', children: ' ' }), bar('t', Text({ children: [Text({ bold: true, backgroundColor: markColors(themeLast()).glossBg, children: g?.term ?? words }), Text({ dimColor: true, children: '  explainer' })] })))
+    const plain = (t: string) => String(t || '').replace(/\[([^\]\n]+)\]\([^()\s]*\)/g, '$1').replace(/[`*]/g, '').replace(/\s+/g, ' ').trim()
+    if (g) {
+      if (g.body) rows.push(bar('b', Text({ children: plain(g.body) })))
+      if (g.here) rows.push(bar('h', Text({ dimColor: true, children: plain(g.here) })))
+    } else rows.push(bar('w', Text({ ...(now.why ? { color: 'error' } : { dimColor: true }), children: now.pending ? 'writing an explainer of these words…' : now.why || 'no explainer yet: press e to ask for one' })))
+  }
   if (m.evidence) rows.push(Box({ key: 'ev', flexDirection: 'column', marginTop: 1, children: evidenceRows(els, m.evidence, Number(e?.props?.bodyColumns) || 60) }))
+  // the pane's key: explain the cited words
+  const keys: { k: string; label: string; press: () => unknown }[] = []
+  if (words) keys.push({ k: 'e', label: explainShown.has(me) ? 'hide the explainer' : 'explain these words', press: () => {
+    if (explainShown.has(me)) explainShown.delete(me)
+    else {
+      explainShown.add(me)
+      if (row) void explainTerm($, row, words).catch(() => undefined)
+    }
+    $.ui.invalidate('ui.render')
+  } })
+  if (keys.length) {
+    const { Button } = els
+    rows.push(Text({ key: 'keys-gap', children: ' ' }), Box({ key: 'ev-keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap((x, i) => [
+      ...(i ? [Text({ key: `ev-key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
+      Button({ key: `ev-key-${x.k}`, plain: true, dimColor: true, hotkey: x.k, label: x.label, hover: quiet(`ev-key-${x.k}`), onPress: x.press }),
+    ]) }))
+  }
   return Box({ flexDirection: 'column', children: rows })
 }

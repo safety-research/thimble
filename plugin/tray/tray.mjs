@@ -2,7 +2,7 @@
 // parts of panes/tray.js, panes/mark.js, shell.tsx stepWords/replyPlace/trayScope and shell/cards.js drawsHyperlinks).
 //
 // The tray is one small panel above the prompt. It shows one mark at a time: a citation with its evidence, or an
-// explainer or an important detail (a heads-up). What it shows is the top of a stack, so a citation inside an explainer
+// explainer or a heads-up. What it shows is the top of a stack, so a citation inside an explainer
 // opens over it, and 0 returns to the one under it; 0 on the first closes the tray.
 //
 //   a frame   a MarkRef ({row, kind: 'citation', n} | {row, kind: 'explain' | 'heads', id}), with `open: 'code'` while
@@ -14,11 +14,10 @@
 //   sameRef(a, b), open(f), push(tray, f), back(tray), top(tray), base(tray)
 //   stopsOfRow(row, cites, spans, cards)   one row's stops: its citations and spans by where they stand, then its cards
 //   stopsOfTurn(rows, stopsOf, inline)     a turn's stops: its rows' and the cards Claude drew between them
-//   pageOf(heights, room, from), rowsOf(line, width)   what of a tall tray body fits above the bar, and `m` for more
+//   rowsOf(line, width)                    the rows a line takes when it wraps
 //   indexOf(list, at), stepFrom(list, k, dir), restStop(pool, dir)   where ] and [ go next, and from rest
 //   stopWhat(stop), stepWords(ends), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
-//   scopeText(frame, info)                 what a question asked with the tray open carries for Claude
 //   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it, or
 //                                          did not run: x starts it)
 //   explainerText(gloss)                   an explainer's or a heads-up's words as the tray draws them (markdown)
@@ -54,18 +53,20 @@ export const base = tray => (tray && Array.isArray(tray.stack) && tray.stack.len
 /**
  * One row's stops in reading order: its citations (`cites`: [{n, start, words}], n > 0, a citation the check knows) and
  * the features' spans on its words (`spans`: [{id, kind, start, end}], an explainer or a heads-up), by where each
- * starts, then the cards drawn under it (`cards`: their ids, oldest first). A heads-up on a citation's words stops
- * before that citation, so one ] opens it; an explainer there stops after it (the citation's tray offers it with h).
+ * starts, then the cards drawn under it (`cards`: their ids, oldest first). An explainer or a heads-up on a citation's
+ * words, or over them, stops before that citation, as a click on the words opens it first: ] then goes on to the
+ * citation.
  */
 export function stopsOfRow(row, cites, spans, cards) {
   const known = (cites || []).filter(c => c && c.n > 0)
-  const on = s => known.find(c => typeof c.words === 'string' && s.start >= c.start + 1 && s.end <= c.start + 1 + c.words.length)
+  const end = c => (typeof c.end === 'number' ? c.end : c.start + 1 + (typeof c.words === 'string' ? c.words.length : 0))
+  const under = s => known.filter(c => c.start < s.end && s.start < end(c)).map(c => c.start)
   const marks = [
     ...known.map(c => ({ row, kind: 'citation', n: c.n, at: c.start })),
     ...(spans || []).filter(s => s && s.id).map(s => {
       const kind = s.kind === 'heads' ? 'heads' : 'explain'
-      const c = kind === 'heads' ? on(s) : null
-      return { row, kind, id: s.id, at: c ? c.start - 0.5 : s.start }
+      const cs = under(s)
+      return { row, kind, id: s.id, at: cs.length ? Math.min(s.start, ...cs) - 0.5 : s.start }
     }),
   ].sort((a, b) => a.at - b.at || (a.kind === 'citation' ? -1 : 1))
     .map(m => ({ ...m, at: Math.ceil(m.at) }))
@@ -91,32 +92,6 @@ export function stopsOfTurn(rows, stopsOf, inline) {
     out.push(...under)
   })
   return out
-}
-
-/**
- * Which units of a body fit in `room` rows (`heights`: each unit's rows), from unit `from`: {start, end, more} where
- * units start..end-1 show and `more` is how many are left out. When all fit, all show. Else one row is kept for the
- * line that says there is more, and at least one unit shows; the rows left after the units that fit show the next unit's
- * first rows. `next`: where `m` goes (that cut unit, whole), the start again after the end. A unit taller than the room
- * shows a room of its rows at a time: `skip` (from `skip`, its rows already shown) is how many of its first rows the
- * page leaves out, and `nextSkip` where `m` goes on in it.
- */
-export function pageOf(heights, room, from = 0, skip = 0) {
-  const hs = (heights || []).map(h => Math.max(1, h | 0))
-  const total = hs.reduce((a, b) => a + b, 0)
-  if (!(room > 0) || total <= room) return { start: 0, end: hs.length, more: 0, next: null }
-  const start = from > 0 && from < hs.length ? from : 0
-  const cut = start === from && skip > 0 && skip < hs[start] ? skip : 0
-  const shown = cut ? { skip: cut } : {}
-  let end = start + 1
-  let used = hs[start] - cut
-  // the rest of the first unit is taller than the room: its next rows, and m goes on in it
-  if (used > room - 1) return { start, end, more: hs.length - end + start, next: start, ...shown, nextSkip: cut + room - 1 }
-  while (end < hs.length && used + hs[end] <= room - 1) { used += hs[end]; end++ }
-  // a unit too tall for the rows left shows its first rows there (the page cuts it) and m starts at it, so the rows
-  // under a short unit are not left empty when the next one wraps to more of them
-  if (end < hs.length && used < room - 1) return { start, end: end + 1, more: hs.length - end - 1 + start, next: end, ...shown }
-  return { start, end, more: hs.length - end + start, next: end < hs.length ? end : 0, ...shown }
 }
 
 /** The rows a line of `width` cells takes when it wraps at words (a line is at least one row). */
@@ -181,54 +156,30 @@ export function cutTitle(s, n) {
 const plain = s => String(s || '').replace(/\[([^\]]*)\]\(#\)/g, '$1').replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim()
 const cut = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
-/** What a side thread is about, in words: the citation, explainer or important detail, by the words the person read.
- *  `info`: {words} for a citation, {gloss} for an explainer or a heads-up. */
+/** What a side thread is about, in words: the citation, explainer or heads-up, by the words the person read, or the
+ *  lines of a file an explainer cites (`place`, its `id` the place). `info`: {words} for a citation, {gloss} for an
+ *  explainer or a heads-up. */
 export function aboutOf(f, info = {}) {
   if (!f) return 'this mark'
-  if (f.kind === 'citation') return `the citation "${cut(plain(info.words) || `citation ${f.n}`, 80)}"`
+  // words that open with a quote of their own keep it, never two
+  const q = s => (/^["\u201c]/.test(s) ? s : `"${s}"`)
+  if (f.kind === 'citation') return `the citation ${q(cut(plain(info.words) || `citation ${f.n}`, 80))}`
+  if (f.kind === 'place') return `the lines ${f.id}`
   const g = info.gloss || {}
-  if (f.kind === 'heads') return `the important detail "${cut(plain(g.title || g.term), 80)}"`
-  return `the explainer of "${cut(plain(g.term), 80)}"`
-}
-
-/** Where a citation's evidence is, in words for Claude: the cited place, or the code that computed it. */
-function evidenceWords(ev) {
-  if (!ev) return ''
-  if (ev.kind === 'computed') return ` Its evidence is the output of code ${ev.by === 'main' ? 'you' : 'the check'} ran.`
-  if (ev.kind === 'card') return ` Its evidence is the card "${ev.title}" (${ev.ref}).`
-  return ` Its evidence is ${ev.file}:${ev.line}.`
-}
-
-/**
- * What a question the person asks with the tray open carries for Claude: which mark was open, where it stands, and
- * what it said, so "this" can mean it. `info`: {begins (the reply's first words), words, status, evidence} for a
- * citation, {begins, gloss} for an explainer or a heads-up.
- */
-export function scopeText(f, info = {}) {
-  if (!f) return ''
-  const begins = cut(String(info.begins || '').replace(/\s+/g, ' ').trim(), 80)
-  const where = begins ? ` in your reply that begins "${begins}"` : ''
-  if (f.kind === 'citation') {
-    const st = info.status === 'corrected' ? ' The check corrected it.' : info.status === 'failed' ? (info.failedBy === 'none' ? ' Its check did not run.' : ' The check flagged it.') : info.status === 'verified' ? ' The check verified it.' : ''
-    return `The analyst asked this with a citation of your reply open in the tray: "${plain(info.words)}"${where}. "This" may mean that value.${st}${evidenceWords(info.evidence)}`
-  }
-  const g = info.gloss || {}
-  if (f.kind === 'heads') {
-    return `The analyst asked this with an important detail of your reply open in the tray: "${plain(g.title || g.term)}", on the words "${plain(g.term)}"${where}. It said: ${(g.bullets || []).map(plain).join(' ')}${g.todo ? ` What to do: ${plain(g.todo)}` : ''} "This" or "it" may mean that detail.`
-  }
-  return `The analyst asked this with an explainer of your reply open in the tray: the term "${plain(g.term)}"${where}. The explainer said: ${plain(g.body || g.title)}${g.here ? ` ${plain(g.here)}` : ''} "This" or "it" may mean that term.`
+  if (f.kind === 'heads') return `the heads-up ${q(cut(plain(g.title || g.term), 80))}`
+  return `the explainer of ${q(cut(plain(g.term), 80))}`
 }
 
 /** Whether a citation can be repaired (x): it failed (the check could not confirm it, or did not run). */
 export const canRepair = m => !!m && m.status === 'failed'
 
 /** An explainer's words as the tray draws them, as markdown whose citations stay `[words](#)`: what it is, then where
- *  it mattered here. A heads-up: its title in bold, two to four bullets, and one line on what to do. */
+ *  it mattered here. A heads-up: its title in bold, then two to four bullets. */
 export function explainerText(g) {
   if (!g) return ''
   if (g.kind === 'heads') {
     const bullets = (Array.isArray(g.bullets) ? g.bullets : []).filter(x => typeof x === 'string' && x.trim()).slice(0, 4)
-    return [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', bullets.map(x => `- ${x}`).join('\n'), g.todo ? `→ ${g.todo}` : ''].filter(Boolean).join('\n\n')
+    return [g.title ? `**${String(g.title).replace(/\*/g, '')}**` : '', bullets.map(x => `- ${x}`).join('\n')].filter(Boolean).join('\n\n')
   }
   return [g.body || g.title || '', g.here || ''].filter(Boolean).join('\n\n')
 }
@@ -372,27 +323,25 @@ function literalBits(line) {
 }
 
 /**
- * The one line of a check's code that printed an output line: of the lines that print, the one whose own words all
- * stand in that output line (the most of them; the later one on a tie), else the last line that prints, else the
- * last line with code. Trimmed; '' without code.
+ * The one line of a check's code that printed an output line: of the lines that print, the one with the most of its own
+ * words in that output line (the later one on a tie); else, when no such line's words stand there, the last line that
+ * prints values alone (`print(n)`, `echo $x`), which may have printed it; else ''. A line whose own words are not in
+ * the output did not print it, so it is never shown above that output (a script's `print("totals")` above another
+ * print's line, a trailing `echo $TMPDIR` above the script's output).
  */
 export function printLine(code, out) {
   const lines = String(code || '').split('\n')
   const said = String(out || '')
   let best = -1
   let most = 0
-  let last = -1
-  let any = -1
+  let bare = -1
   lines.forEach((l, i) => {
-    if (!l.trim() || /^\s*(#|\/\/)/.test(l)) return
-    any = i
-    if (!PRINTS.test(l)) return
-    last = i
+    if (!l.trim() || /^\s*(#|\/\/)/.test(l) || !PRINTS.test(l)) return
     const bits = literalBits(l)
-    if (!bits.length || bits.some(b => !said.includes(b))) return
-    const n = bits.reduce((a, b) => a + b.length, 0)
-    if (n >= most) { best = i; most = n }
+    if (!bits.length) { bare = i; return }
+    const n = bits.filter(b => said.includes(b)).reduce((a, b) => a + b.length, 0)
+    if (n > 0 && n >= most) { best = i; most = n }
   })
-  const i = best >= 0 ? best : last >= 0 ? last : any
+  const i = best >= 0 ? best : bare
   return i >= 0 ? lines[i].trim() : ''
 }

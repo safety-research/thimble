@@ -325,6 +325,16 @@ test("the fixer's end: the line and a notification say it is fixed; d shows what
   expect(textOf(rows[0])).toBe('  ✓ thimble fixed: Bar says read for coverage · tests pass')
   expect(textOf(rows[1])).toBe('    y use it now · d what changed · n later')
   expect(s.notes).toEqual([{ text: 'thimble fixed: Bar says read for coverage · tests pass', title: 'thimble' }])
+  // each key's words are a click that does what the key does: d opens what changed (the d key closes it again)
+  const keyButton = (rs: Any[], k: string): Any => {
+    const walk = (n: Any): Any => (!n || typeof n !== 'object' ? null : Array.isArray(n) ? n.map(walk).find(Boolean) ?? null : n.type === 'Button' && n.props?.key === `fix-key-${k}` ? n : walk(n.props?.children))
+    return walk(rs)
+  }
+  await keyButton(rows, 'd').props.onPress()
+  expect((await fixLineRows(s.$, ELS, 110)).map(textOf)).toContain('    Changed     1 file · tests pass')
+  await (await fixKey(s.$, 'd'))!.later()
+  rows = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(rows[1])).toBe('    y use it now · d what changed · n later')
   // d: a few lines in the line's place, not a diff
   await (await fixKey(s.$, 'd'))!.later()
   rows = await fixLineRows(s.$, ELS, 110)
@@ -457,7 +467,7 @@ test('/thimble-fix alone says how to ask and that fixes are listed and managed i
   expect(s.commands).toEqual([])
 })
 
-test("Claude starts a fix with the fix-thimble skill: the same fork starts, Claude reads what came of it, and is told when it ends", async () => {
+test("Claude starts a fix it offered, on the person's yes, with the fix-thimble skill: the same fork starts, Claude reads what came of it, and is told when it ends", async () => {
   expect(wordsOfSkill("What thimble does wrong, and what it should do: the explainer's links show as raw text\n\nthimble starts its fix…")).toBe("the explainer's links show as raw text")
   expect(wordsOfSkill('What thimble does wrong, and what it should do: \n\nthimble starts its fix…')).toBe('')
   expect(wordsOfSkill('What thimble does wrong, and what it should do: $ARGUMENTS\n\nthimble starts…\n\nARGUMENTS: the bar is cut')).toBe('the bar is cut')
@@ -467,7 +477,7 @@ test("Claude starts a fix with the fix-thimble skill: the same fork starts, Clau
   expect(r.result).toEqual({ success: true, commandName: 'fix-thimble' })
   expect(String(r.text)).toBe('thimble started a fork of this conversation that fixes thimble in the background, in a copy ("make the bar say read"). The person sees "fixing make the bar say read" on the bar while it works, and decides with a key whether to use the fix. Tell the person in one short line, then go on with their request. thimble tells you when the fix ends.')
   expect(s.ran.find(x => x.argv.includes('new'))?.stdin).toBe("the card's legend hides its last row")
-  expect(String(s.spawns[0].prompt)).toContain("Claude, in the conversation above, saw thimble misbehave and asked for this change to the person's thimble:")
+  expect(String(s.spawns[0].prompt)).toContain("Claude, in the conversation above, saw thimble misbehave and offered this change to the person's thimble, and the person said yes:")
   // no words: nothing starts, and Claude reads why
   const none = skillText(await skillCall(s, ' '))
   expect(String(none.text)).toContain('thimble started no fix')
@@ -535,7 +545,7 @@ test('/thimble-fix alone and /thimble-fix update answer at once, with no turn of
   await skillCall(s, "2 make the bar's coverage item bold")
   expect(String(s.spawns[0].prompt)).toContain('The person asked for this change to their thimble:')
   expect(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).toEqual({})
-  // after two of main's turns (Claude's question, and its answer), a skill call is Claude's own again
+  // after two of main's turns (Claude's question, and its answer), a skill call is a fix Claude offered again
   await s.call('command.run', { command: 'thimble-fix', args: 'the bar' })
   for (const turnId of ['t-1', 't-2']) await s.call('turn.complete', { turnId, reason: 'answer', answer: 'ok', durationMs: 9, isAborted: false }, async () => ({}))
   await s.end('Title: Bar coverage bold\nWhat it does: The coverage item is bold.')

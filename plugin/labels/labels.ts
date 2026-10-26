@@ -116,7 +116,7 @@ async function readHere($: Engine, name: string, root: string): Promise<void> {
   await labelsChanged($)
   const about = `label:${root}|${name}`
   if (out.error) failNotice($, `× The model's reads of the label ${name} failed: ${String(out.error).slice(0, 200)}.`, about)
-  else if (out.failed) failNotice($, `× ${out.failed.toLocaleString('en-US')} record${out.failed === 1 ? '' : 's'} of the label ${name} got no value, because ${out.failedCalls === 1 ? 'a model call' : `${out.failedCalls} model calls`} failed: ${out.why}. \`thimble label ${name} --again\` asks again.`, about)
+  else if (out.failed) failNotice($, `× ${out.failed.toLocaleString('en-US')} record${out.failed === 1 ? '' : 's'} of the label ${name} got no value, because ${out.because}. \`thimble label ${name} --again\` asks again.`, about)
   else return
   failing.set(about, { root, name })
 }

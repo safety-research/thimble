@@ -1,10 +1,12 @@
 // thimble fix in the page (backend fixes.py): `/thimble-fix <words>` in the chat asks Claude to change the person's own
 // thimble. The words go with a text copy of what the page shows now (pageText), so "this card" can name what is open.
-// The server answers at once; the fixer works in the background in a thread of its own (`fixing <name>` in the tree),
-// main's chat shows the message and one line that points there, the row above the composer says how the work goes, and
-// one notice at the top of the chat says how it ended (FixStrip), from GET /api/fixes and the stream's `fix` events.
-// `/thimble-fix N <words>`, or a message in the fix's thread, changes fix N (a round of it, never a new fix).
-// `/thimble-fix` alone opens Your fixes.
+// As in the terminal, main reads the words with the person's fixes beside it and starts the fix with its fix_thimble
+// tool: a round of the fix the words follow up on, or a new fix, or first one short question. The fixer is main's
+// subagent, which works in the background in a thread of its own (`fixing <name>` in the tree): main's chat shows its
+// card where main started it, the row above the composer says how the work goes, and a row of main's chat and of the
+// fix's thread says how it ended, at the time it ended (FixStrip), from GET /api/fixes and the stream's `fix` events. A
+// message in a fix's own thread changes that fix (a round of it, never a new fix). `/thimble-fix` alone opens Your
+// fixes.
 
 export const FIX_COMMAND = '/thimble-fix'
 
@@ -44,7 +46,7 @@ export interface FixStatus {
   fixes: FixRow[]
 }
 
-/** Whether the fix is in the work before the person's notice: Claude fixes it, or the kernel checks it. */
+/** Whether the fix is in the work before its row asks the person: Claude fixes it, or the kernel checks it. */
 export const working = (r: FixRow): boolean => r.phase === 'fixing' || r.phase === 'testing'
 
 /** Whether the fix goes on now, after the person's click (or comes off after Undo): the server starts again. */
@@ -58,7 +60,7 @@ export function workingText(r: FixRow, now: number = Date.now() / 1000): string 
   return `${doing} “${r.title || r.words}”${took}`
 }
 
-/** The notice's words for a fix. Pure. */
+/** What a fix's row says now. Pure. */
 export function fixText(r: FixRow): string {
   if (reloading(r)) return 'Reloading thimble…'
   if (working(r)) return workingText(r)
@@ -67,7 +69,7 @@ export function fixText(r: FixRow): string {
 
 export type FixAction = 'use' | 'what' | 'later' | 'undo' | 'redo'
 
-/** The buttons a fix's notice offers: Use it now, What changed and Later on a ready fix, Undo on a fix that is on,
+/** The buttons a fix's row offers: Use it now, What changed and Later on a ready fix, Undo on a fix that is on,
  * Redo on one that did not pass. Pure. */
 export function fixActions(r: FixRow): FixAction[] {
   if (r.phase) return []

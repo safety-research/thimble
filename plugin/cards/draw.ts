@@ -4,7 +4,9 @@
 // call, since the old place is in the terminal's scrollback: canRedraw). Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
-//   frame         the card's frame: its title, the Client, a failure, and the keys that reach it now; left of it, the
+//   frame         the card's frame: its title (a click asks about the card) and, at its right, `ask about this card`
+//                 (the question names the item selected, when one is), the Client (a click on an item selects it as
+//                 its key does; on other words, asks about them: client.tsx, runner.mjs pick), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
 //                 asked), beside the line a click selected (`▸`), about that part, else beside the title; nothing for a card the version of its answer shown now leaves out (core/answerview.ts
 //                 cardHidden)
@@ -16,7 +18,8 @@
 //                 lists the key, else the newest that lists it
 //   cardTake      a letter at an empty prompt that a card takes (hooks/keys.ts asks): the key at once, and its undo when
 //                 the person was typing a word
-//   cardPost      what a card's Client sends: Button presses and clicks
+//   cardPost      what a card's Client sends: Button presses, clicks, and a click on a run of words (the item on its
+//                 line, else its side thread)
 //   cardText      a card's text copy as it draws now (for v)
 //   revealCard    the card's row brought into view in the conversation
 //
@@ -32,11 +35,14 @@
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
-import { cardAsk, cardHidden, underCard } from '../core/answerview'
-import { askCell } from '../core/askcell.js'
+import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
+import { quiet } from '../core/askcell.js'
 import { cut } from '../core/text.js'
+import { rowsKnown } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
+import { cardRef } from '../marks/message.js'
+import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
 import { layoutLines } from './layout.js'
@@ -78,6 +84,9 @@ export function noteViewport(v: { columns?: number; rows?: number; isFullscreen?
   if (v?.rows && v.rows > 0) rowsSeen = v.rows
   if (typeof v?.isFullscreen === 'boolean') fullscreen = v.isFullscreen
 }
+
+/** Whether the last drawing saw the fullscreen layout (undefined: none said yet). */
+export const fullscreenNow = (): boolean | undefined => fullscreen
 
 /** Whether Claude Code can still draw a card again that main drew in `turn`: always in the fullscreen layout; on the
  *  main screen only while that turn runs, since the main screen says nothing of which rows have scrolled away. */
@@ -227,14 +236,72 @@ export async function keyOwner($: Engine, key: string): Promise<CardMeta | null>
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
 }
 
+/** What j and k do on a card, found once per version by pressing them in the runner, which leaves the card as it was
+ *  (act): by its ▸ (the card guide's marker), the way each moves it, down or up; else `step` when each changes the card
+ *  and the other takes it back (a card of steps). Null while that is not known, or for keys that do neither. */
+type Steps = Record<string, 'down' | 'up' | 'step'>
+const stepsKnown = new Map<string, { gen: number; dir: Steps | null }>()
+const stepsAsked = new Set<string>()
+
+async function stepsOf($: Engine, meta: CardMeta): Promise<Steps | null> {
+  const known = stepsKnown.get(meta.id)
+  if (known && known.gen === meta.gen) return known.dir
+  const once = `${meta.id}:${meta.gen}`
+  if (stepsAsked.has(once)) return null
+  stepsAsked.add(once)
+  void (async () => {
+    const width = (await treeOf($, meta.id))?.width ?? cardWidth()
+    const at = (c: Any) => (Array.isArray(c?.lines) ? (c.lines as string[]).findIndex(l => l.includes('▸')) : -1)
+    const start = await askCard($, meta, 'copy', { width })
+    const order = ['j', 'k', 'k', 'j'].filter(k => meta.keys.includes(k))
+    const r = order.length ? await askCard($, meta, 'act', { width, actions: order.map(key => ({ key })) }) : null
+    const copies = [start, ...((r?.copies ?? []) as Any[])]
+    const rows = copies.map(at)
+    const texts = copies.map(c => (Array.isArray(c?.lines) ? (c.lines as string[]).join('\n') : null))
+    const dir: Steps = {}
+    order.forEach((k, i) => {
+      const a = rows[i]!
+      const b = rows[i + 1]!
+      if (!dir[k] && a >= 0 && b >= 0 && a !== b) dir[k] = b > a ? 'down' : 'up'
+    })
+    // j then k: the card changed and came back, so the two step it one way and back
+    if (!dir.j && !dir.k && order.join('') === 'jkkj' && texts[0] !== null && texts[1] !== texts[0] && texts[2] === texts[0]) { dir.j = 'step'; dir.k = 'step' }
+    stepsKnown.set(meta.id, { gen: meta.gen, dir: Object.keys(dir).length ? dir : null })
+    $.ui.invalidate('ui.render')
+  })().catch(() => stepsKnown.set(meta.id, { gen: meta.gen, dir: null }))
+  return null
+}
+
+/** The keys of the card that takes them now (keyOwner), for the bar: j and k by the way they move the ▸ (`j down`,
+ *  `k up`) or through steps (`j k step`), and the card's other letters together (`f g card keys`). None when no card on screen takes a key. */
+export async function cardKeyWords($: Engine): Promise<{ key: string; words: string }[]> {
+  const metas: CardMeta[] = []
+  for (const id of await keptSeen($)) {
+    if (shown.get(id) === false) continue
+    const m = await keptMeta($, id)
+    if (m && m.version > 0 && m.keys.length) metas.push(m)
+  }
+  if (!metas.length) return []
+  const focus = await keptFocus($)
+  const meta = metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0]!
+  const dir = await stepsOf($, meta)
+  const steps = meta.keys.filter(k => dir?.[k] === 'step')
+  const out = steps.length ? [{ key: steps.join(' '), words: 'step' }] : []
+  out.push(...meta.keys.filter(k => dir?.[k] && dir[k] !== 'step').map(k => ({ key: k, words: dir![k]! as string })))
+  const rest = meta.keys.filter(k => !dir?.[k])
+  if (rest.length) out.push({ key: rest.join(' '), words: 'card keys' })
+  return out
+}
+
 /** The card's frame: title, the Client that draws its tree, a failure, and the keys that reach it now; under it, what
  *  the features put under a card. `o.layout`: the width the card is laid out at when that is wider than the frame
  *  (a copy in the side pane is the conversation's drawing, cut at the frame's edge, so no row of it wraps). */
-export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: number } = {}): Promise<Any> {
+export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: number; indent?: number } = {}): Promise<Any> {
   const E = $.ui.resolve(e) as Any
   // a card the version of its answer shown now leaves out (a squeeze's): nothing in its place
   if (await cardHidden($, meta.id)) return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', children: [] })
-  const inside = cardWidth(e.viewport?.columns)
+  // `indent`: columns the drawing that holds the card takes on its left beyond an answer's (a catch-up's rule)
+  const inside = cardWidth(e.viewport?.columns ? e.viewport.columns - (o.indent ?? 0) : undefined)
   const width = Math.max(inside, Math.floor(o.layout ?? 0))
   const t = await treeOf($, meta.id)
   const focused = (await focusNow($)) === meta.id
@@ -248,25 +315,30 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // a drawing that failed at another width: the card draws again at this one
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
   // the title on a line of its own, then the card
-  const client = E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) })
+  // its rows as the Client last reported them, so what measures a drawing holding the card (a catch-up's rule) counts them
+  const client = rowsKnown(E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) }), heights.get(meta.id))
+  // the line a click or a key selected (`▸`, the card guide's marker): `ask about this card` asks about that part of
+  // the card, so a click on a bar and then on those words start a thread about the bar
+  const sel = fault ? null : selectedLine(current?.tree, width)
+  const ask = await cardAsk($, meta.id, meta.title, sel?.text ?? '')
+  // the title asks about the whole card when clicked, its words underlined under the pointer
+  const whole = sel ? await cardAsk($, meta.id, meta.title) : ask
+  const title = E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title })
+  const titled = whole ? E.Button({ key: 'title-ask', plain: true, label: `ask about ${whole.label}`, onPress: whole.press, hover: quiet(`card-title-${meta.id}`), children: [title] }) : title
+  // at the title's right, in thimble's color, what asks a side thread about the card (the question names the item
+  // selected, when one is)
+  const askWords = 'ask about this card'
+  const askEl = ask ? E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: [E.Text({ key: 'ask-w', color: accent(), wrap: 'truncate-end', children: askWords })] }) : null
   const rows: Any[] = [
-    E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title }),
+    askEl ? E.Box({ key: 'title-row', flexDirection: 'row', justifyContent: 'space-between', children: [E.Box({ key: 'title-l', flexShrink: 1, children: [titled] }), E.Box({ key: 'title-r', flexShrink: 0, marginLeft: 2, children: [askEl] })] }) : titled,
     // a drawing wider than the frame: its columns past the frame's edge are cut
     ...(fault ? [] : [width > inside ? E.Box({ key: 'cut', flexDirection: 'column', width: inside, overflow: 'hidden', children: [client] }) : client]),
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
-  // the line a click or a key selected (`▸`, the card guide's marker): the margin asks about that part of the card,
-  // beside it, so a click on a bar and one on the ? next to it start a thread about the bar
-  const sel = fault ? null : selectedLine(current?.tree, width)
-  const ask = await cardAsk($, meta.id, meta.title, sel?.text ?? '')
-  const titleRows = Math.max(1, Math.ceil(Array.from(meta.title).length / Math.max(1, inside)))
-  const box = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: ask ? 0 : 2, width: inside + 4, children: rows })
-  // the margin left of the frame, in the 2 columns of its indent, beside its title: asks a side thread about the card
-  // (its title and what it shows); the row's keyed Box scopes the ?'s hover, so it shows while the pointer is on the card
-  const framed = ask
-    ? E.Box({ key: `ask-row-${meta.id}`, flexDirection: 'row', children: [E.Box({ width: 2, flexShrink: 0, paddingTop: 1 + (sel ? titleRows + sel.row : 0), children: [askCell(E, { key: `card-ask-${meta.id}`, ...ask, color: accent() })] }), box] })
-    : box
+  // the frame in the 2 columns of its indent; `ask about this card` at its title's right is how a side thread about it
+  // starts, so no ? in the margin asks the same
+  const framed = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: inside + 4, children: rows })
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
   const under = await underCard($, E, meta.id, inside)
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
@@ -305,12 +377,12 @@ export async function clientFault($: Engine, key: string, reason: string): Promi
   failNotice($, `The card “${cut(meta.title, 40)}” could not be drawn: ${reason.slice(0, 120)}`, about(id))
 }
 
-/** A card's text copy as it draws now: what its newest version shows, at the width it is drawn at. */
-export async function cardText($: Engine, id: string): Promise<string> {
+/** A card's text copy as it draws now: what its newest version shows, at the width it is drawn at (or `width`). */
+export async function cardText($: Engine, id: string, width?: number): Promise<string> {
   const meta = await metaOf($, id)
   if (!meta || meta.version < 1) return ''
   const t = await treeOf($, id)
-  const r = await askCard($, meta, 'copy', { width: t?.width ?? cardWidth() })
+  const r = await askCard($, meta, 'copy', { width: width ?? t?.width ?? cardWidth() })
   return r?.ok ? (r.lines as string[]).join('\n') : `(the card did not draw: ${r?.error ?? 'no answer'})`
 }
 
@@ -323,23 +395,62 @@ export async function cardText($: Engine, id: string): Promise<string> {
 export async function revealCard($: Engine, id: string, block: 'start' | 'nearest' = 'nearest'): Promise<void> {
   const meta = await metaOf($, id)
   if (!meta || meta.version < 1) return
-  const row = meta.anchorRow ?? meta.toolUseId
+  const row = meta.anchorRow ?? meta.inRow ?? meta.toolUseId
   try {
     void Promise.resolve($.ui.scroll({ to: { requestId: row }, block: meta.anchorRow && block === 'start' ? 'end' : block })).catch(() => undefined)
   } catch { /* nothing moves */ }
 }
 
 /** The cards an answer row holds, framed, under it: those still anchored there (on the main screen, a version main
- *  draws of such a card in a later turn stands at main's call: canRedraw). */
+ *  draws of such a card in a later turn stands at main's call: canRedraw). A card the words the row shows place on a
+ *  line of their own (a squeeze's version placing a card v drew) draws on that line instead (framesIn). */
 export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
   const metas: CardMeta[] = []
-  for (const id of await anchoredAt($, e.requestId)) {
+  const ids = await anchoredAt($, e.requestId)
+  const shown = ids.length ? (await textView($, e.requestId, String(e.props?.text ?? ''))).text : ''
+  const placed = new Set(shown.split('\n').map(cardRef).filter(Boolean))
+  for (const id of ids) {
     const meta = await metaOf($, id)
-    if (meta && meta.version > 0 && meta.anchorRow === e.requestId) metas.push(meta)
+    if (meta && meta.version > 0 && meta.anchorRow === e.requestId && !placed.has(id)) metas.push(meta)
   }
   if (metas.length) noteShown($, metas.map(m => m.id), e.props?.onScreen)
   const out: Any[] = []
   for (const meta of metas) out.push(await frame($, e, meta))
+  return out
+}
+
+/** The frames of the cards a reply's text places on lines of their own (marks/message.js cardRef), by id: main's cards
+ *  that have drawn. The marks' drawing of the reply draws each on its line (marks/view.ts messageEl). `here`: the rows
+ *  the text stands for (a catch-up's own id), where a card placed there draws, not a line pointing to it. */
+export async function framesIn($: Engine, e: Any, text: string, here: string[] = [e.requestId], o: { indent?: number } = {}): Promise<Record<string, Any>> {
+  const out: Record<string, Any> = {}
+  const drawn: string[] = []
+  for (const line of String(text ?? '').split('\n')) {
+    const id = cardRef(line)
+    if (!id || out[id]) continue
+    const meta = await metaOf($, id)
+    if (!meta || meta.version < 1) continue
+    // a card drawn under an answer (v, a squeeze's new card) draws on the line a version of that answer places it on;
+    // another row's line points to it
+    if (meta.anchorRow && !here.includes(meta.anchorRow)) {
+      const E = $.ui.resolve(e) as Any
+      out[id] = E.Box({ key: `under-${id}`, children: [E.Text({ dimColor: true, children: `↑ “${cut(meta.title, 60)}” is drawn under an earlier answer` })] })
+      continue
+    }
+    // a card stands in one place: the newest row that placed it (or a catch-up of the replies, `<row>#cu`, drawn below
+    // them); an earlier one shows a line that points there
+    if (!meta.anchorRow && meta.inRow && !here.includes(meta.inRow)) {
+      const E = $.ui.resolve(e) as Any
+      const where = meta.inRow.endsWith('#cu') ? 'is in the catch-up below' : 'is drawn further down'
+      out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” ${where}` })] })
+      continue
+    }
+    // a card on a line of the text stands in the text's column, 2 columns in from an answer's left edge (where a card
+    // drawn under the answer stands), so it is that much narrower, and keeps the 2 columns free at the right
+    out[id] = await frame($, e, meta, { ...o, indent: (o.indent ?? 0) + 2 })
+    drawn.push(id)
+  }
+  if (drawn.length) noteShown($, drawn, e.props?.onScreen)
   return out
 }
 
@@ -374,7 +485,26 @@ const handled = new Map<string, number>()
 /** One event of a Client's: the card on screen, the drawing it needs, a Button press or a click. */
 async function clientEvent($: Engine, meta: CardMeta, ev: Any): Promise<Any> {
   if (ev.seen) { await markSeen($, meta.id); return null }
-  if (typeof ev.rows === 'number') { heights.set(meta.id, ev.rows); return null }
+  if (typeof ev.rows === 'number') {
+    // a new height draws again what measured the card at its old one (a catch-up's rule)
+    const was = heights.get(meta.id)
+    heights.set(meta.id, ev.rows)
+    if (was !== ev.rows) $.clock.after(0, () => $.ui.invalidate('ui.render'))
+    return null
+  }
+  // a click on a run of the card's words: the item on its line, as the card's keys select it (runner.mjs pick); else
+  // the side thread about the run, as the margin asks about the card
+  if (ev.ask && typeof ev.ask === 'object') {
+    if (Array.isArray(ev.ask.path)) {
+      await atWidth($, meta, Number(ev.width))
+      const r = await askCard($, meta, 'pick', { path: ev.ask.path.slice(0, 64).map((x: unknown) => Math.trunc(Number(x) || 0)) })
+      if (r?.ok && r.handled) { await setFocus($, meta.id); return r }
+    }
+    const element = { text: String(ev.ask.text ?? '').slice(0, 400), line: String(ev.ask.line ?? '').slice(0, 400) }
+    const a = await cardAsk($, meta.id, meta.title, '', element)
+    if (a) await Promise.resolve(a.press()).catch(() => undefined)
+    return null
+  }
   if (typeof ev.draw === 'string') {
     const [gen, width] = ev.draw.split(':').map(Number)
     return gen === meta.gen && width ? { width, r: await askCard($, meta, 'draw', { width }) } : null
@@ -409,7 +539,7 @@ function needOf(meta: CardMeta, d: CardDrawing | null, width: number, theme: The
  *  needs. */
 function propsAt(meta: CardMeta, t: CardTree | null | undefined, room: number, theme: Theme): Any {
   const d = drawingAt(t, meta.gen, room, theme)
-  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme) }
+  return { tree: d?.tree ?? null, width: room, need: needOf(meta, d, room, theme), tint: citeTint('verified', theme), accent: accent(), theme }
 }
 
 /** A Client's post: the events it has not had an answer for, each handled once, in order. After a press or a click,

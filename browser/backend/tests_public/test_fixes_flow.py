@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -181,65 +182,184 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
     fixes._phase.clear()  # the server that starts again knows of no phase: the notice is gone once the fix is on
     assert fixes.status()["fixes"] == []
     assert fixes.status(every=True)["fixes"][0]["state"] == "on"  # Your fixes still lists it, with Undo
-    # main's chat keeps one line that says so
-    assert any(r.get("type") == "text" and "“Card says how many rows” is on" in r.get("delta", "") for r in _log(CORPUS))
+    # how it ended, then that it is on: rows of main's chat and of the fix's thread, in the order they happened
+    rows = [("ready", "thimble fixed: Card says how many rows · tests pass"), ("fixed", "“Card says how many rows” is on")]
+    [chat] = _fixer_chats(CORPUS)
+    for log in (_log(CORPUS), _log(CORPUS, chat["id"])):
+        assert [(r["status"], r["text"]) for r in log if r.get("type") == "chip" and r.get("kind") == "fix"] == rows
+        assert {r["ref"] for r in log if r.get("kind") == "fix"} == {"fix:1"}
 
 
-async def test_a_fix_runs_in_its_own_chat_in_the_tree_and_main_shows_only_the_message_and_one_line(fixing, monkeypatch,
-                                                                                                    analyst):
+def scripted(main: list[Any], fixer: list[Any]) -> list[Any]:
+    """Replies for main and for the fixers, each from its own list, whichever asks first: a fixer's request is the one
+    whose conversation holds the fixer's first message."""
+    main, fixer = list(main), list(fixer)
+
+    def reply(body: dict[str, Any]) -> Any:
+        mine = fixer if "The person asked for this change to their thimble" in json.dumps(body["messages"]) else main
+        return mine.pop(0) if mine else text("(no more)")
+
+    return [reply] * (len(main) + len(fixer))
+
+
+async def _main_done() -> None:
+    """Main's turns on what was posted to it, to their end."""
+    from app import runtime
+
+    for _ in range(100):
+        task = runtime._spaces[CORPUS].main.task
+        if task is not None and not task.done():
+            await task
+            continue
+        await asyncio.sleep(0.05)
+        task = runtime._spaces[CORPUS].main.task
+        if task is None or task.done():
+            return
+
+
+def _asked(client: Any, i: int = -1) -> str:
+    """What main read of the person's /thimble-fix: the user message of main's request `i`."""
+    msgs = [json.dumps(b["messages"]) for b in client.bodies]
+    return [m for m in msgs if "The person asks for a change to thimble itself" in m
+            and "The person asked for this change to their thimble" not in m][i]
+
+
+async def test_a_fix_runs_in_its_own_chat_in_the_tree_and_main_shows_it_where_main_started_it(fixing, monkeypatch,
+                                                                                               analyst):
     work = fixing.home / "fixes" / "work" / "1"
-    api_key(monkeypatch, [
-        call("Write", {"file_path": str(work / "browser" / "note.txt"), "content": "rows\n"}),
-        text("Title: Card says how many rows\nWhat it does: The card's title now ends with its row count."),
-    ])
+    client = api_key(monkeypatch, scripted(
+        [call("fix_thimble", {"words": "new make the card count its rows"}), text("Started a fix for the card.")],
+        [call("Write", {"file_path": str(work / "browser" / "note.txt"), "content": "rows\n"}),
+         text("Title: Card says how many rows\nWhat it does: The card's title now ends with its row count.")]))
     before = len(_log(CORPUS))
     got = await fixes.request_route(CORPUS, fixes.Asked(words="make the card count its rows", page=PAGE), analyst)
-    assert got["fix"]["id"] == 1
+    assert got["event"]
+    await _main_done()
+    # main read the request as the terminal's /thimble-fix gives it, with the person's fixes (none) beside it
+    asked = _asked(client)
+    assert "make the card count its rows" in asked and "fix_thimble" in asked
+    assert "for a new fix):\\n\\n(none yet)" in asked
     # the fix's own chat, which the thread tree lists by the fix's name, not its number
     [chat] = _fixer_chats(CORPUS)
     assert chat["kind"] == "agent" and chat["fix"] == 1 and chat["title"] == "fixing make the card count its rows"
-    records = await _mirrored(CORPUS, chat["id"])
+    await _mirrored(CORPUS, chat["id"])
     await _ended()
     records = _log(CORPUS, chat["id"])
-    # it opens with the person's words, not the fixer's prompt, and its steps are its own
+    # it opens with the person's words, not the fixer's prompt, and its steps are its own; it got the page
     users = [r["text"] for r in records if r["type"] == "user"]
     assert users == ["make the card count its rows"]
     assert any(r["type"] == "tool_use" and r["name"] == "Write" for r in records)
-    # main's chat: the message as the person typed it, and one line that the fix started in its chat; none of its steps
+    assert "Incidents by week" in json.dumps([b for b in client.bodies if "The person asked for this change" in json.dumps(b)][-1]["messages"])
+    # main's chat: the message as the person typed it, the fixer as main's subagent (its card reads the fix's chat),
+    # main's line, and at the fix's end the row that asks the person; main's call carries the fix's name, never its
+    # number
     added = _log(CORPUS)[before:]
     assert [(r["type"], r.get("text") or r.get("chat")) for r in added if r["type"] in ("user", "agent")] == [
         ("user", "/thimble-fix make the card count its rows"), ("agent", chat["id"])]
-    assert not any(r["type"] in ("tool_use", "tool_result") for r in added)
+    assert [(r["status"], r["ref"]) for r in added if r["type"] == "chip"] == [("ready", "fix:1")]
+    assert [r.get("name", "").rsplit("__", 1)[-1] for r in added if r["type"] == "tool_use"] == ["fix_thimble"]
+    # what main read of its call: the fix by its name, never its number
+    result = json.dumps([b for b in client.bodies if "tool_result" in json.dumps(b["messages"])
+                         and "The person asked for this change" not in json.dumps(b["messages"])][-1]["messages"][-1])
+    assert "(\\u201cmake the card count its rows\\u201d)" in result or '(\\"make the card count its rows\\")' in result
+    assert "fix 1" not in result
+    assert any(r["type"] == "text" and "Started a fix" in (r.get("delta") or "") for r in added)
+    # main is not told of the fix a second time at the person's next message: it started it
+    from app import runtime
+    assert runtime._spaces[CORPUS].notes.get(runtime.MAIN) in (None, [])
     assert agents.read_meta(CORPUS, chat["id"])["status"] == "done"
 
 
-async def test_n_and_words_change_fix_n_in_place_and_other_words_are_a_new_fix(fixing, monkeypatch, analyst):
-    api_key(monkeypatch, [text("Title: Card counts rows\nWhat it does: The card counts rows."),
-                          text("Title: Card counts rows\nWhat it does: The card counts rows and columns."),
-                          text("Title: Five rows a page\nWhat it does: Pages hold five rows.")])
+async def test_main_tells_a_follow_up_from_a_new_fix_with_the_person_s_fixes_beside_the_words(fixing, monkeypatch,
+                                                                                               analyst):
+    client = api_key(monkeypatch, scripted(
+        [call("fix_thimble", {"words": "new count the rows"}), text("Started."),
+         call("fix_thimble", {"words": "1 count the columns too"}, "toolu_2"), text("Changing it."),
+         call("fix_thimble", {"words": "5 rows a page"}, "toolu_3"), text("Started.")],
+        [text("Title: Card counts rows\nWhat it does: The card counts rows."),
+         text("Title: Card counts rows\nWhat it does: The card counts rows and columns."),
+         text("Title: Five rows a page\nWhat it does: Pages hold five rows.")]))
     await fixes.request_route(CORPUS, fixes.Asked(words="count the rows"), analyst)
+    await _main_done()
     await _ended()
     before = len(_log(CORPUS))
-    got = await fixes.request_route(CORPUS, fixes.Asked(words="1 count the columns too"), analyst)
-    # a round of fix 1 (`fix round 1`), never a new fix: the same id and the same chat, renamed `changing …`
-    assert got["fix"]["id"] == 1 and got["fix"]["round"] is True
+    await fixes.request_route(CORPUS, fixes.Asked(words="it should count the columns too"), analyst)
+    await _main_done()
+    # main read the person's fixes beside the words: the number as the handle, the name and the state
+    asked = _asked(client)
+    assert "it should count the columns too" in asked
+    assert '1  \\"Card counts rows\\" (ready): The card\'s title now ends with its row count.' in asked
+    # fix_thimble `1 <words>`: a round of fix 1 (`fix round 1`), never a new fix: the same id and the same chat
     assert ("round", "1") in fixing.calls and [c[0] for c in fixing.calls].count("new") == 1
     assert fixing.recs[1]["words"] == ["count the rows", "count the columns too"]
     [chat] = _fixer_chats(CORPUS)
     assert chat["title"] == "changing Card counts rows"
     assert [(r["type"], r.get("text")) for r in _log(CORPUS)[before:] if r["type"] == "user"] == [
-        ("user", "/thimble-fix 1 count the columns too")]
+        ("user", "/thimble-fix it should count the columns too")]
+    # main's card of the round is the fix's second run, so it shows that run's steps alone
+    assert [(r["chat"], r.get("run")) for r in _log(CORPUS)[before:] if r["type"] == "agent"] == [(chat["id"], 1)]
     await _ended()
     assert [r["text"] for r in _log(CORPUS, chat["id"]) if r["type"] == "user"] == ["count the rows", "count the columns too"]
     # a number that is no fix of the person's is part of the words of a new fix, as the terminal reads it
-    got = await fixes.request_route(CORPUS, fixes.Asked(words="5 rows a page"), analyst)
-    assert got["fix"]["id"] == 2 and fixing.recs[2]["words"] == ["5 rows a page"]
+    await fixes.request_route(CORPUS, fixes.Asked(words="five rows a page"), analyst)
+    await _main_done()
+    assert fixing.recs[2]["words"] == ["5 rows a page"]
     await _ended(2)
+
+
+async def test_main_may_ask_first_and_starts_the_fix_with_the_answer(fixing, monkeypatch, analyst):
+    client = api_key(monkeypatch, scripted(
+        [text("Which card: the incidents card or the weeks card?"),
+         call("fix_thimble", {"words": "new the incidents card should count its rows"}), text("Started.")],
+        [text("Title: Card counts rows\nWhat it does: The card counts rows.")]))
+    await fixes.request_route(CORPUS, fixes.Asked(words="the card should count", page=PAGE), analyst)
+    await _main_done()
+    assert [c[0] for c in fixing.calls] == ["list"] and _fixer_chats(CORPUS) == []
+    await main_turn("the incidents one")
+    await _main_done()
+    assert fixing.recs[1]["words"] == ["the incidents card should count its rows"]
+    await _ended()
+    # the fixer still gets the page as it was when the person asked
+    fixer = [b for b in client.bodies if "The person asked for this change to their thimble" in json.dumps(b["messages"])]
+    assert "Incidents by week" in json.dumps(fixer[0]["messages"])
+
+
+async def test_the_row_times_a_round_from_its_start_not_from_when_the_fix_was_made(fixing):
+    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "state": "working", "words": ["a"], "created": time.time() - 3600}
+    fixes._phase_set(1, "fixing")
+    assert time.time() - fixes.status()["fixes"][0]["created"] < 60
+    fixes._phase_set(1, "testing")  # the same work goes on: the same start
+    assert time.time() - fixes.status()["fixes"][0]["created"] < 60
+    fixes._phase_set(1, None)
+    assert 1 not in fixes._since
+
+
+async def test_a_fix_whose_server_stopped_while_it_worked_is_taken_as_it_stands_at_the_page_s_first_look(fixing,
+                                                                                                       monkeypatch):
+    fixing.recs[1] = {"id": 1, "title": "Card counts rows", "state": "working", "words": ["a"], "made_in": "browser",
+                      "work": str(fixing.home / "fixes" / "work" / "1"), "base": "HEAD"}
+    monkeypatch.setattr(fixes, "_recovered", False)
+    await fixes.status_route()  # the route reads the records in a worker thread; the recovery starts on the loop
+    for _ in range(50):
+        if fixing.recs[1]["state"] != "working":
+            break
+        await asyncio.sleep(0.1)
+    assert ("done" in [c[0] for c in fixing.calls]) and fixing.recs[1]["state"] == "ready"
+
+
+def test_main_reads_each_fix_the_words_may_change_by_its_number_name_and_state():
+    recs = [{"id": 1, "title": "Card counts rows", "state": "on", "summary": "The card counts\nits rows."},
+            {"id": 2, "title": "", "state": "working", "prev": {"state": "on"}},
+            {"id": 3, "title": "Old one", "state": "removed"}]
+    assert fixes.fixes_context(recs).splitlines() == [
+        '1  "Card counts rows" (on): The card counts its rows.',
+        '2  "fix 2" (on, being changed (working))']
+    assert fixes.fixes_context(recs[2:]) == "(none yet)"
 
 
 async def test_words_in_the_fix_s_thread_go_to_its_fixer_while_it_works(fixing, monkeypatch, analyst):
     client = api_key(monkeypatch, [text("Working on it."), text("Title: Card counts rows\nWhat it does: Rows and columns.")])
-    await fixes.request_route(CORPUS, fixes.Asked(words="count the rows"), analyst)
+    await fixes.request(CORPUS, "count the rows", "")
     before = len(_log(CORPUS))
     # typed in the fix's own thread while its fixer works: a round of the fix, for the same fixer
     got = await fixes.request_route(CORPUS, fixes.Asked(words="and the columns", fix=1), analyst)
@@ -344,15 +464,12 @@ async def test_the_routes_take_the_analyst_s_click_alone(fixing):
     assert e.value.status_code == 400
 
 
-async def test_file_dev_ticket_on_thimble_s_code_asks_for_a_fix(fixing, monkeypatch):
-    api_key(monkeypatch, [text("Title: Wider pane\nWhat it does: The pane is wider.")])
+async def test_file_dev_ticket_on_thimble_s_code_starts_no_fix(fixing):
+    # a change to thimble itself is the person's fix, which fix_thimble starts once they ask for it
     res = await tools.call(CORPUS, "file_dev_ticket", {"title": "Wider pane", "body": "the pane is narrow"},
                            tool_use_id="toolu_ticket")
-    said = json.dumps(res.content)
-    assert "fix 1" in said and "Wider pane" in said
-    assert fixing.calls[0][0] == "new" and fixing.recs[1]["words"] == ["Wider pane\n\nthe pane is narrow"]
-    assert fixing.recs[1]["made_in"] == "browser"
-    await _ended()
+    assert "fix_thimble" in json.dumps(res.content) and not res.is_error
+    assert fixing.calls == [] and _fixer_chats(CORPUS) == []
 
 
 def test_fixes_off_leave_the_code_tickets_their_entry_points(monkeypatch):

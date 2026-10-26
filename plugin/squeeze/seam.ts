@@ -1,4 +1,4 @@
-// seam.ts: where Squeeze and catch-up meet the rest of thimble (core/answerview.ts calls each function by name, since
+// seam.ts: where Squeeze and Catch-up (two settings) meet the rest of thimble (core/answerview.ts calls each function by name, since
 // Claude Code follows `$` only into functions a file declares or imports). The feature's own modules are beside this
 // file: term.ts (the records, the rewrite, the catch-up, what Claude hears), ui.ts (the chips, their keys, the bar, the
 // drawing), cards.ts (the cards a squeeze changes), chips.mjs (pure: the chips, the request, the reply, the checks),
@@ -6,21 +6,21 @@
 //
 //   SQUEEZE_KEYS                       its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   squeezeView($, row, text)          the text a row of Claude's shows now in place of what Claude wrote: a version
-//                                      the person squeezed or stretched, the part of it written in so far, `hidden`
-//                                      for the replies a catch-up covers, `dim` while a rewrite runs; null: the row as
-//                                      Claude wrote it
-//   squeezeRow($, els, row, cols)      the row drawn whole in place of its words, or null: a catch-up, with the rule
-//                                      down its side and its head line, its words with their marks
-//   squeezeUnder($, els, row, cols)    what stands under the row after its cards: the chips while they are open on it,
-//                                      what a squeeze left out of its cards, why a catch-up failed
+//                                      the person squeezed or stretched, the part of it written in so far, `dim` while
+//                                      a rewrite runs; null: the row as Claude wrote it
+//   squeezeUnder($, els, row, cols, cardsIn)  what stands under the row after its cards: the catch-up of the replies
+//                                      it ends (the rule down its side, its head line, its words with their marks, the
+//                                      replies' explainers and the cards it places), why a catch-up failed, what a
+//                                      squeeze left out of its cards, the chips while they are open on it
 //   squeezeUnderCard($, els, id, cols) what stands under one card: what a squeeze changed of it
 //   squeezeHidesCard($, id)            whether a card is left out of the version of its answer shown now
 //   squeezeHolds($)                    whether the chips are open: their keys come before the tray's and the ask's
 //   squeezeKey($, key, until)          s (and the chips' keys while they are open): a taker as hooks/keys.ts takes it
-//   squeezeBar($, on, preview)         its items at the bar's left (`s squeeze`, lit with the levels set; the chips'
-//                                      keys while they are open)
-//   registerSqueeze                    its own hooks: /squeeze and its autocomplete, the chips' Client, the prompt that
-//                                      carries the version told to Claude, a resumed session's cards
+//   squeezeBar($, on, preview)         its items at the bar's left (`s squeeze`, `b catch up on N replies`; the
+//                                      chips' keys while they are open)
+//   registerSqueeze                    its own hooks: /squeeze (what + writes in the prompt box, hidden from the
+//                                      typeahead) and its autocomplete, the chips' Client, the prompt that carries the
+//                                      version told to Claude, a resumed session's cards
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
@@ -30,24 +30,20 @@ import { featureOn } from '../settings/features.mjs'
 import { restoreCardsShown } from './cards'
 import { ownWords } from './chips.mjs'
 import { promptSent, recOf } from './term'
-import { addOwn, barItems, catchUpEl, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
+import { addOwn, barItems, type CardsIn, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export const SQUEEZE_KEYS = ['s']
+export const SQUEEZE_KEYS = ['s', 'b']
 
 export async function squeezeView($: Engine, row: string, _text: string): Promise<TextView | null> {
   return viewOf($, row)
 }
 
-export async function squeezeRow($: Engine, els: Any, row: string, cols: number): Promise<Any | null> {
-  return catchUpEl($, els, row, cols)
-}
-
-export async function squeezeUnder($: Engine, els: Any, row: string, cols: number): Promise<Any[]> {
-  return underRow($, els, row, cols)
+export async function squeezeUnder($: Engine, els: Any, row: string, cols: number, cardsIn?: CardsIn): Promise<Any[]> {
+  return underRow($, els, row, cols, cardsIn)
 }
 
 export async function squeezeUnderCard($: Engine, els: Any, id: string, _cols: number): Promise<Any[]> {
@@ -89,10 +85,14 @@ export const registerSqueeze: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
+  // /squeeze is not a command people type: + in the chips writes it in the prompt box, and the person's words follow it.
+  // So the typeahead and /help leave it out; it runs when the box sends it
+  on('command.describe', { command: /^(thimble:)?squeeze$/ }, async ($, e, next) => ({ ...(await next(e)), isHidden: true })).catch(($, e, next) => next(e))
+
   // /squeeze [words]: a chip in the person's own words on the message the chips are open on (else the one the keys act
   // on), picked; with no words, the chips open
   on('command.run', { command: 'squeeze' }, async ($, e) => {
-    if (!featureOn('squeeze')) return { text: 'Squeeze is off. Turn on "Squeeze and catch-up" in /thimble-settings to use it.' }
+    if (!featureOn('squeezeAnswers')) return { text: 'Squeeze is off. Turn it on in /thimble-settings to use it.' }
     const id = (await openNow($))?.id ?? (await targetNow($))
     if (!id || !(await recOf($, id))) return { text: 'No message to squeeze yet: ask Claude something first.' }
     if (!ownWords(e.args)) { await openChips($, id); return {} }
@@ -110,6 +110,13 @@ export const registerSqueeze: Register = on => {
     // a row writes the whole words in place of what follows /squeeze (the token is the last word typed)
     const head = e.text.slice(9, e.start)
     return { suggestions: [...r.suggestions, ...hits.filter(d => d.toLowerCase().startsWith(head.toLowerCase())).map(d => ({ text: d.slice(head.length), label: d, description: 'a chip you typed earlier' }))] }
+  }).catch(($, e, next) => next(e))
+
+  // the prompt box changed (a key typed there, esc esc): the chips let go of words begun after + (ui.ts promptHasKeys)
+  on('prompt.change', async ($, e, next) => {
+    const r = await next(e)
+    await promptHasKeys($, String(e.text ?? '')).catch(() => undefined)
+    return r
   }).catch(($, e, next) => next(e))
 
   // the chips' Client posted: a press, or a key while a click gave them the keyboard

@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { answersOf, failedCall, readLabel, summary } from '../labelreads.mjs'
+import { answersOf, because, failedCall, readLabel, summary } from '../labelreads.mjs'
 
 const LEAN = fileURLToPath(new URL('../../bin/thimble', import.meta.url))
 const LABEL = { name: 'apology', definition: 'The message apologizes.', values: ['yes', 'no'], reason: true }
@@ -81,5 +81,31 @@ test('reads: the calls of a wave go out together; with their answers the values 
   const failed = await readLabel({ name: 'apology', kernel, callAll: busy, template: '{{RECORDS}}' })
   assert.equal(failed.failedCalls, 1)
   assert.equal(failed.why, 'the API is overloaded')
-  assert.match(failed.text, /^apology: 0 of 4 records have a value\. 4 have no value \(1 call failed: the API is overloaded\): `thimble label apology --again` asks the model again\.$/)
+  assert.equal(failed.because, 'a model call failed: the API is overloaded')
+  assert.match(failed.text, /^apology: 0 of 4 records have a value\. 4 have no value \(a model call failed: the API is overloaded\): `thimble label apology --again` asks the model again\.$/)
+  // again, with the call answered but its reply not JSON: no call failed, and the line says the reply could not be read
+  spawnSync(LEAN, ['label', 'apology', '--in', 'chat/*.jsonl', '--prompt', 'The message says sorry.'], { cwd: root, env, encoding: 'utf8' })
+  const prose = async (reqs, each) => {
+    const out = reqs.map(() => ({ isAnswered: true, text: 'I read the records and most of them apologize.' }))
+    for (const [i, r] of out.entries()) await each(i, r)
+    return out
+  }
+  const unread = await readLabel({ name: 'apology', kernel, callAll: prose, template: '{{RECORDS}}' })
+  assert.equal(unread.failedCalls, 0)
+  assert.equal(unread.failed, 4)
+  assert.equal(unread.because, 'a model reply held no JSON array of values, so it could not be read')
+  assert.match(unread.text, /4 have no value \(a model reply held no JSON array of values, so it could not be read\)/)
+})
+
+test('why records got no value: one part for each way, in plain words, and none left out', () => {
+  assert.equal(because({ unread: 50, unreadWhy: 'held no JSON array of values' }), '50 model replies held no JSON array of values, so they could not be read')
+  const off = answersOf('[{"i": 1, "value": "maybe"}, {"i": 2, "value": "no"}]', UNITS, LABEL.values)
+  assert.equal(off.leftOut, 1)
+  assert.equal(off.offList, 1)
+  assert.equal(off.unread, null)
+  assert.equal(because({ calls: 2, callWhy: 'the API is overloaded', unread: 1, unreadWhy: 'held no JSON array of values', leftOut: off.leftOut, offList: off.offList, offWhy: off.offWhy, before: 3 }),
+    '2 model calls failed: the API is overloaded; a model reply held no JSON array of values, so it could not be read; ' +
+    "the model's replies left out a record; the model gave a record a value off the label's list (the reply gave \"maybe\", which is not one of yes, no); " +
+    '3 records had no value before these reads')
+  assert.equal(because({}), '')
 })

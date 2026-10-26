@@ -6,7 +6,11 @@
 //   - an answer: the last text row of a turn of main's that answered (the person's question, a key's ask, a background
 //     task's report, which starts a turn of its own);
 //   - a reply in a long turn: words Claude wrote before it went on working (LONG_REPLY characters or more), queued
-//     when its turn takes its next step.
+//     when its turn takes its next step;
+//   - the words of an answer with cards: the rows above and between the turn's cards, queued with its answer, since
+//     a reply that explains, shows a card and explains again is one answer;
+//   - a catch-up (squeeze/term.ts): each version shown is read by the explain and heads lenses as an answer is, with
+//     its words as what the analyst reads (lookAtCatchUp).
 // One worker takes the queue in order. When several messages wait (they came while a look ran), it takes them all in
 // one look whose prompt names each of them. Two looks never run at once, and a look never delays a turn. It looks only
 // where a person is (S.person): never in a `-p` run, and in a session Claude Code's background service runs only once
@@ -27,14 +31,17 @@
 //
 // Switches (settings/features.mjs): each lens belongs to a feature (explain, details, claims); the observer runs while
 // one of them is on, and a lens whose feature is off has no section in the prompt, no key in the reply and no merge.
+// A lens whose feature has a mode (Claims: auto, on demand, off) joins the look after each reply only in its `auto` mode;
+// else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims have not read,
+// for a look of that lens alone.
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { cardText } from '../cards/draw'
 import { metaOf } from '../cards/store'
-import { claimsLookFailed, claimsMerge, claimsState } from '../claims/seam'
-import { messageOf, turnOf, type TurnRec } from '../core/answers'
+import { CLAIMS_FIND, claimsFindEnd, claimsFindStart, claimsLookFailed, claimsMerge, claimsState, claimsUnread } from '../claims/seam'
+import { messageOf, turnOf, turnOfRow, type TurnRec } from '../core/answers'
 import { isPersonPrompt, oneLine } from '../core/answers.mjs'
 import { textView } from '../core/answerview'
 import { readKept, rootHere, runThimble, startDir, writeKept } from '../core/env'
@@ -42,7 +49,7 @@ import { modelWhy } from '../core/why.js'
 import { explainMerge, explainState } from '../explain/seam'
 import { sessionKey } from '../hooks/conversation'
 import { promptText, type PromptName } from '../prompts/prompts'
-import { featureOn } from '../settings/features.mjs'
+import { featureOn, lensesAfterReply } from '../settings/features.mjs'
 import { record, tracked } from '../telemetry/telemetry'
 import { composeSystem, composeTurn, sharesOf, skeletonOf } from './compose.mjs'
 import { LENSES } from './lenses.mjs'
@@ -55,8 +62,9 @@ type Any = any
 /** The prompt of a message's turn: its words, and who sent it (prompt.submit's origin kind). */
 export type TurnPrompt = { text: string; by: string }
 /** One of Claude's messages a look reads: its row, its words, whether it ended its turn, its turn and that turn's
- *  prompt. `at`: when it was queued (session clock); `t`: the same in wall time. */
-export type LookMsg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; at: number; t: number }
+ *  prompt. `at`: when it was queued (session clock); `t`: the same in wall time. `only`: the lenses of a look on
+ *  demand (the claims'), which reads it with those alone. */
+export type LookMsg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; at: number; t: number; only?: string[]; catchUp?: string }
 /** What one look gave, as a feature's merge reads it: the messages it read (the newest last), the reply read
  *  leniently (reply.mjs parseAnswer), whether the person started another turn while it looked, and a log of the
  *  look's own (a feature may note what it placed). */
@@ -83,10 +91,15 @@ const S = {
 }
 
 const cut = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`)
-const wait = ($: Engine, ms: number) => new Promise<void>(done => { $.clock.after(ms, () => done()) })
+function wait($: Engine, ms: number): Promise<void> {
+  return new Promise<void>(done => { $.clock.after(ms, () => done()) })
+}
 
-/** Whether the observer runs: one of the features its lenses serve is on. */
-export const observerOn = (): boolean => (LENSES as Lens[]).some(l => featureOn(l.option))
+/** Whether a lens joins the look after each reply: its feature is on, in its `auto` mode when it has one. */
+const lensAuto = (l: Lens): boolean => lensesAfterReply(l.option)
+
+/** Whether the observer looks after each reply: one of its lenses joins that look. */
+export const observerOn = (): boolean => (LENSES as Lens[]).some(lensAuto)
 
 // ------------------------------------------------------------------------------------------------ what it reads
 
@@ -126,6 +139,11 @@ function promptedBy(p: TurnPrompt): string {
 /** The messages a look reads, named so the fork finds each in the conversation: its kind, its turn, its first words. */
 export function messagesText(msgs: LookMsg[]): string {
   const one = (m: LookMsg) => {
+    // a catch-up is not in the session above: its words stand here, and it is what the analyst reads of the replies
+    if (m.catchUp) {
+      const n = m.catchUp.split('\n').length
+      return `A catch-up thimble wrote of Claude's messages since the analyst's last prompt (${n} line${n === 1 ? '' : 's'}). The analyst reads it below those messages, in place of reading them. It is not in the session above; these are its words:\n${cut(m.catchUp, 6000)}`
+    }
     const begins = oneLine(m.text, 140)
     const n = m.text.split('\n').length
     const lines = `${n} line${n === 1 ? '' : 's'}`
@@ -139,7 +157,7 @@ export function messagesText(msgs: LookMsg[]): string {
 }
 
 /** The keys above the analyst's prompt, as the features leave them. */
-const rowKeys = () => [['cards', 'v card'], ['squeeze', 's squeeze'], ['claims', 'c claims']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
+const rowKeys = () => [['cards', 'v card'], ['squeezeAnswers', 's squeeze'], ['claims', 'c claims']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
 
 /** The look's step on the bar's busy line: `adding explainers, details, claims`. */
 export function lookWord(lenses: string[]): string {
@@ -150,13 +168,16 @@ export function lookWord(lenses: string[]): string {
 
 // ------------------------------------------------------------------------------------------------ the queue
 
+/** A message as the queue knows it: its row, and the lenses of a look on demand. */
+const queuedKey = (m: { row: string; only?: string[]; catchUp?: string }) => `${m.row}${m.only ? `#${m.only.join(',')}` : ''}${m.catchUp ? `#cu${m.catchUp.length}` : ''}`
+
 async function enqueue($: Engine, m: Omit<LookMsg, 'at' | 't'>): Promise<void> {
-  if (S.queued.has(m.row)) {
+  if (S.queued.has(queuedKey(m))) {
     // its words were queued as a reply already: it is the answer now, while it still waits
     if (m.kind === 'answer') { const w = S.queue.find(x => x.row === m.row); if (w) w.kind = 'answer' }
     return
   }
-  S.queued.add(m.row)
+  S.queued.add(queuedKey(m))
   S.queue.push({ ...m, at: Number(await $.clock.now()), t: Date.now() })
   $.clock.after(LOOK_DELAY, () => { void drain($) })
 }
@@ -165,7 +186,12 @@ async function drain($: Engine): Promise<void> {
   if (S.busy) return
   S.busy = true
   try {
-    while (S.queue.length) await look($, S.queue.splice(0))
+    // the messages that wait, together, up to the first that wants other lenses (a look on demand, or after a reply)
+    while (S.queue.length) {
+      const kind = String(S.queue[0]!.only ?? '')
+      const n = S.queue.findIndex(m => String(m.only ?? '') !== kind)
+      await look($, S.queue.splice(0, n < 0 ? S.queue.length : n))
+    }
   } finally {
     S.busy = false
     if (S.queue.length) $.clock.after(LOOK_DELAY, () => { void drain($) })
@@ -179,12 +205,50 @@ async function msgOf($: Engine, t: TurnRec, row: string, kind: 'answer' | 'reply
   return { row, text: m.text, kind, turnId: t.turnId, turnNo: t.n, prompt: { text: t.prompt.text, by: t.prompt.by } }
 }
 
+/** A turn's answer as looks read it: a reply with cards is one answer, so the words above and between its cards come
+ *  first, then its last row. */
+async function answerMsgs($: Engine, t: TurnRec): Promise<Omit<LookMsg, 'at' | 't'>[]> {
+  const out: Omit<LookMsg, 'at' | 't'>[] = []
+  const first = Math.min(...t.cards.map(c => (typeof c.after === 'number' ? c.after : Infinity)))
+  if (Number.isFinite(first)) {
+    for (const row of t.rows.slice(Math.max(0, first - 1), -1)) {
+      const w = await msgOf($, t, row, 'reply')
+      if (w) out.push(w)
+    }
+  }
+  const m = t.answer ? await msgOf($, t, t.answer, 'answer') : null
+  if (m) out.push(m)
+  return out
+}
+
+/** f in the Claims pane: the answers the claims have not read, queued for a look of the claims lens alone. Answers
+ *  how many answers it queued. */
+export async function findClaimsNow($: Engine): Promise<number> {
+  const turns = await claimsUnread($)
+  if (!turns.length) return 0
+  await claimsFindStart($, turns.length)
+  for (const t of turns) for (const m of await answerMsgs($, t)) await enqueue($, { ...m, only: ['claims'] })
+  return turns.length
+}
+
+/** A catch-up's version shown (squeeze/term.ts settled): the explain and heads lenses read it as they read an answer,
+ *  with its words as what the analyst reads below `row`, the newest message it covers, where what they give is kept
+ *  (explain/seam.ts explainMerge) and the catch-up's drawing finds it (explainSpansOf). */
+export async function lookAtCatchUp($: Engine, row: string, text: string): Promise<void> {
+  const only = (LENSES as Lens[]).filter(l => (l.name === 'explain' || l.name === 'heads') && featureOn(l.option)).map(l => l.name)
+  if (!only.length || S.person !== 'now' || !text.trim()) return
+  const t = await turnOfRow($, row)
+  const m = t ? await msgOf($, t, row, 'answer') : null
+  if (m) await enqueue($, { ...m, only, catchUp: text })
+}
+
 // ------------------------------------------------------------------------------------------------ the look
 
-async function lensParts($: Engine): Promise<Part[]> {
+/** The lenses of a look and their fragments: those that join the look after each reply, or `only` these (on demand). */
+async function lensParts($: Engine, only?: string[]): Promise<Part[]> {
   const parts: Part[] = []
   for (const lens of LENSES as Lens[]) {
-    if (!featureOn(lens.option)) continue
+    if (only ? !only.includes(lens.name) || !featureOn(lens.option) : !lensAuto(lens)) continue
     parts.push({ lens, text: await promptText($, lens.feature), id: lens.feature })
   }
   return parts
@@ -221,24 +285,28 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
   const started = Date.now()
   const gen = S.gen
   const row: Record<string, unknown> = { kind: 'look', turn: newest.turnNo, messages: batch.map(m => ({ row: m.row, kind: m.kind, turn: m.turnNo })), wait_ms: Math.max(0, started - batch[0]!.t) }
+  const only = newest.only
+  if (only) row.only = only
+  const on = () => (only ? (LENSES as Lens[]).some(l => only.includes(l.name) && featureOn(l.option)) : observerOn())
   try {
-    if (!observerOn()) { row.dropped = 'turned off'; return }
-    const parts = await lensParts($)
+    if (!on()) { row.dropped = 'turned off'; return }
+    const parts = await lensParts($, only)
     if (!parts.length) { row.skip = 'no lens on'; return }
     const turns: TurnRec[] = []
     for (const id of [...new Set(batch.map(m => m.turnId))]) { const t = await turnOf($, id); if (t) turns.push(t) }
     const [objects, coverage] = await Promise.all([cardsNow($, turns), coverageNow($)])
     const st = { ...(await explainState($).catch(() => ({}))), ...(await claimsState($).catch(() => ({}))) }
-    // a message the person reads in another version (squeezed): the look reads the version they read
-    const shownText = (await textView($, newest.row, newest.text)).text
-    const shown = shownText !== newest.text ? `\nThe analyst reads the newest message squeezed (${shownText.split('\n').length} lines); this is what shows:\n${cut(shownText, 6000)}\n` : ''
+    // a message the person reads in another version (squeezed): the look reads the version they read (a catch-up's
+    // words stand in its message's place, messagesText)
+    const shownText = newest.catchUp ?? (await textView($, newest.row, newest.text)).text
+    const shown = !newest.catchUp && shownText !== newest.text ? `\nThe analyst reads the newest message squeezed (${shownText.split('\n').length} lines); this is what shows:\n${cut(shownText, 6000)}\n` : ''
     const vals = { MESSAGES: messagesText(batch), ROW: rowKeys(), SHOWN: shown, OBJECTS: objects, COVERAGE: coverage }
     const frame = await promptText($, 'observer')
     let p = await pass($, { frame, parts, msgs: batch, vals, st })
     if (!p.out && !signInFailed(p.f)) {
       row.first_try = { error: p.fork.error ?? 'its reply could not be read', ms: p.ms }
       await wait($, RETRY_MS)
-      if (!observerOn()) { row.dropped = 'turned off'; return }
+      if (!on()) { row.dropped = 'turned off'; return }
       p = await pass($, { frame, parts, msgs: batch, vals, st })
     }
     row.fork = p.fork
@@ -252,19 +320,21 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
       return
     }
     const look = lookOf(p.out)
-    const on = new Set(parts.map(x => x.lens.name))
-    if (on.has('explain') || on.has('heads')) {
+    const lensOn = new Set(parts.map(x => x.lens.name))
+    if (lensOn.has('explain') || lensOn.has('heads')) {
       // a lens that is off gives nothing to place
-      const out = { ...p.out, glosses: on.has('explain') ? p.out.glosses : [], heads: on.has('heads') ? p.out.heads : null }
+      const out = { ...p.out, glosses: lensOn.has('explain') ? p.out.glosses : [], heads: lensOn.has('heads') ? p.out.heads : null }
       try { await explainMerge($, { ...look, out }) } catch (err) { row.explain_error = cut(String((err as Error)?.message || err), 300) }
     }
-    if (on.has('claims')) {
+    if (lensOn.has('claims')) {
       try { await claimsMerge($, look) } catch (err) { row.claims_error = cut(String((err as Error)?.message || err), 300) }
     }
     row.land_ms = Date.now() - newest.t
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
   } finally {
+    // a look for the claims on demand ended, whatever came of it: the pane stops saying they are being found
+    if (only?.includes('claims')) await claimsFindEnd($).catch(() => undefined)
     row.ms = Date.now() - started
     if (gen === S.gen) {
       S.log = [...S.log, { at: new Date(Number(await $.clock.now())).toISOString(), ...row }].slice(-400)
@@ -305,6 +375,18 @@ export const registerObserver: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // f in the Claims pane, or a click on its line: the claims of the answers they have not read, found now
+  on('ui.press', { element: /^claims-find$/ }, async ($, e, next) => {
+    if (e.plugin !== 'thimble' || e.element !== CLAIMS_FIND) return next(e)
+    try {
+      await findClaimsNow($)
+    } catch (err) {
+      await claimsFindEnd($).catch(() => undefined)
+      failNotice($, `thimble could not start finding the claims: ${cut(String((err as Error)?.message || err), 160)}. Press f to try again.`, 'claims:find')
+    }
+    return { element: e.element }
+  }).catch(($, e, next) => next(e))
+
   // a step after words Claude wrote to the person: those words were a reply in a long turn
   on('turn.step', { turnId: /\S/ }, async function* ($, e, next) {
     if (e.agentId === undefined) {
@@ -333,8 +415,7 @@ export const registerObserver: Register = on => {
     try {
       if (e.reason !== 'answer' || !observerOn() || S.person !== 'now') return r
       const t = await turnOf($, e.turnId)
-      const m = t?.answer ? await msgOf($, t, t.answer, 'answer') : null
-      if (m) await enqueue($, m)
+      if (t) for (const m of await answerMsgs($, t)) await enqueue($, m)
     } catch {
       // the turn ends whatever the observer makes of it
     }

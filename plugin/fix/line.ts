@@ -29,6 +29,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { thimbleHome } from '../core/home'
+import { quiet } from '../core/askcell.js'
 import { cut, textWidth } from '../core/text.js'
 import { accent } from '../core/theme'
 import { testsWord } from './fixer'
@@ -78,15 +79,17 @@ export async function lineSeen($: Engine): Promise<void> {
   if (l && (l.kind === 'off' || l.kind === 'problem' || l.kind === 'update' || l.kind === 'release' || (l.kind === 'applied' && !l.reload))) await setFixLine($, null)
 }
 
-function keyText(els: Any, k: string, words: string, i: number): Any[] {
-  const { Text } = els
+/** A key and its words, a click that does what the key does (`press`). */
+function keyText(els: Any, k: string, words: string, i: number, press: (k: string) => unknown): Any[] {
+  const { Button, Text } = els
   return [...(i ? [Text({ key: `s${i}`, dimColor: true, children: ' · ' })] : []),
-    Text({ key: `k${i}`, color: accent(), bold: true, children: k }), Text({ key: `w${i}`, children: ` ${words}` })]
+    Button({ key: `fix-key-${k}`, plain: true, label: `${k} ${words}`, hover: quiet(`fix-key-${k}`), onPress: () => press(k), children: [
+      Text({ key: `k${i}`, color: accent(), bold: true, children: k }), Text({ key: `w${i}`, children: ` ${words}` })] })]
 }
 
 /** The keys' row: each key and its words, after the row's indent. */
-function keysRow(els: Any, keys: [string, string][]): Any[] {
-  return [els.Text({ key: 'i', children: '    ' }), ...keys.flatMap(([k, w], i) => keyText(els, k, w, i))]
+function keysRow(els: Any, keys: [string, string][], press: (k: string) => unknown): Any[] {
+  return [els.Text({ key: 'i', children: '    ' }), ...keys.flatMap(([k, w], i) => keyText(els, k, w, i, press))]
 }
 
 /** How many files a fix changed: `2 files`. */
@@ -119,11 +122,13 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   const title = cut(f?.title || `fix ${l.id}`, Math.max(12, width - 40))
   const row = (key: string, children: Any[]) => Box({ key, flexDirection: 'row', flexWrap: 'wrap', width, children: [Text({ key: 'in', children: '  ' }), ...children] })
   const dim = (key: string, children: string) => Text({ key, dimColor: true, children })
+  // a click on a key's words does what the key does
+  const press = (k: string) => pressLine($, l.id, l.kind, k)
   if (l.kind === 'ready' && f && l.open) {
-    return [...whatChanged(els, f, width, `${filesWord(f)} · ${testsWord(f)}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: keysRow(els, [['y', 'use it now'], ['n', 'later']]) })]
+    return [...whatChanged(els, f, width, `${filesWord(f)} · ${testsWord(f)}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: keysRow(els, [['y', 'use it now'], ['n', 'later']], press) })]
   }
   if (l.kind === 'failed' && f && l.open) {
-    return [...whatChanged(els, f, width, `${filesWord(f)} · ${f.error || 'its tests failed'}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: keysRow(els, [['r', 'redo'], ['n', 'later']]) })]
+    return [...whatChanged(els, f, width, `${filesWord(f)} · ${f.error || 'its tests failed'}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: keysRow(els, [['r', 'redo'], ['n', 'later']], press) })]
   }
   let first: Any[] = []
   let second: Any[] = []
@@ -131,14 +136,14 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   if (l.kind === 'ready' && f) {
     // a round of a fix the person has: its new version, which y puts in place of the one they have
     first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: f.prev ? 'thimble changed: ' : 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${testsWord(f)}`)]
-    second = keysRow(els, [['y', 'use it now'], ['d', 'what changed'], ['n', 'later']])
+    second = keysRow(els, [['y', 'use it now'], ['d', 'what changed'], ['n', 'later']], press)
   } else if (l.kind === 'applied') {
     const off = await shownPath($, `${fixesDir(await thimbleHome($))}/off.sh`)
     const live = (await fixesNow($))?.live
     const how = l.reload === 'pending' ? ' · reloads when Claude finishes · '
       : l.reload === 'restart' ? ` · restart Claude Code with --plugin-dir ${live ? await shownPath($, `${live}/plugin`) : 'your fixes'} to load it · `
         : ' · thimble reloaded · '
-    first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 't', children: `${title} is on` }), dim('m', how), ...keyText(els, 'u', 'undo', 0)]
+    first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 't', children: `${title} is on` }), dim('m', how), ...keyText(els, 'u', 'undo', 0, press)]
     second = [dim('o', `    If thimble stops loading: sh ${off}`)]
   } else if (l.kind === 'off') {
     first = l.back
@@ -152,12 +157,12 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     first = [Text({ key: 'g', color: 'error', children: '× ' }), Text({ key: 'h', children: lead }), Text({ key: 't', children: title }), Text({ key: 'p', children: ' did not pass' }),
       ...(fits ? [dim('m', ` · ${reason}`)] : [])]
     if (!fits) why = [Text({ key: 'w', dimColor: true, wrap: 'wrap', children: `  ${reason}` })]
-    second = keysRow(els, [['d', 'what changed'], ['r', 'redo'], ['n', 'later']])
+    second = keysRow(els, [['d', 'what changed'], ['r', 'redo'], ['n', 'later']], press)
   } else if (l.kind === 'request') {
     first = l.kept
       ? [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Claude changed no code: ' }), Text({ key: 't', children: title }), Text({ key: 'm', children: ' stays as it was' })]
       : [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Saved as a request with no code: ' }), Text({ key: 't', children: title })]
-    second = l.kept ? keysRow(els, [['n', 'ok']]) : [...keysRow(els, [['n', 'ok']]), dim('m', ' · thimble fix list, in a shell, lists it')]
+    second = l.kept ? keysRow(els, [['n', 'ok']], press) : [...keysRow(els, [['n', 'ok']], press), dim('m', ' · thimble fix list, in a shell, lists it')]
   } else if (l.kind === 'update') {
     first = [Text({ key: 'g', color: accent(), children: '↑ ' }), Text({ key: 't', children: l.said || 'thimble moved to a new release' }), dim('m', ' · thimble reloaded · thimble fix list, in a shell, lists your fixes')]
   } else if (l.kind === 'release') {

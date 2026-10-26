@@ -26,6 +26,12 @@
 //                             hook around endCheck's (marks/register.ts): the repair's fork skips the hook that spawned
 //                             it, so its end still reaches endCheck
 //
+// The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto cite + verify`,
+// Claude's marks after each reply; `auto cite` (the default), a reply's marks wait `deferred` (drawn as the reply's own
+// cited words), and opening one (tray.ts openMark) checks that one (checkOpened), as a reply's check would; `manual`,
+// Claude makes none, and words the person selects and asks about (c, marks/cite.ts) wait `deferred` until the tray
+// opens them, as one Claude made; `off`, none.
+//
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
 // mark of its share `checking`: a mark it gave no answer for is failed, as the person sees it (store.ts notRun). When a reply's last mark settles, main is told what changed (tellText), once; when a
 // repair ends, main is told how that one mark ended (repairTellText): who started it, the person (x) or thimble (auto).
@@ -44,7 +50,7 @@ import { tellAtNextPrompt } from '../core/tell'
 import { fenced } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
-import { featureOn } from '../settings/features.mjs'
+import { choiceOf, claudeCites } from '../settings/features.mjs'
 import { record } from '../telemetry/telemetry'
 import { marksIn, plainSentence, sentenceOf } from './message.js'
 import { counts, editReply, type MarkItem, type MarkStatus, newReply, notesOf, notRun, type Reply, replyKeyOf, replyOf } from './store'
@@ -107,10 +113,10 @@ async function running($: Engine): Promise<Record<string, Check>> {
 }
 
 /** Every mark of the reply's rows, numbered from 1 across them, each with its row and sentence. */
-function itemsOf(reply: { row: string; text: string }[]): MarkItem[] {
+function itemsOf(reply: { row: string; text: string }[], later = false): MarkItem[] {
   let n = 0
   return reply.flatMap(r => marksIn(r.text).map((m: Any) => ({
-    n: ++n, row: r.row, words: m.words, start: m.start, end: m.end, sentence: sentenceOf(r.text, m), status: 'checking' as MarkStatus, shown: m.words,
+    n: ++n, row: r.row, words: m.words, start: m.start, end: m.end, sentence: sentenceOf(r.text, m), status: (later ? 'deferred' : 'checking') as MarkStatus, shown: m.words,
   })))
 }
 
@@ -172,6 +178,7 @@ const fixedLine = (m: MarkItem) => (m.rewrite
     : `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`)
 
 export function tellText(items: MarkItem[]): string {
+  // words the analyst asked about (Citations manual): main cited nothing, the analyst asked where those words come from
   // a mark whose check did not run is no finding of the check's
   const said = items.filter(m => m.status === 'corrected' || (m.status === 'failed' && m.failedBy !== 'none')).map(m => {
     if (m.status === 'corrected') return fixedLine(m)
@@ -180,7 +187,11 @@ export function tellText(items: MarkItem[]): string {
   })
   const notes = notesOf(items).map(n => `- ${q(n)}`)
   if (!said.length && !notes.length) return ''
-  const parts = ['thimble checked the citations of your last reply against the data. Its words in the blocks below may quote the records.']
+  const told = items.filter(m => m.status === 'corrected' || m.status === 'failed' || m.note)
+  const asked = told.length > 0 && told.every(m => m.asked)
+  const parts = [asked
+    ? 'The analyst asked where words of your reply come from, and thimble checked them against the data. Its words in the blocks below may quote the records.'
+    : 'thimble checked the citations of your last reply against the data. Its words in the blocks below may quote the records.']
   if (said.length) parts.push(`The analyst sees these changes in the reply:\n${fenced(said.join('\n'))}`)
   if (notes.length) parts.push(`The check also found these uncited statements false. The analyst does not see these:\n${fenced(notes.join('\n'))}`)
   parts.push('Use the corrected facts from now on. The analyst has read the changes in the reply, so a correction of them in your next reply would tell them twice. A claim the check could not confirm may still be true: when you need it again, check it first.')
@@ -275,17 +286,20 @@ export async function startCheck($: Engine, e: { turnId: string; reason: string 
   // the rows stay noted until their reply is in the store, so they draw pending until then (awaitsCheck)
   const done = async () => { await $.state.set(ROWS, []) }
   const reply = noted.filter(r => r.text.trim())
-  if (!reply.length || !featureOn('marks')) return await done()
-  const items = itemsOf(reply)
+  if (!reply.length || !claudeCites()) return await done()
+  const later = choiceOf('citations') !== 'auto cite + verify'
+  const items = itemsOf(reply, later)
   if (!items.length) return await done()
   const now = Number(await $.clock.now())
   const key = reply[reply.length - 1]!.row
   const rows = [...new Set([...items.map(m => m.row), key])]
   try {
-    await newReply($, { key, turnId: e.turnId, rows, startedAt: now, settledAt: null, items })
+    await newReply($, { key, turnId: e.turnId, rows, startedAt: now, settledAt: later ? now : null, items })
   } finally {
     await done()
   }
+  // checked when the person opens one (checkOpened)
+  if (later) return
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
   const whole: Check = { agentId: '', key, turnId: e.turnId, marks: items.map(m => m.n), cwd, root, replyEnd: reply[reply.length - 1]!.at, spawnedAt: now }
@@ -330,11 +344,13 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
  *  as main's are (`agentId`, the thread's agent). Main is told nothing: it never read the answer. Call it inside the
  *  thread's turn.complete hook, as startCheck. */
 export async function checkAnswer($: Engine, a: { row: string; text: string; turnId: string; agentId: string; about: string; reason: string }): Promise<void> {
-  if (!featureOn('marks') || (await replyOf($, a.row))) return
-  const items = itemsOf([{ row: a.row, text: a.text }])
+  if (!claudeCites() || (await replyOf($, a.row))) return
+  const later = choiceOf('citations') !== 'auto cite + verify'
+  const items = itemsOf([{ row: a.row, text: a.text }], later)
   if (!items.length) return
   const now = Number(await $.clock.now())
-  await newReply($, { key: a.row, turnId: a.turnId, rows: [a.row], startedAt: now, settledAt: null, items, thread: { agentId: a.agentId, about: a.about } })
+  await newReply($, { key: a.row, turnId: a.turnId, rows: [a.row], startedAt: now, settledAt: later ? now : null, items, thread: { agentId: a.agentId, about: a.about } })
+  if (later) return
   const whole: Check = { agentId: '', key: a.row, turnId: a.turnId, marks: items.map(m => m.n), cwd: String(await $.session.cwd()), root: await startDir($), replyEnd: now, spawnedAt: now, thread: a.agentId }
   if (a.reason !== 'answer') {
     await giveUp($, whole, 'The answer was interrupted.', now)
@@ -422,6 +438,39 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
     return ''
   } finally {
     if (held === hold) held = null
+    starting.delete(id)
+  }
+}
+
+/** A citation opened (tray.ts openMark) whose reply waits to be checked until one is opened (Citations `auto cite`, or words the person asked about in `manual`): its check,
+ *  one fork for it alone, as a reply's check is made. Call it inside the hook of the press or key that opened it (the
+ *  spawn is its first call). Nothing for a citation that is checked, or whose check runs. */
+export async function checkOpened($: Engine, row: string, n: number): Promise<void> {
+  const key = await replyKeyOf($, row)
+  const r = key ? await replyOf($, key) : null
+  const m = r?.items.find(x => x.n === n)
+  if (!key || !r || !m || m.status !== 'deferred' || choiceOf('citations') === 'off' || starting.has(`${key}:${n}`)) return
+  const id = `${key}:${n}`
+  starting.add(id)
+  try {
+    let template = ''
+    try { template = await promptText($, 'checker') } catch { return }
+    const cwd = String(await $.session.cwd())
+    const root = await startDir($)
+    const reply = r.thread ? threadAnswer(r.thread.about) : LAST_REPLY
+    const prompt = `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\nThe analyst opened citation ${n} to read its evidence. It may stand in an earlier reply than your last.`
+    const fork = await spawnFork($, { kind: 'checker', prompt, description: 'checking a citation' })
+    if (!fork.agentId) {
+      failNotice($, `The check of citation ${n} could not start (${String(fork.deny || 'no reason given').slice(0, 80)}). Open it again to try again.`)
+      return
+    }
+    const agentId = fork.agentId
+    const now = Number(await $.clock.now())
+    await editReply($, key, rep => ({ ...rep, settledAt: null, items: rep.items.map(x => (x.n === n ? { ...x, status: 'checking' as MarkStatus } : x)) }))
+    const c: Check = { agentId, key, turnId: r.turnId, marks: [n], cwd, root, replyEnd: now, spawnedAt: now, ...(r.thread ? { thread: r.thread.agentId } : {}) }
+    await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: c }))
+    await showRunning($, key, 1, [agentId])
+  } finally {
     starting.delete(id)
   }
 }

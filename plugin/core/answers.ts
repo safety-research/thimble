@@ -19,8 +19,8 @@
 //   turnsNow($), turnOf($, id), turnOfRow($, row), messageOf($, row), textRows($)   the records
 //   answerRows($), latestAnswer($)    each answered turn's answer row, oldest first; the newest
 //   actingRow($), pickAnswer($, row), stepAnswer($, dir)   the answer the keys act on: the one the person picked with
-//                                     { and } (answerStepKey), else the newest; a new turn of main's gives the keys
-//                                     back to its answer
+//                                     { and } (answerStepKey) or by opening one of its marks, else the newest; a new
+//                                     turn of main's gives the keys back to its answer (s squeezes the newest alone)
 //   sinceLast($)                      since the person's last prompt: the prompt, Claude's text rows, the answers
 //   questionOf($, row)                the words of the prompt the row's turn answers
 //   partOf($, row, feature), setPart($, row, feature, value)   a feature's own part of a message
@@ -35,7 +35,9 @@ import { labelCommands, sinceLastPrompt, stepFrom } from './answers.mjs'
 
 type Engine = EngineInterface
 
-export type Prompt = { text: string; by: string; row: string | null }
+/** A turn's prompt: its words, who sent it (prompt.submit's origin kind, or `unknown` when no submission matched) and
+ *  its row; `command`, the slash command it ran, whose turn starts with the command's tags instead of its words. */
+export type Prompt = { text: string; by: string; row: string | null; command?: string }
 export type LabelUse = { name: string; args: string[]; toolUseId: string; seq: number; ok: boolean }
 /** A card a card call of the turn drew: `after`, how many of the turn's text rows stand above it (the card draws at
  *  its call; a version drawn in an earlier call's place keeps that place). */
@@ -69,10 +71,11 @@ function unwait(p: Prompt): void {
   waiting = waiting.filter(x => x !== p)
 }
 
-/** The waiting prompt a turn that starts with `text` takes: the oldest with its words; for a turn with no text (a
- *  continuation, an image alone) the newest. */
+/** The waiting prompt a turn that starts with `text` takes: the oldest with its words, or for a slash command's turn
+ *  the oldest of that command; for a turn with no text (a continuation, an image alone) the newest that is no
+ *  command (a command that started no turn, such as /clear, still waits). */
 function takeWaiting(text: string): Prompt | null {
-  const p = text ? waiting.find(x => sameText(x.text, text)) : waiting.at(-1)
+  const p = text ? waiting.find(x => startedBy(x, text)) : waiting.findLast(x => !x.command)
   if (p) unwait(p)
   return p ?? null
 }
@@ -218,12 +221,20 @@ async function editTurn($: Engine, turnId: string, edit: (t: TurnRec) => TurnRec
 /** Whether a turn's text is the words of a prompt submitted for it. */
 const sameText = (a: string, b: string) => a.trim() === b.trim()
 
+/** Whether a turn that starts with `text` is the prompt's: its words, or the tags of its slash command
+ *  (`<command-name>/name</command-name>`, a plugin's command with its plugin's name before a colon). */
+function startedBy(p: Prompt, text: string): boolean {
+  if (!p.command) return sameText(p.text, text)
+  const name = /<command-name>\/?([^<]*)<\/command-name>/.exec(text)?.[1]
+  return !!name && (name === p.command || name.endsWith(`:${p.command}`) || p.command.endsWith(`:${name}`))
+}
+
 /** A prompt whose turn started before its prompt.submit hook ran (turn.start found no prompt waiting): the newest turn,
  *  recorded with its words and no sender, is given this prompt's sender, and the prompt waits no more. */
 async function senderOfStarted($: Engine, prompt: Prompt): Promise<void> {
   const newest = (await turnIds($)).at(-1)
   const t = newest ? await turnOf($, newest) : null
-  if (!t || t.prompt.by !== 'unknown' || !sameText(t.prompt.text, prompt.text)) return
+  if (!t || t.prompt.by !== 'unknown' || !startedBy(prompt, t.prompt.text)) return
   unwait(prompt)
   await editTurn($, t.turnId, x => ({ ...x, prompt: { ...x.prompt, by: prompt.by } }))
 }
@@ -329,8 +340,11 @@ async function keepRow($: Engine, e: any, next: (e: any) => Promise<any>): Promi
     else if (e.door === 'prompt' && msg.type === 'user' && !msg.isMeta) {
       const p = waiting.find(x => !x.row && sameText(x.text, text)) ?? waiting.findLast(x => !x.row)
       if (p) p.row = row
+      // the row names who sent it: a turn whose words matched no prompt.submit (a subagent's hand-back starts its turn
+      // with words other than its row's) takes the row's sender, so a reply nobody typed is never the person's prompt
+      const by = String((e.origin as { kind?: string } | undefined)?.kind ?? '')
       const now = await mainTurn($)
-      if (now) await editTurn($, now, t => (t.prompt.row ? t : { ...t, prompt: { ...t.prompt, row } }))
+      if (now) await editTurn($, now, t => (t.prompt.row ? t : { ...t, prompt: { ...t.prompt, row, ...(by && t.prompt.by === 'unknown' ? { by } : {}) } }))
     }
   } catch {
     // the row is stored whatever the record makes of it
@@ -345,13 +359,14 @@ export const registerAnswers: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // the prompt of main's next turn and who sent it (a slash command and a meta prompt start no answer of their own).
-  // Claude Code can start the turn while the hooks beneath this one still run, so the prompt waits before `next`; and
-  // a turn that started before this hook ran is given its sender after
+  // the prompt of main's next turn and who sent it: what the person typed, a slash command of theirs, and a message
+  // nobody typed (a subagent's hand-back) that starts a turn of its own. A message delivered into the running turn
+  // starts none. Claude Code can start the turn while the hooks beneath this one still run, so the prompt waits before
+  // `next`; and a turn that started before this hook ran is given its sender after
   on('prompt.submit', { origin: { kind: /./ } }, async ($, e, next) => {
     let mine: Prompt | null = null
-    if (!e.command && !e.isMeta) {
-      mine = { text: String(e.text ?? '').slice(0, PROMPT_MAX), by: String((e.origin as { kind?: string } | undefined)?.kind ?? ''), row: null }
+    if (!(e.isMeta && e.turnId)) {
+      mine = { text: String(e.text ?? '').slice(0, PROMPT_MAX), by: String((e.origin as { kind?: string } | undefined)?.kind ?? ''), row: null, ...(e.command ? { command: String(e.command.name) } : {}) }
       wait(mine)
     }
     const r = await next(e)
@@ -359,7 +374,7 @@ export const registerAnswers: Register = on => {
       if (mine && (r as { drop?: unknown }).drop) {
         unwait(mine)
       } else if (mine) {
-        mine.text = String((r as { text?: string }).text ?? mine.text).slice(0, PROMPT_MAX)
+        if (!mine.command) mine.text = String((r as { text?: string }).text ?? mine.text).slice(0, PROMPT_MAX)
         if (waiting.includes(mine)) await senderOfStarted($, mine)
       }
     } catch {

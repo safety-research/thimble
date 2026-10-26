@@ -1,12 +1,12 @@
-// expand.ts: an explainer written again at more length, in its place (0.10's shell/expand.ts, Longer). `e` on an
-// explainer the tray shows asks for it: one side call (the registry's `explain-expand` prompt) reads the term, the
-// explainer as it stands, the person's question, the answer as the person reads it, and the lines of the files the
-// explainer and the answer point to, and writes a longer body and a "where it mattered" sentence with links to those
-// lines. The message's part `explain` keeps the longer one in place of the short one (and the short one beside it), so
-// the explainer reads the same wherever it opens next.
+// expand.ts: an explainer of words the analyst picked in an answer (a citation's words in a pane, the selection), written on
+// demand. One fork of the conversation (the registry's `explain-expand` prompt), as the look's explainers are written,
+// so it reads the records main read; it is told the words, the person's question, the answer as the person reads it,
+// and the lines of the files the answer points to, and writes a body and a "where it mattered" sentence with links to
+// those lines. With no conversation to fork (after /clear), one side call reads the same without the records. The
+// message's part `explain` keeps it as it keeps the look's explainers.
 //
-// The files: those the explainer's words link to (`[words](path#L12-20)`), then the places the checker's evidence found
-// for the answer's citations (marks/store.ts MarkItem.evidence), then the files the answer links to.
+// The files: the places the checker's evidence found for the answer's citations (marks/store.ts MarkItem.evidence),
+// then the files the answer links to. placeLines reads the lines an explainer's link points to, for the tray.
 import type { EngineInterface } from 'claude-code'
 
 import { messageOf, partOf, questionOf, setPart } from '../core/answers'
@@ -17,7 +17,7 @@ import { rowMarks } from '../marks/store'
 import { jsonIn } from '../observer/reply.mjs'
 import { promptText } from '../prompts/prompts'
 import { tracked } from '../telemetry/telemetry'
-import type { ExplainPart, Gloss } from './seam'
+import type { ExplainPart } from './seam'
 import { filePlaces } from './place.mjs'
 
 type Engine = EngineInterface
@@ -31,7 +31,7 @@ const str = (v: unknown, n: number) => (typeof v === 'string' ? v.trim().slice(0
 
 type Place = { path: string; from: number | null; to: number | null }
 
-/** The lines of the files at `places`, numbered, as the call reads them; at most FILES_BUDGET. */
+/** The lines of the files at `places`, numbered, as the call reads them; at most FILES_BUDGET; '' when none. */
 async function citedFiles($: Engine, places: Place[], roots: string[]): Promise<string> {
   const out: string[] = []
   let used = 0
@@ -54,7 +54,31 @@ async function citedFiles($: Engine, places: Place[], roots: string[]): Promise<
     out.push(piece)
     used += piece.length
   }
-  return out.join('\n\n') || '(no file the explainer cites could be read)'
+  return out.join('\n\n')
+}
+
+const PLACE_LINES = 12 // lines the tray shows of a place an explainer cites
+
+/** The lines of a file an explainer or a heads-up cites (the tray shows them when its link is pressed): from `from` to
+ *  `to` (the file's first lines when no line is named), at most PLACE_LINES; else a sentence that says why not. */
+export async function placeLines($: Engine, path: string, from: number | null, to: number | null): Promise<{ n: number; text: string }[] | string> {
+  const roots = [...new Set([await startDir($), (await rootHere($)) || ''].filter(Boolean))]
+  const a = Math.max(1, from ?? 1)
+  const b = Math.min(Math.max(a, to ?? a + PLACE_LINES - 1), a + PLACE_LINES - 1)
+  for (const root of path.startsWith('/') ? [''] : roots) {
+    const file = root ? `${root}/${path}` : path
+    let lines: string[]
+    try {
+      lines = String(await $.fs.read(file)).split('\n').slice(a - 1, b)
+    } catch {
+      // a file over the 4 MiB one read takes: its lines from sed
+      const r = await $.process.run(['sed', '-n', `${a},${b}p;${b}q`, '--', file]).catch(() => null)
+      if (!r || r.exitCode !== 0) continue
+      lines = String(r.stdout).replace(/\n$/, '').split('\n')
+    }
+    return lines.map((l, i) => ({ n: a + i, text: l.slice(0, 400) }))
+  }
+  return `${path} could not be read here.`
 }
 
 /** The places the checker found for the row's citations: each evidence's file and cited lines. */
@@ -72,47 +96,60 @@ async function evidencePlaces($: Engine, row: string): Promise<Place[]> {
   return out
 }
 
-/**
- * The explainer `id` of the message `row`, written again at more length: the message's part takes it in place of the
- * short one. Returns null when it did, or a sentence that says why it was not written.
- */
-export async function expandGloss($: Engine, row: string, id: string): Promise<string | null> {
+/** The `explain-expand` prompt over the conversation (a fork), else in a side call: the words, the question, the
+ *  answer they stand in and the files it cites. {body, here} once written, else a sentence that says why not. */
+async function writeExplainer($: Engine, row: string, term: string): Promise<{ body: string; here: string } | string> {
   const msg = await messageOf($, row)
-  const g = (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id]
-  if (!msg || !g) return 'That answer is not in this session any more.'
-  if (g.expanded) return null
+  if (!msg) return 'That answer is not in this session any more.'
   const roots = [...new Set([await startDir($), (await rootHere($)) || ''].filter(Boolean))]
   const answer = (await textView($, row, msg.text)).text
-  const places = [...filePlaces(`${g.body || ''}\n${g.here || ''}`), ...(await evidencePlaces($, row)), ...filePlaces(answer)]
+  const places = [...(await evidencePlaces($, row)), ...filePlaces(answer)]
   const question = await questionOf($, row).catch(() => '')
   const system = await promptText($, 'explain-expand')
+  const files = await citedFiles($, places, roots)
   const prompt = [
-    `The term: ${g.term}`,
-    '',
-    'The explainer as it stands:',
-    `body: ${g.body || ''}`,
-    `here: ${g.here || ''}`,
+    `The term: ${term}`,
     '',
     `The analyst's question: ${String(question || '(not known)').slice(0, 2000)}`,
     '',
     'The answer the term stands in:',
     '<answer>', answer.slice(0, 12000), '</answer>',
-    '',
-    'The files the explainer and the answer cite, with their line numbers:',
-    await citedFiles($, places, roots),
+    ...(files ? ['', 'The files the answer cites, with their line numbers:', files] : []),
   ].join('\n')
   const req = { model: 'opus', maxTokens: 6000, timeoutMs: 120000, system: [{ text: system, cache: true }], prompt }
   let r: Any
   try {
-    r = await tracked($, { feature: 'explain', prompt: 'explain-expand', doing: 'writing a longer explainer', model: req.model, extra: { row, term: g.term } }, () => $.model.complete(req as Any))
+    r = await tracked($, { feature: 'explain', prompt: 'explain-expand', doing: `writing an explainer of “${term.length > 40 ? `${term.slice(0, 39)}…` : term}”`, model: req.model, extra: { row, term } }, async () => {
+      // the conversation, as the look reads it: the records main read are in it
+      const f: Any = await $.model.fork({ prompt: `${system}\n\n${prompt}` })
+      return f?.reason === 'nothing-to-fork' ? $.model.complete(req as Any) : f
+    })
   } catch (err) {
     r = { isAnswered: false, reason: 'refused', error: String((err as Error)?.message || err).slice(0, 300) }
   }
-  if (!r?.isAnswered) return `The longer explanation of “${g.term}” was not written: ${modelWhy(r) || 'the call gave no answer'}. Press e on it to try again.`
+  if (!r?.isAnswered) return `The explanation of “${term}” was not written: ${modelWhy(r) || 'the call gave no answer'}.`
   const d = jsonIn(r.text) as Any
   const body = str(d?.body, 2400)
-  if (!body) return `The longer explanation of “${g.term}” came back empty. Press e on it to try again.`
-  const next: Gloss = { ...g, body, here: str(d?.here, 800) || g.here || '', expanded: true, short: { body: g.body || '', here: g.here || '' } }
-  await setPart<ExplainPart>($, row, 'explain', cur => (cur?.items?.[id] ? { ...cur, items: { ...cur.items, [id]: next } } : cur))
-  return null
+  if (!body) return `The explanation of “${term}” came back empty.`
+  return { body, here: str(d?.here, 800) }
+}
+
+/**
+ * An explainer of words the analyst picked in the message `row` (a citation's words, a term in a pane), written on
+ * demand: kept in the message's part `explain` as its others are, so the words show it wherever they stand. {id} once
+ * written, else a sentence that says why not.
+ */
+export async function askGloss($: Engine, row: string, term: string): Promise<{ id: string } | string> {
+  const got = await writeExplainer($, row, term)
+  if (typeof got === 'string') return got
+  let id = ''
+  await setPart<ExplainPart>($, row, 'explain', cur => {
+    const items = { ...(cur?.items ?? {}) }
+    let n = 1
+    while (items[`a${n}`]) n++
+    id = `a${n}`
+    items[id] = { id, term, body: got.body, here: got.here, asked: true }
+    return { items, order: [...(cur?.order ?? Object.keys(cur?.items ?? {})), id] }
+  })
+  return { id }
 }

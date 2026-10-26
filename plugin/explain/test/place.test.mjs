@@ -6,7 +6,7 @@ import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { findInLink, findRead, findTerm, glossesOf, headsOf, mergeLook } from '../place.mjs'
+import { citeLinks, filePlaces, findInLink, findRead, findTerm, glossesOf, headsOf, markHolding, mergeLook, placeGlosses } from '../place.mjs'
 
 const at = (text, p) => (p ? text.slice(p.start, p.end) : null)
 
@@ -17,7 +17,11 @@ test('a term stands on its words outside links and code, then in a citation\'s w
   assert.equal(at(text, findInLink(text, 'five tries')), 'five tries')
   assert.equal(at(text, findTerm(text, 'Network Ranges')), 'network ranges')
   const across = 'So [5](#) of the 13 files in `src/notes` mention citations.'
-  assert.equal(at(across, findRead(across, '5 of the 13 files in src/notes mention citations')), 'of the 13 files in `src/notes` mention citations')
+  // across a citation, the mark covers the citation whole: the person sees both, and a press on its words opens the citation
+  assert.equal(at(across, findRead(across, '5 of the 13 files in src/notes mention citations')), '[5](#) of the 13 files in `src/notes` mention citations')
+  const by = 'Answers were shared by [1,212 accounts](#) in June.'
+  assert.equal(at(by, findRead(by, 'by 1,212 accounts')), 'by [1,212 accounts](#)')
+  assert.equal(at(by, findRead(by, 'shared by 1,212')), 'shared by [1,212 accounts](#)')
 })
 
 test("the look's explainers: a term the text holds, once, none already explained; one heads-up with bullets", () => {
@@ -25,8 +29,18 @@ test("the look's explainers: a term the text holds, once, none already explained
   const gs = glossesOf([{ term: '`p95`', body: 'b' }, { term: 'p95', body: 'again' }, { term: 'SuspenseBoundary', body: 'w' }, { term: 'not here', body: 'x' }], text, ['suspenseboundary'])
   assert.deepEqual(gs, [{ id: 'g1', term: 'p95', title: 'p95', body: 'b', here: '' }])
   assert.equal(headsOf({ term: 'p95 latency', title: 't', bullets: [] }, text), null)
-  assert.deepEqual(headsOf({ term: 'p95 latency rose', title: 'Only one day', bullets: ['[The log ends on Mar 14](logs/a.log).'], todo: 'Count again.' }, text),
-    { id: 'h1', kind: 'heads', term: 'p95 latency rose', title: 'Only one day', bullets: ['[The log ends on Mar 14](logs/a.log).'], todo: 'Count again.' })
+  assert.deepEqual(headsOf({ term: 'p95 latency rose', title: 'Only one day', bullets: ['[The log ends on Mar 14](logs/a.log).'] }, text),
+    { id: 'h1', kind: 'heads', term: 'p95 latency rose', title: 'Only one day', bullets: ['[The log ends on Mar 14](logs/a.log).'] })
+  // the heads-up only informs: an older look's offer or todo (a call to action) is not kept
+  assert.deepEqual(headsOf({ term: 'p95 latency rose', title: 'Only one day', bullets: ['b'], todo: 'Count again.', offer: 'Count the latency per hour' }, text),
+    { id: 'h1', kind: 'heads', term: 'p95 latency rose', title: 'Only one day', bullets: ['b'] })
+})
+
+test("an explainer's links to a file's lines become citations, each with its place; a citation, a web address and code stay as they are", () => {
+  const got = citeLinks('A [x](#) and [ticket 4](t/a.jsonl#L88) and `[c](d.py#L1)`, [web](https://example.test) and [f](f.py:3-5).')
+  assert.equal(got.text, 'A [x](#) and [ticket 4](#) and `[c](d.py#L1)`, [web](https://example.test) and [f](#).')
+  assert.deepEqual(got.places, [null, { path: 't/a.jsonl', from: 88, to: 88 }, { path: 'f.py', from: 3, to: 5 }])
+  assert.deepEqual(filePlaces('[a](b.py#L2-L4) [c](#) [d](e/f.txt)'), [{ path: 'b.py', from: 2, to: 4 }, { path: 'e/f.txt', from: null, to: null }])
 })
 
 test('a look places each explainer in the newest message that holds it, adds to what the message had, and names what it placed', () => {
@@ -47,3 +61,24 @@ test('a look places each explainer in the newest message that holds it, adds to 
   assert.deepEqual(mergeLook(msgs, { glosses: [{ term: 'p95' }], heads: null }, { glossed: ['P95'] }).placed, [])
 })
 
+
+test('words the analyst asked about over or across marks are one mark, which covers the marks it overlaps; words inside a mark are that mark', () => {
+  const text = 'Requests go through [third-party relays](#) before the heads gateway.'
+  const look = { g1: { id: 'g1', term: 'relays' }, h1: { id: 'h1', kind: 'heads', term: 'heads gateway' } }
+  assert.deepEqual(placeGlosses(text, { items: look, order: ['g1', 'h1'] }).map(p => at(text, p)), ['relays', 'heads gateway'])
+  // asked over the explainer's words: the wider mark stands, the explainer under it draws nothing
+  const wide = { ...look, a1: { id: 'a1', term: 'third-party relays', asked: true } }
+  const placed = placeGlosses(text, { items: wide, order: ['g1', 'h1', 'a1'] })
+  assert.deepEqual(placed.map(p => [p.id, at(text, p)]), [['a1', 'third-party relays'], ['h1', 'heads gateway']])
+  // across a heads-up's words too (and, as any mark, over the whole of a citation it touches): what is left of the
+  // heads-up's words beside it is no mark; the newest asked wins over an older one
+  const across = { ...wide, a2: { id: 'a2', term: 'relays before the heads', asked: true } }
+  assert.deepEqual(placeGlosses(text, { items: across, order: ['g1', 'h1', 'a1', 'a2'] }).map(p => [p.id, at(text, p)]), [['a2', '[third-party relays](#) before the heads']])
+  // words inside a mark, or on it, are that mark; words over it, across it or outside every mark are none
+  assert.equal(markHolding(text, placed, 'third-party')?.id, 'a1')
+  assert.equal(markHolding(text, placed, 'third-party relays')?.id, 'a1')
+  assert.equal(markHolding(text, placed, 'gateway')?.id, 'h1')
+  assert.equal(markHolding(text, placed, 'the heads gateway'), null)
+  assert.equal(markHolding(text, placed, 'relays before'), null)
+  assert.equal(markHolding(text, placed, 'Requests go'), null)
+})

@@ -546,6 +546,8 @@ export function toolSummary(name: string, input: unknown, ws = ''): string {
       return [str(inp.ref), inp.selector ? str(inp.selector) : ''].filter(Boolean).join(' ')
     case 'file_dev_ticket':
       return oneLine(str(inp.title))
+    case 'fix_thimble':
+      return oneLine(str(inp.words))
     case 'Agent':
     case 'Task':
       // the call that started a subagent or a tray entry of thimble's agents (thimble:orient, thimble:writer): its
@@ -616,6 +618,7 @@ export const TOOL_WORDS: Record<string, string> = {
   delete_thread: 'Delete thread',
   screenshot: 'Screenshot',
   file_dev_ticket: 'File ticket',
+  fix_thimble: 'Fix thimble',
 }
 export function toolWord(name: string): string {
   const n = toolDisplayName(name)
@@ -655,6 +658,7 @@ export const TOOL_GROUPS: Record<string, string> = {
   WebFetch: 'Web',
   WebSearch: 'Web',
   file_dev_ticket: 'Dev ticket',
+  fix_thimble: 'Fixes',
   screenshot: 'Screenshot',
   reply_in_thread: 'Reply',
   message_thread: 'Threads',
@@ -911,6 +915,8 @@ export function plainStep(t: ToolRow, questions: ReadonlyMap<string, string> = n
       return with_('Deleted thread', str(inp.thread))
     case 'file_dev_ticket':
       return with_('Filed ticket', oneLine(str(inp.title)))
+    case 'fix_thimble':
+      return with_('Started fix', oneLine(str(inp.words)))
     case 'Read':
       return with_('Read', filePlain(str(inp.file_path ?? inp.path)))
     case 'Grep':
@@ -1577,9 +1583,10 @@ export function mainSkips(records: readonly ChatRecord[], ctx: MainContext): Set
           hidden.add(e.id)
           skip.add(i)
         }
-        // main's call that starts the orientation's or a writer's session: that session's own note in main stands for it.
-        // Its look at the agent tray is bookkeeping, which the tray itself shows
-        if ((name === 'start_orientation' || name === 'start_writing' || name === 'list_agents') && !e.parent_tool_use_id) {
+        // main's call that starts the orientation's or a writer's session: that session's own note in main stands for it,
+        // as the fixer's card stands for the fix_thimble call that started it. Its look at the agent
+        // tray is bookkeeping, which the tray itself shows
+        if ((name === 'start_orientation' || name === 'start_writing' || name === 'list_agents' || name === 'fix_thimble') && !e.parent_tool_use_id) {
           hidden.add(e.id)
           skip.add(i)
         }
@@ -1650,6 +1657,19 @@ export const isFollowUpRow = (r: Row): r is UserRow => r.kind === 'user' && (r.e
  * orientation starts none. Pure. */
 export function landedTexts(rows: readonly Row[]): Set<string> {
   return new Set(rows.filter((r): r is UserRow => r.kind === 'user' && (r.by === 'browser' || isFollowUpRow(r))).map((r) => r.text.trim()))
+}
+
+/** A subagent's runs: each message to it starts one (a round of a fix opens with the person's words), and what came
+ * before the first message is the first run's. Pure. */
+export function messageRuns(rows: readonly Row[]): Row[][] {
+  const out: Row[][] = [[]]
+  let seen = false
+  for (const r of rows) {
+    if (r.kind === 'user' && seen) out.push([])
+    if (r.kind === 'user') seen = true
+    out[out.length - 1].push(r)
+  }
+  return out
 }
 
 /** The latest time a row of `rows` carries (a message, a call, its result, a step's start); null when none does. Pure. */

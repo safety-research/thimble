@@ -5,10 +5,13 @@
 // turn). No `$` here: the plugin hands in the kernel and the model, and the tests a stand-in for each.
 //
 //   readLabel({name, kernel, callAll, template, promptId, settings, progress}) -> {text, note, failed, failedCalls, calls,
-//                                                                                   why}
+//                                                                                   why, because}
 //                                                                                   | {error}
 //   requestFor(template, label, units, settings) -> a $.model.complete request for one batch (units: [{ref, text}])
-//   answersOf(reply, units, values)              -> {values: {ref: {value, confidence, reason}}, failed: {ref: why}}
+//   answersOf(reply, units, values)              -> {values: {ref: {value, confidence, reason}}, failed: {ref: why},
+//                                                    unread: why the reply could not be read | null, leftOut: n,
+//                                                    offList: n, offWhy}
+//   because(tally)                               -> why records of a read got no value, in one phrase for the person
 //   failedCall(reply, units)                     -> {failed: {ref: why}} for a call that brought no text
 //
 // The records go in batches of up to 50 (the kernel's `batches`), one call each, with the registry's `labels` prompt,
@@ -18,6 +21,9 @@
 // wait again by themselves (`--again` asks once more).
 import { fill } from '../prompts/registry.mjs'
 import { modelWhy } from '../core/why.js'
+
+const NO_ARRAY = 'held no JSON array of values'
+const LEFT_OUT = 'the reply gave this record no value'
 
 const REASON = ', "reason": one short sentence naming the words in the record that decided the value'
 
@@ -32,7 +38,8 @@ export function requestFor(template, label, units, cfg = {}) {
     RECORDS: records,
   })
   return {
-    model: String(cfg.model || 'sonnet'),
+    // the label's own model when it names one (the labels pane's edit), else the reads' setting
+    model: String(label.model || cfg.model || 'sonnet'),
     prompt,
     maxTokens: Number(cfg.maxTokens) || 8000,
     ...(cfg.effort ? { effort: String(cfg.effort) } : {}),
@@ -65,10 +72,11 @@ function arrayIn(text) {
 /** What a reply says of each record of its batch. A record the reply leaves out, or gives a value off the list, has
  *  no value and says why; a near miss in case is the value it names. */
 export function answersOf(reply, units, values) {
-  const out = { values: {}, failed: {} }
+  const out = { values: {}, failed: {}, unread: null, leftOut: 0, offList: 0, offWhy: '' }
   const arr = arrayIn(reply)
   if (!arr) {
-    for (const u of units) out.failed[u.ref] = 'the reply held no JSON array of values'
+    out.unread = NO_ARRAY
+    for (const u of units) out.failed[u.ref] = `the reply ${NO_ARRAY}`
     return out
   }
   const byI = new Map()
@@ -79,10 +87,15 @@ export function answersOf(reply, units, values) {
   }
   units.forEach((u, k) => {
     const e = byI.get(k + 1)
-    if (!e) { out.failed[u.ref] = 'the reply gave this record no value'; return }
+    if (!e) { out.failed[u.ref] = LEFT_OUT; out.leftOut++; return }
     const raw = e.value ?? e.label
     const v = values.find(x => x === raw) ?? values.find(x => typeof raw === 'string' && x.toLowerCase() === raw.trim().toLowerCase())
-    if (v === undefined) { out.failed[u.ref] = `the reply gave ${JSON.stringify(raw)}, which is not one of ${values.join(', ')}`; return }
+    if (v === undefined) {
+      out.failed[u.ref] = `the reply gave ${JSON.stringify(raw)}, which is not one of ${values.join(', ')}`
+      out.offWhy ||= out.failed[u.ref]
+      out.offList++
+      return
+    }
     const c = Number(e.confidence)
     out.values[u.ref] = { value: v, ...(Number.isFinite(c) ? { confidence: Math.max(0, Math.min(1, c)) } : {}), ...(e.reason || e.rationale ? { reason: String(e.reason || e.rationale).slice(0, 300) } : {}) }
   })
@@ -93,6 +106,21 @@ export function answersOf(reply, units, values) {
 export function failedCall(reply, units) {
   const why = `the call failed: ${modelWhy(reply)}`
   return { values: {}, failed: Object.fromEntries(units.map(u => [u.ref, why])) }
+}
+
+const some = (k, one, many) => k === 1 ? one : `${n(k)} ${many}`
+
+/** Why the records of a read got no value, in one phrase, a part for each way a record ends with none: calls that
+ *  failed, replies that could not be read, records a reply left out or gave a value off the label's list, and records
+ *  that had no value before these reads. */
+export function because(t) {
+  const parts = []
+  if (t.calls) parts.push(`${some(t.calls, 'a model call', 'model calls')} failed: ${t.callWhy}`)
+  if (t.unread) parts.push(`${some(t.unread, 'a model reply', 'model replies')} ${t.unreadWhy}, so ${t.unread === 1 ? 'it' : 'they'} could not be read`)
+  if (t.leftOut) parts.push(`the model's replies left out ${some(t.leftOut, 'a record', 'records')}`)
+  if (t.offList) parts.push(`the model gave ${some(t.offList, 'a record', 'records')} a value off the label's list (${t.offWhy})`)
+  if (t.before) parts.push(`${some(t.before, 'a record', 'records')} had no value before these reads`)
+  return parts.join('; ')
 }
 
 /** The calls' settings: the model, its effort and limits, how many calls run at once and how many make a wave. */
@@ -128,6 +156,8 @@ export async function readLabel({ name, kernel, callAll, template, promptId = nu
   let calls = 0
   let failedCalls = 0
   let why = ''
+  // each way this read left records with no value, for the line that says why (because)
+  const tally = { calls: 0, callWhy: '', unread: 0, unreadWhy: '', leftOut: 0, offList: 0, offWhy: '', records: 0 }
   let of = null
   let done = 0
   // a read that stops tells the label, so `thimble label NAME --wait` stops too and says why
@@ -156,7 +186,17 @@ export async function readLabel({ name, kernel, callAll, template, promptId = nu
     replies.forEach((reply, i) => {
       calls++
       const got = reply && reply.isAnswered ? answersOf(reply.text, batches[i], w.values) : failedCall(reply, batches[i])
-      if (!reply || !reply.isAnswered) why = Object.values(got.failed)[0] || why
+      if (!reply || !reply.isAnswered) {
+        why = Object.values(got.failed)[0] || why
+        tally.calls++
+        tally.callWhy ||= why.replace(/^the call failed: /, '')
+      } else {
+        if (got.unread) { tally.unread++; tally.unreadWhy ||= got.unread }
+        tally.leftOut += got.leftOut
+        tally.offList += got.offList
+        tally.offWhy ||= got.offWhy
+      }
+      tally.records += Object.keys(got.failed).length
       Object.assign(payload.values, got.values)
       Object.assign(payload.failed, got.failed)
     })
@@ -168,9 +208,11 @@ export async function readLabel({ name, kernel, callAll, template, promptId = nu
   const s = last || await json(['label', name])
   if (s.error) return { error: s.error }
   why = why.replace(/^the call failed: /, '')
-  const text = summary(name, { ...s, why: failedCalls ? `${failedCalls} call${failedCalls === 1 ? '' : 's'} failed: ${why}` : '' })
+  const failed = Number(s.failed) || 0
+  const said = failed ? because({ ...tally, before: Math.max(0, failed - tally.records) }) : ''
+  const text = summary(name, { ...s, why: said })
   return {
-    text, calls, failedCalls, why, failed: Number(s.failed) || 0,
+    text, calls, failedCalls, why, because: said, failed,
     note: `The model finished reading the records of the label ${name} (${calls} call${calls === 1 ? '' : 's'}). ${text} \`thimble label ${name}\` prints its counts.`,
   }
 }

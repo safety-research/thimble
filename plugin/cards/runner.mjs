@@ -25,7 +25,13 @@
 //   key      {id, key}                the view's onKey; `handled` says whether it has one
 //   press    {id, button}             a Button's onPress, by the number the tree gives it
 //   pointer  {id, down, up}           a click: on a Button that holds lines, its onPress; else the onPointer listener
-//                                     gets the down, then the up
+//                                     gets the down, then the up; else, on a card that steps with j and k and marks
+//                                     the item it shows with ▸, the keys that bring the ▸ to the line clicked (pick);
+//                                     else nothing, and `run` names the words clicked ({text, line}: the Text there and
+//                                     its line), which the hooks ask a side thread about
+//   pick     {id, path}               a click on a run of words (the Client's Button around it, which takes the click
+//                                     before any pointer listener): the item on its line, as pointer picks one;
+//                                     `handled` false, the card as it was, when it stands on no item
 //   undo     {id, n}                  the state as it was before the last n keys
 //   act      {id, actions, width}     keys and clicks in order, a text copy after each, then the card as it was
 //   ping
@@ -34,7 +40,10 @@
 // Each event answers the plain tree (`{t, p, c}`: Box, Text and Button nodes, a Button's onPress a number), and the state
 // to keep. A card the runner does not hold answers {ok: false, missing: true}: the hooks load it again from its copy.
 // Every answer carries `seq`, which grows with each request, so the hooks keep the newest drawing when two answers come
-// back out of order.
+// back out of order. It grows across runners too: a runner started again (the hooks module reloaded, which stops the
+// runner it started; the last runner stopped) starts from the time it started, so its answers are newer than any the
+// hooks keep from the runner before. Else the hooks would drop each answer of the new runner as older than the card's
+// drawing, and a card on screen would take no keys or clicks until the new runner had answered as many requests.
 //
 // The tree holds only what Claude Code's Client draws: a Button's children are strings and Text, and a Text's are
 // strings and Text (anything else is the view's error, said to Claude, as Claude Code would refuse to draw it), and a
@@ -47,7 +56,7 @@ import http from 'node:http'
 import { types } from 'node:util'
 import vm from 'node:vm'
 
-import { buttonText, layoutLines, pressAt } from './layout.js'
+import { buttonText, layoutLines, pressAt, rowOf, textAt } from './layout.js'
 import { spaced } from './space.js'
 
 const LOAD_MS = 5000
@@ -273,7 +282,7 @@ Object.defineProperty(this, '__thimble', { writable: false, configurable: false,
         while (k < run.length) {
           let j = k
           while (j < run.length && run[j] === run[k]) j++
-          out.push({ t: 'Text', p: { color: shades(color)[run.charCodeAt(k) - 0x2591] }, c: ['\u2588'.repeat(j - k)] })
+          out.push({ t: 'Text', p: { color: shades(color)[run.charCodeAt(k) - 0x2591] }, c: ['\u2588'.repeat(j - k)], g: run.slice(k, j) })
           k = j
         }
         at = i + run.length
@@ -504,6 +513,8 @@ function inContext(card, op, args, ms) {
   // blank rows between the card's parts (space.js), in the places the version's first drawing gave them, so no key moves
   // them; a view that reads clicks by cell keeps its rows where it drew them
   if (r.ok && r.tree && !r.cells) r.tree = spaced(r.tree, Number(args.width) || card.width || 80, card.plan)
+  // and its tree says so (`cells` on its top node), so the Client leaves its clicks to the view (client.tsx)
+  else if (r.ok && r.tree && typeof r.tree === 'object') r.tree = { ...r.tree, p: { ...(r.tree.p || {}), cells: true } }
   delete r.cells
   if (r.ok && drawnSize(r.tree) > MAX_TREE) {
     drop(card)
@@ -529,12 +540,21 @@ export function drawnSize(tree) {
 // ------------------------------------------------------------------------------------------------- the cards
 
 const cards = new Map()
-// the requests answered, for each answer's `seq`
-let answered = 0
+// the requests answered, for each answer's `seq`: it starts at the runner's start time in milliseconds times a thousand,
+// so a later runner's first answer is newer unless this one answered a thousand requests in each millisecond it ran
+let answered = Date.now() * 1000
 
 /** The text copy of a tree at a width. */
+// The text copy shows the shade glyphs the view wrote (`g`, kept where the light theme draws them as █ in a mixed
+// color, shaded above): the copy has no colors, so a █ there would read as the full shade.
 function copy(tree, width) {
-  return layoutLines(tree, width)
+  return layoutLines(asWritten(tree), width)
+}
+
+function asWritten(n) {
+  if (!n || typeof n !== 'object') return n
+  if (typeof n.g === 'string') return { t: n.t, p: n.p, c: [n.g] }
+  return n.c ? { ...n, c: n.c.map(asWritten) } : n
 }
 
 function load(a) {
@@ -560,10 +580,11 @@ function load(a) {
     const line = /view\.js:(\d+)/.exec(String(e.stack))?.[1]
     return { ok: false, phase: 'view', error: `the view does not parse${line ? ` (line ${line})` : ''}: ${e.message}` }
   }
-  const card = { id: a.id, ctx, version: a.version, width: a.width, tree: null, view, plan: new Map() }
+  const card = { id: a.id, ctx, version: a.version, width: a.width, tree: null, view, plan: new Map(), keys: '' }
   const r = inContext(card, 'init', { title: a.title, state: a.state ?? null, width: a.width }, LOAD_MS)
   if (!r.ok) return r
   card.tree = r.tree
+  card.keys = typeof r.keys === 'string' ? r.keys : ''
   cards.set(a.id, card)
   const own = copy(r.tree, a.width)
   return { ...r, ...own, ...besideOf(card, own, Number(a.beside) || 0) }
@@ -585,10 +606,68 @@ function besideOf(card, own, width) {
   return wrapped.length ? { beside: { width, lines: c.lines, cut: c.cut, wrapped } } : {}
 }
 
-/** A click: a Button around lines that holds the cell where it ended, else the view's onPointer listener. */
+/** A click: a Button around lines that holds the cell where it ended, else the view's onPointer listener, else the
+ *  item of a card that steps with keys on that line (pick). A click none of these takes names the words it fell on
+ *  (`run`), which the hooks ask a side thread about. */
 function click(card, at) {
   const press = pressAt(card.tree, card.width, at.up.x, at.up.y)
-  return press === null ? inContext(card, 'pointer', at, EVENT_MS) : inContext(card, 'press', { button: press }, EVENT_MS)
+  if (press !== null) return inContext(card, 'press', { button: press }, EVENT_MS)
+  const cells = !!(card.tree && card.tree.p && card.tree.p.cells)
+  if (!cells) {
+    const picked = pick(card, at.up.y)
+    if (picked) return picked
+  }
+  const r = inContext(card, 'pointer', at, EVENT_MS)
+  if (r.ok && !r.handled && !cells) {
+    const run = textAt(card.tree, card.width, at.up.x, at.up.y)
+    if (run) r.run = run
+  }
+  return r
+}
+
+/** The keys a click on an item may stand for: next and previous, as the card guide names them. */
+const STEP_KEYS = ['j', 'k']
+
+/** Which lines of a drawing show the selection marker. */
+function marked(tree, width) {
+  try { return layoutLines(tree, width).lines.map(l => l.includes('▸')) } catch { return [] }
+}
+
+/** A click on line `y` of a card that steps with j or k and marks the item it shows with ▸ (the card guide's marker):
+ *  the card as the keys that bring the ▸ to that line leave it, as though the person had pressed them, so a click on an
+ *  item selects it as its key does. The ▸ must move there: a line that holds a ▸ in every state (the selected item's
+ *  details, `▸ Cherbourg: 168 runs`) is no item. Null, with the card as it was, when no number of presses of either key
+ *  moves the ▸ to the line, or the card takes neither key. */
+function pick(card, y) {
+  const keys = STEP_KEYS.filter(k => String(card.keys || '').includes(k))
+  if (!keys.length || !card.tree || !(y >= 0)) return null
+  const first = marked(card.tree, card.width)
+  if (y >= first.length) return null
+  const start = inContext(card, 'save', {}, EVENT_MS)
+  if (!start.ok) return null
+  // every state each key reaches from the start, until it comes back to a state it saw or stops changing
+  const seen = [{ state: start.saved, on: !!first[y] }]
+  let hit = null
+  for (const key of keys) {
+    const states = new Set([start.saved])
+    for (let i = 0; i < first.length + 2 && i < 200; i++) {
+      const r = inContext(card, 'key', { key }, EVENT_MS)
+      if (!r.ok || !r.handled || states.has(r.state)) break
+      states.add(r.state)
+      const on = !!marked(r.tree, card.width)[y]
+      seen.push({ state: r.state, on })
+      if (on && !hit) hit = r.state
+    }
+    const back = inContext(card, 'restore', { saved: start.saved }, EVENT_MS)
+    if (!back.ok) return null
+    if (hit) break
+  }
+  // the ▸ moves to and from this line: the item it marks there is the one clicked
+  const item = seen.some(s => s.on) && seen.some(s => !s.on)
+  if (!item) return null
+  if (seen[0].on) return { ...inContext(card, 'copy', { width: card.width }, EVENT_MS), handled: true }
+  const r = inContext(card, 'restore', { saved: hit }, EVENT_MS)
+  return r.ok ? { ...r, handled: true } : null
 }
 
 function event(a, op, args) {
@@ -636,12 +715,18 @@ function act(a) {
     } else if (x && typeof x.click === 'string') {
       what = `click on "${x.click.slice(0, 60)}"`
       const button = buttonWith(card.tree, x.click)
-      r = button === null ? { ok: true, tree: card.tree, note: `no Button shows "${x.click.slice(0, 60)}"` } : inContext(card, 'press', { button }, EVENT_MS)
+      if (button !== null) r = inContext(card, 'press', { button }, EVENT_MS)
+      else {
+        // as a live click on those words: the item on their line, as the card's keys select it, else a side thread
+        const y = layoutLines(card.tree, card.width).lines.findIndex(l => l.includes(x.click))
+        const picked = y >= 0 && !(card.tree.p && card.tree.p.cells) ? pick(card, y) : null
+        r = picked ?? { ok: true, tree: card.tree, note: y >= 0 ? `a click on "${x.click.slice(0, 60)}" asks the analyst's side thread about it: no Button and no item the card's keys select stands there` : `no line shows "${x.click.slice(0, 60)}"` }
+      }
     } else if (x && Array.isArray(x.click) && x.click.length === 2) {
       const at = { x: Math.trunc(Number(x.click[0]) || 0), y: Math.trunc(Number(x.click[1]) || 0) }
       what = `click at ${at.x},${at.y}`
       r = click(card, { down: at, up: at })
-      if (r.ok && !r.handled) r.note = 'a click at a cell reaches a Button around lines or an onPointer listener, and the view has neither there'
+      if (r.ok && !r.handled) r.note = r.run ? `a click there asks the analyst's side thread about "${String(r.run.text).trim().slice(0, 60)}": no Button, onPointer listener or item the card's keys select stands there` : 'a click at a cell reaches a Button around lines, an onPointer listener or an item the card\'s keys select, and the view has none there'
     } else {
       copies.push({ what: JSON.stringify(x).slice(0, 80), error: 'not a key or a click' })
       continue
@@ -675,6 +760,15 @@ const OPS = {
     return r
   },
   undo: a => event(a, 'undo', { n: Number(a.n) || 0 }),
+  pick: a => {
+    const card = cards.get(a.id)
+    if (!card) return { ok: false, missing: true }
+    const y = rowOf(card.tree, card.width, Array.isArray(a.path) ? a.path : [])
+    const r = y >= 0 && !(card.tree && card.tree.p && card.tree.p.cells) ? pick(card, y) : null
+    if (!r) return { ok: true, handled: false }
+    if (r.ok) card.tree = r.tree
+    return r
+  },
   act,
 }
 

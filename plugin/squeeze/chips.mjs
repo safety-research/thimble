@@ -19,15 +19,16 @@
 // A catch-up is a message of its own that the chips write of several of Claude's messages: all of them since the
 // person's last prompt, when replies piled up (term.ts). Its record is a message's record with `catchup` set; its text
 // (the original) is the messages as written, one after another (catchUpText); the request names them as several
-// messages to write as one (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves,
-// which come back when it goes, so it never shows its original: 0 dismisses it, and the replies show again.
+// messages to catch the person up on (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves,
+// which still show above it, so it never shows its original: 0 dismisses it.
 //
 // The chips belong to the whole answer: its text and the cards drawn in its turn. With the squeeze switch for cards on,
 // the request shows the original's cards (cardsBlock: each card's title, columns, first rows, what it draws and its
 // view), and a reply may edit a card (a new version of it, same id), add one (a new view over the rows of a card the
 // request showed), or leave one out (readCards). cards.ts makes those as the person's versions through the card
 // runner; here the record keeps which cards each version shows, so a version seen before, and the original, come back
-// with their cards (cardListsAt).
+// with their cards (cardListsAt). A card the original places on a line of its own (marks/message.js cardRef) draws
+// where a version places its line, and a version that leaves the line out leaves the card out (placedCards).
 //
 // A record (term.ts builds it from the message and the feature's part of it, core/answers.ts):
 //   {row, text, at, shown, squeeze, catchup?}
@@ -48,6 +49,8 @@
 //   }
 // `shown` holds the text at `at` (null at the original). A citation in it is `[words](#)`, as in Claude's own words:
 // the answer's drawing gives it the look of the checked citation with the same words (marks/register.ts looksByWords).
+
+import { cardRef } from '../marks/message.js'
 
 /** Each Markdown link of a text, in order, as a match: [0] the whole link, [1] its words, [2] its target, `index`.
  *  The words may hold balanced brackets and the target balanced parentheses. */
@@ -93,10 +96,10 @@ export function mapLinks(text, fn) {
 
 /** The chips every message has, in the order drawn. `level0` is where the original stands: "as written". */
 export const CHIPS = Object.freeze([
-  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['short', 'as written', 'longer', 'much longer']), level0: 1, kind: 'fixed' }),
+  Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['short', 'as written', 'longer', 'much longer']), level0: 1, kind: 'fixed', ends: Object.freeze(['shorter', 'longer']) }),
   // (the ids are the records' since before the chips were renamed)
-  Object.freeze({ id: 'interpret', name: 'Interpretation', levels: Object.freeze(['facts only', 'as written', 'expert reading']), level0: 1, kind: 'fixed' }),
-  Object.freeze({ id: 'familiarity', name: 'Background', levels: Object.freeze(['new', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed' }),
+  Object.freeze({ id: 'interpret', name: 'Interpretation', levels: Object.freeze(['facts only', 'as written', 'expert reading']), level0: 1, kind: 'fixed', ends: Object.freeze(['facts', 'expert reading']) }),
+  Object.freeze({ id: 'familiarity', name: 'Background', levels: Object.freeze(['new', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed', ends: Object.freeze(['new', 'expert']) }),
 ])
 export const LENGTH = CHIPS[0]
 /** The level of Length a catch-up arrives at: short. */
@@ -116,6 +119,12 @@ export function glyph(chip, v) {
   const n = Math.max(1, chip.levels.length)
   const lv = Math.max(0, Math.min(n - 1, v))
   return Array.from({ length: n }, (_, i) => (i === lv ? '●' : '○')).join('')
+}
+
+/** What a chip's two ends mean, as its row names them on either side of its dots: `facts` and `expert reading`. */
+export function endsOf(c) {
+  const lv = Array.isArray(c?.levels) ? c.levels : []
+  return Array.isArray(c?.ends) && c.ends.length === 2 ? [...c.ends] : [lv[0] ?? '', lv[lv.length - 1] ?? '']
 }
 
 /** A chip's level in words: its name, and `as written` where the original stands. */
@@ -259,7 +268,7 @@ export const MEANS = Object.freeze({
   interpret: Object.freeze([
     () => 'State what was found: counts, values, what happened, and sentences that sum them up or rank them. Leave out why it happened, what follows from it and what to do.',
     () => '',
-    () => "Lead with Claude's reading of the facts, as an expert in the field reads them: the likely cause, what is usual and what is not, what follows, and what to do. Say where the reading starts, as in \"My read:\", so the analyst can tell it from what was found.",
+    () => "Lead with Claude's reading of the facts, as an expert in the field reads them: the likely cause, what is usual and what is not, what follows, and what to do, with the clues in the facts connected to what an expert knows. Say where the reading starts, as in \"My read:\", and mark what comes from that background knowledge, so the analyst can tell it from what was found.",
   ]),
   // (working, where the original stands, asks nothing)
   familiarity: Object.freeze([
@@ -288,7 +297,7 @@ export function pickLine(c, m = {}) {
 }
 
 /** The line that heads the original in a catch-up's request: several messages, written as one. */
-export const CATCHUP_HEAD = "The original answer: Claude's messages since the analyst's last prompt, in the order it wrote them. Write them as one message."
+export const CATCHUP_HEAD = "The original answer: Claude's messages since the analyst's last prompt, in the order it wrote them. The analyst knows the conversation as it was before them. Write one message that catches them up."
 
 /** A catch-up's original: Claude's messages, in order, one after another. */
 export const catchUpText = texts => (texts || []).map(t => String(t || '').trim()).filter(Boolean).join('\n\n---\n\n')
@@ -598,6 +607,25 @@ export function keepCorrections(text, keep, original = '') {
   return { text: back.length ? `${String(text).trimEnd()}\n\n${back.join('\n\n')}` : text, back }
 }
 
+/**
+ * The lines that place cards (marks/message.js cardRef) in a rewrite: the rewrite puts each card where it helps its
+ * version, so a line it moved draws the card there, and a card whose line it left out is left out of the version
+ * (`left`, as a drop: back with 0). A card the rewrite dropped (`dropped`, its ids) loses its line. Returns the text,
+ * the cards left out and the lines taken out.
+ */
+export function placedCards(text, original, dropped = []) {
+  const gone = new Set(dropped)
+  const removed = []
+  const lines = String(text || '').split('\n').filter(l => {
+    const id = cardRef(l)
+    if (id && gone.has(id)) { removed.push(id); return false }
+    return true
+  })
+  const have = new Set(lines.map(cardRef).filter(Boolean))
+  const left = [...new Set(String(original || '').split('\n').map(cardRef).filter(id => id && !gone.has(id) && !have.has(id)))]
+  return { text: removed.length ? lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() : String(text || ''), left, removed }
+}
+
 /** A line that only heads what comes under it: a markdown heading, a bold lead that is no sentence, or a line that
  *  ends in a colon. */
 export function isHeading(line) {
@@ -636,10 +664,42 @@ function roundings(n) {
   return forms
 }
 
+/** The citations of a text (`[words](#)`), each with its words as read and the numbers they state. */
+const citedIn = text => linkSpans(text).filter(m => m[2] === '#').map(m => ({ words: plainLine(m[1]), nums: numbersIn(plainLine(m[1])) }))
+
+/** The words of a citation other than its numbers, for finding the citation of the original a rewrite's one stands for. */
+const wordSet = w => new Set((String(w).toLowerCase().match(/[a-z][a-z'-]{2,}/g) || []))
+
 /**
- * A rewrite held to the original: a number the original never states is named as a problem. Its citations stay as
- * written: one on the words of a checked citation looks as that one does, any other as unchecked (marks/register.ts
- * looksByWords). Returns the text to show and the problems.
+ * The citations of a rewrite whose numbers no citation of the original states: a cited value the rewrite changed
+ * (`[23 times](#)` where the original cites `[26 times](#)`). Each as {words, was}, `was` the original's citation with the
+ * most words in common, or null. A citation that keeps a value of that one and adds a number the original states
+ * beside it (`[13,339 of 13,704 saves](#)` for `[13,339 saves](#)`) changed nothing.
+ */
+export function changedCitations(original, text) {
+  const orig = citedIn(original)
+  const cited = new Set(orig.flatMap(c => c.nums.flatMap(roundings)))
+  const out = []
+  for (const c of citedIn(text)) {
+    if (!c.nums.length || c.nums.every(n => cited.has(n))) continue
+    const mine = wordSet(c.words)
+    let was = null
+    let best = 0
+    for (const o of orig) {
+      const k = [...wordSet(o.words)].filter(w => mine.has(w)).length
+      if (k > best && o.nums.length) { best = k; was = o }
+    }
+    const kept = was && was.nums.flatMap(roundings).some(n => c.nums.includes(n))
+    if (!kept) out.push({ words: c.words, was: was ? was.words : null })
+  }
+  return out
+}
+
+/**
+ * A rewrite held to the original: a number the original never states is named as a problem, and so is a citation whose
+ * numbers no citation of the original states (changedCitations). Its citations stay as written: one on the words of
+ * a checked citation looks as that one does, any other as unchecked (marks/register.ts looksByWords). Returns the text
+ * to show and the problems.
  */
 export function checkRewrite(original, text) {
   const problems = []
@@ -648,7 +708,11 @@ export function checkRewrite(original, text) {
   // share (0.369) as a percent (37, 36.9)
   const have = new Set(numbersIn(original).flatMap(roundings))
   const stray = [...new Set(numbersIn(mapLinks(out, (all, words) => words)).filter(n => !have.has(n)))]
-  if (stray.length) problems.push(`${stray.slice(0, 3).map(n => `"${n}"`).join(', ')} ${stray.length === 1 ? 'is' : 'are'} not in the original`)
+  // each problem is said as the person reads it on the bar, beside the version it is about
+  if (stray.length) problems.push(`this version states ${stray.slice(0, 3).map(n => `"${n}"`).join(', ')}, which the original answer does not`)
+  // a cited number the rewrite changed, though the original states it elsewhere
+  const changed = changedCitations(original, out).filter(c => !c.words || !stray.some(n => numbersIn(c.words).includes(n)))
+  for (const c of changed.slice(0, 2)) problems.push(c.was ? `this version says "${c.words}" where the original answer says "${c.was}"` : `this version cites "${c.words}", which the original answer states but does not cite`)
   return { text: out, problems }
 }
 
@@ -786,9 +850,9 @@ export function settledNote(rec, told = 'orig') {
   if (isCatchUp(rec)) {
     const n = Number(rec.catchup.replies) || 0
     const of = n === 1 ? 'reply' : `${n} replies`
-    if (rec.catchup.dismissed || typeof rec.shown !== 'string') return told === 'orig' ? '' : `The analyst went back to reading your ${of} since their last prompt as you wrote them${asWere}.`
+    if (rec.catchup.dismissed || typeof rec.shown !== 'string') return told === 'orig' ? '' : `The analyst closed the catch-up of your ${of} since their last prompt; those messages show as you wrote them${asWere}.`
     const named = String(rec.text || '').split('\n\n---\n\n').map(t => `"${firstWordsOf(t)}"`).join('; ')
-    return `The analyst caught up on your ${of} since their last prompt. In place of those messages (${named}), they now read one message that the squeeze chips wrote of them${set ? ` (${set})` : ''}:\n\n${rec.shown.slice(0, 12000)}${cards}\n\n(What you wrote is unchanged, and the analyst can go back to it.)`
+    return `The analyst caught up on your ${of} since their last prompt. Below those messages (${named}), which still show as you wrote them, they read one message that the squeeze chips wrote of them${set ? ` (${set})` : ''}:\n\n${rec.shown.slice(0, 12000)}${cards}`
   }
   const when = clockOf(rec.at)
   const which = `Your message${when ? ` from ${when}` : ''} ("${firstWordsOf(rec.text)}")`

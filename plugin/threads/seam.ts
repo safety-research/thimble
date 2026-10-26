@@ -9,6 +9,8 @@
 //   threadsBar($, on, preview)         its items at the bar's right (`t 2 threads`)
 //   drawThreadsPane($, e, kind, args, els)   the side pane of kind `threads` (the list) or `thread` (one thread: what
 //                                      it is about, its turns, its input)
+//   threadPaneParts($, e, args, els)   one thread's pane in two parts: what it is about with its turns, and the key row
+//                                      with the input bar, which the docked pane keeps at its bottom (core/pane.ts)
 //   openThread($, scope, {key})        the side pane on the thread about `scope` (a new one, or the one already about
 //                                      it), its input taking the keys: the tray's `a` on a mark, a claim's question in
 //                                      the claims pane; true when it opened. `key`: the bar's words that open it where
@@ -17,23 +19,28 @@
 //                                      the tray's `↳ thread: … · a opens it` line
 //   threadUnder($, e, kind, args, els)   the thread under a pane of thimble's (evidence, labels, coverage, claims): its
 //                                      conversation and its input bar, about what the pane shows (core/pane.ts)
+//   threadUnderSplit($, e, kind, args, els)   the same in two parts: the conversation, and the key row with the input
+//                                      bar, which the docked pane keeps at its bottom (core/pane.ts)
 //   rowsUnder($, e, kind, args)        about how many rows that thread takes, for a pane that keeps its own rows in view
+//   PaneEdit                           a field a pane edits in the input bar under it, in place of a question: the
+//                                      labels pane's (labels/pane.tsx labelEdit), its name, its value, what ↵ does
 //   threadPassages($, row)             what a reply's margin asks about (marks/view.ts): its passages, each a thread's
 //                                      subject; `has` once a question was asked of it, `ask` opens it (openThread)
-//   threadOnCard($, id, title, line)   what a card's margin asks about (cards/draw.ts): the part of the card its
-//                                      selected `line` shows (a bar, a row a click selected), else the whole card, as
-//                                      the tray's `a` asks; each part has a thread of its own
+//   threadOnCard($, id, title, line, element)   what a card's margin asks about (cards/draw.ts): the part of the card
+//                                      its selected `line` shows (a bar, a row a click selected), else the whole card,
+//                                      as the tray's `a` asks; or the run of words a click on the card asked about
+//                                      (`element`); each part has a thread of its own
 //   threadCardAnchor($, agentId, id)   where a card a thread's fork drew stands: `thread:<key>`, drawn under its answer
 //                                      in the thread's pane; null for any other agent (cards/tool.ts)
-//   registerThreads                    its own hooks (/threads, the forks' ends, ...)
+//   registerThreads                    its own hooks (the forks' ends, ...)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { drawThreads, rowsUnder as roomUnder, threadUnder as under } from './pane'
+import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
 import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadsBright } from './thread'
-import { cardPart, partAbout } from './threads.mjs'
+import { cardPart, elementPart, partAbout } from './threads.mjs'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -63,6 +70,8 @@ export async function threadsKey($: Engine, key: string, _until: number): Promis
 
 /** `t 2 threads` at the bar's right, while the session has threads: a click lists them, as t does. */
 export async function threadsBar($: Engine, _on: (key: string) => boolean, _preview: boolean): Promise<BarItem[]> {
+  // a drawing made right after a reload (the settings pane's preview, after a switch) reads the kept threads itself
+  await restoreThreads($)
   await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
   const n = threadCount()
   if (!n) return []
@@ -71,6 +80,10 @@ export async function threadsBar($: Engine, _on: (key: string) => boolean, _prev
 
 export async function drawThreadsPane($: Engine, e: Any, kind: 'threads' | 'thread', args: unknown, els: Any): Promise<unknown> {
   return drawThreads($, e, kind, args, els)
+}
+
+export async function threadPaneParts($: Engine, e: Any, args: unknown, els: Any): Promise<{ body: unknown[]; bottom: unknown[] }> {
+  return threadParts($, e, els, args)
 }
 
 /** The first question asked in the thread about `scope`, or null when it has none; read again when a thread changes. */
@@ -86,17 +99,29 @@ export async function threadUnder($: Engine, e: Any, kind: string, args: unknown
   return under($, e, kind, args, els)
 }
 
+export async function threadUnderSplit($: Engine, e: Any, kind: string, args: unknown, els: Any): Promise<{ conv: unknown[]; bottom: unknown[] }> {
+  return threadUnderParts($, e, kind, args, els)
+}
+
 /** About how many rows threadUnder takes under a pane (threads/pane.tsx rowsUnder). */
 export async function rowsUnder($: Engine, e: Any, kind: string, args: unknown): Promise<number> {
   return roomUnder($, e, kind, args)
 }
 
-export async function openThread($: Engine, scope: ThreadScope, o: { key?: string } = {}): Promise<boolean> {
+/** A field a pane edits in the input bar under it (labels/pane.tsx labelEdit). */
+export type { PaneEdit }
+
+export async function openThread($: Engine, scope: ThreadScope, o: { key?: string; where?: string } = {}): Promise<boolean> {
   return openThreadOn($, scope, o)
 }
 
+/** A question asked at once in the thread on `scope`, as its input bar asks it (a heads-up's offer, from the tray). */
+export async function askInThread($: Engine, scope: ThreadScope, text: string): Promise<void> {
+  return askHere($, scope, text)
+}
+
 /** A reply's passages as the margin asks about them; read again when a thread changes. */
-export async function threadPassages($: Engine, row: string): Promise<{ has: (p: Passage) => boolean; ask: (p: Passage) => unknown }> {
+export async function threadPassages($: Engine, row: string): Promise<{ has: (p: Passage) => boolean; ask: (p: Passage) => unknown } | null> {
   await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
   await restoreThreads($)
   const scope = (p: Passage): ThreadScope => ({ about: p.label, passage: { row, text: p.text.slice(0, 4000) } })
@@ -107,12 +132,13 @@ export async function threadPassages($: Engine, row: string): Promise<{ has: (p:
   }
 }
 
-/** A card as its frame's margin asks about it: the thread the tray's `a` opens on it. */
-export async function threadOnCard($: Engine, id: string, title: string, line = ''): Promise<{ label: string; has: boolean; press: () => unknown }> {
+/** A card as its frame's margin asks about it: the thread the tray's `a` opens on it. `element`: a run of its words a
+ *  click asked about, and the words of its row (client.tsx), in place of the selected line. */
+export async function threadOnCard($: Engine, id: string, title: string, line = '', element?: { text: string; line: string }): Promise<{ label: string; has: boolean; press: () => unknown } | null> {
   await $.state.get({ plugin: 'thimble', key: 'threadsGen' })
   await restoreThreads($)
   const about = `the card "${title || id}"`
-  const part = cardPart(line)
+  const part = element ? elementPart(element.text, element.line) : cardPart(line)
   const scope: ThreadScope = part ? { about: partAbout(about, part), card: id, part } : { about, card: id }
   return { label: scope.about, has: asked(scope), press: () => openThreadOn($, scope).catch(() => false) }
 }

@@ -152,3 +152,17 @@ describe("main's look at the agent tray", () => {
     expect(callLineText(`${P}some_new_tool`, {}, '')).toBe('some_new_tool')
   })
 })
+
+describe("main's start of a fix", () => {
+  test("main's fix_thimble call is left out of main: the fixer's card stands for it", () => {
+    const log = records([
+      { type: 'user', ts: '2026-08-30T14:00:00Z', text: '/thimble-fix the card should count its rows' },
+      { type: 'tool_use', ts: '2026-08-30T14:00:01Z', id: 'f1', name: `${P}fix_thimble`, input: { words: 'new the card should count its rows' } },
+      { type: 'agent', ts: '2026-08-30T14:00:02Z', chat: 'fx1', role: 'fixer', title: 'fixing the card should count its rows' },
+      { type: 'tool_result', ts: '2026-08-30T14:00:03Z', id: 'f1', summary: 'thimble started a fork' },
+      { type: 'text', delta: 'Started a fix for the card.' },
+    ])
+    expect([...mainSkips(log, { spawned: new Set(), summaries: [], runs: [] })].sort()).toEqual([1, 3])
+    expect(callLineText(`${P}fix_thimble`, { words: 'new the card should count its rows' }, '')).toBe('fix_thimble new the card should count its rows')
+  })
+})

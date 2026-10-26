@@ -32,15 +32,17 @@ import { keptDir } from '../core/env'
 import { tellAtNextPrompt } from '../core/tell'
 import { modelWhy } from '../core/why.js'
 import type { ExplainPart } from '../explain/seam'
+import { readText } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
+import { lookAtCatchUp } from '../observer/observer'
 import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
 import { tracked } from '../telemetry/telemetry'
 import { trayOffRow } from '../tray/seam'
-import { answerCards, applyCards, showCards, type Answer } from './cards'
+import { answerCards, applyCards, placeCatchUpCards, showCards, type Answer } from './cards'
 import {
   ARRIVE, SCALE, answerText, applyRewrite, cardsAfter, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads,
-  fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, readReply, request, restore, revealStep, rowsOf,
+  fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, placedCards, readReply, request, restore, revealStep, rowsOf,
   setWords, settledNote, shownKey, termsOf,
 } from './chips.mjs'
 
@@ -178,16 +180,25 @@ async function done($: Engine, id: string, gen: number): Promise<void> {
   await noteSettled($, id)
 }
 
-/** The sentences of the citations the check corrected in the rows a record covers, each with its citation as written:
- *  a version keeps them, so the corrected value stays in place. */
-async function correctedSentences($: Engine, rows: string[]): Promise<string[]> {
-  const out: string[] = []
-  for (const r of rows) {
-    for (const it of (await rowMarks($, r))?.items ?? []) {
-      if (it.status === 'corrected' && it.sentence && !out.includes(it.sentence)) out.push(it.sentence)
-    }
+/** A message's words as the person reads them: each sentence a check rewrote in place of Claude's, and each corrected
+ *  citation's words in place of its own (as marks/register.ts draws them), so a rewrite starts from the corrected
+ *  values and never sees the wrong ones beside them. */
+async function asRead($: Engine, row: string, text: string): Promise<string> {
+  const items = (await rowMarks($, row))?.items ?? []
+  if (!items.some(it => it.status === 'corrected')) return text
+  return readText(text, items)
+}
+
+/** The original a record's rewrite starts from: its message as the person reads it (asRead), or, for a catch-up, each
+ *  of its messages so, one after another. */
+async function originalOf($: Engine, rec: Rec): Promise<string> {
+  if (!rec.catchup) return asRead($, rec.row, rec.text)
+  const texts: string[] = []
+  for (const r of rec.catchup.rows) {
+    const m = await messageOf($, r)
+    if (m?.text?.trim()) texts.push(await asRead($, r, m.text))
   }
-  return out.slice(0, 4)
+  return texts.length ? catchUpText(texts) : rec.text
 }
 
 /** One call for a change; its result shows only while no later change came (`gen`, the change's number). */
@@ -195,7 +206,9 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   const rec = await recOf($, id)
   if (!rec) return
   const s = (rec.squeeze ?? {}) as Any
-  const probe: Rec = { ...rec, squeeze: { ...s, at: want.at, scale: SCALE } }
+  // the original as the person reads it: the citations the check corrected stand corrected in it
+  const original = await originalOf($, rec).catch(() => rec.text)
+  const probe: Rec = { ...rec, text: original, squeeze: { ...s, at: want.at, scale: SCALE } }
   const stale = () => latest.get(id) !== gen
   revealing.delete(id)
   await setUi($, id, { running: { since: Number(await $.clock.now()) }, error: null, reveal: null })
@@ -203,14 +216,13 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   // a catch-up answers the person's last prompt, whatever notification or hand-back came after it
   const question = rec.catchup ? String(rec.catchup.question || '') : await questionOf($, rec.row).catch(() => '')
   const system = await promptText($, 'squeeze')
-  // the corrections in the original are named in the request (Claude's own, and the citations the check corrected),
-  // and one the rewrite left out is put back after it
-  const keep: string[] = [...mustKeep(rec.text), ...(await correctedSentences($, rows))].slice(0, 6)
+  // Claude's own corrections in the original are named in the request, and one the rewrite left out is put back after it
+  const keep: string[] = mustKeep(original).slice(0, 6)
   // the terms of the explainers on its words are named in the request
   const terms: string[] = []
   for (const r of rows) for (const t of termsOf(await partOf<ExplainPart>($, r, 'explain'))) if (!terms.includes(t)) terms.push(t)
-  // the answer's cards, which a version may change (with the switch on)
-  const answer: Answer | null = featureOn('squeezeCards') ? await answerCards($, rec).catch(() => null) : null
+  // the answer's cards, which a version may place, change or leave out
+  const answer: Answer | null = await answerCards($, rec).catch(() => null)
   const req = request(probe, {
     system, toolkit: answer?.guide ?? '', question, keep, terms: terms.slice(0, 8), cards: answer?.cards ?? [],
     // a request that shows the cards asks for more thought: whether a card changes, and its view, if one does
@@ -238,22 +250,30 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   // a heading the rewrite ends on, with nothing under it, promises what the text does not give: dropped before a
   // correction is put back after it, and after
   const bare = dropOrphanHeads(reply.text)
-  const back = keepCorrections(bare.text, keep, rec.text)
+  const back = keepCorrections(bare.text, keep, original)
   const whole = dropOrphanHeads(back.text)
   whole.dropped.unshift(...bare.dropped)
   // held to the whole answer it was shown: the message, and its cards' words and rows when the request had them
-  const checked = checkRewrite(answerText(rec.text, answer?.cards ?? []), whole.text)
+  const checked = checkRewrite(answerText(original, answer?.cards ?? []), whole.text)
   // the cards this version changes, made as the person's; one that does not draw is left out, said why
   // (a card a catch-up adds stands under the catch-up, at the row it draws at)
   const changed = answer && reply.cards.length ? await applyCards($, answer, reply.cards, rec.catchup ? drawnAt(rec) : rec.row, setWords(probe) || 'as written') : null
   const cardProblems = answer ? [...reply.cardProblems, ...(changed?.problems ?? [])] : []
-  const cards = answer && changed?.done.length ? cardsAfter(answer.orig, rec.row, changed.done) : null
+  // a card the original placed on a line of its own draws where this version places the line; a version that left the
+  // line out left the card out, as a drop
+  const placed = placedCards(checked.text, original, (changed?.done ?? []).filter((d: Any) => d.op === 'drop').map((d: Any) => d.id))
+  const leftOut = answer ? placed.left.flatMap(id => {
+    const c = answer.cards.find(x => x.id === id)
+    return c ? [{ op: 'drop', id, title: c.title }] : []
+  }) : []
+  const done = [...(changed?.done ?? []), ...leftOut]
+  const cards = answer && done.length ? cardsAfter(answer.orig, rec.row, done) : null
   if (stale()) return
   // the record as it is now (the person may have added a chip meanwhile)
   const fresh = (await recOf($, id)) || rec
   const fs = (fresh.squeeze ?? {}) as Any
   const next = applyRewrite({ ...fresh, squeeze: { ...fs, own: fs.own ?? s.own } }, {
-    text: checked.text, at: want.at,
+    text: placed.text, at: want.at,
     made: { ms, model: req.model, usage: (r as Any).usage, at: new Date(t0).toISOString(), prompt: 'squeeze' }, problems: [...checked.problems, ...cardProblems],
     cards, origCards: answer ? answer.orig : null,
   }) as Rec
@@ -261,9 +281,9 @@ async function once($: Engine, id: string, want: Want, gen: number): Promise<voi
   await settled($, id, next, { written: true })
   await log($, {
     row: id, ok: true, ms, model: req.model, effort: req.effort, prompt: 'squeeze', usage: (r as Any).usage, key: keyWords, problems: checked.problems,
-    rows: rowsOf(checked.text, viewCols), of: rowsOf(rec.text, viewCols),
+    rows: rowsOf(placed.text, viewCols), of: rowsOf(original, viewCols), ...(original !== rec.text ? { corrected: true } : {}),
     ...(keep.length ? { keep: keep.length, put_back: back.back.length } : {}), ...(whole.dropped.length ? { orphan_heads: whole.dropped.length } : {}),
-    ...(terms.length ? { terms: terms.length } : {}), ...(rec.catchup ? { catchup: rec.catchup.replies } : {}),
+    ...(terms.length ? { terms: terms.length } : {}), ...(placed.left.length ? { card_lines_left_out: placed.left } : {}), ...(placed.removed.length ? { card_lines_removed: placed.removed } : {}), ...(rec.catchup ? { catchup: rec.catchup.replies } : {}),
     ...(answer ? { cards: answer.cards.length, asked: reply.cards.map((c: Any) => `${c.op} ${c.id}`), did: (cards?.did ?? []).map((d: Any) => `${d.did} ${d.id}`), card_problems: cardProblems, ...(changed?.unknown.length ? { unknown_cards: changed.unknown } : {}) } : {}),
   })
 }
@@ -276,10 +296,17 @@ async function settled($: Engine, id: string, rec: Rec, o: { written: boolean })
   const before = await recOf($, id)
   await saveRec($, rec)
   const stale = await showCards($, rec)
+  if (rec.catchup) await placeCatchUpCards($, rec)
   if (stale.length) failNotice($, `A card could not be drawn at the version shown: ${stale.join('; ')}. Press 0 or pick the level again to try again.`, 'squeeze')
   await trayOffRow($, id.replace(/#cu$/, ''))
   const was = before ? shownOf(before) : ''
   const now = shownOf(rec)
+  if (rec.catchup && typeof rec.shown === 'string' && now !== was) {
+    // a catch-up's first version: the view goes to it, below the replies it covers; each version is read for
+    // explainers and heads-ups as an answer is
+    if (typeof before?.shown !== 'string') await $.ui.scroll({ to: { key: `cu-${drawnAt(rec)}` }, block: 'start' }).catch(() => undefined)
+    void lookAtCatchUp($, drawnAt(rec), rec.shown).catch(() => undefined)
+  }
   if (now !== was && o.written) { await writeIn($, id, now.length); return }
   // a write-in still running for the version before stops: this one shows whole
   if (revealing.has(id) || (await uiOf($, id)).reveal) { revealing.delete(id); await setUi($, id, { reveal: null }) }
@@ -349,11 +376,11 @@ export type Pile = { n: number; prompt: { row: string | null; text: string } | n
 
 /**
  * Replies piled up: two or more of Claude's replies (turns it ended with words) came since the person's last prompt
- * and since the newest catch-up of them the person read. Then s offers to catch up on all the replies since that
- * prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not.
+ * and since the newest catch-up of them the person read. Then b (the bar names it) catches up on all the replies
+ * since that prompt (`n`). A catch-up dismissed after it showed counts as read; one undone or never written does not.
  */
 export async function pileUp($: Engine, on: (key: string) => boolean = featureOn): Promise<Pile | null> {
-  if (!on('squeeze')) return null
+  if (!on('catchUp')) return null
   const since = await sinceLast($)
   let from = 0
   for (let i = since.replies.length - 1; i >= 0; i--) {
@@ -384,9 +411,9 @@ export async function catchUpAt($: Engine, row: string): Promise<Rec | null> {
 /**
  * A catch-up of Claude's messages `rows` (oldest first) since the person's last prompt: a record whose original is
  * those messages as written, one after another, first written at Length short (one call, as any chip change is). The
- * newest reply (`host`) keeps it; each other message names the host. It draws at the newest of the messages (drawnAt),
- * the last above the prompt, and every other message it covers draws no text while its version shows. Returns its id;
- * the first version is on its way.
+ * newest reply (`host`) keeps it; each other message names the host. It draws below the newest of the messages
+ * (drawnAt), the last above the prompt, and the messages it covers still show as written. Returns its id; the first
+ * version is on its way.
  */
 export async function catchUp($: Engine, o: { host: string; rows: string[]; replies: number; question: string; prompt: string | null }): Promise<string | null> {
   const texts: string[] = []
@@ -416,6 +443,7 @@ export async function dismissCatchUp($: Engine, id: string, o: { undo?: boolean;
   const gone: Rec = { ...rec, catchup: { ...rec.catchup, dismissed: true } }
   // the cards back as the replies had them
   await showCards($, gone)
+  await placeCatchUpCards($, gone)
   for (const r of rec.catchup.rows) {
     if (r !== rec.row) await setPart<SqPart>($, r, 'squeeze', cur => {
       if (!cur || cur.inCatchUp !== rec.row) return cur

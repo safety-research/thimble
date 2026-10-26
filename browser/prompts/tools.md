@@ -455,7 +455,7 @@ Turn a report check off, {{if:browser}}as the switch in the Comments pane does, 
 
 ## file_dev_ticket
 
-File a ticket for thimble's developer agent when thimble itself should change, such as a bug or a missing control, never for a question about the data.
+File a ticket for thimble's developer agent to change a view it built for this corpus, named in `view`. A change to thimble itself is a fix of the person's thimble, which `fix_thimble` starts.
 
 ```json
 {
@@ -467,6 +467,20 @@ File a ticket for thimble's developer agent when thimble itself should change, s
     "view": {"type": "string", "description": "The name of a view the dev agent built for this corpus, when the change is to that view."}
   },
   "required": ["title", "body"]
+}
+```
+
+## fix_thimble
+
+Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is the person's own tool, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, offer a fix and start it only when they say yes. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "words": {"type": "string", "description": "`N <words>` to change the person's fix N, or `new <words>` for a new fix: what thimble does wrong, and what it should do."}
+  },
+  "required": ["words"]
 }
 ```
 
@@ -875,11 +889,27 @@ Filed {label}: {title}. {start}
 
 ## file_dev_ticket-fix
 
-thimble's fixer works on this change as fix {id}, "{title}", in a copy of thimble, with this conversation as its context. The row above the composer shows how it goes. When the change passes thimble's checks, a notice at the top of the chat asks the analyst to use it, and thimble starts again with it after their click. Tell the analyst in one line.
+This call filed nothing: a change to thimble itself is a fix of the person's thimble, which `fix_thimble` starts when they ask for it.
 
-## file_dev_ticket-fix-failed
+## fix_thimble-new
 
-The fixer did not start on this change: {why} Tell the analyst in one line.
+thimble started a fork of this conversation that fixes thimble in the background, in a copy ("{fix}"). The chat shows its work above your reply, and thimble asks the person to use the fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
+
+## fix_thimble-round
+
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy. The chat shows its work above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
+
+## fix_thimble-round-on
+
+thimble started a fork of this conversation that changes the person's fix "{fix}" in the background, in a copy; the version they have stays until they use the changed one. The chat shows its work above your reply, and thimble asks the person to use the changed fix once it passes thimble's checks. Tell the person in one short line, then go on with their request.
+
+## fix_thimble-live
+
+thimble gave these words to the fork that is already fixing "{fix}". Tell the person in one short line, then go on with their request.
+
+## fix_thimble-failed
+
+thimble started no fix: {why} Tell the person in one short line.
 
 ## ticket-terminal
 

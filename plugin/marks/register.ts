@@ -24,15 +24,16 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
-import { markFocus, markPressed, passagesFor, rowDrawing, spansFor, textView, underText, type Span } from '../core/answerview'
+import { checkSpans, markFocus, markPressed, passagesFor, spansFor, textView, underText, type Span } from '../core/answerview'
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
+import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { featureOn } from '../settings/features.mjs'
 import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
-import { marksIn, rewritesIn, withCorrections, withoutMarks } from './message.js'
+import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 
@@ -88,10 +89,21 @@ function sameClaim(a: string, b: string): boolean {
 export function lostSpans(words: string, was: Span[], now: Span[]): LostSpan[] {
   const kept = new Set(now.map(x => x.id))
   return was.filter(x => !kept.has(x.id)).map(x => ({
-    words: words.slice(x.start, x.end).replace(/`/g, ''),
+    words: withoutMarks(words.slice(x.start, x.end)).replace(/`/g, ''),
     kind: /^heads up\b/.test(x.label) ? 'heads-up' : /^explain\b/.test(x.label) ? 'explainer' : 'mark',
     look: x.look, label: x.label, ...(x.onPress ? { onPress: x.onPress } : {}),
   }))
+}
+
+/** Spans placed on `was` where they stand on `now`, the version of it the checks made (message.js carrier); one with
+ *  no place there is left out. */
+export function carried(was: string, now: string, spans: Span[]): Span[] {
+  const carry = carrier(was, now)
+  const words = (t: string, x: { start: number; end: number }) => withoutMarks(t.slice(x.start, x.end)).replace(/`/g, '')
+  return spans.flatMap(x => {
+    const p = carry(x.start, x.end)
+    return p ? [{ ...x, ...p, label: x.label.replace(words(was, x), words(now, p)) }] : []
+  })
 }
 
 /** Why the checker may not make this call, or null (main's calls and other agents' are not this module's). */
@@ -177,38 +189,43 @@ export const registerMarks: Register = on => {
   }).catch(($, e, next) => next(e))
 }
 
-/** A row of Claude's words as marks/register.ts draws it: hidden (a catch-up covers it), a catch-up in its place, its
- *  marks, spans and lines under it, or the drawing beneath (`below`) when it has none of these. */
+/** A row of Claude's words as marks/register.ts draws it: its marks, spans and lines under it, or the drawing beneath
+ *  (`below`) when it has none of these. */
 async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   if (e.props.isSummary) return below()
   const row = e.requestId
   const raw = String(e.props.text ?? '')
   const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
-  // the text this row shows (a squeezed version in place of Claude's words), or nothing (a catch-up covers it)
+  // the text this row shows (a squeezed version in place of Claude's words)
   const view = await textView($, row, raw)
   const els = $.ui.resolve(e) as Any
   if (view.hidden) return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [] })
-  // a row a feature draws whole (a catch-up in the newest reply's place), with the lines under its words
-  const whole = await rowDrawing($, els, row, cols)
-  if (whole) {
-    const under = await underText($, els, row, cols)
-    return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [whole, ...under] })
-  }
-  const marksOn = featureOn('marks')
-  const words = marksOn ? view.text : withoutMarks(view.text)
+  const marksOn = featureOn('citations')
+  const written = marksOn ? view.text : withoutMarks(view.text)
   const reply = marksOn ? await rowMarks($, row) : null
-  const own = words === raw
+  const own = written === raw
+  // the words the analyst asked about (Citations manual) stand as marks in Claude's own words, and the row's marks in
+  // the order the text holds them
+  const asked = own ? withAsked(written, reply?.items ?? []) : { text: written, items: reply?.items ?? [] }
+  const words: string = asked.text
+  const items: MarkItem[] = asked.items
   // Claude's own words as the person reads them: each sentence a check rewrote in place of the one Claude wrote, and
   // each corrected citation's words in place of its own, so the explainers and heads-ups stand on the words shown
-  const rewrote = own ? rewritesIn(words, reply?.items ?? []) : { text: words, placed: new Set<number>() }
-  const text = own ? withCorrections(rewrote.text, reply?.items ?? []) : words
+  const rewrote = own ? rewritesIn(words, items) : { text: words, placed: new Set<number>() }
+  const text = own ? withCorrections(rewrote.text, items) : words
   const marks = marksOn ? marksIn(text) : []
-  const spans = await spansFor($, row, text, marks)
+  // the explainers and heads-ups stand on the words Claude wrote, where the look found them, and follow those words
+  // into the words shown (a correction's words in place of a citation's)
+  const placed = await spansFor($, row, words, marksIn(words))
+  const spans = text === words ? placed : checkSpans(carried(words, text, placed), text, marks, null)
   // a span that stood on words Claude wrote and stands nowhere now, since the check changed those words: a line under
   // the reply says so and opens it
-  const lost = text !== words ? lostSpans(words, await spansFor($, row, words, marksIn(words)), spans) : []
+  const lost = text !== words ? lostSpans(words, placed, spans) : []
   const under = await underText($, els, row, cols)
-  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length) {
+  // the cards the text places on lines of their own
+  const cards = featureOn('cards') ? await framesIn($, e, text) : {}
+  const placesCards = Object.keys(cards).length > 0
+  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) {
     return own ? below() : below({ ...e, props: { ...e.props, text } })
   }
   // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations` runs
@@ -221,7 +238,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   // the marks of Claude's own words by their place; those of a text shown in their place by their words
   const looks: MarkLook[] = own
     ? marks.map((_m: Any, k: number) => {
-      const it = reply?.items[k]
+      const it = items[k]
       if (!it) return { n: k + 1, status: waits ? 'pending' : 'failed' }
       // a rewrite that cannot stand in the text leaves Claude's sentence, whose words the check did not confirm: its
       // cited words alone in that sentence would read wrong
@@ -233,10 +250,10 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const focus = focusN != null ? looks.findIndex(l => l.n === focusN) : -1
   // the citations' tint is the theme set's (view.ts citeLook)
   if (marks.length) await themeNow($)
-  const body = marks.length || spans.length || view.dim || view.lead
+  const body = marks.length || spans.length || view.dim || view.lead || placesCards
     ? messageEl(els, {
       text, marks, looks, key: `mk-${row}`, cols, first: !!e.props.isFirstOfReply, spin,
-      spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null,
+      spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),
       onMark: async (k: number) => {

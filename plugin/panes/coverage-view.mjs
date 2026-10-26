@@ -14,7 +14,7 @@
 //                no unit (an image) is read or not as a whole
 //
 // A pane under 48 columns draws no bars in the rows. Before Claude touched anything the bar is empty and the rows dim,
-// with their file counts.
+// with their file counts. A folder with no files says so, under the head, and draws nothing else.
 import { cut, textWidth } from '../core/text.js'
 
 /** Cells of a row's bar, and of the detail's. */
@@ -224,8 +224,12 @@ export function coverageView(cov, view, { W, H, under = 0 }) {
 
   // ---- the head
   const head = []
-  const right = none ? 'nothing touched yet' : `${num(touched)}/${num(files)} ${narrow ? 'touched' : 'files touched'} · ${pct(touched, files)}`
+  const right = !files ? 'no files' : none ? 'nothing touched yet' : `${num(touched)}/${num(files)} ${narrow ? 'touched' : 'files touched'} · ${pct(touched, files)}`
   head.push([{ s: 'Coverage', tone: 'bold' }, { s: padStart(cut(right, W - 9), W - 8), tone: none ? 'dim' : null }])
+  if (!files) {
+    head.push([], [{ s: cut('This folder holds no files, so there is nothing to cover yet.', W), tone: 'dim' }])
+    return { lines: head.map((runs, i) => ({ key: `h${i}`, runs })), keys: [], sel: -1, selKey: null, top: 0, room: 0, rows: 0, open: [], picked: null, isDir: false, anyOpen: false }
+  }
   head.push(bar(seen, touched - seen, files, W))
   if (none) head.push([])
   else if (narrow) {

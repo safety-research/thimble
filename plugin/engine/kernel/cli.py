@@ -138,6 +138,8 @@ LABEL_HELP = """A label gives every record of a scope one of a few values, and k
 
     --values a,b,c      the values, the positive first (default yes,no; --code takes the values it returns, the most
                         common first)
+    --says "SENTENCE"   what the label marks, in one plain sentence, which the analyst reads in place of a --regex
+                        or --code rule
     --where EXPR        only records for which this Python expression is true (r is the record, text its raw text)
     --within L=V        only records the label L gave the value V
     --limit N           a trial: N records at random; the same label without --limit then labels the rest
@@ -150,9 +152,9 @@ every item or key at its level, as in `--in 'chats.json#/*/messages'`. A label o
 record's place in its file as its ref (`chats.json#/3/messages/12`), so the analyst can open the record, and a quote
 from it is checked against the file. A copy of the records in another file loses that place.
 
-A --prompt label over more than 300 records does not start at once: the analyst is asked first, in the terminal, to
-run all, run on a random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks. The
-choices leave the screen once the analyst answers. After a sample, the same command again asks them to run the rest.
+A --prompt label over more than 300 records does not start at once: the analyst chooses first to run all, run on a
+random sample of 300, or cancel. `thimble label NAME` shows their choice. A trial never asks. After a sample, the same
+command again asks them to run the rest.
 
 The same definition again keeps the values it has and labels only records it has not seen. A --prompt label prints how
 many model calls it makes before they run. The analyst can open a value's records and check a sample of them: what
@@ -366,18 +368,21 @@ def _label(st: Store, a: argparse.Namespace) -> int:
                 print("no code: pass a file with --code FILE, or the code on stdin, defining label(unit)")
                 return 2
         r = LB.define(st, name, kind, rule, a.glob, a.values.split(",") if a.values else None, a.where,
-                      _parse_within(a.within), a.limit, a.reason, a.seed)
+                      _parse_within(a.within), a.limit, a.reason, a.seed, a.says, a.model)
         lab = _load(st, name)
         s = LB.status(lab)
         # a big prompt label asks the person first (estimate.py), unless it is a trial or they said yes to this exact
         # label and scope; the person's key answers with --answer, as the person (labels/use.ts)
         ask = None
         if kind == "prompt" and not a.limit and EST.needs_asking(s["waiting"]) and not LB.approved(lab):
-            calls = len(LB.batches(LB.waiting(st, name)["units"]))
+            units = LB.waiting(st, name)["units"]
+            calls = len(LB.batches(units))
             ask = LB.hold_for_ask(st, name, calls)
             lab = _load(st, name)
-            # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample
+            # after the analyst's sample, the ask is for the rest: run them or cancel, with no second sample. `chars`: the
+            # records' size as the batches count it, from which the plugin says about what the run costs (labels/use.mjs)
             st.emit({"kind": "label_ask", "name": name, "ask": ask["id"], "units": ask["units"], "calls": ask["calls"],
+                     "chars": sum(len(u["text"]) + 40 for u in units),
                      "sample": 0 if ask["rest"] else min(EST.SAMPLE, ask["units"]), "rest": ask["rest"],
                      "text": f"Read {'the other ' if ask['rest'] else ''}{ask['units']:,} records{_where_of(st, lab)} with Claude",
                      "meta": EST.calls_line(ask["calls"])})
@@ -396,12 +401,11 @@ def _label(st: Store, a: argparse.Namespace) -> int:
         if ask:
             choices = "run them or cancel" if ask["rest"] else f"run all, run on a random sample of {EST.SAMPLE}, or cancel"
             print(f"  Not started: the model would read {'the other ' if ask['rest'] else ''}{ask['units']:,} records in "
-                  f"{EST.calls_line(ask['calls'])}, so the analyst is asked first, in the terminal: {choices}. "
+                  f"{EST.calls_line(ask['calls'])}, so the analyst chooses first: {choices}. "
                   f"`thimble label {name} --wait` waits for their choice, then for the model's reads, and prints the "
                   f"label's counts; run it before you answer from this label. Counts from a trial are not the "
-                  f"label's. The choices leave the screen once they answer, so after that do not point them to a key: "
-                  f"to read more records, run this command again, and the terminal asks again. A trial (--limit N) "
-                  f"never asks.")
+                  f"label's. To read more records later, run this command again, and the analyst is asked again. A "
+                  f"trial (--limit N) never asks.")
         elif s["waiting"]:
             calls = len(LB.batches(LB.waiting(st, name)["units"]))
             print(f"  The model reads them in {EST.calls_line(calls)} of up to {LB.BATCH_ITEMS} records each, which run "
@@ -417,10 +421,10 @@ def _label(st: Store, a: argparse.Namespace) -> int:
             if not s["waiting"] or run.get("state") == "cancelled":
                 break
             if run.get("state") == "ask" and time.time() - t0 > a.wait:
-                # the ask waits in the bar while this waits; once the analyst chooses, the reads start and this waits on
-                print(f"{name}: still waiting for the analyst's choice in the bar after {a.wait:.0f}s; nothing runs "
+                # the ask waits for the analyst while this waits; once they choose, the reads start and this waits on
+                print(f"{name}: still waiting for the analyst's choice after {a.wait:.0f}s; nothing runs "
                       f"until then. {s['waiting']:,} records wait, and the counts so far are not the label's. Their "
-                      f"choice reaches you with their next message.")
+                      f"choice reaches you when they answer.")
                 return 0
             if run.get("state") == "ask":
                 time.sleep(1.0)
@@ -558,11 +562,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--code", nargs="?", const="-", metavar="FILE")
     p.add_argument("--prompt", metavar="DEFINITION")
     p.add_argument("--values")
+    p.add_argument("--says", metavar="SENTENCE")
     p.add_argument("--where")
     p.add_argument("--within", metavar="LABEL=VALUE")
     p.add_argument("--limit", type=int)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--reason", action="store_true")
+    p.add_argument("--model", help=argparse.SUPPRESS)  # a prompt label's model: the labels pane's edit of it
     p.add_argument("--set", dest="set_values", nargs="*", metavar="REF=VALUE")
     p.add_argument("--wait", nargs="?", type=float, const=600.0, metavar="SECONDS")
     p.add_argument("--again", action="store_true")
@@ -577,7 +583,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--records", nargs="?", const="*", help=argparse.SUPPRESS)
     p.add_argument("--at", type=int, help=argparse.SUPPRESS)
     p.add_argument("--count", type=int, help=argparse.SUPPRESS)
-    # the person's answer to a big label's ask, which their key in the terminal runs (never Claude's to pass)
+    # the person's answer to a big label's ask, which thimble runs from their answer in the terminal (never Claude's to pass)
     p.add_argument("--answer", choices=("all", "sample", "cancel"), help=argparse.SUPPRESS)
     p.add_argument("--ask", help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_label)

@@ -1,13 +1,15 @@
 // engaged.mjs: what the person engaged with on screen, in the words of a line Claude reads with their next prompt and
-// they never see: an explainer or an important detail they opened, a citation they opened, a question they asked in a
-// side thread. Main reads it with that prompt, and the observer's look, a fork of main's conversation, reads it in the
+// they never see: an explainer or a heads-up they opened, a citation they opened, a question they asked in a side
+// thread. Also the explainers and heads-ups shown on an answer, which Claude reads the same way, so it knows what the
+// analyst was told beside its words. Main reads it with that prompt, and the observer's look, a fork of main's conversation, reads it in the
 // session too: both learn what this analyst knows and cares about as the session goes on. Pure: no `$`.
 //
 //   openedLine(mark, message)  -> {key, text} for a mark the person opened, or null:
 //                                 {kind: 'citation', row, n, words, status, failedBy?}  a citation (marks/store.ts MarkItem)
 //                                 {kind: 'explain', row, term}                    an explainer
-//                                 {kind: 'heads', row, term, title}               an important detail (a heads-up)
+//                                 {kind: 'heads', row, term, title}               a heads-up
 //   askedLine(ask)             -> {key, text} for a question asked in a side thread ({text, about}), or null
+//   commentsText(items, message) -> what Claude reads of the explainers and heads-ups shown on its message, or ''
 //   HEAD                       the line the lines go under
 // `key` names what was engaged with, so the same open is told once.
 import { oneLine } from './answers.mjs'
@@ -37,7 +39,7 @@ export function openedLine(mark, message = '') {
   if (mark.kind === 'explain' || mark.kind === 'heads') {
     const term = oneLine(mark.term, 80)
     if (!term) return null
-    if (mark.kind === 'heads') return { key: `heads|${mark.row ?? ''}|${term}`, text: `- They opened the important detail "${oneLine(mark.title || term, 80)}" on "${term}"${where}.` }
+    if (mark.kind === 'heads') return { key: `heads|${mark.row ?? ''}|${term}`, text: `- They opened the heads-up "${oneLine(mark.title || term, 80)}" on "${term}"${where}.` }
     return { key: `explain|${mark.row ?? ''}|${term}`, text: `- They opened the explainer of "${term}"${where}.` }
   }
   if (mark.kind !== 'citation') return null
@@ -52,4 +54,17 @@ export function askedLine(ask) {
   if (!q) return null
   const on = oneLine((ask && ask.about) || 'the panel', 80)
   return { key: `ask|${q}`, text: `- They asked a side thread about ${on}, which a side agent answers there: "${q}"` }
+}
+
+/** The explainers and heads-ups (explain/seam.ts Gloss) thimble shows on a message, in words for Claude: each one's
+ *  words, so Claude knows what the analyst was told beside its answer; which ones they opened comes with what they did
+ *  on screen (openedLine). '' when there is none. */
+export function commentsText(items, message = '') {
+  const lines = (items || []).filter(g => g && oneLine(g.term)).map(g => {
+    const says = g.kind === 'heads' ? [g.title, ...(g.bullets || [])] : [g.body, g.here]
+    const what = oneLine(says.filter(Boolean).join(' '), 800)
+    return `- ${g.kind === 'heads' ? 'A heads-up' : 'An explainer'} on "${oneLine(g.term, 80)}": ${what}`
+  })
+  if (!lines.length) return ''
+  return [`thimble showed the analyst these comments${inMessage(message)}, each a highlight on its words that they read only if they open it. They tell you what the analyst may have read beside your answer, so saying it again in your next reply would tell them twice. They may not have opened one, so where your reply touches what one says, write about the records, not about the comment; none of them asks anything of you.`, ...lines].join('\n')
 }

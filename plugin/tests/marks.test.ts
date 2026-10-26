@@ -7,7 +7,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
-import { autoRepair, awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
+import { autoRepair, awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, checkOpened, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
+import { setOptions } from '../settings/features.mjs'
 import { marksIn, withRewrites } from '../marks/message.js'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
@@ -15,6 +16,10 @@ import { tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
+
+// these tests check each reply's citations after the reply (Citations: auto cite + verify); the tests of the other modes
+// set their own
+setOptions({ citations: 'auto cite + verify' })
 
 const FORK = 'a0f0e0d0c0b0a0901'
 const REPLY = 'Of the [40](#) pull requests, agent-07 merged [15 of 40](#).\n\nIt said ["ship it"](#).'
@@ -446,4 +451,62 @@ test("a repair that cannot start leaves the citation failed and says why, with x
   await autoRepair($, FORK)
   expect((await rowMarks($, 'row-1'))!.items[2]!.status).toBe('failed')
   expect(String((await failLineNow($))?.text)).toContain('The repair did not start (made-up: no agents now). Press x on the citation to try again.')
+})
+
+test('with Citations auto cite, the default, the reply\'s citations wait unchecked; opening one checks it alone', async () => {
+  setOptions({})
+  try {
+    const { $, seen } = engine(VALIDATED)
+    await noteRow($, 'row-1', REPLY)
+    await startCheck($, { turnId: 't-1', reason: 'answer' })
+    // no check after the reply: each citation reads as the reply's own cited words, with no sign after it
+    expect(seen.spawned.length).toBe(0)
+    expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'deferred', 'deferred'])
+    expect(await drawn($)).toContain('merged 15 of 40.')
+    // the person opens citation 2: its check alone starts, and it spins
+    await checkOpened($, 'row-1', 2)
+    expect(seen.spawned.length).toBe(1)
+    expect(seen.spawned[0].prompt).toBe('CHECK\n2. [15 of 40] in: Of the [40] pull requests, agent-07 merged [15 of 40].\nIN /made-up/data\n\nThe analyst opened citation 2 to read its evidence. It may stand in an earlier reply than your last.')
+    expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'checking', 'deferred'])
+    // opened again while it runs: no second check
+    await checkOpened($, 'row-1', 2)
+    expect(seen.spawned.length).toBe(1)
+    await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+    expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'corrected', 'deferred'])
+    expect(await drawn($)).toContain('merged 12 of 40.')
+    // a checked citation opened again starts nothing
+    await checkOpened($, 'row-1', 2)
+    expect(seen.spawned.length).toBe(1)
+  } finally {
+    setOptions({ citations: 'auto cite + verify' })
+  }
+})
+
+test('with Citations manual or off, Claude\'s reply keeps no citations and nothing is checked', async () => {
+  for (const mode of ['manual', 'off']) {
+    setOptions({ citations: mode })
+    try {
+      const { $, seen } = engine(VALIDATED)
+      await noteRow($, 'row-1', REPLY)
+      await startCheck($, { turnId: 't-1', reason: 'answer' })
+      expect(await rowMarks($, 'row-1')).toBe(null)
+      expect(seen.spawned.length).toBe(0)
+    } finally {
+      setOptions({ citations: 'auto cite + verify' })
+    }
+  }
+})
+
+test("a card placed before a reply's first words draws beside no ●: the ● stands beside those words", () => {
+  const text = '[Edits by day](card:c0a1b2c3d4e5)\n\nJune had one burst of edits.'
+  const card = ELS.Box({ children: [ELS.Text({ children: 'CARD' })] })
+  const body = messageEl(ELS, { text, marks: [], looks: [], key: 'k', cols: 100, first: true, spin: '', cards: { c0a1b2c3d4e5: card }, onMark: () => undefined })
+  const rows = body.props.children as Any[]
+  const glyphOf = (row: Any) => textOf(row.props.children[0])
+  expect(textOf(rows[0])).toContain('CARD')
+  expect(glyphOf(rows[0])).toBe(' ')
+  expect(glyphOf(rows[1])).toBe('●')
+  // a reply that is its card alone keeps the ● beside it
+  const alone = messageEl(ELS, { text: '[Edits by day](card:c0a1b2c3d4e5)', marks: [], looks: [], key: 'k', cols: 100, first: true, spin: '', cards: { c0a1b2c3d4e5: card }, onMark: () => undefined })
+  expect(glyphOf((alone.props.children as Any[])[0])).toBe('●')
 })

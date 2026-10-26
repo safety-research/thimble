@@ -4,8 +4,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { definition } from '../ledger.mjs'
-import { answerNote, askChoices, askOf, howMade, rowValues, sampleOffered, usedNames } from '../use.mjs'
+import { madeOf } from '../ledger.mjs'
+import { answerChoice, answerNote, askChoices, askContext, askInput, askOf, howMade, rowValues, sampleOffered, usedNames } from '../use.mjs'
 
 test('a row names each label a turn used once, in order, and not those another row shows', () => {
   const uses = [{ name: 'spam' }, { name: 'tone' }, { name: 'spam' }, { name: 'lang' }]
@@ -24,35 +24,54 @@ test('a row names the values its records have, then the records with no value, a
   assert.deepEqual(rowValues({ values: ['a', 'b'] }).map(x => x.name), ['a', 'b'])
   // one set of words for how a label was made, in the row and in the pane's definition
   for (const kind of ['prompt', 'set', 'regex', 'code']) {
-    const pane = definition({ name: 'x', kind, rule: 'r', values: ['yes', 'no'], records: 2 }, 60)[0].map(r => r.s).join('')
-    assert.equal(pane, `definition · ${howMade(kind)}`)
+    assert.equal(madeOf({ name: 'x', kind, rule: 'r', values: ['yes', 'no'], records: 2 }), howMade(kind))
   }
   assert.equal(howMade('prompt'), 'read by Claude')
   assert.equal(howMade('set'), 'values Claude gave')
 })
 
-test('an ask offers 1 run all, 2 a sample and 0 cancel, one for the rest no sample; Claude hears the choice, and after a sample how to label the rest, never a key to press', () => {
-  // an ask offers 1 run all, 2 a sample and 0 cancel; an ask for the rest offers no sample
+test('an ask is one question for the question tool: run all, a sample or cancel, each with its cost, one for the rest no sample; the answer picks the choice, and Claude hears how to label the rest', () => {
+  const ev = { kind: 'label_ask', name: 'spam', root: '/made-up/data/', ask: 'a1', units: 420, calls: 9, chars: 300000, sample: 300, text: 'Read 420 records with Claude', meta: '9 model calls', t: 1 }
+  const a = askOf(ev)
+  // the choices, each with what it costs: its calls, the model, the time and the dollars (from the records' size and
+  // the model's list price; none without a size)
   {
-    const ev = { kind: 'label_ask', name: 'spam', root: '/made-up/data/', ask: 'a1', units: 420, sample: 300, text: 'Read 420 records with Claude', meta: '9 model calls', t: 1 }
-    const a = askOf(ev)
     assert.equal(a.root, '/made-up/data')
     assert.equal(sampleOffered(a), true)
-    assert.deepEqual(askChoices(a).map(c => `${c.key} ${c.words}`), ['1 run all', '2 run on a sample of 300', '0 cancel'])
+    assert.deepEqual(askChoices(a).map(c => `${c.label}: ${c.cost}`), ['Run all: 9 calls to Claude Sonnet 5.5, about 20 s, about $0.40', 'Run on a sample of 300: 7 calls to Claude Sonnet 5.5, about 10 s, about $0.25', 'Cancel: reads none'])
+    assert.equal(askChoices(askOf({ ...ev, chars: undefined }))[0].cost, '9 calls to Claude Sonnet 5.5, about 20 s')
     const rest = askOf({ ...ev, ask: 'a2', units: 120, sample: 0, rest: true })
-    assert.deepEqual(askChoices(rest).map(c => `${c.key} ${c.words}`), ['1 run the rest', '0 cancel'])
+    assert.deepEqual(askChoices(rest).map(c => c.label), ['Run the rest', 'Cancel'])
     assert.equal(askOf({ ...ev, name: '../x' }), null)
     assert.equal(askOf({ ...ev, ask: undefined }), null)
   }
-  // Claude hears the choice, and after a sample how to label the rest, never a key to press
+  // the question tool's input, which Claude reads after the command, and the person's answer in its result
   {
-    const a = askOf({ name: 'spam', root: '/d', ask: 'a1', units: 420, sample: 300 })
-    assert.match(answerNote(a, 'cancel', {}), /chose not to run the label spam: the model reads none of its 420 records/)
-    assert.match(answerNote(a, 'all', {}), /run the label spam on all 420 records/)
-    const s = answerNote(a, 'sample', { reads: 300, of: 420 })
+    const input = askInput(a)
+    assert.deepEqual(input.questions[0].options.map(o => o.label), ['Run all', 'Run on a sample of 300', 'Cancel'])
+    assert.equal(input.questions[0].question, 'Read 420 records with Claude for the label spam?')
+    assert.ok(askContext(a).includes(JSON.stringify(input)))
+    assert.match(askContext(a), /AskUserQuestion/)
+    const q = input.questions[0].question
+    assert.equal(answerChoice(a, input, { answers: { [q]: 'Run on a sample of 300' } }), 'sample')
+    assert.equal(answerChoice(a, input, { answers: { [q]: 'cancel' } }), 'cancel')
+    // the question in Claude's own words, its choices as given
+    const reworded = { questions: [{ ...input.questions[0], question: 'Label all 420 messages?' }] }
+    assert.equal(answerChoice(a, reworded, { answers: { 'Label all 420 messages?': 'Run all' } }), 'all')
+    // an answer in the person's own words, or no answer, is no choice
+    assert.equal(answerChoice(a, input, { answers: { [q]: 'only the first 50' } }), null)
+    assert.equal(answerChoice(a, input, { answers: {} }), null)
+    assert.equal(answerChoice(a, { questions: [{ question: 'Which file?', options: [{ label: 'a' }, { label: 'b' }] }] }, { answers: { 'Which file?': 'a' } }), null)
+  }
+  // Claude hears the choice, and after a sample how to label the rest
+  {
+    const b = askOf({ name: 'spam', root: '/d', ask: 'a1', units: 420, sample: 300 })
+    assert.match(answerNote(b, 'cancel', {}), /chose not to run the label spam: the model reads none of its 420 records/)
+    assert.match(answerNote(b, 'all', {}), /run the label spam on all 420 records/)
+    const s = answerNote(b, 'sample', { reads: 300, of: 420 })
     assert.match(s, /random sample of 300 of the label spam's 420 records/)
-    assert.match(s, /the other 120 records stay without a value/)
-    assert.match(s, /without --limit: the terminal then asks the analyst again/)
+    assert.match(s, /The other 120 records stay without a value/)
+    assert.match(s, /without --limit: the analyst is then asked again/)
   }
 })
 

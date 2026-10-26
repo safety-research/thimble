@@ -531,6 +531,21 @@ button.chat-call-chip:hover,
   color: var(--text-primary);
   font-weight: 500;
 }
+/* an agent with a thread of its own keeps its state and the thread's link on the chip's line: its name gives way */
+.chat-agent-threaded {
+  flex-wrap: nowrap;
+}
+.chat-agent-threaded .chat-agent-name {
+  min-width: 6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chat-agent-threaded .chat-agent-meta {
+  flex: 0 1000 auto;
+}
+.chat-agent-threaded .chat-thread-chip {
+  flex: none;
+}
 .chat-agent-target {
   color: var(--text-secondary);
 }
@@ -1831,8 +1846,9 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-tertiary);
 }
 /* thimble fix (chat/FixStrip.tsx): one row above the composer while Claude works on the person's fix, a spinner and
-   its step on the card's surface; once it ended, one notice at the top of the chat on the result's wash (ready and on:
-   positive, did not pass: warning). A ready fix's notice has its buttons on a row of their own under the words */
+   its step on the card's surface; once it ended, a row in the chat where it ended, on the result's wash while it asks
+   (ready: positive, did not pass: warning), with a ready fix's buttons on a row of their own under the words; a row
+   with nothing left to ask is a quiet line */
 .chat-fix {
   display: flex;
   flex: none;
@@ -1882,8 +1898,20 @@ button.model-line-part[aria-expanded='true'] {
   flex: none;
   padding: 8px 12px 0;
 }
-.chat-fix-top .chat-fix {
-  margin: 0;
+.chat-flow > .chat-fix {
+  margin: 4px 0;
+}
+.chat-fix-said .chat-fix-ico {
+  flex: none;
+  color: var(--text-tertiary);
+}
+.chat-fix-said[data-kind='ready'] .chat-fix-ico,
+.chat-fix-said[data-kind='fixed'] .chat-fix-ico {
+  color: var(--status-positive);
+}
+.chat-fix-said[data-kind='failed'] .chat-fix-ico,
+.chat-fix-said[data-kind='problem'] .chat-fix-ico {
+  color: var(--status-warning);
 }
 .chat-fix-note {
   flex-wrap: wrap;

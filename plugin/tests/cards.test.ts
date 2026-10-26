@@ -4,6 +4,8 @@
 // All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import Card from '../cards/client'
+import { cardWidth } from '../cards/draw'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -113,6 +115,8 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
       draw: { ok: true, tree: TREE, state: 'null' },
       copy: { ok: true, lines: ['ada 3', 'bram 5'], cut: [] },
       undo: { ok: true, tree: TREE, state: 'null' },
+      // a click on words that stand on no item
+      pick: { ok: true, handled: false },
     }
     return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ...(answers[op] ?? { ok: false, error: 'no such request' }) as object, ...(o.wide ? { seq: ++seq } : {}) }) } }
   })
@@ -153,6 +157,9 @@ test('a card call keeps the card and answers what it read and what it draws; its
   const client = elements(row).find(n => n.type === 'Client')
   expect(client?.props.module).toContain('client.tsx')
   expect(client?.props.props.tree).toEqual(TREE)
+  // what a part of it shows under the pointer: thimble's tint behind it and its color on a bar, never white inverse
+  expect(client?.props.props.tint).toMatch(/^#[0-9a-f]{6}$/)
+  expect(client?.props.props.accent).toBe('merged')
   // once its Client says it is drawn, the card is on screen and lists the keys that reach it
   const id = JSON.parse(meta![1]).id
   await shown($, callRow('toolu_made_up_1', input))
@@ -168,21 +175,79 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(elements(first).some(n => n.type === 'Client')).toBe(true)
   expect(textOf(first)).not.toContain('version 2')
   const resultOf = (toolUseId: string) => $.ui.render({ ...(callRow(toolUseId, input) as Any), component: 'ToolResult', props: { tool_use_id: toolUseId, tool: TOOL, output: 'the copy', isExpanded: false } } as never)
-  expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('↑ version 2 · “Scores” is drawn in its place above')
-  expect(textOf(await resultOf('toolu_made_up_1'))).toBe('2 rows from runs.json')
+  // each call's row is one line that says what it did; the result under it draws nothing (Claude's copy is in ctrl+o)
+  const lineOf = async (toolUseId: string, call: Record<string, unknown>) => textOf(await $.ui.render(callRow(toolUseId, call)))
+  expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('')
+  expect(await lineOf('toolu_made_up_1b', { ...input, id })).toBe('● Changed card “Scores” to version 2 (new title, new rows, new view) · ↑ shown in its place above')
+  expect((await lineOf('toolu_made_up_1', input)).startsWith('● Drew card “Scores” · 2 rows from runs.json')).toBe(true)
 
   // a small change: edits to the view, its rows and title kept (no `view`, no `data`, no `title`)
   const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1c', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
   expect(String(r3.result)).toContain('Version 3 of “Scores” is drawn')
   expect(String(r3.result)).toContain('It read 2 rows from runs.json')
   expect(Object.entries(w.files).find(([p]) => /\/v3\/view\.js$/.test(p))?.[1]).toBe(VIEW.replace('children: "x"', 'children: "y"'))
-  expect(textOf(await resultOf('toolu_made_up_1b'))).toBe('↑ version 2 · “Scores” is drawn in its place above, now version 3')
+  expect(await lineOf('toolu_made_up_1b', { ...input, id })).toBe('● Changed card “Scores” to version 2 (new title, new rows, new view) · ↑ shown in its place above, now version 3')
+  expect(await lineOf('toolu_made_up_1c', { id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] })).toBe('● Changed card “Scores” to version 3 (1 edit to its view) · ↑ shown in its place above')
   // an edit whose text is not in the view draws nothing, and says why
   const r4 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1d', id, edits: [{ old: 'no such text', new: 'z' }] } as never)) as Any
   expect(String(r4.result)).toContain('edit 1: its `old` text is not in the view of your last call')
   // a new card needs a title
   const r5 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1e', data: 'runs.json', view: VIEW } as never)) as Any
   expect(String(r5.result)).toContain('`title` is empty')
+  // a call with no argument at all (its input did not parse): it says so, and blames no one field
+  const r6 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1f' } as never)) as Any
+  expect(String(r6.result)).toBe('The card did not draw: the call\'s input was empty or did not parse as JSON. Send the call again, whole.')
+})
+
+test('a call with a card\'s id alone moves the card as it is to that call; the earlier call points down to it', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p1', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const before = w.asked.length
+  const placed = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p2', id } as never)) as Any
+  expect(String(placed.result)).toContain('“Scores” (version 1) is drawn here now')
+  // nothing runs again
+  expect(w.asked.length).toBe(before)
+  expect(elements(await $.ui.render(callRow('toolu_made_up_p2', { id }))).some(n => n.type === 'Client')).toBe(true)
+  expect(elements(await $.ui.render(callRow('toolu_made_up_p1', input))).some(n => n.type === 'Client')).toBe(false)
+  const resultOf = (toolUseId: string) => $.ui.render({ ...(callRow(toolUseId, input) as Any), component: 'ToolResult', props: { tool_use_id: toolUseId, tool: TOOL, output: 'the copy', isExpanded: false } } as never)
+  expect(textOf(await resultOf('toolu_made_up_p1'))).toBe('')
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_p1', input)))).toBe('● Drew card “Scores” · ↓ shown further down')
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_p2', { id }))).startsWith('● Moved card “Scores” here · 2 rows from runs.json')).toBe(true)
+  // a later version draws in the new place
+  const r3 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_p3', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)) as Any
+  expect(String(r3.result)).toContain('Version 2 of “Scores” is drawn in place of version 1')
+  expect(elements(await $.ui.render(callRow('toolu_made_up_p2', { id }))).some(n => n.type === 'Client')).toBe(true)
+})
+
+test('a line of the reply that holds only a card\'s link draws the card there; its call folds to one line', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_q1', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const text = `Ada leads.\n\n[Scores](card:${id})\n\nBram is second.`
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-made-up-q' } as never)
+  const reply = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up-q', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never)
+  expect(elements(reply).some(n => n.type === 'Client')).toBe(true)
+  // it stands in the text's column, 2 columns in, so it is 2 narrower than a card under an answer: its frame keeps the
+  // 2 columns at the right free
+  expect(elements(reply).find(n => n.type === 'Client')?.props.width).toBe(cardWidth(98))
+  expect(textOf(reply)).not.toContain('card:')
+  expect(elements(await $.ui.render(callRow('toolu_made_up_q1', input))).some(n => n.type === 'Client')).toBe(false)
+  const res = await $.ui.render({ ...(callRow('toolu_made_up_q1', input) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_q1', tool: TOOL, output: 'the copy', isExpanded: false } } as never)
+  expect(textOf(res)).toBe('')
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_q1', input)))).toBe('● Drew card “Scores” · ↓ shown in the answer')
+  // a later reply that places it again: the card stands there, and the earlier reply points to it
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: `Sorted.\n\n[Scores](card:${id})` }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-made-up-q2' } as never)
+  const again = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up-q', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never)
+  expect(elements(again).some(n => n.type === 'Client')).toBe(false)
+  expect(textOf(again)).toContain('↓ “Scores” is drawn further down')
+  // a later call changes it where it stands: its line points up to the answer above
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_q3', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)
+  expect(textOf(await $.ui.render(callRow('toolu_made_up_q3', { id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] })))).toBe('● Changed card “Scores” to version 2 (1 edit to its view) · ↑ shown in the answer above')
 })
 
 test('a new card waits while the run of calls above it is live and draws once it folds; a card drawn before stays when a later run is live', async ($, on) => {
@@ -386,6 +451,17 @@ test('a card the designer fork drew draws under the answer v was pressed on, als
   expect(w.asked).toContain('draw')
   expect(elements(await answer('row-made-up')).find(n => n.type === 'Client')?.props.props.tree).toEqual(TREE)
   expect(textOf(await answer('another-row'))).not.toContain('Scores')
+  // words of that answer that place it (a squeeze's version) draw it on their line, once, not under the answer too
+  const placing = (requestId: string) => $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text: 'An answer.\n\n[Scores](card:c0123456789ab)\n\nMore of it.', isFirstOfReply: true } } as never)
+  const there = await placing('row-made-up')
+  expect(elements(there).filter(n => n.type === 'Client').length).toBe(1)
+  expect(textOf(there)).not.toContain('card:')
+  // thimble draws the words, with the card on its line, rather than Claude Code's drawing with the card under it
+  expect(textOf(there)).not.toContain('the engine')
+  // another answer's line points to it
+  const other = await placing('another-row')
+  expect(elements(other).some(n => n.type === 'Client')).toBe(false)
+  expect(textOf(other)).toContain('↑ “Scores” is drawn under an earlier answer')
   // its call's row in the fork draws no second card
   const row = await $.ui.render(callRow('toolu_made_up_3', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(elements(row).some(n => n.type === 'Client')).toBe(false)
@@ -467,8 +543,8 @@ test('when the sandbox cannot start, no card runs: the call and the failure line
   expect(bar).not.toContain('× Cards cannot draw')
   // no folder is made for a runner that cannot start
   expect(w.runs.some(a => a.some(x => /\/cards-[0-9a-f]+$/.test(x)))).toBe(false)
-  // the call's result row says the whole reason and the fix
-  const result = textOf(await $.ui.render({ ...(callRow('toolu_made_up_8', {}) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_8', tool: TOOL, output: 'the copy', isExpanded: false } } as never))
+  // the call's row says the whole reason and the fix
+  const result = textOf(await $.ui.render(callRow('toolu_made_up_8', { title: 'Scores' })))
   expect(result).toContain('bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap · Claude got the error')
 })
 
@@ -504,4 +580,83 @@ test('the session ends: the runner stops and its folder goes', async ($, on) => 
   expect(made).toBeTruthy()
   await $.session.end({ reason: 'exit', sessionId: 's-cards' } as never)
   expect(w.runs).toContainEqual(['rm', '-rf', '--', made[made.length - 1]])
+})
+
+// a bar chart's rows: a column of Text lines and of Box rows, each row a label, colored bars and a number side by side
+const ROWS = { t: 'Box', p: { flexDirection: 'column' }, c: [
+  { t: 'Text', p: { bold: true }, c: ['2 groups, 9 in all'] },
+  { t: 'Box', p: {}, c: [{ t: 'Text', p: {}, c: ['  ada  '] }, { t: 'Text', p: { color: 'success' }, c: ['███'] }, { t: 'Text', p: { color: 'warning' }, c: ['█'] }, { t: 'Text', p: {}, c: [' 4'] }] },
+  { t: 'Box', p: {}, c: [{ t: 'Text', p: {}, c: ['  bram '] }, { t: 'Text', p: { color: 'success' }, c: ['█████'] }, { t: 'Text', p: {}, c: [' 5'] }] },
+] }
+
+test('the Client makes every run of a card clickable without a Button that holds a Box: a bar takes thimble\'s color under the pointer, words its tint and an underline', async () => {
+  const el = (type: string) => (p: Any) => ({ type, props: p })
+  const posts: Any[] = []
+  let pointer: Any = null
+  const surface: Any = { elements: { Box: el('Box'), Text: el('Text'), Button: el('Button') }, columns: 60, rows: 0, post: (m: Any) => posts.push(m), onPointer: (f: Any) => { pointer = f } }
+  const drawn = (Card as Any)({ tree: ROWS, width: 60, tint: '#f0e8ff', accent: 'merged' }, surface)
+  const all = elements(drawn)
+  const buttons = all.filter(n => n.type === 'Button')
+  // each run asks on its own: the title, two labels, three bars, two numbers
+  expect(buttons.length).toBe(8)
+  // Claude Code draws no Button that holds a Box: each holds the one Text of its run
+  for (const b of buttons) expect(b.props.children.map((c: Any) => c.type)).toEqual(['Text'])
+  const of = (words: string) => buttons.find(b => textOf(b) === words)!
+  expect(of('███').props.hover).toMatchObject({ inverse: false, color: 'merged' })
+  expect(of('███').props.children[0].props).toMatchObject({ color: 'success', hover: { color: 'merged' } })
+  expect(of('  bram ').props.hover).toMatchObject({ inverse: false, underline: true, backgroundColor: '#f0e8ff' })
+  // a click on a bar: the run, its row's line and its place in the tree, which the runner reads for the item on that
+  // line (a Button takes the click, so no pointer event comes)
+  of('█████').props.onPress()
+  expect(posts.at(-1).events.at(-1).ask).toEqual({ text: '█████', line: '  bram █████ 5', path: [2, 1] })
+  // a click elsewhere still goes as a pointer event
+  pointer({ type: 'down', x: 8, y: 2, button: 'left' })
+  pointer({ type: 'up', x: 8, y: 2 })
+  expect(posts.at(-1).events.at(-1).pointer).toEqual({ down: { x: 8, y: 2 }, up: { x: 8, y: 2 }, button: 'left' })
+})
+
+test('a card shows `ask about this card` at its title\'s right, whose question names the item selected; a click on words on no item asks a side thread about them', async ($, on) => {
+  const w = world(on)
+  const opened: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  // nothing selected: `ask about this card`
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_31', ...input } as never)
+  const row = await shown($, callRow('toolu_made_up_31', input))
+  let ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_31', input) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
+  expect(textOf(ask)).toBe('ask about this card')
+  expect(ask.props.label).toBe('ask about the card "Scores"')
+  // a click on the words `bram 5`, on no item the card's keys select: the runner is asked, then a side thread about
+  // them opens
+  const key = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_31', input) as Any) })).find(n => n.type === 'Client')?.key
+  await row.post({ client: 'made-up', width: 92, events: [{ n: 1, ask: { text: 'bram 5', line: 'bram 5', path: [1] }, width: 92 }] }, { in: key })
+  expect(w.asked).toContain('pick')
+  expect(opened.some(e => /bram 5/.test(String(e.title)))).toBe(true)
+  await row.unmount()
+  // an item selected (▸): the words stay `ask about this card`, and the question names the item
+  const picked = { title: 'Picked', data: 'runs.json', view: `${VIEW}\n// SELECTED` }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_32', ...picked } as never)
+  await (await shown($, callRow('toolu_made_up_32', picked))).unmount()
+  ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_32', picked) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
+  expect(textOf(ask)).toBe('ask about this card')
+  expect(ask.props.label).toBe('ask about "bram 5" in the card "Picked"')
+})
+
+test("a view's own Button under the pointer: the whole row shows highlighted, its words inverse and its bar inverted on the highlight", async () => {
+  const el = (type: string) => (p: Any) => ({ type, props: p })
+  const surface: Any = { elements: { Box: el('Box'), Text: el('Text'), Button: el('Button') }, columns: 60, rows: 0, post: () => undefined, onPointer: () => undefined }
+  // a row the view made a Button: its label and number, then its bar in a Text of its own color (a hex of the card
+  // palette, and a color by name)
+  const row = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Button', p: { plain: true, onPress: 3 }, c: [{ t: 'Text', p: { bold: true }, c: ['▸ bram  5 ', { t: 'Text', p: { color: '#0060c0' }, c: ['█████'] }, { t: 'Text', p: { color: 'success' }, c: ['██'] }] }] }] }
+  const button = elements((Card as Any)({ tree: row, width: 60, theme: 'light' }, surface)).find(n => n.type === 'Button')!
+  expect(button.props.hover).toMatchObject({ inverse: false })
+  const texts = elements(button).filter(n => n.type === 'Text')
+  const words = texts.find(n => n.props.children === '▸ bram  5 ')!
+  expect(words.props.hover).toMatchObject({ scope: button.props.hover.scope, inverse: true })
+  // the bar keeps its color at rest; under the pointer its cells take a light tint of it on the highlight's ground
+  const bar = texts.find(n => n.props.color === '#0060c0')!
+  expect(elements(bar).find(n => n.props?.children === '█████')!.props.hover).toEqual({ scope: button.props.hover.scope, color: '#8cb7e3', backgroundColor: 'text' })
+  const named = texts.find(n => n.props.color === 'success')!
+  expect(elements(named).find(n => n.props?.children === '██')!.props.hover).toEqual({ scope: button.props.hover.scope, color: 'success', backgroundColor: 'text' })
 })

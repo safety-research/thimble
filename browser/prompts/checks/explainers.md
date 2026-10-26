@@ -5,14 +5,15 @@ covers: [documents, answers]
 shown: true
 ---
 
-An explainer marks a key term or phrase of the answer that the analyst may lack the background to understand, and gives them that background in place when they open it. Give one when a claim turns on words the analyst may not be able to place, such as a term of the field or a name the work made up, even if the analyst used those words too. Words they would read right, or that the answer already explains, need none. Give at most one explainer per answer, for the term the claim turns on most.
+An explainer marks words of the answer and gives, in place, the background that a reader new to the records lacks to see what those words mean for the claim, whether or not the words themselves are familiar. Words whose background the answer already gives, or that the analyst already has, need none. Early in a session the analyst has little of this background; later, they have most of it. They read an explainer in a small box beside the answer, then read on.
 
-    Answer    The page stays blank until `hydrate()` runs: the `SuspenseBoundary` holds it back while
-              the user query is pending, and [the query waits on the session check](#).
-    Good      add_comment({"ref": "<the sentence's ref>", "text": "hydrate() attaches the page's event handlers to the HTML the server sent; it is the last step of loading a page.",
-                "details": "Here it runs only after the user query ends [[app/main.ts#L18]]."})
-    Bad       add_comment({"ref": "<the sentence's ref>", "text": "A page is what a website shows."})
+    Answer    These are the support tickets of a print-on-demand shop. [Most of the 410 refund requests](#) come from
+              repeat callers, and [a third of those](#) end in a chargeback.
+    Good      add_comment({"ref": "<the sentence's ref>", "text": "print-on-demand shop: a shop that keeps no stock: a partner prints each mug or shirt after it is ordered and ships it from its own plant. The shop answers the customers but cannot see an order once it goes to print, so its support team often cannot say where an item is.",
+                "details": "Ticket 2210 is typical: support asks the print partner where a shirt is, and the customer waits two days for the answer [[tickets/march.jsonl#L40]]."})
+              add_comment({"ref": "<the sentence's ref>", "text": "chargeback: a refund that the customer's bank takes back from the shop, after the customer disputes the payment with their bank instead of with the shop. The shop also pays the bank a fee for each one.",
+                "details": "Ticket 4471 is one: the bank took back $89 for a hoodie the customer said never came [[tickets/march.jsonl#L88]]."})
+              add_comment({"ref": "<the sentence's ref>", "text": "repeat callers: customers who wrote to support again about the same order, usually because the first answer did not solve their problem. The answer counted a customer as one when two of their tickets name the same order number.",
+                "details": "This customer wrote four times about one hoodie in nine days [[tickets/april.jsonl#L12-L30]]."})
 
-The bad explainer explains a plain word and leaves out the names the claim turns on. The good one explains hydrate(), the name the claim turns on most, with what it does in this work.
-
-An explainer is one add_comment on the sentence that holds the term. Its text names the term, exactly as the analyst reads it, and says in plain words what it means, enough for the analyst to place it in this work. For a name the work made up, it also gives the rule the work applied. Its details say where the term mattered in this work, with a citation of the lines that show it.
+An explainer is one add_comment on the sentence that holds the term. Its text names the term, exactly as the analyst reads it, and says what it means, for a reader new to the field and to the records. Its details say where the term mattered in this work, with a citation of the lines that show it.
