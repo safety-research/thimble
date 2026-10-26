@@ -42,7 +42,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Sandbox = { ok: boolean; node: string; srt: string; platform: string; why: string; fix: string }
+export type Sandbox = { ok: boolean; node: string; nodeVersion?: string; srt: string; platform: string; why: string; fix: string }
 /** Why the runner cannot start; `machine` when the fix is the machine's (a package, a setting), not thimble's. */
 type Down = { why: string; machine?: boolean }
 const downOf = (s: Sandbox): Down => ({ why: sandboxWhy(s), machine: !!s.fix })
@@ -153,7 +153,7 @@ async function start($: Engine, sock: string): Promise<Down | null> {
   if (runner.sock && runner.sock !== sock) await removeFolder($, runner.sock)
   runner.sock = sock
   const argv = runnerArgv({
-    plugin: $.plugin.root, node: s.node, srt: s.srt, platform: s.platform, cards, run: folderOf(sock), sock,
+    plugin: $.plugin.root, node: s.node, nodeVersion: s.nodeVersion, srt: s.srt, platform: s.platform, cards, run: folderOf(sock), sock,
     home: String((await $.env.get('HOME')) || ''), thimbleHome: await thimbleHome($), path: String((await $.env.get('PATH')) || '/usr/bin:/bin'),
   })
   const mine = {}

@@ -12,9 +12,10 @@
 // card runner in the sandbox and waits for its answer. Setups that run at the same time (two sessions start, a card
 // is called while the session start installs) install once: the others wait for that install. It prints one line, or
 // with --json one JSON object:
-//   {ok, node, platform, version, srt, why, fix, ms}
-// `node` is this Node's binary (the runner's), `srt` the folder srt is in, `why` what is wrong and `fix` the one command
-// or step that fixes it, `ms` how long the probe's runner took to answer. Exits 0 when the sandbox works, else 1.
+//   {ok, node, nodeVersion, platform, version, srt, why, fix, ms}
+// `node` is this Node's binary (the runner's), `nodeVersion` its version, `srt` the folder srt is in, `why` what is
+// wrong and `fix` the one command or step that fixes it, `ms` how long the probe's runner took to answer. Exits 0
+// when the sandbox works, else 1.
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -37,7 +38,7 @@ const pin = JSON.parse(fs.readFileSync(join(HERE, 'package.json'), 'utf8')).depe
 const lock = fs.readFileSync(join(HERE, 'package-lock.json'), 'utf8')
 const srt = join(home, 'srt', pin)
 const platform = process.platform
-const out = { ok: false, node: process.execPath, platform, version: pin, srt, why: '', fix: '' }
+const out = { ok: false, node: process.execPath, nodeVersion: process.versions.node, platform, version: pin, srt, why: '', fix: '' }
 
 /** The first of these commands on PATH, or null. */
 function which(cmd) {
@@ -167,7 +168,7 @@ async function probe() {
   const [cards, run] = [join(dir, 'cards'), join(dir, 'run')]
   for (const d of [cards, run]) fs.mkdirSync(d, { mode: 0o700 })
   const sock = join(run, 'cards.sock')
-  const argv = runnerArgv({ plugin: PLUGIN, node: process.execPath, srt, cards, run, sock, platform, home: os.homedir(), thimbleHome: home, path: process.env.PATH || '/usr/bin:/bin' })
+  const argv = runnerArgv({ plugin: PLUGIN, node: process.execPath, nodeVersion: process.versions.node, srt, cards, run, sock, platform, home: os.homedir(), thimbleHome: home, path: process.env.PATH || '/usr/bin:/bin' })
   const t0 = Date.now()
   let said = ''
   let ended = false

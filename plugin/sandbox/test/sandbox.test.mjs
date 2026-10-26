@@ -51,6 +51,15 @@ test('the runner starts with an empty environment, in srt, under Node\'s permiss
   assert.deepEqual(argv.slice(-2), [`${MADE_UP.plugin}/cards/runner.mjs`, `${MADE_UP.run}/cards.sock`])
 })
 
+test('Node 25 and later let the runner make its socket (--allow-net); older Node, which refuses the flag, gets none', () => {
+  const after = nodeVersion => {
+    const argv = runnerArgv({ platform: 'linux', ...MADE_UP, nodeVersion, sock: `${MADE_UP.run}/cards.sock` })
+    return argv[argv.lastIndexOf('--permission') + 1]
+  }
+  for (const v of ['22.20.0', '24.9.0', '', undefined]) assert.equal(after(v), `--allow-fs-read=${MADE_UP.plugin}/cards`, `Node ${v}`)
+  for (const v of ['25.0.0', '26.11.1']) assert.equal(after(v), '--allow-net', `Node ${v}`)
+})
+
 // ---------------------------------------------------------------- in the sandbox, on this machine
 
 let s
