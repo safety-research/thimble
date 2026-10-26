@@ -416,6 +416,18 @@ test("x on a failed citation in the pane checks it again in the background, star
 })
 
 
+test('c in a narrow terminal before any claims names the bar\'s item by the bar\'s words, c evidence', async () => {
+  setOptions({ explain: false, details: false })
+  const s = setup([])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed on the p95 check.'] })
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'evidence']])
+  s.$.ui.open = async () => ({ isPlaced: false })
+  await openClaims(s.$, {}, true)
+  expect(String((await failLineNow(s.$))?.text)).toContain('Click “c evidence” in the bar below')
+  setOptions({})
+})
+
 test('claims on demand: no look reads them after a reply; c shows the pane with f, which finds the claims of the answers not read, alone', async () => {
   // the explainers and heads-ups off, so a look after a reply would be the claims' alone
   setOptions({ explain: false, details: false })

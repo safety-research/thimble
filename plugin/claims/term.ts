@@ -262,7 +262,7 @@ export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false
   await $.state.set(FIRST, { lit: false, opened: true }).catch(() => undefined)
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
-  const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'claims'}`
+  const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
   hintLine($, byKey
     ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${words}” in the bar below to open it here.`
     : `Claude Code did not open the Claims pane here. Widen the terminal, or click “${words}” in the bar below.`, 'pane:claims')

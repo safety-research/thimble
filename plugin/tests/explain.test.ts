@@ -344,6 +344,32 @@ test('words selected outside Claude\'s answers (a setting\'s name in the pane) a
   }
 })
 
+test('a drag over wrapped rows and paragraphs counts its answer lines: one that starts on Claude Code\'s own row or the answer\'s dot keeps the answer\'s words', async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK], { complete: reply({ body: 'What happened.', here: '' }) })
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text:
+      'Uploads fail after the **retry budget** runs out: [41 of the 44](#) failures came 30 seconds after a drop. The client then waits a minute.\n\nAfter that, the `upload.py` loop starts over.' })
+    // wrapped over three rows, across a link and emphasis, no requestId: the bar names e and c, e takes the words
+    const wrapped = { text: '● Uploads fail after the retry\n  budget runs out: 41 of the 44\n  failures came 30 seconds' }
+    s.$.ui.selection = async () => wrapped
+    expect((await explainBar(s.$, () => true, false)).map(x => x.key)).toEqual(['e'])
+    expect((await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)).toEqual(['c'])
+    // across two paragraphs, with the blank row between them
+    s.$.ui.selection = async () => ({ text: 'then waits a minute.\n\n  After that, the upload.py loop' })
+    expect((await explainBar(s.$, () => true, false)).map(x => x.key)).toEqual(['e'])
+    // a drag that starts on Claude Code's row above the answer keeps the answer's lines
+    await pressE(s, { text: '  Ran 3 shell commands\n\n● Uploads fail after the retry\n  budget runs out' })
+    expect(s.calls[0].prompt).toContain('The term: Uploads fail after the retry budget runs out')
+    // a selection with no line of an answer is still none
+    s.$.ui.selection = async () => ({ text: 'MINIMAL MODE  on · off\nCitations  manual' })
+    expect(await explainBar(s.$, () => true, false)).toEqual([])
+    expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
+  } finally {
+    setOptions({})
+  }
+})
+
 test('a selection over several rows explains its words on the newest answer that holds them; words that are a heads-up open it, unwritten', async () => {
   setOptions({})
   const s = setup([LOOK, reply({ glosses: [], heads: null })], { complete: reply({ body: 'How many tries are left.', here: '' }) })

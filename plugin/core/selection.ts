@@ -3,8 +3,9 @@
 // the person selects again, dismisses it, or sends their next prompt, wherever it was made; so a selection in thimble's
 // pane (a setting's name) or the prompt is none of theirs, and one the pane held is dropped when the pane closes.
 //
-//   answerSelection($)   the selection while it lies in Claude's words: on a row of Claude's (`requestId`), or, where
-//                        Claude Code names no row (across rows), words one of Claude's rows holds; else undefined
+//   answerSelection($)   the selection's words that lie in Claude's answers, a line at a time: a drag that starts on a
+//                        row of Claude Code's own (`Ran 3 shell commands`, the answer's ● dot) keeps the answer's lines;
+//                        undefined when no line is an answer's
 //   dropSelection($)     the pane closes: a selection outside the transcript (the pane's) is dropped
 //   selectionUsed($, by, sel), usedBy($, by, sel)   e or c took this selection, so the bar stops naming that key
 //                        for it until words are selected anew
@@ -29,8 +30,11 @@ async function noteDone($: Engine, k: keyof Done, sel: Sel): Promise<void> {
   await $.state.set(DONE, { ...(await doneNow($)), [k]: selKey(sel) }).catch(() => undefined)
 }
 
-/** Words as read on screen and as written in markdown, compared alike: no emphasis or code marks, one space. */
-const plain = (s: string) => s.replace(/[*`_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+/** Words as read on screen and as written in markdown, compared alike: a link as its words, no emphasis or code marks,
+ *  one space. */
+const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*`_]/g, '').replace(/\s+/g, ' ').trim().toLowerCase()
+/** A selected line as its words: without the marks Claude Code draws before a row (● ⎿ and the like). */
+const lineWords = (line: string) => plain(line.replace(/^[\s●⏺⎿▎│]+/u, ''))
 
 /** Claude Code's selection; none where it reports none. */
 async function selectionNow($: Engine): Promise<Sel | undefined> {
@@ -40,12 +44,17 @@ async function selectionNow($: Engine): Promise<Sel | undefined> {
 export async function answerSelection($: Engine): Promise<Sel | undefined> {
   const sel = await selectionNow($)
   if (!sel?.text?.trim() || selKey(sel) === (await doneNow($)).dropped) return undefined
-  if (sel.requestId && (await messageOf($, sel.requestId))) return sel
-  const words = plain(sel.text)
-  for (const row of await textRows($).catch(() => [] as string[])) {
-    if (plain((await messageOf($, row))?.text ?? '').includes(words)) return sel
-  }
-  return undefined
+  const own = sel.requestId ? (await messageOf($, sel.requestId))?.text : undefined
+  const answers = own != null ? [own] : await Promise.all((await textRows($).catch(() => [] as string[]))
+    .map(async row => (await messageOf($, row))?.text ?? ''))
+  const texts = answers.map(plain)
+  const kept = sel.text.split('\n').filter(line => {
+    const words = lineWords(line)
+    return words && texts.some(t => t.includes(words))
+  })
+  if (!kept.length) return own != null ? sel : undefined
+  const text = kept.map(line => line.replace(/^[\s●⏺⎿▎│]+/u, '').trim()).join('\n')
+  return text === sel.text ? sel : { ...sel, text }
 }
 
 export async function dropSelection($: Engine): Promise<void> {
