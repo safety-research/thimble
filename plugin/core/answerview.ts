@@ -193,12 +193,11 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
 
 /** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
  *  claims and the side threads (the left names what acts on an answer). While c cites the selected words (`c cite` at
- *  the left), the claims' item shows without its key, so each key is named once. */
+ *  the left), the claims' item steps aside until the words are cited or let go, so c names one thing. */
 export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const citing = preview ? on('cite') : await safe(citeShown($), false)
-  const claims = items(await safe(claimsBar($, on, preview), []), preview)
   return [
-    ...(citing ? claims.map(({ key: _key, ...x }) => x) : claims),
+    ...(citing ? [] : items(await safe(claimsBar($, on, preview), []), preview)),
     ...items(await safe(threadsBar($, on, preview), []), preview),
   ]
 }

@@ -20,7 +20,7 @@ export const SWITCHES = [
   {
     key: 'minimal', title: 'Minimal', default: false,
     does: 'Everything on demand: nothing runs after a reply and nothing is marked by itself. Select words and press e to explain them or c to cite them, h gives heads-ups on the last answer, and f in Evidence finds the claims. Claude still draws cards, and v visualizes the last answer. The settings below come back when it is off.',
-    says: { on: 'Everything on demand: no call after a reply; e, c and h on an answer, f in Evidence.', off: 'Each feature works as set below.' },
+    says: { on: 'Everything on demand: nothing runs after a reply; you ask with e, c and h on an answer, f in Evidence.', off: 'Each feature works as set below.' },
   },
   {
     key: 'citations', title: 'Citations', group: 'Answers', default: 'manual', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],

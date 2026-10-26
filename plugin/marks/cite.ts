@@ -6,7 +6,7 @@
 // verified, corrected or failed, as for any citation.
 //
 // c is also the Claims pane's key: c cites only while words are selected that it has not cited yet, which the bar shows
-// as `c cite` (beside `e explain`, and the claims' item without its key); else c opens the claims.
+// as `c cite` (beside `e explain`, the claims' item set aside meanwhile); else c opens the claims.
 //
 //   citeKey($, key), citeBar, citeShown   c at an empty prompt while words wait, `c cite` on the bar
 //   citeWords($, row, words)              the citation of these words on that answer: an existing one (Claude's, or
@@ -16,6 +16,7 @@ import type { EngineInterface } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import { failCleared, noticeLine } from '../bar/notice'
 import { answerRows, messageOf, turnOfRow } from '../core/answers'
+import { answerSelection, selectionUsed, usedBy } from '../core/selection'
 import { pickedWords } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { featureOn } from '../settings/features.mjs'
@@ -25,11 +26,6 @@ import { askedWords, codeRanges, marksIn, sentenceOf, withoutMarks } from './mes
 import { editReply, newReply, replyKeyOf, replyOf, type MarkItem } from './store'
 
 type Engine = EngineInterface
-
-/** The selection c last cited, by its row and words: Claude Code answers the last selection until the person selects
- *  again or sends their next prompt, so once c has cited it, c opens the claims again. */
-let cited: string | null = null
-const selKey = (sel: { text?: string; requestId?: string } | undefined) => `${sel?.requestId ?? ''}\n${sel?.text ?? ''}`
 
 /** Where `words`, as the analyst read them, stand in the text Claude wrote, on one line: the spaces and markdown
  *  emphasis between them may differ (`**`, `*`, `` ` ``), and the place found starts and ends on the words themselves. */
@@ -96,8 +92,8 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
 /** c, or a click on `c cite`: the words the analyst last selected with the mouse, on the answer they lie in (else
  *  the newest answer that holds them), cited and found in the files. */
 export async function citeSelection($: Engine): Promise<void> {
-  const sel = await $.ui.selection().catch(() => undefined)
-  cited = selKey(sel)
+  const sel = await answerSelection($)
+  await selectionUsed($, 'cite', sel)
   const { words } = pickedWords(sel?.text ?? '')
   if (!words) { noticeLine($, 'Select words in an answer with the mouse first, then press c to cite them.', 'cite'); return }
   await failCleared($, 'cite')
@@ -108,11 +104,12 @@ export async function citeSelection($: Engine): Promise<void> {
   if (why) noticeLine($, why, 'cite')
 }
 
-/** Whether c cites now: Citations is manual, an answer exists, and words are selected that c has not cited yet. */
+/** Whether c cites now: Citations is manual, an answer exists, and words are selected that c has not cited yet (Claude
+ *  Code answers the last selection until the person selects again, so once c has cited it, c opens the claims again). */
 export async function citeShown($: Engine): Promise<boolean> {
   if (!featureOn('cite')) return false
-  const sel = await $.ui.selection().catch(() => undefined)
-  if (!pickedWords(sel?.text ?? '').words || selKey(sel) === cited) return false
+  const sel = await answerSelection($)
+  if (!pickedWords(sel?.text ?? '').words || (await usedBy($, 'cite', sel))) return false
   return (await answerRows($).catch(() => [])).length > 0
 }
 

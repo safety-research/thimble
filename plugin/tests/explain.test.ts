@@ -5,6 +5,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { partOf, registerAnswers, resetAnswers } from '../core/answers'
+import { closePane } from '../core/pane'
 import { spansFor } from '../core/answerview'
 import { resetEngaged } from '../core/engaged'
 import { registerTell } from '../core/tell'
@@ -313,6 +314,34 @@ test('e with nothing selected says to select words with the mouse first, and how
   expect(String((await failLineNow(s.$))?.text)).toContain('Select words in an answer with the mouse first')
   expect(s.calls.length).toBe(0)
   expect(await trayNow(s.$)).toBe(null)
+})
+
+test('words selected outside Claude\'s answers (a setting\'s name in the pane) are no selection for e or c; words the pane held are dropped when it closes', async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK], { complete: reply({ body: 'never', here: '' }) })
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+    s.$.ui.selection = async () => ({ text: 'MINIMAL' })
+    expect(await explainBar(s.$, () => true, false)).toEqual([])
+    expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
+    expect(await citeKey(s.$, 'c', 0)).toBe(null)
+    await pressE(s, { text: 'MINIMAL' })
+    expect(String((await failLineNow(s.$))?.text)).toContain('Select words in an answer')
+    expect(s.calls.length).toBe(0)
+    // words of the answer selected in the pane: e takes them while it is open, not once it has closed
+    s.$.ui.close = async () => ({})
+    s.$.ui.selection = async () => ({ text: 'failures came' })
+    expect((await explainBar(s.$, () => true, false)).map(x => x.key)).toEqual(['e'])
+    await closePane(s.$)
+    expect(await explainBar(s.$, () => true, false)).toEqual([])
+    expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
+    // words selected in the answer outlive the pane
+    s.$.ui.selection = async () => ({ text: 'failures came', requestId: 't1-row' })
+    await closePane(s.$)
+    expect((await explainBar(s.$, () => true, false)).map(x => x.key)).toEqual(['e'])
+  } finally {
+    setOptions({})
+  }
 })
 
 test('a selection over several rows explains its words on the newest answer that holds them; words that are a heads-up open it, unwritten', async () => {

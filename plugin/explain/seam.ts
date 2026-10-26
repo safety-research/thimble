@@ -26,9 +26,9 @@
 //                                      as the look's are; explaining(term) says while it is written, and
 //                                      pendingSpans draws its words teal from the press on
 //   explainKey($, key), explainBar     e at an empty prompt, `e explain` on the bar: an explainer of the words the
-//                                      analyst selected with the mouse ($.ui.selection, fullscreen layout only), on
-//                                      the answer they lie in, else the newest answer that holds them, opened in the
-//                                      tray. Words inside an explainer or a heads-up (or on it) open that one; words
+//                                      analyst selected with the mouse in Claude's words (core/selection.ts;
+//                                      fullscreen layout only), on the answer they lie in, else the newest answer
+//                                      that holds them, opened in the tray. Words inside an explainer or a heads-up (or on it) open that one; words
 //                                      over or across marks get one explainer, whose mark covers those it overlaps
 //   headsKey($, key), headsBar         h at an empty prompt, `h heads-ups` on the bar, while Minimal is on (nothing is
 //                                      marked by itself then): one look of the heads lens alone at the answer the
@@ -45,6 +45,7 @@ import { fullscreenNow } from '../cards/draw'
 import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
+import { answerSelection, selectionUsed, usedBy } from '../core/selection'
 import { themeNow } from '../core/theme'
 import { tellOpened } from '../core/engaged'
 import { commentsText } from '../core/engaged.mjs'
@@ -364,8 +365,8 @@ async function markOf($: Engine, row: string, words: string): Promise<(Gloss & {
 /** e, or a click on `e explain`: the words the analyst last selected with the mouse, explained in the tray, on the
  *  answer they lie in (else the newest answer that holds them). Words that are an explainer or a heads-up open it. */
 export async function explainSelection($: Engine): Promise<void> {
-  const sel = await $.ui.selection().catch(() => undefined)
-  explained = selKey(sel)
+  const sel = await answerSelection($)
+  await selectionUsed($, 'explain', sel)
   const { words, cut } = pickedWords(sel?.text ?? '')
   if (!words) {
     noticeLine($, fullscreenNow() === false
@@ -392,20 +393,16 @@ export async function explainKey($: Engine, key: string, _until: number): Promis
   return { later: () => explainSelection($) }
 }
 
-/** The selection e last explained, by its row and words: Claude Code answers the last selection until the person
- *  selects again or sends their next prompt, so the bar stops naming e once e has explained it. */
-let explained: string | null = null
-const selKey = (sel: { text?: string; requestId?: string } | undefined) => `${sel?.requestId ?? ''}\n${sel?.text ?? ''}`
-
-/** Words selected that e has not explained yet. */
+/** Words selected that e has not explained yet: Claude Code answers the last selection until the person selects again
+ *  or sends their next prompt, so the bar stops naming e once e has explained it. */
 async function selectionWaits($: Engine): Promise<boolean> {
-  const sel = await $.ui.selection().catch(() => undefined)
-  return !!pickedWords(sel?.text ?? '').words && selKey(sel) !== explained
+  const sel = await answerSelection($)
+  return !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'explain', sel))
 }
 
 /** Whether words are selected now (the bar's `c cite` may stand while they are, marks/cite.ts). */
 export async function wordsSelected($: Engine): Promise<boolean> {
-  return !!pickedWords((await $.ui.selection().catch(() => undefined))?.text ?? '').words
+  return !!pickedWords((await answerSelection($))?.text ?? '').words
 }
 
 /** `e explain` on the bar while words are selected (only Claude Code's fullscreen layout reports a selection; elsewhere

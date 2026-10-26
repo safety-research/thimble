@@ -146,6 +146,13 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(1)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('claimsMode')
   expect(went).toEqual(['mode-citations-manual', 'mode-claimsMode-on demand'])
+  // a click on a choice of another row sets it and picks that row, the ring on the choice now set: the tint and the
+  // ring stand on the row that changed
+  rows.labels = true
+  await nodes(await draw(s)).find(n => n.props?.key === 'mode-labels-off').props.onPress()
+  expect(set.at(-1)).toMatchObject({ key: 'thimble@inline.labels', value: false })
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('labels')
+  expect(focused.at(-1)).toBe('mode-labels-off')
   setOptions({})
 })
 

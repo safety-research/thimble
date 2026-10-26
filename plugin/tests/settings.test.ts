@@ -69,15 +69,15 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   await pane.press({ key: 'mode-citations-manual' })
   expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
   expect((await pane.find({ key: 'says-citations' }))?.text).toContain('select words and press c')
-  // the bar's preview: c cite beside e explain, and the claims' item without its key, so c is named once
+  // the bar's preview, as with words selected: c cite beside e explain, and the claims' item set aside, so c names one
+  // thing
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^ evidence$/ })).toBeUndefined()
-  expect(await pane.find({ type: 'Text', text: /^evidence$/ })).toBeDefined()
-  // the row picked is the first, Minimal, marked; a click on a name picks its row, changing nothing (↑ ↓:
+  expect(await pane.find({ type: 'Text', text: /^ ?evidence$/ })).toBeUndefined()
+  // the row picked is the first, Minimal, tinted with no mark; a click on a name picks its row, changing nothing (↑ ↓:
   // tests/pane.test.ts)
-  expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^› MINIMAL MODE/)
+  expect((await pane.find({ key: 'sw-minimal' }))?.text).not.toContain('›')
   await pane.press({ key: 'switch-claimsMode' })
-  expect((await pane.find({ key: 'sw-claimsMode' }))?.text).toMatch(/^› Evidence/)
+  expect((await pane.find({ key: 'sw-claimsMode' }))?.text).not.toContain('›')
   expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(1)
   await pane.unmount()
 })
@@ -99,8 +99,9 @@ test('Minimal holds what acts after each reply on demand: the rows it changes sa
 
   await $.command.run({ command: 'thimble-settings', args: '' } as never)
   const pane = await $.ui.mount(PANE)
-  expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^› MINIMAL MODE\s+on · off/)
-  expect(await pane.find({ key: 'says-minimal' })).toBeUndefined()
+  // Minimal says what it does under it, on or off
+  expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^\s*MINIMAL MODE\s+on · off/)
+  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('Everything on demand')
   expect((await pane.find({ key: 'says-citations' }))?.text).not.toContain('Minimal')
   expect(await pane.find({ type: 'Text', text: /^ heads-ups$/ })).toBeUndefined()
   await pane.press({ key: 'mode-minimal-on' })
@@ -116,6 +117,7 @@ test('Minimal holds what acts after each reply on demand: the rows it changes sa
   expect(await pane.find({ type: 'Text', text: /^ heads-ups$/ })).toBeDefined()
   await pane.press({ key: 'mode-minimal-off' })
   expect((await pane.find({ key: 'says-citations' }))?.text).not.toContain('Minimal')
+  expect((await pane.find({ key: 'says-minimal' }))?.text).toContain('Everything on demand')
   expect(await pane.find({ type: 'Text', text: /^ heads-ups$/ })).toBeUndefined()
   await pane.unmount()
   setOptions({})

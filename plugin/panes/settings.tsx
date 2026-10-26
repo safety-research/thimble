@@ -1,16 +1,18 @@
 // settings.tsx: the settings pane (core/pane.ts kind `settings`): /thimble-settings, or a click on `thimble` in the
 // bar, opens it. Its top row says `Settings` (core/pane.ts); under it the bar as the settings leave it (bar.tsx, drawn as
 // a preview in a frame: nothing in it presses), then Minimal, then the settings under their headings (Answers,
-// Comments, Panes), every row the same: `›` on the row picked, the name in a column of its own, its choices (`on · off`
-// for a switch; the one set green and bold, the others gray), and under them, gray, what the one set gives (its
-// `says`). Minimal reads `MINIMAL MODE  on · off`, with no line under it; while it is on, a row it changes says so after
-// its choices (`→ on demand`); its own setting stays, and comes back then. The row picked is tinted across the pane.
+// Comments, Panes), every row the same: the name in a column of its own, its choices (`on · off` for a switch; the one
+// set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). Minimal reads
+// `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); while it is on, a row it
+// changes says so after its choices (`→ on demand`); its own setting stays, and comes back then. The row picked is
+// tinted across the pane, with no mark of its own (a `›` there read as a row that opens).
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
 // the ui.focus hook); onto another row it lands on that row's choice set, which changes nothing. A click on a choice
-// sets it, a click on a name picks its row; ↵ on a choice sets it. A change goes through Claude Code (settings/term.ts
-// settingsAction), which keeps the value and loads the plugin again with it; the pane and the bar draw it at once.
+// sets it and picks its row, a click on a name picks its row; ↵ on a choice sets it. A change goes through Claude Code
+// (settings/term.ts settingsAction), which keeps the value and loads the plugin again with it; the pane and the bar
+// draw it at once.
 import type { EngineInterface } from 'claude-code'
 
 import { barRows } from '../bar/bar'
@@ -27,9 +29,11 @@ type Switch = { key: string; title: string; group?: string; choices?: string[]; 
 const PICKED = { plugin: 'thimble', key: 'settingsRow' } as const
 /** The tint of the row picked, as the coverage pane tints its row. */
 const SEL_TINT = 'userMessageBackground'
-/** Where the choices start: `› ` and the name's column. */
+/** Where the choices start: the row's indent and the name's column. */
 const NAME = 11
 const IN = 2 + NAME + 1
+/** Minimal's name, wider than the column: its choices, and the line under them, start after it. */
+const MINIMAL_TITLE = 'MINIMAL MODE '
 
 const ROWS = SWITCHES as Switch[]
 /** A feature's choices as the pane shows them: its modes, or on and off. */
@@ -56,6 +60,13 @@ async function pickedNow($: Engine): Promise<string> {
 async function choose($: Engine, s: Switch, c: string): Promise<void> {
   const said = await settingsAction($, { do: 'set', key: s.key, value: s.choices ? c : c === 'on' })
   if (typeof said === 'string' && said) $.ui.toast(said)
+}
+
+/** A click on a choice: its row is picked and the ring lands on the choice now set, as ← → leave it; a click does not
+ *  move the ring by itself, which stayed on the row picked before and drew there as a second choice set. */
+async function chooseHere($: Engine, s: Switch, c: string): Promise<void> {
+  await choose($, s, c)
+  await pick($, s)
 }
 
 /** Pick a row, and land the ring on its choice set. */
@@ -99,19 +110,20 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
       : []
     const choices = choicesOf(s).flatMap((c, k) => [
       ...(k ? [Text({ key: `sep-${c}`, dimColor: true, children: ' · ' })] : []),
-      Button({ key: choiceKey(s, c), plain: true, label: `${s.title}: ${c}`, onPress: () => choose($, s, c), ...(here && c === set ? { autoFocus: true } : {}), children: [
+      Button({ key: choiceKey(s, c), plain: true, label: `${s.title}: ${c}`, onPress: () => chooseHere($, s, c), ...(here && c === set ? { autoFocus: true } : {}), children: [
         Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: c }),
       ] }),
     ])
-    // Minimal stands over the rows as a heading would, with no line under it; a row it holds says so after its choices
+    // Minimal stands over the rows as a heading would, what it does under it; a row it holds says so after its choices
     const minimal = s.key === 'minimal'
     const by = held[s.key]
-    const says = minimal ? undefined : s.says?.[set]
+    const says = minimal ? s.says?.on : s.says?.[set]
+    const at = minimal ? 2 + MINIMAL_TITLE.length + 1 : IN
     return [...head, Box({ key: `sw-${s.key}`, flexDirection: 'column', width, ...(here ? { backgroundColor: SEL_TINT } : {}), children: [
       Box({ key: 'line', flexDirection: 'row', children: [
-        Text({ key: 'mark', children: here ? '› ' : '  ' }),
+        Text({ key: 'mark', children: '  ' }),
         Button({ key: `switch-${s.key}`, plain: true, label: `${s.title}: ${set}`, onPress: () => pick($, s), children: [
-          Text({ key: 'title', bold: true, children: minimal ? 'MINIMAL MODE ' : s.title.padEnd(NAME) }),
+          Text({ key: 'title', bold: true, children: minimal ? MINIMAL_TITLE : s.title.padEnd(NAME) }),
         ] }),
         Text({ key: 'gap', children: ' ' }),
         Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: [
@@ -119,7 +131,7 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
           ...(by ? [Text({ key: 'held', dimColor: true, children: `  → ${by}` })] : []),
         ] }),
       ] }),
-      ...(says ? [Box({ key: `says-${s.key}`, marginLeft: IN, width: width - IN, children: [Text({ dimColor: true, wrap: 'wrap', children: says })] })] : []),
+      ...(says ? [Box({ key: `says-${s.key}`, marginLeft: at, width: width - at, children: [Text({ dimColor: true, wrap: 'wrap', children: says })] })] : []),
     ] })]
   })
   return Box({ flexDirection: 'column', width, children: [
