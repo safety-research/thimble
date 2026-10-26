@@ -74,16 +74,38 @@ def out_json(v: Any) -> None:
 # Claude Code reads the first 4 MiB of a command's output, so the --json record keeps to COVER_BYTES
 COVER_BYTES = 3 << 20
 COVER_PER_FOLDER = 200  # untouched files named of each folder, at most
+COVER_GROUP_KEYS = ("folder", "files", "touched", "seen_files")  # what the coverage pane reads of a folder
+
+
+def cover_groups(groups: list[dict[str, Any]], room: int) -> list[dict[str, Any]]:
+    """The folders of the --json record: each with what the pane reads of it, in at most `room` bytes. While they take
+    more, the deepest folders Claude touched no file of fold into their parent folder, which then counts their files
+    (the pane counts a folder's files into every folder above it, so each folder's count stays whole). A trace corpus
+    can hold tens of thousands of folders of one or two files."""
+    size = lambda v: len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str).encode()) + 1  # noqa: E731
+    out = {g["folder"]: {k: g.get(k, 0) for k in COVER_GROUP_KEYS} for g in groups}
+    depth = lambda f: 0 if f == "./" else f.rstrip("/").count("/") + 1  # noqa: E731
+    while out and size(list(out.values())) > room:
+        deep = max(depth(f) for f, g in out.items() if not g["touched"]) if any(not g["touched"] for g in out.values()) else 0
+        if deep <= 1:
+            break
+        for f in [f for f, g in out.items() if not g["touched"] and depth(f) == deep]:
+            g = out.pop(f)
+            up = f.rstrip("/").rsplit("/", 1)[0] + "/" if deep > 1 else "./"
+            into = out.setdefault(up, {"folder": up, "files": 0, "touched": 0, "seen_files": 0})
+            into["files"] += g["files"]
+    return sorted(out.values(), key=lambda g: (-g["touched"], -g["files"], g["folder"]))
 
 
 def cmd_coverage(a: argparse.Namespace) -> int:
     st = Store()
     cov = CV.coverage(st, None if a.all else "", per_folder=COVER_PER_FOLDER)
     if a.json:
-        # The totals, groups and types count every file and always print; then the touched files by status, then the
-        # untouched files coverage named (a few of each folder), while the record keeps to COVER_BYTES. `cut` says how
-        # many of each are left out.
+        # The totals, groups and types count every file and always print (the folders as cover_groups keeps them);
+        # then the touched files by status, then the untouched files coverage named (a few of each folder), while the
+        # record keeps to COVER_BYTES. `cut` says how many of each are left out.
         size = lambda v: len(json.dumps(v, ensure_ascii=False, separators=(",", ":"), default=str).encode()) + 1  # noqa: E731
+        cov["groups"] = cover_groups(cov["groups"], COVER_BYTES // 2)
         quiet = cov["untouched"]
         n_quiet = cov["total"]["files"] - cov["total"]["touched_files"]
         cols = list(quiet)

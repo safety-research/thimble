@@ -45,6 +45,7 @@
 // purple ↳ once a thread was asked about it.
 import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
+import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, type Theme } from '../core/theme'
 import { blocks, cardRef, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
 
@@ -57,7 +58,9 @@ export type ViewSpan = { start: number; end: number; look: SpanLook; label: stri
 type Mark = { start: number; end: number; words: string }
 
 export type MarkStatus = 'pending' | 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed' | 'unchecked'
-export type MarkLook = { n: number; status: MarkStatus; shown?: string; narrowed?: boolean }
+/** `quiet`: a citation Claude wrote while Citations is manual (marks/register.ts quietLooks): plain words at rest, its
+ *  underline and tint under the pointer, and a click still opens it. */
+export type MarkLook = { n: number; status: MarkStatus; shown?: string; narrowed?: boolean; quiet?: true }
 
 export type MessageOpts = {
   text: string
@@ -87,6 +90,10 @@ export type MessageOpts = {
   passages?: { has: (p: Passage) => boolean; ask: (p: Passage) => unknown } | null
   /** the cards the reply places on lines of their own (message.js cardRef), drawn there, by the card's id */
   cards?: Record<string, Any>
+  /** a rule down the block's left side in this color (a catch-up's): every block laid out here, so each row is known,
+   *  and the margin cell of each row, 4 wide, draws one ▎ per row the row takes, its gap above it too. Nothing is
+   *  placed absolutely, so the rule ends where the block ends at any width */
+  rule?: string
 }
 
 /** A passage of a reply: its words, and a few of them that name it. */
@@ -194,6 +201,8 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     if (look?.status === 'corrected' && look.shown && look.narrowed) out.push(...narrowRuns(own, look.shown))
     else if (fixed && runsText(fixed) !== runsText(own)) out.push(...fixed)
     else out.push(...own)
+    // a quiet citation shows no sign, so it holds no room for one
+    if (look?.quiet) { k = e; continue }
     if (look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
     else if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
     else out.push({ s: '  ', mark: r.mark, tag: 'gap' })
@@ -251,7 +260,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const tint = citeHover(id, look.status)
   if (r.tag === 'spin') p.color = accent()
   else if (r.tag) p.color = 'error'
-  else Object.assign(p, wordsLook(look.status, id))
+  else if (!look.quiet) Object.assign(p, wordsLook(look.status, id))
   // a span on the mark's words (a heads-up, an explainer, inside them or around them): its fill at rest under the
   // citation's underline, so both show. Its words are the span's press and hover group: an explainer or a heads-up
   // opens first, and ] goes on to the citation (a span comes before the citation it stands on, tray.ts). The
@@ -268,7 +277,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   }
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   // no inverse under the pointer (Claude Code inverts a plain Button): the tint shows the hover
-  const hover = r.tag ? { scope: tint.scope, inverse: false } : { ...tint, inverse: false }
+  const hover = r.tag ? { scope: tint.scope, inverse: false } : { ...tint, inverse: false, ...(look.quiet ? { underline: true } : {}) }
   return els.Button({ key, plain: true, label, hover, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
 }
 
@@ -382,14 +391,21 @@ export function messageEl(els: Any, o: MessageOpts): Any {
       : o.passages
         ? askCell(els, { key, label: p.label, has: o.passages.has(p), press: () => o.passages!.ask(p), glyph, color: accent() })
         : Box({ width: 2, flexShrink: 0, children: [Text({ children: glyph })] })
-    rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [...(o.gutter === false ? [] : [cell]), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
+    if (o.rule) {
+      // the gap above the row stands inside it, so the rule runs through it
+      const top = gap || !rows.length ? 1 : 0
+      const body = Box({ flexDirection: 'column', flexShrink: 1, width: w, paddingTop: top, children: content })
+      const n = Math.max(1, treeRows(body, w))
+      const ruled = Box({ width: 4, flexShrink: 0, children: [Text({ color: o.rule, children: Array.from({ length: n }, () => '▎').join('\n') })] })
+      rows.push(Box({ key, flexDirection: 'row', children: [ruled, body] }))
+    } else rows.push(Box({ key, flexDirection: 'row', marginTop: gap ? 1 : 0, children: [...(o.gutter === false ? [] : [cell]), Box({ flexDirection: 'column', flexShrink: 1, width: w, children: content })] }))
     if (!wait) dot = false
   }
   // a block laid out here: one that holds marks, and every item of a list one of whose items holds marks, so a nested
   // item keeps its indent beside its siblings. A code block never is: its lines stay as written, in Claude Code's
   // Markdown, whatever lies in it
   // (dim words are laid out here too, as Claude Code's Markdown draws no dim text; and a block with a span)
-  const laid: boolean[] = bs.map((b: Any) => b.type !== 'code' && (!!o.dim || marksWithin(o.marks, b.start, b.end).length > 0 || marksWithin(o.spans ?? [], b.start, b.end).length > 0))
+  const laid: boolean[] = bs.map((b: Any) => b.type !== 'code' && (!!o.dim || !!o.rule || marksWithin(o.marks, b.start, b.end).length > 0 || marksWithin(o.spans ?? [], b.start, b.end).length > 0))
   for (let a = 0; a < bs.length; a++) {
     if (bs[a].type !== 'item') continue
     let z = a
@@ -424,7 +440,7 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     push([Markdown({ text: o.text.slice(b.start, bs[j].end) })], b.gap && i > 0, passageOf(i, j))
     i = j + 1
   }
-  return Box({ flexDirection: 'column', marginTop: 1, children: rows })
+  return Box({ flexDirection: 'column', marginTop: o.rule ? 0 : 1, children: rows })
 }
 
 /** A span the features placed on the words Claude wrote that the check of the citations changed, so it stands on no

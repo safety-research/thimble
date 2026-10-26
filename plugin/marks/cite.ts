@@ -6,7 +6,7 @@
 // verified, corrected or failed, as for any citation.
 //
 // c is also the Claims pane's key: c cites only while words are selected that it has not cited yet, which the bar shows
-// as `c cite` (beside `e explain`, and the claims' item without its key); else c opens the claims.
+// as `c cite` (beside `e explain`, the claims' item set aside meanwhile); else c opens the claims.
 //
 //   citeKey($, key), citeBar, citeShown   c at an empty prompt while words wait, `c cite` on the bar
 //   citeWords($, row, words)              the citation of these words on that answer: an existing one (Claude's, or
@@ -14,8 +14,10 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failCleared, noticeLine } from '../bar/notice'
+import { howTo, hintUsed } from '../bar/hints'
+import { failCleared, hintLine } from '../bar/notice'
 import { answerRows, messageOf, turnOfRow } from '../core/answers'
+import { answerSelection, selectionUsed, usedBy } from '../core/selection'
 import { pickedWords } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { featureOn } from '../settings/features.mjs'
@@ -25,11 +27,6 @@ import { askedWords, codeRanges, marksIn, sentenceOf, withoutMarks } from './mes
 import { editReply, newReply, replyKeyOf, replyOf, type MarkItem } from './store'
 
 type Engine = EngineInterface
-
-/** The selection c last cited, by its row and words: Claude Code answers the last selection until the person selects
- *  again or sends their next prompt, so once c has cited it, c opens the claims again. */
-let cited: string | null = null
-const selKey = (sel: { text?: string; requestId?: string } | undefined) => `${sel?.requestId ?? ''}\n${sel?.text ?? ''}`
 
 /** Where `words`, as the analyst read them, stand in the text Claude wrote, on one line: the spaces and markdown
  *  emphasis between them may differ (`**`, `*`, `` ` ``), and the place found starts and ends on the words themselves. */
@@ -63,9 +60,9 @@ async function rowHolding($: Engine, words: string): Promise<string | null> {
 export async function citeWords($: Engine, row: string, words: string): Promise<string | void> {
   const raw = (await messageOf($, row))?.text ?? ''
   const v = await squeezeView($, row, raw).catch(() => null)
-  if (typeof v?.text === 'string' && v.text !== raw) return 'c cites Claude\'s own words: press 0 on the answer to see them as written, then select again.'
+  if (typeof v?.text === 'string' && v.text !== raw) return 'c cites Claude\'s own words: press 0 to see the answer as written, then select again.'
   const at = placeOf(raw, words)
-  if (!at) return `“${words.length > 50 ? `${words.slice(0, 49)}…` : words}” is not in the answer as Claude wrote it. Select words of the answer's text.`
+  if (!at) return `“${words.length > 50 ? `${words.slice(0, 49)}…` : words}” isn't in the answer as Claude wrote it; select words of its text.`
   const key = (await replyKeyOf($, row)) ?? row
   const reply = await replyOf($, key)
   const items = (reply?.items ?? []).filter(m => m.row === row)
@@ -76,8 +73,8 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
     ? (items.filter(m => !m.asked)[hit]?.n ?? null)
     : (items.find(m => m.asked && at.start < m.end && at.end > m.start)?.n ?? null)
   if (n != null) { await openTray($, { row, kind: 'citation', n }); return }
-  if (hit >= 0) return 'Those words are part of a citation whose check is not ready yet. Try again in a moment.'
-  if (codeRanges(raw).some(([a, b]) => at.start < b && at.end > a)) return 'Those words are code, which has no source to find. Select words of the answer\'s text.'
+  if (hit >= 0) return 'those words are in a citation still being checked; try again in a moment.'
+  if (codeRanges(raw).some(([a, b]) => at.start < b && at.end > a)) return 'those words are code, which has no source; select words of the answer\'s text.'
   const text = askedWords(raw.slice(at.start, at.end))
   const next = Math.max(0, ...(reply?.items ?? []).map(m => m.n)) + 1
   const marked = raw.slice(0, at.start) + `[${text}](#)` + raw.slice(at.end)
@@ -96,23 +93,25 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
 /** c, or a click on `c cite`: the words the analyst last selected with the mouse, on the answer they lie in (else
  *  the newest answer that holds them), cited and found in the files. */
 export async function citeSelection($: Engine): Promise<void> {
-  const sel = await $.ui.selection().catch(() => undefined)
-  cited = selKey(sel)
+  const sel = await answerSelection($)
+  await selectionUsed($, 'cite', sel)
   const { words } = pickedWords(sel?.text ?? '')
-  if (!words) { noticeLine($, 'Select words in an answer with the mouse first, then press c to cite them.', 'cite'); return }
+  if (!words) { await howTo($, 'cite', 'select a passage in an answer and press c to verify the claim.', 'cite'); return }
   await failCleared($, 'cite')
   const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
   const row = own ?? (await rowHolding($, words))
-  if (!row) { noticeLine($, 'No answer to cite words in yet: ask Claude something first.', 'cite'); return }
+  if (!row) { await howTo($, 'cite', 'ask Claude something, then select a passage in its answer and press c to verify the claim.', 'cite'); return }
   const why = await citeWords($, row, words)
-  if (why) noticeLine($, why, 'cite')
+  if (why) hintLine($, why, 'cite')
+  else await hintUsed($, 'cite')
 }
 
-/** Whether c cites now: Citations is manual, an answer exists, and words are selected that c has not cited yet. */
+/** Whether c cites now: Citations is manual, an answer exists, and words are selected that c has not cited yet (Claude
+ *  Code answers the last selection until the person selects again, so once c has cited it, c opens the claims again). */
 export async function citeShown($: Engine): Promise<boolean> {
   if (!featureOn('cite')) return false
-  const sel = await $.ui.selection().catch(() => undefined)
-  if (!pickedWords(sel?.text ?? '').words || selKey(sel) === cited) return false
+  const sel = await answerSelection($)
+  if (!pickedWords(sel?.text ?? '').words || (await usedBy($, 'cite', sel))) return false
   return (await answerRows($).catch(() => [])).length > 0
 }
 

@@ -4,7 +4,7 @@
 // call, since the old place is in the terminal's scrollback: canRedraw). Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
-//   frame         the card's frame: its title (a click asks about the card) and, at its right, `ask about this card`
+//   frame         the card's frame: its title (a click asks about the card) and, at its right, `a ask · p artifact`
 //                 (the question names the item selected, when one is), the Client (a click on an item selects it as
 //                 its key does; on other words, asks about them: client.tsx, runner.mjs pick), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
@@ -14,6 +14,7 @@
 //   askCard       a request to the runner about a card; a card the runner does not hold is loaded from its copy first
 //   applyAnswer   the runner's answer to an event: the new tree on screen, the state on disk, a failure said
 //   noteShown     which of a row's cards the screen shows now, from the row's `onScreen` and each card's height
+//   noteFrames    where each card stands in an answer's whole drawing (core/answerview.ts), measured, for noteShown
 //   keyOwner      the card a key at an empty prompt goes to: among the cards the screen shows, the focused card when it
 //                 lists the key, else the newest that lists it
 //   cardTake      a letter at an empty prompt that a card takes (hooks/keys.ts asks): the key at once, and its undo when
@@ -38,13 +39,14 @@ import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { cut } from '../core/text.js'
-import { rowsKnown } from '../core/trail.mjs'
+import { rowsAt, rowsKnown, treeRows } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { cardRef } from '../marks/message.js'
 import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
+import { artifactLine } from './head'
 import { layoutLines } from './layout.js'
 import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, keptFocus, keptMeta, keptSeen, markSeen, metaOf, readState, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
@@ -199,11 +201,13 @@ export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: num
   failNotice($, `The card “${cut(meta.title, 40)}” failed: ${error}`, about(meta.id))
 }
 
-/** Which of the cards at the end of a row (its frames, the last first counted from the row's end) the screen shows
- *  now: the row's `onScreen` names the rows of it in the viewport, null when none is. A card shows when one of its
- *  frame's rows is in the viewport; a card whose height is not known yet takes the whole row. When the cards the
- *  screen shows change, every card's frame draws again, since the keys each names depend on the others. */
-export function noteShown($: Engine, ids: string[], onScreen: { first: number; last: number; of: number } | null | undefined): void {
+/** Which of a row's cards the screen shows now: the row's `onScreen` names the rows of it in the viewport, null when
+ *  none is. `at` gives where a card was measured to stand (noteFrames): its rows, and how many rows of the row are
+ *  below its top (a card placed on a line of the text stands inside it); the others are the cards at the end of the
+ *  row, the last first counted from its end. A card shows when one of its frame's rows is in the viewport; a card
+ *  whose height is not known yet takes the whole row. When the cards the screen shows change, every card's frame draws
+ *  again, since the keys each names depend on the others. */
+export function noteShown($: Engine, ids: string[], onScreen: { first: number; last: number; of: number } | null | undefined, at?: Map<string, { fromEnd: number; rows: number }>): void {
   let changed = false
   let end = onScreen?.of ?? 0
   for (const id of [...ids].reverse()) {
@@ -211,13 +215,38 @@ export function noteShown($: Engine, ids: string[], onScreen: { first: number; l
     if (onScreen === null) now = false
     else if (onScreen) {
       const h = heights.get(id)
-      const start = h ? end - h - FRAME_ROWS : 0
-      now = onScreen.last >= start && onScreen.first < end
-      end = start
+      const m = at?.get(id)
+      if (m) {
+        const top = onScreen.of - m.fromEnd
+        now = onScreen.last >= top && onScreen.first < top + m.rows
+      } else {
+        const start = h ? end - h - FRAME_ROWS : 0
+        now = onScreen.last >= start && onScreen.first < end
+        end = start
+      }
     }
     if (shown.get(id) !== now) { shown.set(id, now); changed = true }
   }
   if (changed) $.clock.after(0, () => $.ui.invalidate('ui.render'))
+}
+
+/** The cards an answer's drawing holds (`tree`, the whole row as its hooks drew it at `width` cells): where each card
+ *  stands in it, measured (core/trail.mjs rowsAt), for noteShown. A card placed on a line of the text, and a card
+ *  under an answer with a catch-up below it, stand inside the row, not at its end. Each is measured from the row's
+ *  end: what stands after a card is thimble's drawing, which treeRows measures, while the text above it may be
+ *  Claude Code's own. */
+export function noteFrames($: Engine, tree: Any, width: number, onScreen: { first: number; last: number; of: number } | null | undefined): void {
+  const keyOf = (n: Any) => String(n?.key ?? n?.props?.key ?? '')
+  // a frame with nothing in it is a card the version shown leaves out
+  const found = rowsAt(tree, width, (n: Any) => keyOf(n).startsWith('frame-') && (n.children ?? n.props?.children ?? []).length > 0) as { el: Any; row: number }[]
+  if (!found.length) return
+  const total = treeRows(tree, width)
+  const at = new Map<string, { fromEnd: number; rows: number }>()
+  for (const f of found) {
+    const id = keyOf(f.el).slice('frame-'.length)
+    if (!at.has(id)) at.set(id, { fromEnd: total - f.row, rows: treeRows(f.el, width) })
+  }
+  noteShown($, [...at.keys()], onScreen, at)
 }
 
 /** The card a key at an empty prompt goes to: among the cards on screen, the focused card when it lists the key, else
@@ -231,6 +260,19 @@ export async function keyOwner($: Engine, key: string): Promise<CardMeta | null>
     if (shown.get(id) === false) continue
     const m = await keptMeta($, id)
     if (m && m.version > 0 && m.keys.includes(key)) metas.push(m)
+  }
+  const focus = await keptFocus($)
+  return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
+}
+
+/** The card a and p of its header act on (head.ts): the card in focus, else the newest on screen, as keyOwner picks
+ *  the card a key reaches. */
+export async function headOwner($: Engine): Promise<CardMeta | null> {
+  const metas: CardMeta[] = []
+  for (const id of await keptSeen($)) {
+    if (shown.get(id) === false) continue
+    const m = await keptMeta($, id)
+    if (m && m.version > 0) metas.push(m)
   }
   const focus = await keptFocus($)
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
@@ -317,7 +359,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // the title on a line of its own, then the card
   // its rows as the Client last reported them, so what measures a drawing holding the card (a catch-up's rule) counts them
   const client = rowsKnown(E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) }), heights.get(meta.id))
-  // the line a click or a key selected (`▸`, the card guide's marker): `ask about this card` asks about that part of
+  // the line a click or a key selected (`▸`, the card guide's marker): `ask` asks about that part of
   // the card, so a click on a bar and then on those words start a thread about the bar
   const sel = fault ? null : selectedLine(current?.tree, width)
   const ask = await cardAsk($, meta.id, meta.title, sel?.text ?? '')
@@ -325,10 +367,16 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   const whole = sel ? await cardAsk($, meta.id, meta.title) : ask
   const title = E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title })
   const titled = whole ? E.Button({ key: 'title-ask', plain: true, label: `ask about ${whole.label}`, onPress: whole.press, hover: quiet(`card-title-${meta.id}`), children: [title] }) : title
-  // at the title's right, in thimble's color, what asks a side thread about the card (the question names the item
-  // selected, when one is)
-  const askWords = 'ask about this card'
-  const askEl = ask ? E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: [E.Text({ key: 'ask-w', color: accent(), wrap: 'truncate-end', children: askWords })] }) : null
+  // at the title's right, in thimble's color, its header's keys: ask (a side thread about the card, whose question
+  // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
+  // alone; every card's words are clicks
+  const lettered = (await headOwner($))?.id === meta.id
+  const word = (key: string, words: string) => [...(lettered ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
+  const askEl = ask ? E.Box({ key: 'head-keys', flexDirection: 'row', children: [
+    E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: word('a', 'ask') }),
+    E.Text({ key: 'head-sep', dimColor: true, children: ' · ' }),
+    E.Button({ key: `card-artifact-${meta.id}`, plain: true, label: `make an artifact of ${meta.title}`, onPress: () => undefined, hover: quiet(`card-artifact-${meta.id}`), children: word('p', 'artifact') }),
+  ] }) : null
   const rows: Any[] = [
     askEl ? E.Box({ key: 'title-row', flexDirection: 'row', justifyContent: 'space-between', children: [E.Box({ key: 'title-l', flexShrink: 1, children: [titled] }), E.Box({ key: 'title-r', flexShrink: 0, marginLeft: 2, children: [askEl] })] }) : titled,
     // a drawing wider than the frame: its columns past the frame's edge are cut
@@ -336,11 +384,12 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
-  // the frame in the 2 columns of its indent; `ask about this card` at its title's right is how a side thread about it
+  // the frame in the 2 columns of its indent; `ask` at its title's right is how a side thread about it
   // starts, so no ? in the margin asks the same
   const framed = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: inside + 4, children: rows })
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
-  const under = await underCard($, E, meta.id, inside)
+  const made = await artifactLine($, E, meta.id)
+  const under = [...(made ? [made] : []), ...(await underCard($, E, meta.id, inside))]
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
 }
 
@@ -413,7 +462,7 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
     const meta = await metaOf($, id)
     if (meta && meta.version > 0 && meta.anchorRow === e.requestId && !placed.has(id)) metas.push(meta)
   }
-  if (metas.length) noteShown($, metas.map(m => m.id), e.props?.onScreen)
+  // which of them the screen shows: the answer's drawing measures where each stands (noteFrames)
   const out: Any[] = []
   for (const meta of metas) out.push(await frame($, e, meta))
   return out
@@ -424,8 +473,7 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
  *  the text stands for (a catch-up's own id), where a card placed there draws, not a line pointing to it. */
 export async function framesIn($: Engine, e: Any, text: string, here: string[] = [e.requestId], o: { indent?: number } = {}): Promise<Record<string, Any>> {
   const out: Record<string, Any> = {}
-  const drawn: string[] = []
-  for (const line of String(text ?? '').split('\n')) {
+    for (const line of String(text ?? '').split('\n')) {
     const id = cardRef(line)
     if (!id || out[id]) continue
     const meta = await metaOf($, id)
@@ -448,9 +496,8 @@ export async function framesIn($: Engine, e: Any, text: string, here: string[] =
     // a card on a line of the text stands in the text's column, 2 columns in from an answer's left edge (where a card
     // drawn under the answer stands), so it is that much narrower, and keeps the 2 columns free at the right
     out[id] = await frame($, e, meta, { ...o, indent: (o.indent ?? 0) + 2 })
-    drawn.push(id)
   }
-  if (drawn.length) noteShown($, drawn, e.props?.onScreen)
+  // which of them the screen shows: the answer's drawing measures where each stands (noteFrames)
   return out
 }
 

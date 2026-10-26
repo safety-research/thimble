@@ -17,7 +17,7 @@
 // It registers no model tool and starts no `claude`.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { failCleared, noticeLine } from '../bar/notice'
+import { failCleared, failNotice } from '../bar/notice'
 import { actingRow, messageOf, partOf, setPart, turnOf, turnsNow, type TurnRec } from '../core/answers'
 import { isPersonPrompt } from '../core/answers.mjs'
 import { readKept, writeKept } from '../core/env'
@@ -260,19 +260,18 @@ export async function claimsLit($: Engine): Promise<boolean> {
 export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false): Promise<void> {
   await reloadClaims($)
   await $.state.set(FIRST, { lit: false, opened: true }).catch(() => undefined)
-  const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims', { focus: true, rows: 36 })
+  const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
-  const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'claims'}`
-  noticeLine($, byKey
-    ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${words}” in the bar below to open it here.`
-    : `Claude Code did not open the Claims pane here. Widen the terminal, or click “${words}” in the bar below.`, 'pane:claims')
+  const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
+  if (byKey) failNotice($, `c needs a wider terminal: widen the window to show the side pane, or click “${words}”.`, 'pane:claims')
+  else failNotice($, 'Claude Code did not open the Evidence pane here.', 'pane:claims')
 }
 
 /** The pane shows other arguments (the person moved in it, by a key or a click), and holds the keyboard: Claude Code
  *  stops a click at the Button it lands on, so a click alone does not give the pane back the keyboard. (Claude Code
  *  leaves the keyboard at a prompt that holds typed words.) */
 export async function showClaims($: Engine, args: ClaimsArgs): Promise<void> {
-  await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Claims', { focus: true })
+  await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true })
 }
 
 // ------------------------------------------------------------------------------------------------ hooks

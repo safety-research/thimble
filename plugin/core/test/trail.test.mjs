@@ -10,34 +10,34 @@ import { crumbOf, nextTrail, rowsKnown, TRAIL_MAX, treeRows } from '../trail.mjs
 const go = (was, kind, args, open = true) => ({ kind, args, title: kind, trail: nextTrail(was, open, kind, args) })
 const words = now => [...(now.trail ?? []).map(t => crumbOf(t.kind, t.args).words), crumbOf(now.kind, now.args).words]
 
-test('claims › cluster › claim › evidence: each step deeper goes on the trail, j and k take the place, e back down', () => {
+test('evidence › cluster › claim › sources: each step deeper goes on the trail, j and k take the place, e back down', () => {
   let p = go(null, 'claims', {})
   assert.deepEqual(p.trail, [])
   p = go(p, 'claims', { group: 'k1', at: 0 })
   p = go(p, 'claims', { claim: 'c1', at: 0 })
   // k and j in the cluster: the claim's place, not a new step
   p = go(p, 'claims', { claim: 'c2', at: 1 })
-  assert.deepEqual(words(p), ['claims', 'cluster', 'claim'])
+  assert.deepEqual(words(p), ['evidence', 'cluster', 'claim'])
   assert.deepEqual(p.trail.at(-1).args, { group: 'k1', at: 0 })
   p = go(p, 'claims', { claim: 'c2', at: 1, open: true, cite: 0 })
-  assert.deepEqual(words(p), ['claims', 'cluster', 'claim', 'evidence'])
+  assert.deepEqual(words(p), ['evidence', 'cluster', 'claim', 'sources'])
   // e closes the evidence: back to the claim, the trail as it was under it
   p = go(p, 'claims', { claim: 'c2', at: 1 })
-  assert.deepEqual(words(p), ['claims', 'cluster', 'claim'])
+  assert.deepEqual(words(p), ['evidence', 'cluster', 'claim'])
   // the claims' own way back to the cluster
   p = go(p, 'claims', { group: 'k1', at: 1 })
-  assert.deepEqual(words(p), ['claims', 'cluster'])
+  assert.deepEqual(words(p), ['evidence', 'cluster'])
 })
 
 test('a pane of another kind goes on top: a citation of a side answer stands over the claim it was asked about', () => {
   let p = go(null, 'claims', {})
   p = go(p, 'claims', { claim: 'c1' })
   p = go(p, 'evidence', { row: 'r1', n: 3 })
-  assert.deepEqual(words(p), ['claims', 'claim', 'citation 3'])
+  assert.deepEqual(words(p), ['evidence', 'claim', 'citation 3'])
   assert.deepEqual(p.trail.at(-1), { kind: 'claims', args: { claim: 'c1' }, title: 'claims' })
   // another citation takes the citation's place
   p = go(p, 'evidence', { row: 'r1', n: 4 })
-  assert.deepEqual(words(p), ['claims', 'claim', 'citation 4'])
+  assert.deepEqual(words(p), ['evidence', 'claim', 'citation 4'])
 })
 
 test("another side thread goes on top of the thread shown: the earlier conversation stays one ‹ back away", () => {

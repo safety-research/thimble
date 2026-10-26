@@ -175,12 +175,12 @@ test('a look that fails leaves a gap the pane names; c opens the pane: the map o
   expect(String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text)).toContain('“c 3 claims”')
   s.$.ui.open = placing
   await take!.later!()
-  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims', focus: true })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence', focus: true })
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 36 } } }, args, els)
   const keysOf = (pane: Any) => buttons(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])
   const pane = await draw({})
   const t = textOf(pane)
-  expect(t).toContain('Claims · 3 claims')
+  expect(t).toContain('Evidence · 3 claims')
   expect(t).not.toContain('clusters')
   expect(t).toContain('Turn 2 was not read:')
   // a few claims are drawn as a map too, nothing chosen, nothing under it; no caption, and no words about clicks
@@ -362,7 +362,7 @@ test("a picked claim's sentences of the reply read as the reply does: a figure t
   expect(textOf(await draw({ claim: 'c2' }))).toContain('The admin then spent four weeks')
 })
 
-test('c in a terminal too narrow for the pane says to click the bar\'s count; once a press opens the pane, that line goes', async () => {
+test('c in a terminal too narrow for the pane fails in red with the click on the bar\'s count; a press opens the pane and the line goes; the next c fails again', async () => {
   setOptions({ claimsMode: 'auto' })
   const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
@@ -371,13 +371,19 @@ test('c in a terminal too narrow for the pane says to click the bar\'s count; on
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await (await claimsKey(s.$, 'c', 0))!.later!()
   await settle()
-  expect(await line()).toContain('Click “c 1 claim” in the bar below')
+  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c 1 claim”.')
+  expect(((await failLineNow(s.$)) as Any)?.kind).toBe('failed')
   // a press's pane is placed at any width: the bar's count opens it
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
   await openClaims(s.$)
   await settle()
-  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims' })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence' })
   expect(await line()).toBe('')
+  // a pane opened once does not quiet the key: c in the narrow terminal fails again
+  s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
+  await openClaims(s.$, {}, true)
+  await settle()
+  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c 1 claim”.')
 })
 
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
@@ -416,9 +422,21 @@ test("x on a failed citation in the pane checks it again in the background, star
 })
 
 
+test('c in a narrow terminal before any claims names the bar\'s item by the bar\'s words, c evidence', async () => {
+  setOptions({ explain: false, details: false })
+  const s = setup([])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed on the p95 check.'] })
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'evidence']])
+  s.$.ui.open = async () => ({ isPlaced: false })
+  await openClaims(s.$, {}, true)
+  expect(String((await failLineNow(s.$))?.text)).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c evidence”.')
+  setOptions({})
+})
+
 test('claims on demand: no look reads them after a reply; c shows the pane with f, which finds the claims of the answers not read, alone', async () => {
   // the explainers and heads-ups off, so a look after a reply would be the claims' alone
-  setOptions({ explain: false, details: false })
+  setOptions({ explain: false, details: false, claimsMode: 'on demand' })
   const replies = [reply([{ claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures', because: 'Its log ends at the [p95 check](#).' }])]
   const s = setup(replies)
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
@@ -427,10 +445,10 @@ test('claims on demand: no look reads them after a reply; c shows the pane with 
   expect(s.forks).toEqual([])
   expect((await claimsStore(s.$)).claims).toEqual([])
   // the bar names the pane, with no count, once an answer waits
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'claims']])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'evidence']])
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, args, els)
   const empty = await draw({})
-  expect(textOf(empty)).toContain('Claims · no claims yet')
+  expect(textOf(empty)).toContain('Evidence · no claims yet')
   expect(textOf(empty)).not.toContain('to save tokens')
   const f = buttons(empty).find(b => b.hotkey === 'f')
   expect([f?.key, f?.label]).toEqual(['claims-find', 'extract claims'])

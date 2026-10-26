@@ -38,6 +38,7 @@ import { drawCoverage } from '../panes/coverage'
 import { drawSettings, settingsFocus } from '../panes/settings'
 import { drawThreadsPane, threadPaneParts, threadUnderSplit } from '../threads/seam'
 import { quiet } from './askcell.js'
+import { dropSelection } from './selection'
 import { cut } from './text.js'
 import { accent } from './theme'
 import { crumbOf, nextTrail, treeRows } from './trail.mjs'
@@ -108,6 +109,7 @@ async function isOpen($: Engine): Promise<boolean> {
 }
 
 export async function closePane($: Engine): Promise<void> {
+  await dropSelection($)
   await $.state.set(NOW, null)
   await $.ui.close({ id: PANE_ID })
 }
@@ -316,6 +318,8 @@ export const registerPanes: Register = on => {
   // esc, or the pane's close mark: back down the trail while it holds a pane, else closed
   on('ui.close', { id: PANE_ID }, async ($, e, next) => {
     if (e.origin?.kind === 'person' && (await paneBack($, undefined, { later: true }).catch(() => false))) return undefined
+    // words selected in the pane stay Claude Code's selection after it closes; e and c no longer take them
+    await dropSelection($)
     return next(e)
   }).catch(($, e, next) => next(e))
 

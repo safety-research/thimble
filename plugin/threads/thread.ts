@@ -409,7 +409,7 @@ export function paneTitle(kind: string, args: unknown, t?: Thread | null): strin
   if (kind === 'evidence') return `citation ${a.n ?? ''}`.trim()
   if (kind === 'labels') return a.label ? `Label ${a.label}` : 'Labels'
   if (kind === 'coverage') return 'Coverage'
-  if (kind === 'claims') return 'Claims'
+  if (kind === 'claims') return 'Evidence'
   return (t?.subject || kind).slice(0, 60)
 }
 
@@ -449,9 +449,8 @@ export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: str
   // open: a notice that a key could not open it goes
   if (placed) await failCleared($, 'pane:threads')
   if (!placed) {
-    noticeLine($, o.key
-      ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${o.key}” ${o.where ?? 'in the bar below'} to open it here.`
-      : 'Claude Code did not open the side pane here. Widen the terminal and ask again.', 'pane:threads')
+    if (o.key) failNotice($, `${o.key.split(' ')[0]} needs a wider terminal: widen the window to show the side pane, or click “${o.key}”${o.where ? ` ${o.where}` : ''}.`, 'pane:threads')
+    else failNotice($, 'Claude Code did not open the side thread here.', 'pane:threads')
   }
   return placed
 }
@@ -462,7 +461,7 @@ export async function listThreads($: Engine, o: { fromKey?: boolean } = {}): Pro
   const placed = await openPane($, 'threads', {}, 'Threads', { focus: true })
   if (placed) await failCleared($, 'pane:threads')
   if (!placed && o.fromKey) {
-    noticeLine($, `Claude Code opens the side pane from a key only in a wider terminal. Click “${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” in the bar below to open it here.`, 'pane:threads')
+    failNotice($, `t needs a wider terminal: widen the window to show the side pane, or click “t ${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}”.`, 'pane:threads')
   }
   return placed
 }

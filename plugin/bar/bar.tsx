@@ -1,7 +1,7 @@
 // bar.tsx: the bar, thimble's line above the prompt, as one drawing. Its rows, top down:
 //
 //   the failure line  only while there is one (bar/notice.ts failLineNow): a failure in red, or a notice. It wraps, so
-//                  the whole failure shows
+//                  the whole failure shows. A hint is not drawn here: the bar shows it in place of its keys
 //   the fix line   only while there is one (fix/line.ts): a fix that is ready (y use it now · d what changed · n
 //                  later), on (u undo), off, failed, or a request with no code
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), the keys of the
@@ -9,7 +9,10 @@
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
 //                  right their items (barRight: `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
-//                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes)
+//                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
+//                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands
+//                  in place of the left's keys, after the busy step, cut to the one row; the right stays, so a hint
+//                  can point at it
 //
 // The settings pane draws the same bar as its switches would leave it (`preview`): nothing in it is a press and no
 // work shows.
@@ -26,7 +29,7 @@ import { pressKey } from '../hooks/keys'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow, keptCounts } from './counts'
-import { failLineNow } from './notice'
+import { failLineNow, hintNow } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,7 +50,7 @@ export type BarItem = Item
 const len = textWidth
 /** How an item's words are drawn: dim, or in the item's own color. */
 const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
-const itemLen = (x: Item) => (x.key ? len(x.key) + 1 : 0) + len(x.words)
+const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + 1 : 0) + len(x.words)
 
 /** The bar's items at its right: coverage, then the labels, as the counts last stood, each while its setting is on. */
 async function countItems($: Engine, on: (key: string) => boolean, presses: BarPresses | null, preview = false): Promise<Item[]> {
@@ -77,7 +80,7 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
     for (const k of await cardKeyWords($).catch(() => [])) out.push({ id: `card-key-${k.key}`, key: k.key, words: k.words, ...(k.key.length === 1 ? { press: () => pressKey($, k.key) } : {}) })
   }
   // a click on `v card` starts the designer fork as v does, in the ui.press hook that answers it (designer/v.ts)
-  if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'card', ...(preview ? {} : { press: () => undefined }) })
+  if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'visualize', ...(preview ? {} : { press: () => undefined }) })
   out.push(...features)
   return out
 }
@@ -91,23 +94,46 @@ export async function barKeys($: Engine): Promise<Set<string>> {
 }
 
 /** The bar's rows: the failure line (when there is one) and the bar, `width` cells wide. */
-export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean } = {}): Promise<Any[]> {
+export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string } = {}): Promise<Any[]> {
   const { Box, Button, Text } = els
   const on = o.on ?? featureOn
   const preview = !!o.preview
   const presses = preview ? null : o.presses ?? null
   const left = await leftItems($, on, preview)
+  // a hint: in place of the left's keys, after the busy step; an item it names (“a ask”) stays after it
+  const hint = preview ? null : ((await hintNow($).catch(() => null)) ?? o.intro ?? null)
+  if (hint) {
+    const named = left.filter(x => x.id !== 'busy' && x.key && hint.includes(`“${x.key} ${x.words}”`))
+    left.splice(0, left.length, ...left.filter(x => x.id === 'busy'), { id: 'hint', glyph: 'Hint:', words: hint }, ...named)
+  }
   let right = [...(await barRight($, on, preview)), ...(await countItems($, on, presses, preview))]
+  // the presses of the bar's items by their words (`r coverage`), before any is cut: an item the failure line names
+  // is a click there too
+  const pressOf = new Map([...left, ...right].filter(x => x.press && x.key).map(x => [`${x.key} ${x.words}`, x.press!] as const))
   // a narrow bar: the labels' count goes first, then coverage's file counts, then coverage. The preview shows every
   // item the switches leave on, its right part on a line of its own when it does not fit
   const room = () => width - 9 - left.reduce((n, x) => n + itemLen(x) + 3, 0) - right.reduce((n, x) => n + itemLen(x) + 3, 0)
-  if (!preview && room() < 0) right = right.filter(x => x.id !== 'labels')
-  if (!preview && room() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
-  if (!preview && room() < 0) right = []
-  // then the busy item's other steps go, and its words are cut, so the bar keeps to one row
+  // a hint is cut before the right gives way, as a hint may point at it, and so is the busy step beside it
+  const h = left.findIndex(x => x.id === 'hint')
+  // the room the row has left as drawn: ` · ` between items, two cells between the left and the right
+  const spare = () => width - 9 - left.reduce((n, x, i) => n + itemLen(x) + (i ? 3 : 0), 0) - right.reduce((n, x, i) => n + itemLen(x) + (i ? 3 : 0), 0) - (right.length ? 2 : 0)
+  // with a hint the row is measured as drawn, so the right keeps its words while they fit
+  const rowRoom = () => (h >= 0 ? spare() : room())
+  const cutHint = (least: number) => { if (h >= 0 && spare() < 0) left[h] = { ...left[h]!, words: cut(left[h]!.words, Math.max(least, len(left[h]!.words) + spare())) } }
+  // the busy item's other steps go, and its words are cut, so the bar keeps to one row
   const b = left.findIndex(x => x.id === 'busy')
-  if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: left[b]!.words.split(' · ')[0]! }
-  if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: cut(left[b]!.words, Math.max(8, len(left[b]!.words) + room())) }
+  const cutBusy = () => {
+    if (!preview && b >= 0 && rowRoom() < 0) left[b] = { ...left[b]!, words: left[b]!.words.split(' · ')[0]! }
+    if (!preview && b >= 0 && rowRoom() < 0) left[b] = { ...left[b]!, words: cut(left[b]!.words, Math.max(8, len(left[b]!.words) + rowRoom())) }
+  }
+  // with a hint, the left gives way first: the busy step, then the hint, which the person's key just asked for
+  if (!preview && h >= 0) { cutBusy(); cutHint(4) }
+  if (!preview && rowRoom() < 0) right = right.filter(x => x.id !== 'labels')
+  if (!preview && rowRoom() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
+  if (!preview && rowRoom() < 0) right = []
+  cutBusy()
+  // the hint takes back the room the right gave up
+  if (!preview && h >= 0) { left[h] = { ...left[h]!, words: hint! }; cutHint(4) }
 
   const words = (x: Item, i: number): Any[] => [
     ...(x.glyph ? [Text({ key: `g${i}`, color: accent(), children: `${x.glyph} ` })] : []),
@@ -121,42 +147,63 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const name = Text({ key: 'name', color: accent(), bold: true, children: 'thimble' })
   const label = presses ? Button({ key: 'bar-thimble', plain: true, label: 'thimble settings', onPress: presses.settings, children: [name] }) : name
   const bar = Box({ key: 'bar', flexDirection: 'row', justifyContent: 'space-between', width, ...(preview ? { flexWrap: 'wrap' } : {}), children: [
-    Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
+    // the preview wraps its items whole, as many as the switches leave on
+    Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, ...(preview ? { flexWrap: 'wrap' } : {}), children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
     ...(right.length ? [Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: joined(right, left.length) })] : []),
   ] })
   // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's
   const fixRows = preview ? [] : await fixLineRows($, els, width).catch(() => [])
-  return [...(preview ? [] : await lineRows($, els, width)), ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), bar]
+  return [...(preview ? [] : await lineRows($, els, width, pressOf)), ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), bar]
 }
 
 /** The failure line: what failed, whole, in red, or a notice. A key it names (`Press x to try again`) is a click
  *  too, which presses that key as the prompt would take it (hooks/keys.ts pressKey); esc and the keys of a pane are
- *  not, as no click at the prompt can press them. */
-async function lineRows($: Engine, els: Any, width: number): Promise<Any[]> {
+ *  not, as no click at the prompt can press them. An item of the bar it quotes (`click “r coverage”`) is a click that
+ *  does what a click on that item does (`named`: the bar's presses by their words). */
+async function lineRows($: Engine, els: Any, width: number, named: Map<string, () => unknown> = new Map()): Promise<Any[]> {
   const { Box, Button, Text } = els
   const fail = await failLineNow($)
-  if (!fail) return []
+  if (!fail || fail.hint !== undefined) return []
   const look = fail.kind === 'failed' ? { color: 'error' } : { color: 'warning' }
   const words = fail.kind === 'failed' ? `× ${fail.text.replace(/^[×!]\s*/, '')}` : fail.text
-  const parts = keyedWords(words)
-  if (!parts.some(p => p.key)) return [Box({ key: 'fail-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [Text({ key: 'fail-text', ...look, wrap: 'wrap', children: words })] })]
+  const parts = pressedWords(words, named)
+  if (!parts.some(p => p.key || p.press)) return [Box({ key: 'fail-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [Text({ key: 'fail-text', ...look, wrap: 'wrap', children: words })] })]
   // with a key to press: wrapped here, word by word, so its press stands among the words (a Text holds no Button)
   const lines: Any[][] = [[]]
   let used = 0
   parts.forEach((p, i) => {
-    const pieces = p.key ? [p.s] : p.s.split(/(?<= )/)
+    const pieces = p.key || p.press ? [p.s] : p.s.split(/(?<= )/)
     pieces.forEach((w, j) => {
       if (used && used + len(w.trimEnd()) > width) { lines.push([]); used = 0 }
-      if (!used && !p.key) w = w.trimStart()
+      if (!used && !p.key && !p.press) w = w.trimStart()
       if (!w) return
       used += len(w)
-      lines[lines.length - 1]!.push(p.key
+      lines[lines.length - 1]!.push(p.press
+        ? Button({ key: `fail-item-${i}`, plain: true, label: p.s.replace(/[“”]/g, ''), hover: quiet(`fail-item-${i}`), onPress: p.press, children: [Text({ ...look, bold: true, underline: true, children: w })] })
+        : p.key
         ? Button({ key: `fail-key-${i}`, plain: true, label: `press ${p.key}`, hover: quiet(`fail-key-${i}`), onPress: () => pressKey($, p.key!), children: [Text({ ...look, bold: true, underline: true, children: w })] })
         : Text({ key: `fail-w-${i}-${j}`, ...look, children: w }))
     })
   })
   const text = Box({ key: 'fail-text', flexDirection: 'column', children: lines.map((l, k) => Box({ key: `fail-row-${k}`, flexDirection: 'row', children: l })) })
   return [Box({ key: 'fail-line', flexDirection: 'row', width, children: [text] })]
+}
+
+/** A line's words cut at each item of the bar it quotes (“r coverage”, a press in `named`, or an item whose words
+ *  begin with the quote) and at each key it tells the person to press (keyedWords). */
+export function pressedWords(s: string, named: Map<string, () => unknown>): { s: string; key?: string; press?: () => unknown }[] {
+  const out: { s: string; key?: string; press?: () => unknown }[] = []
+  let at = 0
+  for (const m of s.matchAll(/“([^”]+)”/g)) {
+    const q = m[1]!
+    const press = named.get(q) ?? [...named].find(([w]) => w.startsWith(`${q} `))?.[1]
+    if (!press) continue
+    if (m.index! > at) out.push(...keyedWords(s.slice(at, m.index)))
+    out.push({ s: m[0], press })
+    at = m.index! + m[0].length
+  }
+  if (at < s.length) out.push(...keyedWords(s.slice(at)))
+  return out
 }
 
 /** A line's words cut at each key it tells the person to press (`Press x`, `press 0`): the key alone is its own part. */

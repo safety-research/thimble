@@ -26,9 +26,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { framesIn } from '../cards/draw'
+import { framesIn, noteFrames } from '../cards/draw'
 import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
-import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, pendingSpans } from '../explain/seam'
+import { EXPLAIN_KEYS, HEADS_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, headsBar, headsKey, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { citeBar, citeKey, citeShown } from '../marks/cite'
@@ -66,7 +66,7 @@ export type MarkRef = { row: string; kind: 'citation'; n: number } | { row: stri
  *  import modules that come back here through the card tool, so a list made as this module loads could read a seam's
  *  keys before its module set them.) */
 export function restoredKeys(): string[] {
-  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...HEADS_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
 }
 
 const safe = async <T>(p: Promise<T>, none: T): Promise<T> => {
@@ -186,18 +186,18 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
     ...tray,
     ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => !(holds && x.focus)),
     ...items(await safe(explainBar($, on, preview), []), preview),
+    ...items(await safe(headsBar($, on, preview), []), preview),
     ...items(await safe(citeBar($, on, preview), []), preview),
   ]
 }
 
 /** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
  *  claims and the side threads (the left names what acts on an answer). While c cites the selected words (`c cite` at
- *  the left), the claims' item shows without its key, so each key is named once. */
+ *  the left), the claims' item steps aside until the words are cited or let go, so c names one thing. */
 export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const citing = preview ? on('cite') : await safe(citeShown($), false)
-  const claims = items(await safe(claimsBar($, on, preview), []), preview)
   return [
-    ...(citing ? claims.map(({ key: _key, ...x }) => x) : claims),
+    ...(citing ? [] : items(await safe(claimsBar($, on, preview), []), preview)),
     ...items(await safe(threadsBar($, on, preview), []), preview),
   ]
 }
@@ -214,6 +214,7 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(squeezeKey($, key, until), null))
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
+    ?? (await safe(headsKey($, key, until), null))
     ?? (await safe(citeKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
@@ -230,8 +231,12 @@ export const registerAnswerView: Register = on => {
       const r = await below()
       if (e.props.isSummary) return r
       const els = $.ui.resolve(e) as Any
-      const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3), async (t, rows, o) => (featureOn('cards') ? framesIn($, e, t, rows, o) : {}))
-      return tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
+      const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
+      const tail = await underAll($, els, e.requestId, cols, async (t, rows, o) => (featureOn('cards') ? framesIn($, e, t, rows, o) : {}))
+      const drawn = tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
+      // where the row's cards stand in it, so a card's keys go to it only while the screen shows it
+      if (featureOn('cards')) noteFrames($, drawn, cols, e.props?.onScreen)
+      return drawn
     } catch {
       return below()
     }

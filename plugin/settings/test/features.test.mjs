@@ -5,23 +5,25 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { RETIRED, SWITCHES, choiceOf, citationsFrom, claudeCites, featureOn, lensesAfterReply, noteChange, setOptions, switchesFrom } from '../features.mjs'
+import { DEFAULTS, DEFAULTS_FIELD, RETIRED, defaultsFrom, SWITCHES, choiceOf, citationsFrom, claudeCites, featureOn, lensesAfterReply, minimalOn, PRESET, atPreset, currentValues, noteChange, noteDefaults, setOptions, switchesFrom } from '../features.mjs'
 
 test("the manifest's userConfig is the features, each on by default and turned off by an option; the observer's look runs while a feature one of its lenses serves is on", () => {
   // the manifest's userConfig is the features: one boolean each, with its name, its words and its default
   {
     const manifest = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
     // the fields Citations replaced stay last, so a value saved under them still reaches the plugin
-    assert.deepEqual(Object.keys(manifest.userConfig), [...SWITCHES.map(s => s.key), ...Object.keys(RETIRED)])
-    assert.deepEqual(SWITCHES.map(s => s.key), ['citations', 'cards', 'squeezeAnswers', 'catchUp', 'explain', 'details', 'claimsMode', 'labels', 'coverage'])
+    assert.deepEqual(Object.keys(manifest.userConfig), [...SWITCHES.map(s => s.key), ...Object.keys(RETIRED), ...Object.keys(DEFAULTS_FIELD)])
+    assert.deepEqual(SWITCHES.map(s => s.key), ['minimal', 'citations', 'cards', 'squeezeAnswers', 'catchUp', 'explain', 'details', 'claimsMode', 'labels', 'coverage'])
     for (const s of SWITCHES) {
       const kind = s.choices ? { type: 'string', options: s.choices } : { type: 'boolean' }
       assert.deepEqual(manifest.userConfig[s.key], { ...kind, title: s.title, description: s.does, default: s.default })
       // a feature with modes says what each one gives
       if (s.choices) assert.deepEqual(Object.keys(s.says), s.choices)
     }
-    for (const [k, f] of Object.entries(RETIRED)) assert.deepEqual(manifest.userConfig[k], f)
-    assert.equal(SWITCHES.find(s => s.key === 'claimsMode').title, 'Claims')
+    for (const [k, f] of Object.entries({ ...RETIRED, ...DEFAULTS_FIELD })) assert.deepEqual(manifest.userConfig[k], f)
+    // the person reads Squeeze as Rewrite and Claims as Evidence; the keys stay, so a saved setting still applies
+    assert.equal(SWITCHES.find(s => s.key === 'squeezeAnswers').title, 'Rewrite')
+    assert.equal(SWITCHES.find(s => s.key === 'claimsMode').title, 'Evidence')
     assert.deepEqual(SWITCHES.find(s => s.key === 'claimsMode').choices, ['auto', 'on demand', 'off'])
   }
   // the heads-ups' switch is named as the tray and the threads name what it gives, and keeps its stored key, so a
@@ -47,10 +49,14 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('cards'), true)
     setOptions({})
   }
-  // Citations: auto cite by default; Claude cites in the two auto modes; c on selected words is manual's; a value outside them is the default
+  // Citations: auto cite + verify by default; Claude cites in the two auto modes, c on selected words in manual; a value
+  // outside them is the default
   {
     setOptions({})
-    assert.equal(choiceOf('citations'), 'auto cite')
+    assert.equal(choiceOf('citations'), 'auto cite + verify')
+    assert.equal(claudeCites(), true)
+    assert.equal(featureOn('cite'), false)
+    setOptions({ citations: 'auto cite' })
     assert.equal(claudeCites(), true)
     assert.equal(featureOn('cite'), false)
     setOptions({ citations: 'auto cite + verify' })
@@ -64,7 +70,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(claudeCites(), false)
     assert.equal(featureOn('citations'), false)
     setOptions({ citations: 'sometimes' })
-    assert.equal(choiceOf('citations'), 'auto cite')
+    assert.equal(choiceOf('citations'), 'auto cite + verify')
     setOptions({})
   }
   // a value saved under the retired fields stands while Citations holds its default; a Citations the person sets wins
@@ -75,6 +81,8 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(citationsFrom({ marks: true, citationChecks: 'on demand' }), null)
     setOptions({ citations: 'auto cite', marks: false })
     assert.equal(choiceOf('citations'), 'off')
+    setOptions({ citations: 'auto cite + verify', marks: false })
+    assert.equal(choiceOf('citations'), 'off')
     setOptions({ citations: 'manual', marks: false })
     assert.equal(choiceOf('citations'), 'manual')
     setOptions({ marks: false })
@@ -83,15 +91,17 @@ test("the manifest's userConfig is the features, each on by default and turned o
     setOptions({})
   }
   // the look after each reply runs while a feature one of its lenses serves is on; the claims join it only when Claims
-  // is auto (on demand by default, a value outside its modes too); Claims off is no claims, and the old Claims switch
-  // saved off stands for it
+  // is auto (auto by default, a value outside its modes too); Claims off is no claims, and the old Claims switch saved
+  // off stands for it
   {
     setOptions({})
     assert.equal(featureOn('observer'), true)
-    assert.equal(choiceOf('claimsMode'), 'on demand')
+    assert.equal(choiceOf('claimsMode'), 'auto')
     assert.equal(featureOn('claims'), true)
+    assert.equal(lensesAfterReply('claims'), true)
+    setOptions({ claimsMode: 'on demand' })
     assert.equal(lensesAfterReply('claims'), false)
-    setOptions({ explain: false, details: false })
+    setOptions({ explain: false, details: false, claimsMode: 'on demand' })
     assert.equal(featureOn('observer'), false)
     setOptions({ explain: false, details: false, claimsMode: 'auto' })
     assert.equal(featureOn('observer'), true)
@@ -103,7 +113,56 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(choiceOf('claims'), 'off')
     assert.equal(featureOn('claims'), false)
     setOptions({ claimsMode: true })
+    assert.equal(choiceOf('claimsMode'), 'auto')
+    setOptions({})
+  }
+  // no default moves now: a value saved at an old default (auto cite, 0.10.3's) stays, before and after the first
+  // session notes the defaults; and a value at an old default still counts as unset for a retired field's move
+  {
+    assert.deepEqual(defaultsFrom({ citations: 'auto cite' }), {})
+    assert.deepEqual(defaultsFrom({ claimsMode: 'on demand' }), {})
+    setOptions({ citations: 'auto cite' })
+    noteDefaults()
+    assert.equal(choiceOf('citations'), 'auto cite')
+    setOptions({ claimsMode: 'on demand' })
+    noteDefaults()
     assert.equal(choiceOf('claimsMode'), 'on demand')
+    setOptions({ claimsMode: 'on demand', claims: false })
+    assert.equal(choiceOf('claimsMode'), 'off')
+    setOptions({})
+  }
+  // Minimal is a preset: its modes (PRESET) keep every lens from the look after each reply, Claude from citing, and the
+  // claims waiting for f; h acts while Heads-ups is on demand. Explainers and Heads-ups saved as the switches they were
+  // read as auto (on) and off (off)
+  {
+    setOptions({})
+    assert.equal(minimalOn(), false)
+    assert.equal(choiceOf('explain'), 'auto')
+    assert.equal(featureOn('heads'), false)
+    assert.equal(atPreset({}), false)
+    setOptions({ minimal: true, ...PRESET })
+    assert.equal(minimalOn(), true)
+    assert.equal(atPreset(currentValues()), true)
+    assert.equal(featureOn('observer'), false)
+    assert.equal(lensesAfterReply('explain'), false)
+    assert.equal(lensesAfterReply('claims'), false)
+    assert.equal(claudeCites(), false)
+    assert.equal(featureOn('cite'), true)
+    assert.equal(featureOn('explain'), true)
+    assert.equal(featureOn('heads'), true)
+    assert.equal(featureOn('cards'), true)
+    // h is Heads-ups' on demand, Minimal or not
+    setOptions({ details: 'on demand' })
+    assert.equal(featureOn('heads'), true)
+    assert.equal(lensesAfterReply('details'), false)
+    assert.equal(lensesAfterReply('explain'), true)
+    setOptions({ details: 'auto' })
+    assert.equal(featureOn('heads'), false)
+    assert.equal(lensesAfterReply('details'), true)
+    setOptions({ explain: true, details: false })
+    assert.equal(choiceOf('explain'), 'auto')
+    assert.equal(choiceOf('details'), 'off')
+    assert.equal(featureOn('details'), false)
     setOptions({})
   }
   // a mode saved under its old name stands for the new one: auto cite + check is auto cite + verify

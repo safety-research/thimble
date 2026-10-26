@@ -5,7 +5,10 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
 import { busyWhile } from '../bar/busy'
-import { failNotice, noticeLine, promptTyped } from '../bar/notice'
+import { INTRO, INTRO_MS } from '../bar/intro'
+import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
+import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
+import { setOptions } from '../settings/features.mjs'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -83,7 +86,7 @@ test('after an answer the bar names v, coverage and the labels; r opens the cove
   await w.clock.advance(100)
   const line = textOf(await $.ui.render(BAND))
   expect(line).toContain('thimble')
-  expect(line).toContain('v card')
+  expect(line).toContain('v visualize')
   expect(line).toContain('r coverage 43% (3/7 files)')
   expect(line).toContain('l 2 labels')
 
@@ -158,20 +161,20 @@ function stateOnly(state: Record<string, unknown>): Any {
 test('each switch takes its items off the bar, and v waits while a design runs', async () => {
   const state: Record<string, unknown> = { answerRow: 'row-made-up', counts: { coverage: '43% (3/7 files)', labels: 2, gen: 1, error: null } }
   const all = (on: (k: string) => boolean) => barRows(stateOnly(state), ELS, 100, { on, preview: true }).then(textOf)
-  expect(await all(() => true)).toContain('v card')
+  expect(await all(() => true)).toContain('v visualize')
   expect(await all(() => true)).toContain('r coverage 43% (3/7 files) · l 2 labels')
   // Coverage and Labels each take their own item off the bar
   expect(await all(k => k !== 'coverage')).not.toContain('coverage')
   expect(await all(k => k !== 'coverage')).toContain('l 2 labels')
   expect(await all(k => k !== 'labels')).not.toContain('labels')
   expect(await all(k => k !== 'labels')).toContain('r coverage 43% (3/7 files)')
-  expect(await all(k => k !== 'cards')).not.toContain('v card')
+  expect(await all(k => k !== 'cards')).not.toContain('v visualize')
   // outside a preview, v shows only while no design runs
   state.designNow = 'd1'
   state['designs:d1'] = { status: 'running' }
-  expect(textOf(await barRows(stateOnly(state), ELS, 100, { on: () => true }))).not.toContain('v card')
+  expect(textOf(await barRows(stateOnly(state), ELS, 100, { on: () => true }))).not.toContain('v visualize')
   state['designs:d1'] = { status: 'done' }
-  expect(textOf(await barRows(stateOnly(state), ELS, 100, { on: () => true }))).toContain('v card')
+  expect(textOf(await barRows(stateOnly(state), ELS, 100, { on: () => true }))).toContain('v visualize')
   // a narrow bar drops the labels first, then the file counts
   const narrow = textOf(await barRows(stateOnly(state), ELS, 40, { on: () => true }))
   expect(narrow).toContain('r coverage 43%')
@@ -217,4 +220,174 @@ test('a long busy step keeps the bar to one row: its other steps go, then its wo
   expect(narrower).toContain('…')
   expect(narrower.length).toBeLessThanOrEqual(26)
   alive = false
+})
+
+test('while a busy step shows, a long hint and the busy step give way before the right loses its words', async () => {
+  let now = 0
+  const state: Record<string, unknown> = { counts: { coverage: '43% (3/7 files)', labels: 0, gen: 1, error: null } }
+  const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined }, clock: { now: async () => now, after: () => ({ cancel() {} }) } }
+  let alive = true
+  await busyWhile($, 'adding explainers', async () => alive)
+  now = 5000
+  hintLine($, 'select words in an answer and press e to explain them.', 'explain')
+  await new Promise(r => setTimeout(r, 5))
+  const rows = await barRows($, ELS, 90, { on: () => true })
+  expect(rows.length).toBe(1)
+  const band = textOf(rows)
+  expect(band).toContain('Hint: select')
+  expect(band).toContain('…')
+  expect(band).toContain('r coverage 43% (3/7 files)')
+  expect(band.length).toBeLessThanOrEqual(90)
+  alive = false
+})
+
+test('the first session starts with one plain line above the bar that says where the settings are and names no key; the first prompt takes it, and no later session or reload shows it again', async ($, on) => {
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  const band = textOf(await $.ui.render(BAND))
+  expect(band).toContain(INTRO)
+  // the keys are the bar's alone: the line repeats none of them
+  expect(band).not.toContain('v visualize · e explain')
+  expect(band).not.toContain('c cite')
+  await $.prompt.submit({ text: 'which runs failed?', origin: { kind: 'composer' } } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+  // a reload or a new session keeps it gone: it is kept for the install, not the session
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test('the line at the first session goes by itself after a few seconds, and stays gone after a reload', async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  expect(textOf(await $.ui.render(BAND))).toContain(INTRO)
+  await w.clock.advance(INTRO_MS - 1000)
+  expect(textOf(await $.ui.render(BAND))).toContain(INTRO)
+  await w.clock.advance(1000)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test('a hint above the bar goes by itself after a few seconds, or at the next key thimble takes; a failure stays', async () => {
+  const state: Record<string, unknown> = {}
+  let now = 0
+  const timers: { at: number; fn: () => void }[] = []
+  const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined } }
+  $.clock = { now: async () => now, after: (ms: number, fn: () => void) => { timers.push({ at: now + ms, fn }); return { cancel() {} } } }
+  const advance = async (ms: number) => {
+    now += ms
+    for (const t of timers.splice(0).filter(t => t.at <= now || !timers.push(t))) t.fn()
+    await new Promise(r => setTimeout(r, 5))
+  }
+  const shown = async () => textOf(await barRows($, ELS, 100, { on: () => true }))
+  hintLine($, 'select words in an answer and press e to explain them.', 'explain')
+  await advance(0)
+  expect(await shown()).toContain('Hint: select words in an answer')
+  await advance(HINT_MS - 1000)
+  expect(await shown()).toContain('Hint: select words in an answer')
+  await advance(1000)
+  expect(await shown()).not.toContain('select words in an answer')
+  hintLine($, 'nothing to step to yet.', 'tray')
+  await advance(0)
+  expect(await shown()).toContain('Hint: nothing to step to yet.')
+  await hintsGone($)
+  expect(await shown()).not.toContain('nothing to step to yet.')
+  failNotice($, 'The card did not draw.')
+  await advance(HINT_MS * 2)
+  await hintsGone($)
+  expect(await shown()).toContain('The card did not draw.')
+})
+
+test('a hint stands in the bar in place of its left keys, after `thimble`; the right stays, and a long hint is cut to the one row', async () => {
+  const state: Record<string, unknown> = { answerRow: 'row-made-up', counts: { coverage: '43% (3/7 files)', labels: 2, gen: 1, error: null }, designNow: 'd1', 'designs:d1': { status: 'done' } }
+  const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined } }
+  const bar = async (width: number) => barRows($, ELS, width, { on: () => true })
+  expect(textOf(await bar(100))).toContain('v visualize')
+  hintLine($, 'press s to rewrite the last answer shorter or longer.', 'remind:rewrite')
+  await new Promise(r => setTimeout(r, 5))
+  const rows = await bar(140)
+  expect(rows.length).toBe(1)
+  const band = textOf(rows)
+  expect(band).toContain('thimble  Hint: press s to rewrite the last answer shorter or longer.')
+  expect(band).not.toContain('v visualize')
+  expect(band).toContain('r coverage 43% (3/7 files) · l 2 labels')
+  // a hint too long for the row is cut, and the bar keeps to one row
+  hintLine($, `select words in an answer and press e to explain them, ${'and then some more words '.repeat(8)}`, 'explain')
+  await new Promise(r => setTimeout(r, 5))
+  const narrow = await bar(80)
+  expect(narrow.length).toBe(1)
+  const cutBar = textOf(narrow)
+  expect(cutBar).toContain('Hint: select words')
+  expect(cutBar).toContain('…')
+  expect(cutBar).toContain('r coverage')
+  expect(cutBar.length).toBeLessThanOrEqual(80)
+})
+
+test('the first session\'s hint says where the settings are, in the bar in place of its keys', async ($, on) => {
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  const band = textOf(await $.ui.render(BAND))
+  expect(band).toContain('thimble  Hint: click thimble for settings.')
+  expect(band.split('click thimble for settings.').length).toBe(2)
+})
+
+test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on, { introDone: true })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test('a how-to hint shows until the session used its feature; then it stays away', async () => {
+  const state: Record<string, unknown> = {}
+  const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined } }
+  await howTo($, 'explain', 'select a passage in an answer and press e to explain it.', 'explain')
+  await new Promise(r => setTimeout(r, 5))
+  expect(String((await failLineNow($))?.text)).toBe('select a passage in an answer and press e to explain it.')
+  await hintsGone($)
+  await hintUsed($, 'explain')
+  await howTo($, 'explain', 'select a passage in an answer and press e to explain it.', 'explain')
+  await new Promise(r => setTimeout(r, 5))
+  expect(await failLineNow($)).toBe(null)
+  // another feature's hint still shows
+  await howTo($, 'cite', 'select a passage in an answer and press c to verify the claim.', 'cite')
+  await new Promise(r => setTimeout(r, 5))
+  expect(String((await failLineNow($))?.text)).toContain('press c to verify')
+})
+
+test('after each answer one reminder of a feature on demand the session has not used; each once a session, none for auto or off', async () => {
+  const state: Record<string, unknown> = {}
+  const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined } }
+  const answer = async (): Promise<string | null> => {
+    await hintsGone($)
+    await remindAfterAnswer($)
+    await new Promise(r => setTimeout(r, 5))
+    const line = await failLineNow($)
+    return line ? String(line.text) : null
+  }
+  setOptions({ explain: 'on demand', details: 'on demand', citations: 'manual', squeezeAnswers: true })
+  try {
+    expect(await answer()).toBe('select a passage in an answer and press e to explain it.')
+    // h is used before its turn comes: the next answer skips it
+    await hintUsed($, 'heads')
+    expect(await answer()).toBe('select a passage in an answer and press c to verify the claim.')
+    expect(await answer()).toBe('press s to rewrite the last answer shorter or longer, more novice or more expert.')
+    // each was reminded once: no more this session
+    expect(await answer()).toBe(null)
+    // a failure showing stays; no reminder replaces it
+    for (const k of Object.keys(state)) delete state[k]
+    failNotice($, 'The card did not draw.')
+    await remindAfterAnswer($)
+    expect(String((await failLineNow($))?.text)).toBe('The card did not draw.')
+    // auto and off: nothing to remind of but the rewrite
+    for (const k of Object.keys(state)) delete state[k]
+    setOptions({ explain: 'auto', details: 'off', citations: 'auto cite', squeezeAnswers: true })
+    expect(await answer()).toBe('press s to rewrite the last answer shorter or longer, more novice or more expert.')
+    expect(await answer()).toBe(null)
+  } finally {
+    setOptions({})
+  }
 })

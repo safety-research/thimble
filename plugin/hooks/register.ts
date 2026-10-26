@@ -36,6 +36,7 @@
 import type { Register } from 'claude-code'
 
 import { registerBar } from '../bar/register'
+import { registerCardHead } from '../cards/head'
 import { registerCards } from '../cards/register'
 import { registerClaims } from '../claims/seam'
 import { registerExplain } from '../explain/seam'
@@ -80,6 +81,7 @@ export const register: Register = (on, options) => {
   registerDesigner(on, options)
   registerAnswerView(on, options)
   registerCards(on, options)
+  registerCardHead(on, options)
   registerMarks(on, options)
   registerLabels(on, options)
   registerLabelUse(on, options)

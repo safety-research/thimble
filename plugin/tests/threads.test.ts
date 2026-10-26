@@ -210,12 +210,12 @@ test('where no fork starts, the thread\'s own agent type answers; a card its age
   expect(dropped.drop).toContain('thread')
 })
 
-test('a thread the side pane cannot open says what to do, with no slash command; once it opens, that line goes', async () => {
+test('a thread the side pane cannot open says so in the failure line, with no slash command; once it opens, that line goes', async () => {
   const s = setup()
   const line = async () => String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text ?? '')
   s.$.ui.open = async () => ({ isPlaced: false })
   expect(await openThread(s.$, SCOPE)).toBe(false)
-  expect(await line()).toContain('Widen the terminal and ask again')
+  expect(await line()).toBe('Claude Code did not open the side thread here.')
   expect(await line()).not.toContain('/threads')
   // asked again where the pane opens: the thread opens and the line goes
   s.$.ui.open = async () => ({ isPlaced: true })

@@ -8,9 +8,12 @@
 // with the new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key), or
 // choiceOf(key) for a mode, when it acts.
 
+/** What Minimal does, as the settings pane says it under its row. */
+const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers, citations, heads-up, and claims only appear when you request them.'
+
 /** The features, in the order the settings pane lists them. `key`: the userConfig field; `title`: its name; `group`:
  *  the heading the pane lists it under, with the others of its group (Answers, Comments on an answer's words, Panes;
- *  a key keeps its name, so a saved setting still applies); `does`: one line on what the person gets
+ *  a key keeps its name, so a saved setting still applies); Minimal, first, has none: it stands over the others; `does`: one line on what the person gets
  *  and what it costs, the field's description (a test checks). `choices`: the modes of a feature that has more than on
  *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
  *  look runs while one such feature is on. `lensesIn`: the mode in which they join the look after each reply (Claims:
@@ -18,58 +21,71 @@
  *  gives (`on` and `off` for a switch), which the settings pane shows under the row for the one set. */
 export const SWITCHES = [
   {
-    key: 'citations', title: 'Citations', group: 'Answers', default: 'auto cite', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
-    does: 'auto cite + verify: Claude cites each claim you would check, and a second Claude verifies each citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press c to cite them. off: no citations.',
+    key: 'minimal', title: 'Minimal', default: false,
+    does: MINIMAL_SAYS,
+    says: { on: MINIMAL_SAYS, off: MINIMAL_SAYS },
+  },
+  {
+    key: 'citations', title: 'Citations', group: 'Answers', default: 'auto cite + verify', choices: ['auto cite + verify', 'auto cite', 'manual', 'off'],
+    does: 'auto cite + verify: Claude cites what each answer rests on, and a second Claude verifies each citation after each answer. auto cite: Claude cites, and a citation is verified when you open it, which spends fewer tokens. manual: select words and press c to cite them. off: no citations.',
     says: {
-      'auto cite + verify': 'Claude cites what its answer rests on; a second Claude verifies each citation right away.',
-      'auto cite': 'Claude cites what its answer rests on; a citation is checked when you open it.',
-      'manual': 'Nothing is cited until you select words and press c.',
+      'auto cite + verify': 'Claude cites what each answer rests on, and a second Claude verifies each citation.',
+      'auto cite': 'Claude cites what each answer rests on; a citation is verified when you open it.',
+      'manual': 'Select words and press c to cite them.',
       'off': 'No citations.',
     },
   },
   {
     key: 'cards', title: 'Cards', group: 'Answers', default: true,
-    does: 'Claude draws interactive cards, and v draws one of the last answer.',
-    says: { on: 'Claude draws charts and tables as cards inside the answer; v draws one of the last answer.', off: 'No cards.' },
+    does: 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.',
+    says: { on: 'Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.', off: 'No cards.' },
   },
   {
-    key: 'squeezeAnswers', title: 'Squeeze', group: 'Answers', default: true,
-    does: 's makes an answer shorter or longer, or writes it for another reader. One rewrite each time you ask.',
-    says: { on: 's rewrites an answer shorter, plainer or longer; 0 brings back the original.', off: 'No squeeze.' },
+    key: 'squeezeAnswers', title: 'Rewrite', group: 'Answers', default: true,
+    does: 'Press s to rewrite an answer shorter or longer, more novice or more expert, or in your own words. Press 0 for the original. One call each time you ask.',
+    says: { on: 'Press s to rewrite an answer shorter or longer, more novice or more expert. Press 0 for the original.', off: 'No rewrites.' },
   },
   {
     key: 'catchUp', title: 'Catch-up', group: 'Answers', default: true,
-    does: 'After replies to background work pile up, b sums them up in one short note, and 0 shows the replies again. One rewrite each time you ask.',
-    says: { on: 'b sums up the replies that came in while you were away.', off: 'No catch-up.' },
+    does: 'Press b to sum up the replies that came in while you were away, in one short note. Press 0 to see the replies again. One call each time you ask.',
+    says: { on: 'Press b to sum up the replies that came in while you were away.', off: 'No catch-up.' },
   },
   {
-    key: 'explain', title: 'Explainers', group: 'Comments', default: true, lenses: ['explain'],
-    does: 'Marks the terms you may not know; ] opens what each one means here. A small part of the call after each reply.',
-    says: { on: 'Words you may not know get a short explainer; select any words and press e for one.', off: 'No explainers.' },
-  },
-  {
-    key: 'details', title: 'Heads-ups', group: 'Comments', default: true, lenses: ['heads'],
-    does: 'Marks a detail of an answer that is easy to miss and changes what it means; ] opens its heads-up. A small part of the call after each reply.',
-    says: { on: 'Words that may mislead get a heads-up.', off: 'No heads-ups.' },
-  },
-  {
-    key: 'claimsMode', title: 'Claims', group: 'Panes', default: 'on demand', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
-    does: 'c opens what Claude and you claimed in the session, with why each holds and its sources. auto: the claims are extracted after each reply, the largest part of the call after it. on demand: f in the Claims pane extracts them, which spends fewer tokens. off: no Claims pane.',
+    key: 'explain', title: 'Explainers', group: 'Comments', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['explain'], lensesIn: 'auto',
+    does: 'auto: terms you may not know get a short explainer after each answer, a small part of the call after it; ] opens each one. Select words and press e for one. on demand: select words and press e for a short explainer. off: no explainers.',
     says: {
-      'auto': 'c lists the claims of the conversation with their evidence; they are extracted after each answer.',
-      'on demand': 'c lists the claims of the conversation with their evidence; press f in the pane to extract them, which spends fewer tokens.',
-      'off': 'No Claims pane.',
+      'auto': 'Terms you may not know get a short explainer after each answer. Select words and press e for one.',
+      'on demand': 'Select words and press e for a short explainer.',
+      'off': 'No explainers.',
+    },
+  },
+  {
+    key: 'details', title: 'Heads-ups', group: 'Comments', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['heads'], lensesIn: 'auto',
+    does: 'auto: details that may mislead get a heads-up after each answer, a small part of the call after it; ] opens each one. on demand: press h for heads-ups on the last answer. off: no heads-ups.',
+    says: {
+      'auto': 'Details that may mislead get a heads-up after each answer.',
+      'on demand': 'Press h for heads-ups on the last answer.',
+      'off': 'No heads-ups.',
+    },
+  },
+  {
+    key: 'claimsMode', title: 'Evidence', group: 'Panes', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
+    does: 'Press c to see the conversation\'s claims and their evidence. auto: claims are found after each answer, the largest part of the call after it. on demand: press f in the pane to find them, which spends fewer tokens. off: no Evidence pane.',
+    says: {
+      'auto': 'Press c to see the conversation\'s claims and their evidence. Claims are found after each answer.',
+      'on demand': 'Press c to see the conversation\'s claims and their evidence. Press f in the pane to find them.',
+      'off': 'No Evidence pane.',
     },
   },
   {
     key: 'labels', title: 'Labels', group: 'Panes', default: true,
-    does: 'The bar counts the labels Claude made, and l opens them. No model call.',
-    says: { on: 'l opens the labels Claude made, with their values and records.', off: 'No Labels pane.' },
+    does: 'Press l to see the labels Claude made, with their values and records. No model call.',
+    says: { on: 'Press l to see the labels Claude made, with their values and records.', off: 'No Labels pane.' },
   },
   {
     key: 'coverage', title: 'Coverage', group: 'Panes', default: true,
-    does: 'The bar shows how much of the data Claude has read, and r opens it by folder. No model call: thimble counts the files after each turn.',
-    says: { on: 'r shows which files Claude has read, by folder.', off: 'No Coverage pane.' },
+    does: 'Press r to see which files Claude has read, by folder. No model call: thimble counts the files after each turn.',
+    says: { on: 'Press r to see which files Claude has read, by folder.', off: 'No Coverage pane.' },
   },
 ]
 
@@ -85,15 +101,42 @@ const BY_KEY = new Map(SWITCHES.map(s => [s.key, s]))
 export const RETIRED = {
   marks: { type: 'boolean', title: 'Citations (old setting)', description: 'Replaced by Citations, which has its modes.', default: true },
   citationChecks: { type: 'string', title: 'Citation checks (old setting)', description: 'Replaced by Citations, which has its modes.', options: ['auto', 'on demand', 'off'], default: 'on demand' },
-  squeeze: { type: 'boolean', title: 'Squeeze and catch-up (old setting)', description: 'Replaced by Squeeze and Catch-up.', default: true },
+  squeeze: { type: 'boolean', title: 'Squeeze and catch-up (old setting)', description: 'Replaced by Rewrite and Catch-up.', default: true },
   counts: { type: 'boolean', title: 'Labels and coverage on the bar (old setting)', description: 'Replaced by Labels and Coverage.', default: true },
   squeezeCards: { type: 'boolean', title: 'Squeeze changes cards (old setting)', description: 'Removed: a squeeze may move or leave out a card.', default: true },
-  claims: { type: 'boolean', title: 'Claims (old setting)', description: 'Replaced by Claims, which has its modes.', default: true },
+  claims: { type: 'boolean', title: 'Claims (old setting)', description: 'Replaced by Evidence, which has its modes.', default: true },
 }
 
 /** Modes renamed since a value was saved under their old name, by feature: the old name stands for the new one, and
  *  the first session saves the new one (term.ts). */
-export const RENAMED = { citations: { 'auto cite + check': 'auto cite + verify' } }
+export const RENAMED = {
+  citations: { 'auto cite + check': 'auto cite + verify' },
+  // a switch until 0.10.4, now modes: on is auto, off is off
+  explain: { true: 'auto', false: 'off' },
+  details: { true: 'auto', false: 'off' },
+}
+
+/** A mode saved under its old name (or as the switch it was), by its new name; undefined when it has none. */
+export const renamedTo = (key, saved) => (typeof saved === 'string' || typeof saved === 'boolean' ? RENAMED[key]?.[String(saved)] : undefined)
+
+/** Defaults that moved, and the hidden field that says a person's settings have had them: the installer saves every
+ *  field's default, so a value at an old default cannot tell whether the person chose it. While `defaultsAt` is not
+ *  `DEFAULTS.at`, the first interactive session saves the new default where the old one stands and sets `defaultsAt`
+ *  (term.ts); a value the person sets afterwards stays. None moves now: a value saved at an old default stays, so
+ *  no one's settings change under them. `formerly`: the defaults a release had before (0.10.3: Citations auto cite,
+ *  Evidence on demand), which the installer may have saved, so a value at one still counts as unset (atDefault). */
+export const DEFAULTS = { at: '0.10.4', moved: {}, formerly: { citations: ['auto cite'], claimsMode: ['on demand'] } }
+export const DEFAULTS_FIELD = { defaultsAt: { type: 'string', title: 'Defaults seen (internal)', description: 'The thimble version whose defaults these settings have had.', default: '' } }
+
+/** The values the moved defaults change in `values`, by feature: {} once `defaultsAt` says they were applied. */
+export function defaultsFrom(values) {
+  if (!values || typeof values !== 'object' || values.defaultsAt === DEFAULTS.at) return {}
+  return Object.fromEntries(Object.entries(DEFAULTS.moved).filter(([k, m]) => values[k] === m.from).map(([k, m]) => [k, m.to]))
+}
+
+/** Whether a setting's value is its default: today's, or one it had before (DEFAULTS), which the installer may have
+ *  saved. */
+export const atDefault = (key, v) => v === undefined || v === BY_KEY.get(key)?.default || v === DEFAULTS.moved[key]?.from || (DEFAULTS.formerly[key] ?? []).includes(v)
 
 /** Names modules ask featureOn by, for a feature kept under another key: Claims (`claims`) is the field `claimsMode`. */
 const ALIAS = { claims: 'claimsMode' }
@@ -127,7 +170,7 @@ export function movedFrom(values) {
 export function settled(values) {
   const base = values && typeof values === 'object' ? values : {}
   const moved = Object.fromEntries(Object.keys(movedFrom(base)).map(k => [k, valueIn(base, k)]))
-  const renamed = Object.fromEntries(Object.entries(RENAMED).filter(([k, names]) => names[base[k]]).map(([k, names]) => [k, names[base[k]]]))
+  const renamed = Object.fromEntries(Object.keys(RENAMED).filter(k => renamedTo(k, base[k])).map(k => [k, renamedTo(k, base[k])]))
   return { ...base, ...renamed, ...moved, ...Object.fromEntries(Object.entries(RETIRED).map(([k, f]) => [k, f.default])) }
 }
 
@@ -143,21 +186,30 @@ export function setOptions(options) {
 export function valueIn(values, key) {
   const s = BY_KEY.get(key)
   const saved = values ? values[key] : undefined
-  const v = RENAMED[key]?.[saved] ?? saved
+  const v = renamedTo(key, saved) ?? saved
   // a setting at its default, while a retired field still holds a value saved before it, stands for that value
   const moved = movedFrom(values)
-  if (s && key in moved && (v === undefined || v === s.default)) return moved[key]
+  if (s && key in moved && atDefault(key, v)) return moved[key]
   if (s?.choices) return s.choices.includes(v) ? v : s.default
   return typeof v === 'boolean' ? v : s ? s.default : true
 }
 
+/** Minimal: the modes it sets, so nothing runs after a reply and each of these waits to be asked. Turning it on saves
+ *  them (settings/term.ts), and the rows show them; a row changed away from them turns it off. */
+export const PRESET = { citations: 'manual', explain: 'on demand', details: 'on demand', claimsMode: 'on demand' }
+
+/** Whether `values` hold Minimal's modes. */
+export const atPreset = values => Object.entries(PRESET).every(([k, v]) => valueIn(values, k) === v)
+
 /** The features as `values` holds them, as a function of a key: whether each is on (a feature with modes is on unless
- *  its mode is `off`). The settings pane asks it with the values Claude Code holds now; featureOn is it with the plugin's
- *  options. */
+ *  its mode is `off`), as Minimal leaves it. The settings pane asks it with the values Claude Code holds now; featureOn
+ *  is it with the plugin's options. */
 export function switchesFrom(values) {
   return key => {
     // c on selected words, a citation the analyst asks for, is Citations' manual mode
     if (key === 'cite') return valueIn(values, 'citations') === 'manual'
+    // h, heads-ups on an answer the person asks for, is Heads-ups' on demand
+    if (key === 'heads') return valueIn(values, 'details') === 'on demand'
     const v = valueIn(values, ALIAS[key] ?? key)
     return typeof v === 'string' ? v !== 'off' : v
   }
@@ -175,7 +227,12 @@ export function noteChange(key, value) {
   if (!s || !(s.choices ? s.choices.includes(value) : typeof value === 'boolean')) return
   // a value the retired fields saved moves first, so the setting the person changes stands over it (term.ts moves
   // them too)
-  current = { ...settled(current), [key]: value }
+  current = { ...settled(current), defaultsAt: DEFAULTS.at, [key]: value }
+}
+
+/** The moved defaults saved in this load's copy, after term.ts saved them in Claude Code's. */
+export function noteDefaults() {
+  current = { ...current, ...defaultsFrom(current), defaultsAt: DEFAULTS.at }
 }
 
 /** The retired fields' values moved in this load's copy, after term.ts moved them in Claude Code's. */
@@ -195,6 +252,9 @@ export function lensesAfterReply(key) {
   const s = BY_KEY.get(ALIAS[key] ?? key)
   return switchesFrom(current)(key) && (!s?.lensesIn || valueIn(current, s.key) === s.lensesIn)
 }
+
+/** Whether Minimal is on: the modes it set (PRESET) stand. */
+export const minimalOn = () => valueIn(current, 'minimal') === true
 
 /** The values this load runs with now, the retired fields' included. */
 export const currentValues = () => ({ ...current })

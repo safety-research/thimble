@@ -39,7 +39,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failNotice, noticeLine } from '../bar/notice'
+import { failNotice } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
 import { tellOpened } from '../core/engaged'
@@ -57,7 +57,7 @@ import { checkOpened, launchRepair, repairOf } from '../marks/checker'
 import { highlighted, wrapCode } from '../marks/evidence'
 import { tableLines } from '../marks/table.mjs'
 import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '../marks/message.js'
-import { looksByWords } from '../marks/register'
+import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
@@ -161,8 +161,10 @@ async function shownOf($: Engine, row: string): Promise<{ text: string; marks: {
 /** The row's citations as it shows them: each with its number in the reply (0: one the check does not know). */
 async function citesOf($: Engine, row: string, shown: { text: string; marks: { start: number; end: number; words: string }[]; own: boolean; items?: MarkItem[] }): Promise<{ n: number; start: number; end: number; words: string }[]> {
   const items = shown.items ?? (await rowMarks($, row))?.items ?? []
-  const looks = shown.own ? shown.marks.map((_m, k) => ({ n: items[k]?.n ?? 0 })) : looksByWords(shown.marks, items, false)
-  return shown.marks.map((m, k) => ({ ...m, n: looks[k]?.n ?? 0 }))
+  const all = shown.own ? shown.marks.map((_m, k) => ({ n: items[k]?.n ?? 0, status: 'unchecked' as const })) : looksByWords(shown.marks, items, false)
+  // a quiet citation (Citations manual) is not shown, so ] passes it
+  const looks = quietLooks(all, items, shown.own)
+  return shown.marks.map((m, k) => ({ ...m, n: looks[k]?.quiet ? 0 : looks[k]?.n ?? 0 }))
 }
 
 /** The explainers and heads-ups on the row's words (explain/seam.ts), each with its kind. */
@@ -393,7 +395,7 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
     const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
     next = restStop(pool, dir) as Stop | null
   }
-  if (!next) { noticeLine($, 'Nothing to step to yet.', 'tray'); return }
+  if (!next) return
   if (next.card) await standOn($, next.row, next.card)
   else await openMark($, refOf(next) as Frame, { reveal: true })
 }
@@ -444,6 +446,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   const stand = tray ? null : k.stand
   if (key === ']' || key === '[') {
     if (!tray && !stand && (await chipsOpen($))) return null
+    // with nothing to step to, ] and [ are the prompt's
+    if (!tray && !stand && !(await allStops($)).length) return null
     return { now: () => stepMark($, key === ']' ? 1 : -1) }
   }
   if (stand) {
@@ -706,7 +710,7 @@ function drawUnits(els: Any, units: Unit[]): Any[] {
 export function evidenceOpener($: Engine, f: { row: string; n: number }): () => Promise<void> {
   return async () => {
     const placed = await openPane($, 'evidence', { row: f.row, n: f.n }, `citation ${f.n}`).catch(() => true)
-    if (!placed) noticeLine($, 'Claude Code did not open the side pane here. The tray above still shows the cited line.', 'tray')
+    if (!placed) failNotice($, 'Claude Code did not open the citation\'s evidence here; the tray above still shows the cited line.', 'tray')
   }
 }
 

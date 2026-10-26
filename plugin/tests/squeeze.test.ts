@@ -6,9 +6,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { cardWidth } from '../cards/draw'
+import { treeRows } from '../core/trail.mjs'
 import { resetSqueeze } from '../squeeze/term'
 import Chips from '../squeeze/chips.tsx'
-import Rule from '../squeeze/rule.tsx'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -81,10 +81,10 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
 
-test('s opens the chips; ] writes a longer version in place, Claude hears it with the next prompt, and 0 brings the original back with no call', async ($, on) => {
+test('s opens the chips; ] writes a longer version in place, Claude hears it with the next prompt, and 0 brings the original back with no call', { options: { citations: 'auto cite' } }, async ($, on) => {
   const t = await setup($, on, ['The build failed on [3 of 12](#) runs: the cache key changed with the lockfile, and the mirror timed out on each fresh fetch.'])
   await t.turn('t1', LONG)
-  expect(await t.bar()).toContain('s squeeze')
+  expect(await t.bar()).toContain('s rewrite')
   expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
   const open = await t.bar()
   expect(open).toContain('[ shorter · ] longer')
@@ -100,9 +100,9 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(String(t.asked[0].prompt)).toContain('Length: longer')
   const shown = textOf(await $.ui.render(answer('row-t1', LONG)))
   expect(shown).toContain('on each fresh fetch')
-  // the chips close with s; the bar says squeeze as before, not the levels set
+  // the chips close with s; the bar says rewrite as before, not the levels set
   await t.press('s')
-  expect(await t.bar()).toContain('s squeeze')
+  expect(await t.bar()).toContain('s rewrite')
   expect(await t.bar()).not.toContain('longer')
   const next = await t.ask('and now?')
   expect(String((next.context ?? []).join('\n'))).toContain('now reads, for the analyst, as:')
@@ -122,12 +122,12 @@ test('with two replies since the last prompt, the bar names b apart from s; b wr
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
   await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
-  expect(await t.bar()).toContain('s squeeze · b catch up on 2 replies')
+  expect(await t.bar()).toContain('s rewrite · b catch up on 2 replies')
   // s opens the chips under the newest reply, with no call and no catch-up among them
   await t.press('s')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(0)
-  expect(await t.bar()).toContain('1–3 chip')
+  expect(await t.bar()).toContain('1–2 chip')
   expect(textOf((await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).tree)).not.toContain('atch up')
   await t.press('s')
   // b writes the catch-up
@@ -204,7 +204,7 @@ async function chipsDrawn($: Any, row: string, text: string, override: Any = {})
   return { client, tree: Chips({ ...client?.props.props, ...override } as never, surface as never), posts }
 }
 
-test('a citation opened over the open chips takes the keys: the bar names 0 once, 0 closes the tray and keeps the version, then the chips take 0 again', async ($, on) => {
+test('a citation opened over the open chips takes the keys: the bar names 0 once, 0 closes the tray and keeps the version, then the chips take 0 again', { options: { citations: 'auto cite' } }, async ($, on) => {
   const text = 'Of the [12 runs](#), [3 failed](#) on the [slow mirror](#).'
   const t = await setup($, on, ['Of all [12 nightly runs](#), exactly [3 of them failed](#), each on the [slow package mirror](#).'])
   await t.turn('t1', text)
@@ -255,13 +255,19 @@ test("a catch-up shows its replies' explainers on its words, and a card it place
   // columns at the right free
   expect(textOf(await $.ui.render(answer('row-t2', two)))).toContain('“Runs” is in the catch-up below')
   expect(nodes(host).find(n => n.type === 'Client' && String(n.props.module).endsWith('/client.tsx'))?.props.width).toBe(cardWidth(VIEW.columns - 4))
-  // its rule is a Client given the catch-up's whole height, which draws one ▎ per row of it, in a box that cuts it at
-  // the catch-up's last row
-  const rule = nodes(host).find(n => n.type === 'Client' && String(n.props.module).endsWith('/rule.tsx'))
-  expect(rule?.props.height).toBe('100%')
-  expect(nodes(host).find(n => n.props?.key === 'cu-rule')?.props.overflow).toBe('hidden')
-  const lines = (rows: number) => textOf(Rule({ color: 'purple' }, { elements: { Text: (p: Any) => ({ type: 'Text', props: p }) }, rows } as never)).split('\n')
-  expect(lines(7)).toEqual(Array(7).fill('▎'))
+  // its rule is drawn row by row, nothing placed absolutely (a box placed so kept a stale height after the width
+  // changed and drew past the catch-up): beside each row of its text, one ▎ per row the row takes, its gap too
+  const cu = nodes(host).find(n => n.props?.key === 'cu-row-t3')
+  expect(cu).toBeDefined()
+  expect(nodes(cu).some(n => n.props?.position === 'absolute')).toBe(false)
+  const ruled = nodes(cu).filter(n => n.type === 'Box' && n.props?.flexDirection === 'row' && String(n.props?.key ?? '').startsWith('cu-row-t3-b'))
+  expect(ruled.length).toBeGreaterThan(0)
+  for (const r of ruled) {
+    const [gutter, body] = [r.props?.children, r.children].find(Array.isArray) as Any[]
+    const w = Number(body.props.width)
+    expect(textOf(gutter).split('\n').every((l: string) => l === '▎')).toBe(true)
+    expect(textOf(gutter).split('\n').length).toBe(Math.max(1, treeRows(body, w)))
+  }
 })
 
 // The catch-up is read for explainers and heads-ups as an answer is: the look reads its words as what the analyst
@@ -287,7 +293,7 @@ test('a catch-up is read for explainers as any answer is: a term only it says ge
 // A catch-up words the replies' citations anew, and each reply numbers its citations from 1. Each citation of the
 // catch-up stands for the reply's citation that states the same claim: a press on a reworded one acts on that citation
 // (the tray stands on it), and citations of two replies light apart, each in its own hover group
-test("a catch-up's reworded citations: a press acts on the reply's citation with the same claim, and two replies' citations light apart", async ($, on) => {
+test("a catch-up's reworded citations: a press acts on the reply's citation with the same claim, and two replies' citations light apart", { options: { citations: 'auto cite' } }, async ($, on) => {
   const t = await setup($, on, ['Of all [12 nightly runs](#), [3 of them failed](#); the retry then passed on [the slow package mirror](#).'])
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'Of the [12 runs](#), [3 failed](#).', { text: 'why did it fail?', by: 'composer' })
@@ -316,7 +322,7 @@ test("a catch-up's reworded citations: a press acts on the reply's citation with
 })
 
 // A person opened an explainer of an older reply and the chips then opened under it: s squeezes the newest reply alone
-test('s opens the chips under the newest reply, after a mark of an older one was opened or { picked an older one', async ($, on) => {
+test('s opens the chips under the newest reply, after a mark of an older one was opened or { picked an older one', { options: { citations: 'auto cite' } }, async ($, on) => {
   const t = await setup($, on, [])
   await t.turn('t1', LONG)
   await t.turn('t2', 'The retry passed on the [slow mirror](#).')
@@ -370,18 +376,19 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   await t.turn('t1', LONG)
   await t.press('s')
   const at0 = await chipsDrawn($, 'row-t1', LONG)
-  expect(at0.client.props.props.items.map((c: Any) => c.ends)).toEqual([['shorter', 'longer'], ['facts', 'expert reading'], ['new', 'expert']])
+  expect(at0.client.props.props.items.map((c: Any) => c.ends)).toEqual([['shorter', 'longer'], ['novice', 'expert']])
   expect(textOf(at0.tree)).toContain('1 Length shorter ○●○○ longer · as written')
-  expect(textOf(at0.tree)).toContain('2 Interpretation facts ○●○ expert reading')
+  expect(textOf(at0.tree)).toContain('2 Background novice ○○●○ expert')
+  expect(textOf(at0.tree)).not.toContain('Interpretation')
   // a press on an end sets that level
-  expect(nodes(at0.tree).some(n => n.type === 'Button' && n.props.label === 'Background: new')).toBe(true)
-  // each of the bar's keys is a press: [ and ] each one way, and 1–3 picks the next chip
+  expect(nodes(at0.tree).some(n => n.type === 'Button' && n.props.label === 'Background: novice')).toBe(true)
+  // each of the bar's keys is a press: [ and ] each one way, and 1–2 picks the next chip
   const bar = nodes(await $.ui.render(above)).filter(n => n.type === 'Button').map(n => String(n.props.label))
-  expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–3 chip', '+ your own']))
+  expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–2 chip', '+ your own']))
   const pressBar = async (k: string) => { const ui = await $.ui.mount(above); await ui.press({ key: k }); await ui.unmount() }
   await pressBar('bar-sq-pick')
-  expect(await t.bar()).toContain('[ facts · ] interpretation')
-  await t.press('3')
+  expect(await t.bar()).toContain('[ more novice · ] more expert')
+  await t.press('2')
   await t.press('[')
   await t.press('[')
   await t.clock.advance(3200)
@@ -433,11 +440,11 @@ test('+ in the chips types a chip, and a key at the prompt (esc gave it the keys
   expect(await t.bar()).toContain('+ ▏ ↵ adds it · tab lets it go')
   await $.prompt.edit({ origin: { kind: 'composer' }, text: 'h', cursor: 1, start: 0, end: 0, inputText: 'h', key: { key: 'h' } } as never)
   expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.plus).toBe(null)
-  // + at the prompt: /squeeze in the box, and the bar asks what for; esc esc clears the box, and the bar lets it go
+  // + at the prompt: /rewrite in the box, and the bar asks what for; esc esc clears the box, and the bar lets it go
   await t.press('+')
-  expect(await t.bar()).toContain('squeeze for…')
+  expect(await t.bar()).toContain('rewrite for…')
   await $.prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } } as never)
-  expect(await t.bar()).not.toContain('squeeze for')
+  expect(await t.bar()).not.toContain('rewrite for')
 })
 
 test('the chips draw in one color: the frame, the keys, the picked chip, its dot and its level words in thimble\'s purple, no amber', async () => {

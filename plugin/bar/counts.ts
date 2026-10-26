@@ -91,7 +91,7 @@ function record(r: Ran, what: string, empty?: Any): Any {
     return JSON.parse(r.stdout)
   } catch {
     const said = r.stderr.trim().split('\n').slice(-1)[0]?.slice(0, 160)
-    throw new Error(said || (r.code ? `${what} stopped with exit code ${r.code}` : `${what} gave no record thimble could read`))
+    throw new Error(said || (r.code ? `${what} stopped with exit code ${r.code}` : r.cut ? `${what} gave a record longer than Claude Code reads (4 MiB)` : `${what} gave no record thimble could read`))
   }
 }
 

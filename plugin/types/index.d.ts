@@ -32,6 +32,9 @@ declare module 'claude-code' {
       /** the card a call of the card tool drew or changed, by the call's tool_use_id: { id } */
       cardCall: StateFamily<unknown>
 
+      // ---- a card's header (cards/head.ts)
+      /** a card's artifact, by card id: { card, status, agentId, until, url?, error? } */
+      cardArtifacts: StateFamily<unknown>
       // ---- v (designer/v.ts)
       /** a design v started, by its key: { key, anchorRow, agentId, status, at, until, error?, cards } */
       designs: StateFamily<unknown>
@@ -50,6 +53,10 @@ declare module 'claude-code' {
       paneView: StateFamily<unknown>
       /** the failure line or a notice, until the person's next prompt (bar/notice.ts) */
       failLine: { kind: 'failed' | 'notice'; text: string; about?: string } | null
+      /** the features the session used, whose how-to hints and reminders stop (bar/hints.ts) */
+      hintsUsed: string[]
+      /** the features a reminder named in the session, each once (bar/hints.ts) */
+      hintsReminded: string[]
 
       // ---- labels (labels/)
       /** goes up when a label changes (Claude's `thimble label` command, a wave of the model's reads, the person's
@@ -64,6 +71,8 @@ declare module 'claude-code' {
       pane: { kind: string; args: unknown; title?: string; escape?: boolean; rows?: number; trail?: { kind: string; args: unknown; title: string; rows?: number }[] } | null
       /** the row the settings pane picked (panes/settings.tsx), by its feature's key */
       settingsRow: string
+      /** the selection the pane held when it closed, and the ones e and c took, by row and words (core/selection.ts) */
+      selectionDone: { dropped?: string; explain?: string; cite?: string }
       /** whether thimble is off in this session (/thimble-off, settings/term.ts) */
       sessionOff: boolean
       /** the id of main's turn that runs, null when none runs (core/turn.ts) */

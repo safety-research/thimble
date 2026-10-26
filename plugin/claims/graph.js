@@ -2,7 +2,7 @@
 // the detail under it (the cluster chosen and its claims, or the claim picked), and where a claim was said. No `$`, no
 // DOM: pane.tsx draws what this returns with Claude Code's own elements, and the tests read it as text.
 //
-//   the head        at rest: Claims and how many (`no claims yet` before the first); `+N new`
+//   the head        at rest: Evidence and how many (`no claims yet` before the first); `+N new`
 //                   bold for a moment after claims came in. Once a cluster or a claim is chosen it goes (the pane's
 //                   top row says where back goes)
 //   the overview    at rest and with a cluster chosen, on top: the map, every cluster a loose group of solid dots in
@@ -1287,11 +1287,11 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false, passag
   return { head, graph, ...base, ...(panel ? scrolled(panel, room) : { panel: [], scroll: { top: 0, max: 0, room } }), cellRows: ch, order: drawn.map(nm => (nm.id === '' ? '-' : nm.id)) }
 }
 
-/** The head: Claims and how many (`no claims yet` before the first), and `+N new` for a moment
+/** The head: Evidence and how many (`no claims yet` before the first), and `+N new` for a moment
  *  after claims came in. */
 function headRuns(data, { narrow = false, fresh = 0 } = {}) {
   const n = data.total || 0
-  const out = [{ s: 'Claims', bold: true }]
+  const out = [{ s: 'Evidence', bold: true }]
   if (!n) out.push({ s: ' · no claims yet', tone: 'dim' })
   else out.push({ s: ` · ${n.toLocaleString('en-US')}${narrow ? '' : ` claim${n === 1 ? '' : 's'}`}`, tone: 'dim' })
   if (fresh) out.push({ s: '  ' }, { s: `+${fresh} new`, bold: true })

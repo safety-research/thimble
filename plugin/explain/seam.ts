@@ -26,10 +26,13 @@
 //                                      as the look's are; explaining(term) says while it is written, and
 //                                      pendingSpans draws its words teal from the press on
 //   explainKey($, key), explainBar     e at an empty prompt, `e explain` on the bar: an explainer of the words the
-//                                      analyst selected with the mouse ($.ui.selection, fullscreen layout only), on
-//                                      the answer they lie in, else the newest answer that holds them, opened in the
-//                                      tray. Words inside an explainer or a heads-up (or on it) open that one; words
+//                                      analyst selected with the mouse in Claude's words (core/selection.ts;
+//                                      fullscreen layout only), on the answer they lie in, else the newest answer
+//                                      that holds them, opened in the tray. Words inside an explainer or a heads-up (or on it) open that one; words
 //                                      over or across marks get one explainer, whose mark covers those it overlaps
+//   headsKey($, key), headsBar         h at an empty prompt, `h heads-ups` on the bar, while Minimal is on (nothing is
+//                                      marked by itself then): one look of the heads lens alone at the answer the
+//                                      keys act on (observer/observer.ts headsUpsNow), once per answer
 //   registerExplain                    the watch of the selection, which draws the bar again when one starts or ends
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
@@ -37,11 +40,13 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failCleared, failNotice, noticeLine } from '../bar/notice'
+import { howTo, hintUsed } from '../bar/hints'
+import { failCleared, failNotice, hintLine } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
-import { answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
+import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
+import { answerSelection, selectionUsed, usedBy } from '../core/selection'
 import { themeNow } from '../core/theme'
 import { tellOpened } from '../core/engaged'
 import { commentsText } from '../core/engaged.mjs'
@@ -50,7 +55,7 @@ import { readKept, writeKept } from '../core/env'
 import { sessionKey } from '../hooks/conversation'
 import type { Take } from '../hooks/keys'
 import { withoutMarks } from '../marks/message.js'
-import type { Look } from '../observer/observer'
+import { headsUpsNow, type Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { openTray } from '../tray/seam'
 import { askGloss } from './expand'
@@ -315,6 +320,7 @@ function explainOpen($: Engine, row: string, words: string): void {
     if (typeof got === 'string') failNotice($, got, 'explain')
     else {
       await failCleared($, 'explain')
+      await hintUsed($, 'explain')
       await openMark($, { row: got.row, kind: 'explain', id: got.id }, got)
     }
   })().catch(err => failNotice($, `The explainer was not written: ${String((err as Error)?.message || err).slice(0, 160)}`, 'explain'))
@@ -361,24 +367,23 @@ async function markOf($: Engine, row: string, words: string): Promise<(Gloss & {
 /** e, or a click on `e explain`: the words the analyst last selected with the mouse, explained in the tray, on the
  *  answer they lie in (else the newest answer that holds them). Words that are an explainer or a heads-up open it. */
 export async function explainSelection($: Engine): Promise<void> {
-  const sel = await $.ui.selection().catch(() => undefined)
-  explained = selKey(sel)
+  const sel = await answerSelection($)
+  await selectionUsed($, 'explain', sel)
   const { words, cut } = pickedWords(sel?.text ?? '')
   if (!words) {
-    noticeLine($, fullscreenNow() === false
-      ? 'Selecting words to explain needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).'
-      : 'Select words in an answer with the mouse first, then press e to explain them.', 'explain')
+    if (fullscreenNow() === false) hintLine($, 'selecting a passage needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).', 'explain')
+    else await howTo($, 'explain', 'select a passage in an answer and press e to explain it.', 'explain')
     return
   }
   await failCleared($, 'explain')
   const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
   const row = own ?? (await rowHolding($, words))
-  if (!row) { noticeLine($, 'No answer to explain words in yet: ask Claude something first.', 'explain'); return }
+  if (!row) { await howTo($, 'explain', 'ask Claude something, then select a passage in its answer and press e to explain it.', 'explain'); return }
   const mark = await markOf($, row, words)
-  if (mark) { await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return }
+  if (mark) { await hintUsed($, 'explain'); await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return }
   // the bar's busy line says what is written until the tray opens on it (expand.ts); a line here would say it twice.
   // Only a cut selection says so, since the busy line names just the words it explains
-  if (cut) noticeLine($, `The selection is long: the explainer covers its first ${words.length} characters.`, 'explain')
+  if (cut) hintLine($, `the passage is long: the explainer covers its first ${words.length} characters.`, 'explain')
   explainOpen($, row, words)
 }
 
@@ -389,20 +394,16 @@ export async function explainKey($: Engine, key: string, _until: number): Promis
   return { later: () => explainSelection($) }
 }
 
-/** The selection e last explained, by its row and words: Claude Code answers the last selection until the person
- *  selects again or sends their next prompt, so the bar stops naming e once e has explained it. */
-let explained: string | null = null
-const selKey = (sel: { text?: string; requestId?: string } | undefined) => `${sel?.requestId ?? ''}\n${sel?.text ?? ''}`
-
-/** Words selected that e has not explained yet. */
+/** Words selected that e has not explained yet: Claude Code answers the last selection until the person selects again
+ *  or sends their next prompt, so the bar stops naming e once e has explained it. */
 async function selectionWaits($: Engine): Promise<boolean> {
-  const sel = await $.ui.selection().catch(() => undefined)
-  return !!pickedWords(sel?.text ?? '').words && selKey(sel) !== explained
+  const sel = await answerSelection($)
+  return !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'explain', sel))
 }
 
 /** Whether words are selected now (the bar's `c cite` may stand while they are, marks/cite.ts). */
 export async function wordsSelected($: Engine): Promise<boolean> {
-  return !!pickedWords((await $.ui.selection().catch(() => undefined))?.text ?? '').words
+  return !!pickedWords((await answerSelection($))?.text ?? '').words
 }
 
 /** `e explain` on the bar while words are selected (only Claude Code's fullscreen layout reports a selection; elsewhere
@@ -414,6 +415,45 @@ export async function explainBar($: Engine, on: (key: string) => boolean, previe
   if (!(await selectionWaits($))) return []
   if (!(await answerRows($).catch(() => [])).length) return []
   return [{ id: 'explain', key: 'e', words: 'explain', press: () => explainSelection($) }]
+}
+
+// ------------------------------------------------------------------------------------------------ heads-ups on demand
+
+/** The bar's key that asks for heads-ups on an answer, while Minimal is on. */
+export const HEADS_KEYS = ['h']
+
+/** The answers h asked heads-ups for in this load: each once. */
+const headsAsked = new Set<string>()
+
+/** The answer h acts on now, while it has not asked for that one's heads-ups yet. */
+async function headsRow($: Engine): Promise<string | null> {
+  if (!featureOn('heads')) return null
+  const row = await actingRow($).catch(() => null)
+  return row && !headsAsked.has(row) ? row : null
+}
+
+async function askHeadsNow($: Engine, row: string): Promise<void> {
+  headsAsked.add(row)
+  $.ui.invalidate('ui.render')
+  if (!(await headsUpsNow($, row).catch(() => false))) {
+    headsAsked.delete(row)
+    failNotice($, 'thimble could not ask for heads-ups on this answer now. Press h to try again.', 'heads')
+  } else await hintUsed($, 'heads')
+}
+
+/** h at an empty prompt, while Minimal is on and an answer has no heads-ups asked for yet. */
+export async function headsKey($: Engine, key: string, _until: number): Promise<Take | null> {
+  if (!HEADS_KEYS.includes(key)) return null
+  const row = await headsRow($)
+  return row ? { later: () => askHeadsNow($, row) } : null
+}
+
+/** `h heads-ups` on the bar while h acts. The settings' preview shows it while Minimal is on. */
+export async function headsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  if (!on('heads')) return []
+  if (preview) return [{ id: 'heads', key: 'h', words: 'heads-ups' }]
+  const row = await headsRow($)
+  return row ? [{ id: 'heads', key: 'h', words: 'heads-ups', press: () => askHeadsNow($, row) }] : []
 }
 
 export const registerExplain: Register = on => {

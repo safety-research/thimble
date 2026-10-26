@@ -2,7 +2,7 @@
 // or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { keyedWords } from '../bar/bar'
+import { keyedWords, pressedWords } from '../bar/bar'
 import { closePane, drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 import { setOptions } from '../settings/features.mjs'
 
@@ -118,12 +118,16 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   s.$.ui.focus = async (a: Any) => { focused.push(a.key); return {} }
   await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
   await draw(s)
+  // Minimal first, then Citations and Cards
+  expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
+  await draw(s)
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('cards')
   await draw(s)
   expect(await scrollPane(s.$, { by: -1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
-  expect(focused).toEqual(['mode-cards-on', 'mode-citations-auto cite'])
+  expect(focused).toEqual(['mode-citations-auto cite + verify', 'mode-cards-on', 'mode-citations-auto cite + verify'])
   // the ring moving along the row picked (← →, tab) sets the choice it lands on; onto another row it lands on that
   // row's choice set, picks that row and changes nothing
   const set: Any[] = []
@@ -136,11 +140,19 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   const went: Any[] = []
   const next = async (e: Any) => { went.push(e.element); return {} }
   await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-citations-manual', origin: { kind: 'person' } }, next)
-  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
+  // (the first change also saves defaultsAt, settings/term.ts)
+  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
   await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-claimsMode-auto', origin: { kind: 'person' } }, next)
-  expect(set.length).toBe(1)
+  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(1)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('claimsMode')
   expect(went).toEqual(['mode-citations-manual', 'mode-claimsMode-on demand'])
+  // a click on a choice of another row sets it and picks that row, the ring on the choice now set: the tint and the
+  // ring stand on the row that changed
+  rows.labels = true
+  await nodes(await draw(s)).find(n => n.props?.key === 'mode-labels-off').props.onPress()
+  expect(set.at(-1)).toMatchObject({ key: 'thimble@inline.labels', value: false })
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('labels')
+  expect(focused.at(-1)).toBe('mode-labels-off')
   setOptions({})
 })
 
@@ -151,4 +163,16 @@ test('a key a failure line names is a part of its own, so a click presses it; es
   expect(keyedWords('Press 0 or pick the level again.').map(p => p.key ?? '')).toEqual(['', '0', ''])
   expect(keyedWords('This pane could not be drawn. Press esc, then open it again.').some(p => p.key)).toBe(false)
   expect(keyedWords('Press ctrl + x to hide it.').some(p => p.key)).toBe(false)
+})
+
+test('an item of the bar a failure line quotes is a part of its own with that item\'s press; a quote no item has stays words', async () => {
+  const coverage = () => 'coverage', labels = () => 'labels'
+  const named = new Map<string, () => unknown>([['r coverage 75% (3/4 files)', coverage], ['l 3 labels', labels]])
+  const parts = pressedWords('× r needs a wider terminal: widen the window to show the side pane, or click “r coverage”.', named)
+  expect(parts.map(p => p.s)).toEqual(['× r needs a wider terminal: widen the window to show the side pane, or click ', '“r coverage”', '.'])
+  expect(parts[1]!.press).toBe(coverage)
+  expect(pressedWords('l needs a wider terminal: widen the window to show the side pane, or click “l 3 labels”.', named)[1]!.press).toBe(labels)
+  expect(pressedWords('t needs a wider terminal: widen the window to show the side pane, or click “t 2 threads”.', named).some(p => p.press)).toBe(false)
+  // a key the line names is still a press of its own
+  expect(pressedWords('“r coverage” failed. Press x to try again.', named).map(p => p.key ?? (p.press ? 'item' : ''))).toEqual(['item', '', 'x', ''])
 })

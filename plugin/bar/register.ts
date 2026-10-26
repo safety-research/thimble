@@ -2,7 +2,7 @@
 //
 //   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
 //                aboveBar). /thimble-settings and a click on `thimble` open the
-//                settings; the person's next prompt takes the failure line; the counts at each load of the plugin and
+//                settings; the person's next prompt takes the failure line and the line at the first session's start (intro.ts); the counts at each load of the plugin and
 //                after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Each pane takes the keys its key row names (coverage's j k ↵ and r, the labels' number keys that
@@ -14,7 +14,9 @@ import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
-import { noticeLine, promptTyped } from './notice'
+import { introDone, introHint } from './intro'
+import { remindAfterAnswer } from './hints'
+import { failNotice, promptTyped } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -34,27 +36,29 @@ async function paneShows($: Engine, kind: string): Promise<boolean> {
 /** Coverage or the labels: open, or closed when the pane shows it. Each takes the keys, so the keys its key row names
  *  act in it, not in the prompt (coverage.tsx, labels/pane.tsx), and esc closes it. A pane a key opened that
  *  Claude Code did not place (a narrow terminal, core/pane.ts) is said in the bar, with the click that opens it. */
-async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void> {
+async function togglePane($: Engine, kind: 'coverage' | 'labels', byKey = false): Promise<void> {
   if (await paneShows($, kind)) { await closePane($); return }
   if (kind === 'coverage') void recount($).catch(() => undefined)
   const placed = kind === 'labels' ? await openLabels($) : await openPane($, kind, {}, TITLES[kind], { focus: true })
-  if (!placed) {
-    // the words the bar shows for it, which a click opens
-    const n = (await countsNow($))?.labels ?? 0
-    const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
-    noticeLine($, `Claude Code opens the ${kind} pane from a key only in a wider terminal. Click “${shown}” in the bar below to open it here.`, `pane:${kind}`)
-  }
+  if (placed) return
+  const name = TITLES[kind]
+  if (!byKey) { failNotice($, `Claude Code did not open the ${name} pane here.`, `pane:${kind}`); return }
+  // the words the bar shows for it, which a click opens
+  const n = (await countsNow($))?.labels ?? 0
+  const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
+  const key = kind === 'labels' ? 'l' : 'r'
+  failNotice($, `${key} needs a wider terminal: widen the window to show the side pane, or click “${key} ${shown}”.`, `pane:${kind}`)
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */
 export async function openSettings($: Engine): Promise<void> {
-  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) noticeLine($, 'Claude Code did not open the settings pane here. Type /thimble-settings to open it.')
+  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) failNotice($, 'Claude Code did not open the settings here. Type /thimble-settings to open them.', 'pane:settings')
 }
 
 /** r or l at an empty prompt, while the bar names it: its pane opens or closes once the word window closed. */
 export async function barKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
   if (!BAR_KEYS.includes(k) || !(await barKeys($)).has(k)) return null
-  return { later: () => togglePane($, k === 'r' ? 'coverage' : 'labels') }
+  return { later: () => togglePane($, k === 'r' ? 'coverage' : 'labels', true) }
 }
 
 export const registerBar: Register = on => {
@@ -80,6 +84,8 @@ export const registerBar: Register = on => {
     const r = await next(e)
     if (e.agentId === undefined) {
       $.clock.after(0, () => { void recount($).catch(() => undefined) })
+      // one reminder of a feature asked for on demand that the session has not used yet (hints.ts)
+      $.clock.after(0, () => { void remindAfterAnswer($).catch(() => undefined) })
     }
     return r
   }).catch(($, e, next) => next(e))
@@ -87,6 +93,7 @@ export const registerBar: Register = on => {
   // the person's own prompt: the failure line goes
   on('prompt.submit', { origin: { kind: /^(?:composer|bridge)$/ } }, async ($, e, next) => {
     if (!e.command) await promptTyped($).catch(() => undefined)
+    await introDone($).catch(() => undefined)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -96,7 +103,9 @@ export const registerBar: Register = on => {
       const els = $.ui.resolve(e) as Any
       const presses: BarPresses = { settings: () => openSettings($), pane: kind => togglePane($, kind) }
       const width = Math.max(20, e.props.bodyColumns)
-      const rows = await barRows($, els, width, { presses })
+      // the hint at the first session's start that says where the settings are (intro.ts), in the bar
+      const intro = await introHint($).catch(() => null)
+      const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
       // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
       // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off
       const room = Number(e.props.maxRows) > 0 ? Math.max(4, Number(e.props.maxRows) - rows.length - 2) : 0

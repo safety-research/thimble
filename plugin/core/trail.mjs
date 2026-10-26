@@ -32,10 +32,10 @@ export function crumbOf(kind, args) {
   switch (kind) {
     case 'claims':
       if (a.source) return { words: 'where it was said', depth: 3 }
-      if (a.open) return { words: 'evidence', depth: 3 }
+      if (a.open) return { words: 'sources', depth: 3 }
       if (a.claim) return { words: 'claim', depth: 2 }
       if (a.group != null && a.group !== '') return { words: 'cluster', depth: 1 }
-      return { words: 'claims', depth: 0 }
+      return { words: 'evidence', depth: 0 }
     // one label is one pane, whichever of its values, examples or definition shows: moving in it takes its place, so
     // esc never goes back to the label already open, only to all the labels; a field's edit stands over it, esc cancels
     case 'labels':
@@ -123,6 +123,34 @@ const known = new WeakMap()
 export function rowsKnown(el, rows) {
   if (el && typeof el === 'object' && typeof rows === 'number' && rows > 0) known.set(el, rows)
   return el
+}
+
+/** Where the elements `test` picks stand in a drawing laid out at `width` cells: each one's first row, counted from the
+ *  drawing's top as treeRows counts rows (a Client at the rows it reported). A card placed on a line of an answer's
+ *  text stands inside the answer, not at its end: what shows it on screen needs its own rows. */
+export function rowsAt(el, width, test) {
+  const out = []
+  const walk = (n, w, top) => {
+    if (n == null || typeof n !== 'object') return
+    if (Array.isArray(n)) { let at = top; for (const x of n) { walk(x, w, at); at += treeRows(x, w) } return }
+    if (test(n)) out.push({ el: n, row: top })
+    const p = n.props ?? {}
+    if (p.display === 'none' || n.type !== 'Box') return
+    const pad = v => (typeof v === 'number' ? v : 0)
+    const head = pad(p.marginTop ?? p.marginY ?? p.margin) + pad(p.paddingTop ?? p.paddingY ?? p.padding) + (p.borderStyle ? 1 : 0)
+    const inner = typeof p.width === 'number' ? Math.min(w, p.width) : w
+    const iw = Math.max(1, inner - (p.borderStyle ? 2 : 0) - pad(p.paddingLeft ?? p.paddingX ?? p.padding) - pad(p.paddingRight ?? p.paddingX ?? p.padding))
+    const cs = kids(n)
+    if (p.flexDirection === 'column' || p.flexDirection === 'column-reverse') {
+      let at = top + head
+      for (const c of cs) { walk(c, iw, at); at += treeRows(c, iw) }
+    } else if (p.flexWrap !== 'wrap') {
+      const fixed = cs.reduce((m, c) => m + (typeof c?.props?.width === 'number' ? c.props.width : 0), 0)
+      for (const c of cs) walk(c, typeof c?.props?.width === 'number' ? c.props.width : Math.max(1, iw - fixed), top + head)
+    }
+  }
+  walk(el, Math.max(1, Math.floor(width)), 0)
+  return out
 }
 
 export function treeRows(el, width) {

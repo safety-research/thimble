@@ -257,8 +257,13 @@ try:
 except (OSError, ValueError, KeyError, TypeError, StopIteration):
     sys.exit(0)  # no defaults to give: Claude Code installs the plugin with its own
 for k, v in (manifest.get("userConfig") or {}).items():
-    if "default" in v:
-        print(k + "=" + json.dumps(v["default"]))
+    d = v.get("default")
+    # --config takes the value as typed: a string bare (quotes would be kept as part of it), a boolean as true or
+    # false; it refuses an empty value, and one refused value drops them all, so an empty default stays unset
+    if isinstance(d, bool):
+        print(k + "=" + json.dumps(d))
+    elif d not in (None, ""):
+        print(k + "=" + str(d))
 ')
       claude plugin install thimble@thimble ${config[@]+"${config[@]}"}
     fi
