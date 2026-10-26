@@ -80,7 +80,7 @@ export async function rootHere($: Engine): Promise<string | null> {
   return (await holding(start)) || (cwd !== start ? holding(cwd) : null)
 }
 
-export type Ran = { code: number; stdout: string; stderr: string }
+export type Ran = { code: number; stdout: string; stderr: string; cut?: boolean }
 
 /** The session the person's own `thimble` commands run under (runThimble): its records are never Claude's, and its
  *  change feed is its own (core/feed.ts withPersonFeed). */
@@ -100,5 +100,6 @@ export async function runThimble($: Engine, root: string, args: string[], o: { s
     cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: session, THIMBLE_CONVERSATION: key }, timeoutMs: o.timeoutMs ?? 120000,
     ...(o.stdin != null ? { stdin: o.stdin } : {}),
   }).catch((err: unknown) => { throw new Error(runWhy(err)) })
-  return { code: r.exitCode ?? 1, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') }
+  // `cut`: its output went past what Claude Code reads of it (4 MiB), so a record in it is cut short
+  return { code: r.exitCode ?? 1, stdout: String(r.stdout || ''), stderr: String(r.stderr || ''), ...(r.isStdoutTruncated ? { cut: true } : {}) }
 }

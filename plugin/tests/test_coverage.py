@@ -260,3 +260,27 @@ def test_counting_a_wal_database_writes_nothing_beside_it(tmp_path: Path, monkey
     cov = CV.coverage(Store(d, session="s1"))
     assert cov["total"]["files"] == 1
     assert sorted(p.name for p in d.iterdir()) == before
+
+
+def test_a_corpus_of_thousands_of_folders_keeps_its_record_under_claude_codes_output_limit() -> None:
+    """Claude Code reads the first 4 MiB of a command's output: a trace corpus of thousands of small folders gave a
+    --json record past it, cut short, which the bar could not read. The folders keep what the pane reads, and the
+    deepest untouched ones fold into their parent folder until they fit, every file still counted."""
+    from kernel import cli as CLI
+
+    groups = [{"folder": "notes/", "files": 3, "touched": 2, "seen_files": 1, "rows": 9, "by_status": {"seen": 1}}]
+    for run in range(4):
+        for task in range(300):
+            for ep in range(3):
+                hit = (run, task, ep) == (0, 7, 0)
+                groups.append({"folder": f"runs/run-{run}/task-{task}/trial-1/episode-{ep}/", "files": 2,
+                               "touched": int(hit), "seen_files": int(hit), "rows": 40, "by_status": {"untouched": 2}})
+    room = 64_000
+    out = CLI.cover_groups(groups, room)
+    assert len(json.dumps(out, separators=(",", ":")).encode()) <= room
+    assert set(out[0]) == set(CLI.COVER_GROUP_KEYS)
+    # every file still counted, and the touched folder kept whole
+    assert sum(g["files"] for g in out) == sum(g["files"] for g in groups)
+    touched = {g["folder"]: g for g in out if g["touched"]}
+    assert set(touched) == {"notes/", "runs/run-0/task-7/trial-1/episode-0/"}
+    assert len(out) < len(groups) and all(g["folder"].count("/") < 5 for g in out if not g["touched"])
