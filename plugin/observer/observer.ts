@@ -139,6 +139,11 @@ function promptedBy(p: TurnPrompt): string {
 /** The messages a look reads, named so the fork finds each in the conversation: its kind, its turn, its first words. */
 export function messagesText(msgs: LookMsg[]): string {
   const one = (m: LookMsg) => {
+    // a catch-up is not in the session above: its words stand here, and it is what the analyst reads of the replies
+    if (m.catchUp) {
+      const n = m.catchUp.split('\n').length
+      return `A catch-up thimble wrote of Claude's messages since the analyst's last prompt (${n} line${n === 1 ? '' : 's'}). The analyst reads it below those messages, in place of reading them. It is not in the session above; these are its words:\n${cut(m.catchUp, 6000)}`
+    }
     const begins = oneLine(m.text, 140)
     const n = m.text.split('\n').length
     const lines = `${n} line${n === 1 ? '' : 's'}`
@@ -291,12 +296,10 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
     for (const id of [...new Set(batch.map(m => m.turnId))]) { const t = await turnOf($, id); if (t) turns.push(t) }
     const [objects, coverage] = await Promise.all([cardsNow($, turns), coverageNow($)])
     const st = { ...(await explainState($).catch(() => ({}))), ...(await claimsState($).catch(() => ({}))) }
-    // a message the person reads in another version (squeezed), or a catch-up of it and the replies before it: the
-    // look reads what they read
+    // a message the person reads in another version (squeezed): the look reads the version they read (a catch-up's
+    // words stand in its message's place, messagesText)
     const shownText = newest.catchUp ?? (await textView($, newest.row, newest.text)).text
-    const shown = newest.catchUp
-      ? `\nBelow the newest message the analyst reads a catch-up thimble wrote of the replies since their last message (${shownText.split('\n').length} lines), in place of reading those replies; this is what shows, and what you read for them:\n${cut(shownText, 6000)}\n`
-      : shownText !== newest.text ? `\nThe analyst reads the newest message squeezed (${shownText.split('\n').length} lines); this is what shows:\n${cut(shownText, 6000)}\n` : ''
+    const shown = !newest.catchUp && shownText !== newest.text ? `\nThe analyst reads the newest message squeezed (${shownText.split('\n').length} lines); this is what shows:\n${cut(shownText, 6000)}\n` : ''
     const vals = { MESSAGES: messagesText(batch), ROW: rowKeys(), SHOWN: shown, OBJECTS: objects, COVERAGE: coverage }
     const frame = await promptText($, 'observer')
     let p = await pass($, { frame, parts, msgs: batch, vals, st })
