@@ -58,7 +58,9 @@ export type ViewSpan = { start: number; end: number; look: SpanLook; label: stri
 type Mark = { start: number; end: number; words: string }
 
 export type MarkStatus = 'pending' | 'checking' | 'deferred' | 'verified' | 'corrected' | 'failed' | 'unchecked'
-export type MarkLook = { n: number; status: MarkStatus; shown?: string; narrowed?: boolean }
+/** `quiet`: a citation Claude wrote while Citations is manual (marks/register.ts quietLooks): plain words at rest, its
+ *  underline and tint under the pointer, and a click still opens it. */
+export type MarkLook = { n: number; status: MarkStatus; shown?: string; narrowed?: boolean; quiet?: true }
 
 export type MessageOpts = {
   text: string
@@ -199,6 +201,8 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     if (look?.status === 'corrected' && look.shown && look.narrowed) out.push(...narrowRuns(own, look.shown))
     else if (fixed && runsText(fixed) !== runsText(own)) out.push(...fixed)
     else out.push(...own)
+    // a quiet citation shows no sign, so it holds no room for one
+    if (look?.quiet) { k = e; continue }
     if (look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
     else if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
     else out.push({ s: '  ', mark: r.mark, tag: 'gap' })
@@ -256,7 +260,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   const tint = citeHover(id, look.status)
   if (r.tag === 'spin') p.color = accent()
   else if (r.tag) p.color = 'error'
-  else Object.assign(p, wordsLook(look.status, id))
+  else if (!look.quiet) Object.assign(p, wordsLook(look.status, id))
   // a span on the mark's words (a heads-up, an explainer, inside them or around them): its fill at rest under the
   // citation's underline, so both show. Its words are the span's press and hover group: an explainer or a heads-up
   // opens first, and ] goes on to the citation (a span comes before the citation it stands on, tray.ts). The
@@ -273,7 +277,7 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   }
   const label = `citation ${look.n}: ${look.shown ?? o.marks[r.mark as number]?.words ?? ''}`.slice(0, 120)
   // no inverse under the pointer (Claude Code inverts a plain Button): the tint shows the hover
-  const hover = r.tag ? { scope: tint.scope, inverse: false } : { ...tint, inverse: false }
+  const hover = r.tag ? { scope: tint.scope, inverse: false } : { ...tint, inverse: false, ...(look.quiet ? { underline: true } : {}) }
   return els.Button({ key, plain: true, label, hover, children: [els.Text(p)], onPress: () => o.onMark(r.mark as number) })
 }
 

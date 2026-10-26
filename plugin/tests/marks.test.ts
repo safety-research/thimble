@@ -10,6 +10,7 @@ import { failLineNow } from '../bar/notice'
 import { autoRepair, awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, checkOpened, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
 import { setOptions } from '../settings/features.mjs'
 import { marksIn, withRewrites } from '../marks/message.js'
+import { quietLooks } from '../marks/register'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { tempRun } from './stubs'
@@ -509,4 +510,36 @@ test("a card placed before a reply's first words draws beside no ●: the ● st
   // a reply that is its card alone keeps the ● beside it
   const alone = messageEl(ELS, { text: '[Edits by day](card:c0a1b2c3d4e5)', marks: [], looks: [], key: 'k', cols: 100, first: true, spin: '', cards: { c0a1b2c3d4e5: card }, onMark: () => undefined })
   expect(glyphOf((alone.props.children as Any[])[0])).toBe('●')
+})
+
+test("with Citations manual, the citations Claude wrote draw as plain words, underlined only under the pointer; words the analyst cited stay underlined", () => {
+  const items: Any[] = [
+    { n: 1, row: 'row-1', words: '40', start: 0, end: 0, sentence: '', status: 'deferred', shown: '40' },
+    { n: 2, row: 'row-1', words: '15 of 40', start: 0, end: 0, sentence: '', status: 'failed', shown: '15 of 40' },
+    { n: 3, row: 'row-1', words: '"ship it"', start: 0, end: 0, sentence: '', status: 'verified', shown: '"ship it"', asked: true },
+  ]
+  const looks = items.map(it => ({ n: it.n, status: it.status }))
+  // auto modes: as they are
+  expect(quietLooks(looks, items, true).some(l => l.quiet)).toBe(false)
+  setOptions({ citations: 'manual' })
+  try {
+    const quiet = quietLooks(looks, items, true)
+    expect(quiet.map(l => !!l.quiet)).toEqual([true, true, false])
+    // by numbers, for a text shown in place of Claude's own
+    expect(quietLooks(looks, items, false).map(l => !!l.quiet)).toEqual([true, true, false])
+    const marks = marksIn(REPLY)
+    const body = messageEl(ELS, { text: REPLY, marks, looks: quiet, key: 'k', cols: 100, first: true, spin: '⠋', onMark: () => undefined })
+    // no sign after a quiet citation, even a failed one
+    expect(textOf(body)).not.toContain('×')
+    const buttons = all(body).filter(n => n.type === 'Button')
+    const of = (w: string) => buttons.find(b => textOf(b) === w)!
+    // Claude's: plain at rest, its underline under the pointer, and still a press
+    expect(of('15 of 40').props.children[0].props.underline).toBeUndefined()
+    expect(of('15 of 40').props.hover.underline).toBe(true)
+    expect(typeof of('15 of 40').props.onPress).toBe('function')
+    // the analyst's own: underlined as before
+    expect(of('"ship it"').props.children[0].props.underline).toBe(true)
+  } finally {
+    setOptions({ citations: 'auto cite + verify' })
+  }
 })

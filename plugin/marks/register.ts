@@ -31,7 +31,7 @@ import { openPane } from '../core/pane'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
-import { featureOn } from '../settings/features.mjs'
+import { choiceOf, featureOn } from '../settings/features.mjs'
 import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
 import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
@@ -70,6 +70,15 @@ export function looksByWords(marks: { words: string }[], items: MarkItem[], runs
     // a corrected mark: the corrected values confirmed, the values Claude first wrote not
     return { n: it.n, status: !it.rewrite && sameClaim(m.words, it.shown) ? 'verified' : 'failed' }
   })
+}
+
+/** The looks of a row's marks while Citations is manual (Minimal holds its auto modes there): the citations Claude
+ *  wrote are quiet (view.ts MarkLook), the words the analyst cited with c stand as they are. `own`: the looks follow
+ *  the items by place (the text is Claude's own), else by their numbers. In any other mode the looks as they are. */
+export function quietLooks(looks: MarkLook[], items: MarkItem[], own: boolean): MarkLook[] {
+  if (choiceOf('citations') !== 'manual') return looks
+  const asked = new Set(items.filter(it => it.asked).map(it => it.n))
+  return looks.map((l, k) => ((own ? items[k]?.asked : l.n > 0 && asked.has(l.n)) ? l : { ...l, quiet: true as const }))
 }
 
 /** Whether two cited words state the same claim: the same numbers, or, with no number in either, each word of one
@@ -236,7 +245,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   // failed, since its check did not run (the tray has no record of it to check)
   const waits = runs || (!reply && (await awaitsCheck($, row)))
   // the marks of Claude's own words by their place; those of a text shown in their place by their words
-  const looks: MarkLook[] = own
+  const byStatus: MarkLook[] = own
     ? marks.map((_m: Any, k: number) => {
       const it = items[k]
       if (!it) return { n: k + 1, status: waits ? 'pending' : 'failed' }
@@ -246,6 +255,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
       return { n: it.n, status: it.status, shown: it.shown, ...(it.narrowed ? { narrowed: true } : {}) }
     })
     : looksByWords(marks, reply?.items ?? [], runs)
+  const looks = quietLooks(byStatus, own ? items : reply?.items ?? [], own)
   const focusN = await markFocus($, row)
   const focus = focusN != null ? looks.findIndex(l => l.n === focusN) : -1
   // the citations' tint is the theme set's (view.ts citeLook)
