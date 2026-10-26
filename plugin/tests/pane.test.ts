@@ -2,7 +2,7 @@
 // or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { keyedWords } from '../bar/bar'
+import { keyedWords, pressedWords } from '../bar/bar'
 import { closePane, drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 import { setOptions } from '../settings/features.mjs'
 
@@ -163,4 +163,16 @@ test('a key a failure line names is a part of its own, so a click presses it; es
   expect(keyedWords('Press 0 or pick the level again.').map(p => p.key ?? '')).toEqual(['', '0', ''])
   expect(keyedWords('This pane could not be drawn. Press esc, then open it again.').some(p => p.key)).toBe(false)
   expect(keyedWords('Press ctrl + x to hide it.').some(p => p.key)).toBe(false)
+})
+
+test('an item of the bar a failure line quotes is a part of its own with that item\'s press; a quote no item has stays words', async () => {
+  const coverage = () => 'coverage', labels = () => 'labels'
+  const named = new Map<string, () => unknown>([['r coverage 75% (3/4 files)', coverage], ['l 3 labels', labels]])
+  const parts = pressedWords('× r needs a wider terminal: click “r coverage” to open it here.', named)
+  expect(parts.map(p => p.s)).toEqual(['× r needs a wider terminal: click ', '“r coverage”', ' to open it here.'])
+  expect(parts[1]!.press).toBe(coverage)
+  expect(pressedWords('l needs a wider terminal: click “l 3 labels” to open it here.', named)[1]!.press).toBe(labels)
+  expect(pressedWords('t needs a wider terminal: click “t 2 threads” to open it here.', named).some(p => p.press)).toBe(false)
+  // a key the line names is still a press of its own
+  expect(pressedWords('“r coverage” failed. Press x to try again.', named).map(p => p.key ?? (p.press ? 'item' : ''))).toEqual(['item', '', 'x', ''])
 })

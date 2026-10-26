@@ -107,6 +107,9 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
     left.splice(0, left.length, ...left.filter(x => x.id === 'busy'), { id: 'hint', glyph: 'Hint:', words: hint }, ...named)
   }
   let right = [...(await barRight($, on, preview)), ...(await countItems($, on, presses, preview))]
+  // the presses of the bar's items by their words (`r coverage`), before any is cut: an item the failure line names
+  // is a click there too
+  const pressOf = new Map([...left, ...right].filter(x => x.press && x.key).map(x => [`${x.key} ${x.words}`, x.press!] as const))
   // a narrow bar: the labels' count goes first, then coverage's file counts, then coverage. The preview shows every
   // item the switches leave on, its right part on a line of its own when it does not fit
   const room = () => width - 9 - left.reduce((n, x) => n + itemLen(x) + 3, 0) - right.reduce((n, x) => n + itemLen(x) + 3, 0)
@@ -150,37 +153,57 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   ] })
   // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's
   const fixRows = preview ? [] : await fixLineRows($, els, width).catch(() => [])
-  return [...(preview ? [] : await lineRows($, els, width)), ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), bar]
+  return [...(preview ? [] : await lineRows($, els, width, pressOf)), ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), bar]
 }
 
 /** The failure line: what failed, whole, in red, or a notice. A key it names (`Press x to try again`) is a click
  *  too, which presses that key as the prompt would take it (hooks/keys.ts pressKey); esc and the keys of a pane are
- *  not, as no click at the prompt can press them. */
-async function lineRows($: Engine, els: Any, width: number): Promise<Any[]> {
+ *  not, as no click at the prompt can press them. An item of the bar it quotes (`click “r coverage”`) is a click that
+ *  does what a click on that item does (`named`: the bar's presses by their words). */
+async function lineRows($: Engine, els: Any, width: number, named: Map<string, () => unknown> = new Map()): Promise<Any[]> {
   const { Box, Button, Text } = els
   const fail = await failLineNow($)
   if (!fail || fail.hint !== undefined) return []
   const look = fail.kind === 'failed' ? { color: 'error' } : { color: 'warning' }
   const words = fail.kind === 'failed' ? `× ${fail.text.replace(/^[×!]\s*/, '')}` : fail.text
-  const parts = keyedWords(words)
-  if (!parts.some(p => p.key)) return [Box({ key: 'fail-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [Text({ key: 'fail-text', ...look, wrap: 'wrap', children: words })] })]
+  const parts = pressedWords(words, named)
+  if (!parts.some(p => p.key || p.press)) return [Box({ key: 'fail-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [Text({ key: 'fail-text', ...look, wrap: 'wrap', children: words })] })]
   // with a key to press: wrapped here, word by word, so its press stands among the words (a Text holds no Button)
   const lines: Any[][] = [[]]
   let used = 0
   parts.forEach((p, i) => {
-    const pieces = p.key ? [p.s] : p.s.split(/(?<= )/)
+    const pieces = p.key || p.press ? [p.s] : p.s.split(/(?<= )/)
     pieces.forEach((w, j) => {
       if (used && used + len(w.trimEnd()) > width) { lines.push([]); used = 0 }
-      if (!used && !p.key) w = w.trimStart()
+      if (!used && !p.key && !p.press) w = w.trimStart()
       if (!w) return
       used += len(w)
-      lines[lines.length - 1]!.push(p.key
+      lines[lines.length - 1]!.push(p.press
+        ? Button({ key: `fail-item-${i}`, plain: true, label: p.s.replace(/[“”]/g, ''), hover: quiet(`fail-item-${i}`), onPress: p.press, children: [Text({ ...look, bold: true, underline: true, children: w })] })
+        : p.key
         ? Button({ key: `fail-key-${i}`, plain: true, label: `press ${p.key}`, hover: quiet(`fail-key-${i}`), onPress: () => pressKey($, p.key!), children: [Text({ ...look, bold: true, underline: true, children: w })] })
         : Text({ key: `fail-w-${i}-${j}`, ...look, children: w }))
     })
   })
   const text = Box({ key: 'fail-text', flexDirection: 'column', children: lines.map((l, k) => Box({ key: `fail-row-${k}`, flexDirection: 'row', children: l })) })
   return [Box({ key: 'fail-line', flexDirection: 'row', width, children: [text] })]
+}
+
+/** A line's words cut at each item of the bar it quotes (“r coverage”, a press in `named`, or an item whose words
+ *  begin with the quote) and at each key it tells the person to press (keyedWords). */
+export function pressedWords(s: string, named: Map<string, () => unknown>): { s: string; key?: string; press?: () => unknown }[] {
+  const out: { s: string; key?: string; press?: () => unknown }[] = []
+  let at = 0
+  for (const m of s.matchAll(/“([^”]+)”/g)) {
+    const q = m[1]!
+    const press = named.get(q) ?? [...named].find(([w]) => w.startsWith(`${q} `))?.[1]
+    if (!press) continue
+    if (m.index! > at) out.push(...keyedWords(s.slice(at, m.index)))
+    out.push({ s: m[0], press })
+    at = m.index! + m[0].length
+  }
+  if (at < s.length) out.push(...keyedWords(s.slice(at)))
+  return out
 }
 
 /** A line's words cut at each key it tells the person to press (`Press x`, `press 0`): the key alone is its own part. */
