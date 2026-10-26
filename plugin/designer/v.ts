@@ -97,7 +97,7 @@ export async function designAnchor($: Engine, agentId: string | undefined): Prom
   return agentId && d?.agentId === agentId && d.status === 'running' ? d.anchorRow : null
 }
 
-/** Whether v would draw a card now: an answer exists, main is not working, and no design runs (the bar's `v card`). Read from the state, so a
+/** Whether v would draw a card now: an answer exists, main is not working, and no design runs (the bar's `v visualize`). Read from the state, so a
  *  drawing that asks draws again when it changes. */
 export async function vReady($: Engine): Promise<boolean> {
   if (!(await answerNow($)) || (await mainRuns($))) return false
@@ -239,7 +239,7 @@ export async function turnDesigner($: Engine): Promise<void> {
 }
 
 export const registerDesigner: Register = on => {
-  // a click on the bar's `v card`: what v does, started in this hook, so the plugin's other hooks serve its fork
+  // a click on the bar's `v visualize`: what v does, started in this hook, so the plugin's other hooks serve its fork
   on('ui.press', { element: /^bar-v$/ }, async ($, e, next) => {
     if (e.plugin !== 'thimble') return next(e)
     try {

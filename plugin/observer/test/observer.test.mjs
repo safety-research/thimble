@@ -19,7 +19,7 @@ test('the real fragments compose: every placeholder filled, each digest from the
   const sys = composeSystem(text('observer'), parts)
   assert.doesNotMatch(sys.text, /\{\{[A-Z_]+\}\}/)
   assert.doesNotMatch(sys.text, /<!--/)
-  const turn = composeTurn(text('observer-turn'), { MESSAGES: "Read this message of Claude's", ROW: 'v card', SHOWN: '', OBJECTS: 'No cards in these turns.', COVERAGE: 'c', SKELETON: skeletonOf(LENSES) }, parts, ST)
+  const turn = composeTurn(text('observer-turn'), { MESSAGES: "Read this message of Claude's", ROW: 'v visualize', SHOWN: '', OBJECTS: 'No cards in these turns.', COVERAGE: 'c', SKELETON: skeletonOf(LENSES) }, parts, ST)
   assert.doesNotMatch(turn.text, /\{\{[A-Z_]+\}\}/)
   assert.match(turn.text, /Terms that already have an explainer in this session:\n- p95/)
   assert.match(turn.text, /- March is half a month/)

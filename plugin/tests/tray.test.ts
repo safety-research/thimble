@@ -104,7 +104,7 @@ test('] opens the tray on a citation with its evidence; a question asked with it
   // each key once: the bar under it keeps its own keys and names none of the tray's
   expect(band.match(/a ask/g)).toEqual(['a ask'])
   expect(band.match(/0 close/g)).toEqual(['0 close'])
-  expect(band).toContain('s squeeze')
+  expect(band).toContain('s rewrite')
   // the citation draws in focus in the answer
   const drawn = await $.ui.render(answer('row-t1', TEXT))
   const cite = all(drawn).find(n => n.type === 'Button' && String(n.props?.label).startsWith('citation 1'))

@@ -146,7 +146,7 @@ test('{ at an empty prompt picks the answer before for the keys, drawn with ▸;
   // the bar names s (squeeze/seam.ts) once there is an answer
   const band = textOf(await $.ui.render({ plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never))
   expect(band).toContain('thimble')
-  expect(band).toContain('s squeeze')
+  expect(band).toContain('s rewrite')
   expect(band).not.toContain('answer 1 of 2')
   await turn('t3', 'You are welcome.')
   expect(textOf(await $.ui.render(answer('row-t1', 'The revert undid a change.')))).toBe('the engine')

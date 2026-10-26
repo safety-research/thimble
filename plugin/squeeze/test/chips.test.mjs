@@ -52,7 +52,7 @@ test('older records still read after the scale went to 5 (levelsAt)', () => {
   const read = squeeze => chipsOf({ text: TEXT, squeeze }).map(c => `${c.id}=${c.levels[c.level]}`)
   // scale 4, no Background chip: its levels read as they were, and Background stands at the original's
   const four = { at: { length: 0, interpret: 2 }, scale: 4, versions: { 'length=0&interpret=2': 'Short, read.' } }
-  assert.deepEqual(read(four), ['length=short', 'interpret=expert reading', 'familiarity=working'])
+  assert.deepEqual(read(four), ['length=short', 'interpret=with context', 'familiarity=working'])
   // its versions come back with no call
   assert.equal(fromVersions({ text: TEXT, squeeze: four }, { length: 0, interpret: 2 }).shown, 'Short, read.')
   // scale 2, when Background had five levels: its level reads as the original's, and the versions it wrote go
@@ -118,7 +118,7 @@ test('a cited number the rewrite changed is named, though the original states it
 
 test('each chip names its two ends', () => {
   const chips = chipsOf({ text: 'x', squeeze: {} })
-  assert.deepEqual(chips.map(endsOf), [['shorter', 'longer'], ['facts', 'expert reading'], ['new', 'expert']])
+  assert.deepEqual(chips.map(endsOf), [['shorter', 'longer'], ['facts', 'with context'], ['new', 'expert']])
   // a chip of the person's own runs from as written to fully
   assert.deepEqual(endsOf({ levels: ['as written', 'a little', 'more', 'fully'] }), ['as written', 'fully'])
 })

@@ -13,7 +13,7 @@
 // Each chip names its two ends either side of its dots (`Interpretation facts ○●○ expert reading`); a press on an end
 // or a dot sets that level. While a rewrite is on its way the old text dims, and the bar's busy line says `rewriting`
 // (term.ts); a version seen before comes back at once.
-//   · s close · + a chip in the person's own words (typed as `/squeeze <words>`, with the earlier ones offered as it is typed)
+//   · s close · + a chip in the person's own words (typed as `/rewrite <words>`, with the earlier ones offered as it is typed)
 // The bar names `s close` first while the chips are open, and the chips' row ends with it too (a press there closes them).
 // A click on the chips hands them the keyboard (their Client, chips.tsx): then tab and shift+tab move between the chips,
 // ← and → between the levels, s or ↵ closes them, and + types the chip's words in the chips, until esc gives the keys back.
@@ -175,7 +175,7 @@ async function pressChip($: Engine, open: Open, cid: string): Promise<void> {
   void setLevels($, open.id, to).catch(() => undefined)
 }
 
-/** A chip of the person's own on a record, from the words they typed after + (or `/squeeze <words>`): added at as
+/** A chip of the person's own on a record, from the words they typed after + (or `/rewrite <words>`): added at as
  *  written, picked, and kept for the session so + offers it again. */
 export async function addOwn($: Engine, id: string, typed: string): Promise<string | null> {
   const rec = await recOf($, id)
@@ -194,9 +194,9 @@ export async function ownEarlier($: Engine): Promise<string[]> {
   return ((await $.state.get(OWN)).value ?? []) as string[]
 }
 
-/** + with the prompt holding the keys: the prompt takes the words, as `/squeeze <words>`, and the bar says so. */
+/** + with the prompt holding the keys: the prompt takes the words, as `/rewrite <words>`, and the bar says so. */
 async function askOwn($: Engine): Promise<void> {
-  await $.prompt.fill({ text: '/squeeze ', mode: 'replace' }).catch(() => undefined)
+  await $.prompt.fill({ text: '/rewrite ', mode: 'replace' }).catch(() => undefined)
   await setOpen($, { hint: true })
 }
 
@@ -274,13 +274,13 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
 }
 
 /** A change of the prompt box (a key typed there, esc esc clearing it): the keys are the prompt's again, so words
- *  begun after + in the chips are let go, and the bar's `squeeze for…` goes once the box no longer holds /squeeze.
+ *  begun after + in the chips are let go, and the bar's `rewrite for…` goes once the box no longer holds /rewrite.
  *  (Claude Code tells no hook of the esc that takes the keys back from the chips, so the words go at the next key.)
  *  Reads the module's copy of the open chips, so an edit costs no read of the state. */
 export async function promptHasKeys($: Engine, text?: string): Promise<void> {
   const open = openKept?.open
   if (!open) return
-  const hint = open.hint && typeof text === 'string' && !/^\/squeeze\b/.test(text)
+  const hint = open.hint && typeof text === 'string' && !/^\/rewrite\b/.test(text)
   if (open.typing != null || open.held || hint) await setOpen($, { typing: null, held: false, ...(hint ? { hint: false } : {}) })
 }
 
@@ -337,12 +337,12 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
 
 // ------------------------------------------------------------------------------------------------ the bar
 
-/** The chips' keys and lines on the bar while they are open; at rest, s: `s squeeze`, the same words whether the
+/** The chips' keys and lines on the bar while they are open; at rest, s: `s rewrite`, the same words whether the
  *  answer shows its original or a squeezed version (the chips name the levels), and `b catch up on N replies` while
  *  replies piled up since the person's last prompt. */
 export async function barItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const squeezing = on('squeezeAnswers')
-  if (preview) return [...(squeezing ? [{ id: 'squeeze', key: 's', words: 'squeeze' }] : []), ...(on('catchUp') ? [{ id: 'catchup', key: CATCH_UP_KEY, words: 'catch up' }] : [])]
+  if (preview) return [...(squeezing ? [{ id: 'squeeze', key: 's', words: 'rewrite' }] : []), ...(on('catchUp') ? [{ id: 'catchup', key: CATCH_UP_KEY, words: 'catch up' }] : [])]
   const open = squeezing ? await openNow($) : null
   const rec = open ? await recOf($, open.id) : null
   if (open && rec) return openItems($, open, rec)
@@ -351,7 +351,7 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const id = (await catchUpOn($, row)) ? cuId(row) : row
   const pile = await pileUp($, on)
   return [
-    ...(squeezing ? [{ id: 'squeeze', key: 's', words: 'squeeze', press: () => openChips($, id) }] : []),
+    ...(squeezing ? [{ id: 'squeeze', key: 's', words: 'rewrite', press: () => openChips($, id) }] : []),
     ...(pile ? [{ id: 'catchup', key: CATCH_UP_KEY, words: `catch up on ${pile.n} replies`, press: () => catchUpNow($) }] : []),
   ]
 }
@@ -371,7 +371,7 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
   if (open.typing != null) { say('sq-typing', `+ ${open.typing}▏ ↵ adds it · tab lets it go`, accent()); return out }
   if (open.hint) {
     const dims = await ownEarlier($)
-    say('sq-hint', `squeeze for…${dims.length ? ` · earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, accent())
+    say('sq-hint', `rewrite for…${dims.length ? ` · earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, accent())
     return out
   }
   // s close comes first, so leaving is the first thing the bar names while the chips hold the keys
@@ -506,7 +506,7 @@ export async function underRow($: Engine, els: Any, row: string, cols: number, c
     if (ui.error) out.push(els.Text({ key: `cu-note-${row}`, color: 'error', wrap: 'wrap', children: `× ${ui.error}` }))
   }
   const left = recs.flatMap(r => (cardNotes(r) as { left: string[] }).left)
-  if (left.length) out.push(els.Box({ key: `lo-${row}`, marginLeft: 2, marginTop: 1, children: [els.Text({ dimColor: true, wrap: 'truncate-end', children: `left out by squeeze: ${left.map(t => `"${t.length > 48 ? `${t.slice(0, 47)}…` : t}"`).join(', ')}` })] }))
+  if (left.length) out.push(els.Box({ key: `lo-${row}`, marginLeft: 2, marginTop: 1, children: [els.Text({ dimColor: true, wrap: 'truncate-end', children: `left out by rewrite: ${left.map(t => `"${t.length > 48 ? `${t.slice(0, 47)}…` : t}"`).join(', ')}` })] }))
   for (const id of [row, ...(cu ? [cu.id] : [])]) {
     const chips = await chipsEl($, els, id, cols)
     if (chips) out.push(chips)
@@ -514,11 +514,11 @@ export async function underRow($: Engine, els: Any, row: string, cols: number, c
   return out
 }
 
-/** The line under a card a squeeze changed: `edited by squeeze` or `added by squeeze`. */
+/** The line under a card a squeeze changed: `edited by rewrite` or `added by rewrite`. */
 export async function underCardLine($: Engine, els: Any, id: string): Promise<Any[]> {
   if (!featureOn('squeezeAnswers')) return []
   const did = await cardDid($, id)
-  return did ? [els.Text({ key: `sq-did-${id}`, dimColor: true, children: `  ${did} by squeeze` })] : []
+  return did ? [els.Text({ key: `sq-did-${id}`, dimColor: true, children: `  ${did} by rewrite` })] : []
 }
 
 /** Whether a card is left out of the version of its answer shown now. */

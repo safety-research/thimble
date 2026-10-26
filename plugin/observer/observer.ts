@@ -157,7 +157,7 @@ export function messagesText(msgs: LookMsg[]): string {
 }
 
 /** The keys above the analyst's prompt, as the features leave them. */
-const rowKeys = () => [['cards', 'v card'], ['squeezeAnswers', 's squeeze'], ['claims', 'c claims']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
+const rowKeys = () => [['cards', 'v visualize'], ['squeezeAnswers', 's rewrite'], ['claims', 'c evidence']].filter(([f]) => featureOn(f!)).map(([, w]) => w).join(', ') || '(none)'
 
 /** The look's step on the bar's busy line: `adding explainers, details, claims`. */
 export function lookWord(lenses: string[]): string {

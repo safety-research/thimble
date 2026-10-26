@@ -142,7 +142,7 @@ test('the map: ten clusters of five to ten claims at the pane sizes of 160×50 a
     const tu = text(rest)
     assert.equal(mapCapacity(w, h), 3 * Math.floor(Math.floor(h * 0.4) / 4))
     assert.equal(rest.rowsView, false, `${w}×${h}: the map, not the rows`)
-    assert.match(tu, /^Claims · 71 claims\n\n/)
+    assert.match(tu, /^Evidence · 71 claims\n\n/)
     assert.ok(rest.head[0][0].bold && !rest.head[0][0].tone)
     // at rest: no claim, nothing chosen, no detail, no caption; every cluster and every claim drawn
     assert.equal(rest.chosen, false)
@@ -492,7 +492,7 @@ test('fourteen clusters: near clusters join, named for both; past what the map h
   const apart = paneData(build(false))
   const v = graphView(apart, {}, { w: 62, h: 12 })
   // the head counts the claims alone
-  assert.match(rowText(v.head[0]), /^Claims · 60 claims$/)
+  assert.match(rowText(v.head[0]), /^Evidence · 60 claims$/)
   assert.deepEqual(v.data.groups.map(g => g.name), ['topic 0', 'topic 1', 'topic 2', 'topic 3', 'topic 4', 'topic 5 + 8 other clusters'])
   const onMap = new Set(v.graph.flatMap(r => r.filter(x => /^g:/.test(x.part || '') && x.s.trim()).map(x => x.part)))
   assert.equal(onMap.size, 6)

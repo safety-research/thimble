@@ -84,7 +84,7 @@ const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key chang
 test('s opens the chips; ] writes a longer version in place, Claude hears it with the next prompt, and 0 brings the original back with no call', async ($, on) => {
   const t = await setup($, on, ['The build failed on [3 of 12](#) runs: the cache key changed with the lockfile, and the mirror timed out on each fresh fetch.'])
   await t.turn('t1', LONG)
-  expect(await t.bar()).toContain('s squeeze')
+  expect(await t.bar()).toContain('s rewrite')
   expect(await t.press('s')).toEqual({ text: '', cursor: 0 })
   const open = await t.bar()
   expect(open).toContain('[ shorter · ] longer')
@@ -100,9 +100,9 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(String(t.asked[0].prompt)).toContain('Length: longer')
   const shown = textOf(await $.ui.render(answer('row-t1', LONG)))
   expect(shown).toContain('on each fresh fetch')
-  // the chips close with s; the bar says squeeze as before, not the levels set
+  // the chips close with s; the bar says rewrite as before, not the levels set
   await t.press('s')
-  expect(await t.bar()).toContain('s squeeze')
+  expect(await t.bar()).toContain('s rewrite')
   expect(await t.bar()).not.toContain('longer')
   const next = await t.ask('and now?')
   expect(String((next.context ?? []).join('\n'))).toContain('now reads, for the analyst, as:')
@@ -122,7 +122,7 @@ test('with two replies since the last prompt, the bar names b apart from s; b wr
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
   await t.turn('t3', 'The retry passed on all runs.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
-  expect(await t.bar()).toContain('s squeeze · b catch up on 2 replies')
+  expect(await t.bar()).toContain('s rewrite · b catch up on 2 replies')
   // s opens the chips under the newest reply, with no call and no catch-up among them
   await t.press('s')
   await t.clock.advance(5000)
@@ -370,9 +370,9 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   await t.turn('t1', LONG)
   await t.press('s')
   const at0 = await chipsDrawn($, 'row-t1', LONG)
-  expect(at0.client.props.props.items.map((c: Any) => c.ends)).toEqual([['shorter', 'longer'], ['facts', 'expert reading'], ['new', 'expert']])
+  expect(at0.client.props.props.items.map((c: Any) => c.ends)).toEqual([['shorter', 'longer'], ['facts', 'with context'], ['new', 'expert']])
   expect(textOf(at0.tree)).toContain('1 Length shorter ○●○○ longer · as written')
-  expect(textOf(at0.tree)).toContain('2 Interpretation facts ○●○ expert reading')
+  expect(textOf(at0.tree)).toContain('2 Interpretation facts ○●○ with context')
   // a press on an end sets that level
   expect(nodes(at0.tree).some(n => n.type === 'Button' && n.props.label === 'Background: new')).toBe(true)
   // each of the bar's keys is a press: [ and ] each one way, and 1–3 picks the next chip
@@ -433,11 +433,11 @@ test('+ in the chips types a chip, and a key at the prompt (esc gave it the keys
   expect(await t.bar()).toContain('+ ▏ ↵ adds it · tab lets it go')
   await $.prompt.edit({ origin: { kind: 'composer' }, text: 'h', cursor: 1, start: 0, end: 0, inputText: 'h', key: { key: 'h' } } as never)
   expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.plus).toBe(null)
-  // + at the prompt: /squeeze in the box, and the bar asks what for; esc esc clears the box, and the bar lets it go
+  // + at the prompt: /rewrite in the box, and the bar asks what for; esc esc clears the box, and the bar lets it go
   await t.press('+')
-  expect(await t.bar()).toContain('squeeze for…')
+  expect(await t.bar()).toContain('rewrite for…')
   await $.prompt.change({ text: '', cursor: 0, origin: { kind: 'clear' } } as never)
-  expect(await t.bar()).not.toContain('squeeze for')
+  expect(await t.bar()).not.toContain('rewrite for')
 })
 
 test('the chips draw in one color: the frame, the keys, the picked chip, its dot and its level words in thimble\'s purple, no amber', async () => {

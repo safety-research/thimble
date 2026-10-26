@@ -175,12 +175,12 @@ test('a look that fails leaves a gap the pane names; c opens the pane: the map o
   expect(String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text)).toContain('“c 3 claims”')
   s.$.ui.open = placing
   await take!.later!()
-  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims', focus: true })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence', focus: true })
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 36 } } }, args, els)
   const keysOf = (pane: Any) => buttons(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])
   const pane = await draw({})
   const t = textOf(pane)
-  expect(t).toContain('Claims · 3 claims')
+  expect(t).toContain('Evidence · 3 claims')
   expect(t).not.toContain('clusters')
   expect(t).toContain('Turn 2 was not read:')
   // a few claims are drawn as a map too, nothing chosen, nothing under it; no caption, and no words about clicks
@@ -376,7 +376,7 @@ test('c in a terminal too narrow for the pane says to click the bar\'s count; on
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
   await openClaims(s.$)
   await settle()
-  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Claims' })
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence' })
   expect(await line()).toBe('')
 })
 
@@ -427,10 +427,10 @@ test('claims on demand: no look reads them after a reply; c shows the pane with 
   expect(s.forks).toEqual([])
   expect((await claimsStore(s.$)).claims).toEqual([])
   // the bar names the pane, with no count, once an answer waits
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'claims']])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'evidence']])
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, args, els)
   const empty = await draw({})
-  expect(textOf(empty)).toContain('Claims · no claims yet')
+  expect(textOf(empty)).toContain('Evidence · no claims yet')
   expect(textOf(empty)).not.toContain('to save tokens')
   const f = buttons(empty).find(b => b.hotkey === 'f')
   expect([f?.key, f?.label]).toEqual(['claims-find', 'extract claims'])

@@ -100,7 +100,7 @@ test("an answer gets one look: a fork of the conversation with the lenses' secti
   const p = s.forks[0]!
   expect(p).toContain('OBSERVER\nPROMPT lens-explain\n\nPROMPT lens-heads\n\nPROMPT lens-claims')
   expect(p).toContain(`TURN Read this message of Claude's, above in the session: Claude's answer at the end of turn 1, which begins "Two runs failed, both on the p95 check." (1 line). It answers the analyst's message "How many test runs failed?".`)
-  expect(p).toContain('KEYS v card, s squeeze, c claims')
+  expect(p).toContain('KEYS v visualize, s rewrite, c evidence')
   expect(p).toContain('CARDS No cards in these turns.')
   expect(p).toContain('READ Claude read 3 of 7 files.')
   expect(p).toContain('REPLY {"glosses": [], "heads": null, "claims": []}')

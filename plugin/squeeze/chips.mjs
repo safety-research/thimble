@@ -98,7 +98,7 @@ export function mapLinks(text, fn) {
 export const CHIPS = Object.freeze([
   Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['short', 'as written', 'longer', 'much longer']), level0: 1, kind: 'fixed', ends: Object.freeze(['shorter', 'longer']) }),
   // (the ids are the records' since before the chips were renamed)
-  Object.freeze({ id: 'interpret', name: 'Interpretation', levels: Object.freeze(['facts only', 'as written', 'expert reading']), level0: 1, kind: 'fixed', ends: Object.freeze(['facts', 'expert reading']) }),
+  Object.freeze({ id: 'interpret', name: 'Interpretation', levels: Object.freeze(['facts only', 'as written', 'with context']), level0: 1, kind: 'fixed', ends: Object.freeze(['facts', 'with context']) }),
   Object.freeze({ id: 'familiarity', name: 'Background', levels: Object.freeze(['new', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed', ends: Object.freeze(['new', 'expert']) }),
 ])
 export const LENGTH = CHIPS[0]

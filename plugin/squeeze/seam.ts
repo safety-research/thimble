@@ -18,7 +18,7 @@
 //   squeezeKey($, key, until)          s (and the chips' keys while they are open): a taker as hooks/keys.ts takes it
 //   squeezeBar($, on, preview)         its items at the bar's left (`s squeeze`, `b catch up on N replies`; the
 //                                      chips' keys while they are open)
-//   registerSqueeze                    its own hooks: /squeeze (what + writes in the prompt box, hidden from the
+//   registerSqueeze                    its own hooks: /rewrite (what + writes in the prompt box, hidden from the
 //                                      typeahead) and its autocomplete, the chips' Client, the prompt that carries the
 //                                      version told to Claude, a resumed session's cards
 import type { EngineInterface, Register } from 'claude-code'
@@ -78,36 +78,36 @@ export const registerSqueeze: Register = on => {
     const r = await next(e)
     try { await restoreCardsShown($) } catch { /* the cards draw as they stand */ }
     try {
-      await $.command.register({ name: 'squeeze', description: 'Squeeze the message the keys act on along a chip in your own words: /squeeze for my manager', argumentHint: '[what to squeeze for]', immediate: true })
+      await $.command.register({ name: 'rewrite', description: 'Rewrite the message the keys act on along a chip in your own words: /rewrite for my manager', argumentHint: '[who or what to rewrite it for]', immediate: true })
     } catch {
       // s at an empty prompt still opens the chips
     }
     return r
   }).catch(($, e, next) => next(e))
 
-  // /squeeze is not a command people type: + in the chips writes it in the prompt box, and the person's words follow it.
+  // /rewrite is not a command people type: + in the chips writes it in the prompt box, and the person's words follow it.
   // So the typeahead and /help leave it out; it runs when the box sends it
-  on('command.describe', { command: /^(thimble:)?squeeze$/ }, async ($, e, next) => ({ ...(await next(e)), isHidden: true })).catch(($, e, next) => next(e))
+  on('command.describe', { command: /^(thimble:)?rewrite$/ }, async ($, e, next) => ({ ...(await next(e)), isHidden: true })).catch(($, e, next) => next(e))
 
-  // /squeeze [words]: a chip in the person's own words on the message the chips are open on (else the one the keys act
+  // /rewrite [words]: a chip in the person's own words on the message the chips are open on (else the one the keys act
   // on), picked; with no words, the chips open
-  on('command.run', { command: 'squeeze' }, async ($, e) => {
-    if (!featureOn('squeezeAnswers')) return { text: 'Squeeze is off. Turn it on in /thimble-settings to use it.' }
+  on('command.run', { command: 'rewrite' }, async ($, e) => {
+    if (!featureOn('squeezeAnswers')) return { text: 'Rewrite is off. Turn it on in /thimble-settings to use it.' }
     const id = (await openNow($))?.id ?? (await targetNow($))
-    if (!id || !(await recOf($, id))) return { text: 'No message to squeeze yet: ask Claude something first.' }
+    if (!id || !(await recOf($, id))) return { text: 'No message to rewrite yet: ask Claude something first.' }
     if (!ownWords(e.args)) { await openChips($, id); return {} }
     await addOwn($, id, e.args)
     return {}
   })
 
-  // what follows /squeeze: the chips typed earlier this session, offered as the words are typed
+  // what follows /rewrite: the chips typed earlier this session, offered as the words are typed
   on('prompt.autocomplete', async ($, e, next) => {
     const r = await next(e)
-    if (!/^\/squeeze\s/.test(e.text) || e.start < 9) return r
+    if (!/^\/rewrite\s/.test(e.text) || e.start < 9) return r
     const typed = e.text.slice(9, e.cursor).toLowerCase()
     const hits = (await ownEarlier($)).filter(d => d.toLowerCase().startsWith(typed) && d.toLowerCase() !== typed).reverse().slice(0, 5)
     if (!hits.length) return r
-    // a row writes the whole words in place of what follows /squeeze (the token is the last word typed)
+    // a row writes the whole words in place of what follows /rewrite (the token is the last word typed)
     const head = e.text.slice(9, e.start)
     return { suggestions: [...r.suggestions, ...hits.filter(d => d.toLowerCase().startsWith(head.toLowerCase())).map(d => ({ text: d.slice(head.length), label: d, description: 'a chip you typed earlier' }))] }
   }).catch(($, e, next) => next(e))

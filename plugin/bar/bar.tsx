@@ -77,7 +77,7 @@ async function leftItems($: Engine, on: (key: string) => boolean, preview: boole
     for (const k of await cardKeyWords($).catch(() => [])) out.push({ id: `card-key-${k.key}`, key: k.key, words: k.words, ...(k.key.length === 1 ? { press: () => pressKey($, k.key) } : {}) })
   }
   // a click on `v card` starts the designer fork as v does, in the ui.press hook that answers it (designer/v.ts)
-  if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'card', ...(preview ? {} : { press: () => undefined }) })
+  if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'visualize', ...(preview ? {} : { press: () => undefined }) })
   out.push(...features)
   return out
 }

@@ -67,12 +67,12 @@ test('v at an empty prompt spawns the designer fork with designer.md once the wo
   expect(w.spawns[0].description).toBe('card of the last answer (v)')
 })
 
-test('a click on the bar\'s `v card` spawns the designer fork, as v does', async ($, on) => {
+test('a click on the bar\'s `v visualize` spawns the designer fork, as v does', async ($, on) => {
   const w = world(on)
   await start($)
   await answer($)
   const bar = await $.ui.mount(BAND)
-  expect(textOf(await bar.drawn())).toContain('v card')
+  expect(textOf(await bar.drawn())).toContain('v visualize')
   await bar.press({ key: 'bar-v' })
   await bar.unmount()
   await w.clock.advance(400)
