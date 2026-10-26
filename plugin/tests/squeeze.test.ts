@@ -8,6 +8,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { cardWidth } from '../cards/draw'
 import { resetSqueeze } from '../squeeze/term'
 import Chips from '../squeeze/chips.tsx'
+import Rule from '../squeeze/rule.tsx'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -252,7 +253,12 @@ test("a catch-up shows its replies' explainers on its words, and a card it place
   // the card moved down into the catch-up: its reply points to it; in the catch-up it fits beside the rule, 2 columns
   // narrower than in an answer
   expect(textOf(await $.ui.render(answer('row-t2', two)))).toContain('“Runs” is in the catch-up below')
-  expect(nodes(host).find(n => n.type === 'Client')?.props.width).toBe(cardWidth(VIEW.columns - 2))
+  expect(nodes(host).find(n => n.type === 'Client' && String(n.props.module).endsWith('/client.tsx'))?.props.width).toBe(cardWidth(VIEW.columns - 2))
+  // its rule is a Client given the catch-up's whole height, which draws one ▎ per row of it
+  const rule = nodes(host).find(n => n.type === 'Client' && String(n.props.module).endsWith('/rule.tsx'))
+  expect(rule?.props.height).toBe('100%')
+  const lines = (rows: number) => textOf(Rule({ color: 'purple' }, { elements: { Text: (p: Any) => ({ type: 'Text', props: p }) }, rows } as never)).split('\n')
+  expect(lines(7)).toEqual(Array(7).fill('▎'))
 })
 
 // The catch-up is read for explainers and heads-ups as an answer is: the look reads its words as what the analyst
