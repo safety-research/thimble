@@ -19,7 +19,7 @@
 // A catch-up is a message of its own that the chips write of several of Claude's messages: all of them since the
 // person's last prompt, when replies piled up (term.ts). Its record is a message's record with `catchup` set; its text
 // (the original) is the messages as written, one after another (catchUpText); the request names them as several
-// messages to summarize as one (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves,
+// messages to catch the person up on (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves,
 // which still show above it, so it never shows its original: 0 dismisses it.
 //
 // The chips belong to the whole answer: its text and the cards drawn in its turn. With the squeeze switch for cards on,
@@ -297,7 +297,7 @@ export function pickLine(c, m = {}) {
 }
 
 /** The line that heads the original in a catch-up's request: several messages, written as one. */
-export const CATCHUP_HEAD = "The original answer: Claude's messages since the analyst's last prompt, in the order it wrote them. Write one summary of them: where things stand now, what led there and what is still running, not a part for each message."
+export const CATCHUP_HEAD = "The original answer: Claude's messages since the analyst's last prompt, in the order it wrote them. The analyst knows the conversation as it was before them. Write one message that catches them up."
 
 /** A catch-up's original: Claude's messages, in order, one after another. */
 export const catchUpText = texts => (texts || []).map(t => String(t || '').trim()).filter(Boolean).join('\n\n---\n\n')
