@@ -5,6 +5,7 @@
 // pressed in a row make one rewrite, and the latest one shows. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { cardWidth } from '../cards/draw'
 import { resetSqueeze } from '../squeeze/term'
 import Chips from '../squeeze/chips.tsx'
 import { promptStub, tempRun } from './stubs'
@@ -248,8 +249,10 @@ test("a catch-up shows its replies' explainers on its words, and a card it place
   expect(textOf(host)).toContain('catch-up of the 2 replies above')
   // the reply's explainer stands on the catch-up's words too
   expect(nodes(host).some(n => n.type === 'Button' && String(n.props.label).startsWith('explain slow mirror'))).toBe(true)
-  // the card moved down into the catch-up: its reply points to it
+  // the card moved down into the catch-up: its reply points to it; in the catch-up it fits beside the rule, 2 columns
+  // narrower than in an answer
   expect(textOf(await $.ui.render(answer('row-t2', two)))).toContain('“Runs” is in the catch-up below')
+  expect(nodes(host).find(n => n.type === 'Client')?.props.width).toBe(cardWidth(VIEW.columns - 2))
 })
 
 // The catch-up is read for explainers and heads-ups as an answer is: the look reads its words as what the analyst

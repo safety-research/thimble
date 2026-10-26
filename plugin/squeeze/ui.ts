@@ -44,7 +44,7 @@ type Engine = EngineInterface
 type Any = any
 /** The frames of the cards a text places on lines of their own (cards/draw.ts framesIn), each drawn there as at
  *  home when the card's line stood in one of `rows`. */
-export type CardsIn = (text: string, rows: string[]) => Promise<Record<string, Any>>
+export type CardsIn = (text: string, rows: string[], o?: { indent?: number }) => Promise<Record<string, Any>>
 type At = Record<string, number>
 type Open = { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean }
 
@@ -467,7 +467,8 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
   const replies = Number(cu.catchup?.replies) || 0
   const w = Math.max(20, cols - 2)
   // a card it places on a line of its own draws there (its reply points down to it)
-  const cards = cardsIn ? await cardsIn(text, [cu.id]).catch(() => ({})) : {}
+  // its cards fit beside the rule, whose column and padding take 2 columns more than an answer's
+  const cards = cardsIn ? await cardsIn(text, [cu.id], { indent: 2 }).catch(() => ({})) : {}
   const spans = await spansOver($, cu.catchup?.rows ?? [], text, marks)
   const body = messageEl(els, {
     text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: !!ui.running, cards, spans,

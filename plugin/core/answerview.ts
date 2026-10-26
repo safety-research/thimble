@@ -148,7 +148,7 @@ export async function underText($: Engine, els: Any, row: string, cols: number):
 
 /** The lines under a row after the cards drawn under it: the catch-up of the replies it ends, the squeeze chips.
  *  `cardsIn`: the frames of the cards a text places on lines of its own (cards/draw.ts framesIn). */
-export async function underAll($: Engine, els: Any, row: string, cols: number, cardsIn?: (text: string, rows: string[]) => Promise<Record<string, Any>>): Promise<Any[]> {
+export async function underAll($: Engine, els: Any, row: string, cols: number, cardsIn?: (text: string, rows: string[], o?: { indent?: number }) => Promise<Record<string, Any>>): Promise<Any[]> {
   return els0(await safe(squeezeUnder($, els, row, cols, cardsIn), []))
 }
 
@@ -230,7 +230,7 @@ export const registerAnswerView: Register = on => {
       const r = await below()
       if (e.props.isSummary) return r
       const els = $.ui.resolve(e) as Any
-      const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3), async (t, rows) => (featureOn('cards') ? framesIn($, e, t, rows) : {}))
+      const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3), async (t, rows, o) => (featureOn('cards') ? framesIn($, e, t, rows, o) : {}))
       return tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
     } catch {
       return below()
