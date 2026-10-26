@@ -3,12 +3,14 @@
 // the screen and take keys. Each host calls one function here, and this calls each feature's seam by name (Claude Code
 // follows `$` only into functions a file declares or imports, so a list of handlers that take `$` cannot be called):
 //
-//   marks/register.ts  AssistantMessage   textView (the text a row shows), rowDrawing (a row a feature draws whole: a
-//                                         catch-up), spansFor (explainers and heads-ups on its words), markFocus (the
+//   marks/register.ts  AssistantMessage   textView (the text a row shows), spansFor (explainers and heads-ups on its
+//                                         words), markFocus (the
 //                                         citation the tray shows), underText (lines under the row's words),
 //                                         markPressed (a press on a citation), passagesFor (what the margin of
 //                                         each passage asks: a side thread about it)
-//   registerAnswerView AssistantMessage   underAll: lines under a row after the cards drawn under it (the chips)
+//   registerAnswerView AssistantMessage   underAll: lines under a row after the cards drawn under it (the catch-up
+//                                         of the replies it ends, the chips)
+//   squeeze/ui.ts      a catch-up         spansOver: the explainers and heads-ups of its replies on its words
 //   cards/draw.ts      a card's frame     underCard: lines under one card (its label row); cardAsk (what its
 //                                         margin asks: a side thread about it)
 //   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the
@@ -24,12 +26,14 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
+import { framesIn } from '../cards/draw'
 import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
-import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans, pendingSpans } from '../explain/seam'
+import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { citeBar, citeKey, citeShown } from '../marks/cite'
-import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeRow, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
+import { featureOn } from '../settings/features.mjs'
+import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
@@ -40,8 +44,7 @@ type Engine = EngineInterface
 type Any = any
 
 /** What a row of Claude's shows in place of the words Claude wrote (squeeze/seam.ts squeezeView). `text`: the words
- *  shown (null: Claude's own); `hidden`: the row draws nothing (a catch-up covers it); `dim`: drawn dim (a rewrite
- *  runs). */
+ *  shown (null: Claude's own); `hidden`: the row draws nothing; `dim`: drawn dim (a rewrite runs). */
 export type TextView = { text?: string | null; hidden?: boolean; dim?: boolean }
 
 /** How a span of a row's words is drawn: the props of its Text. */
@@ -106,9 +109,10 @@ export async function spansFor($: Engine, row: string, text: string, marks: { st
   return checkSpans(given, text, marks, focus && focus.kind !== 'citation' ? focus.id : null)
 }
 
-/** A row a feature draws whole in place of its words (a catch-up), or null. */
-export async function rowDrawing($: Engine, els: Any, row: string, cols: number, cardsIn?: (text: string, rows: string[]) => Promise<Record<string, Any>>): Promise<Any | null> {
-  return safe(squeezeRow($, els, row, cols, cardsIn), null)
+/** The explainers and heads-ups of the messages `rows` on the words of a text that stands for them (a catch-up),
+ *  checked (checkSpans). */
+export async function spansOver($: Engine, rows: string[], text: string, marks: { start: number; end: number; words: string }[]): Promise<Span[]> {
+  return checkSpans(await safe(explainSpansOf($, rows, text), [] as Span[]), text, marks, null)
 }
 
 /** The citation of the row the tray shows (its number in the reply), or null. */
@@ -142,9 +146,10 @@ export async function underText($: Engine, els: Any, row: string, cols: number):
   return els0(await safe(labelsUnderAnswer($, els, row, cols), []))
 }
 
-/** The lines under a row after the cards drawn under it: the squeeze chips, a catch-up's tail. */
-export async function underAll($: Engine, els: Any, row: string, cols: number): Promise<Any[]> {
-  return els0(await safe(squeezeUnder($, els, row, cols), []))
+/** The lines under a row after the cards drawn under it: the catch-up of the replies it ends, the squeeze chips.
+ *  `cardsIn`: the frames of the cards a text places on lines of its own (cards/draw.ts framesIn). */
+export async function underAll($: Engine, els: Any, row: string, cols: number, cardsIn?: (text: string, rows: string[]) => Promise<Record<string, Any>>): Promise<Any[]> {
+  return els0(await safe(squeezeUnder($, els, row, cols, cardsIn), []))
 }
 
 /** Whether a card is left out of what its answer shows now (a squeeze's version that leaves it out): its frame draws
@@ -225,7 +230,7 @@ export const registerAnswerView: Register = on => {
       const r = await below()
       if (e.props.isSummary) return r
       const els = $.ui.resolve(e) as Any
-      const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3))
+      const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3), async (t, rows) => (featureOn('cards') ? framesIn($, e, t, rows) : {}))
       return tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
     } catch {
       return below()

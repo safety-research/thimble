@@ -13,6 +13,8 @@
 //
 //   explainSpans($, row, text, marks)  the explainers and heads-ups on the words of a row as it shows now (`text`, a
 //                                      squeezed version too: a term is found again there in another form)
+//   explainSpansOf($, rows, text)      the explainers and heads-ups of those messages on the words of a text that stands
+//                                      for them (a catch-up), each opening on its own message
 //   explainState($)                    what the lenses' digests read: {glossed, headsGiven}
 //   explainMerge($, look)              what one look gave for the explain and heads lenses, placed and kept
 //   tellComments($, rows)              Claude hears the explainers and heads-ups shown on these answers with the next
@@ -107,6 +109,46 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
       onPress: async () => {
         await openTray($, { row, kind, id: p.id })
         await tellOpened($, heads ? { kind, row, term: g.term, title: g.title } : { kind, row, term: g.term }, own)
+      },
+    }
+  })
+}
+
+/** The explainers and heads-ups of the messages `rows` on the words of a text that stands for them (a catch-up of
+ *  those replies): each where the text says its term, in another form too (place.mjs anchorTerm); a press opens it on
+ *  its own message, as a press on it there does. */
+export async function explainSpansOf($: Engine, rows: string[], text: string): Promise<Span[]> {
+  const items: Record<string, Gloss> = {}
+  const order: string[] = []
+  const from: Record<string, { row: string; id: string }> = {}
+  for (const row of rows) {
+    const part = await partOf<ExplainPart>($, row, 'explain')
+    for (const id of part?.order ?? Object.keys(part?.items ?? {})) {
+      const g = part?.items?.[id]
+      if (!g || !shown(g)) continue
+      const k = `${row}|${id}`
+      items[k] = g
+      order.push(k)
+      from[k] = { row, id }
+    }
+  }
+  if (!order.length) return []
+  const c = markColors(await themeNow($))
+  return (placeGlosses(text, { items, order }, true) as { id: string; start: number; end: number }[]).map(p => {
+    const g = items[p.id]!
+    const { row, id } = from[p.id]!
+    const heads = g.kind === 'heads'
+    const kind = heads ? 'heads' as const : 'explain' as const
+    return {
+      id: p.id,
+      start: p.start,
+      end: p.end,
+      look: { backgroundColor: heads ? c.headsBg : c.glossBg, hoverBg: heads ? c.headsFocus : c.glossFocus },
+      focus: { bold: true, backgroundColor: heads ? c.headsFocus : c.glossFocus },
+      label: `${heads ? 'heads up' : 'explain'} ${withoutMarks(text.slice(p.start, p.end)).replace(/`/g, '')}`.slice(0, 120),
+      onPress: async () => {
+        await openTray($, { row, kind, id })
+        await tellOpened($, heads ? { kind, row, term: g.term, title: g.title } : { kind, row, term: g.term }, (await messageOf($, row))?.text ?? '')
       },
     }
   })

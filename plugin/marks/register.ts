@@ -24,7 +24,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { SPIN } from '../bar/busy'
-import { checkSpans, markFocus, markPressed, passagesFor, rowDrawing, spansFor, textView, underText, type Span } from '../core/answerview'
+import { checkSpans, markFocus, markPressed, passagesFor, spansFor, textView, underText, type Span } from '../core/answerview'
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
@@ -189,23 +189,17 @@ export const registerMarks: Register = on => {
   }).catch(($, e, next) => next(e))
 }
 
-/** A row of Claude's words as marks/register.ts draws it: hidden (a catch-up covers it), a catch-up in its place, its
- *  marks, spans and lines under it, or the drawing beneath (`below`) when it has none of these. */
+/** A row of Claude's words as marks/register.ts draws it: its marks, spans and lines under it, or the drawing beneath
+ *  (`below`) when it has none of these. */
 async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   if (e.props.isSummary) return below()
   const row = e.requestId
   const raw = String(e.props.text ?? '')
   const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
-  // the text this row shows (a squeezed version in place of Claude's words), or nothing (a catch-up covers it)
+  // the text this row shows (a squeezed version in place of Claude's words)
   const view = await textView($, row, raw)
   const els = $.ui.resolve(e) as Any
   if (view.hidden) return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [] })
-  // a row a feature draws whole (a catch-up in the newest reply's place), with the lines under its words
-  const whole = await rowDrawing($, els, row, cols, async (t, rows) => (featureOn('cards') ? framesIn($, e, t, rows) : {}))
-  if (whole) {
-    const under = await underText($, els, row, cols)
-    return els.Box({ key: `ans-${row}`, flexDirection: 'column', children: [whole, ...under] })
-  }
   const marksOn = featureOn('citations')
   const written = marksOn ? view.text : withoutMarks(view.text)
   const reply = marksOn ? await rowMarks($, row) : null

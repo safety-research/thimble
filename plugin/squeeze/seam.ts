@@ -6,19 +6,18 @@
 //
 //   SQUEEZE_KEYS                       its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   squeezeView($, row, text)          the text a row of Claude's shows now in place of what Claude wrote: a version
-//                                      the person squeezed or stretched, the part of it written in so far, `hidden`
-//                                      for the replies a catch-up covers, `dim` while a rewrite runs; null: the row as
-//                                      Claude wrote it
-//   squeezeRow($, els, row, cols, cardsIn)  the row drawn whole in place of its words, or null: a catch-up, with the rule
-//                                      down its side and its head line, its words with their marks
-//   squeezeUnder($, els, row, cols)    what stands under the row after its cards: the chips while they are open on it,
-//                                      what a squeeze left out of its cards, why a catch-up failed
+//                                      the person squeezed or stretched, the part of it written in so far, `dim` while
+//                                      a rewrite runs; null: the row as Claude wrote it
+//   squeezeUnder($, els, row, cols, cardsIn)  what stands under the row after its cards: the catch-up of the replies
+//                                      it ends (the rule down its side, its head line, its words with their marks, the
+//                                      replies' explainers and the cards it places), why a catch-up failed, what a
+//                                      squeeze left out of its cards, the chips while they are open on it
 //   squeezeUnderCard($, els, id, cols) what stands under one card: what a squeeze changed of it
 //   squeezeHidesCard($, id)            whether a card is left out of the version of its answer shown now
 //   squeezeHolds($)                    whether the chips are open: their keys come before the tray's and the ask's
 //   squeezeKey($, key, until)          s (and the chips' keys while they are open): a taker as hooks/keys.ts takes it
-//   squeezeBar($, on, preview)         its items at the bar's left (`s squeeze`, lit with the levels set; the chips'
-//                                      keys while they are open)
+//   squeezeBar($, on, preview)         its items at the bar's left (`s squeeze`, `b catch up on N replies`; the
+//                                      chips' keys while they are open)
 //   registerSqueeze                    its own hooks: /squeeze (what + writes in the prompt box, hidden from the
 //                                      typeahead) and its autocomplete, the chips' Client, the prompt that carries the
 //                                      version told to Claude, a resumed session's cards
@@ -31,7 +30,7 @@ import { featureOn } from '../settings/features.mjs'
 import { restoreCardsShown } from './cards'
 import { ownWords } from './chips.mjs'
 import { promptSent, recOf } from './term'
-import { addOwn, barItems, catchUpEl, type CardsIn, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
+import { addOwn, barItems, type CardsIn, chipsHold, chipsPost, closeChips, hidesCard, openChips, openNow, ownEarlier, promptHasKeys, squeezeKeyTake, targetNow, turnChips, underCardLine, underRow, viewOf } from './ui'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,12 +42,8 @@ export async function squeezeView($: Engine, row: string, _text: string): Promis
   return viewOf($, row)
 }
 
-export async function squeezeRow($: Engine, els: Any, row: string, cols: number, cardsIn?: CardsIn): Promise<Any | null> {
-  return catchUpEl($, els, row, cols, cardsIn)
-}
-
-export async function squeezeUnder($: Engine, els: Any, row: string, cols: number): Promise<Any[]> {
-  return underRow($, els, row, cols)
+export async function squeezeUnder($: Engine, els: Any, row: string, cols: number, cardsIn?: CardsIn): Promise<Any[]> {
+  return underRow($, els, row, cols, cardsIn)
 }
 
 export async function squeezeUnderCard($: Engine, els: Any, id: string, _cols: number): Promise<Any[]> {

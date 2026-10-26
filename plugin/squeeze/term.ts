@@ -38,7 +38,7 @@ import { promptText } from '../prompts/prompts'
 import { featureOn } from '../settings/features.mjs'
 import { tracked } from '../telemetry/telemetry'
 import { trayOffRow } from '../tray/seam'
-import { answerCards, applyCards, showCards, type Answer } from './cards'
+import { answerCards, applyCards, placeCatchUpCards, showCards, type Answer } from './cards'
 import {
   ARRIVE, SCALE, answerText, applyRewrite, cardsAfter, catchUpStands, catchUpText, checkRewrite, chipsOf, dropOrphanHeads,
   fromVersions, isCatchUp, isOriginal, keepCorrections, mustKeep, placedCards, readReply, request, restore, revealStep, rowsOf,
@@ -295,6 +295,7 @@ async function settled($: Engine, id: string, rec: Rec, o: { written: boolean })
   const before = await recOf($, id)
   await saveRec($, rec)
   const stale = await showCards($, rec)
+  if (rec.catchup) await placeCatchUpCards($, rec)
   if (stale.length) failNotice($, `A card could not be drawn at the version shown: ${stale.join('; ')}. Press 0 or pick the level again to try again.`, 'squeeze')
   await trayOffRow($, id.replace(/#cu$/, ''))
   const was = before ? shownOf(before) : ''
@@ -403,9 +404,9 @@ export async function catchUpAt($: Engine, row: string): Promise<Rec | null> {
 /**
  * A catch-up of Claude's messages `rows` (oldest first) since the person's last prompt: a record whose original is
  * those messages as written, one after another, first written at Length short (one call, as any chip change is). The
- * newest reply (`host`) keeps it; each other message names the host. It draws at the newest of the messages (drawnAt),
- * the last above the prompt, and every other message it covers draws no text while its version shows. Returns its id;
- * the first version is on its way.
+ * newest reply (`host`) keeps it; each other message names the host. It draws below the newest of the messages
+ * (drawnAt), the last above the prompt, and the messages it covers still show as written. Returns its id; the first
+ * version is on its way.
  */
 export async function catchUp($: Engine, o: { host: string; rows: string[]; replies: number; question: string; prompt: string | null }): Promise<string | null> {
   const texts: string[] = []
@@ -435,6 +436,7 @@ export async function dismissCatchUp($: Engine, id: string, o: { undo?: boolean;
   const gone: Rec = { ...rec, catchup: { ...rec.catchup, dismissed: true } }
   // the cards back as the replies had them
   await showCards($, gone)
+  await placeCatchUpCards($, gone)
   for (const r of rec.catchup.rows) {
     if (r !== rec.row) await setPart<SqPart>($, r, 'squeeze', cur => {
       if (!cur || cur.inCatchUp !== rec.row) return cur

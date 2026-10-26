@@ -20,7 +20,7 @@
 // person's last prompt, when replies piled up (term.ts). Its record is a message's record with `catchup` set; its text
 // (the original) is the messages as written, one after another (catchUpText); the request names them as several
 // messages to write as one (CATCHUP_HEAD), and it arrives at Length short. Its original is the replies themselves,
-// which come back when it goes, so it never shows its original: 0 dismisses it, and the replies show again.
+// which still show above it, so it never shows its original: 0 dismisses it.
 //
 // The chips belong to the whole answer: its text and the cards drawn in its turn. With the squeeze switch for cards on,
 // the request shows the original's cards (cardsBlock: each card's title, columns, first rows, what it draws and its
@@ -850,9 +850,9 @@ export function settledNote(rec, told = 'orig') {
   if (isCatchUp(rec)) {
     const n = Number(rec.catchup.replies) || 0
     const of = n === 1 ? 'reply' : `${n} replies`
-    if (rec.catchup.dismissed || typeof rec.shown !== 'string') return told === 'orig' ? '' : `The analyst went back to reading your ${of} since their last prompt as you wrote them${asWere}.`
+    if (rec.catchup.dismissed || typeof rec.shown !== 'string') return told === 'orig' ? '' : `The analyst closed the catch-up of your ${of} since their last prompt; those messages show as you wrote them${asWere}.`
     const named = String(rec.text || '').split('\n\n---\n\n').map(t => `"${firstWordsOf(t)}"`).join('; ')
-    return `The analyst caught up on your ${of} since their last prompt. In place of those messages (${named}), they now read one message that the squeeze chips wrote of them${set ? ` (${set})` : ''}:\n\n${rec.shown.slice(0, 12000)}${cards}\n\n(What you wrote is unchanged, and the analyst can go back to it.)`
+    return `The analyst caught up on your ${of} since their last prompt. Below those messages (${named}), which still show as you wrote them, they read one message that the squeeze chips wrote of them${set ? ` (${set})` : ''}:\n\n${rec.shown.slice(0, 12000)}${cards}`
   }
   const when = clockOf(rec.at)
   const which = `Your message${when ? ` from ${when}` : ''} ("${firstWordsOf(rec.text)}")`
