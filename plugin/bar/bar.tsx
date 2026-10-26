@@ -1,7 +1,7 @@
 // bar.tsx: the bar, thimble's line above the prompt, as one drawing. Its rows, top down:
 //
 //   the failure line  only while there is one (bar/notice.ts failLineNow): a failure in red, or a notice. It wraps, so
-//                  the whole failure shows
+//                  the whole failure shows. A hint is not drawn here: the bar shows it in place of its keys
 //   the fix line   only while there is one (fix/line.ts): a fix that is ready (y use it now · d what changed · n
 //                  later), on (u undo), off, failed, or a request with no code
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), the keys of the
@@ -9,7 +9,10 @@
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
 //                  right their items (barRight: `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
-//                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes)
+//                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
+//                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands
+//                  in place of the left's keys, after the busy step, cut to the one row; the right stays, so a hint
+//                  can point at it
 //
 // The settings pane draws the same bar as its switches would leave it (`preview`): nothing in it is a press and no
 // work shows.
@@ -26,7 +29,7 @@ import { pressKey } from '../hooks/keys'
 import { featureOn } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow, keptCounts } from './counts'
-import { failLineNow } from './notice'
+import { failLineNow, hintNow } from './notice'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -47,7 +50,7 @@ export type BarItem = Item
 const len = textWidth
 /** How an item's words are drawn: dim, or in the item's own color. */
 const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
-const itemLen = (x: Item) => (x.key ? len(x.key) + 1 : 0) + len(x.words)
+const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + 1 : 0) + len(x.words)
 
 /** The bar's items at its right: coverage, then the labels, as the counts last stood, each while its setting is on. */
 async function countItems($: Engine, on: (key: string) => boolean, presses: BarPresses | null, preview = false): Promise<Item[]> {
@@ -91,16 +94,26 @@ export async function barKeys($: Engine): Promise<Set<string>> {
 }
 
 /** The bar's rows: the failure line (when there is one) and the bar, `width` cells wide. */
-export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean } = {}): Promise<Any[]> {
+export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string } = {}): Promise<Any[]> {
   const { Box, Button, Text } = els
   const on = o.on ?? featureOn
   const preview = !!o.preview
   const presses = preview ? null : o.presses ?? null
   const left = await leftItems($, on, preview)
+  // a hint: in place of the left's keys, after the busy step; an item it names (“a ask”) stays after it
+  const hint = preview ? null : ((await hintNow($).catch(() => null)) ?? o.intro ?? null)
+  if (hint) {
+    const named = left.filter(x => x.id !== 'busy' && x.key && hint.includes(`“${x.key} ${x.words}”`))
+    left.splice(0, left.length, ...left.filter(x => x.id === 'busy'), { id: 'hint', glyph: 'Hint:', words: hint }, ...named)
+  }
   let right = [...(await barRight($, on, preview)), ...(await countItems($, on, presses, preview))]
   // a narrow bar: the labels' count goes first, then coverage's file counts, then coverage. The preview shows every
   // item the switches leave on, its right part on a line of its own when it does not fit
   const room = () => width - 9 - left.reduce((n, x) => n + itemLen(x) + 3, 0) - right.reduce((n, x) => n + itemLen(x) + 3, 0)
+  // a hint is cut before the right gives way, as a hint may point at it
+  const h = left.findIndex(x => x.id === 'hint')
+  const cutHint = (least: number) => { if (h >= 0 && room() < 0) left[h] = { ...left[h]!, words: cut(left[h]!.words, Math.max(least, len(left[h]!.words) + room())) } }
+  if (!preview) cutHint(24)
   if (!preview && room() < 0) right = right.filter(x => x.id !== 'labels')
   if (!preview && room() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
   if (!preview && room() < 0) right = []
@@ -108,6 +121,8 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const b = left.findIndex(x => x.id === 'busy')
   if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: left[b]!.words.split(' · ')[0]! }
   if (!preview && b >= 0 && room() < 0) left[b] = { ...left[b]!, words: cut(left[b]!.words, Math.max(8, len(left[b]!.words) + room())) }
+  // the hint takes back the room the right gave up
+  if (!preview && h >= 0) { left[h] = { ...left[h]!, words: hint! }; cutHint(4) }
 
   const words = (x: Item, i: number): Any[] => [
     ...(x.glyph ? [Text({ key: `g${i}`, color: accent(), children: `${x.glyph} ` })] : []),
@@ -136,7 +151,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
 async function lineRows($: Engine, els: Any, width: number): Promise<Any[]> {
   const { Box, Button, Text } = els
   const fail = await failLineNow($)
-  if (!fail) return []
+  if (!fail || fail.hint !== undefined) return []
   const look = fail.kind === 'failed' ? { color: 'error' } : { color: 'warning' }
   const words = fail.kind === 'failed' ? `× ${fail.text.replace(/^[×!]\s*/, '')}` : fail.text
   const parts = keyedWords(words)

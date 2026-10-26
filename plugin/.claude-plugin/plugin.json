@@ -18,7 +18,7 @@
     "citations": {
       "type": "string",
       "title": "Citations",
-      "description": "auto cite + verify: Claude cites each claim you would check, and a second Claude verifies each citation after each reply. auto cite: Claude cites, and a citation is checked when you open it, which spends fewer tokens. manual: select words in an answer and press c to cite them. off: no citations.",
+      "description": "auto cite + verify: Claude cites what each answer rests on, and a second Claude verifies each citation after each answer. auto cite: Claude cites, and a citation is verified when you open it, which spends fewer tokens. manual: select words and press c to cite them. off: no citations.",
       "options": [
         "auto cite + verify",
         "auto cite",
@@ -30,25 +30,25 @@
     "cards": {
       "type": "boolean",
       "title": "Cards",
-      "description": "Claude draws interactive cards, and v visualizes the last answer as a card.",
+      "description": "Claude draws charts and tables as cards in its answers. Press v to visualize the last answer.",
       "default": true
     },
     "squeezeAnswers": {
       "type": "boolean",
       "title": "Rewrite",
-      "description": "s rewrites an answer shorter or longer, for a reader more novice or more expert, or in your own words. One rewrite each time you ask.",
+      "description": "Press s to rewrite an answer shorter or longer, more novice or more expert, or in your own words. Press 0 for the original. One call each time you ask.",
       "default": true
     },
     "catchUp": {
       "type": "boolean",
       "title": "Catch-up",
-      "description": "After replies to background work pile up, b sums them up in one short note, and 0 shows the replies again. One rewrite each time you ask.",
+      "description": "Press b to sum up the replies that came in while you were away, in one short note. Press 0 to see the replies again. One call each time you ask.",
       "default": true
     },
     "explain": {
       "type": "string",
       "title": "Explainers",
-      "description": "auto: marks the terms you may not know after each reply, a small part of the call after it; ] opens what each one means here. on demand: select words and press e for one. off: no explainers.",
+      "description": "auto: terms you may not know get a short explainer after each answer, a small part of the call after it; ] opens each one. Select words and press e for one. on demand: select words and press e for a short explainer. off: no explainers.",
       "options": [
         "auto",
         "on demand",
@@ -59,7 +59,7 @@
     "details": {
       "type": "string",
       "title": "Heads-ups",
-      "description": "auto: marks a detail of an answer that is easy to miss and changes what it means, a small part of the call after each reply; ] opens its heads-up. on demand: h gives heads-ups on the last answer. off: no heads-ups.",
+      "description": "auto: details that may mislead get a heads-up after each answer, a small part of the call after it; ] opens each one. on demand: press h for heads-ups on the last answer. off: no heads-ups.",
       "options": [
         "auto",
         "on demand",
@@ -70,7 +70,7 @@
     "claimsMode": {
       "type": "string",
       "title": "Evidence",
-      "description": "c opens what Claude and you claimed in the session, with why each holds and its sources. auto: the claims are extracted after each reply, the largest part of the call after it. on demand: f in the Evidence pane extracts them, which spends fewer tokens. off: no Evidence pane.",
+      "description": "Press c to see the conversation's claims and their evidence. auto: claims are found after each answer, the largest part of the call after it. on demand: press f in the pane to find them, which spends fewer tokens. off: no Evidence pane.",
       "options": [
         "auto",
         "on demand",
@@ -81,13 +81,13 @@
     "labels": {
       "type": "boolean",
       "title": "Labels",
-      "description": "The bar counts the labels Claude made, and l opens them. No model call.",
+      "description": "Press l to see the labels Claude made, with their values and records. No model call.",
       "default": true
     },
     "coverage": {
       "type": "boolean",
       "title": "Coverage",
-      "description": "The bar shows how much of the data Claude has read, and r opens it by folder. No model call: thimble counts the files after each turn.",
+      "description": "Press r to see which files Claude has read, by folder. No model call: thimble counts the files after each turn.",
       "default": true
     },
     "marks": {

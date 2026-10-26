@@ -63,12 +63,12 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   const pane = await $.ui.mount(PANE)
   expect((await pane.find({ key: 'switch-citations' }))?.text).toContain('Citations')
   for (const mode of ['auto cite + verify', 'auto cite', 'manual', 'off']) expect(await pane.find({ key: `mode-citations-${mode}` })).toBeDefined()
-  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('checked when you open it')
+  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('verified when you open it')
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^ evidence$/ })).toBeDefined()
   await pane.press({ key: 'mode-citations-manual' })
   expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
-  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('select words and press c')
+  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('Select words and press c to cite them.')
   // the bar's preview, as with words selected: c cite beside e explain, and the claims' item set aside, so c names one
   // thing
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()

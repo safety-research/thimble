@@ -1,9 +1,9 @@
 // notice.ts: the failure line, the one way thimble tells the person that something failed. One line above the prompt
 // (bar.tsx draws it), the whole notice in red, until the person types their next prompt, or until what failed works
 // again (failCleared, by the notice's `about`: a card that draws again). noticeLine is the same line, not in red, for
-// what is not thimble's failure (a model's safeguards, a package the machine lacks). hintLine is a notice that only
-// says how to do something (select words first, click the bar in a narrow terminal): it goes on its own after HINT_MS,
-// or at the next key thimble takes, as it takes up the row.
+// what is not thimble's failure (a model's safeguards, a package the machine lacks). hintLine is a hint that only says
+// how to do something (select words first, click the bar in a narrow terminal): the bar shows it in place of its keys
+// (`Hint: …`, bar.tsx), not above, and it goes on its own after HINT_MS, or at the next key thimble takes.
 //
 //   state: failLine (a failure, a notice, or a hint)
 import type { EngineInterface } from 'claude-code'
@@ -78,6 +78,12 @@ export async function failCleared($: Engine, about: string): Promise<void> {
 export async function failLineNow($: Engine): Promise<FailLine | null> {
   const line = ((await $.state.get(FAIL)).value ?? null) as FailLine | null
   return line?.hint !== undefined && !hints.has(line.hint) ? null : line
+}
+
+/** The hint the bar shows now in place of its keys, if any. */
+export async function hintNow($: Engine): Promise<string | null> {
+  const line = await failLineNow($)
+  return line?.hint !== undefined ? line.text.replace(/^(?!Claude\b)([A-Z])(?=[a-z])/, c => c.toLowerCase()) : null
 }
 
 /** The person typed their next prompt: the failure line goes (they have seen it). */

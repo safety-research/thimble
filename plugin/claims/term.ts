@@ -264,8 +264,8 @@ export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false
   if (placed) { await failCleared($, 'pane:claims'); return }
   const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
   hintLine($, byKey
-    ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${words}” in the bar below to open it here.`
-    : `Claude Code did not open the Claims pane here. Widen the terminal, or click “${words}” in the bar below.`, 'pane:claims')
+    ? `click “${words}” on the right to open it here.`
+    : `Claude Code did not open the Evidence pane here; widen the terminal, or click “${words}” on the right.`, 'pane:claims')
 }
 
 /** The pane shows other arguments (the person moved in it, by a key or a click), and holds the keyboard: Claude Code

@@ -14,7 +14,7 @@ import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
-import { introDone, introRow } from './intro'
+import { introDone, introHint } from './intro'
 import { hintLine, promptTyped } from './notice'
 
 type Engine = EngineInterface
@@ -43,13 +43,13 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels'): Promise<void>
     // the words the bar shows for it, which a click opens
     const n = (await countsNow($))?.labels ?? 0
     const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
-    hintLine($, `Claude Code opens the ${kind} pane from a key only in a wider terminal. Click “${shown}” in the bar below to open it here.`, `pane:${kind}`)
+    hintLine($, `click “${kind === 'labels' ? 'l' : 'r'} ${shown}” on the right to open it here.`, `pane:${kind}`)
   }
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */
 export async function openSettings($: Engine): Promise<void> {
-  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) hintLine($, 'Claude Code did not open the settings pane here. Type /thimble-settings to open it.')
+  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) hintLine($, 'type /thimble-settings to open the settings.')
 }
 
 /** r or l at an empty prompt, while the bar names it: its pane opens or closes once the word window closed. */
@@ -98,9 +98,9 @@ export const registerBar: Register = on => {
       const els = $.ui.resolve(e) as Any
       const presses: BarPresses = { settings: () => openSettings($), pane: kind => togglePane($, kind) }
       const width = Math.max(20, e.props.bodyColumns)
-      // the line at the first session's start that says where the settings are (intro.ts), right above the bar
-      const intro = await introRow($, els).catch(() => null)
-      const rows = [...(intro ? [intro] : []), ...(await barRows($, els, width, { presses }))]
+      // the hint at the first session's start that says where the settings are (intro.ts), in the bar
+      const intro = await introHint($).catch(() => null)
+      const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
       // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
       // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off
       const room = Number(e.props.maxRows) > 0 ? Math.max(4, Number(e.props.maxRows) - rows.length - 2) : 0

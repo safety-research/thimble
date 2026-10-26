@@ -415,8 +415,8 @@ test('a on a card at a narrow terminal: the bar names the click on a ask, and th
   }
   expect(opens).toEqual(['thimble'])
   const band = textOf(await $.ui.render(above()))
-  expect(band).toContain('wider terminal')
-  expect(band).toContain('“a ask”')
+  expect(band).toContain('Hint: click “a ask” to open it here.')
+  expect(band).toContain('a ask')
   // the press on a ask in the bar: Claude Code places it
   wide = true
   const ui = await $.ui.mount(above())
@@ -424,7 +424,7 @@ test('a on a card at a narrow terminal: the bar names the click on a ask, and th
   await ui.unmount()
   expect(opens).toEqual(['thimble', 'thimble'])
   // open now: the notice goes
-  expect(textOf(await $.ui.render(above()))).not.toContain('wider terminal')
+  expect(textOf(await $.ui.render(above()))).not.toContain('Hint: click')
 })
 
 // a heads-up on the citation's words, with long bullets, and an explainer after it

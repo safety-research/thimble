@@ -215,7 +215,7 @@ test('a thread the side pane cannot open says what to do, with no slash command;
   const line = async () => String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text ?? '')
   s.$.ui.open = async () => ({ isPlaced: false })
   expect(await openThread(s.$, SCOPE)).toBe(false)
-  expect(await line()).toContain('Widen the terminal and ask again')
+  expect(await line()).toContain('widen the terminal and ask again')
   expect(await line()).not.toContain('/threads')
   // asked again where the pane opens: the thread opens and the line goes
   s.$.ui.open = async () => ({ isPlaced: true })

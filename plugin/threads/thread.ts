@@ -450,8 +450,8 @@ export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: str
   if (placed) await failCleared($, 'pane:threads')
   if (!placed) {
     hintLine($, o.key
-      ? `Claude Code opens the side pane from a key only in a wider terminal. Click “${o.key}” ${o.where ?? 'in the bar below'} to open it here.`
-      : 'Claude Code did not open the side pane here. Widen the terminal and ask again.', 'pane:threads')
+      ? `click “${o.key}”${o.where ? ` ${o.where}` : ''} to open it here.`
+      : 'Claude Code did not open the side pane here; widen the terminal and ask again.', 'pane:threads')
   }
   return placed
 }
@@ -462,7 +462,7 @@ export async function listThreads($: Engine, o: { fromKey?: boolean } = {}): Pro
   const placed = await openPane($, 'threads', {}, 'Threads', { focus: true })
   if (placed) await failCleared($, 'pane:threads')
   if (!placed && o.fromKey) {
-    hintLine($, `Claude Code opens the side pane from a key only in a wider terminal. Click “${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” in the bar below to open it here.`, 'pane:threads')
+    hintLine($, `click “t ${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}” on the right to open it here.`, 'pane:threads')
   }
   return placed
 }

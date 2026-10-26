@@ -370,19 +370,19 @@ export async function explainSelection($: Engine): Promise<void> {
   const { words, cut } = pickedWords(sel?.text ?? '')
   if (!words) {
     hintLine($, fullscreenNow() === false
-      ? 'Selecting words to explain needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).'
-      : 'Select words in an answer with the mouse first, then press e to explain them.', 'explain')
+      ? 'selecting words needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).'
+      : 'select words in an answer and press e to explain them.', 'explain')
     return
   }
   await failCleared($, 'explain')
   const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
   const row = own ?? (await rowHolding($, words))
-  if (!row) { hintLine($, 'No answer to explain words in yet: ask Claude something first.', 'explain'); return }
+  if (!row) { hintLine($, 'ask Claude something, then select words in its answer and press e to explain them.', 'explain'); return }
   const mark = await markOf($, row, words)
   if (mark) { await openMark($, { row, kind: mark.kind === 'heads' ? 'heads' : 'explain', id: mark.id }, mark); return }
   // the bar's busy line says what is written until the tray opens on it (expand.ts); a line here would say it twice.
   // Only a cut selection says so, since the busy line names just the words it explains
-  if (cut) hintLine($, `The selection is long: the explainer covers its first ${words.length} characters.`, 'explain')
+  if (cut) hintLine($, `the selection is long: the explainer covers its first ${words.length} characters.`, 'explain')
   explainOpen($, row, words)
 }
 

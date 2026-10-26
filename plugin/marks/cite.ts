@@ -95,11 +95,11 @@ export async function citeSelection($: Engine): Promise<void> {
   const sel = await answerSelection($)
   await selectionUsed($, 'cite', sel)
   const { words } = pickedWords(sel?.text ?? '')
-  if (!words) { hintLine($, 'Select words in an answer with the mouse first, then press c to cite them.', 'cite'); return }
+  if (!words) { hintLine($, 'select words in an answer and press c to cite them.', 'cite'); return }
   await failCleared($, 'cite')
   const own = sel?.requestId && (await messageOf($, sel.requestId)) ? sel.requestId : null
   const row = own ?? (await rowHolding($, words))
-  if (!row) { hintLine($, 'No answer to cite words in yet: ask Claude something first.', 'cite'); return }
+  if (!row) { hintLine($, 'ask Claude something, then select words in its answer and press c to cite them.', 'cite'); return }
   const why = await citeWords($, row, words)
   if (why) hintLine($, why, 'cite')
 }
