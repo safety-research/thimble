@@ -127,7 +127,7 @@ test('with two replies since the last prompt, the bar names b apart from s; b wr
   await t.press('s')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(0)
-  expect(await t.bar()).toContain('1–3 chip')
+  expect(await t.bar()).toContain('1–2 chip')
   expect(textOf((await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).tree)).not.toContain('atch up')
   await t.press('s')
   // b writes the catch-up
@@ -370,18 +370,19 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   await t.turn('t1', LONG)
   await t.press('s')
   const at0 = await chipsDrawn($, 'row-t1', LONG)
-  expect(at0.client.props.props.items.map((c: Any) => c.ends)).toEqual([['shorter', 'longer'], ['facts', 'with context'], ['new', 'expert']])
+  expect(at0.client.props.props.items.map((c: Any) => c.ends)).toEqual([['shorter', 'longer'], ['novice', 'expert']])
   expect(textOf(at0.tree)).toContain('1 Length shorter ○●○○ longer · as written')
-  expect(textOf(at0.tree)).toContain('2 Interpretation facts ○●○ with context')
+  expect(textOf(at0.tree)).toContain('2 Background novice ○○●○ expert')
+  expect(textOf(at0.tree)).not.toContain('Interpretation')
   // a press on an end sets that level
-  expect(nodes(at0.tree).some(n => n.type === 'Button' && n.props.label === 'Background: new')).toBe(true)
-  // each of the bar's keys is a press: [ and ] each one way, and 1–3 picks the next chip
+  expect(nodes(at0.tree).some(n => n.type === 'Button' && n.props.label === 'Background: novice')).toBe(true)
+  // each of the bar's keys is a press: [ and ] each one way, and 1–2 picks the next chip
   const bar = nodes(await $.ui.render(above)).filter(n => n.type === 'Button').map(n => String(n.props.label))
-  expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–3 chip', '+ your own']))
+  expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–2 chip', '+ your own']))
   const pressBar = async (k: string) => { const ui = await $.ui.mount(above); await ui.press({ key: k }); await ui.unmount() }
   await pressBar('bar-sq-pick')
-  expect(await t.bar()).toContain('[ facts · ] interpretation')
-  await t.press('3')
+  expect(await t.bar()).toContain('[ more novice · ] more expert')
+  await t.press('2')
   await t.press('[')
   await t.press('[')
   await t.clock.advance(3200)

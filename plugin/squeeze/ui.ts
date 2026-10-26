@@ -50,7 +50,7 @@ type Open = { id: string; focus: string; edge: string | null; typing: string | n
 const OPEN = { plugin: 'thimble', key: 'squeezeOpen' } as const
 const OWN = { plugin: 'thimble', key: 'squeezeOwn' } as const
 /** What [ and ] do to each chip, in its words: the way down, then the way up. */
-const WAYS: Record<string, [string, string]> = { length: ['shorter', 'longer'], interpret: ['facts', 'interpretation'], familiarity: ['newer', 'more expert'] }
+const WAYS: Record<string, [string, string]> = { length: ['shorter', 'longer'], familiarity: ['more novice', 'more expert'] }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 

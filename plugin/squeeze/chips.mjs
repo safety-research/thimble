@@ -97,9 +97,8 @@ export function mapLinks(text, fn) {
 /** The chips every message has, in the order drawn. `level0` is where the original stands: "as written". */
 export const CHIPS = Object.freeze([
   Object.freeze({ id: 'length', name: 'Length', levels: Object.freeze(['short', 'as written', 'longer', 'much longer']), level0: 1, kind: 'fixed', ends: Object.freeze(['shorter', 'longer']) }),
-  // (the ids are the records' since before the chips were renamed)
-  Object.freeze({ id: 'interpret', name: 'Interpretation', levels: Object.freeze(['facts only', 'as written', 'with context']), level0: 1, kind: 'fixed', ends: Object.freeze(['facts', 'with context']) }),
-  Object.freeze({ id: 'familiarity', name: 'Background', levels: Object.freeze(['new', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed', ends: Object.freeze(['new', 'expert']) }),
+  // (the id is the records' since before the chip was renamed)
+  Object.freeze({ id: 'familiarity', name: 'Background', levels: Object.freeze(['novice', 'learning', 'working', 'expert']), level0: 2, kind: 'fixed', ends: Object.freeze(['novice', 'expert']) }),
 ])
 export const LENGTH = CHIPS[0]
 /** The level of Length a catch-up arrives at: short. */
@@ -121,7 +120,7 @@ export function glyph(chip, v) {
   return Array.from({ length: n }, (_, i) => (i === lv ? '●' : '○')).join('')
 }
 
-/** What a chip's two ends mean, as its row names them on either side of its dots: `facts` and `expert reading`. */
+/** What a chip's two ends mean, as its row names them on either side of its dots: `novice` and `expert`. */
 export function endsOf(c) {
   const lv = Array.isArray(c?.levels) ? c.levels : []
   return Array.isArray(c?.ends) && c.ends.length === 2 ? [...c.ends] : [lv[0] ?? '', lv[lv.length - 1] ?? '']
@@ -132,7 +131,7 @@ export function levelWords(c) {
   return c.level === c.level0 ? 'as written' : c.levels[c.level] || ''
 }
 
-/** The levels set away from the original, in words (`short · interpret`), or '' at the original. */
+/** The levels set away from the original, in words (`short · expert`), or '' at the original. */
 export function setWords(rec) {
   return chipsOf(rec).filter(c => c.level !== c.level0).map(c => c.levels[c.level]).join(' · ')
 }
@@ -144,11 +143,12 @@ export function setWords(rec) {
  *  as short. Background had the same four levels at scale 3, so its level reads as it was; before scale 3 it had five,
  *  and its level reads as the original's. */
 function levelsAt(s) {
-  let at = s.at && typeof s.at === 'object' ? s.at : {}
+  // the Interpretation chip went in 0.10.4: a level a record set on it reads as not set
+  const { interpret: _gone, ...at } = s.at && typeof s.at === 'object' ? s.at : {}
   // (a record of before has versions written; a new one has none until its first rewrite, which sets the scale)
   const scale = Number(s.scale) || 1
   if (scale >= 4 || !Object.keys(s.versions || {}).length) return at
-  const { length, familiarity, ...others } = at
+  const { length, familiarity, ...others } = /** @type {Record<string, number>} */ (at)
   const rest = scale >= 3 && Number.isInteger(familiarity) ? { ...others, familiarity } : others
   if (!Number.isInteger(length)) return rest
   const was = scale < 2 ? (length >= 3 ? null : 0) : length === 2 ? null : Math.max(0, length - 1)
@@ -263,12 +263,6 @@ export const MEANS = Object.freeze({
     m => `About as long as the original, about ${m.words} words.`,
     m => `About one and a half times the original, about ${round(m.words * 1.5)} words. Explain what the original says more fully, such as what a term means or how one step led to the next.${m.data ? ' Add detail from the cards and their rows where it helps, each new number cited.' : ''}`,
     m => `About two and a half times the original, about ${round(m.words * 2.5)} words. Give each point in full, with each term explained and each step that led to it.${m.data ? ' Add the detail behind each point from the cards and their rows, each new number cited.' : ''}`,
-  ]),
-  // (as written, the middle, asks nothing: the chip is not named in the request while it stands there)
-  interpret: Object.freeze([
-    () => 'State what was found: counts, values, what happened, and sentences that sum them up or rank them. Leave out why it happened, what follows from it and what to do.',
-    () => '',
-    () => "Lead with Claude's reading of the facts, as an expert in the field reads them: the likely cause, what is usual and what is not, what follows, and what to do, with the clues in the facts connected to what an expert knows. Say where the reading starts, as in \"My read:\", and mark what comes from that background knowledge, so the analyst can tell it from what was found.",
   ]),
   // (working, where the original stands, asks nothing)
   familiarity: Object.freeze([

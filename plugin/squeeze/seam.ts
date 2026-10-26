@@ -16,7 +16,7 @@
 //   squeezeHidesCard($, id)            whether a card is left out of the version of its answer shown now
 //   squeezeHolds($)                    whether the chips are open: their keys come before the tray's and the ask's
 //   squeezeKey($, key, until)          s (and the chips' keys while they are open): a taker as hooks/keys.ts takes it
-//   squeezeBar($, on, preview)         its items at the bar's left (`s squeeze`, `b catch up on N replies`; the
+//   squeezeBar($, on, preview)         its items at the bar's left (`s rewrite`, `b catch up on N replies`; the
 //                                      chips' keys while they are open)
 //   registerSqueeze                    its own hooks: /rewrite (what + writes in the prompt box, hidden from the
 //                                      typeahead) and its autocomplete, the chips' Client, the prompt that carries the

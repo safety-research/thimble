@@ -31,10 +31,11 @@ test('the request carries only the definition of each level picked, and Length a
   const rec = { text: TEXT, squeeze: { at: { length: 3, interpret: 0, 'x-boss': 3 }, own: [{ id: 'x-boss', words: 'for my boss' }], scale: 4 } }
   const tail = request(rec, { system: 'S' }).prompt[1].text
   assert.match(tail, /- Length: much longer\. About two and a half times the original/)
-  assert.match(tail, /- Interpretation: facts only\. State what was found/)
+  // the Interpretation chip went in 0.10.4: a level an older record set on it is not sent
+  assert.ok(!tail.includes('Interpretation'))
   assert.match(tail, /"for my boss": fully\. Write the whole text as these words ask\./)
   // no other level of any chip is defined, and the input (the original) stays in the cached head
-  for (const [chip, at] of [['length', 3], ['interpret', 0]]) {
+  for (const [chip, at] of [['length', 3]]) {
     MEANS[chip].forEach((m, i) => { if (i !== at && m(words)) assert.ok(!tail.includes(m(words).split('.')[0]), `${chip} level ${i} is not in the request`) })
   }
   assert.ok(!tail.includes(MEANS.own[1]()) && !tail.includes(MEANS.own[2]()))
@@ -45,18 +46,19 @@ test('the request carries only the definition of each level picked, and Length a
   assert.ok(!one.includes('Interpretation'))
   // a record of scale 3 (one line first, Background's four levels) reads on the scales now, its Background level kept
   const old = chipsOf({ text: TEXT, squeeze: { at: { length: 4, familiarity: 0 }, scale: 3, versions: { 'length=4': 'x' } } })
-  assert.deepEqual(old.map(c => `${c.id}=${c.levels[c.level]}`), ['length=much longer', 'interpret=as written', 'familiarity=new'])
+  assert.deepEqual(old.map(c => `${c.id}=${c.levels[c.level]}`), ['length=much longer', 'familiarity=novice'])
 })
 
 test('older records still read after the scale went to 5 (levelsAt)', () => {
   const read = squeeze => chipsOf({ text: TEXT, squeeze }).map(c => `${c.id}=${c.levels[c.level]}`)
-  // scale 4, no Background chip: its levels read as they were, and Background stands at the original's
-  const four = { at: { length: 0, interpret: 2 }, scale: 4, versions: { 'length=0&interpret=2': 'Short, read.' } }
-  assert.deepEqual(read(four), ['length=short', 'interpret=with context', 'familiarity=working'])
-  // its versions come back with no call
-  assert.equal(fromVersions({ text: TEXT, squeeze: four }, { length: 0, interpret: 2 }).shown, 'Short, read.')
+  // scale 4, no Background chip: Length reads as it was, Background stands at the original's, and the Interpretation
+  // level it set reads as not set (that chip went in 0.10.4)
+  const four = { at: { length: 0, interpret: 2 }, scale: 4, versions: { 'length=0&interpret=2': 'Short, read.', 'length=0': 'Short.' } }
+  assert.deepEqual(read(four), ['length=short', 'familiarity=working'])
+  // the version of its levels without Interpretation comes back with no call; the one with it is not shown
+  assert.equal(fromVersions({ text: TEXT, squeeze: four }, { length: 0 }).shown, 'Short.')
   // scale 2, when Background had five levels: its level reads as the original's, and the versions it wrote go
-  assert.deepEqual(read({ at: { familiarity: 4 }, scale: 2, versions: { 'familiarity=4': 'x' } }), ['length=as written', 'interpret=as written', 'familiarity=working'])
+  assert.deepEqual(read({ at: { familiarity: 4 }, scale: 2, versions: { 'familiarity=4': 'x' } }), ['length=as written', 'familiarity=working'])
   assert.equal(fromVersions({ text: TEXT, squeeze: { at: {}, scale: 2, versions: { 'familiarity=0': 'x' } } }, { familiarity: 0 }), null)
   // scale 3 kept Background's four levels: a version of it alone comes back
   assert.equal(fromVersions({ text: TEXT, squeeze: { at: {}, scale: 3, versions: { 'familiarity=0': 'New.' } } }, { familiarity: 0 }).shown, 'New.')
@@ -118,7 +120,7 @@ test('a cited number the rewrite changed is named, though the original states it
 
 test('each chip names its two ends', () => {
   const chips = chipsOf({ text: 'x', squeeze: {} })
-  assert.deepEqual(chips.map(endsOf), [['shorter', 'longer'], ['facts', 'with context'], ['new', 'expert']])
+  assert.deepEqual(chips.map(endsOf), [['shorter', 'longer'], ['novice', 'expert']])
   // a chip of the person's own runs from as written to fully
   assert.deepEqual(endsOf({ levels: ['as written', 'a little', 'more', 'fully'] }), ['as written', 'fully'])
 })
