@@ -9,6 +9,12 @@
   "license": "Apache-2.0",
   "types": "./types/index.d.ts",
   "userConfig": {
+    "minimal": {
+      "type": "boolean",
+      "title": "Minimal",
+      "description": "Everything on demand: nothing runs after a reply and nothing is marked by itself. Select words and press e to explain them or c to cite them, h gives heads-ups on the last answer, and f in Evidence finds the claims. Claude still draws cards, and v draws one. The settings below come back when it is off.",
+      "default": false
+    },
     "citations": {
       "type": "string",
       "title": "Citations",
@@ -19,7 +25,7 @@
         "manual",
         "off"
       ],
-      "default": "auto cite"
+      "default": "manual"
     },
     "cards": {
       "type": "boolean",
@@ -29,7 +35,7 @@
     },
     "squeezeAnswers": {
       "type": "boolean",
-      "title": "Squeeze",
+      "title": "Rewrite",
       "description": "s makes an answer shorter or longer, or writes it for another reader. One rewrite each time you ask.",
       "default": true
     },
@@ -53,8 +59,8 @@
     },
     "claimsMode": {
       "type": "string",
-      "title": "Claims",
-      "description": "c opens what Claude and you claimed in the session, with why each holds and its sources. auto: the claims are extracted after each reply, the largest part of the call after it. on demand: f in the Claims pane extracts them, which spends fewer tokens. off: no Claims pane.",
+      "title": "Evidence",
+      "description": "c opens what Claude and you claimed in the session, with why each holds and its sources. auto: the claims are extracted after each reply, the largest part of the call after it. on demand: f in the Evidence pane extracts them, which spends fewer tokens. off: no Evidence pane.",
       "options": [
         "auto",
         "on demand",
@@ -114,6 +120,12 @@
       "title": "Claims (old setting)",
       "description": "Replaced by Claims, which has its modes.",
       "default": true
+    },
+    "defaultsAt": {
+      "type": "string",
+      "title": "Defaults seen (internal)",
+      "description": "The thimble version whose defaults these settings have had.",
+      "default": ""
     }
   }
 }

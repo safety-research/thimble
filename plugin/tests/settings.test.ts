@@ -2,7 +2,7 @@
 // a switch turns it off through Claude Code ($.config.set). All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { choiceOf, citationsFrom, featureOn, noteChange, setOptions } from '../settings/features.mjs'
+import { DEFAULTS, choiceOf, citationsFrom, featureOn, noteChange, setOptions } from '../settings/features.mjs'
 import { registerSettings } from '../settings/term'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,7 +36,8 @@ test('/thimble-settings opens the settings under their headings; a press on a ch
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeDefined()
 
   await pane.press({ key: 'mode-coverage-off' })
-  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.coverage', value: false })])
+  // the first change saves 0.10.4's moved default first (defaultsAt), then the change
+  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.defaultsAt', value: DEFAULTS.at }), expect.objectContaining({ key: 'thimble@inline.coverage', value: false })])
   expect((await pane.find({ key: 'says-coverage' }))?.text).toContain('No Coverage pane.')
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeUndefined()
   // Labels is a setting of its own: its item stays
@@ -44,7 +45,7 @@ test('/thimble-settings opens the settings under their headings; a press on a ch
   await pane.unmount()
 })
 
-test('Citations has four modes: auto cite by default, a press on one sets it, the line under the row says what it gives, and manual puts c cite on the bar', async ($, on) => {
+test('Citations has four modes: a press on one sets it, the line under the row says what it gives, and manual puts c cite on the bar', async ($, on) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   mock.clock(on, { now: 0 })
   const rows: Record<string, boolean | string> = { citations: 'auto cite', explain: true }
@@ -66,18 +67,57 @@ test('Citations has four modes: auto cite by default, a press on one sets it, th
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^ claims$/ })).toBeDefined()
   await pane.press({ key: 'mode-citations-manual' })
-  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
+  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
   expect((await pane.find({ key: 'says-citations' }))?.text).toContain('select words and press c')
   // the bar's preview: c cite beside e explain, and the claims' item without its key, so c is named once
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^ claims$/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^claims$/ })).toBeDefined()
-  // the row picked is the first, marked; a click on a name picks its row, changing nothing (↑ ↓: tests/pane.test.ts)
-  expect((await pane.find({ key: 'sw-citations' }))?.text).toMatch(/^› Citations/)
+  // the row picked is the first, Minimal, marked; a click on a name picks its row, changing nothing (↑ ↓:
+  // tests/pane.test.ts)
+  expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^› Minimal/)
   await pane.press({ key: 'switch-claimsMode' })
-  expect((await pane.find({ key: 'sw-claimsMode' }))?.text).toMatch(/^› Claims/)
-  expect(set.length).toBe(1)
+  expect((await pane.find({ key: 'sw-claimsMode' }))?.text).toMatch(/^› Evidence/)
+  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(1)
   await pane.unmount()
+})
+
+test('Minimal holds what acts after each reply on demand: the rows it changes say so, the preview names h, and each row keeps its own setting', async ($, on) => {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
+  mock.clock(on, { now: 0 })
+  const rows: Record<string, boolean | string> = { minimal: false, citations: 'auto cite + verify', explain: true, details: true, claimsMode: 'auto', defaultsAt: DEFAULTS.at }
+  const set: Any[] = []
+  on('config.list', () => ({ value: Object.entries(rows).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })) }))
+  on('config.set', (_$: unknown, e: Any) => { set.push(e); rows[String(e.key).split('.').pop()!] = e.value; return { value: e.value } })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('fs.exists', () => ({ value: false }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  setOptions(rows)
+
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  const pane = await $.ui.mount(PANE)
+  expect((await pane.find({ key: 'sw-minimal' }))?.text).toMatch(/^› Minimal\s+on · off/)
+  expect((await pane.find({ key: 'says-citations' }))?.text).not.toContain('Minimal')
+  expect(await pane.find({ type: 'Text', text: /^ heads-ups$/ })).toBeUndefined()
+  await pane.press({ key: 'mode-minimal-on' })
+  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.minimal', value: true })])
+  expect((await pane.find({ key: 'sw-citations' }))?.text).toContain('→ manual')
+  expect((await pane.find({ key: 'says-citations' }))?.text).toBe('Minimal: manual until Minimal is off.')
+  expect((await pane.find({ key: 'sw-claimsMode' }))?.text).toContain('→ on demand')
+  expect((await pane.find({ key: 'sw-explain' }))?.text).toContain('→ on demand')
+  expect((await pane.find({ key: 'sw-details' }))?.text).toContain('→ on demand')
+  expect((await pane.find({ key: 'sw-cards' }))?.text).not.toContain('→')
+  // the setting it holds stays as set: auto cite + verify, green
+  expect(await pane.find({ key: 'mode-citations-auto cite + verify' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^ heads-ups$/ })).toBeDefined()
+  await pane.press({ key: 'mode-minimal-off' })
+  expect((await pane.find({ key: 'says-citations' }))?.text).not.toContain('Minimal')
+  expect(await pane.find({ type: 'Text', text: /^ heads-ups$/ })).toBeUndefined()
+  await pane.unmount()
+  setOptions({})
 })
 
 test('a mode saved under the old fields moves to Citations at the first session, which sets the old ones back to their defaults; /config hides the old ones', async () => {
@@ -106,7 +146,7 @@ test('a mode saved under the old fields moves to Citations at the first session,
   registerSettings(on, { citations: 'auto cite', marks: true, citationChecks: 'auto', cards: true } as never)
   expect(choiceOf('citations')).toBe('auto cite + verify')
   await call('session.start', { isInteractive: true })
-  expect(set.map(e => [e.key, e.value])).toEqual([['thimble@inline.citations', 'auto cite + verify'], ['thimble@inline.citationChecks', 'on demand']])
+  expect(set.map(e => [e.key, e.value])).toEqual([['thimble@inline.citations', 'auto cite + verify'], ['thimble@inline.citationChecks', 'on demand'], ['thimble@inline.defaultsAt', DEFAULTS.at]])
   expect((await call('config.describe', { key: 'thimble@inline.marks', label: 'x', isHidden: false })).isHidden).toBe(true)
   expect((await call('config.describe', { key: 'thimble@inline.citationChecks', label: 'x', isHidden: false })).isHidden).toBe(true)
   expect((await call('config.describe', { key: 'thimble@inline.citations', label: 'x', isHidden: false })).isHidden).toBe(false)
@@ -127,7 +167,7 @@ test('a mode saved under the old fields moves to Citations at the first session,
   expect(featureOn('catchUp')).toBe(false)
   expect(featureOn('coverage')).toBe(false)
   await call('session.start', { isInteractive: true })
-  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['squeezeAnswers', false], ['catchUp', false], ['labels', false], ['coverage', false], ['squeeze', true], ['counts', true], ['squeezeCards', true]])
+  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['squeezeAnswers', false], ['catchUp', false], ['labels', false], ['coverage', false], ['squeeze', true], ['counts', true], ['squeezeCards', true], ['defaultsAt', DEFAULTS.at]])
   expect(featureOn('catchUp')).toBe(false)
   noteChange('catchUp', true)
   expect(featureOn('catchUp')).toBe(true)
@@ -140,7 +180,23 @@ test('a mode saved under the old fields moves to Citations at the first session,
   registerSettings(on, { citations: 'auto cite + check', claims: false, claimsMode: 'on demand' } as never)
   expect(featureOn('claims')).toBe(false)
   await call('session.start', { isInteractive: true })
-  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['citations', 'auto cite + verify'], ['claimsMode', 'off'], ['claims', true]])
+  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['citations', 'auto cite + verify'], ['claimsMode', 'off'], ['claims', true], ['defaultsAt', DEFAULTS.at]])
   expect(choiceOf('citations')).toBe('auto cite + verify')
+  // 0.10.4's default: auto cite, which the installer saved as the default before, is manual once, and defaultsAt, hidden
+  // from /config, says so; auto cite saved after that stays
+  set.length = 0
+  Object.assign(rows, { citations: 'auto cite' })
+  for (const k of Object.keys(hooks)) delete hooks[k]
+  registerSettings(on, { citations: 'auto cite', defaultsAt: '' } as never)
+  await call('session.start', { isInteractive: true })
+  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['citations', 'manual'], ['defaultsAt', DEFAULTS.at]])
+  expect(choiceOf('citations')).toBe('manual')
+  expect((await call('config.describe', { key: 'thimble@inline.defaultsAt', label: 'x', isHidden: false })).isHidden).toBe(true)
+  set.length = 0
+  for (const k of Object.keys(hooks)) delete hooks[k]
+  registerSettings(on, { citations: 'auto cite', defaultsAt: DEFAULTS.at } as never)
+  await call('session.start', { isInteractive: true })
+  expect(set).toEqual([])
+  expect(choiceOf('citations')).toBe('auto cite')
   setOptions({})
 })

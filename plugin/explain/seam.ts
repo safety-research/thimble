@@ -30,6 +30,9 @@
 //                                      the answer they lie in, else the newest answer that holds them, opened in the
 //                                      tray. Words inside an explainer or a heads-up (or on it) open that one; words
 //                                      over or across marks get one explainer, whose mark covers those it overlaps
+//   headsKey($, key), headsBar         h at an empty prompt, `h heads-ups` on the bar, while Minimal is on (nothing is
+//                                      marked by itself then): one look of the heads lens alone at the answer the
+//                                      keys act on (observer/observer.ts headsUpsNow), once per answer
 //   registerExplain                    the watch of the selection, which draws the bar again when one starts or ends
 //
 // The colors follow Claude Code's theme (core/theme.ts; place.mjs markColors).
@@ -39,7 +42,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import { failCleared, failNotice, noticeLine } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
-import { answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
+import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
 import { themeNow } from '../core/theme'
@@ -50,7 +53,7 @@ import { readKept, writeKept } from '../core/env'
 import { sessionKey } from '../hooks/conversation'
 import type { Take } from '../hooks/keys'
 import { withoutMarks } from '../marks/message.js'
-import type { Look } from '../observer/observer'
+import { headsUpsNow, type Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
 import { openTray } from '../tray/seam'
 import { askGloss } from './expand'
@@ -414,6 +417,45 @@ export async function explainBar($: Engine, on: (key: string) => boolean, previe
   if (!(await selectionWaits($))) return []
   if (!(await answerRows($).catch(() => [])).length) return []
   return [{ id: 'explain', key: 'e', words: 'explain', press: () => explainSelection($) }]
+}
+
+// ------------------------------------------------------------------------------------------------ heads-ups on demand
+
+/** The bar's key that asks for heads-ups on an answer, while Minimal is on. */
+export const HEADS_KEYS = ['h']
+
+/** The answers h asked heads-ups for in this load: each once. */
+const headsAsked = new Set<string>()
+
+/** The answer h acts on now, while it has not asked for that one's heads-ups yet. */
+async function headsRow($: Engine): Promise<string | null> {
+  if (!featureOn('heads')) return null
+  const row = await actingRow($).catch(() => null)
+  return row && !headsAsked.has(row) ? row : null
+}
+
+async function askHeadsNow($: Engine, row: string): Promise<void> {
+  headsAsked.add(row)
+  $.ui.invalidate('ui.render')
+  if (!(await headsUpsNow($, row).catch(() => false))) {
+    headsAsked.delete(row)
+    noticeLine($, 'thimble could not ask for heads-ups on this answer now. Press h to try again.', 'heads')
+  }
+}
+
+/** h at an empty prompt, while Minimal is on and an answer has no heads-ups asked for yet. */
+export async function headsKey($: Engine, key: string, _until: number): Promise<Take | null> {
+  if (!HEADS_KEYS.includes(key)) return null
+  const row = await headsRow($)
+  return row ? { later: () => askHeadsNow($, row) } : null
+}
+
+/** `h heads-ups` on the bar while h acts. The settings' preview shows it while Minimal is on. */
+export async function headsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+  if (!on('heads')) return []
+  if (preview) return [{ id: 'heads', key: 'h', words: 'heads-ups' }]
+  const row = await headsRow($)
+  return row ? [{ id: 'heads', key: 'h', words: 'heads-ups', press: () => askHeadsNow($, row) }] : []
 }
 
 export const registerExplain: Register = on => {
