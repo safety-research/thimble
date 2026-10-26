@@ -38,6 +38,7 @@ import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { cut } from '../core/text.js'
+import { rowsKnown } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { cardRef } from '../marks/message.js'
@@ -313,7 +314,8 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // a drawing that failed at another width: the card draws again at this one
   const failedElsewhere = !!meta.errorWidth && meta.errorWidth !== width
   // the title on a line of its own, then the card
-  const client = E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) })
+  // its rows as the Client last reported them, so what measures a drawing holding the card (a catch-up's rule) counts them
+  const client = rowsKnown(E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) }), heights.get(meta.id))
   // the line a click or a key selected (`▸`, the card guide's marker): `ask about this card` asks about that part of
   // the card, so a click on a bar and then on those words start a thread about the bar
   const sel = fault ? null : selectedLine(current?.tree, width)
@@ -478,7 +480,13 @@ const handled = new Map<string, number>()
 /** One event of a Client's: the card on screen, the drawing it needs, a Button press or a click. */
 async function clientEvent($: Engine, meta: CardMeta, ev: Any): Promise<Any> {
   if (ev.seen) { await markSeen($, meta.id); return null }
-  if (typeof ev.rows === 'number') { heights.set(meta.id, ev.rows); return null }
+  if (typeof ev.rows === 'number') {
+    // a new height draws again what measured the card at its old one (a catch-up's rule)
+    const was = heights.get(meta.id)
+    heights.set(meta.id, ev.rows)
+    if (was !== ev.rows) $.clock.after(0, () => $.ui.invalidate('ui.render'))
+    return null
+  }
   // a click on a run of the card's words: the item on its line, as the card's keys select it (runner.mjs pick); else
   // the side thread about the run, as the margin asks about the card
   if (ev.ask && typeof ev.ask === 'object') {

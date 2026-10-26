@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { crumbOf, nextTrail, TRAIL_MAX, treeRows } from '../trail.mjs'
+import { crumbOf, nextTrail, rowsKnown, TRAIL_MAX, treeRows } from '../trail.mjs'
 
 /** The pane after `kind, args` opens over `was` (open), as core/pane.ts openPane keeps it. */
 const go = (was, kind, args, open = true) => ({ kind, args, title: kind, trail: nextTrail(was, open, kind, args) })
@@ -100,4 +100,16 @@ test("a key's Button counts the hotkey Claude Code draws before its words", () =
   const row = el('Box', { flexDirection: 'row', flexWrap: 'wrap' }, [key('k', 'previous claim'), el('Text', {}, ' · '), key('j', 'next claim'), el('Text', {}, ' · '), key('e', 'evidence')])
   // `k: previous claim · j: next claim · e: evidence`, 47 cells: two rows at 40 columns, where the words alone (38) fit one
   assert.equal(treeRows(row, 40), 2)
+})
+
+test("a Client counts the rows its module reported (a card's), so a rule beside a drawing holding it reaches its end", () => {
+  const T = (children) => ({ type: 'Text', props: {}, children: [children] })
+  const card = rowsKnown({ type: 'Client', props: { module: './client.tsx', width: 60 } }, 24)
+  const body = { type: 'Box', props: { flexDirection: 'column' }, children: [T('Two replies about the made-up runs.'), { type: 'Box', props: { flexDirection: 'column', borderStyle: 'round' }, children: [T('A made-up card'), card] }, T('After the card.')] }
+  // the text, the frame's two borders and title, the card's 24 reported rows, the text after it
+  assert.equal(treeRows(body, 80), 1 + 2 + 1 + 24 + 1)
+  // a Client that has not reported its rows yet counts as 10
+  assert.equal(treeRows({ type: 'Client', props: {} }, 80), 10)
+  // a report of no rows changes nothing
+  assert.equal(treeRows(rowsKnown({ type: 'Client', props: {} }, 0), 80), 10)
 })
