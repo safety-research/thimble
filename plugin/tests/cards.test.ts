@@ -5,6 +5,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import Card from '../cards/client'
+import { cardWidth } from '../cards/draw'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -231,6 +232,9 @@ test('a line of the reply that holds only a card\'s link draws the card there; i
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-made-up-q' } as never)
   const reply = await $.ui.render({ component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up-q', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } } as never)
   expect(elements(reply).some(n => n.type === 'Client')).toBe(true)
+  // it stands in the text's column, 2 columns in, so it is 2 narrower than a card under an answer: its frame keeps the
+  // 2 columns at the right free
+  expect(elements(reply).find(n => n.type === 'Client')?.props.width).toBe(cardWidth(98))
   expect(textOf(reply)).not.toContain('card:')
   expect(elements(await $.ui.render(callRow('toolu_made_up_q1', input))).some(n => n.type === 'Client')).toBe(false)
   const res = await $.ui.render({ ...(callRow('toolu_made_up_q1', input) as Any), component: 'ToolResult', props: { tool_use_id: 'toolu_made_up_q1', tool: TOOL, output: 'the copy', isExpanded: false } } as never)

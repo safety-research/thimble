@@ -445,7 +445,9 @@ export async function framesIn($: Engine, e: Any, text: string, here: string[] =
       out[id] = E.Box({ key: `moved-${id}`, children: [E.Text({ dimColor: true, children: `↓ “${cut(meta.title, 60)}” ${where}` })] })
       continue
     }
-    out[id] = await frame($, e, meta, o)
+    // a card on a line of the text stands in the text's column, 2 columns in from an answer's left edge (where a card
+    // drawn under the answer stands), so it is that much narrower, and keeps the 2 columns free at the right
+    out[id] = await frame($, e, meta, { ...o, indent: (o.indent ?? 0) + 2 })
     drawn.push(id)
   }
   if (drawn.length) noteShown($, drawn, e.props?.onScreen)

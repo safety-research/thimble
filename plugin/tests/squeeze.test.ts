@@ -251,12 +251,15 @@ test("a catch-up shows its replies' explainers on its words, and a card it place
   // the reply's explainer stands on the catch-up's words too
   expect(nodes(host).some(n => n.type === 'Button' && String(n.props.label).startsWith('explain slow mirror'))).toBe(true)
   // the card moved down into the catch-up: its reply points to it; in the catch-up it fits beside the rule, 2 columns
-  // narrower than in an answer
+  // narrower than on a line of an answer's text, which is 2 narrower than under an answer, so its frame keeps the 2
+  // columns at the right free
   expect(textOf(await $.ui.render(answer('row-t2', two)))).toContain('“Runs” is in the catch-up below')
-  expect(nodes(host).find(n => n.type === 'Client' && String(n.props.module).endsWith('/client.tsx'))?.props.width).toBe(cardWidth(VIEW.columns - 2))
-  // its rule is a Client given the catch-up's whole height, which draws one ▎ per row of it
+  expect(nodes(host).find(n => n.type === 'Client' && String(n.props.module).endsWith('/client.tsx'))?.props.width).toBe(cardWidth(VIEW.columns - 4))
+  // its rule is a Client given the catch-up's whole height, which draws one ▎ per row of it, in a box that cuts it at
+  // the catch-up's last row
   const rule = nodes(host).find(n => n.type === 'Client' && String(n.props.module).endsWith('/rule.tsx'))
   expect(rule?.props.height).toBe('100%')
+  expect(nodes(host).find(n => n.props?.key === 'cu-rule')?.props.overflow).toBe('hidden')
   const lines = (rows: number) => textOf(Rule({ color: 'purple' }, { elements: { Text: (p: Any) => ({ type: 'Text', props: p }) }, rows } as never)).split('\n')
   expect(lines(7)).toEqual(Array(7).fill('▎'))
 })

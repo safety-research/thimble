@@ -466,7 +466,7 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
   const replies = Number(cu.catchup?.replies) || 0
   const w = Math.max(20, cols - 2)
   // a card it places on a line of its own draws there (its reply points down to it)
-  // its cards fit beside the rule, whose column and padding take 2 columns more than an answer's
+  // its cards fit beside the rule, whose column and padding take 2 columns more than an answer's text
   const cards = cardsIn ? await cardsIn(text, [cu.id], { indent: 2 }).catch(() => ({})) : {}
   const spans = await spansOver($, cu.catchup?.rows ?? [], text, marks)
   const body = messageEl(els, {
@@ -479,8 +479,9 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
     },
   })
   // the rule: a Client as tall as the catch-up, which draws one ▎ per row it is given (rule.tsx), so it ends where the
-  // catch-up ends, whatever its text and cards lay out to
-  const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, children: [els.Client({ key: `cu-rule-${row}`, module: './rule.tsx', width: 2, height: '100%', props: { color: accent() } })] })
+  // catch-up ends, whatever its text and cards lay out to; its box cuts it there, since the rows the Client was given
+  // last can be more than the catch-up has now (a row below it changed, and Claude Code has not called it again yet)
+  const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, overflow: 'hidden', children: [els.Client({ key: `cu-rule-${row}`, module: './rule.tsx', width: 2, height: '100%', props: { color: accent() } })] })
   const head = els.Text({ key: 'cu-head', children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} above` })] })
   return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [
     els.Box({ key: 'cu-ruled', flexDirection: 'column', paddingLeft: 2, children: [rule, head, body] }),
