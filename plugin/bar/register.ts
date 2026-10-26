@@ -2,7 +2,7 @@
 //
 //   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
 //                aboveBar). /thimble-settings and a click on `thimble` open the
-//                settings; the person's next prompt takes the failure line; the counts at each load of the plugin and
+//                settings; the person's next prompt takes the failure line and the line at the session's start (intro.ts); the counts at each load of the plugin and
 //                after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Each pane takes the keys its key row names (coverage's j k ↵ and r, the labels' number keys that
@@ -14,6 +14,7 @@ import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
+import { introDone, introRow } from './intro'
 import { noticeLine, promptTyped } from './notice'
 
 type Engine = EngineInterface
@@ -87,6 +88,7 @@ export const registerBar: Register = on => {
   // the person's own prompt: the failure line goes
   on('prompt.submit', { origin: { kind: /^(?:composer|bridge)$/ } }, async ($, e, next) => {
     if (!e.command) await promptTyped($).catch(() => undefined)
+    await introDone($).catch(() => undefined)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -96,7 +98,9 @@ export const registerBar: Register = on => {
       const els = $.ui.resolve(e) as Any
       const presses: BarPresses = { settings: () => openSettings($), pane: kind => togglePane($, kind) }
       const width = Math.max(20, e.props.bodyColumns)
-      const rows = await barRows($, els, width, { presses })
+      // the line at a session's start that says what the keys do (intro.ts), right above the bar
+      const intro = await introRow($, els, presses).catch(() => null)
+      const rows = [...(intro ? [intro] : []), ...(await barRows($, els, width, { presses }))]
       // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
       // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off
       const room = Number(e.props.maxRows) > 0 ? Math.max(4, Number(e.props.maxRows) - rows.length - 2) : 0

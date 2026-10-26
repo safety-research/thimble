@@ -53,6 +53,8 @@ declare module 'claude-code' {
       paneView: StateFamily<unknown>
       /** the failure line or a notice, until the person's next prompt (bar/notice.ts) */
       failLine: { kind: 'failed' | 'notice'; text: string; about?: string } | null
+      /** the session whose line at its start went at the person's first prompt (bar/intro.ts) */
+      introDone: string | null
 
       // ---- labels (labels/)
       /** goes up when a label changes (Claude's `thimble label` command, a wave of the model's reads, the person's

@@ -5,6 +5,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
 import { busyWhile } from '../bar/busy'
+import { introKeys } from '../bar/intro'
 import { failNotice, noticeLine, promptTyped } from '../bar/notice'
 import { promptStub } from './stubs'
 
@@ -217,4 +218,27 @@ test('a long busy step keeps the bar to one row: its other steps go, then its wo
   expect(narrower).toContain('…')
   expect(narrower.length).toBeLessThanOrEqual(26)
   alive = false
+})
+
+test('a session starts with a line above the bar that names the keys of the features on and where the settings are; the first prompt takes it, and a click on its thimble opens the settings', async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  const band = textOf(await $.ui.render(BAND))
+  expect(band).toContain('thimble · v visualize · e explain')
+  expect(band).toContain('s rewrite · click thimble for settings')
+  // its thimble opens the settings, as the bar's does
+  const ui = await $.ui.mount(BAND)
+  await ui.press({ key: 'intro-thimble' })
+  await ui.unmount()
+  expect(w.opened).toEqual(['thimble'])
+  // the person's first prompt: the line goes, and a resumed session does not show it again
+  await $.prompt.submit({ text: 'which runs failed?', origin: { kind: 'composer' } } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain('click thimble for settings')
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain('click thimble for settings')
+})
+
+test('the line at a session\'s start names a key only while its feature is on', async () => {
+  expect(introKeys(() => true)).toEqual([['v', 'visualize'], ['e', 'explain'], ['c', 'cite'], ['s', 'rewrite']])
+  expect(introKeys(k => k !== 'cards' && k !== 'cite')).toEqual([['e', 'explain'], ['s', 'rewrite']])
 })
