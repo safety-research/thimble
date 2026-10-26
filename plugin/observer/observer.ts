@@ -8,7 +8,9 @@
 //   - a reply in a long turn: words Claude wrote before it went on working (LONG_REPLY characters or more), queued
 //     when its turn takes its next step;
 //   - the words of an answer with cards: the rows above and between the turn's cards, queued with its answer, since
-//     a reply that explains, shows a card and explains again is one answer.
+//     a reply that explains, shows a card and explains again is one answer;
+//   - a catch-up (squeeze/term.ts): each version shown is read by the explain and heads lenses as an answer is, with
+//     its words as what the analyst reads (lookAtCatchUp).
 // One worker takes the queue in order. When several messages wait (they came while a look ran), it takes them all in
 // one look whose prompt names each of them. Two looks never run at once, and a look never delays a turn. It looks only
 // where a person is (S.person): never in a `-p` run, and in a session Claude Code's background service runs only once
@@ -39,7 +41,7 @@ import { failNotice } from '../bar/notice'
 import { cardText } from '../cards/draw'
 import { metaOf } from '../cards/store'
 import { CLAIMS_FIND, claimsFindEnd, claimsFindStart, claimsLookFailed, claimsMerge, claimsState, claimsUnread } from '../claims/seam'
-import { messageOf, turnOf, type TurnRec } from '../core/answers'
+import { messageOf, turnOf, turnOfRow, type TurnRec } from '../core/answers'
 import { isPersonPrompt, oneLine } from '../core/answers.mjs'
 import { textView } from '../core/answerview'
 import { readKept, rootHere, runThimble, startDir, writeKept } from '../core/env'
@@ -62,7 +64,7 @@ export type TurnPrompt = { text: string; by: string }
 /** One of Claude's messages a look reads: its row, its words, whether it ended its turn, its turn and that turn's
  *  prompt. `at`: when it was queued (session clock); `t`: the same in wall time. `only`: the lenses of a look on
  *  demand (the claims'), which reads it with those alone. */
-export type LookMsg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; at: number; t: number; only?: string[] }
+export type LookMsg = { row: string; text: string; kind: 'answer' | 'reply'; turnId: string; turnNo: number; prompt: TurnPrompt; at: number; t: number; only?: string[]; catchUp?: string }
 /** What one look gave, as a feature's merge reads it: the messages it read (the newest last), the reply read
  *  leniently (reply.mjs parseAnswer), whether the person started another turn while it looked, and a log of the
  *  look's own (a feature may note what it placed). */
@@ -89,7 +91,9 @@ const S = {
 }
 
 const cut = (s: string, n: number) => (s.length <= n ? s : `${s.slice(0, n - 1)}…`)
-const wait = ($: Engine, ms: number) => new Promise<void>(done => { $.clock.after(ms, () => done()) })
+function wait($: Engine, ms: number): Promise<void> {
+  return new Promise<void>(done => { $.clock.after(ms, () => done()) })
+}
 
 /** Whether a lens joins the look after each reply: its feature is on, in its `auto` mode when it has one. */
 const lensAuto = (l: Lens): boolean => lensesAfterReply(l.option)
@@ -160,7 +164,7 @@ export function lookWord(lenses: string[]): string {
 // ------------------------------------------------------------------------------------------------ the queue
 
 /** A message as the queue knows it: its row, and the lenses of a look on demand. */
-const queuedKey = (m: { row: string; only?: string[] }) => (m.only ? `${m.row}#${m.only.join(',')}` : m.row)
+const queuedKey = (m: { row: string; only?: string[]; catchUp?: string }) => `${m.row}${m.only ? `#${m.only.join(',')}` : ''}${m.catchUp ? `#cu${m.catchUp.length}` : ''}`
 
 async function enqueue($: Engine, m: Omit<LookMsg, 'at' | 't'>): Promise<void> {
   if (S.queued.has(queuedKey(m))) {
@@ -222,6 +226,17 @@ export async function findClaimsNow($: Engine): Promise<number> {
   return turns.length
 }
 
+/** A catch-up's version shown (squeeze/term.ts settled): the explain and heads lenses read it as they read an answer,
+ *  with its words as what the analyst reads below `row`, the newest message it covers, where what they give is kept
+ *  (explain/seam.ts explainMerge) and the catch-up's drawing finds it (explainSpansOf). */
+export async function lookAtCatchUp($: Engine, row: string, text: string): Promise<void> {
+  const only = (LENSES as Lens[]).filter(l => (l.name === 'explain' || l.name === 'heads') && featureOn(l.option)).map(l => l.name)
+  if (!only.length || S.person !== 'now' || !text.trim()) return
+  const t = await turnOfRow($, row)
+  const m = t ? await msgOf($, t, row, 'answer') : null
+  if (m) await enqueue($, { ...m, only, catchUp: text })
+}
+
 // ------------------------------------------------------------------------------------------------ the look
 
 /** The lenses of a look and their fragments: those that join the look after each reply, or `only` these (on demand). */
@@ -276,9 +291,12 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
     for (const id of [...new Set(batch.map(m => m.turnId))]) { const t = await turnOf($, id); if (t) turns.push(t) }
     const [objects, coverage] = await Promise.all([cardsNow($, turns), coverageNow($)])
     const st = { ...(await explainState($).catch(() => ({}))), ...(await claimsState($).catch(() => ({}))) }
-    // a message the person reads in another version (squeezed): the look reads the version they read
-    const shownText = (await textView($, newest.row, newest.text)).text
-    const shown = shownText !== newest.text ? `\nThe analyst reads the newest message squeezed (${shownText.split('\n').length} lines); this is what shows:\n${cut(shownText, 6000)}\n` : ''
+    // a message the person reads in another version (squeezed), or a catch-up of it and the replies before it: the
+    // look reads what they read
+    const shownText = newest.catchUp ?? (await textView($, newest.row, newest.text)).text
+    const shown = newest.catchUp
+      ? `\nBelow the newest message the analyst reads a catch-up thimble wrote of the replies since their last message (${shownText.split('\n').length} lines), in place of reading those replies; this is what shows, and what you read for them:\n${cut(shownText, 6000)}\n`
+      : shownText !== newest.text ? `\nThe analyst reads the newest message squeezed (${shownText.split('\n').length} lines); this is what shows:\n${cut(shownText, 6000)}\n` : ''
     const vals = { MESSAGES: messagesText(batch), ROW: rowKeys(), SHOWN: shown, OBJECTS: objects, COVERAGE: coverage }
     const frame = await promptText($, 'observer')
     let p = await pass($, { frame, parts, msgs: batch, vals, st })

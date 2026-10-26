@@ -44,7 +44,7 @@ type Engine = EngineInterface
 type Any = any
 /** The frames of the cards a text places on lines of their own (cards/draw.ts framesIn), each drawn there as at
  *  home when the card's line stood in one of `rows`. */
-export type CardsIn = (text: string, rows: string[]) => Promise<Record<string, Any>>
+export type CardsIn = (text: string, rows: string[], o?: { indent?: number }) => Promise<Record<string, Any>>
 type At = Record<string, number>
 type Open = { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean }
 
@@ -467,7 +467,8 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
   const replies = Number(cu.catchup?.replies) || 0
   const w = Math.max(20, cols - 2)
   // a card it places on a line of its own draws there (its reply points down to it)
-  const cards = cardsIn ? await cardsIn(text, [cu.id]).catch(() => ({})) : {}
+  // its cards fit beside the rule, whose column and padding take 2 columns more than an answer's
+  const cards = cardsIn ? await cardsIn(text, [cu.id], { indent: 2 }).catch(() => ({})) : {}
   const spans = await spansOver($, cu.catchup?.rows ?? [], text, marks)
   const body = messageEl(els, {
     text, marks, looks, key: `cu-${row}`, cols: w, first: false, spin: '⠋', dim: !!ui.running, cards, spans,
@@ -479,9 +480,10 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
     },
   })
   const head = els.Text({ key: 'cu-head', children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} above` })] })
-  // the rule: as tall as the head and the drawn body (its text and the cards it places, at their reported heights),
-  // with room to spare, cut at the catch-up's own height
-  const tall = treeRows(body, w) + 4
+  // the rule: longer than the head and the drawn body can be (its text and the cards it places, at their reported
+  // heights), cut at the catch-up's own height. A count of rows is an estimate (markdown lays out blank lines, lists
+  // and marks its own way), so the rule is drawn twice that and more: a rule cut short shows, one cut long does not
+  const tall = 2 * treeRows(body, w) + 20
   const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, overflow: 'hidden', flexDirection: 'column', children: [els.Text({ color: accent(), children: Array.from({ length: tall }, () => '▎').join('\n') })] })
   return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [
     els.Box({ key: 'cu-ruled', flexDirection: 'column', paddingLeft: 2, children: [rule, head, body] }),
