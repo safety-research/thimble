@@ -287,10 +287,13 @@ async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_i
 
     try:
         main = started("claude", "--session-id", MAIN, "--", "/thimble")
+        # a long hold, so that a slow runner's "at once" is never read as held
+        monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 5.0)
         t0 = time.monotonic()
         r = await hello(main)
         assert r.status_code == 200 and r.json() == {"ok": True}
-        assert time.monotonic() - t0 < module_bridge.HELLO_HOLD_S, "accepted at once, inside session.start"
+        assert time.monotonic() - t0 < module_bridge.HELLO_HOLD_S / 2, "accepted at once, inside session.start"
+        monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 0.6)
         assert module_bridge._accepted(CORPUS, MAIN) and "idle" not in _registry()["module"]
         module_bridge._bridges.clear()
         resumed = started("claude", "--resume", MAIN)
@@ -354,7 +357,8 @@ async def test_a_stray_hello_never_unseats_main_s_module(client, plugin_headers)
 
 
 async def test_a_hello_after_clear_is_accepted_whether_rekey_names_the_new_id_before_or_after_it(client,
-                                                                                               plugin_headers):
+                                                                                               plugin_headers,
+                                                                                               monkeypatch):
     _launch()
     old = Module(client, plugin_headers)
     assert (await old.hello()).status_code == 200
@@ -370,9 +374,11 @@ async def test_a_hello_after_clear_is_accepted_whether_rekey_names_the_new_id_be
     assert _registry()["module"]["rekeyed"] == {MAIN: NEW}
     # --rekey first (an in-session /resume back to the first session): the hello is accepted at once
     module_bridge.rekey(CORPUS, NEW, MAIN)
+    monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 5.0)  # as above: "at once" with room for a slow runner
     t0 = time.monotonic()
     assert (await old.hello()).status_code == 200
     assert time.monotonic() - t0 < module_bridge.HELLO_HOLD_S / 2
+    monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 0.6)
     assert module_bridge.main_session(CORPUS) == MAIN
 
 
