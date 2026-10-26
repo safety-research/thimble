@@ -15,7 +15,10 @@
 //                                     to it (e closes the evidence: the claim again); a pane that was not open starts
 //                                     a new trail
 //   treeRows(el, width)            -> about how many rows a drawing takes at `width` cells: what the pane under its
-//                                     input bar has room for, and how far it scrolls
+//                                     input bar has room for, how far it scrolls, and how tall a rule beside a
+//                                     drawing stands (a catch-up's)
+//   rowsKnown(el, rows)            -> says how many rows a Client element draws, as its module last reported them
+//                                     (a card's), so treeRows counts them and not a guess
 
 import { textWidth } from './text.js'
 
@@ -114,6 +117,14 @@ function textRows(s, w, wraps) {
   return rows
 }
 
+// the rows Client elements draw, as their modules reported them, by element
+const known = new WeakMap()
+
+export function rowsKnown(el, rows) {
+  if (el && typeof el === 'object' && typeof rows === 'number' && rows > 0) known.set(el, rows)
+  return el
+}
+
 export function treeRows(el, width) {
   const w = Math.max(1, Math.floor(width))
   if (el == null || el === false || el === true) return 0
@@ -158,7 +169,7 @@ export function treeRows(el, width) {
     case 'Input': return my + Math.max(1, Number(p.rows) || 1)
     case 'Code': return my + textRows(String(p.source ?? ''), iw, false)
     case 'Markdown': return my + textRows(String(p.text ?? ''), iw, true)
-    case 'Client': return my + Math.max(1, Number(p.rows) || 10)
+    case 'Client': return my + Math.max(1, known.get(el) ?? (Number(p.rows) || 10))
     default: return my + Math.max(1, Number(p.rows) || textRows(textIn(kids(el)), iw, true))
   }
 }

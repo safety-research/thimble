@@ -26,6 +26,7 @@ import type { BarItem } from '../bar/bar'
 import { markPressed, spansOver } from '../core/answerview'
 import { latestAnswer, pickAnswer } from '../core/answers'
 import { openPane } from '../core/pane'
+import { treeRows } from '../core/trail.mjs'
 import { accent } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import type { Take } from '../hooks/keys'
@@ -35,7 +36,7 @@ import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { cardDid, cardHidden } from './cards'
-import { atOf, cardNotes, chipsOf, endsOf, isOriginal, levelWords, ownWords, revealCut, rowsOf, stepAt, withOwn } from './chips.mjs'
+import { atOf, cardNotes, chipsOf, endsOf, isOriginal, levelWords, ownWords, revealCut, stepAt, withOwn } from './chips.mjs'
 import { catchUp, catchUpAt, catchUpOn, cuId, drawnAt, dismissCatchUp, partNow, pileUp, recOf, saveRec, seeView, setLevels, uiOf, wantLevels, type Rec } from './term'
 
 type Engine = EngineInterface
@@ -478,8 +479,9 @@ async function catchUpEl($: Engine, els: Any, row: string, cols: number, cardsIn
     },
   })
   const head = els.Text({ key: 'cu-head', children: [els.Text({ color: accent(), bold: true, children: 'thimble' }), els.Text({ dimColor: true, children: `  catch-up of the ${replies} ${replies === 1 ? 'reply' : 'replies'} above` })] })
-  // the rule: as tall as the text is likely to be, cut at the catch-up's own height
-  const tall = rowsOf(text, w) + 4
+  // the rule: as tall as the head and the drawn body (its text and the cards it places, at their reported heights),
+  // with room to spare, cut at the catch-up's own height
+  const tall = treeRows(body, w) + 4
   const rule = els.Box({ key: 'cu-rule', position: 'absolute', top: 0, bottom: 0, left: 0, width: 2, overflow: 'hidden', flexDirection: 'column', children: [els.Text({ color: accent(), children: Array.from({ length: tall }, () => '▎').join('\n') })] })
   return els.Box({ key: `cu-${row}`, flexDirection: 'column', marginTop: 1, children: [
     els.Box({ key: 'cu-ruled', flexDirection: 'column', paddingLeft: 2, children: [rule, head, body] }),
