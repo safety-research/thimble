@@ -96,8 +96,8 @@ test('Claude hears the version the person settled on once, the original only aft
   assert.equal(settledNote(restore(rec), 'orig'), '')
   assert.match(settledNote(restore(rec), shownKey(rec)), /reads again, for the analyst, as you wrote it/)
   const cu = { row: 'r3', text: catchUpText(['First reply.', 'Second reply.']), shown: 'Both, short.', squeeze: { at: { length: 0 }, scale: 4 }, catchup: { host: 'r3', rows: ['r2', 'r3'], replies: 2, question: 'q' } }
-  assert.match(settledNote(cu, 'orig'), /caught up on your 2 replies since their last prompt\. In place of those messages \("First reply\."; "Second reply\."\)/)
-  assert.match(settledNote({ ...cu, catchup: { ...cu.catchup, dismissed: true } }, shownKey(cu)), /went back to reading your 2 replies/)
+  assert.match(settledNote(cu, 'orig'), /caught up on your 2 replies since their last prompt\. Below those messages \("First reply\."; "Second reply\."\), which still show/)
+  assert.match(settledNote({ ...cu, catchup: { ...cu.catchup, dismissed: true } }, shownKey(cu)), /closed the catch-up of your 2 replies/)
   // the terms of a message's explainers, not its heads-ups
   assert.deepEqual(termsOf({ items: { a: { id: 'a', term: 'hydrate' }, b: { id: 'b', term: 'the cache', kind: 'heads' } }, order: ['a', 'b'] }), ['hydrate'])
 })

@@ -1,7 +1,7 @@
 // Squeeze and catch-up in the terminal (squeeze/): s at an empty prompt opens the chips under the answer, ] asks one
 // rewrite and the new text shows in place of Claude's words, Claude hears the version with the next prompt, 0 brings
-// the original back with no call; with two replies since the person's last prompt, s opens the same chips under the
-// newest, and they offer a catch-up as one more chip, which writes one catch-up of them, and 0 dismisses it; keys
+// the original back with no call; with two replies since the person's last prompt, b writes one catch-up of them below
+// the newest, while the replies still show, with their explainers on its words and their cards moved into it; keys
 // pressed in a row make one rewrite, and the latest one shows. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
@@ -24,9 +24,13 @@ const answer = (requestId: string, text: string) => ({ plugin: 'thimble', compon
 const above = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: VIEW } as never
 const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
 
+/** What the observer's look answers (its explainers, heads-up and claims), '{}' unless a test sets it. */
+let lookReply = '{}'
+
 /** `kept`: files of the conversation's folder before the session starts, by their path in it (`marks/row-t1.json`). */
 async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kept: Record<string, string> = {}) {
   resetSqueeze()
+  lookReply = '{}'
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -38,7 +42,7 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
   const keptOf = (path: string) => Object.keys(kept).find(k => path.endsWith(`/${k}`))
   on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? (keptOf(e.path) ? kept[keptOf(e.path)!] : undefined) ?? promptStub(e.path) ?? '' }))
   on('fs.write', (_$: unknown, e: { path: string; content: string }) => { files[e.path] = String(e.content); return { value: undefined } })
-  on('fs.list', (_$: unknown, e: { path: string }) => ({ value: Object.keys(kept).filter(k => String(e.path).endsWith(`/${k.split('/')[0]}`)).map(k => ({ name: k.split('/')[1], kind: 'file' })) }))
+  on('fs.list', (_$: unknown, e: { path: string }) => ({ value: Object.keys(kept).filter(k => String(e.path).endsWith(`/${k.split('/')[0]}`)).map(k => ({ name: k.split('/')[1], kind: k.split('/').length > 2 ? 'dir' : 'file' })) }))
   on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files }))
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   on('env.set', () => ({ value: {} }))
@@ -49,7 +53,7 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
   on('prompt.fill', () => ({ isFilled: true }) as never)
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   on('prompt.change', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
-  on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
+  on('model.fork', () => ({ value: { isAnswered: true, text: lookReply } }))
   on('model.complete', async (_$: unknown, e: Any) => { asked.push(e); return { value: { isAnswered: true, text: `<text>\n${(await replies.shift()) ?? 'Short.'}\n</text>`, usage: {} } } })
   on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { ...(tempRun(e.argv) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }))
   on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
@@ -110,7 +114,7 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   expect(back).not.toContain('fresh fetch')
 })
 
-test('with two replies since the last prompt, the bar names b apart from s; b writes one catch-up under the newest, with the chips closed and 0 on the bar; 0 brings the replies back', async ($, on) => {
+test('with two replies since the last prompt, the bar names b apart from s; b writes one catch-up below the newest, the replies still show, and the chips stay closed', async ($, on) => {
   const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
   await t.turn('t1', 'Earlier answer.')
   await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
@@ -128,17 +132,16 @@ test('with two replies since the last prompt, the bar names b apart from s; b wr
   await t.clock.advance(5000)
   expect(String(t.asked[0].prompt)).toContain("Claude's messages since the analyst's last prompt")
   expect(String(t.asked[0].prompt)).toContain('The analyst asked: why did it fail?')
-  // the covered reply draws nothing; the newest draws the catch-up with its head line
-  expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('')
+  // the covered reply draws as written; the newest draws its own words, then the catch-up below with its head line
+  expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
   const host = textOf(await $.ui.render(answer('row-t3', 'The retry passed on all runs.')))
-  expect(host).toContain('catch-up of the 2 replies since your last message')
+  expect(host.indexOf('the engine')).toBeLessThan(host.indexOf('catch-up of the 2 replies above'))
   expect(host).toContain('Both: the build failed, and the retry passed.')
-  // the squeeze chips stay closed under a catch-up: the bar names 0, which brings the replies back
+  // the squeeze chips stay closed under a catch-up, and nothing is hidden, so no key brings the replies back
   expect(host).not.toContain('1–')
   expect(await t.bar()).not.toContain('chip')
-  expect(await t.bar()).toContain('0 show the replies')
-  await t.press('0')
-  expect(textOf(await $.ui.render(answer('row-t2', 'The build failed on three runs.')))).toBe('the engine')
+  expect(await t.bar()).not.toContain('show the replies')
+  expect(String((await t.ask('and?')).context ?? '')).toContain('Below those messages')
   // a catch-up the person read counts: the bar no longer offers one, and b does nothing
   expect(await t.bar()).not.toContain('catch up')
   const asked = t.asked.length
@@ -224,6 +227,30 @@ test('a citation opened over the open chips takes the keys: the bar names 0 once
   expect(textOf(await $.ui.render(answer('row-t1', text)))).not.toContain('slow package mirror')
 })
 
+// The catch-up stands for its replies: their explainers stand on its words where it says their terms, and a card it
+// places moves down into it, while the reply keeps a line that points to it
+test("a catch-up shows its replies' explainers on its words, and a card it places moves into it from its reply", async ($, on) => {
+  const card = 'c1234abcd5'
+  const meta = { id: card, version: 1, title: 'Runs', toolUseId: 'toolu_made_up', agentId: null, anchorRow: null, keys: [], read: '', columns: [], file: '', gen: 1, error: null, calls: { toolu_made_up: { version: 1 } }, at: 0 }
+  const t = await setup($, on, [`Both: the slow mirror failed the build, and the retry passed.\n\n[Runs](card:${card})`], { [`cards/${card}/meta.json`]: JSON.stringify(meta) })
+  await t.turn('t1', 'Earlier answer.')
+  // the look after the first reply explains a term of it
+  lookReply = '{"glosses": [{"term": "slow mirror", "body": "A package mirror that answers slowly."}], "heads": null, "claims": []}'
+  const two = `The build failed on the slow mirror.\n\n[Runs](card:${card})`
+  await t.turn('t2', two, { text: 'why did it fail?', by: 'composer' })
+  await t.clock.advance(1000)
+  lookReply = '{}'
+  await t.turn('t3', 'The retry passed.', { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  await t.press('b')
+  await t.clock.advance(5000)
+  const host = await $.ui.render(answer('row-t3', 'The retry passed.'))
+  expect(textOf(host)).toContain('catch-up of the 2 replies above')
+  // the reply's explainer stands on the catch-up's words too
+  expect(nodes(host).some(n => n.type === 'Button' && String(n.props.label).startsWith('explain slow mirror'))).toBe(true)
+  // the card moved down into the catch-up: its reply points to it
+  expect(textOf(await $.ui.render(answer('row-t2', two)))).toContain('“Runs” is in the catch-up below')
+})
+
 // A catch-up words the replies' citations anew, and each reply numbers its citations from 1. Each citation of the
 // catch-up stands for the reply's citation that states the same claim: a press on a reworded one acts on that citation
 // (the tray stands on it), and citations of two replies light apart, each in its own hover group
@@ -236,7 +263,9 @@ test("a catch-up's reworded citations: a press acts on the reply's citation with
   await t.clock.advance(5000)
   const host = answer('row-t3', 'The retry passed on the [slow mirror](#).')
   const all = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : [n, ...[n.props?.children, n.children].flat(Infinity).flatMap(all)])
-  const cites = all(await $.ui.render(host)).filter(n => n.type === 'Button' && /^citation /.test(String(n.props.label)))
+  // the catch-up's citations (the reply above it keeps its own)
+  const cu = all(await $.ui.render(host)).find(n => n.props?.key === 'cu-row-t3')
+  const cites = all(cu).filter(n => n.type === 'Button' && /^citation /.test(String(n.props.label)))
   const labels = [...new Set(cites.map(b => String(b.props.label)))]
   expect(labels.length).toBe(3)
   // three hover groups: the mirror (the second reply's citation 1) does not light with the 12 runs (the first's 1)
