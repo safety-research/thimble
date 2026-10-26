@@ -147,7 +147,9 @@ async function needs() {
   const { SandboxManager } = await import(pathToFileURL(join(srt, 'node_modules', '@anthropic-ai', 'sandbox-runtime', 'dist', 'index.js')).href)
   const { errors } = SandboxManager.checkDependencies()
   if (!errors.length) return null
-  const packages = platform === 'linux' ? [['bwrap', 'bubblewrap'], ['socat', 'socat'], ['rg', 'ripgrep']].filter(([c]) => !which(c)).map(([, p]) => p) : []
+  // srt looks for bwrap, socat and rg with the `which` command, which a small Linux (Arch's base image) may lack: srt
+  // then says all three are missing, though they may be there
+  const packages = platform === 'linux' ? [['bwrap', 'bubblewrap'], ['socat', 'socat'], ['rg', 'ripgrep'], ['which', 'which']].filter(([c]) => !which(c)).map(([, p]) => p) : []
   return { why: `this machine lacks what the sandbox needs: ${errors.join('; ')}`, fix: packages.length ? `Install ${packages.length > 1 ? 'them' : 'it'}: ${installCommand(packages)}` : '' }
 }
 

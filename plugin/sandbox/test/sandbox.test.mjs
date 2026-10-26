@@ -175,6 +175,13 @@ test('setup.mjs names the fix of what keeps the sandbox from installing or start
     assert.match(got.why, /^this machine lacks what the sandbox needs: .*bubblewrap/)
     assert.match(got.fix, /bubblewrap, socat, ripgrep/)
     assert.equal(r.status, 1)
+    // bubblewrap, socat and ripgrep there, but no `which`, with which srt looks for them: the fix installs `which`
+    const found = join(dir, 'found')
+    mkdirSync(found)
+    for (const c of ['node', 'bwrap', 'socat', 'rg']) symlinkSync(c === 'node' ? s.node : spawnSync('sh', ['-c', `command -v ${c}`], { encoding: 'utf8' }).stdout.trim(), join(found, c))
+    const noWhich = JSON.parse(spawnSync(join(found, 'node'), [SETUP, '--json'], { encoding: 'utf8', env: { PATH: found, THIMBLE_HOME: process.env.THIMBLE_HOME } }).stdout)
+    assert.equal(noWhich.ok, false)
+    assert.equal(noWhich.fix, "Install it: install which with your system's package manager")
     // the AppArmor fix is given only when bubblewrap could not make its namespaces
     const other = withFailingBwrap('bwrap: execvp /made-up/bash: No such file or directory')
     assert.equal(other.ok, false)
