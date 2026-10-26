@@ -51,6 +51,15 @@ test('the runner starts with an empty environment, in srt, under Node\'s permiss
   assert.deepEqual(argv.slice(-2), [`${MADE_UP.plugin}/cards/runner.mjs`, `${MADE_UP.run}/cards.sock`])
 })
 
+test('Node 25 and later let the runner make its socket (--allow-net); older Node, which refuses the flag, gets none', () => {
+  const after = nodeVersion => {
+    const argv = runnerArgv({ platform: 'linux', ...MADE_UP, nodeVersion, sock: `${MADE_UP.run}/cards.sock` })
+    return argv[argv.lastIndexOf('--permission') + 1]
+  }
+  for (const v of ['22.20.0', '24.9.0', '', undefined]) assert.equal(after(v), `--allow-fs-read=${MADE_UP.plugin}/cards`, `Node ${v}`)
+  for (const v of ['25.0.0', '26.11.1']) assert.equal(after(v), '--allow-net', `Node ${v}`)
+})
+
 // ---------------------------------------------------------------- in the sandbox, on this machine
 
 let s
@@ -173,7 +182,9 @@ test('setup.mjs names the fix of what keeps the sandbox from installing or start
     assert.doesNotMatch(other.fix, /AppArmor|sysctl/)
     const userns = withFailingBwrap('bwrap: setting up uid map: Permission denied')
     assert.equal(userns.ok, false)
-    const restricted = readFileSync('/proc/sys/kernel/apparmor_restrict_unprivileged_userns', { encoding: 'utf8', flag: 'r' }).trim() === '1'
+    // a kernel without Ubuntu's AppArmor setting (Arch, Fedora) has no such file: not restricted, as setup.mjs reads it
+    const sysctl = '/proc/sys/kernel/apparmor_restrict_unprivileged_userns'
+    const restricted = existsSync(sysctl) && readFileSync(sysctl, { encoding: 'utf8', flag: 'r' }).trim() === '1'
     if (restricted) assert.equal(userns.fix, 'AppArmor keeps bubblewrap from making its namespaces. Allow them: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0')
   }
   // npm that cannot reach its registry: the fix says how to see why, and the command that tries again

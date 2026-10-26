@@ -1,7 +1,7 @@
 // runner.mjs: the card runner. One Node process per session runs every card's view, keeps each card's state and
 // handlers, and makes the text copy of what a card draws. The hooks (ask.ts) start it and talk to it over a Unix socket.
 //
-//   sandbox/run.mjs --srt <srt> <rules> -- env -i PATH=… node --permission --allow-fs-read=<plugin>/cards
+//   sandbox/run.mjs --srt <srt> <rules> -- env -i PATH=… node --permission [--allow-net] --allow-fs-read=<plugin>/cards
 //        --allow-fs-read=<plugin>/core/text.js --allow-fs-read=<cards of the session> --allow-fs-write=<its folder>
 //        --disallow-code-generation-from-strings --max-old-space-size=1024 runner.mjs <socket>
 //
@@ -804,12 +804,18 @@ function serve(sock) {
     })
   })
   // a socket the runner cannot make (its folder is not writable, say) is said, and the runner ends: the hooks then say
-  // why it did not start, where the guard below would keep it running with no socket
-  server.on('error', e => {
+  // why it did not start, where the guard above would keep it running with no socket, or, when listen throws (Node's
+  // permission model refuses the socket), let it end without a word
+  const cannot = e => {
     process.stderr.write(`the card runner cannot listen on ${sock}: ${e.message}\n`)
     process.exit(1)
-  })
-  server.listen(sock, () => fs.chmodSync(sock, 0o600))
+  }
+  server.on('error', cannot)
+  try {
+    server.listen(sock, () => fs.chmodSync(sock, 0o600))
+  } catch (e) {
+    cannot(e)
+  }
   // the session that started this runner is gone: so is the runner
   const parent = process.ppid
   setInterval(() => { if (process.ppid !== parent) process.exit(0) }, 2000)
