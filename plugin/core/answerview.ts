@@ -26,7 +26,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { framesIn } from '../cards/draw'
+import { framesIn, noteFrames } from '../cards/draw'
 import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
 import { EXPLAIN_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
@@ -230,8 +230,12 @@ export const registerAnswerView: Register = on => {
       const r = await below()
       if (e.props.isSummary) return r
       const els = $.ui.resolve(e) as Any
-      const tail = await underAll($, els, e.requestId, Math.max(20, (e.viewport?.columns ?? 100) - 3), async (t, rows, o) => (featureOn('cards') ? framesIn($, e, t, rows, o) : {}))
-      return tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
+      const cols = Math.max(20, (e.viewport?.columns ?? 100) - 3)
+      const tail = await underAll($, els, e.requestId, cols, async (t, rows, o) => (featureOn('cards') ? framesIn($, e, t, rows, o) : {}))
+      const drawn = tail.length ? els.Box({ flexDirection: 'column', children: [r, ...tail] }) : r
+      // where the row's cards stand in it, so a card's keys go to it only while the screen shows it
+      if (featureOn('cards')) noteFrames($, drawn, cols, e.props?.onScreen)
+      return drawn
     } catch {
       return below()
     }

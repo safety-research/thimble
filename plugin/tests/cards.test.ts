@@ -6,6 +6,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import Card from '../cards/client'
 import { cardWidth } from '../cards/draw'
+import { treeRows } from '../core/trail.mjs'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -465,6 +466,32 @@ test('a card the designer fork drew draws under the answer v was pressed on, als
   // its call's row in the fork draws no second card
   const row = await $.ui.render(callRow('toolu_made_up_3', { title: 'Scores', data: 'runs.json', view: VIEW }))
   expect(elements(row).some(n => n.type === 'Client')).toBe(false)
+})
+
+test('a card placed in the middle of an answer takes keys while the screen shows it, not while it shows the text after it', async ($, on) => {
+  const w = world(on)
+  const dir = '/made-up/.thimble/conversations/s-cards/cards/c0123456789ab'
+  const meta = { id: 'c0123456789ab', version: 1, title: 'Scores', toolUseId: 'toolu_made_up_3', agentId: 'a-made-up', anchorRow: 'row-made-up', keys: ['o'], read: '2 rows', columns: ['name', 'score'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_3: { version: 1 } }, at: 1 }
+  w.files[`${dir}/meta.json`] = JSON.stringify(meta)
+  w.files[`${dir}/v1/view.js`] = VIEW
+  w.dirs['/made-up/.thimble/conversations/s-cards/cards'] = ['c0123456789ab']
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  // a long answer that places the card after its first paragraph
+  const after = Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1} after the card.`).join('\n\n')
+  const text = `An answer.\n\n[Scores](card:c0123456789ab)\n\n${after}`
+  const at = (onScreen?: Any) => ({ component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true, ...(onScreen !== undefined ? { onScreen } : {}) } })
+  const row = (onScreen?: Any) => $.ui.render(at(onScreen) as never)
+  // the card's Client draws (Claude Code mounts it), so the card has been on screen
+  await $.ui.mount({ plugin: 'thimble', ...at() } as never)
+  const of = treeRows(await row(), 97)
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  // the screen shows the answer's top, with the card: the card takes o
+  await row({ first: 0, last: 20, of })
+  expect(await edit('o')).toEqual({ text: '', cursor: 0 })
+  await w.clock.advance(1000)
+  // the screen shows only the paragraphs after the card: the card is scrolled away, so o is typed
+  await row({ first: of - 15, last: of - 1, of })
+  expect((await edit('o')).text).toBe('o')
 })
 
 test("a card call the person's permission rules refuse draws nothing, and says why", async ($, on) => {

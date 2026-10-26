@@ -14,6 +14,7 @@
 //   askCard       a request to the runner about a card; a card the runner does not hold is loaded from its copy first
 //   applyAnswer   the runner's answer to an event: the new tree on screen, the state on disk, a failure said
 //   noteShown     which of a row's cards the screen shows now, from the row's `onScreen` and each card's height
+//   noteFrames    where each card stands in an answer's whole drawing (core/answerview.ts), measured, for noteShown
 //   keyOwner      the card a key at an empty prompt goes to: among the cards the screen shows, the focused card when it
 //                 lists the key, else the newest that lists it
 //   cardTake      a letter at an empty prompt that a card takes (hooks/keys.ts asks): the key at once, and its undo when
@@ -38,7 +39,7 @@ import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { cut } from '../core/text.js'
-import { rowsKnown } from '../core/trail.mjs'
+import { rowsAt, rowsKnown, treeRows } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { cardRef } from '../marks/message.js'
@@ -199,11 +200,13 @@ export async function applyAnswer($: Engine, meta: CardMeta, r: Any, width?: num
   failNotice($, `The card “${cut(meta.title, 40)}” failed: ${error}`, about(meta.id))
 }
 
-/** Which of the cards at the end of a row (its frames, the last first counted from the row's end) the screen shows
- *  now: the row's `onScreen` names the rows of it in the viewport, null when none is. A card shows when one of its
- *  frame's rows is in the viewport; a card whose height is not known yet takes the whole row. When the cards the
- *  screen shows change, every card's frame draws again, since the keys each names depend on the others. */
-export function noteShown($: Engine, ids: string[], onScreen: { first: number; last: number; of: number } | null | undefined): void {
+/** Which of a row's cards the screen shows now: the row's `onScreen` names the rows of it in the viewport, null when
+ *  none is. `at` gives where a card was measured to stand (noteFrames): its rows, and how many rows of the row are
+ *  below its top (a card placed on a line of the text stands inside it); the others are the cards at the end of the
+ *  row, the last first counted from its end. A card shows when one of its frame's rows is in the viewport; a card
+ *  whose height is not known yet takes the whole row. When the cards the screen shows change, every card's frame draws
+ *  again, since the keys each names depend on the others. */
+export function noteShown($: Engine, ids: string[], onScreen: { first: number; last: number; of: number } | null | undefined, at?: Map<string, { fromEnd: number; rows: number }>): void {
   let changed = false
   let end = onScreen?.of ?? 0
   for (const id of [...ids].reverse()) {
@@ -211,13 +214,38 @@ export function noteShown($: Engine, ids: string[], onScreen: { first: number; l
     if (onScreen === null) now = false
     else if (onScreen) {
       const h = heights.get(id)
-      const start = h ? end - h - FRAME_ROWS : 0
-      now = onScreen.last >= start && onScreen.first < end
-      end = start
+      const m = at?.get(id)
+      if (m) {
+        const top = onScreen.of - m.fromEnd
+        now = onScreen.last >= top && onScreen.first < top + m.rows
+      } else {
+        const start = h ? end - h - FRAME_ROWS : 0
+        now = onScreen.last >= start && onScreen.first < end
+        end = start
+      }
     }
     if (shown.get(id) !== now) { shown.set(id, now); changed = true }
   }
   if (changed) $.clock.after(0, () => $.ui.invalidate('ui.render'))
+}
+
+/** The cards an answer's drawing holds (`tree`, the whole row as its hooks drew it at `width` cells): where each card
+ *  stands in it, measured (core/trail.mjs rowsAt), for noteShown. A card placed on a line of the text, and a card
+ *  under an answer with a catch-up below it, stand inside the row, not at its end. Each is measured from the row's
+ *  end: what stands after a card is thimble's drawing, which treeRows measures, while the text above it may be
+ *  Claude Code's own. */
+export function noteFrames($: Engine, tree: Any, width: number, onScreen: { first: number; last: number; of: number } | null | undefined): void {
+  const keyOf = (n: Any) => String(n?.key ?? n?.props?.key ?? '')
+  // a frame with nothing in it is a card the version shown leaves out
+  const found = rowsAt(tree, width, (n: Any) => keyOf(n).startsWith('frame-') && (n.children ?? n.props?.children ?? []).length > 0) as { el: Any; row: number }[]
+  if (!found.length) return
+  const total = treeRows(tree, width)
+  const at = new Map<string, { fromEnd: number; rows: number }>()
+  for (const f of found) {
+    const id = keyOf(f.el).slice('frame-'.length)
+    if (!at.has(id)) at.set(id, { fromEnd: total - f.row, rows: treeRows(f.el, width) })
+  }
+  noteShown($, [...at.keys()], onScreen, at)
 }
 
 /** The card a key at an empty prompt goes to: among the cards on screen, the focused card when it lists the key, else
@@ -413,7 +441,7 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
     const meta = await metaOf($, id)
     if (meta && meta.version > 0 && meta.anchorRow === e.requestId && !placed.has(id)) metas.push(meta)
   }
-  if (metas.length) noteShown($, metas.map(m => m.id), e.props?.onScreen)
+  // which of them the screen shows: the answer's drawing measures where each stands (noteFrames)
   const out: Any[] = []
   for (const meta of metas) out.push(await frame($, e, meta))
   return out
@@ -424,8 +452,7 @@ export async function framesUnder($: Engine, e: Any): Promise<Any[]> {
  *  the text stands for (a catch-up's own id), where a card placed there draws, not a line pointing to it. */
 export async function framesIn($: Engine, e: Any, text: string, here: string[] = [e.requestId], o: { indent?: number } = {}): Promise<Record<string, Any>> {
   const out: Record<string, Any> = {}
-  const drawn: string[] = []
-  for (const line of String(text ?? '').split('\n')) {
+    for (const line of String(text ?? '').split('\n')) {
     const id = cardRef(line)
     if (!id || out[id]) continue
     const meta = await metaOf($, id)
@@ -448,9 +475,8 @@ export async function framesIn($: Engine, e: Any, text: string, here: string[] =
     // a card on a line of the text stands in the text's column, 2 columns in from an answer's left edge (where a card
     // drawn under the answer stands), so it is that much narrower, and keeps the 2 columns free at the right
     out[id] = await frame($, e, meta, { ...o, indent: (o.indent ?? 0) + 2 })
-    drawn.push(id)
   }
-  if (drawn.length) noteShown($, drawn, e.props?.onScreen)
+  // which of them the screen shows: the answer's drawing measures where each stands (noteFrames)
   return out
 }
 
