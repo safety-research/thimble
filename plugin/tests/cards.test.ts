@@ -37,7 +37,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -86,7 +86,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     if (String(e.argv[1] ?? '').endsWith('/sandbox/setup.mjs') && setups++ === 0 && o.firstSetupHangs) return new Promise(() => undefined) as never
     return { value: { ...(tempRun(e.argv, o.sandbox) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  on('process.spawn', async function* (_$: unknown, e: { argv: string[] }) { spawned.push(e.argv); return { code: 0, signal: null } })
+  on('process.spawn', async function* (_$: unknown, e: { argv: string[] }) { spawned.push(e.argv); return { value: { code: 0, signal: null } } })
   on('env.set', () => ({ value: {} }))
   on('ui.toast', () => ({ value: undefined }))
   on('http.fetch', (_$: unknown, e: { url: string; init?: { body?: string } }) => {
@@ -96,6 +96,8 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     if (o.sandbox?.ok === false) throw new Error('made-up: no such socket')
     // Claude Code refuses the plugin's requests, its Unix socket's too
     if (o.refused) return { deny: '$.http.fetch: refused: nonessential network traffic is disabled for this session' }
+    // no runner listens until the hooks start one
+    if (o.noRunner && op === 'ping' && !spawned.length) throw new Error('made-up: no such socket')
     // a view that takes all the runner's memory: the socket closes while it answers
     if (op === o.crash) throw new Error('made-up: socket hang up')
     const body = JSON.parse(e.init?.body || '{}')
@@ -577,6 +579,24 @@ test('when the sandbox cannot start, no card runs: the call and the failure line
   const result = textOf(await $.ui.render(callRow('toolu_made_up_8', { title: 'Scores' })))
   expect(result).toContain('bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap · Claude got the error')
 })
+
+// the hooks run in Claude Code's engine, whose own version is not the runner's: only setup.mjs's answer says it
+for (const [nodeVersion, net] of [['26.11.1', true], ['25.0.0', true], ['22.22.0', false]] as const) {
+  test(`the hooks start the runner on the Node setup.mjs names: Node ${nodeVersion} ${net ? 'gets' : 'does not get'} --allow-net`, async ($, on) => {
+    const w = world(on, { sandbox: { nodeVersion }, noRunner: true })
+    await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.advance(10)
+    // the runner starts on the clock's next turn, and the hooks wait on the clock for its answer
+    const call = $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_15', title: 'Scores', data: 'runs.json', view: VIEW } as never)
+    for (let i = 0; i < 10 && !w.spawned.length; i++) await w.clock.advance(20)
+    expect(String(((await call) as Any).result)).not.toContain('did not draw')
+    const argv = w.spawned.at(-1) ?? []
+    const command = argv.slice(argv.indexOf('/made-up/bin/node', argv.indexOf('--')))
+    expect(command.slice(0, 2)).toEqual(['/made-up/bin/node', '--permission'])
+    expect(command[2] === '--allow-net').toBe(net)
+    expect(command.includes('--allow-net')).toBe(net)
+  })
+}
 
 test('a card called while the session start still installs the sandbox draws: it does not wait on that install\'s answer', async ($, on) => {
   const w = world(on, { firstSetupHangs: true })
