@@ -4,7 +4,7 @@
 // call, since the old place is in the terminal's scrollback: canRedraw). Inside the frame, the one Client module (client.tsx) draws the tree the runner made of the view. The
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
-//   frame         the card's frame: its title (a click asks about the card) and, at its right, `ask about this card`
+//   frame         the card's frame: its title (a click asks about the card) and, at its right, `a ask · p artifact`
 //                 (the question names the item selected, when one is), the Client (a click on an item selects it as
 //                 its key does; on other words, asks about them: client.tsx, runner.mjs pick), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
@@ -46,6 +46,7 @@ import { cardRef } from '../marks/message.js'
 import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
+import { artifactLine } from './head'
 import { layoutLines } from './layout.js'
 import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, keptFocus, keptMeta, keptSeen, markSeen, metaOf, readState, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
@@ -264,6 +265,19 @@ export async function keyOwner($: Engine, key: string): Promise<CardMeta | null>
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
 }
 
+/** The card a and p of its header act on (head.ts): the card in focus, else the newest on screen, as keyOwner picks
+ *  the card a key reaches. */
+export async function headOwner($: Engine): Promise<CardMeta | null> {
+  const metas: CardMeta[] = []
+  for (const id of await keptSeen($)) {
+    if (shown.get(id) === false) continue
+    const m = await keptMeta($, id)
+    if (m && m.version > 0) metas.push(m)
+  }
+  const focus = await keptFocus($)
+  return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
+}
+
 /** What j and k do on a card, found once per version by pressing them in the runner, which leaves the card as it was
  *  (act): by its ▸ (the card guide's marker), the way each moves it, down or up; else `step` when each changes the card
  *  and the other takes it back (a card of steps). Null while that is not known, or for keys that do neither. */
@@ -345,7 +359,7 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // the title on a line of its own, then the card
   // its rows as the Client last reported them, so what measures a drawing holding the card (a catch-up's rule) counts them
   const client = rowsKnown(E.Client({ key: clientKey(meta), module: './client.tsx', width, props: propsAt(meta, t, width, theme) }), heights.get(meta.id))
-  // the line a click or a key selected (`▸`, the card guide's marker): `ask about this card` asks about that part of
+  // the line a click or a key selected (`▸`, the card guide's marker): `ask` asks about that part of
   // the card, so a click on a bar and then on those words start a thread about the bar
   const sel = fault ? null : selectedLine(current?.tree, width)
   const ask = await cardAsk($, meta.id, meta.title, sel?.text ?? '')
@@ -353,10 +367,16 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   const whole = sel ? await cardAsk($, meta.id, meta.title) : ask
   const title = E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title })
   const titled = whole ? E.Button({ key: 'title-ask', plain: true, label: `ask about ${whole.label}`, onPress: whole.press, hover: quiet(`card-title-${meta.id}`), children: [title] }) : title
-  // at the title's right, in thimble's color, what asks a side thread about the card (the question names the item
-  // selected, when one is)
-  const askWords = 'ask about this card'
-  const askEl = ask ? E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: [E.Text({ key: 'ask-w', color: accent(), wrap: 'truncate-end', children: askWords })] }) : null
+  // at the title's right, in thimble's color, its header's keys: ask (a side thread about the card, whose question
+  // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
+  // alone; every card's words are clicks
+  const lettered = (await headOwner($))?.id === meta.id
+  const word = (key: string, words: string) => [...(lettered ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
+  const askEl = ask ? E.Box({ key: 'head-keys', flexDirection: 'row', children: [
+    E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: word('a', 'ask') }),
+    E.Text({ key: 'head-sep', dimColor: true, children: ' · ' }),
+    E.Button({ key: `card-artifact-${meta.id}`, plain: true, label: `make an artifact of ${meta.title}`, onPress: () => undefined, hover: quiet(`card-artifact-${meta.id}`), children: word('p', 'artifact') }),
+  ] }) : null
   const rows: Any[] = [
     askEl ? E.Box({ key: 'title-row', flexDirection: 'row', justifyContent: 'space-between', children: [E.Box({ key: 'title-l', flexShrink: 1, children: [titled] }), E.Box({ key: 'title-r', flexShrink: 0, marginLeft: 2, children: [askEl] })] }) : titled,
     // a drawing wider than the frame: its columns past the frame's edge are cut
@@ -364,11 +384,12 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   ]
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
-  // the frame in the 2 columns of its indent; `ask about this card` at its title's right is how a side thread about it
+  // the frame in the 2 columns of its indent; `ask` at its title's right is how a side thread about it
   // starts, so no ? in the margin asks the same
   const framed = E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', borderStyle: 'round', borderColor: focused ? 'text' : undefined, borderDimColor: !focused, paddingX: 1, marginLeft: 2, width: inside + 4, children: rows })
   // what the features put under a card (core/answerview.ts underCard: the labels it used, what a squeeze changed)
-  const under = await underCard($, E, meta.id, inside)
+  const made = await artifactLine($, E, meta.id)
+  const under = [...(made ? [made] : []), ...(await underCard($, E, meta.id, inside))]
   return under.length ? E.Box({ key: `card-at-${meta.id}`, flexDirection: 'column', children: [framed, ...under] }) : framed
 }
 

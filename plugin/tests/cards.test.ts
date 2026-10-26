@@ -76,6 +76,9 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   }))
   const spawned: string[][] = []
   const runs: string[][] = []
+  // the forks a card's header starts (cards/head.ts)
+  const forks: Any[] = []
+  on('agent.spawn', (_$: unknown, e: Any) => { forks.push(e); return { model: 'claude-made-up' } as never })
   let setups = 0
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
     runs.push(e.argv)
@@ -128,7 +131,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
       : o.ask && !String(e.input?.file_path).startsWith(DATA) ? { decision: 'ask', setting: 'permissions.blockReadsOutsideWorkingDirectories' } : { decision: 'allow' }) as never)
   on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] }) as never)
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  return { files, asked, dirs, clock, spawned, runs, look }
+  return { files, asked, dirs, clock, spawned, runs, look, forks }
 }
 
 const callRow = (toolUseId: string, input: Record<string, unknown>) => ({
@@ -514,19 +517,19 @@ test('a data file whose real path leaves this folder (a symlink out) is refused,
 test('keys at an empty prompt: letters only, never a slash command; a word that starts with a card key and v goes back whole', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  // the view asks for "a" and "/"; the card gets the letter only
-  const view = 'const keys = "a/"\nfunction onKey(k, s) {}\nfunction view(p, s) { return s.elements.Text({ children: "x" }) }'
+  // the view asks for "g" and "/"; the card gets the letter only
+  const view = 'const keys = "g/"\nfunction onKey(k, s) {}\nfunction view(p, s) { return s.elements.Text({ children: "x" }) }'
   const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_6', title: 'Scores', data: 'runs.json', view } as never)) as Any
   expect(String(r.result)).toContain('a card takes letters only, so it does not get /')
   await shown($, callRow('toolu_made_up_6', { title: 'Scores', data: 'runs.json', view }))
   const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
   const meta = JSON.parse(Object.entries(w.files).find(([p]) => p.endsWith('/meta.json'))![1])
-  expect(meta.keys).toEqual(['a'])
+  expect(meta.keys).toEqual(['g'])
   expect((await edit('/')).text).toBe('/')
   await w.clock.advance(1000)
-  // "a" then "v" straight after (the person types "available"): a word, and v starts nothing
-  expect(await edit('a')).toEqual({ text: '', cursor: 0 })
-  expect((await edit('v')).text).toBe('av')
+  // "g" then "v" straight after (the person types "gvisor"): a word, and v starts nothing
+  expect(await edit('g')).toEqual({ text: '', cursor: 0 })
+  expect((await edit('v')).text).toBe('gv')
   expect(w.asked).toContain('undo')
 })
 
@@ -642,18 +645,20 @@ test('the Client makes every run of a card clickable without a Button that holds
   expect(posts.at(-1).events.at(-1).pointer).toEqual({ down: { x: 8, y: 2 }, up: { x: 8, y: 2 }, button: 'left' })
 })
 
-test('a card shows `ask about this card` at its title\'s right, whose question names the item selected; a click on words on no item asks a side thread about them', async ($, on) => {
+test('a card shows `a ask · p artifact` at its title\'s right, whose ask names the item selected; a click on words on no item asks a side thread about them', async ($, on) => {
   const w = world(on)
   const opened: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opened.push(e); return { value: { isPlaced: true } } })
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  // nothing selected: `ask about this card`
+  // nothing selected: `a ask`, the card the keys reach showing the letters
   const input = { title: 'Scores', data: 'runs.json', view: VIEW }
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_31', ...input } as never)
   const row = await shown($, callRow('toolu_made_up_31', input))
   let ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_31', input) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
-  expect(textOf(ask)).toBe('ask about this card')
+  expect(textOf(ask)).toBe('a ask')
   expect(ask.props.label).toBe('ask about the card "Scores"')
+  const head = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_31', input) as Any) })).find(n => n.props?.key === 'head-keys')
+  expect(textOf(head)).toBe('a ask · p artifact')
   // a click on the words `bram 5`, on no item the card's keys select: the runner is asked, then a side thread about
   // them opens
   const key = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_31', input) as Any) })).find(n => n.type === 'Client')?.key
@@ -661,13 +666,38 @@ test('a card shows `ask about this card` at its title\'s right, whose question n
   expect(w.asked).toContain('pick')
   expect(opened.some(e => /bram 5/.test(String(e.title)))).toBe(true)
   await row.unmount()
-  // an item selected (▸): the words stay `ask about this card`, and the question names the item
+  // an item selected (▸): the words stay `ask`, and the question names the item
   const picked = { title: 'Picked', data: 'runs.json', view: `${VIEW}\n// SELECTED` }
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_32', ...picked } as never)
   await (await shown($, callRow('toolu_made_up_32', picked))).unmount()
   ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_32', picked) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
-  expect(textOf(ask)).toBe('ask about this card')
+  expect(textOf(ask)).toBe('a ask')
   expect(ask.props.label).toBe('ask about "bram 5" in the card "Picked"')
+  // the card the keys no longer reach (the newer one does): its words alone, which a click presses
+  ask = elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_31', input) as Any) })).find(n => n.type === 'Button' && n.props?.key === 'ask-visible')
+  expect(textOf(ask)).toBe('ask')
+})
+
+test('p on the card the keys reach starts the fork that makes an artifact of it, with artifact.md and the card\'s copy; a word starting with p starts nothing', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_41', ...input } as never)
+  await (await shown($, callRow('toolu_made_up_41', input))).unmount()
+  const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k }) as never
+  // p then a letter: the person types a word, and no fork starts
+  expect(((await $.prompt.edit(key('p'))) as Any).text).toBe('')
+  await w.clock.advance(100)
+  expect(((await $.prompt.edit(key('l'))) as Any).text).toBe('pl')
+  await w.clock.advance(1000)
+  expect(w.forks.length).toBe(0)
+  // p alone: the fork starts once the word window closed, with the card's title and its text copy
+  expect(((await $.prompt.edit(key('p'))) as Any).text).toBe('')
+  await w.clock.advance(100)
+  await w.clock.advance(300)
+  expect(w.forks.length).toBe(1)
+  expect(w.forks[0].description).toBe('artifact of a card (p)')
+  expect(w.forks[0].prompt).toContain('PROMPT artifact')
 })
 
 test("a view's own Button under the pointer: the whole row shows highlighted, its words inverse and its bar inverted on the highlight", async () => {

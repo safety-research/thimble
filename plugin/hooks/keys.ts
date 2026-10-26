@@ -6,6 +6,7 @@
 //   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
 //                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers' (e:
 //                                    the selected words), c, t
+//   a p      cards/head.ts headKey   the header of the card the keys reach: a ask, p artifact
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them
 //
@@ -29,6 +30,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { failNotice } from '../bar/notice'
 import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'
+import { HEAD_KEYS, headKey } from '../cards/head'
 import { restoredKey, restoredKeys } from '../core/answerview'
 import { vKey } from '../designer/v'
 import { fixKey } from '../fix/line'
@@ -43,7 +45,7 @@ export const WORD_MS = 350
  *  core/answerview.ts, import the card tool, which reads them, so a list made as this module loads would read the
  *  features' keys before their modules set them.) */
 export function ownKeys(): string[] {
-  return ['v', ...restoredKeys(), ...BAR_KEYS]
+  return ['v', ...restoredKeys(), ...HEAD_KEYS, ...BAR_KEYS]
 }
 
 /** How a taker takes a key: `card` (a card's own key: its keys typed quickly are not a word), `now` with its `undo`
@@ -62,7 +64,7 @@ const failed = (key: string, err: unknown) => `The ${key} key did not run: ${Str
 
 /** Who takes the key now, in the order above. */
 async function takerOf($: Engine, key: string, until: number): Promise<Take | null> {
-  return (await fixKey($, key)) ?? (await vKey($, key, until)) ?? (await restoredKey($, key, until)) ?? (await cardTake($, key)) ?? (await barKey($, key))
+  return (await fixKey($, key)) ?? (await vKey($, key, until)) ?? (await restoredKey($, key, until)) ?? (await headKey($, key, until)) ?? (await cardTake($, key)) ?? (await barKey($, key))
 }
 
 /** A key a click pressed (a key a failure line names, bar/bar.tsx): done at once, by whoever takes it now, as if it

@@ -32,6 +32,9 @@ declare module 'claude-code' {
       /** the card a call of the card tool drew or changed, by the call's tool_use_id: { id } */
       cardCall: StateFamily<unknown>
 
+      // ---- a card's header (cards/head.ts)
+      /** a card's artifact, by card id: { card, status, agentId, until, url?, error? } */
+      cardArtifacts: StateFamily<unknown>
       // ---- v (designer/v.ts)
       /** a design v started, by its key: { key, anchorRow, agentId, status, at, until, error?, cards } */
       designs: StateFamily<unknown>

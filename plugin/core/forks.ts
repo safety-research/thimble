@@ -1,5 +1,6 @@
 // forks.ts: the forks of main thimble starts beside the conversation: the checker after each reply (marks), the
-// designer when the person presses v (designer), and a side thread's agent when the person asks one (threads). A fork
+// designer when the person presses v (designer), a side thread's agent when the person asks one (threads), and the
+// copy that publishes a card as an artifact when the person presses p on it (cards/head.ts). A fork
 // has main's conversation as its context, its model and its tools, so it works as main would, and its calls go through
 // the same permission checks as main's.
 //
@@ -30,7 +31,7 @@ import { turnsNow } from './answers'
 
 type Engine = EngineInterface
 
-export type ForkKind = 'checker' | 'designer' | 'thread' | 'fixer'
+export type ForkKind = 'checker' | 'designer' | 'thread' | 'fixer' | 'artifact'
 
 const FORKS = { plugin: 'thimble', key: 'forks' } as const
 const KEPT = 64
@@ -55,7 +56,7 @@ export async function spawnFork($: Engine, o: { kind: ForkKind; prompt: string; 
     return { deny: String((err as Error)?.message || err) }
   }
   if (!r || r.deny !== undefined) return { deny: String(r?.deny || 'Claude Code started no agent') }
-  if (!r.agentId) return { deny: 'Claude Code did not name the agent it started' }
+  if (!r.agentId) return { deny: 'Claude Code did not name the agent it started' + JSON.stringify(r).replace(/"/g, "'") }
   const agentId = String(r.agentId)
   known.set(agentId, o.kind)
   for (const old of [...known.keys()].slice(0, Math.max(0, known.size - KEPT))) known.delete(old)

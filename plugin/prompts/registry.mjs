@@ -27,6 +27,11 @@ export const TEXTS = {
     reader: 'designer/v.ts',
     use: 'the prompt of the designer fork that v starts',
   },
+  artifact: {
+    about: "publish a card as a private claude.ai artifact: its chart or table, title, one sentence and the files it cites",
+    reader: 'cards/head.ts',
+    use: 'the prompt of the fork that p on a card starts',
+  },
   labels: {
     about: "the classifier that reads a --prompt label's records",
     reader: 'labels/labels.ts',
