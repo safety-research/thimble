@@ -415,7 +415,8 @@ test('a on a card at a narrow terminal: the bar names the click on a ask, and th
   }
   expect(opens).toEqual(['thimble'])
   const band = textOf(await $.ui.render(above()))
-  expect(band).toContain('Hint: click “a ask”; a needs a wider terminal.')
+  expect(band).toContain('a needs a wider terminal: click “a ask” to open it here.')
+  expect(band).not.toContain('Hint:')
   expect(band).toContain('a ask')
   // the press on a ask in the bar: Claude Code places it
   wide = true

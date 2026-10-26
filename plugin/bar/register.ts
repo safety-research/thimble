@@ -15,7 +15,7 @@ import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
 import { introDone, introHint } from './intro'
-import { howTo, remindAfterAnswer } from './hints'
+import { remindAfterAnswer } from './hints'
 import { failNotice, promptTyped } from './notice'
 
 type Engine = EngineInterface
@@ -46,7 +46,8 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels', byKey = false)
   // the words the bar shows for it, which a click opens
   const n = (await countsNow($))?.labels ?? 0
   const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
-  await howTo($, `pane:${kind}`, `click “${kind === 'labels' ? 'l' : 'r'} ${shown}”; ${kind === 'labels' ? 'l' : 'r'} needs a wider terminal.`, `pane:${kind}`)
+  const key = kind === 'labels' ? 'l' : 'r'
+  failNotice($, `${key} needs a wider terminal: click “${key} ${shown}” to open it here.`, `pane:${kind}`)
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */

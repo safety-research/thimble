@@ -305,12 +305,12 @@ test('a hint stands in the bar in place of its left keys, after `thimble`; the r
   const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined } }
   const bar = async (width: number) => barRows($, ELS, width, { on: () => true })
   expect(textOf(await bar(100))).toContain('v visualize')
-  hintLine($, 'click “r coverage 43% (3/7 files)” on the right to open it here.', 'pane:coverage')
+  hintLine($, 'press s to rewrite the last answer shorter or longer.', 'remind:rewrite')
   await new Promise(r => setTimeout(r, 5))
   const rows = await bar(140)
   expect(rows.length).toBe(1)
   const band = textOf(rows)
-  expect(band).toContain('thimble  Hint: click “r coverage 43% (3/7 files)” on the right to open it here.')
+  expect(band).toContain('thimble  Hint: press s to rewrite the last answer shorter or longer.')
   expect(band).not.toContain('v visualize')
   expect(band).toContain('r coverage 43% (3/7 files) · l 2 labels')
   // a hint too long for the row is cut, and the bar keeps to one row
@@ -353,9 +353,9 @@ test('a how-to hint shows until the session used its feature; then it stays away
   await new Promise(r => setTimeout(r, 5))
   expect(await failLineNow($)).toBe(null)
   // another feature's hint still shows
-  await howTo($, 'pane:coverage', 'click “r coverage”; r needs a wider terminal.', 'pane:coverage')
+  await howTo($, 'cite', 'select a passage in an answer and press c to verify the claim.', 'cite')
   await new Promise(r => setTimeout(r, 5))
-  expect(String((await failLineNow($))?.text)).toContain('click “r coverage”')
+  expect(String((await failLineNow($))?.text)).toContain('press c to verify')
 })
 
 test('after each answer one reminder of a feature on demand the session has not used; each once a session, none for auto or off', async () => {

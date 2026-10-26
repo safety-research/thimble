@@ -362,7 +362,7 @@ test("a picked claim's sentences of the reply read as the reply does: a figure t
   expect(textOf(await draw({ claim: 'c2' }))).toContain('The admin then spent four weeks')
 })
 
-test('c in a terminal too narrow for the pane says to click the bar\'s count; once a press opens the pane, that line goes', async () => {
+test('c in a terminal too narrow for the pane fails in red with the click on the bar\'s count; a press opens the pane and the line goes; the next c fails again', async () => {
   setOptions({ claimsMode: 'auto' })
   const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
@@ -371,13 +371,19 @@ test('c in a terminal too narrow for the pane says to click the bar\'s count; on
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await (await claimsKey(s.$, 'c', 0))!.later!()
   await settle()
-  expect(await line()).toContain('click “c 1 claim”; c needs a wider terminal.')
+  expect(await line()).toBe('c needs a wider terminal: click “c 1 claim” to open it here.')
+  expect(((await failLineNow(s.$)) as Any)?.kind).toBe('failed')
   // a press's pane is placed at any width: the bar's count opens it
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
   await openClaims(s.$)
   await settle()
   expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence' })
   expect(await line()).toBe('')
+  // a pane opened once does not quiet the key: c in the narrow terminal fails again
+  s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
+  await openClaims(s.$, {}, true)
+  await settle()
+  expect(await line()).toBe('c needs a wider terminal: click “c 1 claim” to open it here.')
 })
 
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
@@ -424,7 +430,7 @@ test('c in a narrow terminal before any claims names the bar\'s item by the bar\
   expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'evidence']])
   s.$.ui.open = async () => ({ isPlaced: false })
   await openClaims(s.$, {}, true)
-  expect(String((await failLineNow(s.$))?.text)).toContain('click “c evidence”; c needs a wider terminal.')
+  expect(String((await failLineNow(s.$))?.text)).toBe('c needs a wider terminal: click “c evidence” to open it here.')
   setOptions({})
 })
 

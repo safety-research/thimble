@@ -1,5 +1,5 @@
 // hints.ts: the hints that say how to use a feature, and the reminders of the features asked for on demand. A how-to
-// hint (select a passage first, the click that opens a pane in a narrow terminal) shows until the person has used that
+// hint (select a passage first) shows until the person has used that
 // feature once in the session; after each of main's answers, one reminder names a feature set to on demand (or
 // manual) that the session has not used yet, each at most once a session. Both are hints (notice.ts hintLine): the bar
 // shows them in place of its keys, and they go after a few seconds, at the next key, or at a prompt.
@@ -24,7 +24,7 @@ async function remindedNow($: Engine): Promise<string[]> {
   return list((await $.state.get(REMINDED)).value)
 }
 
-/** The person used a feature (`explain`, `cite`, `heads`, `rewrite`, `pane:<kind>`): its how-to hint and its reminder
+/** The person used a feature (`explain`, `cite`, `heads`, `rewrite`): its how-to hint and its reminder
  *  stop for the rest of the session. */
 export async function hintUsed($: Engine, feature: string): Promise<void> {
   const used = await usedNow($)
