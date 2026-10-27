@@ -10,6 +10,7 @@
 #   thimble-browser [FOLDER] [--port N]   FOLDER: the folder you are in when not given; starts a new session
 #   thimble-browser -c | --continue       continue the folder's latest session: its chat, canvas, report and labels
 #   thimble-browser -r | --resume [ID]    pick an earlier session from a list (or the session of chat ID)
+#   thimble-browser --link [FOLDER]       a fresh sign-in link to the server that runs; it starts no new session
 #   thimble-browser --setup               choose how the workbench reaches Claude, and check it
 #   thimble-browser --demo [NAME...]      the demo datasets (also: thimble demo)
 #   thimble-browser --setup --how claude-code --yes | --key-file F | --how wif --wif-file F   the same, without asking
@@ -30,10 +31,11 @@ if [ -z "${THIMBLE_BROWSER_LIVE:-}" ] && [ -f "$fixes/browser-ready" ] && [ -x "
   exec "$fixes/live/browser/scripts/thimble-browser" "$@"
 fi
 
-folder="" setup=0 setup_args=() session=new demo=0
+folder="" setup=0 setup_args=() session=new demo=0 link=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -c | --continue) session=continue; shift ;;
+    --link) link=1; shift ;;
     -r | --resume)
       session=pick; shift
       # an id, not a folder, takes the place of the list
@@ -43,7 +45,7 @@ while [ $# -gt 0 ]; do
     --port=*) export THIMBLE_PORT="${1#--port=}"; shift ;;
     --setup) setup=1; shift; setup_args=("$@"); break ;;
     --demo) demo=1; shift; setup_args=("$@"); break ;;
-    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "thimble-browser: unknown option $1 (see --help)" >&2; exit 2 ;;
     *) if [ -z "$folder" ] && [ -d "$1" ]; then folder="$1"; else echo "thimble-browser: $1 is not a folder" >&2; exit 2; fi; shift ;;
   esac
@@ -63,6 +65,10 @@ fi
 if [ "$demo" = 1 ]; then
   [ -f "$root/backend/app/demo.py" ] || { echo "thimble-browser: this release of the workbench has no demos" >&2; exit 1; }
   cd "$root/backend" && exec "$py" -m app.cli demo ${setup_args[@]+"${setup_args[@]}"}
+fi
+if [ "$link" = 1 ]; then  # the server that runs serves the page it built, so nothing is built here
+  here="$(cd "${folder:-.}" && pwd -P)"
+  cd "$root/backend" && exec "$py" -m app.cli link --cwd "$here"
 fi
 
 # quietly CMD...: runs CMD, and shows what it printed only when it fails (as scripts/install.sh does)

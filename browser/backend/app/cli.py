@@ -4511,6 +4511,8 @@ def _failed_up(what: str, e: BaseException) -> int:
 
 
 BROWSER_LINE = "thimble browser: {what}"
+# `thimble-browser --link` (cmd_link) when no server of this install answers: no page to sign in to
+LINK_NO_SERVER_LINE = "no server is running. Start it with thimble-browser in a folder of files."
 
 
 SESSION_NONE_LINE = {"continue": "no earlier session in {cwd} to continue.",
@@ -4682,6 +4684,28 @@ def cmd_browser(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_link(args: argparse.Namespace) -> int:
+    """`thimble-browser --link [FOLDER]`: a fresh sign-in link to the server that runs, in the form cmd_browser prints
+    it, for the folder's workspace (known_corpus), or for the start page, which lists the server's workspaces, when the
+    server holds none for the folder. It starts no server, opens no session and registers nothing, so the page keeps
+    its chat. The new code voids the last one made for that workspace (hook_auth.mint), and only a terminal gets one
+    (to_terminal), as at the start. 1, with LINK_NO_SERVER_LINE, when no server of this install answers."""
+    cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
+    url = api_url()
+    if refuse_foreign(url):
+        return 1
+    if not serves(url):
+        print(BROWSER_LINE.format(what=LINK_NO_SERVER_LINE))
+        return 1
+    known = known_corpus(cwd.resolve(), Path(resolve_env()["data_dir"]).resolve())
+    pair = to_terminal()
+    link = ui_url(known[0] if known else None, pair=pair)
+    print(BROWSER_LINE.format(what=link), flush=True)
+    if pair and "#p=" not in link:
+        print(NO_CODE_LINE.format(log=log_path()))
+    return 0
+
+
 class Quit(Exception):
     """The terminal that holds thimble-browser closed (SIGHUP), or the launcher was told to end (SIGTERM)."""
 
@@ -4793,6 +4817,10 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--session", default="new",
                    help="new | continue | pick | a chat's id: the session of the folder to open (pick_session)")
     b.set_defaults(fn=cmd_browser)
+    lk = sub.add_parser("link", help="thimble-browser --link: a fresh sign-in link to the server that runs, for this "
+                                     "folder; it starts nothing")
+    lk.add_argument("--cwd")
+    lk.set_defaults(fn=cmd_link)
     e = sub.add_parser("up", aliases=["ensure"], help="start the server if needed, open this directory, print the URL")
     e.add_argument("--cwd")
     e.add_argument("--session")
