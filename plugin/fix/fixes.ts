@@ -58,6 +58,9 @@ export type Fix = {
   notice?: Record<string, string[]>
   /** when this round of work started, in seconds, which a refused try and a reload keep */
   started?: number
+  /** while the fixer's change is tested in a process of the kernel's own (the runner): when the tests started, and the
+   *  lock file the runner holds while it lives */
+  testing?: { since: number; lock: string } | null
   /** the person's own words of each round, beside `words` (Claude's, for the fixer), when they typed /thimble-fix
    *  <words>; null for a round without them */
   asked?: (string | null)[]

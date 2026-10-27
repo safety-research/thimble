@@ -632,6 +632,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--request", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--no-tests", dest="no_tests", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--cannot", help=argparse.SUPPRESS)  # done: the fixer's end said why it cannot be done (-: stdin)
+    p.add_argument("--within", type=float, help=argparse.SUPPRESS)  # done: wait at most SECONDS for the tests
     p.add_argument("--session", help=argparse.SUPPRESS)  # new, round, again, redo, done: the Claude Code session of the fixer
     p.add_argument("--answer", choices=("pr", "file"), default="file", help=argparse.SUPPRESS)
     p.add_argument("--ask", help=argparse.SUPPRESS)

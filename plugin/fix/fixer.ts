@@ -28,7 +28,7 @@
 //          command's start, by the fix's id)
 import type { EngineInterface } from 'claude-code'
 
-import { busyWhile } from '../bar/busy'
+import { busy, busyWhile } from '../bar/busy'
 import { failNotice } from '../bar/notice'
 import { spawnFork } from '../core/forks'
 import { thimbleHome } from '../core/home'
@@ -298,6 +298,10 @@ export function endOf(answer: string): { title: string; summary: string; request
 /** The fixer ended: thimble commits its change and tests it, then the line says what came of it. */
 const ending = new Set<number>()
 
+/** How long one `thimble fix done` waits for the fix's tests, in seconds: with the kernel's start, less than the 10
+ *  minutes Claude Code gives a process call. */
+const DONE_WAIT_S = 540
+
 export async function fixerEnded($: Engine, e: Any, id: number): Promise<void> {
   if (ending.has(id)) return
   ending.add(id)
@@ -336,9 +340,17 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   const args = end.cannot
     ? ['done', String(id), '--cannot', '-']
     : ['done', String(id), '--summary', '-', ...(end.title ? ['--title', end.title] : []), ...(end.request ? ['--request'] : [])]
-  // the tests of one fix at a time, each run once more when it fails (engine/kernel/fixes.py run_tests): the wait for
-  // another fix's tests counts too; 10 minutes, the most Claude Code gives a process call (core/test/limits.test.mjs)
-  const r = await kernelFix($, args, { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 600000, doing: `testing ${fix ? fixName(fix, 28) : `fix ${id}`}` })
+  // the tests run in a process of the kernel's own, for one fix at a time, each run once more when it fails
+  // (engine/kernel/fixes.py done), which may take longer than Claude Code gives a process call (10 minutes,
+  // core/test/limits.test.mjs): each call waits for them at most DONE_WAIT_S, and while the fix it gives says that they
+  // still run, the next call waits on. A fix whose tests already run (its end taken again after a reload) is waited for
+  // the same way: the kernel starts nothing new for it
+  const check = () => kernelFix($, [...args, '--within', String(DONE_WAIT_S)], { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 600000 })
+  const r = await busy($, `testing ${fix ? fixName(fix, 28) : `fix ${id}`}`, async () => {
+    let got = await check()
+    while (got.ok && jsonOf<Fix>(got.out)?.testing) got = await check()
+    return got
+  })
   await refreshFixes($)
   if (!r.ok) {
     await setFixLine($, { id, kind: 'problem', said: `“${name}” could not be checked: ${cut(r.err || 'thimble fix done gave nothing', 200)}` })

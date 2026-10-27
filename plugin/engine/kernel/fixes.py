@@ -13,9 +13,11 @@ Under $THIMBLE_HOME/fixes:
     work/<id>/       a fix's scratch worktree, cut from mine. The fixer edits only here, and its shell runs in the
                      sandbox runtime, which may write only here and in tmp/<id>/, and reach only the package registries
                      (REGISTRIES). Removed after apply or "not now".
-    tmp/<id>/        the fixer's home and temp folder in the sandbox, and the log of the tests thimble ran
+    tmp/<id>/        the fixer's home and temp folder in the sandbox, and the logs of the tests thimble ran (tests.log)
+                     and of the process that ran them (runner.log)
     srt/<pin>/       the release's sandbox runtime, once live's pin or lock file is not the release's (_srt)
     tests.lock       the quick tests run for one fix at a time
+    tests/<id>.lock  held by the process that runs a fix's quick tests (the runner) while it lives
     fixes.jsonl      every request: one line per change of a fix's record; the last line of an id is its record
     release.json     where the release came from: the install's kind, its source, Claude Code's marketplace entry
                      before the first fix, the release commit (base) and its version
@@ -58,6 +60,9 @@ refusal on the record (refused: why, the files, the tests' output) until the nex
 to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
 cannot be done (done with `cannot`), which is the failure the person sees. The quick tests run with no network, for one
 fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix fails (run_tests).
+They run in a process of their own (the runner), apart from the call that checks the fix, so that they may take longer
+than Claude Code lets a call run: the record stays working, with `testing`, until the runner writes what came of them,
+and done waits for that (_start_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -620,16 +625,26 @@ def run_tests(fid: int | str) -> tuple[bool, str]:
     for one fix at a time, since two runs at once make the hooks tests run out of time, and a run that fails runs once
     more before the tests count as failed. (passed, the log's last lines, which say when they passed only the second
     time)."""
+    try:
+        argv = _tests_argv(fid)
+    except FixError as e:
+        return False, str(e)
+    return _run_tests(argv, fid)
+
+
+def _tests_argv(fid: int | str) -> list[str]:
+    """The command that runs the quick tests (run_tests) in the copy, in the sandbox."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
     if not cmd:
         parts = [LAUNCHER_SMOKE, QUICK_TESTS]
         if _has_pytest(_python()):
             parts.append('"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider')
         cmd = " && ".join(parts)
-    try:
-        argv = sandbox_argv(fid) + [cmd]
-    except FixError as e:
-        return False, str(e)
+    return sandbox_argv(fid) + [cmd]
+
+
+def _run_tests(argv: list[str], fid: int | str) -> tuple[bool, str]:
+    """run_tests, with the command made already (_tests_argv): the runner gets it from the call that checks the fix."""
     with Lock("tests.lock"):
         ok, log = _tests_once(argv, fid)
         if not ok:
@@ -653,6 +668,129 @@ def _tests_once(argv: list[str], fid: int | str) -> tuple[bool, str]:
     (home() / "tmp" / str(fid)).mkdir(parents=True, exist_ok=True)
     (home() / "tmp" / str(fid) / "tests.log").write_text(log + "\n")
     return p.returncode == 0, "\n".join(log.splitlines()[-12:])
+
+
+TESTS_FAILED = "its tests failed in the sandbox"
+# the log's last lines of a fix whose runner ended before it wrote what came of the tests
+TESTS_STOPPED = "the tests stopped before they finished"
+# the runner: this kernel's Python, isolated (no PYTHON* settings, no folder of the caller's on its path), with its job
+# on stdin
+RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from kernel import fixes; fixes.tests_runner()"
+
+
+def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str]) -> dict[str, Any]:
+    """The quick tests of a fixer's change in a process of their own (the runner), in a session of its own, apart from
+    the call that checks the change: the tests wait for other fixes' tests and run twice when they fail, which may take
+    longer than Claude Code lets a call run. The record stays working, with `testing` (when they started, and the lock
+    file the runner holds while it lives), until the runner writes what came of them (tests_runner)."""
+    import fcntl  # noqa: PLC0415
+
+    fid = rec["id"]
+    lock = home() / "tests" / f"{fid}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    held = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        # held from before the record says that the tests run, then by the runner, so no wait takes the lock for a
+        # runner that ended (_ended)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        rec = put({**rec, "testing": {"since": time.time(), "lock": str(lock)}})
+        job = {"id": fid, "argv": argv, "title": named, "testing": rec["testing"]}
+        log = _new_log(tmp_dir(fid) / "runner.log")
+        try:
+            p = subprocess.Popen([sys.executable or "python3", "-I", "-c", RUNNER, str(Path(__file__).resolve().parents[1])],
+                                 stdin=subprocess.PIPE, stdout=log, stderr=log, cwd=home(), start_new_session=True,
+                                 pass_fds=(held,))
+            with p.stdin:
+                p.stdin.write(json.dumps(job).encode())
+        except OSError:
+            pass  # a runner that did not start is one that ended: the wait for it says so
+        finally:
+            os.close(log)
+    finally:
+        os.close(held)
+    return rec
+
+
+def _new_log(p: Path) -> int:
+    """A new file for the runner's output, or /dev/null. The fixer writes in the same folder, so what it may have left
+    under the name (a link, a pipe) goes first."""
+    try:
+        p.unlink(missing_ok=True)
+        return os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError:
+        return os.open(os.devnull, os.O_WRONLY)
+
+
+def tests_runner() -> None:
+    """The runner (_start_tests), with its job on stdin: the tests as run_tests runs them, then what came of them on the
+    fix's record, as done writes it. A record that went on without them (the fix was removed) stays as it is."""
+    job = json.loads(sys.stdin.read())
+    ok, tail = _run_tests(job["argv"], job["id"])
+    rec = get(job["id"])
+    if rec.get("state") != "working" or rec.get("testing") != job["testing"]:
+        return
+    rec.pop("testing")
+    rec = _tested(rec, ok, tail, job["title"])
+    if rec.get("prev") and rec["state"] == "ready":
+        try:
+            settle(rec)
+        except Exception:
+            put(rec)  # the round stays ready with its own change, as done left it when settle failed
+            raise
+        return
+    put(rec)
+
+
+def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None) -> dict[str, Any]:
+    """The record with what came of its tests: ready, named by the fixer's title, or failed, with the refusal that the
+    next fixer in the copy is told (the end of the tests' output)."""
+    rec.update(tests="passed" if ok else "failed", tests_tail=tail, state="ready" if ok else "failed",
+               error=None if ok else TESTS_FAILED)
+    if not ok:
+        rec["refused"] = {"why": TESTS_FAILED, "files": [], "tests": tail}
+    elif named:
+        rec["title"] = named
+    return rec
+
+
+def _wait(fid: int, deadline: float | None) -> dict[str, Any]:
+    """The fix's record once the runner of its tests wrote what came of them, or at `deadline` (time.monotonic) as it
+    is then: still working, with `testing`."""
+    while True:
+        rec = get(fid)
+        mark = rec.get("testing")
+        if not mark or rec.get("state") != "working":
+            return rec
+        while not _ended(fid, mark):
+            if deadline is not None and time.monotonic() >= deadline:
+                return get(fid)
+            time.sleep(0.1)
+
+
+def _ended(fid: int, mark: dict[str, Any]) -> bool:
+    """Whether the runner of the tests `mark` names is gone (its lock file is free). When the record still waits for it,
+    the runner was stopped before it wrote what came of the tests: the fix fails, with no refusal, so that no new round
+    of its fixer starts from it (r starts it again)."""
+    import fcntl  # noqa: PLC0415
+
+    try:
+        fd = os.open(str(mark.get("lock") or ""), os.O_RDWR)
+    except OSError:
+        fd = -1
+    try:
+        if fd >= 0:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+        rec = get(fid)
+        if rec.get("state") == "working" and rec.get("testing") == mark:
+            rec.pop("testing")
+            put({**rec, "state": "failed", "tests": "failed", "tests_tail": TESTS_STOPPED, "error": TESTS_FAILED})
+        return True
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 # ------------------------------------------------------------------ a request
@@ -898,16 +1036,24 @@ def _is_checkout(work: str | None) -> bool:
 
 
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
-         tests: bool = True, session: str | None = None, cannot: str | None = None) -> dict[str, Any]:
+         tests: bool = True, session: str | None = None, cannot: str | None = None,
+         within: float | None = None) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the quick tests in
     the sandbox. ready, failed (with the reason), or a request with no code. A round of a fix changed in place (prev):
     a ready change becomes the fix's new version, the fix's change and the round's in one commit (settle), which waits
     for the person's y while the version before stays as it was; a round that changed nothing leaves the fix as it was.
     `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
-    `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r."""
+    `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r.
+    The tests run in a process of their own (_start_tests), and done waits for what came of them; with `within`, at
+    most that many seconds, and then it gives the fix as it is: still working, with `testing`. A done of a fix whose
+    tests run starts nothing: it waits for them in the same way, and one with `within` that comes after they ended gives
+    what came of them."""
+    deadline = None if within is None else time.monotonic() + max(within, 0.0)
     rec = get(fid)
     if session and rec.get("session") and rec["session"] != session:
         raise FixError(f"fix {rec['id']} is being made in another Claude Code session, which checks it when its fixer ends")
+    if rec.get("testing") or (within is not None and rec.get("state") != "working"):
+        return _wait(rec["id"], deadline)
     if rec.get("state") != "working":
         raise FixError(f"fix {rec['id']} was checked already ({state_word(rec)}), so there is nothing to check")
     if cannot is not None and cannot.strip():
@@ -917,6 +1063,8 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
                    **({"blocked": blocked} if blocked else {}))
         return put(rec)
     rec = _done(fid, title, summary, request, tests)
+    if rec.get("testing"):
+        return _wait(rec["id"], deadline)
     if rec.get("prev") and rec.get("state") == "request":
         return {**_restore(rec), "unchanged": True}
     if rec.get("prev") and rec.get("state") == "ready":
@@ -1019,17 +1167,14 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
         why = f"it adds or changes a binary file ({binary[0]}); a fix changes text only"
         rec.update(state="failed", tests=None, error=why, refused={"why": why, "files": binary})
         return put(rec)
-    if tests:
-        ok, tail = run_tests(rec["id"])
-        rec.update(tests="passed" if ok else "failed", tests_tail=tail)
-        rec.update(state="ready" if ok else "failed", error=None if ok else "its tests failed in the sandbox")
-        if not ok:
-            rec["refused"] = {"why": "its tests failed in the sandbox", "files": [], "tests": tail}
-    else:
-        rec.update(tests="skipped", state="ready", error=None)
-    if rec["state"] == "ready" and named:
-        rec["title"] = named
-    return put(rec)
+    if not tests:
+        rec.update(tests="skipped", state="ready", error=None, **({"title": named} if named else {}))
+        return put(rec)
+    try:
+        argv = _tests_argv(rec["id"])
+    except FixError as e:
+        return put(_tested(rec, False, str(e), named))
+    return _start_tests(rec, named, argv)
 
 
 def _drop_work(rec: dict[str, Any]) -> None:
@@ -2924,10 +3069,10 @@ def cmd(a) -> int:
             out_json(again(a.id, a.session))
         elif verb == "done":
             if a.cannot == "-":
-                out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done"))
+                out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done", within=a.within))
             else:
                 summary = stdin_text() if a.summary == "-" else (a.summary or "")
-                out_json(done(a.id, a.title, summary, a.request, not a.no_tests, session=a.session))
+                out_json(done(a.id, a.title, summary, a.request, not a.no_tests, session=a.session, within=a.within))
         elif verb == "apply":
             if a.ask == "-":
                 out_json(apply(a.id, stdin_text()))
