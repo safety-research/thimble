@@ -24,7 +24,7 @@ const TEMP = { plugin: 'thimble', key: 'tempDir' } as const
  *  get it as their TMPDIR (hooks/path.ts), and reads there need no dialog (hooks/temp_allow.py), so it is found once
  *  per session and kept in $.state, where a reload of the plugin finds it. */
 export async function tempDir($: Engine): Promise<string> {
-  const kept = (await $.state.get(TEMP)).value
+  const kept = await keptTempDir($)
   if (kept) return kept
   const claude = String((await $.env.get('CLAUDE_CODE_TMPDIR')) || '').replace(/\/+$/, '')
   const uid = claude ? await userId($) : ''
@@ -34,6 +34,11 @@ export async function tempDir($: Engine): Promise<string> {
   if (!dir) throw new Error(`thimble could not make a temp folder of its own in ${claude || own || 'TMPDIR'} or in its home folder`)
   await $.state.set(TEMP, dir)
   return dir
+}
+
+/** The session's temp folder when a load of the plugin in this session found it already, else ''. */
+export async function keptTempDir($: Engine): Promise<string> {
+  return (await $.state.get(TEMP)).value || ''
 }
 
 /** This user's id, which Claude Code names its temp folder after (`claude-<uid>`); '' when `id` does not say it. */

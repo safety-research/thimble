@@ -13,9 +13,10 @@ const START = { cwd: '/made-up/data', surface: 'terminal', isInteractive: true }
 const TEMPS = ['CLAUDE_CODE_TMPDIR', 'TMPDIR']
 
 /** A machine (`uname -s`, which fails for a null system, and `id -u`) and an environment, which the hooks read and
- *  write: the temp folders they set, in order. */
-function world(on: Any, o: { system: string | null; uid: string; env: Record<string, string>; deny?: string }) {
+ *  write: the temp folders they set, in order. `kept`: the temp folder an earlier load of the plugin kept in $.state. */
+function world(on: Any, o: { system: string | null; uid: string; env: Record<string, string>; deny?: string; kept?: string }) {
   mock.clock(on, { now: 0 })
+  if (o.kept) on('state.get', async (_$: unknown, e: Any, next: Any) => (e.key === 'tempDir' ? { value: { value: o.kept, version: 1 } } : next(e)))
   const env: Record<string, string | undefined> = { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', PATH: '/usr/bin', ...o.env }
   const set: [string, string | undefined][] = []
   on('env.get', (_$: unknown, e: { name: string }) => ({ value: env[e.name] }))
@@ -105,4 +106,27 @@ test('when the system is not known, nothing moves either: where Claude Code keep
   await $.session.start(START)
   expect(w.set).toEqual([])
   expect(w.guides).toEqual(['Rows in /made-up/tmp/thimble.'])
+})
+
+test('a reload over thimble 0.10.5, which moved TMPDIR into its temp folder alone: Claude Code\'s temp folder goes back where it started', async ($, on) => {
+  // 0.10.5 found no TMPDIR, so the home's tmp/ became the session's temp folder, kept in $.state, and the commands' TMPDIR
+  const w = world(on, { system: 'Linux', uid: '1000', env: { TMPDIR: '/made-up/.thimble/tmp' }, kept: '/made-up/.thimble/tmp' })
+  await $.session.start(START)
+  // Claude Code's folder is claude-1000/ in /tmp again, where it started and where its sandbox lets commands write; the
+  // temp folder the guidance named already stays the session's
+  expect(w.set).toEqual([['CLAUDE_CODE_TMPDIR', '/tmp']])
+  expect(w.guides).toEqual(['Rows in /made-up/.thimble/tmp.'])
+})
+
+test('a reload over thimble 0.10.5, which made thimble/ in the person\'s TMPDIR its temp folder: Claude Code\'s goes back to that TMPDIR', async ($, on) => {
+  const w = world(on, { system: 'Linux', uid: '1000', env: { TMPDIR: '/made-up/tmp/thimble' }, kept: '/made-up/tmp/thimble' })
+  await $.session.start(START)
+  expect(w.set).toEqual([['CLAUDE_CODE_TMPDIR', '/made-up/tmp']])
+})
+
+test('a session started in a command of a thimble 0.10.5 session keeps the TMPDIR it got, thimble/ though it is', async ($, on) => {
+  // nothing in $.state: this Claude Code started with that TMPDIR, and keeps its own temp folder and its sandbox's in it
+  const w = world(on, { system: 'Linux', uid: '1000', env: { TMPDIR: '/made-up/outer/thimble' } })
+  await $.session.start(START)
+  expect(w.set[0]).toEqual(['CLAUDE_CODE_TMPDIR', '/made-up/outer/thimble'])
 })

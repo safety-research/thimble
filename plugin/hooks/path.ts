@@ -18,7 +18,7 @@
 // it is. thimble's temp folder is `thimble/` in Claude Code's, so a sandboxed command can write it too.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { tempDir } from '../core/home'
+import { keptTempDir, tempDir } from '../core/home'
 
 type Engine = EngineInterface
 
@@ -70,8 +70,19 @@ async function keepClaudeTemp($: Engine): Promise<boolean> {
   if (await $.env.get('CLAUDE_CODE_TMPDIR')) return true
   const uname = await $.process.run(['uname', '-s'])
   if (uname.exitCode !== 0) return false
-  const root = claudeTempRoot(String(uname.stdout).trim(), { TMPDIR: await $.env.get('TMPDIR'), TMP: await $.env.get('TMP'), TEMP: await $.env.get('TEMP') })
+  const root = claudeTempRoot(String(uname.stdout).trim(), { TMPDIR: await startTmp($), TMP: await $.env.get('TMP'), TEMP: await $.env.get('TEMP') })
   return !(await $.env.set('CLAUDE_CODE_TMPDIR', root)).deny
+}
+
+/** The TMPDIR Claude Code started with. thimble 0.10.5 and before moved TMPDIR into its temp folder and left
+ *  CLAUDE_CODE_TMPDIR unset, so after a reload of the plugin over such a load, TMPDIR is the temp folder $.state keeps
+ *  (core/home.ts tempDir): then the TMPDIR that load replaced, the folder around `thimble/`, or none when the temp
+ *  folder is the home's tmp/. */
+async function startTmp($: Engine): Promise<string | undefined> {
+  const tmp = await $.env.get('TMPDIR')
+  const kept = await keptTempDir($)
+  if (!tmp || !kept || tmp.replace(/\/+$/, '') !== kept) return tmp
+  return kept.endsWith('/thimble') ? kept.slice(0, -'/thimble'.length) || '/' : undefined
 }
 
 export const registerPath: Register = on => {
