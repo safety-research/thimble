@@ -461,8 +461,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   if (key === 'a') return { later: () => askAbout($, f, true) }
   if (key === '1') return { now: () => askAbout($, f, true) }
   if (f.kind === 'citation') {
-    const ev = (await itemOf($, f.row, f.n))?.evidence
-    if ((key === '+' || key === '-') && ev?.kind === 'computed' && (key === '+') !== (f.open === 'code')) {
+    // only the keys that act on the citation read it: a key's hook has a few milliseconds of its own time
+    if ((key === '+' || key === '-') && (key === '+') !== (f.open === 'code') && (await itemOf($, f.row, f.n))?.evidence?.kind === 'computed') {
       const all = key === '+'
       return { now: () => showCode($, all), undo: () => showCode($, !all) }
     }

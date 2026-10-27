@@ -554,6 +554,8 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
   let selected: Any = { text: 'failed on the p95 check', requestId: 'row-t1' }
   on('ui.selection', () => ({ value: selected }))
+  let gets = 0
+  on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
   const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-cite')
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('c cite')
@@ -568,9 +570,11 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   expect(spawns.length).toBe(1)
   expect(band).not.toContain('c cite')
   expect(band).toContain('c evidence')
-  // with nothing selected, c opens Evidence
+  // with nothing selected, c opens Evidence; the open tray's citation, which c does not act on, is not read for the key
   selected = undefined
+  gets = 0
   expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  expect(gets).toBe(0)
   await clock.advance(1000)
   expect(opens).toEqual(['Evidence'])
 })
