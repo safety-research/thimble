@@ -9,6 +9,13 @@
 // call it `$TMPDIR`. The session's commands get thimble's own (core/home.ts tempDir: `thimble/` in the person's
 // TMPDIR, else the home's tmp/), so `$TMPDIR` in a command is the folder the texts name, and no such file lands in a
 // folder other users can read.
+//
+// Claude Code's own temp folder stays where it started. Claude Code keeps it, `claude-<uid>/`, in CLAUDE_CODE_TMPDIR,
+// else in /tmp on macOS and in TMPDIR elsewhere, and looks it up again for each command: a command in its Bash sandbox
+// gets that folder as its TMPDIR and writes there the folder it ended in, while the sandbox lets commands write only
+// the folder Claude Code started with. A TMPDIR moved alone would take Claude Code's folder along on Linux, out of the
+// sandbox's reach, and every sandboxed command would fail. So CLAUDE_CODE_TMPDIR is set first to where Claude Code
+// keeps its folder, unless the person set it, and TMPDIR moves only once it is.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { tempDir } from '../core/home'
@@ -49,6 +56,24 @@ async function putBinFirst($: Engine): Promise<void> {
   }
 }
 
+/** Where Claude Code keeps its temp folder when CLAUDE_CODE_TMPDIR names none, by Claude Code's own rule: /tmp on macOS
+ *  (`system` is what `uname -s` says), else the first of TMPDIR, TMP and TEMP that is set, else /tmp. */
+export function claudeTempRoot(system: string, env: { TMPDIR?: string; TMP?: string; TEMP?: string }): string {
+  if (system === 'Darwin') return '/tmp'
+  const set = env.TMPDIR ?? env.TMP ?? env.TEMP
+  return set ? set.replace(/\/+$/, '') || '/' : '/tmp'
+}
+
+/** CLAUDE_CODE_TMPDIR set to where Claude Code keeps its temp folder, unless it is set already; false when it could not
+ *  be set, or the system is not known. */
+async function keepClaudeTemp($: Engine): Promise<boolean> {
+  if (await $.env.get('CLAUDE_CODE_TMPDIR')) return true
+  const uname = await $.process.run(['uname', '-s'])
+  if (uname.exitCode !== 0) return false
+  const root = claudeTempRoot(String(uname.stdout).trim(), { TMPDIR: await $.env.get('TMPDIR'), TMP: await $.env.get('TMP'), TEMP: await $.env.get('TEMP') })
+  return !(await $.env.set('CLAUDE_CODE_TMPDIR', root)).deny
+}
+
 export const registerPath: Register = on => {
   // the cwd matcher keeps this hook apart from the other modules' (one hook per event and matcher in a module)
   on('session.start', { cwd: /^\// }, async ($, e, next) => {
@@ -60,7 +85,7 @@ export const registerPath: Register = on => {
     }
     try {
       const dir = await tempDir($)
-      if ((await $.env.get('TMPDIR')) !== dir) await $.env.set('TMPDIR', dir)
+      if ((await $.env.get('TMPDIR')) !== dir && (await keepClaudeTemp($))) await $.env.set('TMPDIR', dir)
     } catch {
       // the texts name thimble's temp folder by its path
     }
