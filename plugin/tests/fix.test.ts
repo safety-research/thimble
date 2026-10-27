@@ -189,9 +189,9 @@ function setup() {
     for (let n = 0; n < 5 && timers.length; n++) for (const fn of timers.splice(0)) await fn()
     await new Promise(r => setTimeout(r, 5))
   }
-  // the session the plugin names on new, round, redo and done, and the person's own words, are left out: tests look at
-  // them apart
-  const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).filter(x => !x.startsWith('--asked=')).join(' ').replace(/ --session \S+/, '')).filter(Boolean)
+  // the session the plugin names on new, round, redo and done, how long done waits for the tests, and the person's own
+  // words, are left out: tests look at them apart
+  const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).filter(x => !x.startsWith('--asked=')).join(' ').replace(/ --session \S+/, '').replace(/ --within \S+/, '')).filter(Boolean)
   /** The fixer's end: its agent idles, and its turn's end reaches the hooks. */
   const end = async (answer: string, agentId = 'agent-fixer-1') => {
     for (const a of agents) if (a.id === agentId) a.status = 'idle'
@@ -426,6 +426,50 @@ test('a fixer that works on across a reload keeps its step and its time on the b
   const before = lists()
   for (let i = 0; i < 5; i++) await s.tick()
   expect(lists()).toBe(before)
+})
+
+/** The kernel's first `n` answers to done: the fix still working, its tests still running in the kernel's own process.
+ *  Each done call, with the bar's steps while it runs. */
+function stillTesting(s: ReturnType<typeof setup>, n: number): { argv: string[]; timeoutMs: number; steps: string[] }[] {
+  const calls: { argv: string[]; timeoutMs: number; steps: string[] }[] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push({ argv, timeoutMs: o.timeoutMs, steps: busySteps() })
+      if (n-- > 0) return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, state: 'working', testing: { since: 1761200000, lock: `${HOME}/fixes/tests/1.lock` } }), stderr: '' }
+    }
+    return run(argv, o)
+  }
+  return calls
+}
+
+test("while the fix's tests still run, the check asks the kernel again, each call within Claude Code's 10 minutes, with testing <name> on the bar; then the line says what came of them", async () => {
+  const s = setup()
+  const calls = stillTesting(s, 2)
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(3)
+  for (const c of calls) {
+    expect(c.argv).toEqual(expect.arrayContaining(['done', '1', '--summary', '-', '--title', 'Bar says read', '--within', '540']))
+    expect(c.timeoutMs).toBe(600000)
+    expect(c.steps).toContain('testing make the bar say read')
+  }
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
+  expect(busySteps()).not.toContain('testing make the bar say read')
+})
+
+test("a fix whose tests run when the plugins reload is waited for: its fixer's end, taken again, asks the kernel until the tests ended, then shows the line", async () => {
+  const s = setup()
+  s.made()
+  // the fixer ended and its change is being tested; the reload came before the check said what came of it
+  s.agents.push({ id: 'agent-fixer-1', status: 'idle' })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  const calls = stillTesting(s, 1)
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await s.tick()
+  expect(calls.map(c => [c.argv.includes('--within'), c.timeoutMs])).toEqual([[true, 600000], [true, 600000]])
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: make the bar say read · tests pass')
 })
 
 test('n leaves the fix ready in the list, where thimble fix apply in a shell turns it on; a fixer that changed nothing leaves a request', async () => {
