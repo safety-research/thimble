@@ -191,7 +191,11 @@ claude plugin uninstall thimble@thimble
 
 To remove the browser workbench, delete `~/.local/bin/thimble-browser` and the checkout. Uninstalling leaves your data
 alone. To remove what thimble wrote, delete `~/.thimble` and `~/.thimble-browser` (and a `thimble/` folder that a build
-before 0.10.0 made in a data folder).
+before 0.10.0 made in a data folder). With `--local`, your fixes also live in the checkout, as the branch `mine` and
+the refs under `refs/thimble/`, and a new install sets them aside by itself, under `refs/thimble-old/`, when `mine` is
+one that thimble made. To remove them, after you delete `~/.thimble`, run `git worktree prune`, `git branch -D mine`
+and `git for-each-ref --format='delete %(refname)' refs/thimble refs/thimble-old | git update-ref --stdin` in the
+checkout.
 
 ## When something does not work
 

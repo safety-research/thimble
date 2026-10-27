@@ -27,7 +27,9 @@ Under $THIMBLE_HOME/fixes:
                      exact text that leaves), title
     sent/<id>/       what left the machine, or what the person saved as files
 
-refs/thimble/fixes/<id> in live's repository keeps each fix's commit, on or off, so an undone fix can come back.
+refs/thimble/fixes/<id> in live's repository keeps each fix's commit, on or off, so an undone fix can come back. A clone
+install's home that was deleted leaves mine and these refs in the person's clone; a new home that makes live moves them
+under refs/thimble-old/<UTC time>/ when mine is thimble's own (_leftovers_aside).
 
 More words for a fix are a round of that fix, never a new fix (round_). A fix that is on, off or ready with no copy is
 changed in place: a copy holds its change, the fixer adds to it, and the new version (refs/thimble/next/<id>) waits for
@@ -372,10 +374,7 @@ def ensure_live() -> dict[str, Any]:
             git("remote", "set-url", "origin", src["url"], cwd=live)
         git("checkout", "-q", "-b", "mine", commit, cwd=live)
     else:
-        has = run(["git", "rev-parse", "--verify", "-q", "refs/heads/mine"], cwd=repo, check=False).returncode == 0
-        if has:
-            raise FixError(f"your clone {repo} already has a branch named mine; rename it (git branch -m mine "
-                           "mine-old), then ask again")
+        _leftovers_aside(repo)
         git("worktree", "add", "-q", "-b", "mine", str(live), commit, cwd=repo)
     # the release's tag when the commit has one (v0.10.2), for its name in the list and in thimble update
     tag = git("describe", "--tags", "--exact-match", "--match", "v*", commit, cwd=live, check=False)
@@ -386,6 +385,48 @@ def ensure_live() -> dict[str, Any]:
     _write_off_sh(rel)
     place_release(commit)
     return rel
+
+
+def _leftovers_aside(repo: Path) -> None:
+    """Before a clone install's live is made in the person's clone: what a thimble home that was deleted left there
+    goes aside, so that nothing of it is lost and the new fixes see none of it. git forgets the worktrees whose folders
+    are gone; then, with no records in this home, thimble's own mine (_thimbles_mine) and every ref under refs/thimble/
+    move under refs/thimble-old/<UTC time>/ in one update (refs/heads/mine as heads/mine, refs/thimble/fixes/1 as
+    thimble/fixes/1). Any other mine, or a mine while this home has records, stops the request."""
+    run(["git", "worktree", "prune"], cwd=repo, check=False)
+    has = run(["git", "rev-parse", "--verify", "-q", "refs/heads/mine"], cwd=repo, check=False).returncode == 0
+    recs = records()
+    if has and (recs or not _thimbles_mine(repo)):
+        raise FixError(f"your clone {repo} already has a branch named mine; rename it (git branch -m mine "
+                       "mine-old), then ask again")
+    old = [] if recs else git("for-each-ref", "--format=%(objectname) %(refname)", "refs/heads/mine", "refs/thimble/",
+                              cwd=repo).splitlines()
+    if not old:
+        return
+    stamp = aside = "refs/thimble-old/" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    n = 1
+    while git("for-each-ref", "--count=1", aside + "/", cwd=repo):
+        n += 1
+        aside = f"{stamp}-{n}"
+    moves = []
+    for line in old:
+        sha, _, ref = line.partition(" ")
+        moves += [f"create {aside}/{ref.removeprefix('refs/')} {sha}", f"delete {ref} {sha}"]
+    run(["git", "update-ref", "--no-deref", "--stdin"], cwd=repo, stdin="\n".join(moves) + "\n")
+
+
+def _thimbles_mine(repo: Path) -> bool:
+    """Whether the clone's mine is one that a deleted thimble home left: no worktree has it checked out or is another
+    thimble home's live (which is detached while that home's fixes are off), and thimble committed each commit that is
+    only on mine (on no other branch or tag). A mine with no commits of its own, such as the release commit, is one."""
+    wts = git("worktree", "list", "--porcelain", cwd=repo).splitlines()
+    paths = [Path(x.partition(" ")[2]) for x in wts if x.startswith("worktree ")]
+    if "branch refs/heads/mine" in wts or any(p.name == "live" and (p.parent / "release.json").exists() for p in paths):
+        return False
+    me = as_thimble()
+    own = git("log", "--format=%cn <%ce>", "refs/heads/mine", "--not", "--exclude=mine", "--branches", "--tags", "--",
+              cwd=repo).splitlines()
+    return all(x == f"{me['GIT_COMMITTER_NAME']} <{me['GIT_COMMITTER_EMAIL']}>" for x in own)
 
 
 def place_release(base: str) -> None:
