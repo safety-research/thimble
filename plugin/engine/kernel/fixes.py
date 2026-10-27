@@ -646,7 +646,7 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, session
         rec = {"id": fid, "title": (title or short(words)).strip(), "words": [], "rounds": 1, "made_in": made_in,
                "created": now, "started": now, "state": "working", "work": str(wt), "base": base, "commit": None,
                "files": [], "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
-               "session": session or None}
+               "conversation": os.environ.get("THIMBLE_CONVERSATION") or None, "session": session or None}
         return put(_with_words(rec, [words], asked))
 
 
@@ -2283,7 +2283,8 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     elif off_ids:
         nxt.append((f"thimble fix on {off_ids[0]}", "turn a fix on (it asks for your key here)"))
     if can_share():
-        nxt.append((f"thimble file issue {first}", f"post fix {first} as a GitHub issue (you check it before it goes)"))
+        nxt.append((f"thimble file issue {first}",
+                    f"a link to GitHub's new-issue form with fix {first}'s text, to read and submit"))
         code = [r["id"] for r in fixes if r.get("state") in ("on", "ready") and r.get("commit") and not r.get("pr")]
         if code:
             nxt.append((f"thimble file pr {code[0]}", f"open a pull request with fix {code[0]}'s code (asks first)"))
@@ -2349,7 +2350,8 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     if s == "pending":
         acts.append(("thimble reapply", "Claude checks it against the release and brings it back"))
     if s in ("on", "off", "ready", "sent") and can_share():
-        acts.append((f"thimble file issue {r['id']}", "post it as a GitHub issue"))
+        acts.append((f"thimble file issue {r['id']}",
+                     "a link to GitHub's new-issue form with its text, to read and submit"))
     if s in ("on", "ready") and r.get("commit") and not r.get("pr") and can_share():
         acts.append((f"thimble file pr {r['id']}", "open a pull request with its code on the public repo (asks first)"))
     if s == "on" and is_on():
@@ -2455,10 +2457,25 @@ def _walk_strings(v: Any, fields: set[str], values: set[str], depth: int = 0) ->
             values.add(s)
 
 
+WALK_S = 2.0  # how long the scan lists the names of a folder's files, at most
+
+
+def _named_files(st: Store) -> list[str]:
+    """The files under the root whose names the scan takes out, relative: those the conversation read, and every file
+    a walk of WALK_S seconds lists, unless the root holds the home folder (the home folder, /), whose walk would list
+    every file of the machine before a word is printed."""
+    from . import sources as S  # noqa: PLC0415
+
+    read = {r for s in st.seen() for f in [s.get("file"), *(s.get("files") or [])] if f and (r := st.rel(str(f)))}
+    if Path.home().resolve().is_relative_to(st.root):
+        return sorted(read)
+    return sorted(read | set(S.list_files(st.root, until=time.monotonic() + WALK_S)))
+
+
 def session_terms(st: Store | None) -> dict[str, list[str]]:
     """The person's details for the scan, collected here and now: their machine (user, host, git identity, home) and,
-    with a store, the folder under analysis (its path, file and folder names) and the fields and values of the records
-    Claude read this session."""
+    with a store, the folder under analysis (its path, file and folder names, _named_files) and the fields and values of
+    the records Claude read this session."""
     from . import sources as S  # noqa: PLC0415
 
     t: dict[str, set[str]] = {k: set() for k in ("name", "host", "git", "path", "folder", "file", "field", "value")}
@@ -2488,7 +2505,7 @@ def session_terms(st: Store | None) -> dict[str, list[str]]:
             return len(x) >= 3 and not x.isdigit()
 
         try:
-            rels = S.list_files(st.root)
+            rels = _named_files(st)
         except Exception:  # noqa: BLE001 - a folder that cannot be listed: the machine's terms still count
             rels = []
         for rel in rels:

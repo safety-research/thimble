@@ -170,14 +170,15 @@ def open_link(url: str) -> bool:
 
 
 def _store_of(rec: dict[str, Any]) -> Store | None:
-    """The folder whose names the scan takes out, in a shell: the one the fix was asked in, else the folder the shell
-    stands in (not the home folder or /, whose every file the scan would list)."""
+    """The folder whose names the scan takes out, in a shell: the one the fix was asked in, as the conversation that
+    asked read it, else the folder the shell stands in (not the home folder or /). session_terms lists no file of a
+    folder that holds the home folder: there it takes the names of the files the conversation read."""
     here = Path.cwd()
     root = rec.get("root") if rec.get("root") and Path(rec["root"]).is_dir() else None
     if not root and here not in (Path.home(), Path("/")):
         root = str(here)
     try:
-        return Store(root) if root else None
+        return Store(root, session=rec.get("conversation") or None) if root else None
     except Exception:  # noqa: BLE001 - a folder thimble cannot read: the machine's names are still taken out
         return None
 
@@ -218,6 +219,12 @@ def lines(r: dict[str, Any]) -> list[str]:
     return out
 
 
+def checking(fid: int, quiet: bool = False) -> None:
+    """The line a person reads at once, while the scan reads their folder's names (seconds in a large folder)."""
+    if not quiet:
+        print(f"Checking fix {fid}'s text for your names and paths…", file=sys.stderr, flush=True)
+
+
 def cmd(a) -> int:
     """thimble file issue ID [--json] [--open] [--draft -]: see cli.py FILE_HELP."""
     from .cli import out_json, stdin_text  # noqa: PLC0415
@@ -232,6 +239,7 @@ def cmd(a) -> int:
                 raise FX.FixError("--draft - reads one JSON object: {\"title\", \"wrong\", \"fixed\"}")
         root = os.environ.get("THIMBLE_ROOT")
         st = Store(root, session=os.environ.get("THIMBLE_CONVERSATION")) if root else None
+        checking(FX.get(a.id)["id"], a.json)
         r = share(a.id, given if isinstance(given, dict) else None, st, open_it=a.open)
     except FX.FixError as e:
         print(f"thimble file issue: {e}", file=sys.stderr)
@@ -546,6 +554,7 @@ def pr_cmd(a) -> int:
         user = _gh_ready()
         root = os.environ.get("THIMBLE_ROOT")
         st = Store(root, session=os.environ.get("THIMBLE_CONVERSATION")) if root else None
+        checking(FX.get(a.id)["id"])
         r = pr_preview(a.id, st)
         print("\n".join(pr_lines(r, user, c)))
         if r["code"]:

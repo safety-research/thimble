@@ -927,7 +927,7 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
         "What next",
         f"  thimble fix show {a}      what fix {a} does, in a few lines",
         f"  thimble fix off {a}       turn a fix off; thimble fix on {a} turns it back on",
-        f"  thimble file issue {a}    post fix {a} as a GitHub issue (you check it before it goes)",
+        f"  thimble file issue {a}    a link to GitHub's new-issue form with fix {a}'s text, to read and submit",
         f"  thimble file pr {a}       open a pull request with fix {a}'s code (asks first)",
         f"  thimble fix remove {a}    delete a fix",
         "  thimble update          get the newest thimble and keep your fixes"]
@@ -938,7 +938,7 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert shown[1] == '  You asked     "the legend should count the files nobody read like the untouched ones"'
     assert shown[2] == "  Claude did    The coverage legend says how many files are untouched."
     assert shown[3] == "  Changed       1 file · tests pass"
-    assert shown[5:] == [f"  thimble file issue {c}    post it as a GitHub issue",
+    assert shown[5:] == [f"  thimble file issue {c}    a link to GitHub's new-issue form with its text, to read and submit",
                          f"  thimble file pr {c}       open a pull request with its code on the public repo (asks first)",
                          f"  thimble fix off {c}       turn it off"]
     # off and on one fix in a shell: on needs the person's y in their terminal, never Claude's Bash tool

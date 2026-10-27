@@ -218,10 +218,11 @@ def test_a_change_that_does_not_apply_on_main_is_refused_before_anything_goes(wo
     asked = answer(monkeypatch, "y")
     assert CLI.main(["file", "pr", str(rec["id"])]) == 1
     cap = capsys.readouterr()
-    assert cap.err.strip() == (
+    # the line that says the scan runs, at once, then why nothing goes
+    assert cap.err.strip().splitlines() == ["Checking fix 1's text for your names and paths…",
         f"thimble file pr: fix 1's change does not apply to the newest thimble (0.10.2, {world['base'][:7]} on main), "
         "which a pull request goes onto: the lines it changes are different there. Ask /thimble-fix to make it work on "
-        "the newest thimble (thimble update moves you to it), then try again")
+        "the newest thimble (thimble update moves you to it), then try again"]
     assert asked == [] and cap.out == "" and calls(gh) == ["auth status", "api user"]
     assert branches(gh, "made-up") == [] and "pr" not in FX.get(rec["id"])
 
@@ -236,7 +237,7 @@ def test_a_fix_that_builds_on_another_fix_says_so(world, gh, monkeypatch, capsys
     FX.write_json(SH.share_dir(b["id"]) / "given.json", DRAFT)
     answer(monkeypatch, "y")
     assert CLI.main(["file", "pr", str(b["id"]), "--yes"]) == 1
-    assert capsys.readouterr().err.strip() == (
+    assert capsys.readouterr().err.strip().splitlines()[-1] == (
         "thimble file pr: fix 2's change does not apply to thimble 0.10.2 alone: it builds on another of your fixes. "
         "Ask /thimble-fix to make it work on the release by itself")
     assert branches(gh, "made-up") == []

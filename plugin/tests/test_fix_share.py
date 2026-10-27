@@ -162,3 +162,45 @@ def test_in_a_shell_the_scan_takes_out_the_names_of_the_folder_the_fix_was_asked
     out = SH.share(r["id"])
     assert out["took"] == "took 1 file name out of the text"
     assert "board-7.jsonl" not in out["body"] + out["url"] and "after Claude read ‹data file›" in out["body"]
+
+
+def test_a_fix_asked_in_the_home_folder_lists_none_of_its_files_and_the_shell_says_at_once_what_runs(world, monkeypatch, opened, capsys, tmp_path):
+    from kernel import sources  # noqa: PLC0415
+
+    # a session started in the home folder (a made-up one): the fix's folder is the home folder
+    home = tmp_path / "made-up-home"
+    (home / "notes").mkdir(parents=True)
+    (home / "notes" / "board-7.jsonl").write_text('{"x": 1}\n')
+    for k, v in {"HOME": str(home), "LOGNAME": "dana-made-up", "USER": "dana-made-up", "THIMBLE_ROOT": str(home),
+                 "THIMBLE_CONVERSATION": "conv-made-up"}.items():
+        monkeypatch.setenv(k, v)
+    r = FX.new("after Claude read board-7.jsonl the bar still said coverage")
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("coverage", "read"))
+    FX.done(r["id"], "Bar says read", "The bar says read.")
+    assert FX.get(r["id"])["root"] == str(home) and FX.get(r["id"])["conversation"] == "conv-made-up"
+    # what the conversation read, as the hooks keep it (hooks/watch.ts)
+    seen = FX.thimble_home() / "seen" / "conv-made-up.jsonl"
+    seen.parent.mkdir(parents=True, exist_ok=True)
+    seen.write_text(json.dumps({"tool": "Read", "file": str(home / "notes" / "board-7.jsonl"), "from": 1, "to": 1,
+                                "cwd": str(home)}) + "\n")
+    # the person's shell, somewhere else: a walk of every file of the home folder would take minutes, so none runs
+    for k in ("THIMBLE_ROOT", "THIMBLE_CONVERSATION"):
+        monkeypatch.delenv(k)
+    monkeypatch.chdir(tmp_path)
+    real = sources.list_files
+
+    def listed(root, until=None):
+        assert Path(root).resolve() != home.resolve(), "the scan listed the home folder"
+        return real(root, until)
+
+    monkeypatch.setattr(sources, "list_files", listed)
+    FX.write_json(SH.share_dir(r["id"]) / "given.json",
+                  {**DRAFT, "wrong": "dana-made-up saw the bar say coverage after Claude read board-7.jsonl."})
+    assert CLI.main(["file", "issue", str(r["id"])]) == 0
+    cap = capsys.readouterr()
+    # a line at once, before the scan, then the link: the user's name and the file the conversation read are out
+    assert cap.err.splitlines()[0] == f"Checking fix {r['id']}'s text for your names and paths…"
+    took = next(x for x in cap.out.splitlines() if "privacy check" in x)
+    assert "1 file name" in took and " 1 name" in took
+    assert "board-7.jsonl" not in cap.out and "dana-made-up" not in cap.out
