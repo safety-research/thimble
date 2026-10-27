@@ -18,7 +18,7 @@
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`,
 //                                         `c cite`)
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
-//                                         no card may take
+//                                         no card may take; keysReady, as the plugin loads, what the keys read
 //   core/pane.ts       the side pane      the kinds `claims`, `threads` and `thread` (the seams' draws)
 //
 // Every function here answers what the seams give, checked, and nothing when a seam throws: a feature's failure never
@@ -228,6 +228,14 @@ async function cKey($: Engine, key: string, until: number): Promise<Take | null>
   const later = (await safe(claimsKey($, key, until), null))?.later
   if (!later) return safe(citeKey($, key, until), null)
   return { later: async () => ((await safe(citeShown($), false)) ? citeSelection($) : later()) }
+}
+
+/** What the features' keys read of the state (whether the tray and the squeeze chips hold the keys), read as the plugin
+ *  loads: each load starts with nothing kept (a change in the settings loads it again), and the first key would read it
+ *  inside the few milliseconds Claude Code gives the key's hook. */
+export async function keysReady($: Engine): Promise<void> {
+  await safe(trayHolds($), false)
+  await safe(squeezeHolds($), false)
 }
 
 // ------------------------------------------------------------------------------------------------ hooks
