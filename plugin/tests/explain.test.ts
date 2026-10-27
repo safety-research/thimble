@@ -11,8 +11,7 @@ import { resetEngaged } from '../core/engaged'
 import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
-import { failLineNow, failNotice, promptTyped } from '../bar/notice'
-import { noteViewport } from '../cards/draw'
+import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
@@ -129,40 +128,6 @@ test("after a look, the answer's explainer and heads-up stand on their words in 
   expect(spans[0]!.label).toBe('explain retry budget')
   expect(await explainState(s.$)).toEqual({ glossed: ['retry budget'], headsGiven: ['Only one network'] })
   expect(JSON.parse(s.files.get('/made-up/.thimble/conversations/s-explain/explain.json')!)).toEqual({ glossed: ['retry budget'], headsGiven: ['Only one network'] })
-})
-
-test('the session\'s first marks come with one notice of what the orange and the teal mean, how one opens and what e does; later marks bring none, and a failure showing stays', async () => {
-  setOptions({})
-  const later = reply({ glosses: [{ term: 'upload', body: 'A file sent to the server.' }], heads: null })
-  const s = setup([LOOK, later])
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
-  const line = await failLineNow(s.$)
-  expect(line?.kind).toBe('notice')
-  for (const words of ['Orange marks a heads-up', 'Teal marks an explainer', 'Click one, or press ]', 'press e']) expect(String(line?.text)).toContain(words)
-  // the next prompt takes it, and a later look's marks bring it no more
-  await promptTyped(s.$)
-  await answered(s, { id: 't2', prompt: 'And the upload?', text: 'The upload stops at five tries.' })
-  expect(await partOf(s.$, 't2-row', 'explain')).not.toBe(null)
-  expect(await failLineNow(s.$)).toBe(null)
-
-  // a failure that shows when the first marks come stays; the notice waits for the next marks. In Claude Code's default
-  // layout it says the key, not the click, and no e (no selection reaches thimble there)
-  noteViewport({ isFullscreen: false })
-  try {
-    const t = setup([LOOK, later])
-    failNotice(t.$, 'A made-up card failed.')
-    await settle()
-    await answered(t, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
-    expect(String((await failLineNow(t.$))?.text)).toBe('A made-up card failed.')
-    await promptTyped(t.$)
-    await answered(t, { id: 't2', prompt: 'And the upload?', text: 'The upload stops at five tries.' })
-    const told = String((await failLineNow(t.$))?.text)
-    expect(told).toContain('Press ] to step through them.')
-    expect(told).not.toContain('Click')
-    expect(told).not.toContain('press e')
-  } finally {
-    noteViewport({ isFullscreen: true })
-  }
 })
 
 test('a term is explained once per conversation, and each switch hides what its lens gave', async () => {
@@ -327,7 +292,7 @@ test('e explains the words selected in an answer, on the row the selection lies 
   const id = part.order.find(x => part.items[x]!.term === 'the client')!
   expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'explain', id })
   // no line says it is being written (the bar's busy line does), and the bar no longer names e for these words
-  expect((await failLineNow(s.$))?.about).not.toBe('explain')
+  expect(await failLineNow(s.$)).toBe(null)
   expect(await explainBar(s.$, () => true, false)).toEqual([])
   s.$.ui.selection = async () => ({ text: 'uploads', requestId: 't1-row' })
   expect((await explainBar(s.$, () => true, false)).map(x => x.key)).toEqual(['e'])

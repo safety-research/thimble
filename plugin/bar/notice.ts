@@ -1,8 +1,7 @@
 // notice.ts: the failure line, the one way thimble tells the person that something failed. One line above the prompt
 // (bar.tsx draws it), the whole notice in red, until the person types their next prompt, or until what failed works
 // again (failCleared, by the notice's `about`: a card that draws again). noticeLine is the same line, not in red, for
-// what is not thimble's failure (a model's safeguards, a package the machine lacks) or what the session is told once
-// (bar/hints.ts noticeOnce). hintLine is a hint that only says
+// what is not thimble's failure (a model's safeguards, a package the machine lacks). hintLine is a hint that only says
 // how to do something (select words first, click the bar in a narrow terminal): the bar shows it in place of its keys
 // (`Hint: …`, bar.tsx), or above them when it does not fit there whole, and it goes on its own after HINT_MS, or at the
 // next key thimble takes.

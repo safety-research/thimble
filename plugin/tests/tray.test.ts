@@ -421,7 +421,7 @@ test('a on a card at a narrow terminal: the bar names the click on a ask, and th
   }
   expect(opens).toEqual(['thimble'])
   const band = textOf(await $.ui.render(above()))
-  for (const part of ['144', '118', '“a ask”']) expect(band).toContain(part)
+  expect(band).toContain('a needs a wider terminal: widen the window to show the side pane, or click “a ask”.')
   expect(band).not.toContain('Hint:')
   expect(band).toContain('a ask')
   // the press on a ask in the bar: Claude Code places it
@@ -477,7 +477,7 @@ const TALL = {
   evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nfor i, r in enumerate(runs):\n    print(f"run {i + 1}: {r}")\nprint(f"failed: {bad}")', output: OUTPUT, highlight: [[OUTPUT.length - 2, OUTPUT.length]] },
 }
 
-test('a tray taller than the rows the band has over the bar shows its body in a window of them: the band ends with the whole bar, its failure line too, and the dim row under the window says how many more lines there are and shows them', CITES, async ($, on) => {
+test('a tray taller than the rows the band has over the bar shows its body in a window of them: the band ends with the whole bar, its failure line too, the dim row under the window says how many more lines there are, and the wheel over the band moves the window', CITES, async ($, on) => {
   const scrolls: Any[] = []
   const { clock } = await resumed($, on, TALL, 's-tray-tall', { scrolls })
   const drawn = async (maxRows: number) => {
@@ -491,12 +491,6 @@ test('a tray taller than the rows the band has over the bar shows its body in a 
     expect(tray).toBeGreaterThan(-1)
     expect(d.rows.slice(tray + 1).map(n => n.props?.key)).toContain('bar')
     expect(String(d.rows.at(-1)?.props?.key)).toMatch(/^bar/)
-  }
-  const press = async (maxRows: number) => {
-    const ui = await $.ui.mount(above(maxRows))
-    await ui.press({ key: 'tray-scroll' })
-    await ui.unmount()
-    return drawn(maxRows)
   }
   // the person's wheel over the band, as Claude Code raises it, and the band's scrolls that reached Claude Code's own
   const wheel = (by: number) => $.ui.scroll({ component: 'AbovePrompt', requestId: 'above', offset: 0, by, bodyRows: 7, contentRows: 8, origin: { kind: 'person' } } as never)
@@ -524,19 +518,18 @@ test('a tray taller than the rows the band has over the bar shows its body in a 
   // the wheel over the band moves the window, a row a tick, and the band itself does not move
   await wheel(2)
   d = await drawn(8)
+  fits(d, 8)
   expect(d.window?.props?.top).toBe(-2)
   expect(bandScrolls()).toBe(0)
-  // a press on that row shows the next rows
-  d = await press(8)
+  // at the last rows the row under the window counts the lines above, and the wheel goes back up
+  await wheel(100)
+  d = await drawn(8)
   fits(d, 8)
-  expect(d.window?.props?.top).toBeLessThan(-2)
-  // in a band of twelve rows the window is taller: at the last rows it counts the lines above, and a press goes back up
-  d = await drawn(12)
-  for (let i = 0; i < 5 && /↓ \d+ more line/.test(d.text); i++) d = await press(12)
-  fits(d, 12)
-  const above12 = Number(/↑ (\d+) line/.exec(d.text)?.[1])
-  expect(d.window?.props?.top).toBe(-above12)
-  d = await press(12)
+  const above8 = Number(/↑ (\d+) line/.exec(d.text)?.[1])
+  expect(above8).toBeGreaterThan(5)
+  expect(d.window?.props?.top).toBe(-above8)
+  await wheel(-100)
+  d = await drawn(8)
   expect(d.window?.props?.top).toBeUndefined()
   // a band with the rows for all of it shows it whole, with no window
   const whole = await drawn(40)

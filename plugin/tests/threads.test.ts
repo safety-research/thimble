@@ -444,7 +444,7 @@ test("a heads-up's thread shows it as the tray does: named a heads-up, its links
   expect(textOf(point.props.children[0])).toBe('▎ ')
 })
 
-test("a running thread under a tall heads-up shows its question, the steps its fork took and that it is answering; the pane counts the heads-up's rows at the width they wrap at", async () => {
+test("a running thread under a tall heads-up shows its question and the steps its fork took; the pane counts the heads-up's rows at the width they wrap at", async () => {
   const s = setup()
   let poll: (() => void) | null = null
   s.$.clock.every = (_ms: number, f: () => void) => { poll = f; return () => undefined }
@@ -471,7 +471,6 @@ test("a running thread under a tall heads-up shows its question, the steps its f
   expect(shown).toContain('how many were retried?')
   expect(shown).not.toContain('earlier turn')
   expect(shown).toContain('● 2 steps · ls runs')
-  expect(textOf(nodes(tree).find(n => n.props?.key === 'conv-run'))).toContain('answering…')
   // each point wraps after its gutter, so the pane, which scrolls to the conversation's end, counts it at that width
   const part = nodes(tree).find(n => n.props?.key === 'subject-m0')
   expect(treeRows(part, 50)).toBe(treeRows(els.Text({ wrap: 'wrap', children: `· ${point}` }), 48))

@@ -157,24 +157,12 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   setOptions({})
 })
 
-test('a pane a key could not open in a narrow window: the notice says how wide the window must be and how wide it is, as Claude Code said, and offers the click that opens it here; the panes that lay out by their rows ask for them', async () => {
+test('a pane a key could not open in a narrow window: the notice offers the click that opens it here; the panes that lay out by their rows ask for them', async () => {
   const s = setup()
   s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (118 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
   expect(await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })).toBe(false)
   const said = narrowNotice('r', 'r coverage')
-  expect(said).toContain('144 columns')
-  expect(said).toContain('118')
   expect(pressedWords(said, new Map([['r coverage 43% (3/7 files)', () => 'opened']])).find(p => p.press)?.s).toBe('“r coverage”')
-  // once the pane had opened (110 columns then), the notice names that width
-  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 110 columns (100 now, an id the person opened before)' } }
-  await openPane(s.$, 'claims', {}, 'Evidence', { focus: true, rows: 36 })
-  expect(narrowNotice('c', 'c 3 claims')).toContain('110')
-  expect(narrowNotice('c', 'c 3 claims')).toContain('100')
-  // Claude Code gives no width: the notice still offers the click
-  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false } }
-  await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })
-  expect(narrowNotice('r', 'r coverage')).not.toMatch(/\d/)
-  expect(narrowNotice('r', 'r coverage')).toContain('“r coverage”')
   // a pane drawn inline gets the rows it asks for: the settings, coverage and a citation's evidence ask for theirs
   s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: true } }
   for (const kind of ['settings', 'coverage', 'evidence']) {
@@ -184,7 +172,7 @@ test('a pane a key could not open in a narrow window: the notice says how wide t
   }
 })
 
-test("in Claude Code's default layout, which sends no click and docks no pane, the notice names /tui fullscreen and the width at which the key opens the pane above the prompt, with no click; where nothing places panes, it does not say to widen the window", async () => {
+test("in Claude Code's default layout, which sends no click and docks no pane, the notice names /tui fullscreen, with no click; where nothing places panes, it does not say to widen the window", async () => {
   const s = setup()
   const named = new Map([['r coverage 43% (3/7 files)', () => 'opened']])
   try {
@@ -193,8 +181,6 @@ test("in Claude Code's default layout, which sends no click and docks no pane, t
     expect(await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })).toBe(false)
     const said = narrowNotice('r', 'r coverage')
     expect(said).toContain('/tui fullscreen')
-    expect(said).toContain('144')
-    expect(said).toContain('80')
     expect(said).not.toMatch(/click/i)
     expect(pressedWords(said, named).some(p => p.press)).toBe(false)
     // no surface here places panes: neither a wider window nor the fullscreen layout opens it

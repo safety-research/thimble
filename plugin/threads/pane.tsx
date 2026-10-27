@@ -23,9 +23,7 @@
 //   ● Links peaked that day: 2,994 of …       the answer after ●
 //
 //     [a card it drew]
-//
-//     ⎿ answering…                            a question at work, under what its fork did so far; the bar says
-//                                             `⠋ answering: <thread>` with its seconds (bar/busy.ts)
+//                                             a question at work: the bar says `⠋ answering: <thread>` (bar/busy.ts)
 //   e: show the card · m: add this answer…    the keys' row, as other panes draw keys: e the card whole or not (a
 //                                             card's thread), m (or a click) adds the answer to the main conversation
 //                                             once it answered, and says so after
@@ -178,12 +176,6 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
       else if (meta.anchorRow !== `thread:${t.key}`) out.push(Text({ key: `${k}-c-${meta.id}`, dimColor: true, wrap: 'truncate-end', children: `  ⎿ drew a new version of “${cut(meta.title, 40)}” in the conversation` }))
       else out.push(Box({ key: `${k}-c-${meta.id}`, marginTop: 1, children: [await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: w + 2 } }, meta)] }))
     }
-  }
-  // a question at work: one row says so under what the thread did so far, until its answer comes (the bar's busy line
-  // turns and counts the seconds)
-  if (t.status === 'running') {
-    out.push(Text({ key: 'conv-run-gap', children: ' ' }))
-    out.push(Text({ key: 'conv-run', dimColor: true, wrap: 'truncate-end', children: '  ⎿ answering…' }))
   }
   if (t.status === 'failed') {
     out.push(Text({ key: 'conv-fail-gap', children: ' ' }))

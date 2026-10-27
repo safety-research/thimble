@@ -371,10 +371,10 @@ test('c in a terminal too narrow for the pane fails in red with the click on the
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
   await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['[Run 4 failed](#).'] })
   const line = async () => ((await failLineNow(s.$)) as Any)?.text ?? ''
-  s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false, reason: 'unasked below 144 columns (118 now)' } }
+  s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await (await claimsKey(s.$, 'c', 0))!.later!()
   await settle()
-  for (const part of ['144', '118', '“c 1 claim”']) expect(await line()).toContain(part)
+  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c 1 claim”.')
   expect(((await failLineNow(s.$)) as Any)?.kind).toBe('failed')
   // a press's pane is placed at any width: the bar's count opens it
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
@@ -386,7 +386,7 @@ test('c in a terminal too narrow for the pane fails in red with the click on the
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await openClaims(s.$, {}, true)
   await settle()
-  expect(await line()).toContain('“c 1 claim”')
+  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c 1 claim”.')
 })
 
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
@@ -433,7 +433,7 @@ test('c in a narrow terminal before any claims names the bar\'s item by the bar\
   expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'evidence']])
   s.$.ui.open = async () => ({ isPlaced: false })
   await openClaims(s.$, {}, true)
-  expect(String((await failLineNow(s.$))?.text)).toContain('“c evidence”')
+  expect(String((await failLineNow(s.$))?.text)).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c evidence”.')
   setOptions({})
 })
 

@@ -31,10 +31,10 @@
 //
 // The tray takes only the rows the band above the prompt has over the bar (bar/register.ts), so the bar stays on
 // screen: a body taller than that shows in a window of those rows, which the wheel over the band scrolls, over a dim
-// row that says how many more lines there are (a press on it shows the next ones). A card ] reaches takes the keys
-// (cards/store.ts setFocus); `a` asks about it and 0 gives the keys back. An open tray does not change what the next
-// prompt asks: a question about the mark goes to a side thread (a). The tray closes when the person sends a prompt.
-// What the person opens reaches main through core/engaged.ts.
+// row that says how many more lines there are. A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks
+// about it and 0 gives the keys back. An open tray does not change what the next prompt asks: a question about the
+// mark goes to a side thread (a). The tray closes when the person sends a prompt. What the person opens reaches main
+// through core/engaged.ts.
 //
 //   state: tray ({stack} or null), trayCard (the card ] reached: {row, card})
 import type { EngineInterface, Register } from 'claude-code'
@@ -746,18 +746,17 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
 }
 
 /** How many rows of the tray's body its window has scrolled past, and the window as last drawn (how many rows of the
- *  body it hides, and its own rows; null when the body fits): what the wheel over the band and the row under the window
- *  move (scrollTray). A change of the tray starts it at its top again (writeTray). */
+ *  body it hides, and its own rows; null when the body fits): what the wheel over the band moves (scrollTray). A change
+ *  of the tray starts it at its top again (writeTray). */
 let scrolled = 0
 let windowed: { over: number; rows: number } | null = null
 
 /** The tray's body in at most `fit` rows: whole when it fits; else a window of `fit` − 1 of its rows, and under it a dim
- *  row that says how many more lines there are below (at the end, above), a press that shows the next rows (at the end,
- *  the first ones again). Claude Code scrolls the band only when its whole tree is taller than its rows, so the wheel
- *  over the band moves the window (registerTray's ui.scroll hook). With fewer than two rows for the body, it shows
- *  whole, and the band scrolls as Claude Code scrolls it. */
-function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number): Any[] {
-  const { Box, Button, Text } = els
+ *  row that says how many more lines there are below (at the end, above). Claude Code scrolls the band only when its
+ *  whole tree is taller than its rows, so the wheel over the band moves the window (registerTray's ui.scroll hook).
+ *  With fewer than two rows for the body, it shows whole, and the band scrolls as Claude Code scrolls it. */
+function fitBody(els: Any, body: Any[], w: number, fit: number): Any[] {
+  const { Box, Text } = els
   const tall = treeRows(body, w)
   if (tall <= fit || fit < 2) { windowed = null; return body }
   const rows = fit - 1
@@ -765,14 +764,12 @@ function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number): Any[
   windowed = { over, rows }
   scrolled = Math.max(0, Math.min(over, scrolled))
   const below = over - scrolled
-  const words = below > 0 ? `↓ ${below} more line${below === 1 ? '' : 's'} · scroll` : `↑ ${over} line${over === 1 ? '' : 's'} above · scroll`
+  const words = below > 0 ? `↓ ${below} more line${below === 1 ? '' : 's'}` : `↑ ${over} line${over === 1 ? '' : 's'} above`
   return [
     Box({ key: 'tray-window', flexDirection: 'column', height: rows, overflow: 'hidden', children: [
       Box({ key: 'tray-window-in', flexDirection: 'column', flexShrink: 0, ...(scrolled ? { position: 'relative', top: -scrolled } : {}), children: body }),
     ] }),
-    Button({ key: 'tray-scroll', plain: true, label: below > 0 ? 'show the next lines' : 'show the first lines', hover: quiet('tray-scroll'), onPress: () => scrollTray($, below > 0 ? rows : -over), children: [
-      Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: words }),
-    ] }),
+    Text({ key: 'tray-scroll', dimColor: true, wrap: 'truncate-end', children: words }),
   ]
 }
 
@@ -865,7 +862,7 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     ? Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [Box({ key: 'l', flexShrink: 1, children: [titleEl] }), rightEl] })
     : Box({ key: 'tray-head', flexDirection: 'column', children: [titleEl, Box({ key: 'r-row', flexDirection: 'row', justifyContent: 'flex-end', width: inner, children: [rightEl] })] })
   // of the rows the tray may take, the frame's two borders and its head take theirs, and the body what is left
-  const shown = fitBody($, els, body, inner, room > 0 ? room - 2 - treeRows(head, inner) : Infinity)
+  const shown = fitBody(els, body, inner, room > 0 ? room - 2 - treeRows(head, inner) : Infinity)
   const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: shown })] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
 }
