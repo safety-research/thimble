@@ -579,6 +579,27 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   expect(opens).toEqual(['Evidence'])
 })
 
+test('with Evidence off, c cites the selected words, and with none selected c is a letter of the prompt, since nothing on the bar names it', { options: { citations: 'auto cite + verify', claimsMode: 'off' } }, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
+  let selected: Any = { text: 'failed on the p95 check', requestId: 'row-t1' }
+  on('ui.selection', () => ({ value: selected }))
+  const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-cite-off')
+  expect(textOf(await $.ui.render(above()))).toContain('c cite')
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  // the words are a citation of their own, open in the tray, and its check started
+  expect(textOf(await $.ui.render(above(40)))).toContain('failed on the p95 check')
+  expect(spawns.length).toBe(1)
+  // nothing selected: c is typed, and opens nothing
+  selected = undefined
+  expect(textOf(await $.ui.render(above(40)))).not.toContain('c cite')
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: 'c', cursor: 1 })
+  await clock.advance(1000)
+  expect(opens).toEqual([])
+})
+
 test('a sentence the check rewrote draws as rewritten, its citation corrected, though the analyst asked about other words of it: those step aside', CITES, async ($, on) => {
   const fixed = { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40', rewrite: 'Of the runs, [11 of 40] failed on the p99 check.' }
   const asked = { n: 2, row: 'row-t1', words: 'failed on the p95 check', start: 27, end: 50, sentence: 'Of the runs, [12 of 40] [failed on the p95 check].', status: 'deferred', shown: 'failed on the p95 check', asked: true }
