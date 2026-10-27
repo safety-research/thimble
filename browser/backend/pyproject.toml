@@ -17,8 +17,10 @@ dependencies = [
   "pandas>=2.2",
   "matplotlib>=3.9",
   "altair>=5.3",
-  # the kernels read workbooks (pandas.read_excel), and a citation of a PDF page resolves to its text (app/pdfs.py)
+  # the kernels read workbooks (pandas.read_excel) and parquet files (pandas.read_parquet), and a citation of a PDF page
+  # resolves to its text (app/pdfs.py)
   "openpyxl>=3.1",
+  "pyarrow>=26",
   "pypdf>=5.0",
   # the card harness (app/render.py) draws every card offscreen in a headless Chromium, which install.sh fetches for
   # the version uv.lock pins

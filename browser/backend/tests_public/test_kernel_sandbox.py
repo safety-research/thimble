@@ -256,6 +256,25 @@ async def test_a_wrapped_kernel_imports_the_thimble_module_from_its_file(wrap, m
         await notebook.shutdown_all()
 
 
+@pytest.mark.parametrize("wrap", ["srt", "bwrap"])
+async def test_a_wrapped_kernel_reads_a_parquet_file_of_the_corpus(wrap, monkeypatch, workspaces_tmp, data_tmp):
+    """Card code reads a corpus's parquet files, as eval data often comes: pandas finds its parquet engine (pyarrow) in
+    the wrapped kernel, as it finds openpyxl for a workbook."""
+    if not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+    import pandas as pd  # noqa: PLC0415
+
+    pd.DataFrame({"agent": ["a", "b", "a"], "edits": [3, 1, 2]}).to_parquet(data_tmp / "mini" / "edits.parquet")
+    code = "import pandas as pd\nd = pd.read_parquet('edits.parquet')\nprint(len(d), int(d.edits.sum()))\n"
+    try:
+        cell = await notebook.run_code("mini", code, "main")
+        said = "".join(b.get("text/plain", "") for b in cell["outputs"]).split()
+        assert said == ["3", "6"], cell["outputs"]
+    finally:
+        await notebook.shutdown_all()
+
+
 def test_a_backend_imported_through_a_link_names_the_files_a_wrapped_kernel_reads_by_their_real_paths(tmp_path):
     """srt hides the install tree by its real path (notebook._kernel_hides), so each file a wrapped kernel reads is
     named by its real path even when the backend is imported through a link (a PYTHONPATH naming a linked checkout):
