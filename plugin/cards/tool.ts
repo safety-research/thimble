@@ -5,9 +5,8 @@
 //      call, as plan mode's refusal does. An `ask` that a rule of the person's makes refuses it too, since Claude Code
 //      cannot put its dialog in front of a plugin's own tool; one that comes only from the mode (a tool of a plugin, a
 //      file outside the working folder) lets it go on, since the card reads only a file of the session's folders or
-//      temp folders, and runs its view in the runner's sandbox
-//   1. checks the file is in the session's folder, the temp folder or Claude Code's around it (where a command in its
-//      Bash sandbox writes), and copies it into the card's folder
+//      temp folder, and runs its view in the runner's sandbox
+//   1. checks the file is in the session's folder or the temp folder, and copies it into the card's folder
 //   2. loads the view and the copy into the runner (runner.mjs), which draws the card and makes its text copy
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
 //      the designer fork called; a new version draws in the card's place
@@ -29,7 +28,7 @@ import type { EngineInterface } from 'claude-code'
 import { failCleared } from '../bar/notice'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
-import { claudeTempDir, tempDir } from '../core/home'
+import { tempDir } from '../core/home'
 import { paneNow } from '../core/pane'
 import { mainTurn } from '../core/turn'
 import { designAnchor } from '../designer/v'
@@ -51,12 +50,11 @@ const COPY_LINES = 60
 /** Rows of the screen the card's frame, the prompt box and the bar above it take, besides the card's own. */
 const AROUND_ROWS = 14
 
-/** The tool's input, as the model reads it: `temp` is the temp folder, where Claude writes its rows. */
-const schemaOf = (temp: string) => ({
+const SCHEMA = {
   type: 'object',
   properties: {
     title: { type: 'string', description: 'what the card shows, in a few words; with `id`, leave out to keep the title' },
-    data: { type: 'string', description: `the path of the JSON file of rows, in this folder or in ${temp}; with \`id\`, leave out to keep the rows` },
+    data: { type: 'string', description: 'the path of the JSON file of rows, in this folder or $TMPDIR (may start with $TMPDIR/); with `id`, leave out to keep the rows' },
     view: { type: 'string', description: 'JavaScript that defines function view(props, surface); with `id`, give `edits` instead, or only new `data` to keep the view' },
     edits: {
       type: 'array',
@@ -70,7 +68,7 @@ const schemaOf = (temp: string) => ({
       items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'words the card shows (a click there, as the analyst clicks), or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
     },
   },
-})
+}
 
 /** The card guide, as the model reads it: card-tool.md with the temp folder and thimble's own keys filled in. The
  *  tool's description, and what a squeeze's request shows of how a card's view is written (squeeze/cards.ts). */
@@ -83,7 +81,7 @@ export async function cardGuide($: Engine): Promise<string> {
 
 /** The tool, as the model reads it. */
 export async function registerCardTool($: Engine): Promise<void> {
-  await $.tool.register({ name: 'card', isDeferred: false, description: await cardGuide($), inputSchema: schemaOf(await tempDir($)) })
+  await $.tool.register({ name: 'card', isDeferred: false, description: await cardGuide($), inputSchema: SCHEMA })
 }
 
 /** Why the person's permission rules refuse this call, or null (step 0 above). */
@@ -97,11 +95,10 @@ async function refused($: Engine, input: Record<string, unknown>, file: string |
   return null
 }
 
-/** The folders a data file may be in, each as its real path: the session's folders, the temp folder, and Claude Code's
- *  temp folder around it, which a command in Claude Code's Bash sandbox gets as its TMPDIR. */
+/** The folders a data file may be in, each as its real path: the session's folders and the temp folder. */
 async function roots($: Engine): Promise<string[]> {
   const out: string[] = []
-  for (const c of [await $.session.cwd().catch(() => ''), await startDir($).catch(() => ''), await tempDir($), await claudeTempDir($)]) {
+  for (const c of [await $.session.cwd().catch(() => ''), await startDir($).catch(() => ''), await tempDir($)]) {
     if (!c) continue
     const st = await $.fs.stat(c, { resolve: true }).catch(() => null)
     if (st?.kind === 'dir' && st.realPath && !out.includes(st.realPath)) out.push(st.realPath)
@@ -109,20 +106,16 @@ async function roots($: Engine): Promise<string[]> {
   return out
 }
 
-/** The data file's real path, or why it cannot be read. `$TMPDIR/` is the temp folder, a command's TMPDIR, else Claude
- *  Code's temp folder, the TMPDIR of a command in Claude Code's Bash sandbox. */
+/** The data file's real path, or why it cannot be read. */
 async function dataFile($: Engine, raw: string): Promise<{ path?: string; bad?: string }> {
   const p = String(raw ?? '').trim()
   if (!p) return { bad: '`data` is empty: give the path of the JSON file of rows you wrote' }
-  const temp = await tempDir($)
-  const tmp = /^\$\{?TMPDIR\}?(?=\/)/
-  const [first, second] = tmp.test(p) ? [temp, await claudeTempDir($)].filter(Boolean).map(t => p.replace(tmp, t)) : [p]
-  const stat = async (n: string) => $.fs.stat(n.startsWith('/') ? n : `${await $.session.cwd()}/${n}`, { resolve: true }).catch(() => null)
-  let st = await stat(first!)
-  if (st?.kind !== 'file' && second) st = await stat(second)
+  const expanded = p.replace(/^\$\{?TMPDIR\}?(?=\/)/, await tempDir($))
+  const path = expanded.startsWith('/') ? expanded : `${await $.session.cwd()}/${expanded}`
+  const st = await $.fs.stat(path, { resolve: true }).catch(() => null)
   if (!st || st.kind !== 'file' || !st.realPath) return { bad: `there is no file at ${p}` }
   const real = st.realPath
-  if (!(await roots($)).some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${p} is outside this folder and the temp folder, ${temp}; write the data file in one of them` }
+  if (!(await roots($)).some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${p} is outside this folder and the temp folder ($TMPDIR); write the data file in one of them` }
   if (st.size > MAX_ROWS_BYTES) return { bad: `${p} is ${Math.round(st.size / 1048576)} MB; a card reads at most 64 MB, so write only the rows it shows` }
   return { path: real }
 }

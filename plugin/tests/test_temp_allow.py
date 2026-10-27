@@ -48,18 +48,6 @@ def test_the_session_tmpdir_is_the_temp_folder(tmp_path):
     assert T.verdict(ev("Read", file_path=f"{temp}/rows.json"), env) == "allow"
 
 
-def test_the_temp_folder_in_claude_codes_own(tmp_path):
-    # thimble/ in Claude Code's temp folder, whatever TMPDIR says; Claude Code's own files beside it are not thimble's
-    claude = tmp_path / "cc" / f"claude-{os.getuid()}"
-    temp = claude / "thimble"
-    temp.mkdir(parents=True)
-    temp.chmod(0o700)
-    (temp / "rows.json").write_text("[]")
-    env = {"CLAUDE_CODE_TMPDIR": str(tmp_path / "cc"), "TMPDIR": str(tmp_path / "elsewhere"), "HOME": str(tmp_path / "home")}
-    assert T.verdict(ev("Read", file_path=f"{temp}/rows.json"), env) == "allow"
-    assert T.verdict(ev("Write", agent="a1", file_path=f"{claude}/cwd-1a2b", content="/"), env) is None
-
-
 def test_a_folder_other_users_can_open_is_not_the_temp_folder(tmp_path):
     temp, env = setup(tmp_path)
     temp.chmod(0o755)

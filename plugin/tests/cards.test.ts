@@ -37,7 +37,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string>; stat?: (path: string) => Any } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -67,12 +67,12 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   const real = (p: string) => `/${p.split('/').reduce((a: string[], x) => (x === '..' ? a.slice(0, -1) : x && x !== '.' ? [...a, x] : a), []).join('/')}`
   on('fs.stat', (_$: unknown, e: { path: string }) => ({
     // escape.json looks local but its real target is outside every allowed root (a symlink out of the folder); so does
-    // link.json in the temp folder. `stat` answers for the paths a test names
-    value: o.stat?.(e.path) ?? (e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
+    // link.json in the temp folder
+    value: e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
       : e.path.endsWith('/link.json') ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/made-up/home/.ssh/id' }
         : e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
           : e.path === DATA || e.path.startsWith('/made-up/tmp') ? { kind: e.path.endsWith('.json') ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: real(e.path) }
-            : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false }),
+            : { kind: 'missing', size: 0, mtimeMs: 0, isLink: false },
   }))
   const spawned: string[][] = []
   const runs: string[][] = []
@@ -514,20 +514,6 @@ test('a data file whose real path leaves this folder (a symlink out) is refused,
   const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_8', title: 'Out', data: 'escape.json', view: VIEW } as never)) as Any
   expect(String(r.result)).toContain('is outside this folder and the temp folder')
   expect(w.asked).not.toContain('load')
-})
-
-test("rows a command in Claude Code's Bash sandbox wrote in its TMPDIR, Claude Code's temp folder, are read from there", async ($, on) => {
-  // thimble's temp folder is thimble/ in Claude Code's, claude-1000/ in CLAUDE_CODE_TMPDIR; the rows are beside it
-  const missing = { kind: 'missing', size: 0, mtimeMs: 0, isLink: false }
-  const w = world(on, { env: { CLAUDE_CODE_TMPDIR: '/made-up/tmp' }, stat: p => (p.startsWith('/made-up/tmp/claude-1000/thimble/') ? missing : undefined) })
-  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  const call = async (n: number, data: string) => String(((await $.tool.call({ tool: TOOL, tool_use_id: `toolu_made_up_s${n}`, title: 'Scores', data, view: VIEW } as never)) as Any).result)
-  // as the command named it, and by its path
-  expect(await call(1, '$TMPDIR/rows.json')).toContain('It read 2 rows from rows.json')
-  expect(await call(2, '/made-up/tmp/claude-1000/rows.json')).toContain('It read 2 rows from rows.json')
-  expect(w.runs.filter(a => a[0] === 'cp').map(a => a[2])).toEqual(['/made-up/tmp/claude-1000/rows.json', '/made-up/tmp/claude-1000/rows.json'])
-  // a file in neither folder is still refused
-  expect(await call(3, '/made-up/tmp/other/rows.json')).toContain('is outside this folder and the temp folder, /made-up/tmp/claude-1000/thimble')
 })
 
 test('keys at an empty prompt: letters only, never a slash command; a word that starts with a card key and v goes back whole', async ($, on) => {

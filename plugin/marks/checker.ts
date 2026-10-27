@@ -45,7 +45,7 @@ import { cardsDir } from '../cards/store'
 import { failNotice, noticeLine } from '../bar/notice'
 import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
-import { claudeTempDir, tempDir } from '../core/home'
+import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { fenced } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
@@ -527,12 +527,9 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
   // main's calls too: the check may cite what main printed (the validator keeps the calls whose output the answer cites)
   // a side thread's answer: the thread's calls are its own code, as main's are a reply's
   const calls = [...bashCalls(await $.session.messages({ agentId: e.agentId }), 'checker'), ...bashCalls(await $.session.messages(c.thread ? { agentId: c.thread } : undefined), 'main')]
-  // the code a check may cite: Claude's own, in the temp folder, or in Claude Code's around it, where a command in
-  // Claude Code's Bash sandbox writes
-  const tmp = (await claudeTempDir($)) || (await tempDir($))
   const ran = await $.process.run(validateArgv($), {
     cwd: c.cwd, timeoutMs: 120000,
-    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp, cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
+    stdin: JSON.stringify({ cwd: c.cwd, root: c.root, tmp: await tempDir($), cards_dir: await cardsDir($), marks: items.map(m => ({ n: m.n, words: m.words, sentence: m.sentence })), answer: e.answer, calls }),
   })
   let out: { parsed: boolean; results: Any[] } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }

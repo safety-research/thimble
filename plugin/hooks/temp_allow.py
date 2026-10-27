@@ -1,12 +1,11 @@
 """temp_allow.py: Read, Grep, Glob and a fork's Write in thimble's temp folder need no dialog.
 
-thimble asks Claude to write a card's rows in the session's temp folder (core/home.ts tempDir: `thimble/` in Claude
-Code's own temp folder, else in the person's TMPDIR, else $THIMBLE_HOME/tmp; a folder only this user can open), which is
-outside the working folder, so Claude Code would ask the person before Claude reads them back. v's fork works in the
-background, where a dialog would stop it until the person answers, and it writes its rows with the Write tool. This is a
-standard PreToolUse command hook (hooks.json), not a hook of the plugin's module: where an organization manages Claude
-Code, its security default asks each tool check again without the plugins a person installs, and a module's allow there
-would be skipped with a notice.
+thimble asks Claude to write a card's rows in the session's temp folder (core/home.ts tempDir: `thimble/` in the
+person's TMPDIR, else $THIMBLE_HOME/tmp; a folder only this user can open), which is outside the working folder, so
+Claude Code would ask the person before Claude reads them back. v's fork works in the background, where a dialog would
+stop it until the person answers, and it writes its rows with the Write tool. This is a standard PreToolUse command hook
+(hooks.json), not a hook of the plugin's module: where an organization manages Claude Code, its security default asks
+each tool check again without the plugins a person installs, and a module's allow there would be skipped with a notice.
 
 The hook only says "allow"; a deny or ask rule of the person's still decides. A Glob's absolute pattern names its own
 folder, so only a relative one is let through. With the Cards switch off (the plugin option `cards`), it says nothing.
@@ -32,15 +31,12 @@ def own_folder(path):
 
 
 def temp_folders(env):
-    """The folders core/home.ts tempDir may have picked: thimble/ in Claude Code's temp folder (claude-<uid>/ in
-    CLAUDE_CODE_TMPDIR), thimble/ in TMPDIR, $THIMBLE_HOME/tmp. The session's commands get thimble's folder as their
-    TMPDIR (hooks/path.ts), and a hook may get it too, so TMPDIR itself counts when it is a folder named thimble."""
+    """The folders core/home.ts tempDir may have picked. The session's commands get thimble's folder as their TMPDIR
+    (hooks/path.ts), and a hook may get it too, so TMPDIR itself counts when it is a folder named thimble."""
     out = []
-    claude = (env.get("CLAUDE_CODE_TMPDIR") or "").rstrip("/")
     tmp = (env.get("TMPDIR") or "").rstrip("/")
     home = (env.get("THIMBLE_HOME") or os.path.join(env.get("HOME") or ".", ".thimble")).rstrip("/")
-    cands = [os.path.join(claude, f"claude-{os.getuid()}", "thimble")] if claude else []
-    cands += [os.path.join(tmp, "thimble")] if tmp else []
+    cands = [os.path.join(tmp, "thimble")] if tmp else []
     if tmp and os.path.basename(os.path.realpath(tmp)) == "thimble":
         cands.append(tmp)
     cands.append(os.path.join(home, "tmp"))
