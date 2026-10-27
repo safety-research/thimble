@@ -25,6 +25,8 @@ function setup() {
   registerForks(on, {} as never)
   registerCardHead(on, {} as never)
   const state = new Map<string, unknown>()
+  // the reads of $.state that wait until the test lets them go, by key (hold)
+  const holds = new Map<string, (() => void)[]>()
   // the agents Claude Code runs, as $.agent.list() gives them
   const agents: Any[] = []
   // the forks Claude Code started: the spawns this module's agent.spawn hook let go
@@ -37,7 +39,13 @@ function setup() {
   let copyGoes: Any = { isCopied: true }
   const $: Any = {
     state: {
-      get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }),
+      // each read gives a copy of its own, as the engine's does; a read of a held key waits until the test lets it go
+      get: async (k: Any) => {
+        const held = holds.get(JSON.stringify(k))
+        if (held) await new Promise<void>(r => held.push(r))
+        const v = state.get(JSON.stringify(k))
+        return { value: v === undefined ? undefined : JSON.parse(JSON.stringify(v)) }
+      },
       set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true } },
     },
     agent: { spawn: async (a: Any) => hooks['agent.spawn'][0]($, a, Object.assign(async () => started(a), { origin: { plugin: 'thimble' } })), list: async () => agents },
@@ -62,6 +70,14 @@ function setup() {
       return r
     })
   }
+  // the reads of a key wait from `hold` until `letGo`, so that two reads of one record overlap
+  const hold = (ref: Any) => { holds.set(JSON.stringify(ref), []) }
+  const letGo = async (ref: Any) => {
+    const held = holds.get(JSON.stringify(ref)) ?? []
+    holds.delete(JSON.stringify(ref))
+    for (const go of held) go()
+    await settle()
+  }
   // the bar's next tick, which takes out each job that ended, earlier tests' too: a job begun for it asks for the tick,
   // and the clock stays, so the tick shows nothing and stops
   const barTick = async () => {
@@ -70,7 +86,7 @@ function setup() {
   }
   // what main reads with the person's next prompt (core/tell.ts)
   const told = () => Object.values((state.get(JSON.stringify({ plugin: 'thimble', key: 'tell' })) ?? {}) as Record<string, string>).join('\n')
-  return { $, E, ended, spawns, clock, barTick, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } }, agents, kept, start, told }
+  return { $, E, ended, spawns, clock, barTick, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } }, agents, kept, start, hold, letGo, told }
 }
 
 /** A publish an earlier load of the plugin started: its fork, and the card's record. */
@@ -228,6 +244,28 @@ test('a fork whose end comes at a reload before the fork registry knows it again
   await r.ended('agent-earlier-12', 'https://claude.ai/artifact/made-up-12')
   await r.start()
   expect(words(await artifactLine(r.$, r.E, 'c-made-up-12'))).toContain('https://claude.ai/artifact/made-up-12')
+  expect(steps()).toBe(before)
+})
+
+test("at a reload, the session start and the card's drawing read its record at once: the fork's end still ends the busy step", async () => {
+  const s = setup()
+  await s.barTick()
+  const before = steps()
+  earlier(s, 'c-made-up-13', 'agent-earlier-13')
+  s.agents.push({ id: 'agent-earlier-13', status: 'running' })
+  // the session start reads the card's record, and the card draws (is it being made?) before that read answers
+  const record = { plugin: 'thimble', key: 'cardArtifacts', id: 'c-made-up-13' }
+  s.hold(record)
+  const starting = s.start()
+  await settle()
+  const drawing = artifactMaking(s.$, 'c-made-up-13')
+  await s.letGo(record)
+  expect(await drawing).toBe(true)
+  await starting
+  expect(steps()).toBe(before + 1)
+  await s.ended('agent-earlier-13', 'https://claude.ai/artifact/made-up-13')
+  expect(words(await artifactLine(s.$, s.E, 'c-made-up-13'))).toContain('https://claude.ai/artifact/made-up-13')
+  await s.barTick()
   expect(steps()).toBe(before)
 })
 

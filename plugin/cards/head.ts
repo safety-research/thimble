@@ -88,6 +88,10 @@ async function madeOf($: Engine, card: string): Promise<Made | null> {
   if (known) return known
   // a reload of the plugin: the record as the earlier load kept it, known again
   const kept = ((await $.state.get({ ...MADE, id: card })).value ?? null) as Made | null
+  // each read of $.state gives a copy of its own: the record another read (the session start's, the card's drawing)
+  // or a save kept meanwhile is the one, so that the fork's end changes the record the busy step watches
+  const meanwhile = made.get(card)
+  if (meanwhile) return meanwhile
   if (kept) made.set(card, kept)
   return kept
 }
