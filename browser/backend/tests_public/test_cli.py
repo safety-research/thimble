@@ -185,7 +185,8 @@ def test_the_link_says_it_signs_in_one_browser_once_and_link_prints_a_new_one_wi
     minutes, and how to get a new one; in VS Code's terminal, which opens a link clicked there in its own browser, to
     copy it into a browser. `thimble-browser --link` prints a new link for the folder's workspace (the start page's for
     a folder with none) from the server that runs, and does nothing else: no new session, no start, no hold of the
-    terminal. Output a program reads holds no code, and says where to get one."""
+    terminal. Output a program reads holds no code, and says where to get one. With no server (a Ctrl-C stopped it),
+    the way back is --continue, which keeps the session the page had open, not a new session that moves it aside."""
     _healthy_no_process(monkeypatch)
     monkeypatch.setattr(cli, "serves", lambda url=None: True)
     minted = []
@@ -204,11 +205,11 @@ def test_the_link_says_it_signs_in_one_browser_once_and_link_prints_a_new_one_wi
     monkeypatch.setattr(cli, "to_terminal", lambda: True)
     monkeypatch.delenv("TERM_PROGRAM", raising=False)
     folder = str(data / "mini" / "agents")
-    once = cli.LINK_ONCE_LINE.format(minutes=5)
+    once = cli.LINK_ONCE_LINE.format(minutes=5, where="")
     assert cli.main(["browser", "--cwd", folder, "--link"]) == 0
     assert capsys.readouterr().out.splitlines() == ["thimble browser: http://127.0.0.1:5300/?ws=mini#p=c1",
                                                     f"thimble browser: {once}"]
-    assert minted == [{"ws": "mini"}] and "thimble-browser --link" in once
+    assert minted == [{"ws": "mini"}] and "thimble-browser --link prints" in once, "--link holds no terminal"
     monkeypatch.setenv("TERM_PROGRAM", "vscode")
     assert cli.main(["browser", "--cwd", folder, "--link"]) == 0
     assert capsys.readouterr().out.splitlines()[1:] == [f"thimble browser: {once}",
@@ -225,6 +226,30 @@ def test_the_link_says_it_signs_in_one_browser_once_and_link_prints_a_new_one_wi
     monkeypatch.setattr(cli, "serves", lambda url=None: False)
     assert cli.main(["browser", "--cwd", folder, "--link"]) == 1
     assert capsys.readouterr().out.splitlines() == [f"thimble browser: {cli.NO_SERVER_LINK_LINE}"]
+    assert "thimble-browser --continue starts" in cli.NO_SERVER_LINK_LINE
+
+
+def test_the_link_of_a_thimble_browser_that_holds_the_terminal_sends_for_a_new_one_to_another(home, data, monkeypatch,
+                                                                                              capsys):
+    """thimble-browser holds the terminal that printed its link until Ctrl-C, which stops the server, so the line under
+    the link says to run --link in another terminal; with --detach the terminal is free again, and the line names the
+    command alone."""
+    _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "open_workspace", lambda cwd, data_dir, url, here=False: ("mini", True))
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (200, {"code": "c1"}))
+    monkeypatch.setattr(cli, "to_terminal", lambda: True)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    held = []
+    monkeypatch.setattr(cli, "hold_until_quit", lambda: held.append(True))
+    folder = str(data / "mini" / "agents")
+    assert cli.main(["browser", "--cwd", folder]) == 0 and held == [True]
+    link, under = capsys.readouterr().out.splitlines()[:2]
+    assert link == "thimble browser: http://127.0.0.1:5300/?ws=mini#p=c1"
+    assert under == f"thimble browser: {cli.LINK_ONCE_LINE.format(minutes=5, where=cli.HELD_WHERE)}"
+    assert "thimble-browser --link in another terminal" in under
+    assert cli.main(["browser", "--cwd", folder, "--detach"]) == 0 and held == [True]
+    free = cli.LINK_ONCE_LINE.format(minutes=5, where="")
+    assert capsys.readouterr().out.splitlines()[1] == f"thimble browser: {free}"
 
 
 def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monkeypatch, capsys):

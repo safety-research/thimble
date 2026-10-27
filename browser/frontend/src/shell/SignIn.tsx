@@ -14,12 +14,13 @@ import { KEY_ITEM } from '../lib/browserKey'
 import { bus } from '../lib/bus'
 
 /** The way in, which ends the line; a span in backticks is drawn as code. A link's code signs in one browser, once, so
- * the printed link may be spent, and `thimble-browser --link` prints a new one without a new session. */
-export const WAY_IN = 'Open the link `thimble-browser` printed in your terminal, or run `thimble-browser --link` there for a new one.'
+ * the printed link may be spent, and `thimble-browser --link` prints a new one without a new session, in another
+ * terminal: thimble-browser holds the one that printed the link until Ctrl-C, which stops the server. */
+export const WAY_IN = 'Open the link `thimble-browser` printed in your terminal, or run `thimble-browser --link` in another terminal for a new one.'
 /** The line a browser that is not signed in sees. */
 export const SIGN_IN_LINE = `This browser isn't signed in. ${WAY_IN}`
 /** The line when the server refused the link's code with 410 (used, replaced by a newer one, or expired). */
-export const CODE_GONE_LINE = "This link was used or has expired, so this browser isn't signed in. Each link signs in one browser, once: run `thimble-browser --link` in your terminal for a new one."
+export const CODE_GONE_LINE = "This link was used or has expired, so this browser isn't signed in. Each link signs in one browser, once: run `thimble-browser --link` in another terminal for a new one."
 
 type State = 'wait' | 'in' | 'out'
 
