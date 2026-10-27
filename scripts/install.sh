@@ -257,7 +257,28 @@ if [ "$plugin" = 1 ]; then
   step "The terminal plugin"
   source="safety-research/thimble"
   [ "$local" = 1 ] && source="$root"
-  if command -v claude >/dev/null 2>&1; then
+  # once a fix went on, Claude Code loads thimble from the fixes' live folder, and refuses another source for its
+  # marketplace: thimble update moves that folder to the new release and keeps the fixes
+  fixes_live="$(cd / && "$py" -c '
+import json, os
+cc = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+live = os.path.realpath(os.path.join(os.environ.get("THIMBLE_HOME") or os.path.expanduser("~/.thimble"), "fixes", "live"))
+for at, keys in ((("plugins", "known_marketplaces.json"), ("thimble", "source")),
+                 (("settings.json",), ("extraKnownMarketplaces", "thimble", "source"))):
+    try:
+        d = json.load(open(os.path.join(cc, *at)))
+        for k in keys:
+            d = d[k]
+        p = os.path.realpath(d["path"]) if d.get("source") == "directory" else ""
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        p = ""
+    if p and (p + os.sep).startswith(live + os.sep):
+        print(live)
+        break
+' || true)"
+  if [ -n "$fixes_live" ]; then
+    say "Claude Code loads thimble from your fixes ($fixes_live), so the plugin is left as it is: run thimble update, which updates both products and keeps your fixes."
+  elif command -v claude >/dev/null 2>&1; then
     claude plugin marketplace add "$source"
     if claude plugin list --json 2>/dev/null | grep -q '"thimble@thimble"'; then
       claude plugin marketplace update thimble

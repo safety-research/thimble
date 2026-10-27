@@ -70,9 +70,8 @@ runs the steps only after you answer y.
 
 Restart the `claude` sessions that were open, or run `/reload-plugins` in them: until then they report "Plugin
 directory does not exist" after each tool call. 0.9 also left a headless Chromium in `~/.cache/ms-playwright` (about
-650 MB): delete it if nothing else uses it. In 0.10, `thimble-browser` replaces `/thimble browser`, and
-`scripts/install.sh` or `claude plugin update thimble@thimble` replaces `thimble update`; 0.10 has no `thimble`
-command in your shell.
+650 MB): delete it if nothing else uses it. In 0.10, `thimble-browser` replaces `/thimble browser`, and 0.10's own
+`thimble update`, in a shell, updates both products (see "Update and uninstall").
 
 ## Install
 
@@ -182,10 +181,12 @@ The browser workbench:
 
 ## Update and uninstall
 
-To update both, pull the checkout and run `scripts/install.sh` again. The plugin alone:
+To update both products, run `thimble update` in a shell (not inside Claude Code). It moves the plugin and the browser
+workbench to the newest release, keeps your fixes, and says what to do next; with `--local`, it moves them to the commit
+your checkout has, so pull it first. A plugin installed without a clone updates with `claude plugin update
+thimble@thimble`. To uninstall the plugin:
 
 ```
-claude plugin update thimble@thimble
 claude plugin uninstall thimble@thimble
 ```
 

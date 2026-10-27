@@ -133,3 +133,50 @@ def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     said = [n.strip() for n in "\n".join(notes).split("Note: ") if n.strip()]
     sandbox = next((n for n in said if "the made-up runner did not start." in n), "")
     assert sandbox.endswith("Install them: sudo made-up-get install bubblewrap socat"), said
+
+
+def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_rest_installs(tmp_path):
+    """Once a fix went on, Claude Code's marketplace thimble is the fixes' live folder, which its settings keep, and it
+    refuses another source for the name. The install leaves the plugin to thimble update, says so in one line, and
+    installs the browser workbench."""
+    live = tmp_path / "thimble" / "fixes" / "live"
+    (live / "plugin" / "bin").mkdir(parents=True)
+    entry = {"source": "directory", "path": str(live)}
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"source": entry, "installLocation": str(live)}}))
+    (cc / "settings.json").write_text(json.dumps({"extraKnownMarketplaces": {"thimble": {"source": entry}}}))
+    bin_ = tmp_path / "stubs"
+    log = tmp_path / "claude.log"
+    stub(bin_ / "claude", f'echo "$@" >> "{log}"\n'
+         'case "$1 $2" in "--version ") echo "2.1.311 (Claude Code)" ;;\n'
+         '"plugin marketplace") echo "Cannot add marketplace: its source does not match its settings" >&2; exit 1 ;; esac\n'
+         'exit 0\n')
+    stub(bin_ / "node", "echo v22.20.0\n")
+    stub(bin_ / "uv", '[ "$1" = --version ] && echo "uv 0.9.0"\nexit 0\n')
+    stub(bin_ / "npm", "exit 0\n")
+    stub(bin_ / "bwrap", "exit 0\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home")}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-setup", "--bin-dir", str(tmp_path / "bin")],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, p.stdout + p.stderr
+    lines = p.stdout.splitlines()
+    assert [x for x in lines if "thimble update" in x] == [
+        f"Claude Code loads thimble from your fixes ({live.resolve()}), so the plugin is left as it is: run thimble "
+        "update, which updates both products and keeps your fixes."]
+    assert [x for x in log.read_text().splitlines() if x.startswith("plugin")] == []
+    assert "To start the browser workbench, run this in a folder of files:" in lines
+    assert (tmp_path / "bin" / "thimble-browser").exists() and not (tmp_path / "bin" / "thimble").exists()
+
+
+def test_install_md_updates_with_thimble_update():
+    """INSTALL.md's update is the shell's thimble update, which updates both products and keeps the fixes; no line says
+    that 0.10 has no thimble command, or that another command replaces thimble update."""
+    text = (ROOT / "INSTALL.md").read_text()
+    update = " ".join(text.split("## Update and uninstall", 1)[1].split("\n## ", 1)[0].split())
+    assert "run `thimble update` in a shell" in update and "keeps your fixes" in update
+    flat = " ".join(text.split())
+    assert "has no `thimble`" not in flat and "replaces `thimble update`" not in flat
