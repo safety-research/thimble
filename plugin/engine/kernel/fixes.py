@@ -438,19 +438,22 @@ def _leftovers_aside(repo: Path) -> None:
 def _thimbles_mine(repo: Path) -> bool:
     """Whether the clone's mine is one that a deleted thimble home left: no worktree has it checked out, rebases or
     bisects it (git refuses to move a branch a worktree uses), no worktree is another thimble home's live (which is
-    detached while that home's fixes are off), and thimble made or recorded each commit that is only on mine (on no
-    other branch, tag or remote branch, and not in HEAD's history): thimble committed it, or it is the very commit that a
-    ref under refs/thimble/fixes/ names (a fix thimble update --continue recorded, which Claude committed as the person).
+    detached while that home's fixes are off), it tracks no upstream (branch.mine.remote, which thimble never sets), and
+    thimble made or recorded each commit that is only on mine (on no other branch, tag or remote branch; a detached HEAD
+    on top of mine, as in a rebase onto it, does not count): thimble committed it, or it is the very commit that a ref
+    under refs/thimble/fixes/ names (a fix thimble update --continue recorded, which Claude committed as the person).
     A mine with no commits of its own, such as the release commit, is one."""
     wts = git("worktree", "list", "--porcelain", cwd=repo).splitlines()
     if "branch refs/heads/mine" in wts or _other_live(repo):
+        return False
+    if git("config", "--get", "branch.mine.remote", cwd=repo, check=False):
         return False
     if run(["git", "branch", "-f", "--no-track", "mine", "refs/heads/mine"], cwd=repo, check=False).returncode != 0:
         return False
     me = as_thimble()
     recorded = set(git("for-each-ref", "--format=%(objectname)", "refs/thimble/fixes/", cwd=repo).split())
     own = git("log", "--format=%H %cn <%ce>", "refs/heads/mine", "--not", "--exclude=mine", "--branches", "--tags",
-              "--remotes", "HEAD", "--", cwd=repo).splitlines()
+              "--remotes", "--", cwd=repo).splitlines()
     return all(x.partition(" ")[0] in recorded
                or x.partition(" ")[2] == f"{me['GIT_COMMITTER_NAME']} <{me['GIT_COMMITTER_EMAIL']}>" for x in own)
 

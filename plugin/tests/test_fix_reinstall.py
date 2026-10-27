@@ -72,6 +72,40 @@ def test_a_mine_with_a_commit_someone_else_made_stops_and_nothing_moves(world):
     assert refs(rel) == before
 
 
+def test_a_mine_that_tracks_an_upstream_is_the_persons_and_stops_and_nothing_moves(world):
+    """The person's own branch mine, which tracks the mine of their remote (thimble never sets an upstream): each of
+    its commits is on the remote's branch too, and it is still theirs."""
+    rel = world["rel"]
+    own = sh("git", "commit-tree", sh("git", "rev-parse", "HEAD^{tree}", cwd=rel), "-p", "HEAD", "-m", "my change", cwd=rel)
+    sh("git", "update-ref", "refs/remotes/origin/mine", own, cwd=rel)
+    sh("git", "branch", "mine", own, cwd=rel)
+    sh("git", "config", "branch.mine.remote", "origin", cwd=rel)
+    sh("git", "config", "branch.mine.merge", "refs/heads/mine", cwd=rel)
+    before = refs(rel)
+    with pytest.raises(FX.FixError, match=STOP):
+        FX.new("say read")
+    assert refs(rel) == before and sh("git", "config", "branch.mine.remote", cwd=rel) == "origin"
+
+
+def test_a_mine_under_a_paused_rebase_with_a_commit_of_the_persons_stops_and_nothing_moves(world):
+    rel = world["rel"]
+    left(world)
+    # the person's own commit on top of thimble's (sh commits as the made-up person t)
+    mine = sh("git", "commit-tree", sh("git", "rev-parse", "mine^{tree}", cwd=rel), "-p", "mine", "-m", "my change",
+              cwd=rel)
+    sh("git", "update-ref", "refs/heads/mine", mine, cwd=rel)
+    # a branch of theirs rebased onto mine, which stops at a conflict: HEAD is detached on top of mine while it lasts
+    sh("git", "checkout", "-q", "-b", "topic", cwd=rel)
+    (rel / "plugin" / "bar" / "bar.tsx").write_text("const words = `seen ${n}`\n")
+    sh("git", "commit", "-q", "-am", "the bar says seen", cwd=rel)
+    assert subprocess.run(["git", "rebase", "mine"], cwd=rel, capture_output=True).returncode != 0
+    assert sh("git", "rev-parse", "HEAD", cwd=rel) == mine
+    before = refs(rel)
+    with pytest.raises(FX.FixError, match=STOP):
+        FX.new("say read")
+    assert refs(rel) == before
+
+
 def test_a_mine_checked_out_in_another_worktree_stops_and_nothing_moves(world, tmp_path):
     rel = world["rel"]
     left(world)
