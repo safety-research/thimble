@@ -6,6 +6,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import Card from '../cards/client'
 import { cardWidth } from '../cards/draw'
+import { callLine } from '../cards/register'
 import { treeRows } from '../core/trail.mjs'
 import { promptStub, tempRun } from './stubs'
 
@@ -203,6 +204,19 @@ test('a card call keeps the card and answers what it read and what it draws; its
   // a call with no argument at all (its input did not parse): it says so, and blames no one field
   const r6 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_1f' } as never)) as Any
   expect(String(r6.result)).toBe('The card did not draw: the call\'s input was empty or did not parse as JSON. Send the call again, whole.')
+})
+
+test('a call\'s line names no title until the call\'s input names one; then it names the card', async () => {
+  // Claude Code draws the call's row while its input still streams in: no word stands in quotes as if it were a title
+  expect(callLine({}, null, 'toolu_made_up_s1', true)).not.toContain('“')
+  expect(callLine({ data: 'runs.json' }, null, 'toolu_made_up_s1', true)).not.toContain('“')
+  expect(callLine({ title: 'Scores' }, null, 'toolu_made_up_s1', true)).toContain('“Scores”')
+  // a call that changes a card names the card it knows
+  expect(callLine({ id: 'c0123456789ab', edits: [{ old: 'a', new: 'b' }] }, { title: 'Scores', calls: {} }, 'toolu_made_up_s2', true)).toContain('“Scores”')
+  // a new card refused before it had a title says why, and names no title
+  const refused = callLine({ view: 'x' }, { title: '', calls: { toolu_made_up_s3: { version: 0, error: '`title` is empty' } } }, 'toolu_made_up_s3', false)
+  expect(refused).toContain('did not draw: `title` is empty')
+  expect(refused).not.toContain('“')
 })
 
 test('a call with a card\'s id alone moves the card as it is to that call; the earlier call points down to it', async ($, on) => {
