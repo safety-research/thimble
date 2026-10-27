@@ -5,12 +5,13 @@
 //                settings; the person's next prompt takes the failure line and the line at the first session's start (intro.ts); the counts at each load of the plugin and
 //                after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
-//                Each pane takes the keys its key row names (coverage's j k ↵ and r, the labels' number keys that
-//                check records), and esc closes it
+//                Each pane takes the keys its key row names (coverage's j k ↵, the labels' number keys that check
+//                records), and esc closes it; coverage's r close is a click, so an r typed in it reaches the prompt,
+//                where it only closes the pane, if it still shows once the word window closed
 import type { EngineInterface, Register } from 'claude-code'
 
 import { aboveBar } from '../core/answerview'
-import { closePane, narrowNotice, openPane, paneShows } from '../core/pane'
+import { closePane, narrowNotice, openPane, paneNow, paneShows } from '../core/pane'
 import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
@@ -27,6 +28,10 @@ type Any = any
 export const BAR_KEYS = ['r', 'l']
 
 const TITLES = { coverage: 'Coverage', labels: 'Labels', settings: 'thimble settings' } as const
+
+/** Which pane the side pane showed as the bar last drew: r or l typed while its own pane shows means to close it.
+ *  Kept in memory, so the key reads no state. */
+let drawnPane: string | null = null
 
 /** Coverage or the labels: open, or closed when the pane shows it. Each takes the keys, so the keys its key row names
  *  act in it, not in the prompt (coverage.tsx, labels/pane.tsx), and esc closes it. A pane a key opened that
@@ -50,10 +55,14 @@ export async function openSettings($: Engine): Promise<void> {
   if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) failNotice($, 'Claude Code did not open the settings here. Type /thimble-settings to open them.', 'pane:settings')
 }
 
-/** r or l at an empty prompt, while the bar names it: its pane opens or closes once the word window closed. */
+/** r or l at an empty prompt, while the bar names it: its pane opens or closes once the word window closed. Typed while
+ *  its pane shows (in the pane, which leaves the key to the prompt), it closes the pane if esc or a click has not closed
+ *  it within the window, and never opens it again (as w does the claims', claims/seam.ts). */
 export async function barKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
   if (!BAR_KEYS.includes(k) || !(await barKeys($)).has(k)) return null
-  return { later: () => togglePane($, k === 'r' ? 'coverage' : 'labels', true) }
+  const kind = k === 'r' ? 'coverage' : 'labels'
+  const close = drawnPane === kind
+  return { later: async () => (close ? (await paneShows($, kind).catch(() => false)) && closePane($) : togglePane($, kind, true)) }
 }
 
 export const registerBar: Register = on => {
@@ -97,6 +106,8 @@ export const registerBar: Register = on => {
       if (e.props.hasSurvey) return next(e)
       const els = $.ui.resolve(e) as Any
       const presses: BarPresses = { settings: () => openSettings($), pane: kind => togglePane($, kind) }
+      const shows = (await paneNow($).catch(() => null))?.kind ?? null
+      drawnPane = shows && (await paneShows($, shows).catch(() => false)) ? shows : null
       const width = Math.max(20, e.props.bodyColumns)
       // the hint at the first session's start that says where the settings are (intro.ts), in the bar
       const intro = await introHint($).catch(() => null)
