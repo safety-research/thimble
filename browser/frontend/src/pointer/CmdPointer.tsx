@@ -3,10 +3,12 @@
 // beside it: on a region, the element; on text, the chunk around the word, quoted. A ⌘-drag selects text and joins the
 // anchors it touches. Report blocks (`data-anchor-cell`) are taken whole (anchors.ts cellOf); inside a card
 // (`data-anchor-parts`) the innermost part is taken (parts.ts). The click also captures a picture (capture.ts), and
-// Enter posts a thread to the analyst's Claude Code session. A view's frame sends its own hover and click through the bus
-// (pointHover, pointAt, cmdHeld). On a Mac ⌘ is also every shortcut's key, so the pointer shows once ⌘ has been held
-// alone for HOLD_MS, and a key pressed with ⌘ (⌘C, ⌘V, ⌘Z) lets go of it until ⌘ is released; a ⌘-press points at
-// once. Off a Mac, Ctrl does what ⌘ does (lib/platform), at once, and lets go at a key pressed with it. The send lets
+// Enter posts a thread to the analyst's Claude Code session. A view's frame, and a custom card's (canvas/cardBridge),
+// sends its own hover and click through the bus (pointHover, pointAt, cmdHeld). On a Mac ⌘ is also every shortcut's key,
+// so the pointer shows once ⌘ has been held alone for HOLD_MS, and a key pressed with ⌘ (⌘C, ⌘V, ⌘Z) lets go of it
+// until ⌘ is released; a ⌘-press points at once. Off a Mac, Ctrl does what ⌘ does (lib/platform), at once, and lets go
+// at a key pressed with it. A ⌘ pressed while a frame has the focus reaches the page as no key event: the first move
+// with ⌘ held starts the pointer as the key-down would have. The send lets
 // go of the highlight and opens the thread in the chat column. The box shows only while the element it is about is on
 // screen: a switch to another tab or a collapsed frame hides it, its text kept, and it comes back beside the element
 // when the element is back (onScreen); a send under way goes on. ⌘ here stands for the ask key Settings picks
@@ -189,6 +191,8 @@ export function CmdPointer({ ws }: { ws: string }) {
     // tint goes then
     let wait: number | null = null
     let at: { x: number; y: number } | null = null
+    // ⌘ is down after a key pressed with it (a shortcut): the pointer stays off until ⌘ is released
+    let shortcut = false
     const unwait = () => {
       if (wait != null) window.clearTimeout(wait)
       wait = null
@@ -198,27 +202,32 @@ export function CmdPointer({ ws }: { ws: string }) {
       on()
       if (at && !press.current && !highlight.isHeld() && !agentTinted()) follow(document.elementFromPoint(at.x, at.y), at.x, at.y)
     }
+    // ⌘ pressed with another key already down is a shortcut's start: it stays off until ⌘ is released
+    const other = (e: MouseEvent | KeyboardEvent) => e.shiftKey || e.ctrlKey || (getAskKey() === 'alt' ? e.metaKey : e.altKey)
     const onKeyDown = (e: KeyboardEvent) => {
       if (!mac) {
         if (isPointKey(e.key, mac)) on()
         // off a Mac, Ctrl with another key is a shortcut (Ctrl+C, Ctrl+Z), not a point: the pointer lets go of it
-        else if (cmdOn()) off()
+        else if (held(e) || cmdOn()) {
+          shortcut = held(e)
+          off()
+        }
         return
       }
       if (isPointKey(e.key, mac)) {
-        // ⌘ pressed with another key already down is a shortcut's start: it stays off until ⌘ is released
-        const other = e.shiftKey || e.ctrlKey || (getAskKey() === 'alt' ? e.metaKey : e.altKey)
-        if (!e.repeat && wait == null && !cmdOn() && !other) wait = window.setTimeout(shown, HOLD_MS)
+        if (!e.repeat && wait == null && !cmdOn() && !other(e)) wait = window.setTimeout(shown, HOLD_MS)
       } else if (held(e)) {
         // a key pressed with ⌘ is a shortcut (⌘C, ⌘V, ⌘Z), not a point: the pointer lets go until ⌘ is released
         unwait()
         off()
+        shortcut = true
       }
     }
     const onKeyUp = (e: KeyboardEvent) => {
       if (isPointKey(e.key, mac) || !held(e)) {
         unwait()
         off()
+        shortcut = false
       }
     }
     const onMouseDown = (e: MouseEvent) => {
@@ -236,7 +245,13 @@ export function CmdPointer({ ws }: { ws: string }) {
       // so the page never stays in the ⌘ state with its text selectable
       if (!held(e)) {
         unwait()
+        shortcut = false
         if (cmdOn()) off()
+      } else if (!cmdOn() && wait == null && !shortcut && !press.current) {
+        // ⌘ went down while a frame had the focus (a card's page, after a click in it), so no key event of it reached
+        // the page: the move starts the pointer as that key-down would have
+        if (!mac) on()
+        else if (!other(e)) wait = window.setTimeout(shown, HOLD_MS)
       }
       const p = press.current
       if (p) {
@@ -336,19 +351,20 @@ export function CmdPointer({ ws }: { ws: string }) {
       if (rect) highlight.box(rect)
       else highlight.clear()
     })
-    const offPoint = bus.on('pointAt', ({ anchor, text, element, rect, frame, view }) => {
+    const offPoint = bus.on('pointAt', ({ anchor, text, element, rect, frame, view, info }) => {
       highlight.retarget()
       highlight.box(rect, frame)
       highlight.hold()
       track('pointer-open', { target: anchor, detail: { frame: true } })
       // inside a viewer's frame, whose sandbox cannot be drawn from here: the element is named by its view (`view:<slug>`),
             // so the thread can reach that view's ticket
-      openBox({ anchor, anchors: [anchor], text: element ? `${element}\n${text}`.trim() : text, rect, span: false, info: { surface: 'files', element: view ? `view:${view}` : 'view', selector: '' }, image: Promise.resolve(null), el: frame, mark: 'box' })
+      openBox({ anchor, anchors: [anchor], text: element ? `${element}\n${text}`.trim() : text, rect, span: false, info: info ?? { surface: 'files', element: view ? `view:${view}` : 'view', selector: '' }, image: Promise.resolve(null), el: frame, mark: 'box' })
     })
     // a control that asks about its element (a card's Ask about this): the box opens as a ⌘-click on the element opens it
     const offAsk = bus.on('askAbout', ({ el }) => {
       const a = nearestAnchor(el)
       if (!a) return
+      highlight.retarget()
       highlight.region(a.el)
       highlight.hold()
       track('pointer-open', { target: a.anchor, detail: { via: 'ask' } })

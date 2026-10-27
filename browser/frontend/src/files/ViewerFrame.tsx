@@ -176,10 +176,12 @@ export function colourScript(state: unknown): string {
   return `<script>window.__thimbleColour=${json}</script>`
 }
 
-/** A rect the frame reports, in the page's coordinates. */
+/** A rect the frame reports, in the page's coordinates: moved to where the frame is and scaled as it is drawn, since a
+ * card's frame on a zoomed canvas is drawn larger or smaller than its own pixels. */
 export function toPage(frame: HTMLIFrameElement, r: { left: number; top: number; width: number; height: number }): DOMRect {
   const f = frame.getBoundingClientRect()
-  return new DOMRect(f.left + r.left, f.top + r.top, r.width, r.height)
+  const k = frame.offsetWidth > 0 ? f.width / frame.offsetWidth : 1
+  return new DOMRect(f.left + (frame.clientLeft + r.left) * k, f.top + (frame.clientTop + r.top) * k, r.width * k, r.height * k)
 }
 
 /** Scroll each scrolling box around `from`, innermost first, so the page box `r` sits in view, a third of the way down
