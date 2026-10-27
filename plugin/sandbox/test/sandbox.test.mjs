@@ -186,7 +186,9 @@ test('in the sandbox: no network, and no variable of the session\'s', () => {
 
 test('in the sandbox, with rules that allow a site (the fixer\'s shell, thimble fix): that site, through srt\'s proxies, and no other', t => {
   if (!existsSync('/usr/bin/curl')) return t.skip('no curl on this machine')
-  const rules = { ...rulesHere(), network: { ...rulesHere().network, allowedDomains: ['registry.npmjs.org'] } }
+  // the card runner's rules, with the fixer's sites and, as the fixer's rules show it, /etc (curl's certificates on Linux)
+  const base = rulesHere()
+  const rules = { ...base, filesystem: { ...base.filesystem, allowRead: [...base.filesystem.allowRead, '/etc'] }, network: { ...base.network, allowedDomains: ['registry.npmjs.org'] } }
   const status = url => `curl -s -m 30 -o /dev/null -w '%{http_code}\\n' ${url}`
   // the site itself, outside the sandbox: a machine with no network, or behind a proxy of its own, cannot reach it
   const online = spawnSync('/bin/sh', ['-c', status('https://registry.npmjs.org/')], { encoding: 'utf8', timeout: 60000, env: { PATH: '/usr/bin:/bin' } }).stdout.trim() === '200'

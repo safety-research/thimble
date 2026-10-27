@@ -14,9 +14,9 @@
 // command when the process that started it is gone (a long-lived command, such as the card runner, would stay
 // otherwise), and exits with the command's status, or with 3 when the sandbox could not be set up.
 import { spawn } from 'node:child_process'
-import { accessSync, constants as fsConstants } from 'node:fs'
+import { accessSync, existsSync, mkdtempSync, rmSync, constants as fsConstants } from 'node:fs'
 import { createRequire } from 'node:module'
-import { constants } from 'node:os'
+import { constants, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -51,11 +51,14 @@ let SandboxManager
 let wrapped
 // whether this process starts srt's network proxies (rules that allow sites), which it then stops before it exits
 let proxies = false
+// the folder of the proxies' sockets on Linux, which this process removes before it exits
+let sockets = ''
 
 /** Exit with `status`, once srt's proxies are stopped when this process started them. srt's own hook at exit cannot wait
  *  for that, so on Linux it left the sockets of its bridges in the temp folder, one or two for each command. */
 async function exit(status) {
   if (proxies) await Promise.race([SandboxManager.reset().catch(() => {}), new Promise(r => setTimeout(r, 3000))])
+  if (sockets) rmSync(sockets, { recursive: true, force: true })
   process.exit(status)
 }
 
@@ -74,6 +77,14 @@ try {
   // them: the command reaches those sites, and no other, through the proxies this process runs while it runs.
   if (rules.network.allowedDomains.length) {
     proxies = true
+    // On Linux the proxies' bridges are Unix sockets in the temp folder, which srt binds into the sandbox before the
+    // folders the rules hide, so rules that hide it (the fixer's hide /) hid them too, and no site answered. They go in
+    // a short folder of their own that the command may write, which srt binds back, removed when this process exits.
+    if (process.platform === 'linux') {
+      sockets = mkdtempSync(join(existsSync('/tmp') ? '/tmp' : tmpdir(), 'thimble-srt-'))
+      process.env.TMPDIR = sockets
+      rules.filesystem.allowWrite = [...rules.filesystem.allowWrite, sockets]
+    }
     await SandboxManager.initialize(rules)
   } else SandboxManager.updateConfig(rules)
   wrapped = await SandboxManager.wrapWithSandbox(command, systemBash(), rules)
