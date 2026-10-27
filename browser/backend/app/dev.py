@@ -61,7 +61,9 @@ ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main'
 nothing.
 
 Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode, Bypass
-included, and ask as main does, in the analyst's terminal. thimble's own questions about its code stay on the ticket's card, in
+included, and ask as main does, in the analyst's terminal. Where the server runs its agents itself (runtime.py), no
+agent is asked anything: a view builder and its reviewer write the view's folder and their own folder (view_work_dir)
+alone, on either engine (runtime.agent_writes). thimble's own questions about its code stay on the ticket's card, in
 every mode, Bypass included (CODE_TOOL): its chat hosts the ticket's key (agent_session.host) for them alone, and a
 question nobody answers within the card's wait (userconf.card_wait_s) is a no.
 
@@ -3375,7 +3377,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     - still not built: a change to a built view leaves the view as it was, a proposal the analyst did not ask for gets
       up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view
       the analyst asked for fails with Retry."""
-    from . import subagents, view_review, view_tools, views  # noqa: PLC0415
+    from . import notices, subagents, view_review, view_tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
     if prop is None or prop.get("agent_id") != run.agent_id:
@@ -3420,9 +3422,12 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         return
     failure = (str(finish.get("report") or prop.get("last_report") or "")
                or (UNCHANGED_LINE if prop.get("revision") and views.unchanged_since_built(c, slug) else "")
-               or " ".join(str(report or "").split())[:ERROR_CHARS] or "the checks did not pass")
+               or " ".join(str(report or "").split()) or "the checks did not pass")
     first = next((ln for ln in failure.splitlines() if ln.startswith(("problem: ", "bad ", "page: "))), "")
-    shown = (first or failure)[:ERROR_CHARS]
+    # a builder's long report shows on the chip and in the notice as its first sentence and its last, where it says
+    # what to do (notices.gist), never as a head cut mid-word. A repair's builder gets its first ERROR_CHARS, as it
+    # gets the gate's report and finish_view's (both kept cut there).
+    shown = first[:ERROR_CHARS] or notices.gist(failure, notices.REASON_CHARS)
     log.warning("the view %s/%s was not built: %s", c, slug, shown)
     if prop.get("revision"):
         views.end_revision(c, slug, shown, failed_change=str(prop.get("change") or ""))
@@ -3434,7 +3439,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         if run.chat and agents.meta_or_none(c, str(run.chat)) is not None:
             Log(agents.Recorder(c, str(run.chat))).stage(REPAIR_LINE.format(n=done + 1, of=VIEW_REPAIRS))
         _view_runs[(c, slug)] = _Build(route=subagents.FOLLOW_ON)
-        ans = await start_build(c, slug, subagents.FOLLOW_ON, repair=repair_text(failure, done + 1))
+        ans = await start_build(c, slug, subagents.FOLLOW_ON, repair=repair_text(failure[:ERROR_CHARS], done + 1))
         if ans.refused and ans.kind != subagents.LIMIT:
             log.info("%s: the repair of %s did not start: %s", c, slug, ans.reason)
         return

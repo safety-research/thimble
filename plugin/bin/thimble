@@ -9,6 +9,54 @@ while [ -L "$self" ]; do
   case $to in /*) self=$to ;; *) self=$(dirname "$self")/$to ;; esac
 done
 here=$(cd "$(dirname "$self")/.." && pwd)
+# the way back from your fixes runs from the release, which no fix changes (engine/kernel/fixes.py): `thimble fix`,
+# `thimble file`, `thimble update` and `thimble reapply` run the launcher of the release checkout in
+# $THIMBLE_HOME/fixes/release, and that launcher hands the other commands to live's, so a fix to them works. A release
+# checkout from before this hand-off (its launcher names no fixes/release/plugin) runs an older kernel, which does not
+# know this one's commands: this launcher then runs its own kernel, which moves the checkout forward (ensure_live)
+fixes=${THIMBLE_HOME:-$HOME/.thimble}/fixes
+release=$(cd "$fixes/release/plugin" 2>/dev/null && pwd -P)
+# whether the release checkout ($top) is as commit $1 has it: HEAD detached there, and no file changed, untracked or
+# ignored. One git call, which takes no lock, so that it never stops another process's git in the checkout
+pristine() {
+  st=$(git --no-optional-locks -C "$top" status --porcelain=v2 --branch --ignored --untracked-files=normal 2>/dev/null) ||
+    return 1
+  printf '%s\n' "$st" | grep -qx "# branch.oid $1" && printf '%s\n' "$st" | grep -qx '# branch.head (detached)' &&
+    ! printf '%s\n' "$st" | grep -qv '^# '
+}
+# git in the release checkout with no hook of the repository's (in a clone install, the person's own clone's), tried
+# again for up to 5 s while another git holds the checkout's index (index.lock)
+relgit() {
+  n=0
+  while ! err=$(git -c core.hooksPath=/dev/null -C "$top" "$@" 2>&1); do
+    case $err in *index.lock*) ;; *) return 1 ;; esac
+    n=$((n + 1))
+    [ "$n" -lt 50 ] || return 1
+    sleep 0.1
+  done
+}
+# the release checkout's kernel writes no bytecode (-B), which would change the checkout
+nobyte=
+if [ -n "$release" ] && [ -x "$release/bin/thimble" ] && grep -q 'fixes/release/plugin' "$release/bin/thimble" 2>/dev/null; then
+  me=$(cd "$here" && pwd -P)
+  [ "$me" = "$release" ] && nobyte=-B
+  case "$1" in
+    fix|fixes|file|update|reapply)
+      [ "$me" = "$release" ] || exec "$release/bin/thimble" "$@"
+      # the checkout as the release commit (release.json's base) has it, before any of its code runs: a file changed in
+      # it is restored and a file added to it removed (fixes.py place_release does the same). A checkout that is so
+      # already is left alone, so that thimble's other processes that run from it never meet it half put back
+      top=${release%/plugin}
+      if [ "$(git -C "$top" rev-parse --show-toplevel 2>/dev/null)" = "$top" ]; then
+        base=$(sed -n 's/^ *"base": *"\([0-9a-f]*\)".*/\1/p' "$fixes/release.json" 2>/dev/null | head -n 1)
+        if ! pristine "${base:-$(git -C "$top" rev-parse HEAD 2>/dev/null)}"; then
+          relgit checkout -q -f --detach "${base:-HEAD}"
+          relgit clean -q -ffdx
+        fi
+      fi ;;
+    *) if [ "$me" = "$release" ] && [ -x "$fixes/live/plugin/bin/thimble" ]; then exec "$fixes/live/plugin/bin/thimble" "$@"; fi ;;
+  esac
+fi
 py=${THIMBLE_PYTHON:-}
 if [ -z "$py" ] && [ -x "$here/.venv/bin/python" ]; then py="$here/.venv/bin/python"; fi
 # for whoever works on thimble (not in its help): `thimble dev prompts`, the prompt registry (prompts/node.mjs);
@@ -18,7 +66,7 @@ if [ "$1" = dev ]; then
   case "$2" in
     prompts) shift; exec node "$here/prompts/node.mjs" "$@";;
     stats) shift 2; exec node "$here/telemetry/stats.mjs" "$@";;
-    validate) exec "${py:-python3}" "$here/engine/validate.py";;
+    validate) exec "${py:-python3}" $nobyte "$here/engine/validate.py";;
   esac
 fi
-exec "${py:-python3}" "$here/engine/thimble.py" "$@"
+exec "${py:-python3}" $nobyte "$here/engine/thimble.py" "$@"

@@ -3,12 +3,15 @@
 //   node --test plugin/cards/test/runner.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import { startRunner } from './start.mjs'
+import { saidOf } from '../argv.mjs'
 import { checkView } from '../runner.mjs'
 
 let dir
@@ -318,6 +321,17 @@ test("a view's stray rejected promise or async error does not take the runner do
   // the runner still answers after every one of these
   assert.equal((await ask('ping', {})).ok, true)
   assert.deepEqual((await load(COUNTER)).r.lines, ['count 0', 'ada 3', 'bram 5', 'cleo 1', '[ add ten ]'])
+})
+
+test('a runner that fails before its socket listens says why as it ends, where those guards would end it with nothing said', () => {
+  // as a Node whose permission model refuses something the runner does at its start: here, making its server
+  const refuse = `data:text/javascript,${encodeURIComponent('import http from "node:http"; http.createServer = () => { throw Object.assign(new Error("made-up: refused"), { code: "ERR_ACCESS_DENIED" }) }')}`
+  const r = spawnSync(process.execPath, ['--import', refuse, fileURLToPath(new URL('../runner.mjs', import.meta.url)), join(dir, 'never.sock')], { encoding: 'utf8', timeout: 30000 })
+  assert.notEqual(r.status, 0)
+  assert.match(r.stderr, /made-up: refused/)
+  // the one line the hooks and setup.mjs make of Node's report quotes the error and its code
+  const said = saidOf(r.stderr)
+  assert.ok(said.includes('made-up: refused') && said.includes('ERR_ACCESS_DENIED'), said)
 })
 
 // A day chart drawn as Text runs that j and k step through, the day shown marked ▸ (the card guide's marker), and the

@@ -91,13 +91,16 @@ export async function personSession($: Engine): Promise<string> {
 
 /** `thimble …` in `root`, as the person's own command, over this conversation's labels. `stdin`: what it reads (the
  *  secret of a key press, the model's answers); `session`: the session its records go under (coverage counts Claude's
- *  own session). A run that gives no result (stopped, past its time, not started) throws why in words (core/why.js). */
-export async function runThimble($: Engine, root: string, args: string[], o: { stdin?: string; session?: string; timeoutMs?: number } = {}): Promise<Ran> {
+ *  own session); `bin`: another launcher than the loaded plugin's (fix/fixes.ts kernelFix: the release's); `env`: more
+ *  of its environment. A run that gives no result (stopped, past its time, not started) throws why in words
+ *  (core/why.js). */
+export async function runThimble($: Engine, root: string, args: string[], o: { stdin?: string; session?: string; timeoutMs?: number; bin?: string; env?: Record<string, string> } = {}): Promise<Ran> {
   const dir = $.plugin.root.replace(/\/+$/, '')
   const key = await sessionKey($)
   const session = o.session ?? personOf(key)
-  const r = await $.process.run([`${dir}/bin/thimble`, ...args], {
-    cwd: root, env: { THIMBLE_ROOT: root, THIMBLE_SESSION: session, THIMBLE_CONVERSATION: key }, timeoutMs: o.timeoutMs ?? 120000,
+  // THIMBLE_PLUGIN_ROOT: the folder this plugin was loaded from, for a launcher of another folder
+  const r = await $.process.run([o.bin ?? `${dir}/bin/thimble`, ...args], {
+    cwd: root, env: { ...o.env, THIMBLE_ROOT: root, THIMBLE_SESSION: session, THIMBLE_CONVERSATION: key, THIMBLE_PLUGIN_ROOT: dir }, timeoutMs: o.timeoutMs ?? 120000,
     ...(o.stdin != null ? { stdin: o.stdin } : {}),
   }).catch((err: unknown) => { throw new Error(runWhy(err)) })
   // `cut`: its output went past what Claude Code reads of it (4 MiB), so a record in it is cut short

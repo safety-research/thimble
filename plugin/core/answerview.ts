@@ -18,7 +18,7 @@
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`,
 //                                         `c cite`)
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
-//                                         no card may take
+//                                         no card may take; keysReady, as the plugin loads, what the keys read
 //   core/pane.ts       the side pane      the kinds `claims`, `threads` and `thread` (the seams' draws)
 //
 // Every function here answers what the seams give, checked, and nothing when a seam throws: a feature's failure never
@@ -27,11 +27,11 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { framesIn, noteFrames } from '../cards/draw'
-import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
+import { CLAIMS_KEYS, claimsBar, claimsKey, claimsReady } from '../claims/seam'
 import { EXPLAIN_KEYS, HEADS_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, headsBar, headsKey, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
-import { citeBar, citeKey, citeShown } from '../marks/cite'
+import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
@@ -66,7 +66,7 @@ export type MarkRef = { row: string; kind: 'citation'; n: number } | { row: stri
  *  import modules that come back here through the card tool, so a list made as this module loads could read a seam's
  *  keys before its module set them.) */
 export function restoredKeys(): string[] {
-  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...HEADS_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...HEADS_KEYS, ...CITE_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
 }
 
 const safe = async <T>(p: Promise<T>, none: T): Promise<T> => {
@@ -192,19 +192,18 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
 }
 
 /** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
- *  claims and the side threads (the left names what acts on an answer). While c cites the selected words (`c cite` at
- *  the left), the claims' item steps aside until the words are cited or let go, so c names one thing. */
+ *  claims and the side threads (the left names what acts on an answer). */
 export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  const citing = preview ? on('cite') : await safe(citeShown($), false)
   return [
-    ...(citing ? [] : items(await safe(claimsBar($, on, preview), []), preview)),
+    ...items(await safe(claimsBar($, on, preview), []), preview),
     ...items(await safe(threadsBar($, on, preview), []), preview),
   ]
 }
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
  *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
- *  tray's ] [ at rest, s, { } over the answers, e, c (cite while words wait, else the claims), then t. */
+ *  tray's ] [ at rest, s, { } over the answers, e, c (the selected words cited, while they wait; else typed), w (the
+ *  claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   const tray = await safe(trayHolds($), false)
   const chips = await safe(squeezeHolds($), false)
@@ -218,6 +217,15 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(citeKey($, key, until), null))
     ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
+}
+
+/** What the features' keys read of the state (whether the tray and the squeeze chips hold the keys, whether the bar
+ *  names w), read as the plugin loads: each load starts with nothing kept (a change in the settings loads it again), and
+ *  the first key would read it inside the few milliseconds Claude Code gives the key's hook. */
+export async function keysReady($: Engine): Promise<void> {
+  await safe(trayHolds($), false)
+  await safe(squeezeHolds($), false)
+  await safe(claimsReady($), undefined)
 }
 
 // ------------------------------------------------------------------------------------------------ hooks

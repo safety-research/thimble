@@ -1,26 +1,30 @@
 // bar.tsx: the bar, thimble's line above the prompt, as one drawing. Its rows, top down:
 //
 //   the failure line  only while there is one (bar/notice.ts failLineNow): a failure in red, or a notice. It wraps, so
-//                  the whole failure shows. A hint is not drawn here: the bar shows it in place of its keys
+//                  the whole failure shows. A hint stands here only when the bar has no room for it whole (`Hint: …`)
 //   the fix line   only while there is one (fix/line.ts): a fix that is ready (y use it now · d what changed · n
 //                  later), on (u undo), off, failed, or a request with no code
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), the keys of the
 //                  card that takes them now (cards/draw.ts cardKeyWords: `j down · k up`), `v card` while
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
-//                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
-//                  right their items (barRight: `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
+//                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c cite`); at its
+//                  right their items (barRight: `w 11 claims`, `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
 //                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
 //                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands
-//                  in place of the left's keys, after the busy step, cut to the one row; the right stays, so a hint
-//                  can point at it
+//                  in place of the left's keys, after the busy step, while it fits there whole; the right stays, so a
+//                  hint can point at it
 //
-// The settings pane draws the same bar as its switches would leave it (`preview`): nothing in it is a press and no
-// work shows.
+// A bar too narrow for its items gives way in this order: the busy step's other steps, then its words (whole words,
+// down to its glyph and seconds), then the labels' count, coverage's file counts and coverage. The keys stay: what
+// still does not fit goes on more rows, each item whole, the right's items on a row of their own when beside the first
+// row they would take no fewer rows. The settings pane draws the same bar as its switches would leave it
+// (`preview`), on as many rows as its items take: nothing in it is a press, no work shows and nothing gives way.
 import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
-import { cut, textWidth } from '../core/text.js'
+import { controlWords } from '../core/selection'
+import { cutWords, textWidth } from '../core/text.js'
 import { accent } from '../core/theme'
 import { cardKeyWords } from '../cards/draw'
 import { vReady } from '../designer/v'
@@ -68,13 +72,43 @@ async function countItems($: Engine, on: (key: string) => boolean, presses: BarP
   return out
 }
 
-/** The bar's items at its left, after `thimble`: the busy step, v, then the features' items. */
+/** The busy step as an item, its words in at most `room` cells: every step that runs, else the newest, else the
+ *  newest's first whole words; at least its glyph and seconds. */
+function busyItem(b: { glyph: string; word: string; secs: number | null; more: string[] }, room = Infinity): Item {
+  const secs = b.secs != null ? `${b.secs}s` : ''
+  const newest = [b.word, secs].filter(Boolean).join(' ')
+  const all = [newest, ...b.more].join(' · ')
+  if (len(all) <= room) return { id: 'busy', glyph: b.glyph, words: all }
+  if (len(newest) <= room) return { id: 'busy', glyph: b.glyph, words: newest }
+  let kept = ''
+  for (const w of b.word.split(' ')) {
+    const more = kept ? `${kept} ${w}` : w
+    if (len(`${more}…`) + (secs ? len(secs) + 1 : 0) > room) break
+    kept = more
+  }
+  return { id: 'busy', glyph: b.glyph, words: [kept ? `${kept}…` : '', secs].filter(Boolean).join(' ') }
+}
+
+/** Items in rows of whole items, ` · ` between them: the first row `first` cells wide, the others `rest`. An item wider
+ *  than its row keeps the first of its words that fit. */
+function fill(xs: Item[], first: number, rest: number): Item[][] {
+  const rows: Item[][] = [[]]
+  let used = 0
+  for (const x of xs) {
+    if (used && used + 3 + itemLen(x) > (rows.length === 1 ? first : rest)) { rows.push([]); used = 0 }
+    const room = rows.length === 1 ? first : rest
+    const fit = itemLen(x) > room ? { ...x, words: cutWords(x.words, len(x.words) - itemLen(x) + room) } : x
+    used += (used ? 3 : 0) + itemLen(fit)
+    rows[rows.length - 1]!.push(fit)
+  }
+  return rows
+}
+
+/** The bar's items at its left, after `thimble` and the busy step: v, then the features' items. */
 async function leftItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<Item[]> {
   const out: Item[] = []
-  const b = preview ? null : await busyNow($)
-  if (b) out.push({ id: 'busy', glyph: b.glyph, words: [`${b.word}${b.secs != null ? ` ${b.secs}s` : ''}`, ...b.more].join(' · ') })
   const features = await barLeft($, on, preview)
-  if (features.some(x => x.focus)) return [...out, ...features.filter(x => x.focus)]
+  if (features.some(x => x.focus)) return features.filter(x => x.focus)
   // the keys of the card on screen that takes them, each a click that presses it
   if (!preview && on('cards')) {
     for (const k of await cardKeyWords($).catch(() => [])) out.push({ id: `card-key-${k.key}`, key: k.key, words: k.words, ...(k.key.length === 1 ? { press: () => pressKey($, k.key) } : {}) })
@@ -93,47 +127,52 @@ export async function barKeys($: Engine): Promise<Set<string>> {
   return new Set([...(featureOn('coverage') && c?.coverage ? ['r'] : []), ...(featureOn('labels') && c?.labels ? ['l'] : [])])
 }
 
-/** The bar's rows: the failure line (when there is one) and the bar, `width` cells wide. */
+/** The bar's rows: the failure line (or a hint the bar has no room for) when there is one, and the bar, `width` cells
+ *  wide, on as many rows as its items need. */
 export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string } = {}): Promise<Any[]> {
   const { Box, Button, Text } = els
   const on = o.on ?? featureOn
   const preview = !!o.preview
   const presses = preview ? null : o.presses ?? null
-  const left = await leftItems($, on, preview)
-  // a hint: in place of the left's keys, after the busy step; an item it names (“a ask”) stays after it
-  const hint = preview ? null : ((await hintNow($).catch(() => null)) ?? o.intro ?? null)
-  if (hint) {
-    const named = left.filter(x => x.id !== 'busy' && x.key && hint.includes(`“${x.key} ${x.words}”`))
-    left.splice(0, left.length, ...left.filter(x => x.id === 'busy'), { id: 'hint', glyph: 'Hint:', words: hint }, ...named)
-  }
+  const b = preview ? null : await busyNow($)
+  const keys = await leftItems($, on, preview)
   let right = [...(await barRight($, on, preview)), ...(await countItems($, on, presses, preview))]
   // the presses of the bar's items by their words (`r coverage`), before any is cut: an item the failure line names
   // is a click there too
-  const pressOf = new Map([...left, ...right].filter(x => x.press && x.key).map(x => [`${x.key} ${x.words}`, x.press!] as const))
-  // a narrow bar: the labels' count goes first, then coverage's file counts, then coverage. The preview shows every
-  // item the switches leave on, its right part on a line of its own when it does not fit
-  const room = () => width - 9 - left.reduce((n, x) => n + itemLen(x) + 3, 0) - right.reduce((n, x) => n + itemLen(x) + 3, 0)
-  // a hint is cut before the right gives way, as a hint may point at it, and so is the busy step beside it
-  const h = left.findIndex(x => x.id === 'hint')
-  // the room the row has left as drawn: ` · ` between items, two cells between the left and the right
-  const spare = () => width - 9 - left.reduce((n, x, i) => n + itemLen(x) + (i ? 3 : 0), 0) - right.reduce((n, x, i) => n + itemLen(x) + (i ? 3 : 0), 0) - (right.length ? 2 : 0)
-  // with a hint the row is measured as drawn, so the right keeps its words while they fit
-  const rowRoom = () => (h >= 0 ? spare() : room())
-  const cutHint = (least: number) => { if (h >= 0 && spare() < 0) left[h] = { ...left[h]!, words: cut(left[h]!.words, Math.max(least, len(left[h]!.words) + spare())) } }
-  // the busy item's other steps go, and its words are cut, so the bar keeps to one row
-  const b = left.findIndex(x => x.id === 'busy')
-  const cutBusy = () => {
-    if (!preview && b >= 0 && rowRoom() < 0) left[b] = { ...left[b]!, words: left[b]!.words.split(' · ')[0]! }
-    if (!preview && b >= 0 && rowRoom() < 0) left[b] = { ...left[b]!, words: cut(left[b]!.words, Math.max(8, len(left[b]!.words) + rowRoom())) }
+  const pressOf = new Map([...keys, ...right].filter(x => x.press && x.key).map(x => [`${x.key} ${x.words}`, x.press!] as const))
+  // its items' words, which a double click on one selects: no answer's words (core/selection.ts)
+  if (!preview) controlWords('bar', ['thimble', ...[...keys, ...right].flatMap(x => [x.words, ...(x.key ? [`${x.key} ${x.words}`] : [])])])
+  // the cells the bar's first row has left as drawn: `thimble` and two cells, ` · ` between items, two cells between the
+  // left and the right
+  const lenOf = (xs: Item[]) => xs.reduce((n, x, i) => n + itemLen(x) + (i ? 3 : 0), 0)
+  const spare = (l: Item[], r: Item[]) => width - 9 - lenOf(l) - (r.length ? lenOf(r) + 2 : 0)
+  // a hint: in place of the left's keys, after the busy step, while it fits there whole beside what the bar keeps (the
+  // busy step's glyph and seconds, the right's keys); an item it names (“a ask”) stays after it, on the right too.
+  // Longer, it stands above the bar, and the bar keeps its keys
+  const hint = preview ? null : ((await hintNow($).catch(() => null)) ?? o.intro ?? null)
+  const named = (x: Item) => !!hint && !!x.key && hint.includes(`“${x.key} ${x.words}”`)
+  const counted = (x: Item) => (x.id === 'coverage' || x.id === 'labels') && !named(x)
+  const hinted: Item[] = hint ? [{ id: 'hint', glyph: 'Hint:', words: hint }, ...keys.filter(named)] : []
+  const hintIn = !!hint && spare([...(b ? [busyItem(b, 0)] : []), ...hinted], right.filter(x => !counted(x))) >= 0
+  const left = [...(b ? [busyItem(b)] : []), ...(hintIn ? hinted : keys)]
+  if (!preview) {
+    // a narrow bar: the busy step gives way first, down to its glyph and seconds, then the labels' count, coverage's file
+    // counts and coverage; the busy step takes back the room left
+    const least = b ? [busyItem(b, 0), ...left.slice(1)] : left
+    if (spare(least, right) < 0) right = right.filter(x => x.id !== 'labels' || !counted(x))
+    if (spare(least, right) < 0) right = right.map(x => (x.id === 'coverage' && counted(x) ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
+    if (spare(least, right) < 0) right = right.filter(x => x.id !== 'coverage' || !counted(x))
+    if (b) left[0] = busyItem(b, len(least[0]!.words) + spare(least, right))
   }
-  // with a hint, the left gives way first: the busy step, then the hint, which the person's key just asked for
-  if (!preview && h >= 0) { cutBusy(); cutHint(4) }
-  if (!preview && rowRoom() < 0) right = right.filter(x => x.id !== 'labels')
-  if (!preview && rowRoom() < 0) right = right.map(x => (x.id === 'coverage' ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
-  if (!preview && rowRoom() < 0) right = []
-  cutBusy()
-  // the hint takes back the room the right gave up
-  if (!preview && h >= 0) { left[h] = { ...left[h]!, words: hint! }; cutHint(4) }
+  // what still does not fit takes more rows, each item whole: the left's in rows under its first item, beside the right's
+  // on the first row, or, when that takes no fewer rows, with the right's on a row of their own under them
+  const alone = fill(left, width - 9, width - 9)
+  const room = width - 9 - lenOf(right) - 2
+  const beside = !right.length ? alone : room >= Math.max(0, ...left.map(itemLen)) ? fill(left, room, width - 9) : null
+  const under = right.length ? fill(right, width, width) : []
+  const besideWins = !!beside && beside.length < alone.length + under.length
+  const lines = besideWins ? beside! : alone
+  const rightLines = besideWins ? [] : under
 
   const words = (x: Item, i: number): Any[] => [
     ...(x.glyph ? [Text({ key: `g${i}`, color: accent(), children: `${x.glyph} ` })] : []),
@@ -146,14 +185,25 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
 
   const name = Text({ key: 'name', color: accent(), bold: true, children: 'thimble' })
   const label = presses ? Button({ key: 'bar-thimble', plain: true, label: 'thimble settings', onPress: presses.settings, children: [name] }) : name
-  const bar = Box({ key: 'bar', flexDirection: 'row', justifyContent: 'space-between', width, ...(preview ? { flexWrap: 'wrap' } : {}), children: [
-    // the preview wraps its items whole, as many as the switches leave on
-    Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, ...(preview ? { flexWrap: 'wrap' } : {}), children: [label, ...(left.length ? [Text({ key: 'gap', children: '  ' }), ...joined(left, 0)] : [])] }),
-    ...(right.length ? [Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: joined(right, left.length) })] : []),
-  ] })
+  let at = 0
+  const bar = lines.map((xs, k) => {
+    const row = Box({ key: k ? `bar-${k}` : 'bar', flexDirection: 'row', justifyContent: 'space-between', width, children: [
+      Box({ key: 'bar-left', flexDirection: 'row', flexShrink: 1, children: [k ? Text({ key: 'indent', children: ' '.repeat(9) }) : label, ...(xs.length && !k ? [Text({ key: 'gap', children: '  ' })] : []), ...joined(xs, at)] }),
+      ...(!k && besideWins ? [Box({ key: 'bar-right', flexDirection: 'row', flexShrink: 0, children: joined(right, left.length) })] : []),
+    ] })
+    at += xs.length
+    return row
+  })
+  const below = rightLines.map((xs, k) => Box({ key: `bar-right-${k}`, flexDirection: 'row', justifyContent: 'flex-end', width, children: joined(xs, left.length) }))
+  // a hint the bar has no room for: above it, whole, where the failure line stands (a hint and a failure never show
+  // together)
+  const hintRow = Box({ key: 'hint-line', flexDirection: 'row', width, children: [Text({ key: 'hint-text', wrap: 'wrap', children: [
+    Text({ key: 'g', color: accent(), children: 'Hint: ' }), Text({ key: 'w', dimColor: true, children: hint }),
+  ] })] })
+  const top = preview ? [] : hint && !hintIn ? [hintRow] : await lineRows($, els, width, pressOf)
   // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's
   const fixRows = preview ? [] : await fixLineRows($, els, width).catch(() => [])
-  return [...(preview ? [] : await lineRows($, els, width, pressOf)), ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), bar]
+  return [...top, ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), ...bar, ...below]
 }
 
 /** The failure line: what failed, whole, in red, or a notice. A key it names (`Press x to try again`) is a click

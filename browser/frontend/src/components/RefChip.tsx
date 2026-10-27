@@ -215,9 +215,12 @@ export function citedTable(r: ResolvedRef, col: string, row: string): { grid: Gr
 const OWN_TABLES = '.outputs-html table'
 const OWN_BOX = '.bcell-output, .bdetail-artifact'
 
+/** The card a whole card's ref resolved to, which its hover shows (CellPreview): a card that runs code, and a data card
+ * with no outputs (a custom card, a note, an example), whose excerpt is its source rather than what it shows; null for
+ * a plan, whose excerpt lists its steps (and a step's ref, its step). */
 function cellOf(r: ResolvedRef): Cell | null {
   const rec = r.record
-  if (r.kind !== 'cell' || !rec || typeof rec !== 'object' || typeof rec.id !== 'string' || !Array.isArray(rec.outputs)) return null
+  if (r.kind !== 'cell' || !rec || typeof rec !== 'object' || typeof rec.id !== 'string' || rec.kind === 'plan') return null
   return rec as Cell
 }
 

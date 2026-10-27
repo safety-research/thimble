@@ -1,5 +1,6 @@
 // ⌘ on a Mac (src/pointer/CmdPointer.tsx HOLD_MS), in a real browser that reports a Mac: the pointer and its highlight
-// show only once ⌘ has been held alone for about 300 ms, at what the pointer is over; a ⌘-click opens the box at once.
+// show only once ⌘ has been held alone for about 300 ms, at what the pointer is over; a ⌘-click opens the box at once;
+// after a shortcut (⌘C) the pointer stays off while ⌘ is held, though the mouse moves.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -82,5 +83,17 @@ test('on a Mac a ⌘-click opens the box at once', async () => {
   await page.mouse.click(250, 175)
   await page.keyboard.up('Meta')
   await page.waitForSelector('.pointer-box', { timeout: 2000 })
+  await page.close()
+})
+
+test('on a Mac a shortcut (⌘C) keeps the pointer off while ⌘ is held, though the mouse moves', async () => {
+  const page = await open(true)
+  await page.keyboard.down('Meta')
+  await page.keyboard.press('c')
+  await page.mouse.move(260, 180)
+  await page.mouse.move(270, 190)
+  await page.waitForTimeout(450)
+  assert.deepEqual(await pointer(page), { on: false, hl: false }, 'off, with no highlight')
+  await page.keyboard.up('Meta')
   await page.close()
 })

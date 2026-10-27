@@ -6,6 +6,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import Card from '../cards/client'
 import { cardWidth } from '../cards/draw'
+import { callLine } from '../cards/register'
 import { treeRows } from '../core/trail.mjs'
 import { promptStub, tempRun } from './stubs'
 
@@ -37,7 +38,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -65,10 +66,13 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: (dirs[e.path ?? ''] ?? []).map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }))
   // a path's real path, `.` and `..` folded
   const real = (p: string) => `/${p.split('/').reduce((a: string[], x) => (x === '..' ? a.slice(0, -1) : x && x !== '.' ? [...a, x] : a), []).join('/')}`
+  // when the runner's code on disk was last changed (a test patches it in place)
+  const code = { mtimeMs: 1 }
   on('fs.stat', (_$: unknown, e: { path: string }) => ({
     // escape.json looks local but its real target is outside every allowed root (a symlink out of the folder); so does
     // link.json in the temp folder
-    value: e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
+    value: e.path.endsWith('/cards/argv.mjs') ? { kind: 'file', size: 64, mtimeMs: code.mtimeMs, isLink: false, realPath: e.path }
+      : e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
       : e.path.endsWith('/link.json') ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/made-up/home/.ssh/id' }
         : e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
           : e.path === DATA || e.path.startsWith('/made-up/tmp') ? { kind: e.path.endsWith('.json') ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: real(e.path) }
@@ -86,7 +90,16 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     if (String(e.argv[1] ?? '').endsWith('/sandbox/setup.mjs') && setups++ === 0 && o.firstSetupHangs) return new Promise(() => undefined) as never
     return { value: { ...(tempRun(e.argv, o.sandbox) ?? { exitCode: 0, stdout: '', stderr: '' }), isStdoutTruncated: false, isStderrTruncated: false } }
   })
-  on('process.spawn', async function* (_$: unknown, e: { argv: string[] }) { spawned.push(e.argv); return { code: 0, signal: null } })
+  on('process.spawn', async function* (_$: unknown, e: { argv: string[] }) {
+    spawned.push(e.argv)
+    // a runner that ends before it listens, and says why; one that neither listens nor ends while the hooks wait
+    if (o.runnerEnds) {
+      yield { stream: 'stderr', text: o.runnerEnds.stderr }
+      return { value: { code: o.runnerEnds.code, signal: o.runnerEnds.signal } }
+    }
+    if (o.runnerHangs) await clock.sleep(60000)
+    return { value: { code: 0, signal: null } }
+  })
   on('env.set', () => ({ value: {} }))
   on('ui.toast', () => ({ value: undefined }))
   on('http.fetch', (_$: unknown, e: { url: string; init?: { body?: string } }) => {
@@ -96,6 +109,10 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     if (o.sandbox?.ok === false) throw new Error('made-up: no such socket')
     // Claude Code refuses the plugin's requests, its Unix socket's too
     if (o.refused) return { deny: '$.http.fetch: refused: nonessential network traffic is disabled for this session' }
+    // no runner listens until the hooks start one; with `runnerEnds` or `runnerHangs`, none ever does
+    if (o.noRunner && op === 'ping' && !spawned.length) throw new Error('made-up: no such socket')
+    if ((o.runnerEnds || o.runnerHangs) && op === 'ping') throw new Error('made-up: no such socket')
+    if (o.deadRunner && op === 'ping') throw new Error('made-up: no such socket')
     // a view that takes all the runner's memory: the socket closes while it answers
     if (op === o.crash) throw new Error('made-up: socket hang up')
     const body = JSON.parse(e.init?.body || '{}')
@@ -129,9 +146,14 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   on('tool.check', (_$: unknown, e: Any) => (e.tool === 'Read' && String(e.input?.file_path).endsWith('secret.json') ? { decision: 'deny', reason: 'a made-up deny rule', rule: 'Read(./secret.json)' }
     : o.ask && String(e.input?.file_path).startsWith('/made-up/tmp/mine') ? { decision: 'ask', rule: 'Read(/made-up/tmp/mine/**)' }
       : o.ask && !String(e.input?.file_path).startsWith(DATA) ? { decision: 'ask', setting: 'permissions.blockReadsOutsideWorkingDirectories' } : { decision: 'allow' }) as never)
-  on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] }) as never)
+  // the words of each answer the engine draws itself, as the hooks hand them to it
+  const answers: string[] = []
+  on('ui.render', (_$: unknown, e: Any) => {
+    if (e.component === 'AssistantMessage') answers.push(String(e.props?.text ?? ''))
+    return { type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] } as never
+  })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  return { files, asked, dirs, clock, spawned, runs, look, forks }
+  return { files, asked, dirs, clock, spawned, runs, look, forks, answers, code }
 }
 
 const callRow = (toolUseId: string, input: Record<string, unknown>) => ({
@@ -203,6 +225,19 @@ test('a card call keeps the card and answers what it read and what it draws; its
   expect(String(r6.result)).toBe('The card did not draw: the call\'s input was empty or did not parse as JSON. Send the call again, whole.')
 })
 
+test('a call\'s line names no title until the call\'s input names one; then it names the card', async () => {
+  // Claude Code draws the call's row while its input still streams in: no word stands in quotes as if it were a title
+  expect(callLine({}, null, 'toolu_made_up_s1', true)).not.toContain('“')
+  expect(callLine({ data: 'runs.json' }, null, 'toolu_made_up_s1', true)).not.toContain('“')
+  expect(callLine({ title: 'Scores' }, null, 'toolu_made_up_s1', true)).toContain('“Scores”')
+  // a call that changes a card names the card it knows
+  expect(callLine({ id: 'c0123456789ab', edits: [{ old: 'a', new: 'b' }] }, { title: 'Scores', calls: {} }, 'toolu_made_up_s2', true)).toContain('“Scores”')
+  // a new card refused before it had a title says why, and names no title
+  const refused = callLine({ view: 'x' }, { title: '', calls: { toolu_made_up_s3: { version: 0, error: '`title` is empty' } } }, 'toolu_made_up_s3', false)
+  expect(refused).toContain('did not draw: `title` is empty')
+  expect(refused).not.toContain('“')
+})
+
 test('a call with a card\'s id alone moves the card as it is to that call; the earlier call points down to it', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
@@ -252,6 +287,29 @@ test('a line of the reply that holds only a card\'s link draws the card there; i
   // a later call changes it where it stands: its line points up to the answer above
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_q3', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)
   expect(textOf(await $.ui.render(callRow('toolu_made_up_q3', { id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] })))).toBe('● Changed card “Scores” to version 2 (1 edit to its view) · ↑ shown in the answer above')
+})
+
+test('a card\'s link among an answer\'s words reads as the card\'s title, whether Claude Code or thimble draws the words', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_r1', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const row = (requestId: string, text: string) => ({ component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } }) as never
+  const append = (uuid: string, text: string) => $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid } as never)
+  // nothing of thimble's to draw in the answer: Claude Code draws it, given the link as its words
+  const text = `Ada leads; the scores are in the card above ([Scores](card:${id})).`
+  await append('row-made-up-r1', text)
+  await $.ui.render(row('row-made-up-r1', text))
+  expect(w.answers.at(-1)).toBe('Ada leads; the scores are in the card above (Scores).')
+  // an answer that also places the card on a line of its own: thimble draws it, and its words name the card alone
+  const placed = `Ada leads.\n\n[Scores](card:${id})\n\nThe card above ([Scores](card:${id})) sorts by score.`
+  await append('row-made-up-r2', placed)
+  const reply = await $.ui.render(row('row-made-up-r2', placed))
+  expect(elements(reply).some(n => n.type === 'Client')).toBe(true)
+  const words = elements(reply).filter(n => n.type === 'Markdown').map(n => String(n.props.text)).join('\n')
+  expect(words).toContain('The card above (Scores) sorts by score.')
+  expect(words).not.toContain('card:')
 })
 
 test('a new card waits while the run of calls above it is live and draws once it folds; a card drawn before stays when a later run is live', async ($, on) => {
@@ -497,6 +555,32 @@ test('a card placed in the middle of an answer takes keys while the screen shows
   expect((await edit('o')).text).toBe('o')
 })
 
+test("a card kept from before w was thimble's own still lists w: the bar names only the keys it can get, and w never reaches it", async ($, on) => {
+  const w = world(on)
+  const dir = '/made-up/.thimble/conversations/s-cards/cards/c0123456789ab'
+  // its keys as the card tool kept them before w was thimble's own
+  const meta = { id: 'c0123456789ab', version: 1, title: 'Scores', toolUseId: 'toolu_made_up_3', agentId: 'a-made-up', anchorRow: 'row-made-up', keys: ['o', 'w'], read: '2 rows', columns: ['name', 'score'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_3: { version: 1 } }, at: 1 }
+  w.files[`${dir}/meta.json`] = JSON.stringify(meta)
+  w.files[`${dir}/v1/view.js`] = VIEW
+  w.dirs['/made-up/.thimble/conversations/s-cards/cards'] = ['c0123456789ab']
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  // the card's Client draws under its answer (Claude Code mounts it), so the card is on screen
+  await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text: 'An answer.', isFirstOfReply: true } } as never)
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  // the bar names o, its one key it can get
+  const bar = textOf(await $.ui.render(BAND))
+  expect(bar).toContain('o card keys')
+  expect(bar).not.toContain('w card keys')
+  // w never reaches it: nothing names w here, so it is typed, and the card is asked nothing
+  const asked = w.asked.filter(x => x === 'key').length
+  expect((await edit('w')).text).toBe('w')
+  expect(w.asked.filter(x => x === 'key').length).toBe(asked)
+  // o does
+  await w.clock.advance(1000)
+  expect(await edit('o')).toEqual({ text: '', cursor: 0 })
+  expect(w.asked.filter(x => x === 'key').length).toBe(asked + 1)
+})
+
 test("a card call the person's permission rules refuse draws nothing, and says why", async ($, on) => {
   const w = world(on)
   w.files[`${DATA}/secret.json`] = '[]'
@@ -577,6 +661,77 @@ test('when the sandbox cannot start, no card runs: the call and the failure line
   const result = textOf(await $.ui.render(callRow('toolu_made_up_8', { title: 'Scores' })))
   expect(result).toContain('bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap · Claude got the error')
 })
+
+// the hooks run in Claude Code's engine, whose own Node is not the runner's: only setup.mjs's answer says which grants
+// the runner's Node takes, whatever its version (a Node 24 that took the flag would get it too)
+for (const [nodeVersion, net] of [['26.11.1', true], ['24.30.0', true], ['22.22.0', false]] as const) {
+  test(`the hooks start the runner with the grants setup.mjs says its Node takes: Node ${nodeVersion} that ${net ? 'takes --allow-net gets it' : 'refuses --allow-net does not get it'}`, async ($, on) => {
+    const w = world(on, { sandbox: { nodeVersion, grants: { '--allow-net': net } }, noRunner: true })
+    await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.advance(10)
+    // the runner starts on the clock's next turn, and the hooks wait on the clock for its answer
+    const call = $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_15', title: 'Scores', data: 'runs.json', view: VIEW } as never)
+    for (let i = 0; i < 10 && !w.spawned.length; i++) await w.clock.advance(20)
+    expect(String(((await call) as Any).result)).not.toContain('did not draw')
+    const argv = w.spawned.at(-1) ?? []
+    const command = argv.slice(argv.indexOf('/made-up/bin/node', argv.indexOf('--')))
+    expect(command.slice(0, 2)).toEqual(['/made-up/bin/node', '--permission'])
+    expect(command[2] === '--allow-net').toBe(net)
+    expect(command.includes('--allow-net')).toBe(net)
+  })
+}
+
+// the report Node prints when an error ends the runner at its start: the error and its code come before the stack, and
+// Node's version last
+const REFUSED = `file:///made-up/cards/runner.mjs:792\n  const server = http.createServer(serve)\n                      ^\n\nError: made-up: refused\n${'    at serve (file:///made-up/cards/runner.mjs:792:23)\n'.repeat(10)} {\n  code: 'ERR_ACCESS_DENIED'\n}\n\nNode.js v24.30.0\n`
+
+test('a runner that ends before it answers, while setup.mjs\'s own runner starts: the call and the line say how it ended, on which Node, and its error and code', async ($, on) => {
+  const w = world(on, { sandbox: { nodeVersion: '24.30.0' }, runnerEnds: { stderr: REFUSED, code: 1, signal: null } })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(10)
+  const call = $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_16', title: 'Scores', data: 'runs.json', view: VIEW } as never)
+  await w.clock.advance(100)
+  const text = String(((await call) as Any).result)
+  for (const said of ['exit 1', 'Node 24.30.0', '/made-up/bin/node', 'made-up: refused', 'ERR_ACCESS_DENIED']) expect(text).toContain(said)
+  expect(text).not.toContain('Node.js v24.30.0')
+  const bar = textOf(await $.ui.render(BAND))
+  expect(bar).toContain('Cards cannot draw')
+  for (const said of ['exit 1', 'Node 24.30.0', 'made-up: refused']) expect(bar).toContain(said)
+  // setup.mjs's own runner, which the probe started, answered
+  expect(w.runs.some(a => String(a[1] ?? '').endsWith('/sandbox/setup.mjs') && a.includes('--probe'))).toBe(true)
+})
+
+test('a runner that does not answer in time, while setup.mjs\'s own runner starts: the call says so, and not how the runner the hooks stopped ended', async ($, on) => {
+  const w = world(on, { sandbox: { nodeVersion: '24.30.0' }, runnerHangs: true })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(10)
+  const call = $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_17', title: 'Scores', data: 'runs.json', view: VIEW } as never)
+  await w.clock.advance(6000)
+  const text = String(((await call) as Any).result)
+  expect(text).toMatch(/did not answer in \d+ s/)
+  expect(text).not.toContain('ended with')
+  expect(w.spawned.length).toBe(1)
+})
+
+// the session's runner stops at once while setup.mjs's probe, which starts the code on disk, starts: when that code
+// changed since the session loaded it (patched in place), the session runs the old code, and only a reload helps
+for (const patched of [true, false]) {
+  test(`a runner that does not start ${patched ? 'on card code patched on disk since the session loaded it says to type /reload-plugins' : 'on the code the session loaded says only that it stopped'}`, async ($, on) => {
+    const w = world(on, { deadRunner: true })
+    await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.advance(10)
+    if (patched) w.code.mtimeMs = 2
+    let done = false
+    const call = ($.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_16', title: 'Scores', data: 'runs.json', view: VIEW } as never) as Promise<Any>).finally(() => { done = true })
+    for (let i = 0; i < 400 && !done; i++) await w.clock.advance(20)
+    const text = String(((await call) as Any).result)
+    const reload = "thimble's card code changed on disk after this session loaded it, so the session runs the old code: type /reload-plugins"
+    if (patched) expect(text).toContain(reload)
+    // how it ended is the runner's own line (tested above); unpatched code is told nothing about a reload
+    else expect(text).toMatch(/the card runner did not (start in its sandbox|answer in)/)
+    if (!patched) expect(text).not.toContain('/reload-plugins')
+  })
+}
 
 test('a card called while the session start still installs the sandbox draws: it does not wait on that install\'s answer', async ($, on) => {
   const w = world(on, { firstSetupHangs: true })

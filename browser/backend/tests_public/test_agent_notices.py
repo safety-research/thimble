@@ -144,6 +144,23 @@ async def test_a_view_that_failed_to_build_is_told_with_retry_and_its_next_build
     await _until(lambda: _open(f"agent:view:{slug}", c) is None, "its next build left the notice")
 
 
+async def test_a_builder_s_long_report_is_told_by_its_first_sentence_and_the_last_that_says_how_to_finish(board, bridge):
+    """A build that ended on a long report and no view: its notice and its chip show the report's first sentence and its
+    last, where the builder says how to finish, never its head cut mid-word."""
+    c = board
+    slug = views.propose(c, "Posts", "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
+    assert (await dev.start_build(c, slug, subagents.CLICK)).started
+    prop = views.read_proposal(c, slug)
+    first = "I couldn't install Posts: I'm not allowed to write to the view's folder (extension/views/posts)."
+    last = "To finish, copy views-work/posts into extension/views/posts and press Retry."
+    report = " ".join([first, *["Every write there was refused, by the file tool and by the shell alike."] * 12, last])
+    assert len(report) > 900
+    subagents.run_ended(c, prop["agent_id"], "done", report, source="handback")
+    await _until(lambda: (views.read_proposal(c, slug) or {}).get("status") == "failed", "it never failed")
+    assert _open(f"agent:view:{slug}", c)["text"] == f"The view Posts failed to build: {first} … {last}"
+    assert views.read_proposal(c, slug)["error"] == f"{first} … {last}"
+
+
 # --------------------------------------------------------------------------- checks.py
 
 

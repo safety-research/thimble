@@ -23,7 +23,7 @@
 //                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
 //                look whatever the cause
 //   deferred     as pending: a citation whose check waits until the person opens it (the setting Citations: auto
-//                cite, or words the person asked about in manual)
+//                cite, or words the person asked about with c)
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //
@@ -47,7 +47,7 @@ import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, type Theme } from '../core/theme'
-import { blocks, cardRef, inline, marksWithin, runsText, tableOf, wrapRuns } from './message.js'
+import { blocks, cardRef, inline, marksWithin, runsText, tableOf, withoutCardLinks, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -434,10 +434,11 @@ export function messageEl(els: Any, o: MessageOpts): Any {
       i++
       continue
     }
-    // a run of blocks with no mark: Claude Code's own Markdown, whole
+    // a run of blocks with no mark: Claude Code's own Markdown, whole, each card's link in it as its words (Claude Code
+    // would write its target after them)
     let j = i
     while (j + 1 < bs.length && !laidOut(j + 1) && !placed(j + 1) && joins(bs[j], bs[j + 1])) j++
-    push([Markdown({ text: o.text.slice(b.start, bs[j].end) })], b.gap && i > 0, passageOf(i, j))
+    push([Markdown({ text: withoutCardLinks(o.text.slice(b.start, bs[j].end)) })], b.gap && i > 0, passageOf(i, j))
     i = j + 1
   }
   return Box({ flexDirection: 'column', marginTop: o.rule ? 0 : 1, children: rows })

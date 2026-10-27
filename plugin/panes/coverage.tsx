@@ -62,17 +62,22 @@ export async function drawCoverage($: EngineInterface, e: Any, args: unknown, el
     : Text({ key: l.key, wrap: 'truncate-end', children: runs(l.runs) })))
 
   // the keys, under a rule: each a plain Button its key presses (Claude Code draws the key, lit, then a colon). ↵ has no
-  // hotkey, so the pane draws it, lit as Claude Code lights the keys beside it (a plugin cannot set that color)
-  const keys: [string | null, string, () => unknown][] = [
+  // hotkey, so the pane draws it, lit as Claude Code lights the keys beside it (a plugin cannot set that color). Nor has
+  // r close (`click`), a click alone: an r typed while the pane holds the keyboard goes to the prompt, where r closes
+  // the pane once its word window closed (bar/register.ts barKey), and a word that starts with r (run …) is typed whole
+  const keys: [string | null, string, () => unknown, 'click'?][] = [
     ['k', 'up', step(-1)],
     ['j', 'down', step(1)],
     [null, v.anyOpen ? 'open / collapse' : 'open', () => (v.selKey ? press(v.selKey)() : undefined)],
-    ['r', 'close', () => closePane($)],
+    ['r', 'close', () => closePane($), 'click'],
   ]
-  const keyRow = Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap(([k, label, onPress], i) => [
+  const keyRow = Box({ key: 'keys', flexDirection: 'row', flexWrap: 'wrap', children: keys.flatMap(([k, label, onPress, click], i) => [
     ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
     k
-      ? Button({ key: `key-${k}`, plain: true, hotkey: k, label, hover: quiet(`coverage-key-${k}`), onPress, children: [Text({ key: 'w', dimColor: true, children: label })] })
+      ? Button({
+        key: `key-${k}`, plain: true, ...(click ? {} : { hotkey: k }), label, hover: quiet(`coverage-key-${k}`), onPress,
+        children: click ? [Text({ key: 'k', color: 'suggestion', children: k }), Text({ key: 'c', children: ': ' }), Text({ key: 'w', dimColor: true, children: label })] : [Text({ key: 'w', dimColor: true, children: label })],
+      })
       : Button({ key: 'key-enter', plain: true, label, hover: quiet('coverage-key-enter'), onPress, children: [Text({ key: 'k', color: 'suggestion', bold: true, children: '↵' }), Text({ key: 'w', dimColor: true, children: ` ${label}` })] }),
   ]) })
 

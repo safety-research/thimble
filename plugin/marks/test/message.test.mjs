@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { carrier, inline, marksIn, rewritesIn, runsText, sentenceOf, withCorrections, withRewrites } from '../message.js'
+import { carrier, inline, marksIn, rewritesIn, runsText, sentenceOf, withAsked, withCorrections, withoutCardLinks, withRewrites } from '../message.js'
 
 const words = text => marksIn(text).map(m => m.words)
 
@@ -80,6 +80,25 @@ test("a rewrite in a sentence with a link stands whole: the link keeps its targe
   assert.deepEqual([...one.placed], [1])
 })
 
+test('words asked about in a sentence that the check of one of Claude\'s marks rewrote are left out, so the rewrite stands: it holds only the marks it was written with', () => {
+  const text = 'Uploads fail when the budget runs out: [41 of the 44](#) failures came after a drop. The client gives up.'
+  const place = w => ({ start: text.indexOf(w), end: text.indexOf(w) + w.length })
+  const claude = { n: 1, status: 'deferred', words: '41 of the 44', shown: '41 of the 44', ...place('[41 of the 44](#)') }
+  const asked = [
+    { n: 2, status: 'deferred', words: 'Uploads fail', shown: 'Uploads fail', asked: true, ...place('Uploads fail') },
+    { n: 3, status: 'deferred', words: 'gives up', shown: 'gives up', asked: true, ...place('gives up') },
+  ]
+  assert.equal(withAsked(text, [claude, ...asked]).text, '[Uploads fail](#) when the budget runs out: [41 of the 44](#) failures came after a drop. The client [gives up](#).')
+  // the check rewrote the sentence (before or after the analyst asked): words asked about in it are no mark, those of
+  // another sentence still are
+  const fixed = { ...claude, status: 'corrected', shown: '43 of the 44', rewrite: 'Uploads fail when the budget runs out: [43 of the 44] failures came within a minute of a drop.' }
+  const a = withAsked(text, [fixed, ...asked])
+  assert.deepEqual(a.items.map(it => it.n), [1, 3])
+  const r = rewritesIn(a.text, a.items)
+  assert.deepEqual([...r.placed], [0])
+  assert.equal(r.text, 'Uploads fail when the budget runs out: [43 of the 44](#) failures came within a minute of a drop. The client [gives up](#).')
+})
+
 test('a correction\'s words stand in place of its mark\'s words, so features place their words on what is shown; a narrowing or a rewrite does not', () => {
   const text = 'Of the runs, [12 of 40](#) failed, [all](#) on [Tuesday at noon](#).'
   const items = [
@@ -141,4 +160,17 @@ test("a feature's span lies on plain words, inside one mark's words or over whol
   const first = '[1,212 accounts](#) shared answers.'
   const from = inline(first, 0, first.length, marksIn(first), [{ start: 0, end: first.indexOf(' answers') }])
   assert.deepEqual(from.filter(r => r.span === 0).map(r => [r.s, r.mark]), [['1,212 accounts', 0], [' shared', undefined]])
+})
+
+test("a card's link among words reads as the card's title, in thimble's drawing and in the words Claude Code draws; in code it stays as written", () => {
+  const text = 'The runs are in the card above ([Runs per day: 18 days](card:c0a1b2c3d4e5f)) if you want them.'
+  const read = 'The runs are in the card above (Runs per day: 18 days) if you want them.'
+  assert.equal(runsText(inline(text, 0, text.length)), read)
+  assert.equal(withoutCardLinks(text), read)
+  const code = 'Write `[Scores](card:c0123456789ab)` on a line of its own.\n\n```\n[Scores](card:c0123456789ab)\n```'
+  assert.equal(withoutCardLinks(code), code)
+  // a link to anything else keeps its target
+  const file = 'See [the log](run.log).'
+  assert.equal(runsText(inline(file, 0, file.length)), 'See the log (run.log).')
+  assert.equal(withoutCardLinks(file), file)
 })

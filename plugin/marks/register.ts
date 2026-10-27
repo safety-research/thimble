@@ -28,12 +28,13 @@ import { checkSpans, markFocus, markPressed, passagesFor, spansFor, textView, un
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
+import { shownWords } from '../core/selection'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { choiceOf, featureOn } from '../settings/features.mjs'
 import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
-import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutMarks } from './message.js'
+import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 
@@ -213,7 +214,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const written = marksOn ? view.text : withoutMarks(view.text)
   const reply = marksOn ? await rowMarks($, row) : null
   const own = written === raw
-  // the words the analyst asked about (Citations manual) stand as marks in Claude's own words, and the row's marks in
+  // the words the analyst asked about (c, marks/cite.ts) stand as marks in Claude's own words, and the row's marks in
   // the order the text holds them
   const asked = own ? withAsked(written, reply?.items ?? []) : { text: written, items: reply?.items ?? [] }
   const words: string = asked.text
@@ -222,6 +223,8 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   // each corrected citation's words in place of its own, so the explainers and heads-ups stand on the words shown
   const rewrote = own ? rewritesIn(words, items) : { text: words, placed: new Set<number>() }
   const text = own ? withCorrections(rewrote.text, items) : words
+  // the words a selection in this row is read against (core/selection.ts)
+  shownWords(row, raw, text)
   const marks = marksOn ? marksIn(text) : []
   // the explainers and heads-ups stand on the words Claude wrote, where the look found them, and follow those words
   // into the words shown (a correction's words in place of a citation's)
@@ -234,9 +237,13 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   // the cards the text places on lines of their own
   const cards = featureOn('cards') ? await framesIn($, e, text) : {}
   const placesCards = Object.keys(cards).length > 0
-  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) {
-    return own ? below() : below({ ...e, props: { ...e.props, text } })
+  // the words as Claude Code draws them, each card's link among them as its words (Claude Code would write its target
+  // after them)
+  const plain = () => {
+    const shown = withoutCardLinks(text)
+    return shown === raw ? below() : below({ ...e, props: { ...e.props, text: shown } })
   }
+  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) return plain()
   // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations` runs
   const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
   const spin = SPIN[frame % SPIN.length]!
@@ -272,7 +279,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
         if (n > 0) await openPane($, 'evidence', { row, n }, `citation ${n}`)
       },
     })
-    : await (own ? below() : below({ ...e, props: { ...e.props, text } }))
+    : await plain()
   const gone = lostSpansEl(els, lost, `ml-${row}`)
   const parts = [body, ...(gone ? [gone] : []), ...under]
   return parts.length === 1 ? body : els.Box({ key: `ans-${row}`, flexDirection: 'column', children: parts })

@@ -1,7 +1,7 @@
 // runner.mjs: the card runner. One Node process per session runs every card's view, keeps each card's state and
 // handlers, and makes the text copy of what a card draws. The hooks (ask.ts) start it and talk to it over a Unix socket.
 //
-//   sandbox/run.mjs --srt <srt> <rules> -- env -i PATH=… node --permission --allow-fs-read=<plugin>/cards
+//   sandbox/run.mjs --srt <srt> <rules> -- env -i PATH=… node --permission [--allow-net] --allow-fs-read=<plugin>/cards
 //        --allow-fs-read=<plugin>/core/text.js --allow-fs-read=<cards of the session> --allow-fs-write=<its folder>
 //        --disallow-code-generation-from-strings --max-old-space-size=1024 runner.mjs <socket>
 //
@@ -779,9 +779,13 @@ const OPS = {
 // exception fatal by default, which would end the one runner for every card in the session. The runner awaits all its
 // own promises and wraps each request in try/catch, so what still reaches here comes from a card's code; it is already
 // contained (the card's own call answered, or will time out), so the process stays up and the card draws on. A card
-// cannot take the runner down this way.
-process.on('unhandledRejection', () => {})
-process.on('uncaughtException', () => {})
+// cannot take the runner down this way. The guards start once the socket listens: no card runs before that, and what
+// fails before it is the runner's own start (a Node whose permission model refuses something it does), which Node then
+// says as it ends the process, where the guards would let it end with nothing said.
+function guard() {
+  process.on('unhandledRejection', () => {})
+  process.on('uncaughtException', () => {})
+}
 
 function serve(sock) {
   try { fs.unlinkSync(sock) } catch { /* no socket left from an earlier runner */ }
@@ -803,13 +807,21 @@ function serve(sock) {
       res.end(JSON.stringify({ ...out, seq: ++answered }))
     })
   })
-  // a socket the runner cannot make (its folder is not writable, say) is said, and the runner ends: the hooks then say
-  // why it did not start, where the guard below would keep it running with no socket
-  server.on('error', e => {
+  // a socket the runner cannot make (its folder is not writable, or Node's permission model refuses it) is said, and
+  // the runner ends: the hooks then say why it did not start
+  const cannot = e => {
     process.stderr.write(`the card runner cannot listen on ${sock}: ${e.message}\n`)
     process.exit(1)
-  })
-  server.listen(sock, () => fs.chmodSync(sock, 0o600))
+  }
+  server.on('error', cannot)
+  try {
+    server.listen(sock, () => {
+      guard()
+      fs.chmodSync(sock, 0o600)
+    })
+  } catch (e) {
+    cannot(e)
+  }
   // the session that started this runner is gone: so is the runner
   const parent = process.ppid
   setInterval(() => { if (process.ppid !== parent) process.exit(0) }, 2000)

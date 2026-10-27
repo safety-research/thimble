@@ -30,6 +30,11 @@ export async function tempDir($: Engine): Promise<string> {
   return dir
 }
 
+/** The session's temp folder when a load of the plugin in this session found it already, else ''. */
+export async function keptTempDir($: Engine): Promise<string> {
+  return (await $.state.get(TEMP)).value || ''
+}
+
 /** The folder, made when missing: its real path when it is a folder this user owns and no link (then mode 700), else ''. */
 async function ownFolder($: Engine, dir: string): Promise<string> {
   const r = await $.process.run(['sh', '-c', 'mkdir -p -m 700 "$1" && [ -d "$1" ] && [ ! -h "$1" ] && [ -O "$1" ] && chmod 700 "$1" && cd "$1" && pwd -P', 'sh', dir])

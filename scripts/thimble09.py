@@ -86,10 +86,10 @@ def find():
         target = os.readlink(LAUNCHER) if os.path.islink(LAUNCHER) else ""
         target = os.path.normpath(os.path.join(os.path.dirname(LAUNCHER), target)) if target else ""
         text = read(target or LAUNCHER)
-        # 0.10's link runs its kernel (engine/thimble.py), or points into Claude Code's plugins or thimble's live copy
-        # (gone after a move), and is no 0.9 left behind
+        # 0.10's link runs its kernel (engine/thimble.py), or points into Claude Code's plugins or thimble's live copy or
+        # release checkout (gone after a move), and is no 0.9 left behind
         ours = ("engine/thimble.py" in text and "thimble uninstall" not in text) or (
-            not text and ("/plugins/marketplaces/" in target or "/fixes/live/" in target))
+            not text and any(x in target for x in ("/plugins/marketplaces/", "/fixes/live/", "/fixes/release/")))
         if not ours and (target.endswith("/plugin/bin/thimble") or "thimble uninstall" in text):
             f["launcher"] = target or LAUNCHER
             # 0.9's own command; a 0.9 clone pulled to 0.10 leaves the link on 0.10's plugin/bin/thimble, which fails

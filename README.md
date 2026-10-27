@@ -16,7 +16,7 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 - **Citations**: every claim points to the code output or file line that shows it, and a second Claude checks each one against your files.
 - **Labels** (`l`): records sorted into categories by a rule or a model's reading, which you can open and correct.
 - **Coverage** (`r`): how much of the folder Claude has read, and what it never opened.
-- **Evidence** (`c`): everything the session has concluded, as a map, with why each claim holds and what was corrected. They are found when you ask (`f` in the pane), or after every reply when you turn that on.
+- **Evidence** (`w`): everything the session has concluded, as a map, with why each claim holds and what was corrected. The claims are found after every reply; set Evidence to on demand to find them only when you ask (`f` in the pane).
 - **Rewrite** (`s`): the last answer, shorter or longer, for a novice or an expert, or as you describe it.
 - **Side threads** (`t`): ask about a passage or part of a card without derailing the session.
 
@@ -28,17 +28,17 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 claude "install thimble from https://github.com/safety-research/thimble"
 ```
 
-Claude asks whether you want the terminal plugin, the browser workbench, or both, and helps with anything missing. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
+Claude asks whether you want both the terminal plugin and the browser workbench (the default) or the plugin alone, and helps with anything missing. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
 
 ### Manual installation
 
 ```
-git clone https://github.com/safety-research/thimble
-cd thimble
+git clone https://github.com/safety-research/thimble ~/thimble
+cd ~/thimble
 scripts/install.sh
 ```
 
-`scripts/install.sh --no-browser` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
+The browser workbench builds about 1 GB in the checkout and runs from it, so keep it in a folder of its own. `scripts/install.sh --no-browser` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
 
 ## Usage
 
@@ -46,7 +46,7 @@ scripts/install.sh
 
 Run `claude` in a folder with files you'd like to analyze. thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off; `/plugin` turns thimble off.
 
-When thimble does something wrong, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble. In a shell, `thimble file issue N` posts fix N as a GitHub issue and `thimble file pr N` opens a pull request with its code; each shows you the text first.
+When thimble does something wrong, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble, and a key puts the change to use, or not; a fix that changes the sandbox, the hooks file or a command hook, the launcher or a package says so first. A fix never changes the way back: `thimble fix off` in a shell, or `sh ~/.thimble/fixes/off.sh` when thimble does not load, brings back the plain release. In a shell, `thimble file issue N` gives a link to GitHub's new-issue form with fix N's text, which you read and submit there, and `thimble file pr N` shows you the text and the code, then opens a pull request with them.
 
 ![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
 
@@ -62,7 +62,7 @@ Claude Code, macOS or Linux, Python 3.10+ and Node.js 22.18+. The browser workbe
 
 ## Security & Privacy
 
-thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). The plugin runs inside your Claude Code session: it collects no data of its own, its model calls go through your session, and Claude's card code runs in Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime) with no network.
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). The plugin runs inside your Claude Code session: it collects no data of its own, its model calls go through your session, and Claude's card code runs in Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime) with no network. A fix of thimble is made in a copy, by a Claude whose shell runs in the same sandbox and reaches only the npm and PyPI registries; the code that turns fixes off and undoes them runs from the installed release, which no fix changes.
 
 ## License
 

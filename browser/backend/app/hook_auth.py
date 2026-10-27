@@ -132,17 +132,16 @@ PAIRED_FILE = "paired.json"
 PAIR_TTL_S = 300  # a link's sign-in code works this long after it was made (mint), and once
 # a click route's 403 without the analyst's cookie: every such click, not only the permission answers (live check L32)
 ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message or stop thimble's agents, build a view,"
-                " answer a permission request, change a permission mode): open it from the link shown under /thimble's"
-                " reply, or printed by `thimble up` in a shell, and click there")
+                " answer a permission request, change a permission mode): open it from the link `thimble-browser`"
+                " printed in your terminal, and click there")
 
 # A write to the local API (any method but GET/HEAD/OPTIONS) is either a token route (guarded: the plugin, the CLI, a
 # program's grant), which needs the hook proof, or an analyst route, which needs a signed-in browser's cookie (analyst).
 # A notebook kernel can reach this server on 127.0.0.1 but holds neither.
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
-WRITE_REFUSED = ("open thimble from the link shown under /thimble's reply, or printed by `thimble up` in a shell, to"
-                 " make changes")
-CODE_GONE = ("This sign-in link was already used or has expired. Run `thimble up` in a shell for a new one, or type"
-             " /thimble in your terminal.")
+WRITE_REFUSED = "open thimble from the link `thimble-browser` printed in your terminal, to make changes"
+# the page's own words for it are lib/notices CODE_GONE_TEXT
+CODE_GONE = "This sign-in link was already used or has expired. Run `thimble-browser` again for a new one."
 # A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except
 # these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
 OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})

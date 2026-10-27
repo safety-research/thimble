@@ -170,9 +170,33 @@ test("the fork's cards anchor to the answer v was pressed on, and a fork that dr
   // a later answer does not move the design's anchor
   await s.call('session.append', { door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, message: { content: [{ type: 'text', text: 'A later answer.' }] } }, async () => ({ uuid: 'row-answer-2' }))
   expect(await designAnchor(s.$, 'agent-1')).toBe(ROW)
-  await s.call('turn.complete', end('answer', 'The records hold no times to draw.\nMore words.'), async () => ({ text: '' }))
+  await s.call('turn.complete', end('answer', 'The records hold no times to draw.\n\nMore words.'), async () => ({ text: '' }))
   expect(await s.failLine()).toContain('v drew no card. The copy that drew it ended with: “The records hold no times to draw.”')
   expect(await designAnchor(s.$, 'agent-1')).toBe(null)
+})
+
+test("a fork that drew none: the failure line quotes its first paragraph, cut at a word only when long", async () => {
+  const words = (n: number, from = 0) => Array.from({ length: n }, (_, i) => `word${from + i}`).join(' ')
+  // a first paragraph of about 300 characters, on two lines, shows whole
+  const s = setup()
+  await pressV(s)
+  const first = [`The card tool gave no answer to the call: ${words(20)}`, `${words(20, 20)}.`]
+  const answer = `${first.join('\n')}\n\nThe second paragraph.`
+  await s.call('turn.complete', end('answer', answer), async () => ({ text: '' }))
+  const line = await s.failLine()
+  expect(line).toContain(`“${first.join(' ')}”`)
+  expect(line).not.toContain('The second paragraph.')
+
+  // one of about 900 characters is cut at a word's end
+  const t = setup()
+  await pressV(t)
+  const long = `The card tool gave no answer to the call: ${words(130)}.`
+  await t.call('turn.complete', end('answer', long), async () => ({ text: '' }))
+  const quote = /“([^”]*)”/.exec(await t.failLine())![1]!
+  expect(quote.endsWith('…')).toBe(true)
+  const kept = quote.slice(0, -1)
+  expect(long.startsWith(kept)).toBe(true)
+  expect(long[kept.length]).toBe(' ')
 })
 
 test("a refused design says that the model's safeguards refused it, and how to switch models, as a notice, not a failure", async () => {

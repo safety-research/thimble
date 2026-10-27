@@ -1,11 +1,11 @@
 // keys.ts: thimble's keys at an empty prompt, in one hook. A key goes to the first of these that takes it now:
 //
 //   y d n u r  fix/line.ts fixKey    the line of a fix above the bar, while it shows: y use it now, d what
-//                                    changed, n later, u undo, r redo
+//                                    changed, n later (a failed fix: dismiss), u undo, r redo
 //   v        designer/v.ts vKey      a card of the last answer
 //   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
 //                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers' (e:
-//                                    the selected words), c, t
+//                                    the selected words), c (a citation of the selected words), w (the claims), t
 //   a p      cards/head.ts headKey   the header of the card the keys reach: a ask, p artifact
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them
@@ -32,7 +32,7 @@ import { introKey } from '../bar/intro'
 import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'
 import { HEAD_KEYS, headKey } from '../cards/head'
-import { restoredKey, restoredKeys } from '../core/answerview'
+import { keysReady, restoredKey, restoredKeys } from '../core/answerview'
 import { vKey } from '../designer/v'
 import { fixKey } from '../fix/line'
 import { promptHasKeys } from '../squeeze/ui'
@@ -160,6 +160,14 @@ async function burst($: Engine, keys: string[], now: number, live: () => boolean
 }
 
 export const registerKeys: Register = on => {
+  // what the keys read of the state, read as the plugin loads, so the first key after a load reads it no more than the
+  // next ones do
+  on('session.start', { isInteractive: true }, async ($, e, next) => {
+    const r = await next(e)
+    await keysReady($).catch(() => undefined)
+    return r
+  }).catch(($, e, next) => next(e))
+
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
     // the prompt has the keys: words begun after + in the squeeze chips are let go (esc gave the keys back)
     await promptHasKeys($).catch(() => undefined)

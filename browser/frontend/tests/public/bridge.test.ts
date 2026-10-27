@@ -3,9 +3,9 @@
 // it is ready and reports each data-anchor once; window.thimble.fetch posts a query and resolves with the page's answer
 // to that id, and a newer fetch with its key or its signal drops it and has its call cancelled; a message from
 // anywhere but the parent page is ignored; with a label filter on, what the filter drops is hidden; in a card's frame
-// the page draws what `init` brings, says the height it needs, and has what the filter drops dimmed; a label call with
-// no gesture in the frame is refused there, and the key for label calls reaches the bridge alone. The label calls with
-// a real gesture are tests/public/browser/view-label-calls.test.ts.
+// the page draws what `init` brings, says the height it needs, has what the filter drops dimmed, and passes the page a
+// wheel turn it does not take; a label call with no gesture in the frame is refused there, and the key for label calls
+// reaches the bridge alone. The label calls with a real gesture are tests/public/browser/view-label-calls.test.ts.
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -138,6 +138,20 @@ describe('the view bridge', () => {
     expect(win().thimble.markOf('board.jsonl#L1')).toMatchObject({ bar: '#e69f00' })
     expect(doc.getElementById('one')!.getAttribute('data-thimble-drop')).toBe('dim')
     expect(doc.getElementById('two')!.hasAttribute('data-thimble-drop')).toBe(false)
+  })
+
+  test("in a card's frame a wheel turn nothing in the page scrolls goes to the page, as over any other card; a view keeps it", async () => {
+    const turn = () => {
+      const e = new dom.window.WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 40, clientX: 5, clientY: 9 })
+      win().document.getElementById('one')!.dispatchEvent(e)
+      return e
+    }
+    turn()
+    expect(of('wheel')).toEqual([])
+    await load(true)
+    const e = turn()
+    expect(of('wheel')).toMatchObject([{ deltaY: 40, ctrlKey: false, x: 5, y: 9 }])
+    expect(e.defaultPrevented).toBe(false)
   })
 
   test('a label call with no gesture in the frame is refused there and said to the page', async () => {

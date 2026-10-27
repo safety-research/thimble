@@ -2,6 +2,7 @@
 // what it says and what it brings; and what the welcome before them says. Every example is the tour's own
 // (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
 // analyst to act acts only on that example, so nothing reaches the server.
+import { TRACK_LANES } from '../files/Ruler'
 import { setMarkup, type Api, type Example, type Step } from './engine'
 import reportFigs from './report-figs.json'
 
@@ -238,11 +239,53 @@ const sideExample = (api: Api, section: SideSection) => {
 // ---------- Labels: one agent's transcript in the Transcript view with two labels on it, each in colours of its own:
 // what each step does (four values) and whether it coordinates with other agents (yes/no); the ruler beside it shows
 // both down the whole file. Captured, with the Labels sidebar that lists them, over the real one, which the step opens.
+
+/** the transcript's lines (agent-05.jsonl, as the Labels sidebar counts its records), which its ruler stands for, the
+ * records the example leaves out included */
+const TX_LINES = 76
+
+/** The labels' marks on the example transcript's ruler, drawn from the records it shows as thimble's ruler draws them
+ * (files/Ruler.tsx Marks): a lane per label, in the order of a record's gutter cells, with its stripe, and on it a mark
+ * over each run of records whose cell is lit in one colour. A lane is a grid of a row per line of the file's `total`,
+ * and a mark spans its records' rows in their cells' colour, so the ruler spans the bar at any height, with no gap
+ * between two marks that meet, and shows the records' colours in either theme. */
+function drawRuler(reader: HTMLElement, total: number): void {
+  const bar = reader.querySelector('.reader-ruler-bar')
+  if (!bar) return
+  const lanes: { from: number; to: number; colour: string }[][] = []
+  for (const rec of reader.querySelectorAll<HTMLElement>('.reader-record[data-line]')) {
+    const line = Number(rec.dataset.line)
+    rec.querySelectorAll<HTMLElement>('.reader-gutter-cell').forEach((cell, k) => {
+      const runs = (lanes[k] ??= [])
+      const colour = cell.classList.contains('is-lit') ? cell.style.background : ''
+      if (!colour) return
+      const last = runs[runs.length - 1]
+      if (last && last.to === line - 1 && last.colour === colour) last.to = line
+      else runs.push({ from: line, to: line, colour })
+    })
+  }
+  const marks = document.createElement('div')
+  marks.className = 'reader-ruler-marks'
+  const { lane: width, gap, inset } = TRACK_LANES
+  lanes.forEach((runs, k) => {
+    const lane = document.createElement('div')
+    Object.assign(lane.style, { position: 'absolute', top: '0', bottom: '0', left: `${inset + k * (width + gap)}px`, width: `${width}px`, display: 'grid', gridTemplateRows: `repeat(${total}, minmax(0, 1fr))`, background: 'rgba(var(--ink-rgb), 0.035)' })
+    for (const r of runs) {
+      const mark = document.createElement('div')
+      Object.assign(mark.style, { gridRow: `${r.from} / ${r.to + 1}`, background: r.colour })
+      lane.append(mark)
+    }
+    marks.append(lane)
+  })
+  bar.prepend(marks)
+}
+
 const labelsExample = (api: Api): Example => {
   const realReader = () => api.q('[data-panel="files"] .reader')
   const rd = api.snap('txReader', 'tour-ex-reader')
   const reader = rd.firstElementChild as HTMLElement
   reader.querySelectorAll('.reader-tab:not(.active)').forEach((t) => t.remove())
+  drawRuler(reader, TX_LINES)
   Object.assign(rd.style, { display: 'flex', flexDirection: 'column', background: api.groundOf(realReader() || api.q(filesPanel)) })
   Object.assign(reader.style, { flex: '1', minHeight: '0', overflow: 'hidden' })
   Object.assign(api.tag(rd).style, { left: '50%', right: 'auto', transform: 'translateX(-50%)' })
@@ -549,7 +592,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       interact: (api) => api.els.frame ?? null,
       title: 'Views',
-      body: 'thimble also proposes views, custom-generated just for your corpus, like this Timeline of every event.',
+      body: 'thimble proposes views built for your own files. This one, on the tour’s example data, is a Timeline of every event.',
     },
     {
       tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6,

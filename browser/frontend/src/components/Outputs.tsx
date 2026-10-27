@@ -214,12 +214,13 @@ export const chartLabels = (ids: readonly string[] | undefined, concepts: Readon
 
 /**
  * One bundle. `maxLines` caps text; `maxRows` caps an html table behind "Show all"; `fitWidth` is the room a chart has;
- * `card` drops a chart's own title under a card's question; `labels` colour a chart's classes by label.
+ * `card` drops a chart's own title under a card's question and folds an error to its one line (ErrorOut); `labels`
+ * colour a chart's classes by label.
  */
 export function Output({ bundle, maxLines, maxRows, fitWidth, card, labels }: { bundle: MimeBundle; maxLines?: number; maxRows?: number; fitWidth?: number; card?: boolean; labels?: ChartLabels }) {
   const cap = (s: string) => (maxLines ? capLines(s, maxLines) : s)
   const mime = pickMime(bundle)
-  if (mime === ERROR_MIME) return <ErrorOut err={bundle[ERROR_MIME]} maxLines={maxLines} />
+  if (mime === ERROR_MIME) return <ErrorOut err={bundle[ERROR_MIME]} maxLines={maxLines} fold={card} />
   if (mime === null) {
     const keys = Object.keys(bundle ?? {}).filter((k) => !k.startsWith('_'))
     if (!keys.length) return null
@@ -433,7 +434,10 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
   )
 }
 
-function ErrorOut({ err, maxLines }: { err: any; maxLines?: number }) {
+/** An error: its name and message, then its traceback, cut at `maxLines`. On a card (`fold`) it is one line, its name
+ * and its message's first line: a run that failed while Claude goes on with the card reads as one line, and the card's
+ * details show the error whole. */
+function ErrorOut({ err, maxLines, fold = false }: { err: any; maxLines?: number; fold?: boolean }) {
   const ename = String(err?.ename ?? 'Error')
   const evalue = String(err?.evalue ?? '')
   let tb: string[] = Array.isArray(err?.traceback) ? err.traceback.map((l: unknown) => stripAnsi(asText(l))) : []
@@ -441,13 +445,15 @@ function ErrorOut({ err, maxLines }: { err: any; maxLines?: number }) {
     const body = capLines(tb.join('\n'), Math.max(1, maxLines - 1))
     tb = body ? [body] : []
   }
+  const folded = fold && tb.length > 0
+  const said = folded ? evalue.split('\n')[0] : evalue
   return (
     <pre className="outputs-text outputs-error">
       <span className="outputs-error-head">
         {ename}
-        {evalue ? `: ${evalue}` : ''}
+        {said ? `: ${said}` : ''}
       </span>
-      {tb.length ? '\n' + tb.join('\n') : ''}
+      {tb.length && !folded ? '\n' + tb.join('\n') : ''}
     </pre>
   )
 }

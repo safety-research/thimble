@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 const LINE = "This browser isn't signed in. Open the link thimble-browser printed in your terminal, or run thimble-browser again."
-const GONE = "This link was used or has expired, so this browser isn't signed in. Open the link thimble-browser printed in your terminal, or run thimble-browser again."
+const GONE = "This link was used or has expired, so this browser isn't signed in. Run thimble-browser again for a new one."
 
 let paired: boolean | 'down' = false
 // the server answers reads without the sign-in, as it does for the screenshot tool's credential
@@ -69,7 +69,7 @@ describe('the sign-in gate', () => {
   test('the lines are the contract the server and the release test share, and each starts by saying the browser is not signed in', async () => {
     const { SIGN_IN_LINE, CODE_GONE_LINE } = await gate()
     expect(SIGN_IN_LINE).toBe("This browser isn't signed in. Open the link `thimble-browser` printed in your terminal, or run `thimble-browser` again.")
-    expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Open the link `thimble-browser` printed in your terminal, or run `thimble-browser` again.")
+    expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Run `thimble-browser` again for a new one.")
   })
 
   test('a browser that is not signed in sees only the line, and the app never mounts or reads', async () => {

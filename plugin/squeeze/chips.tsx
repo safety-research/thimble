@@ -5,15 +5,17 @@
 //   props: {items: [{id, n, name, levels, level, level0, ends, word, picked}], plus: what is typed after + (null when
 //           nothing is), width, ack}
 //   in a frame in thimble's color, one row of chips, wrapped to the width: each its digit (a key, drawn as the bar draws its keys), its name, its two ends either
-//   side of its dots, each end and dot a press (`1 Length shorter ○●○○ longer`), and its level in words where it
-//   stands away from the original or is picked (` · as written`), the picked chip in thimble's color, as its frame
+//   side of its dots (`1 Length shorter ○●○○ longer`), each dot a press that sets its level and each end a press that
+//   moves the chip one level toward it, and its level in words where it stands away from the original or is picked
+//   (` · as written`), the picked chip in thimble's color, as its frame
 //   and its keys are; then `+`, which adds a chip of the person's own; then
 //   `s close`, its key drawn as the bar draws its keys, which closes the chips (not while words are typed after +,
 //   where s is a letter)
 //
 // It sends {events: [{n, press}] | [{n, key}]}: a press on a chip's name or level words (`chip-<id>`, `word-<id>`), on
-// one of its dots (`lvl-<id>-<i>`), on + (`add`), on s close (`close`); and each key while a click has given it the
-// keyboard (Claude Code keeps tab, the arrows, enter and esc in its prompt otherwise; Escape gives the keyboard back). Each post carries every
+// one of its dots (`lvl-<id>-<i>`), on one of its ends (`step-<id>-down`, `step-<id>-up`), on + (`add`), on s close
+// (`close`); and each key while a click has given it the keyboard (Claude Code keeps tab, the arrows, enter and esc in
+// its prompt otherwise; Escape gives the keyboard back). Each post carries every
 // event the hooks have not answered yet, numbered; ui.ts handles each number once and answers the last as `ack`.
 import type { ClientModule, ClientSurface } from 'claude-code'
 
@@ -51,15 +53,15 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     const tone = c.picked ? { color: keyColor } : { dimColor: true }
     const last = c.levels.length - 1
     const dots = c.levels.map((lv, i) => press(`lvl-${c.id}-${i}`, `${c.name}: ${lv}`, [E.Text({ ...tone, children: i === c.level ? '●' : '○' })]))
-    // the ends, either side of the dots: a press sets the chip at that end
+    // the ends, either side of the dots: a press moves the chip one level toward that end, as [ and ] do
     const [lo = '', hi = ''] = Array.isArray(c.ends) ? c.ends : [c.levels[0], c.levels[last]]
-    const end = (i: number, words: string, pad: string) => press(`lvl-${c.id}-${i}`, `${c.name}: ${c.levels[i]}`, [E.Text({ dimColor: true, children: pad === 'l' ? `${words} ` : ` ${words}` })])
+    const end = (way: 'down' | 'up', words: string) => press(`step-${c.id}-${way}`, `${c.name}: one level toward ${words}`, [E.Text({ dimColor: true, children: way === 'down' ? `${words} ` : ` ${words}` })])
     const away = c.level0 === undefined || c.level !== c.level0
     return E.Box({ key: `c-${c.id}`, flexDirection: 'row', marginRight: 3, children: [
       press(`chip-${c.id}`, `${c.name}: ${c.word}`, [E.Text({ color: keyColor, bold: true, children: `${c.n} ` }), E.Text({ ...tone, bold: c.picked, children: `${c.name} ` })]),
-      end(0, lo, 'l'),
+      end('down', lo),
       ...dots,
-      end(last, hi, 'r'),
+      end('up', hi),
       ...(c.picked || away ? [press(`word-${c.id}`, `${c.name}: ${c.word}`, [E.Text({ bold: c.picked, ...(c.picked ? { color: keyColor } : {}), children: ` · ${c.word}` })])] : []),
     ] })
   }

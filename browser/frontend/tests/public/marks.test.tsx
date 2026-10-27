@@ -9,6 +9,7 @@ import { bus } from '../../src/lib/bus.ts'
 import { MarksFooter } from '../../src/marks/MarksFooter.tsx'
 import type { MarkItem } from '../../src/marks/marks.ts'
 import { withMarkHrefs } from '../../src/marks/marks.ts'
+import { lineWindow } from '../../src/marks/Mark.tsx'
 import { mount, settle, unmountAll } from './mount.tsx'
 
 afterEach(() => unmountAll())
@@ -66,6 +67,64 @@ test("a place in a mark's label opens its file and the label closes at once, hov
   } finally {
     off()
   }
+})
+
+// a README paragraph on one line, of about 1,000 characters, and a quoted phrase in its middle
+const PARAGRAPH = Array.from({ length: 70 }, (_, i) => `word${i} and`).join(' ') + ' The quotes stay word for word. A node keeps what was actually said, verbatim and dated. ' + Array.from({ length: 70 }, (_, i) => `more${i} text`).join(' ')
+const QUOTED = 'what was actually said'
+/** The line as the check keeps it (engine/kernel/evidence.py window): 600 characters from 150 before the words, "…"
+ * where it is cut, and the words' place in it. */
+const kept = (line: string, words: string) => {
+  const at = line.indexOf(words)
+  const a = at - 150
+  const text = `…${line.slice(a, a + 600)}…`
+  return { text, highlight: [at - a + 1, at - a + 1 + words.length] as [number, number] }
+}
+
+test("a long cited line shows the words around the quoted ones, cut at words, and the blank lines around it are left out", async () => {
+  const ev = { kind: 'quote' as const, file: 'README.md', line: 55, lines: [{ n: 54, text: '' }, { n: 55, ...kept(PARAGRAPH, QUOTED) }, { n: 56, text: '' }] }
+  const el = await mount(<ChatMarkdown text={`[${QUOTED}](#) in the notes`} checks={[item(0, QUOTED, { evidence: ev })]} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  const rows = [...document.querySelectorAll('.mark-pop .refchip-line')]
+  expect(rows.map((r) => r.querySelector('.mark-ev-n')?.textContent)).toEqual(['55'])
+  const shown = rows[0].querySelector('.mark-ev-text')!.textContent!
+  expect(rows[0].querySelector('.cite-cell')?.textContent).toBe(QUOTED)
+  // it starts and ends at a word of the line, "…" at each cut, and the quoted words come within its first 80 characters
+  expect(shown.startsWith('…') && shown.endsWith('…')).toBe(true)
+  const inner = shown.slice(1, -1)
+  const at = PARAGRAPH.indexOf(inner)
+  expect(at).toBeGreaterThan(0)
+  expect(PARAGRAPH[at - 1]).toBe(' ')
+  expect(PARAGRAPH[at + inner.length]).toBe(' ')
+  expect(shown.indexOf(QUOTED)).toBeLessThan(80)
+  expect(shown.length).toBeLessThan(300)
+})
+
+test("a long line of a call's output shows the words around the highlighted ones, cut at words", async () => {
+  const output = ['5:**New agent: read the notes first.**', `8:d55e920 ${PARAGRAPH}`, '9:done'].join('\n')
+  const at = output.indexOf(QUOTED)
+  const checks = [item(0, QUOTED, { evidence: { kind: 'computed', code: 'git log --oneline | grep -n said', output, highlight: [[at, at + QUOTED.length]], by: 'check' } })]
+  const el = await mount(<ChatMarkdown text={`[${QUOTED}](#) in the log`} checks={checks} />)
+  await act(async () => el.querySelector<HTMLElement>('.mark-words')!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  await settle()
+  const rows = [...document.querySelectorAll('.mark-pop .refchip-lines:not(.mark-ev-code) .refchip-line')].map((r) => r.textContent!)
+  expect(rows[0]).toBe('5:**New agent: read the notes first.**')
+  expect(rows[2]).toBe('9:done')
+  const inner = rows[1].slice(1, -1)
+  expect(rows[1].startsWith('…') && rows[1].endsWith('…') && output.includes(` ${inner} `)).toBe(true)
+  expect(rows[1].indexOf(QUOTED)).toBeLessThan(80)
+  expect(document.querySelector('.mark-pop .cite-cell')?.textContent).toBe(QUOTED)
+})
+
+test('a line short enough to read whole is shown whole, and a long one cut at words on both sides', () => {
+  expect(lineWindow('rows 40, merged 12', [15, 17])).toEqual({ from: 0, to: 18, lead: false, tail: false })
+  const w = lineWindow(PARAGRAPH, [PARAGRAPH.indexOf(QUOTED), PARAGRAPH.indexOf(QUOTED) + QUOTED.length])
+  expect(w.lead && w.tail).toBe(true)
+  expect([PARAGRAPH[w.from - 1], PARAGRAPH[w.to]]).toEqual([' ', ' '])
+  // a line with nothing marked keeps its start
+  const head = lineWindow(PARAGRAPH)
+  expect([head.from, head.lead, head.tail, PARAGRAPH[head.to]]).toEqual([0, false, true, ' '])
 })
 
 test('while the reply streams its marks wait, whatever an earlier check said', async () => {

@@ -70,10 +70,10 @@ export const SWITCHES = [
   },
   {
     key: 'claimsMode', title: 'Evidence', group: 'Panes', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
-    does: 'Press c to see the conversation\'s claims and their evidence. auto: claims are found after each answer, the largest part of the call after it. on demand: press f in the pane to find them, which spends fewer tokens. off: no Evidence pane.',
+    does: 'Press w to see the conversation\'s claims and their evidence. auto: claims are found after each answer, the largest part of the call after it. on demand: press f in the pane to find them, which spends fewer tokens. off: no Evidence pane.',
     says: {
-      'auto': 'Press c to see the conversation\'s claims and their evidence. Claims are found after each answer.',
-      'on demand': 'Press c to see the conversation\'s claims and their evidence. Press f in the pane to find them.',
+      'auto': 'Press w to see the conversation\'s claims and their evidence. Claims are found after each answer.',
+      'on demand': 'Press w to see the conversation\'s claims and their evidence. Press f in the pane to find them.',
       'off': 'No Evidence pane.',
     },
   },
@@ -124,9 +124,11 @@ export const renamedTo = (key, saved) => (typeof saved === 'string' || typeof sa
  *  `DEFAULTS.at`, the first interactive session saves the new default where the old one stands and sets `defaultsAt`
  *  (term.ts); a value the person sets afterwards stays. None moves now: a value saved at an old default stays, so
  *  no one's settings change under them. `formerly`: the defaults a release had before (0.10.3: Citations auto cite,
- *  Evidence on demand), which the installer may have saved, so a value at one still counts as unset (atDefault). */
+ *  Evidence on demand), which the installer may have saved, so a value at one still counts as unset (atDefault).
+ *  `defaultsAt` starts at `none`, no version, and not empty: the installer gives each field its default, Claude Code
+ *  takes no empty value, and it says a field with no value is not set. */
 export const DEFAULTS = { at: '0.10.4', moved: {}, formerly: { citations: ['auto cite'], claimsMode: ['on demand'] } }
-export const DEFAULTS_FIELD = { defaultsAt: { type: 'string', title: 'Defaults seen (internal)', description: 'The thimble version whose defaults these settings have had.', default: '' } }
+export const DEFAULTS_FIELD = { defaultsAt: { type: 'string', title: 'Defaults seen (internal)', description: 'The thimble version whose defaults these settings have had.', default: 'none' } }
 
 /** The values the moved defaults change in `values`, by feature: {} once `defaultsAt` says they were applied. */
 export function defaultsFrom(values) {
@@ -206,8 +208,8 @@ export const atPreset = values => Object.entries(PRESET).every(([k, v]) => value
  *  is it with the plugin's options. */
 export function switchesFrom(values) {
   return key => {
-    // c on selected words, a citation the analyst asks for, is Citations' manual mode
-    if (key === 'cite') return valueIn(values, 'citations') === 'manual'
+    // c on selected words, a citation the analyst asks for, works in every mode of Citations but off
+    if (key === 'cite') return valueIn(values, 'citations') !== 'off'
     // h, heads-ups on an answer the person asks for, is Heads-ups' on demand
     if (key === 'heads') return valueIn(values, 'details') === 'on demand'
     const v = valueIn(values, ALIAS[key] ?? key)

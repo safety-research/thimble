@@ -5,15 +5,18 @@
 //   checking 12 citations       the checker forks over a reply's marks (marks/checker.ts)
 //   drawing a card              the designer fork v started, until its first card (designer/v.ts)
 //   improving the card          the designer fork after its first card, until it ends
+//   publishing an artifact      the fork p started on a card, until it ends (cards/head.ts)
 //   counting coverage           `thimble coverage`: the bar's count, the coverage pane (bar/counts.ts)
 //   labeling <name>             a --prompt label's model reads (labels/labels.ts)
 //
-//   busy($, word, work)       runs `work` as a job named by its step; its end (or failure) ends the job. tracked()
+//   busy($, word, work, since)  runs `work` as a job named by its step; its end (or failure) ends the job. tracked()
 //                             (telemetry.ts) does this for every model call, so a new call shows without code of its
-//                             own.
-//   busyWhile($, word, alive) a job that ends when `alive()` says false (checked at each tick): work that another
-//                             hook ends, such as a fork, whose turn ends in turn.complete. `alive()` may give new
-//                             words for the step instead of true, as the work goes on ("checking 3 citations").
+//                             own. `since`, as busyWhile's.
+//   busyWhile($, word, alive, since)  a job that ends when `alive()` says false (checked at each tick): work that
+//                             another hook ends, such as a fork, whose turn ends in turn.complete. `alive()` may give
+//                             new words for the step instead of true, as the work goes on ("checking 3 citations").
+//                             `since`: when the work began, for work that began before this load of the module (a
+//                             fixer that works on across a reload), so its seconds go on.
 //   busyNow($)                what the bar shows: the newest job that has run SHOW_MS or more (the step the person
 //                             most likely just started), as a turning glyph and its words, its seconds from SECS_MS
 //                             on, and the other steps that run beside it, by their words. Reading it makes the drawing
@@ -39,9 +42,11 @@ let nextId = 1
 let frame = 0
 let ticking = false
 
-async function begin($: Engine, word: string, alive?: Alive): Promise<number> {
+async function begin($: Engine, word: string, alive?: Alive, since?: number): Promise<number> {
   const id = nextId++
-  jobs.set(id, { word, t0: Number(await $.clock.now()), ...(alive ? { alive } : {}) })
+  const now = Number(await $.clock.now())
+  // a start after now is no start this clock knows: the job starts now
+  jobs.set(id, { word, t0: since != null && since <= now ? since : now, ...(alive ? { alive } : {}) })
   $.clock.after(SHOW_MS, () => { if (jobs.has(id)) tick($) })
   return id
 }
@@ -51,10 +56,11 @@ function end($: Engine, id: number): void {
   if (!jobs.size) void $.state.set(BUSY, { frame, n: 0 }).catch(() => undefined)
 }
 
-/** Run `work` as a job the bar shows while it runs. */
-export async function busy<R>($: Engine, word: string, work: () => Promise<R>): Promise<R> {
+/** Run `work` as a job the bar shows while it runs; `since`, when the work began (the session's clock, in
+ *  milliseconds), for work that began before this call. */
+export async function busy<R>($: Engine, word: string, work: () => Promise<R>, since?: number): Promise<R> {
   let id = 0
-  try { id = await begin($, word) } catch { /* the work runs unshown */ }
+  try { id = await begin($, word, undefined, since) } catch { /* the work runs unshown */ }
   try {
     return await work()
   } finally {
@@ -62,9 +68,9 @@ export async function busy<R>($: Engine, word: string, work: () => Promise<R>): 
   }
 }
 
-/** A job the bar shows until `alive()` says false. */
-export async function busyWhile($: Engine, word: string, alive: Alive): Promise<void> {
-  try { await begin($, word, alive) } catch { /* unshown */ }
+/** A job the bar shows until `alive()` says false; `since`, when it began (the session's clock, in milliseconds). */
+export async function busyWhile($: Engine, word: string, alive: Alive, since?: number): Promise<void> {
+  try { await begin($, word, alive, since) } catch { /* unshown */ }
 }
 
 /** The jobs whose work another hook ended, taken out. */

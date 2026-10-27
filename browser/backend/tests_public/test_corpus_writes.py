@@ -6,6 +6,7 @@ Both engines honor the switch: the Messages API's tools (runtime_tools.Box, its 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -135,3 +136,123 @@ def test_the_checker_s_fork_never_writes_the_corpus(space, monkeypatch):
     with pytest.raises(Stop):
         asyncio.run(runtime_api.fork_stream(CORPUS, "check", model="claude-opus-5-5", effort=None))
     assert space.corpus not in seen["write_roots"] and seen["write_roots"]
+
+
+# --------------------------------------------------------------------------- a view's own folders (runtime.agent_writes)
+
+
+def agent(sp: runtime.Space, role: str, key: str = "") -> runtime.Spec:
+    return sp.spec_of(runtime.Conv(sp, "a2", "agent", agent_id="a2", role=role, key=key))
+
+
+async def write(spec: runtime.Spec, path) -> runtime_tools.Out:
+    return await runtime_tools.call(box(spec), "Write", {"file_path": str(path), "content": "x"})
+
+
+async def test_a_view_s_builder_and_reviewer_write_its_folder_and_their_own_alone(space, tmp_path):
+    from app import dev, views  # noqa: PLC0415
+
+    folder, other = views.views_dir(CORPUS) / "posts", views.views_dir(CORPUS) / "other"
+    work = dev.view_work_dir(CORPUS, "posts")
+    other.mkdir(parents=True)
+    for role, key in (("view-builder", "view:posts"), ("view-reviewer", "review:posts")):
+        spec = agent(space, role, key)
+        assert spec.write_roots[:2] == [folder, work] and len(spec.write_roots) == 3, role
+        for p in (folder / "view.json", work / "draft.py"):
+            got = await write(spec, p)
+            assert not got.is_error and p.read_text() == "x", (role, got.text)
+        # another view, the extension's own files, the views' state, a way out by .. or by a link: refused
+        (folder / "out").symlink_to(other)
+        for p in (other / "view.json", views.local_dir(CORPUS) / "extension.json", space.ws / "views" / "x.json",
+                  space.ws / "registry" / "x", folder / ".." / "other" / "view.json", folder / "out" / "view.json",
+                  space.ws / "writers" / "x.md", space.corpus / "x.txt"):
+            got = await write(spec, p)
+            assert got.is_error and not p.exists(), (role, p)
+        (folder / "out").unlink()
+        # Claude Code's settings: Edit and the sandbox's writes allowed in the two folders, extension/ no longer denied
+        # (a deny would win over the allow), the other protected folders still denied
+        cc = runtime_cc.settings(spec, True, tmp_path)
+        assert f"Edit(/{folder}/**)" in cc["permissions"]["allow"] and f"Edit(/{work}/**)" in cc["permissions"]["allow"]
+        assert not any("/extension" in r for r in cc["permissions"]["deny"])
+        assert f"Edit(/{space.ws / 'registry'}/**)" in cc["permissions"]["deny"]
+        fs = cc["sandbox"]["filesystem"]
+        assert str(folder) in fs["allowWrite"] and str(views.views_dir(CORPUS)) not in fs["allowWrite"]
+        assert str(views.local_dir(CORPUS)) not in fs["denyWrite"] and str(space.ws / "trusted") in fs["denyWrite"]
+
+
+def test_a_view_s_builder_s_bash_rules_deny_no_folder_that_holds_one_it_writes(space):
+    """srt's rules for the Bash of a view's builder on the Messages API (runtime_tools._rules): no denied folder holds a
+    folder it writes, since on macOS a denied folder wins over an allowed one inside it, as runtime.spec_of leaves such a
+    folder out of no_write; the other protected folders stay denied, and every other agent keeps extension/ denied."""
+    from app import dev, views  # noqa: PLC0415
+
+    fs = runtime_tools._rules(box(agent(space, "view-builder", "view:posts")))["filesystem"]
+    folder, work = views.views_dir(CORPUS) / "posts", dev.view_work_dir(CORPUS, "posts")
+    assert str(folder) in fs["allowWrite"] and str(work) in fs["allowWrite"]
+    assert not [(d, a) for d in fs["denyWrite"] for a in fs["allowWrite"] if d == a or Path(d) in Path(a).parents]
+    assert str(space.ws / "trusted") in fs["denyWrite"] and str(space.ws / "registry") in fs["denyWrite"]
+    writer = runtime_tools._rules(box(agent(space, "writer", "writer:report")))["filesystem"]
+    assert str(views.local_dir(CORPUS)) in writer["denyWrite"]
+
+
+async def test_a_view_s_builder_s_bash_writes_its_folders_alone_on_the_api_engine(space):
+    """In the sandbox, the Bash of a view's builder on the Messages API writes its view's folder and its own work
+    folder, and neither another view, the extension's manifest nor the folder the hooks trust."""
+    if why := runtime_tools.sandbox_reason():
+        pytest.skip(why)
+    from app import dev, views  # noqa: PLC0415
+
+    views.ensure_local(space.ws)  # the manifest is there before any build, as the server makes it
+    other = views.views_dir(CORPUS) / "other"
+    other.mkdir(parents=True)
+    (space.ws / "trusted").mkdir(exist_ok=True)
+    spec = agent(space, "view-builder", "view:posts")
+    for p, want in ((views.views_dir(CORPUS) / "posts" / "view.json", "written"),
+                    (dev.view_work_dir(CORPUS, "posts") / "draft.py", "written"), (other / "view.json", "refused"),
+                    (views.local_dir(CORPUS) / "extension.json", "refused"), (space.ws / "trusted" / "x", "refused")):
+        cmd = f"(echo x > {p}) 2>/dev/null && echo written || echo refused"
+        out = await runtime_tools.call(box(spec), "Bash", {"command": cmd})
+        assert out.text.strip() == want, (p, out.text)
+        assert want == "refused" or p.read_text() == "x\n"
+    # a new file beside its folders, in the workspace or the extension, never reaches the disk (on Linux the folders on
+    # the way to them are the sandbox's empty stand-ins)
+    for p in (space.ws / "new.txt", views.local_dir(CORPUS) / "new.json", views.views_dir(CORPUS) / "new" / "view.json"):
+        await runtime_tools.call(box(spec), "Bash", {"command": f"mkdir -p {p.parent}; echo x > {p}"})
+        assert not p.exists(), p
+
+
+async def test_no_other_agent_writes_a_view_s_folder(space, tmp_path):
+    from app import views  # noqa: PLC0415
+
+    folder = views.views_dir(CORPUS) / "posts"
+    folder.mkdir(parents=True)
+    others = {"writer": agent(space, "writer", "writer:report"), "main": space.spec_of(space.main),
+              # a view's role whose start names no view, another view's kind or a slug that is no slug
+              "builder without a key": agent(space, "view-builder"),
+              "builder with a review's key": agent(space, "view-builder", "review:posts"),
+              "reviewer with a build's key": agent(space, "view-reviewer", "view:posts"),
+              "builder with a path for a slug": agent(space, "view-builder", "view:../../trusted")}
+    for who, spec in others.items():
+        assert views.local_dir(CORPUS) in spec.no_write, who
+        assert not any(w == folder or folder in w.parents or w in folder.parents for w in spec.write_roots), who
+        got = await write(spec, folder / "view.json")
+        assert got.is_error and not (folder / "view.json").exists(), who
+        deny = runtime_cc.settings(spec, True, tmp_path)["permissions"]["deny"]
+        assert f"Edit(/{views.local_dir(CORPUS)}/**)" in deny, who
+    for who in ("builder without a key", "builder with a review's key", "reviewer with a build's key",
+                "builder with a path for a slug"):
+        assert len(others[who].write_roots) == 1, who  # its temp folder alone
+
+
+async def test_an_agent_takes_the_key_of_the_start_the_server_recorded(space, monkeypatch):
+    from app import subagents  # noqa: PLC0415
+
+    monkeypatch.setattr(runtime, "_spawn_task", lambda coro, name: coro.close())
+    rid = subagents.new_request(CORPUS, "start", "view:posts", {"prompt": "p"}, {}, subagents.CLICK, role="view-builder")
+    got = runtime._spawn_agent(space, {"role": "view-builder", "request": rid})
+    assert space.convs[got["agentId"]].key == "view:posts"
+    # another role's request, or none: no key
+    got = runtime._spawn_agent(space, {"role": "view-reviewer", "request": rid})
+    assert space.convs[got["agentId"]].key == ""
+    got = runtime._spawn_agent(space, {"role": "view-builder"})
+    assert space.convs[got["agentId"]].key == ""

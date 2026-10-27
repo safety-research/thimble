@@ -12,9 +12,12 @@
 // card runner in the sandbox and waits for its answer. Setups that run at the same time (two sessions start, a card
 // is called while the session start installs) install once: the others wait for that install. It prints one line, or
 // with --json one JSON object:
-//   {ok, node, platform, version, srt, why, fix, ms}
-// `node` is this Node's binary (the runner's), `srt` the folder srt is in, `why` what is wrong and `fix` the one command
-// or step that fixes it, `ms` how long the probe's runner took to answer. Exits 0 when the sandbox works, else 1.
+//   {ok, node, nodeVersion, grants, platform, version, srt, why, fix, ms}
+// `node` is this Node's binary (the runner's), `nodeVersion` its version, `grants` whether it takes each grant of
+// Node's permission model that the runner needs beyond its files (argv.mjs's GRANTS, such as {'--allow-net': true}),
+// as its list of the flags it allows in NODE_OPTIONS says (process.allowedNodeEnvironmentFlags, which holds each
+// --allow-* flag it takes), `srt` the folder srt is in, `why` what is wrong and `fix` the one command or step that
+// fixes it, `ms` how long the probe's runner took to answer. Exits 0 when the sandbox works, else 1.
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -22,11 +25,14 @@ import os from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { SOCKET_MAX, runnerArgv } from '../cards/argv.mjs'
+import { GRANTS, SAID_MAX, SOCKET_MAX, endOf, runnerArgv, saidOf } from '../cards/argv.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN = dirname(HERE)
+// the check is srt's own floor (package.json's engines), since the browser workbench, whose Node may be that old,
+// installs srt with this setup too; its fix names the terminal plugin's minimum (scripts/install.sh checks it)
 const NODE_MIN = [22, 12]
+const PLUGIN_NODE_MIN = '22.18'
 const PROBE_MS = 15000
 
 const args = process.argv.slice(2)
@@ -37,7 +43,10 @@ const pin = JSON.parse(fs.readFileSync(join(HERE, 'package.json'), 'utf8')).depe
 const lock = fs.readFileSync(join(HERE, 'package-lock.json'), 'utf8')
 const srt = join(home, 'srt', pin)
 const platform = process.platform
-const out = { ok: false, node: process.execPath, platform, version: pin, srt, why: '', fix: '' }
+const grants = Object.fromEntries(GRANTS.map(g => [g, process.allowedNodeEnvironmentFlags.has(g)]))
+// this Node, as the lines that say why name it
+const thisNode = `Node ${process.versions.node} (${process.execPath})`
+const out = { ok: false, node: process.execPath, nodeVersion: process.versions.node, grants, platform, version: pin, srt, why: '', fix: '' }
 
 /** The first of these commands on PATH, or null. */
 function which(cmd) {
@@ -146,7 +155,9 @@ async function needs() {
   const { SandboxManager } = await import(pathToFileURL(join(srt, 'node_modules', '@anthropic-ai', 'sandbox-runtime', 'dist', 'index.js')).href)
   const { errors } = SandboxManager.checkDependencies()
   if (!errors.length) return null
-  const packages = platform === 'linux' ? [['bwrap', 'bubblewrap'], ['socat', 'socat'], ['rg', 'ripgrep']].filter(([c]) => !which(c)).map(([, p]) => p) : []
+  // srt looks for bwrap, socat and rg with the `which` command, which a small Linux (Arch's base image) may lack: srt
+  // then says all three are missing, though they may be there
+  const packages = platform === 'linux' ? [['bwrap', 'bubblewrap'], ['socat', 'socat'], ['rg', 'ripgrep'], ['which', 'which']].filter(([c]) => !which(c)).map(([, p]) => p) : []
   return { why: `this machine lacks what the sandbox needs: ${errors.join('; ')}`, fix: packages.length ? `Install ${packages.length > 1 ? 'them' : 'it'}: ${installCommand(packages)}` : '' }
 }
 
@@ -167,13 +178,13 @@ async function probe() {
   const [cards, run] = [join(dir, 'cards'), join(dir, 'run')]
   for (const d of [cards, run]) fs.mkdirSync(d, { mode: 0o700 })
   const sock = join(run, 'cards.sock')
-  const argv = runnerArgv({ plugin: PLUGIN, node: process.execPath, srt, cards, run, sock, platform, home: os.homedir(), thimbleHome: home, path: process.env.PATH || '/usr/bin:/bin' })
+  const argv = runnerArgv({ plugin: PLUGIN, node: process.execPath, grants, srt, cards, run, sock, platform, home: os.homedir(), thimbleHome: home, path: process.env.PATH || '/usr/bin:/bin' })
   const t0 = Date.now()
   let said = ''
-  let ended = false
+  let ended = null
   const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'ignore', 'pipe'] })
-  child.stderr.on('data', d => { said = `${said}${d}`.slice(-600) })
-  child.on('exit', () => { ended = true })
+  child.stderr.on('data', d => { said = `${said}${d}`.slice(-SAID_MAX) })
+  child.on('exit', (code, signal) => { ended = { code, signal } })
   const ping = () => new Promise(resolve => {
     const q = http.request({ socketPath: sock, path: '/ping', method: 'POST' }, res => { res.resume(); res.on('end', () => resolve(res.statusCode === 200)) })
     q.on('error', () => resolve(false))
@@ -185,8 +196,11 @@ async function probe() {
       await new Promise(r => setTimeout(r, 20))
     }
     await new Promise(r => setTimeout(r, 50))
-    const why = said.trim().split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 300)
-    return { error: ended ? `the card runner did not start in the sandbox${why ? ` (${why})` : ''}` : `the card runner did not answer in ${PROBE_MS / 1000} s`, said }
+    if (!ended) return { error: `the card runner did not answer in ${PROBE_MS / 1000} s`, said }
+    // how it ended and on which Node: what says why when it said nothing, as when Node 25 refused its socket
+    const why = saidOf(said)
+    const how = `ended with ${endOf(ended, os.constants.signals)} on ${thisNode}`
+    return { error: why ? `the card runner did not start in the sandbox: it ${how}, and said: ${why}` : `the card runner ${how} before it opened its socket, and said nothing`, said }
   } finally {
     child.kill()
     fs.rmSync(dir, { recursive: true, force: true })
@@ -200,7 +214,7 @@ function read(path) {
 async function main() {
   const [major, minor] = process.versions.node.split('.').map(Number)
   if (major < NODE_MIN[0] || (major === NODE_MIN[0] && minor < NODE_MIN[1])) {
-    return { why: `Node ${process.versions.node} is too old for the sandbox runtime`, fix: `Install Node ${NODE_MIN.join('.')} or later.` }
+    return { why: `Node ${process.versions.node} is too old for the sandbox runtime`, fix: `Install Node ${PLUGIN_NODE_MIN} or later.` }
   }
   if (!installed()) {
     const failed = await locked(() => (installed() ? null : install()))

@@ -188,6 +188,16 @@ def test_a_long_reason_keeps_its_first_sentence_and_its_fix():
     assert notices.reason("Not logged in", server=True)[0].endswith("run `thimble server restart`")
 
 
+def test_a_long_reason_cut_short_ends_on_a_whole_sentence():
+    """A failure's text cut short mid-word has no last sentence to show, so its first sentence stands alone, never the
+    cut end in the place of the fix."""
+    first = "I couldn't install Posts: I'm not allowed to write to the view's folder (extension/views/posts)."
+    cut = " ".join([first, *["Every write there was refused, by the file tool and by the shell alike."] * 6, "To fini"])
+    assert notices.reason(cut)[0] == first.rstrip(".")
+    said = f"{cut}sh, copy views-work/posts into extension/views/posts (then Retry)."
+    assert notices.reason(said)[0].endswith("… To finish, copy views-work/posts into extension/views/posts (then Retry)")
+
+
 def test_an_agent_is_named_by_its_role_and_its_run_s_title():
     assert notices.who("orientation", "Orientation") == ("Orientation", "The orientation")
     assert notices.who("view-builder", "view: Agent Network") == ("View build: Agent Network",

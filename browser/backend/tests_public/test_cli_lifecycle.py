@@ -1,6 +1,7 @@
 """What `stop` ends under the supervisor (app.cli): the workspaces' kernels by their records, and never a recorded pid
 whose command line is no kernel; the server first, with time to stop its own agents; and the server stops when the
-terminal that holds thimble-browser closes. The stand-in kernels and servers are Python processes that sleep."""
+terminal that holds thimble-browser closes. Ctrl-C says at once that the server stops, and before the terminal is held
+it is one line. The stand-in kernels and servers are Python processes that sleep."""
 from __future__ import annotations
 
 import json
@@ -148,3 +149,51 @@ def test_closing_the_terminal_stops_the_server_as_ctrl_c_does(monkeypatch, capsy
     cli.hold_until_quit(sleep)
     assert stops == [1] and "server: pid 1 stopped" in capsys.readouterr().out
     assert signal.getsignal(sig) is before
+
+
+def test_ctrl_c_says_at_once_that_the_server_stops(monkeypatch, capsys):
+    """Ctrl-C while thimble-browser holds the terminal: the line that says the server stops shows before the stop,
+    which takes some seconds, so the first Ctrl-C is seen to work."""
+    seen: list[str] = []
+
+    def stop() -> list[str]:
+        seen.append(capsys.readouterr().out)
+        return ["server: pid 1 stopped"]
+
+    def sleep(_s: float) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "stop", stop)
+    cli.hold_until_quit(sleep)
+    assert seen == [f"\n{cli.STOPPING_LINE}\n"] and capsys.readouterr().out == "server: pid 1 stopped\n"
+
+
+def test_ctrl_c_before_the_terminal_is_held_is_one_line_and_stops_only_the_server_this_run_started(monkeypatch, capsys,
+                                                                                                    tmp_path):
+    """Ctrl-C while thimble-browser starts (its imports, the server's start): one line in place of a traceback, and 130.
+    The server this run started is stopped, since no terminal holds it any more; one that ran before it is left alone,
+    and no other command stops a server."""
+    stops: list[int] = []
+    monkeypatch.setattr(cli, "stop", lambda: stops.append(1) or ["server: pid 41 stopped"])
+    monkeypatch.setattr(cli, "pid_alive", lambda pid: pid == 41)
+
+    def interrupted(_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli, "cmd_browser", interrupted)
+    monkeypatch.setattr(cli, "cmd_list", interrupted)
+    before = signal.getsignal(signal.SIGINT)
+    cli.LAST_START.clear()
+    try:
+        assert cli.main(["browser", "--cwd", str(tmp_path)]) == 130
+        out = capsys.readouterr()
+        assert out.out.splitlines() == ["", "thimble browser: interrupted"] and out.err == "" and stops == []
+        cli.LAST_START.update(pid=41, port=8300)
+        assert cli.main(["list"]) == 130
+        assert capsys.readouterr().out.splitlines() == ["", "thimble list: interrupted"] and stops == []
+        assert cli.main(["browser", "--cwd", str(tmp_path)]) == 130
+        assert capsys.readouterr().out.splitlines() == ["", "thimble browser: interrupted", cli.STOPPING_LINE,
+                                                        "server: pid 41 stopped"]
+        assert stops == [1] and signal.getsignal(signal.SIGINT) is before
+    finally:
+        cli.LAST_START.clear()

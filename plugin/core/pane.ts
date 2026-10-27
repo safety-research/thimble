@@ -5,7 +5,7 @@
 //   labels     ../labels/pane.tsx       the folder's labels and their records
 //   coverage   ../panes/coverage.tsx    what Claude read of the folder
 //   settings   ../panes/settings.tsx    the three switches
-//   claims     ../claims/seam.ts        the conversation's claims (c)
+//   claims     ../claims/seam.ts        the conversation's claims (w)
 //   threads    ../threads/seam.ts       the side threads (t)
 //   thread     ../threads/seam.ts       one side thread: what it is about, its turns, its input
 //
@@ -16,9 +16,10 @@
 // pane is open goes on top of it (a citation opened from a side answer stands over that answer); the row at the top
 // names what esc does there, as the bar names a key (`esc back to claim`, on the trail's first pane `esc close`), a click
 // that does the same: Claude Code closes a pane on esc (and on its close mark), and while the trail holds a pane the
-// ui.close hook goes back to it instead.
+// ui.close hook goes back to it instead. The way back passes over a pane the trail can no longer show (a side thread
+// the conversation no longer holds), and a pane Claude Code does not place when the pane goes back to it closes.
 //
-// Docked beside the conversation, the pane keeps its input bar and its key row at its bottom: the drawing above them
+// Docked beside the conversation, the pane keeps its top row, and its input bar and key row at its bottom: the drawing
 // gets the rows left over (a pane that lays itself out reads them as its `bodyRows`), the side thread's conversation
 // follows it, and when the two are taller than that room they scroll in it with the wheel and ↑ ↓ (the ui.scroll
 // hook), the end shown when the conversation grows. In a pane whose drawing fits, ↑ and ↓ press the
@@ -31,12 +32,13 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { failCleared, failLineNow } from '../bar/notice'
+import { fullscreenNow } from '../cards/draw'
 import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
 import { drawSettings, settingsFocus } from '../panes/settings'
-import { drawThreadsPane, threadPaneParts, threadUnderSplit } from '../threads/seam'
+import { drawThreadsPane, threadKnown, threadPaneParts, threadUnderSplit } from '../threads/seam'
 import { quiet } from './askcell.js'
 import { dropSelection } from './selection'
 import { cut } from './text.js'
@@ -54,11 +56,32 @@ const NOW = { plugin: 'thimble', key: 'pane' } as const
 export type PaneEntry = { kind: string; args: unknown; title: string; rows?: number }
 export type PaneNow = { kind: string; args: unknown; title?: string; escape?: boolean; rows?: number; trail?: PaneEntry[] }
 
+/** The rows a kind asks for, as the claims and the labels ask for theirs. Claude Code draws a pane inline after a click
+ *  in a narrow window, and always in its default layout: as tall as the pane asks, within its bounds (a third of the
+ *  window in the fullscreen layout, all but a few rows in the default one); a pane that asks for none gets a third.
+ *  Docked beside the conversation, a pane takes the window's height whatever it asks. */
+const ROWS: Record<string, number> = { settings: 40, coverage: 28, evidence: 28 }
+
+/** Why Claude Code did not place the last open, as it said: `nowhere` when the width is not why (no surface here places
+ *  panes). */
+let unplaced: { nowhere?: boolean } = {}
+
+/** What the failure line says when a key at the prompt (`key`) could not open the side pane: that it needs a wider
+ *  terminal, and the bar's item a click on which opens the pane here at any width (its `words`, and `where` they stand
+ *  when not on the bar). Claude Code's default layout sends no click and draws a pane only above the prompt
+ *  (cards/draw.ts fullscreenNow): there it names the command that turns on the fullscreen layout. Where no surface here
+ *  places panes, only that it did not open. */
+export function narrowNotice(key: string, words: string, where = ''): string {
+  if (unplaced.nowhere) return 'Claude Code did not open the side pane here.'
+  if (fullscreenNow() === false) return `${key} opens the side pane in Claude Code's fullscreen layout: type /tui fullscreen. In this layout it opens above the prompt in a wider window.`
+  return `${key} needs a wider terminal: widen the window to show the side pane, or click “${words}”${where ? ` ${where}` : ''}.`
+}
+
 /** `focus`: the person opened it (a key, a click, a command), so it takes the keyboard and Esc closes it. Answers
  *  whether the pane is on screen; once it is, the notice that said the side pane could not open (`pane:…`) goes.
  *  Claude Code places a pane at any width only when the person's own command, prompt or click opened it; a key at the
  *  prompt is none of these, so below 144 columns (110 once the person opened the pane before) the pane would wait
- *  unseen until the terminal grows. Such a pane is closed, and the caller says why. */
+ *  unseen until the terminal grows. Such a pane is closed, and the caller says why (narrowNotice). */
 /** Claude Code sets `closeOnEscape` and `rows` anew on each open, so an open that only redraws the pane with other
  *  arguments (a key in it: j, v, a page) keeps those the open pane has; else Esc would stop closing it after one key.
  *  The pane shown before goes on the trail, or this one takes its place (trail.mjs nextTrail); `under` goes under it. */
@@ -66,7 +89,7 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   const was = await paneNow($)
   const open = was ? await isOpen($) : false
   const escape = Boolean(o.focus || (open && was?.escape))
-  const rows = o.rows ?? (open && was?.kind === kind ? was?.rows : undefined)
+  const rows = o.rows ?? (open && was?.kind === kind ? was?.rows : undefined) ?? ROWS[kind]
   const trail = nextTrail(was, open, kind, args) as PaneEntry[]
   // `under`: the pane esc goes back to, when the trail does not already end on it (a label opened from under an answer
   // goes back to all the labels)
@@ -74,6 +97,8 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   if (o.under && !(last?.kind === o.under.kind && JSON.stringify(last.args ?? null) === JSON.stringify(o.under.args ?? null))) trail.push(o.under)
   await $.state.set(NOW, { kind, args, title, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}), ...(trail.length ? { trail } : {}) })
   const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
+  const why = String((r as { reason?: string }).reason ?? '')
+  unplaced = { nowhere: !!why && !/columns/.test(why) }
   if (r.isPlaced) {
     // the line that said the side pane could not open (a narrow terminal: `pane:<kind>`) goes once it is open, on
     // whatever it shows
@@ -85,22 +110,37 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   return false
 }
 
-/** Back down the trail: to its pane `to` (an index into it; the last one when left out), the panes over it gone. False
- *  when the trail is empty (the pane is on its first pane). The pane takes the keyboard: the person moves in it. */
+/** Back down the trail: to its pane `to` (an index into it; the last one when left out), the panes over it gone, and a
+ *  pane it can no longer show passed over. False when it holds none it can show (the pane is on its first pane). The
+ *  pane takes the keyboard: the person moves in it. */
 export async function paneBack($: Engine, to?: number, o: { later?: boolean } = {}): Promise<boolean> {
   const now = await paneNow($)
   const trail = now?.trail ?? []
   if (!now || !trail.length) return false
-  const i = to == null ? trail.length - 1 : Math.max(0, Math.min(trail.length - 1, to))
+  let i = to == null ? trail.length - 1 : Math.max(0, Math.min(trail.length - 1, to))
+  while (i >= 0 && !(await canShow($, trail[i]!))) i--
+  if (i < 0) return false
   const e = trail[i]!
   const rest = trail.slice(0, i)
   await $.state.set(NOW, { kind: e.kind, args: e.args, title: e.title, escape: true, ...(e.rows ? { rows: e.rows } : {}), ...(rest.length ? { trail: rest } : {}) })
-  const open = () => $.ui.open({ id: PANE_ID, title: e.title, focus: true, closeOnEscape: true, ...(e.rows ? { rows: e.rows } : {}) })
+  const open = async () => {
+    const r = await $.ui.open({ id: PANE_ID, title: e.title, focus: true, closeOnEscape: true, ...(e.rows ? { rows: e.rows } : {}) })
+    // not placed (the close mark closed the pane, and an open of the plugin's own waits unseen in a narrow terminal):
+    // closed, as openPane closes one, so no unseen pane stays open for the next pane to stand on
+    if (!r.isPlaced) await closePane($)
+  }
   // inside Claude Code's close (esc) the pane is closing, so the open that retitles it and gives it the keyboard back
   // waits until that close was refused
   if (o.later) $.clock.after(0, () => { void open().catch(() => undefined) })
   else await open()
   return true
+}
+
+/** Whether the pane can show a pane of its trail again: not a side thread the conversation no longer holds (one opened
+ *  and never asked, which a reload of the plugin forgets). Yes when it cannot say. */
+async function canShow($: Engine, e: PaneEntry): Promise<boolean> {
+  if (e.kind !== 'thread') return true
+  return threadKnown($, String((e.args as Any)?.key ?? '')).catch(() => true)
 }
 
 /** Whether thimble's pane is open (the person may have closed it); open when Claude Code cannot say. */
@@ -116,6 +156,12 @@ export async function closePane($: Engine): Promise<void> {
 
 export async function paneNow($: Engine): Promise<PaneNow | null> {
   return ((await $.state.get(NOW)).value ?? null) as PaneNow | null
+}
+
+/** Whether the side pane shows this kind now: the key that opens it (r, l, w) closes it then. */
+export async function paneShows($: Engine, kind: string): Promise<boolean> {
+  if ((await paneNow($))?.kind !== kind) return false
+  return (await $.ui.panes()).some(p => p.id === PANE_ID)
 }
 
 /** A /clear or a /resume (hooks/turnover.ts): a pane on the earlier conversation's records closes (thimble's settings
@@ -194,7 +240,7 @@ function topRow($: Engine, els: Any, now: PaneNow, W: number): Any[] {
   const btn = Button({ key: under ? 'pane-back' : 'pane-close', plain: true, label: under ? 'back' : 'close the pane', hover: quiet(under ? 'pane-back' : 'pane-close'), onPress: () => (under ? paneBack($) : closePane($)), children: [
     ...key, Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: words }),
   ] })
-  return [Box({ key: 'pane-top', flexDirection: 'row', justifyContent: name ? 'space-between' : 'flex-end', width: W, children: [
+  return [Box({ key: 'pane-top', flexDirection: 'row', flexShrink: 0, justifyContent: name ? 'space-between' : 'flex-end', width: W, children: [
     ...(name ? [Text({ key: 'pane-name', bold: true, children: name })] : []),
     Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 1, children: [btn] }),
   ] })]
@@ -216,7 +262,10 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const kels = noting(els, keys)
     own = null
     arrows = null
-    const top = topRow($, els, now, W)
+    // the top row names the pane esc goes back to: one the trail can still show, as paneBack finds it
+    const live: PaneEntry[] = []
+    for (const x of now.trail ?? []) if (await canShow($, x)) live.push(x)
+    const top = topRow($, els, { ...now, trail: live }, W)
     const T = top.length ? treeRows(top, W) : 0
     // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
     // and input bar (`under`, kept at the bottom)
@@ -254,7 +303,12 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     scrolled.by = Math.max(0, Math.min(over, scrolled.by))
     laid = { id, pinned: true, over, keys, own, arrows }
     const left = over - scrolled.by
-    const cue = over > 0 ? els.Text({ key: 'pane-more', dimColor: true, wrap: 'truncate-end', children: left > 0 ? `↓ ${left} more row${left === 1 ? '' : 's'} · scroll or ↓` : `↑ ${over} row${over === 1 ? '' : 's'} above · scroll or ↑` }) : null
+    // in the frame only the body gives way: Claude Code's Box and Text shrink unless told otherwise, so beside a drawing
+    // far taller than the frame the top row and this cue would shrink to nothing (a Box holds the cue: a Text takes no
+    // flexShrink of its own)
+    const cue = over > 0 ? els.Box({ key: 'pane-more', flexShrink: 0, children: [
+      els.Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: left > 0 ? `↓ ${left} more row${left === 1 ? '' : 's'} · scroll or ↓` : `↑ ${over} row${over === 1 ? '' : 's'} above · scroll or ↑` }),
+    ] }) : null
     const body = els.Box({ key: 'pane-body', flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden', children: [
       els.Box({ key: 'pane-body-in', flexDirection: 'column', flexShrink: 0, ...(scrolled.by ? { position: 'relative', top: -scrolled.by } : {}), children: [drawn, ...conv] }),
     ] })

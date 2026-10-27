@@ -46,7 +46,7 @@ import { fullscreenNow } from '../cards/draw'
 import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
-import { answerSelection, selectionUsed, usedBy } from '../core/selection'
+import { answerSelection, selectionKey, selectionNow, selectionUsed, usedBy } from '../core/selection'
 import { themeNow } from '../core/theme'
 import { tellOpened } from '../core/engaged'
 import { commentsText } from '../core/engaged.mjs'
@@ -54,6 +54,7 @@ import { tellAtNextPrompt } from '../core/tell'
 import { readKept, writeKept } from '../core/env'
 import { sessionKey } from '../hooks/conversation'
 import type { Take } from '../hooks/keys'
+import { citeShown } from '../marks/cite'
 import { withoutMarks } from '../marks/message.js'
 import { headsUpsNow, type Look } from '../observer/observer'
 import { featureOn } from '../settings/features.mjs'
@@ -470,8 +471,10 @@ let watching = 0
 
 /** The bar names `e explain` and `c cite` only while words are selected, and Claude Code tells no hook when the
  *  person selects: so while its fullscreen layout is drawn (the only one that reports a selection), the selection is
- *  read every SELECTION_MS and the bar drawn again when one starts or ends. One watch per load of the plugin; a watch of an
- *  earlier load stops at its next read. */
+ *  read every SELECTION_MS and the bar drawn again when one starts or ends, or other words are selected. c's key reads
+ *  whether words wait as marks/cite.ts last worked it out for the selection, so a new selection is worked out here
+ *  too, before the bar draws again (citeShown). One watch per load of the plugin; a watch of an earlier load stops at
+ *  its next read. */
 function watchSelection($: Engine): void {
   const mine = ++watching
   let had = ''
@@ -479,8 +482,12 @@ function watchSelection($: Engine): void {
     if (mine !== watching) return
     try {
       if (fullscreenNow() === true && (featureOn('explain') || featureOn('cite'))) {
-        const has = `${await selectionWaits($)} ${await wordsSelected($)}`
-        if (has !== had) { had = has; $.ui.invalidate('ui.render') }
+        const has = `${await selectionWaits($)} ${await wordsSelected($)} ${selectionKey(await selectionNow($))}`
+        if (has !== had) {
+          had = has
+          await citeShown($).catch(() => false)
+          $.ui.invalidate('ui.render')
+        }
       }
     } catch {
       return

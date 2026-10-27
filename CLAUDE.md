@@ -6,13 +6,16 @@ This repository holds two products: the terminal plugin for Claude Code (`plugin
 ## Installing thimble for a user
 
 When the user asks you to install thimble (for example "install thimble from
-https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) has the details and the fixes.
+https://github.com/safety-research/thimble"), do this. The install is done when what they chose works for them: the
+plugin in the next `claude` they start in a terminal, and the workbench when they run `thimble-browser`.
+[INSTALL.md](INSTALL.md) has the details and the fixes.
 
-1. Ask first, with your question tool (AskUserQuestion) when you have it, which they want:
-   - **The terminal plugin alone**: in their Claude Code sessions, Claude cites its claims, a second Claude checks
-     them, and Claude draws cards of the data. It needs Node.js and Python, and no other access.
-   - **The browser workbench too**: the same work in a web page on this machine. It takes about 1 GB of disk and needs
+1. Ask first, with your question tool (AskUserQuestion) when you have it, which they want, in this order:
+   - **The terminal plugin and the browser workbench** (the default; mark it recommended): in their Claude Code
+     sessions, Claude cites its claims, a second Claude checks them, and Claude draws cards of the data; the browser
+     workbench does the same work in a web page on this machine. The workbench takes about 1 GB of disk and needs
      access to the Claude API: an API key, Workload Identity Federation, or their Claude Code sign-in.
+   - **The terminal plugin alone**: only the Claude Code part. It needs Node.js and Python, and no other access.
 2. thimble 0.9 is here when `~/.local/bin/thimble` or `~/.thimble/app` exists, or when `scripts/install.sh` (step 3)
    stops with what it found and the commands that remove it. 0.10 does not load while 0.9's plugin is installed.
    Before you remove anything, tell the user plainly that removing 0.9 deletes its workspaces (cards, notebooks,
@@ -22,11 +25,19 @@ https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) 
    --yes`, since you cannot answer its question; when it fails, the commands it lists after it). Never pass
    `--remove-0.9`: it needs a terminal. When this session had 0.9 loaded, each tool call then reports "Plugin
    directory does not exist": tell the user to type `/reload-plugins`, and go on.
-3. Clone the repository (or use the local folder the user names) and run `scripts/install.sh` in it, with
-   `--no-browser` for the plugin alone, and `--no-setup` (step 4 asks instead). Add `--local` when the source is a
-   local folder, so the plugin comes from it. The script checks what is missing first, one line each, and installs
-   nothing until all of it is there. Tell the user what is missing and the command that fixes it, run that command
-   only when the user agrees, then run the script again.
+3. Clone the repository into a folder of its own, such as `~/thimble`, or use the local folder the user names; the
+   folder this session runs in may be their own project. The checkout stays where it is: the workbench builds about
+   1 GB in it, and `thimble-browser` runs from it. Run `scripts/install.sh` in the checkout, with `--no-browser` for
+   the plugin alone, and `--no-setup` (step 4 asks instead). Add `--local` when the source is a local folder, so the
+   plugin comes from it. The script prints a few dozen lines, one or two per step, and with the workbench it runs for
+   a few minutes (uv sync, npm ci and a build of the page). It checks what is missing first,
+   one line each, and installs nothing until all of it is there. Tell the user what is missing and the command that
+   fixes it, run that command only when the user agrees, then run the script again.
+
+   The script runs in your shell, and its checks pass or fail there. The plugin runs in the `claude` that the user
+   starts from a terminal, on the `node` that terminal finds first: a Node that only your own command loads
+   (`nvm use`, fnm, asdf) is not that one. After a change to Node, check what a new terminal finds:
+   `$SHELL -ic 'command -v node; node --version'`.
 4. When the workbench was installed, set up how it reaches Claude before you reply. Ask with your question tool:
    their Claude Code sign-in, an Anthropic API key, or Workload Identity Federation (WIF). Then:
    - **Claude Code sign-in**: show this text and get a yes: "This uses your Claude subscription through Claude Code
@@ -43,18 +54,26 @@ https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) 
    Each command ends with a check that Claude answers. When the check fails, tell the user what failed and the next
    step, and run the command again after the fix. Say that the page asks at its first start only when the user
    chooses to skip this step.
-5. End with a short reply on how to use what was installed:
+5. While something the user chose does not work yet, the install is not done: the script's notes, its sandbox line
+   and the checks of steps 3 and 4 say what. Fix it, with the user's yes, or give them the step that only they can
+   take. Once it works, end with a short reply on how to use what was installed:
    - The plugin: open `claude` in a folder of data files. Claude cites each claim, and a second Claude checks it
      against the files; a click on the underlined words opens the evidence. The line above the prompt shows the keys:
-     `v` card, `s` squeeze, `c` claims, `r` coverage. A click on `thimble` in that line, or `/thimble-settings`, opens
-     the settings; `/plugin` turns thimble off.
+     `v` visualize, `s` rewrite, `w` evidence, `r` coverage. A click on `thimble` in that line, or
+     `/thimble-settings`, opens the settings; `/plugin` turns thimble off.
    - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints.
-6. When the plugin was installed, offer to show it in this session, in one short line: "Type /reload-plugins, then
-   try it." (You cannot type `/reload-plugins` for them; it loads thimble here.) When they answer after the reload,
-   look at `examples/sample/runs.csv` yourself (40 made-up nightly test runs) and answer: did the failures start
-   after the config change? Answer it as thimble's guidance says: one card, and checked citations. Never ask the
-   user to type the question or a path. If the line above the prompt does not show `thimble` after the reload, say
-   that a new `claude` session in a folder of their own files will have it.
+6. When the plugin works, offer to show it on the checkout's `examples/sample/runs.csv` (40 made-up nightly test
+   runs), in one short line, and never ask the user to type the question or a path. A citation can name only files in
+   the folder its session works in, and a session keeps the PATH and the Claude Code it started with. So when the
+   checkout lies outside this session's folder, or the plugin needs a Node or a Claude Code that this session does not
+   have, the line gives a command to run in a new terminal, which starts `claude` in the sample's folder with the
+   question, such as:
+   `cd ~/thimble/examples/sample && claude "Did the failures start after the config change? Show it as a card."`
+   Otherwise the line is "Type /reload-plugins, then try it." (You cannot type `/reload-plugins` for them; it loads
+   thimble here.) When they answer after the reload, look at the sample yourself and answer: did the failures start
+   after the config change? Answer it as thimble's guidance says: one card, and checked citations. If the line above
+   the prompt does not show `thimble` after the reload, say that a new `claude` session in a folder of their own files
+   will have it.
 
 ## Working on thimble
 

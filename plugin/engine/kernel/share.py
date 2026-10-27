@@ -1,10 +1,10 @@
 """thimble file issue ID: a fix as a public GitHub issue that the person checks and submits themselves.
 
-The draft is a title, what was wrong and how it was fixed, in plain words, with the thimble version and the mode. It is
-Claude's text when the plugin or the browser gives one (`--draft -`, the JSON fix-draft.md asks for), else the one given
-before for this fix, else the fix's own record: the person's words and what the fixer said the fix does. The privacy
-scan (privacy.py, as `thimble fix draft` runs it) takes the names and values of the person's folder and machine out of
-the draft first.
+The draft is a title, what was wrong and how it was fixed (for a fix that failed, why it could not be done and what
+Claude tried), in plain words, with the thimble version and the mode. It is Claude's text when the plugin or the
+browser gives one (`--draft -`, the JSON fix-draft.md asks for), else the one given before for this fix, else the fix's
+own record: the person's words and what the fixer said the fix does. The privacy scan (privacy.py, as `thimble fix
+draft` runs it) takes the names and values of the person's folder and machine out of the draft first.
 
 The command prints GitHub's new-issue link with the title and the text in it; `--open` opens the link in the person's
 browser too. On GitHub's page the person reads the text, pastes a screenshot if they want and presses Submit. thimble
@@ -115,13 +115,20 @@ def _given(rec: dict[str, Any], given: dict[str, Any] | None) -> tuple[dict[str,
 
 
 def _body(rec: dict[str, Any], d: dict[str, str]) -> str:
-    """The issue's text, in GitHub Markdown."""
-    request = rec.get("state") == "request" or not rec.get("commit")
+    """The issue's text, in GitHub Markdown: what was wrong, then how it was fixed, or what it needs (a request with no
+    code), or, for a fix that failed, why it could not be done here and what Claude tried (a refused try's change)."""
+    failed = rec.get("state") == "failed"
+    request = failed or rec.get("state") == "request" or not rec.get("commit")
     rel = FX.release()
     version = rel.get("version") or str(rel.get("base") or "")[:7] or "?"
-    fixed = d["fixed"] or ("(no change: Claude could not do it in code)" if request else "(say how it works now)")
-    return (f"### What was wrong\n\n{d['wrong'] or '(say what you saw)'}\n\n"
-            f"### {'What it needs' if request else 'How it was fixed'}\n\n{fixed}\n\n"
+    if failed:
+        why = " ".join(str(rec.get("error") or "").split()) or "(say what stopped it)"
+        middle = f"### Why it could not be done here\n\n{why}\n\n" + (
+            f"### What Claude tried\n\n{d['fixed']}\n\n" if d["fixed"] else "")
+    else:
+        fixed = d["fixed"] or ("(no change: Claude could not do it in code)" if request else "(say how it works now)")
+        middle = f"### {'What it needs' if request else 'How it was fixed'}\n\n{fixed}\n\n"
+    return (f"### What was wrong\n\n{d['wrong'] or '(say what you saw)'}\n\n{middle}"
             f"thimble {version} · {rec.get('made_in') or 'terminal'} · "
             f"{'asked through' if request else 'fixed by'} `thimble fix`\n")
 
@@ -170,14 +177,15 @@ def open_link(url: str) -> bool:
 
 
 def _store_of(rec: dict[str, Any]) -> Store | None:
-    """The folder whose names the scan takes out, in a shell: the one the fix was asked in, else the folder the shell
-    stands in (not the home folder or /, whose every file the scan would list)."""
+    """The folder whose names the scan takes out, in a shell: the one the fix was asked in, as the conversation that
+    asked read it, else the folder the shell stands in (not the home folder or /). session_terms lists no file of a
+    folder that holds the home folder: there it takes the names of the files the conversation read."""
     here = Path.cwd()
     root = rec.get("root") if rec.get("root") and Path(rec["root"]).is_dir() else None
     if not root and here not in (Path.home(), Path("/")):
         root = str(here)
     try:
-        return Store(root) if root else None
+        return Store(root, session=rec.get("conversation") or None) if root else None
     except Exception:  # noqa: BLE001 - a folder thimble cannot read: the machine's names are still taken out
         return None
 

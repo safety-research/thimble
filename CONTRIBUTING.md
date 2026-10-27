@@ -20,7 +20,11 @@ session start or after `/reload-plugins`. To load it for one session only, witho
 a folder of data files with `claude --plugin-dir /path/to/thimble/plugin`.
 
 Once you have fixes (thimble fix), Claude Code loads thimble from `~/.thimble/fixes/live` instead: after `git pull`,
-`thimble update` moves thimble and your fixes onto the commit you checked out.
+`thimble update` moves thimble and your fixes onto the commit you checked out. The way back from a fix (`thimble fix`,
+`thimble file`, `thimble update`, the fixer's sandbox and the tests it runs) runs from `~/.thimble/fixes/release`, a
+checkout of that commit which no fix changes. A fix may change any text file but the fix flow and the privacy scan
+(`plugin/engine/kernel/fixes.py`, PROTECTED_KINDS), and the line that asks whether to use it names the files it changes
+of the sandbox, the hooks file and the command hooks, the launcher, thimble's scripts and the lock files (NOTICE_KINDS).
 
 The browser workbench runs from the checkout too: `thimble-browser FOLDER` builds the page again when its sources
 changed, so an edit to the page shows when you start it again.
@@ -51,7 +55,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 
 | What | Where |
 |---|---|
-| the manifest: name, the switches (Citations (its modes), Cards, Squeeze, Catch-up, Comments (Explainers, Heads-ups), Claims (its modes), Labels, Coverage; the old fields they replaced stay, hidden); a release commit adds its version (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit) | `plugin/.claude-plugin/plugin.json` |
+| the manifest: name, the switches (Minimal, Citations (its modes), Cards, Rewrite, Catch-up, Comments (Explainers, Heads-ups, with their modes), Evidence (its modes), Labels, Coverage; the old fields they replaced, and defaultsAt, stay, hidden); a release commit adds its version (with none, Claude Code names an install by its commit, so an install from a branch takes each new commit) | `plugin/.claude-plugin/plugin.json` |
 | the `thimble` command (`label`, `coverage`; `thimble dev prompts`, `thimble dev stats`, `thimble dev validate`) and its kernel, on the Python standard library | `plugin/bin/thimble`, `plugin/engine/` |
 | the deterministic check of a checker's answer: a quote in its line, the marked words in the real output of a call that ran the code | `plugin/engine/kernel/evidence.py`, `plugin/engine/validate.py` |
 | the hooks module, its order, the session's PATH and TMPDIR, the command hook that lets Claude read thimble's temp folder without a dialog (`temp_allow.py`), which files Claude read (for coverage), and thimble's keys at an empty prompt with their word window (`keys.ts`) | `plugin/hooks/` |
@@ -62,7 +66,7 @@ The terminal plugin, `plugin/`. Each module has one job; `plugin/hooks/register.
 | cards: the `card` tool, the runner that runs the cards' views (`runner.mjs`) and the command that starts it in the sandbox (`argv.mjs`), drawing, a card's keys | `plugin/cards/` |
 | the sandbox the card runner runs in, shared with the browser workbench: Anthropic's sandbox runtime (srt) pinned (`package.json`, `package-lock.json`), the launcher that runs one command in it (`run.mjs`, `bwrap.sh`), and `setup.mjs`, which installs srt in `~/.thimble/srt` and says whether it works | `plugin/sandbox/` |
 | `v`: the designer fork that draws a card of the last answer | `plugin/designer/` |
-| the observer: one look at each answer, a fork of the conversation, for the explainers, important details and claims (the claims on demand, f in their pane, unless Extract claims is auto); its lenses | `plugin/observer/` |
+| the observer: one look at each answer, a fork of the conversation, for the explainers, important details and claims (the claims on demand, f in their pane, unless Evidence is auto); its lenses | `plugin/observer/` |
 | the features that act on answers, each meeting the rest through its `seam.ts` (`core/answerview.ts` calls them): squeeze, stretch and catch-up; the explainers and important details; the claims; the side threads; the citation and explanation tray | `plugin/squeeze/`, `plugin/explain/`, `plugin/claims/`, `plugin/threads/`, `plugin/tray/` |
 | the line above the prompt: busy step, failure line, counts | `plugin/bar/` |
 | the settings and coverage panes | `plugin/panes/` |

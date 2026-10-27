@@ -6,6 +6,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { cardWidth } from '../cards/draw'
+import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { resetSqueeze } from '../squeeze/term'
 import Chips from '../squeeze/chips.tsx'
@@ -172,6 +173,20 @@ test('keys pressed in a row make one rewrite, at the last level, 1 s after the l
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(2)
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('the much longer version.')
+})
+
+test("a bar narrower than the open chips' items lays them on more rows, each whole on one row and none wider than the bar, the line that says a chip goes no further too", async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  // the second chip, Background, down to its first level and a step past it
+  for (const k of ['2', '[', '[', '[']) await t.press(k)
+  const band = await $.ui.render({ ...(above as Any), props: { ...(above as Any).props, bodyColumns: 60 } } as never)
+  const kids = (n: Any): Any[] => { const c = n?.children ?? n?.props?.children; return Array.isArray(c) ? c : c == null ? [] : [c] }
+  const rows = kids(band).filter(n => /^bar/.test(String(n.props?.key))).map(textOf)
+  expect(rows.length).toBeGreaterThan(1)
+  for (const r of rows) expect(textWidth(r)).toBeLessThanOrEqual(60)
+  for (const item of ['s close', 'Background goes no further than novice', '[ more novice', '] more expert', '+ your own']) expect(rows.some(r => r.includes(item))).toBe(true)
 })
 
 test('a key pressed while a rewrite runs: the running one is not shown, the latest one is', async ($, on) => {
@@ -380,8 +395,6 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   expect(textOf(at0.tree)).toContain('1 Length shorter ○●○○ longer · as written')
   expect(textOf(at0.tree)).toContain('2 Background novice ○○●○ expert')
   expect(textOf(at0.tree)).not.toContain('Interpretation')
-  // a press on an end sets that level
-  expect(nodes(at0.tree).some(n => n.type === 'Button' && n.props.label === 'Background: novice')).toBe(true)
   // each of the bar's keys is a press: [ and ] each one way, and 1–2 picks the next chip
   const bar = nodes(await $.ui.render(above)).filter(n => n.type === 'Button').map(n => String(n.props.label))
   expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–2 chip', '+ your own']))
@@ -406,6 +419,71 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   await t.clock.advance(3000)
   expect(t.asked.length).toBe(1)
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('in plain words.')
+})
+
+test('a press on a chip\'s end moves it one level toward that end, as [ and ] do, and no further than the end; a press on a dot sets that level', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  const level = async (id: string) => (await chipsDrawn($, 'row-t1', LONG)).client.props.props.items.find((c: Any) => c.id === id).level
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  // Length stands at as written: longer, then much longer, one level a press
+  await ui.press({ key: 'step-length-up' })
+  expect(await level('length')).toBe(2)
+  await ui.press({ key: 'step-length-up' })
+  expect(await level('length')).toBe(3)
+  // at its end it stays, and the bar says it goes no further
+  await ui.press({ key: 'step-length-up' })
+  expect(await level('length')).toBe(3)
+  expect(await t.bar()).toContain('goes no further')
+  // Background stands at working: its novice end moves it to learning, and picks it
+  await ui.press({ key: 'step-familiarity-down' })
+  expect(await level('familiarity')).toBe(1)
+  expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.items.find((c: Any) => c.picked).id).toBe('familiarity')
+  // a dot sets its level at once
+  await ui.press({ key: 'lvl-length-0' })
+  expect(await level('length')).toBe(0)
+  await ui.unmount()
+})
+
+test('on a catch-up a press on Length\'s longer end goes from short past as written (the replies themselves) to longer', async ($, on) => {
+  const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
+  const newest = 'The retry passed on all runs.'
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', newest, { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  // the chips open on the catch-up of the newest reply and the reply before
+  await t.press('b')
+  await t.clock.advance(5000)
+  await t.press('s')
+  // a catch-up arrives at Length short; as written is the replies themselves, so its longer end goes past it to longer
+  const length = async () => (await chipsDrawn($, 'row-t3', newest)).client.props.props.items.find((c: Any) => c.id === 'length').level
+  expect(await length()).toBe(0)
+  const ui = await $.ui.mount(answer('row-t3', newest))
+  await ui.press({ key: 'step-length-up' })
+  expect(await length()).toBe(2)
+  // and its shorter end goes back past it to short
+  await ui.press({ key: 'step-length-down' })
+  expect(await length()).toBe(0)
+  await ui.unmount()
+})
+
+test('while a click holds the keys in the chips, ↵ keeps them open, and s closes them', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  const chips = async () => (await chipsDrawn($, 'row-t1', LONG)).client?.props.props
+  const picked = async () => (await chips()).items.find((c: Any) => c.picked)?.id
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  // a click on the dot where Background stands picks it
+  await ui.press({ key: 'lvl-familiarity-2' })
+  expect(await picked()).toBe('familiarity')
+  // ↵ keeps them open
+  await ui.key({ key: 'return' })
+  expect(await chips()).toBeDefined()
+  await ui.key({ key: 's' })
+  expect(await chips()).toBeUndefined()
+  await ui.unmount()
 })
 
 test('the rewrite starts from the corrected citations: the request holds the corrected value alone, and names no correction', async ($, on) => {

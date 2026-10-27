@@ -38,10 +38,12 @@ import type { EngineInterface } from 'claude-code'
 import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
+import { controlWords } from '../core/selection'
 import { cut } from '../core/text.js'
 import { rowsAt, rowsKnown, treeRows } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
+import { ownKeys } from '../hooks/keys'
 import { cardRef } from '../marks/message.js'
 import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
@@ -249,17 +251,24 @@ export function noteFrames($: Engine, tree: Any, width: number, onScreen: { firs
   noteShown($, [...at.keys()], onScreen, at)
 }
 
+/** A card's keys it can get: none of thimble's own (hooks/keys.ts ownKeys). The card tool gives a version none of them,
+ *  but a card kept from before one became thimble's own (w) still lists it. */
+function cardKeys(m: CardMeta, own: string[]): string[] {
+  return m.keys.filter(k => !own.includes(k))
+}
+
 /** The card a key at an empty prompt goes to: among the cards on screen, the focused card when it lists the key, else
  *  the newest that lists it; null when no card does, and the key is typed. A card is on screen when its frame was
  *  drawn since the plugin loaded and the screen shows it now (noteShown), so a card scrolled out of view, and one a
- *  resumed session no longer shows, takes no keys. */
+ *  resumed session no longer shows, takes no keys. No card gets one of thimble's own keys (cardKeys). */
 export async function keyOwner($: Engine, key: string): Promise<CardMeta | null> {
+  const own = ownKeys()
   // a key press reads what cards/store.ts keeps of the cards, no state
   const metas: CardMeta[] = []
   for (const id of await keptSeen($)) {
     if (shown.get(id) === false) continue
     const m = await keptMeta($, id)
-    if (m && m.version > 0 && m.keys.includes(key)) metas.push(m)
+    if (m && m.version > 0 && cardKeys(m, own).includes(key)) metas.push(m)
   }
   const focus = await keptFocus($)
   return metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0] ?? null
@@ -317,20 +326,22 @@ async function stepsOf($: Engine, meta: CardMeta): Promise<Steps | null> {
 /** The keys of the card that takes them now (keyOwner), for the bar: j and k by the way they move the ▸ (`j down`,
  *  `k up`) or through steps (`j k step`), and the card's other letters together (`f g card keys`). None when no card on screen takes a key. */
 export async function cardKeyWords($: Engine): Promise<{ key: string; words: string }[]> {
+  const own = ownKeys()
   const metas: CardMeta[] = []
   for (const id of await keptSeen($)) {
     if (shown.get(id) === false) continue
     const m = await keptMeta($, id)
-    if (m && m.version > 0 && m.keys.length) metas.push(m)
+    if (m && m.version > 0 && cardKeys(m, own).length) metas.push(m)
   }
   if (!metas.length) return []
   const focus = await keptFocus($)
   const meta = metas.find(m => m.id === focus) ?? metas.sort((a, b) => b.at - a.at)[0]!
+  const keys = cardKeys(meta, own)
   const dir = await stepsOf($, meta)
-  const steps = meta.keys.filter(k => dir?.[k] === 'step')
+  const steps = keys.filter(k => dir?.[k] === 'step')
   const out = steps.length ? [{ key: steps.join(' '), words: 'step' }] : []
-  out.push(...meta.keys.filter(k => dir?.[k] && dir[k] !== 'step').map(k => ({ key: k, words: dir![k]! as string })))
-  const rest = meta.keys.filter(k => !dir?.[k])
+  out.push(...keys.filter(k => dir?.[k] && dir[k] !== 'step').map(k => ({ key: k, words: dir![k]! as string })))
+  const rest = keys.filter(k => !dir?.[k])
   if (rest.length) out.push({ key: rest.join(' '), words: 'card keys' })
   return out
 }
@@ -372,6 +383,8 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // alone; every card's words are clicks
   const lettered = (await headOwner($))?.id === meta.id
   const word = (key: string, words: string) => [...(lettered ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
+  // their words, which a double click on one selects: no answer's words (core/selection.ts)
+  controlWords('card', ['a ask', 'ask', 'p artifact', 'artifact'])
   const askEl = ask ? E.Box({ key: 'head-keys', flexDirection: 'row', children: [
     E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: word('a', 'ask') }),
     E.Text({ key: 'head-sep', dimColor: true, children: ' · ' }),

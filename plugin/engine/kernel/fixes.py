@@ -6,9 +6,21 @@ Under $THIMBLE_HOME/fixes:
                      commit plus one commit per fix that is on, in the order they went on. A GitHub install's live is
                      a clone of Claude Code's own clone of the marketplace, at the installed commit (no download); a
                      clone install's (scripts/install.sh --local) is a worktree of that clone, so `mine` shows there.
+    release/         the release commit (base) as it is, never changed by a fix: a detached worktree of live's
+                     repository, made with live, moved when base moves, made again when it is missing, and put back as
+                     the release commit has it before the way back runs from it (place_release, the launcher), never
+                     from live
     work/<id>/       a fix's scratch worktree, cut from mine. The fixer edits only here, and its shell runs in the
-                     sandbox runtime, which may write only here and in tmp/<id>/. Removed after apply or "not now".
-    tmp/<id>/        the fixer's home and temp folder in the sandbox, and the log of the tests thimble ran
+                     sandbox runtime, which may write only here and in tmp/<id>/, and reach only the package registries
+                     (REGISTRIES). Removed after apply or "not now".
+    tmp/<id>/        the fixer's home and temp folder in the sandbox, and the logs of the tests thimble ran (tests.log)
+                     and of the process that ran them (runner.log)
+    srt/<pin>/       the release's sandbox runtime, once live's pin or lock file is not the release's (_srt)
+    tests.lock       the quick tests run for one fix at a time
+    tests/<id>.lock  the fix's guard: one check of the fix at a time, from before it commits the fixer's change until the
+                     record says that its tests run (done)
+    tests/<id>.<run>.lock  a lock file of each run of a fix's quick tests, held by the process that runs them (the
+                     runner) while it lives, and gone after it
     fixes.jsonl      every request: one line per change of a fix's record; the last line of an id is its record
     release.json     where the release came from: the install's kind, its source, Claude Code's marketplace entry
                      before the first fix, the release commit (base) and its version
@@ -20,7 +32,9 @@ Under $THIMBLE_HOME/fixes:
                      exact text that leaves), title
     sent/<id>/       what left the machine, or what the person saved as files
 
-refs/thimble/fixes/<id> in live's repository keeps each fix's commit, on or off, so an undone fix can come back.
+refs/thimble/fixes/<id> in live's repository keeps each fix's commit, on or off, so an undone fix can come back. A clone
+install's home that was deleted leaves mine and these refs in the person's clone; a new home that makes live moves them
+under refs/thimble-old/<UTC time>/ when mine is thimble's own (_leftovers_aside).
 
 More words for a fix are a round of that fix, never a new fix (round_). A fix that is on, off or ready with no copy is
 changed in place: a copy holds its change, the fixer adds to it, and the new version (refs/thimble/next/<id>) waits for
@@ -34,13 +48,26 @@ plugin from live into its own cache (`claude plugin update`), and the session lo
 is never edited here. Because Claude Code names a copy by the plugin's version, live's plugin.json carries the
 release's version with the commit of mine after it (0.10.2+fix.4e1a9c2), written in live's working tree only.
 
-A fix may not change the files that keep the person safe (PROTECTED): the fix flow, the privacy scan, the sandbox and
-its settings, the hooks file and its command hooks, the launcher, thimble's scripts, and lock files. Binary files are
-refused too. thimble checks this when the fixer ends (done); the fixer's prompt does not list these files. A check that
-refuses a change (these files, a binary file, failing tests) keeps the refusal on the record (refused: why, the files,
-the tests' output) until the next check, and the plugin gives it back to a fixer in the same copy (again): the fixer
-puts the change elsewhere or fixes the tests, or ends saying why it cannot be done (done with `cannot`), which is the
-failure the person sees.
+The way back from a fix runs from the release checkout, so no fix can break its own undo, not even one that changes the
+launcher or the kernel's modules: the plugin runs `thimble fix` with release/'s launcher (fix/fixes.ts kernelFix); the
+shell's `thimble` is a link to it (_relink_cli), and the launcher runs `thimble fix`, `thimble file`, `thimble update`
+and `thimble reapply` from release/ and the rest (label, coverage, which Claude runs) from live, so a fix to them works;
+the fixer's shell and the quick tests run in release/'s sandbox (sandbox_dir); off.sh runs no thimble code at all.
+
+A fix may not change the way back (PROTECTED): the fix flow, which turns fixes off and undoes them, and the privacy scan
+a shared fix goes through. Binary files are refused too. It may change the rest (NOTICE), such as the sandbox, the hooks
+file and its command hooks, the launcher, thimble's scripts and lock files (a package added from REGISTRIES): its record
+names the kinds and the files (notice), and the line that asks whether to use it says them in one sentence, as thimble
+fix show does; a fix that thimble update --continue turns on again, with no key press, may change only those it changed
+before (continue_). A file moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
+prompt does not list these files. A check that refuses a change (these files, a binary file, failing tests) keeps the
+refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
+to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
+cannot be done (done with `cannot`), which is the failure the person sees. The quick tests run with no network, for one
+fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix fails (run_tests).
+They run in a process of their own (the runner), apart from the call that checks the fix, so that they may take longer
+than Claude Code lets a call run: the record stays working, with `testing`, until the runner writes what came of them,
+and done waits for that (_start_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -74,8 +101,8 @@ STATES = ("working", "ready", "failed", "on", "off", "redo", "pending", "request
           "merged")
 PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 
-# the files a fix may not change, by what each one is: what keeps undo, off, the sandbox and the scan working (fnmatch
-# patterns over the repository's paths). The refusal names each file with what it is.
+# the files a fix may not change, by what each one is: the way back, which turns fixes off and undoes them, and the scan
+# a shared fix goes through (fnmatch patterns over the repository's paths). The refusal names each file with what it is.
 PROTECTED_KINDS = {
     "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/engine/kernel/share.py", "plugin/fix/*",
                      "plugin/prompts/fixer.md", "plugin/prompts/fix-draft.md", "plugin/prompts/fix-merge.md",
@@ -83,14 +110,22 @@ PROTECTED_KINDS = {
                      "browser/backend/app/fixes.py", "browser/backend/app/fix_share.py", "browser/frontend/src/fixes/share*",
                      "browser/frontend/src/chat/FixStrip.tsx", "browser/frontend/src/chat/fix.ts"),
     "the privacy scan": ("plugin/engine/kernel/privacy.py",),
-    "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "browser/backend/app/kernel_wrap.py"),
+}
+PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
+# the files a fix may change that the person is told of before they use it, by what each one is: the rest of what keeps
+# them safe, and the packages thimble installs. A file counts as the first kind it matches.
+NOTICE_KINDS = {
+    "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "plugin/cards/ask.ts", "plugin/cards/runner.mjs",
+                    "browser/backend/app/kernel_wrap.py", "browser/backend/app/kernel_srt.mjs",
+                    "browser/backend/app/srt.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),
     "a command hook": ("plugin/hooks/temp-allow.sh", "plugin/hooks/temp_allow.py"),
     "the launcher": ("plugin/bin/*",),
     "thimble's scripts": ("scripts/*", "browser/scripts/*"),
-    "a lock file": ("*package-lock.json", "*yarn.lock", "*pnpm-lock.yaml", "*uv.lock", "*poetry.lock", "*Cargo.lock"),
+    "dependencies": ("*package-lock.json", "*yarn.lock", "*pnpm-lock.yaml", "*uv.lock", "*poetry.lock", "*Cargo.lock"),
 }
-PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
+# the sites the fixer's own shell commands may reach, so that a fix can add a package; the quick tests reach none
+REGISTRIES = ("registry.npmjs.org", "pypi.org", "files.pythonhosted.org")
 
 
 class FixError(Exception):
@@ -106,6 +141,10 @@ def home() -> Path:
 
 def live_dir() -> Path:
     return home() / "live"
+
+
+def release_dir() -> Path:
+    return home() / "release"
 
 
 def work_dir(fid: int) -> Path:
@@ -187,7 +226,8 @@ def short(words: str, n: int = 48) -> str:
 
 
 def records() -> dict[int, dict[str, Any]]:
-    """Each fix's record: the last line of its id in fixes.jsonl."""
+    """Each fix's record: the last line of its id in fixes.jsonl. A record stored before thimble kept a notice (0.10.4
+    and older) gets the one its files have now, as put would give it, so that the person is told before they use it."""
     out: dict[int, dict[str, Any]] = {}
     try:
         lines = (home() / "fixes.jsonl").read_text().splitlines()
@@ -199,6 +239,11 @@ def records() -> dict[int, dict[str, Any]]:
             out[int(r["id"])] = r
         except (ValueError, KeyError, TypeError):
             continue
+    for r in out.values():
+        if "notice" not in r:
+            notice = notice_of([str(f.get("path") or "") for f in r.get("files") or [] if isinstance(f, dict)])
+            if notice:
+                r["notice"] = notice
     return out
 
 
@@ -214,8 +259,16 @@ def get(fid: int | str) -> dict[str, Any]:
 
 
 def put(rec: dict[str, Any]) -> dict[str, Any]:
-    """The record's new state, as one line appended in one write."""
+    """The record's new state, as one line appended in one write, with the kinds of files it changes that the person is
+    told of (notice), from its files as they are now. Only a working fix's tests run (`testing`): a fix that went on
+    without them (removed while they ran) has no such mark."""
     rec = {**rec, "updated": time.time()}
+    rec.pop("notice", None)
+    if rec.get("state") != "working":
+        rec.pop("testing", None)
+    notice = notice_of([str(f.get("path") or "") for f in rec.get("files") or []])
+    if notice:
+        rec["notice"] = notice
     home().mkdir(parents=True, exist_ok=True)
     line = json.dumps(rec, ensure_ascii=False) + "\n"
     fd = os.open(home() / "fixes.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -227,13 +280,17 @@ def put(rec: dict[str, Any]) -> dict[str, Any]:
 
 
 class Lock:
-    """One change of live at a time (a key press and a session start at once)."""
+    """One change of live at a time (a key press and a session start at once); with `name` tests.lock, one run of the
+    quick tests at a time."""
+
+    def __init__(self, name: str = "fixes.lock"):
+        self.name = name
 
     def __enter__(self):
         import fcntl  # noqa: PLC0415
 
         home().mkdir(parents=True, exist_ok=True)
-        self.f = open(home() / "fixes.lock", "w")
+        self.f = open(home() / self.name, "w")
         fcntl.flock(self.f, fcntl.LOCK_EX)
         return self
 
@@ -299,6 +356,13 @@ def find_source() -> dict[str, Any]:
 OFF_SH = """#!/bin/sh
 # Back to the plain thimble release, also when thimble does not load: sh {off}
 # It shows the release commit in {live} and has Claude Code copy it. Your fixes stay: `thimble fix on` brings them back.
+# First the release checkout, which `thimble fix` runs from, goes back to the release commit as it has it, also when a
+# file in it (its launcher) was changed, with no hook of the repository's.
+release=$(cd {release_q} 2>/dev/null && pwd -P)
+if [ -n "$release" ] && [ "$(git -C "$release" rev-parse --show-toplevel 2>/dev/null)" = "$release" ]; then
+  git -c core.hooksPath=/dev/null -C "$release" checkout -q -f --detach {base} 2>/dev/null
+  git -c core.hooksPath=/dev/null -C "$release" clean -q -ffdx 2>/dev/null
+fi
 live={live_q}
 git -C "$live" checkout -q -- {plugin_json} 2>/dev/null
 git -C "$live" checkout -q --detach {base} || {{ echo "thimble: could not show the release in $live"; exit 1; }}
@@ -312,15 +376,19 @@ def _write_off_sh(rel: dict[str, Any]) -> None:
     off = home() / "off.sh"
     off.write_text(OFF_SH.format(off=off, live=live_dir(), live_q=shlex.quote(str(live_dir())), plugin_json=PLUGIN_JSON,
                                  base=shlex.quote(rel["base"]), state_q=shlex.quote(str(home() / "state.json")),
-                                 claude=shlex.quote(claude())))
+                                 claude=shlex.quote(claude()), release_q=shlex.quote(str(release_dir()))))
     off.chmod(0o755)
 
 
 def ensure_live() -> dict[str, Any]:
-    """live, made at the first request: nothing the person runs changes until the first fix goes on."""
+    """live, made at the first request, with the release checkout beside it: nothing the person runs changes until the
+    first fix goes on. Until then, the release follows the code that runs (_follow), so that the release checkout is
+    never older than it."""
     rel = release()
     live = live_dir()
     if rel and (live / ".git").exists():
+        rel = _follow(rel)
+        place_release(rel["base"])
         return rel
     src = find_source()
     repo, commit = Path(src["repo"]), src["commit"]
@@ -333,10 +401,7 @@ def ensure_live() -> dict[str, Any]:
             git("remote", "set-url", "origin", src["url"], cwd=live)
         git("checkout", "-q", "-b", "mine", commit, cwd=live)
     else:
-        has = run(["git", "rev-parse", "--verify", "-q", "refs/heads/mine"], cwd=repo, check=False).returncode == 0
-        if has:
-            raise FixError(f"your clone {repo} already has a branch named mine; rename it (git branch -m mine "
-                           "mine-old), then ask again")
+        _leftovers_aside(repo)
         git("worktree", "add", "-q", "-b", "mine", str(live), commit, cwd=repo)
     # the release's tag when the commit has one (v0.10.2), for its name in the list and in thimble update
     tag = git("describe", "--tags", "--exact-match", "--match", "v*", commit, cwd=live, check=False)
@@ -345,7 +410,174 @@ def ensure_live() -> dict[str, Any]:
            **({"tag": tag} if RELEASE_TAG.match(tag) else {})}
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
+    rel = _follow(rel)
+    place_release(rel["base"])
     return rel
+
+
+def _leftovers_aside(repo: Path) -> None:
+    """Before a clone install's live is made in the person's clone: what a thimble home that was deleted left there
+    goes aside, so that nothing of it is lost and the new fixes see none of it. git forgets the worktrees whose folders
+    are gone; then, with no records in this home and no other thimble home's live in the clone (_other_live), thimble's
+    own mine (_thimbles_mine) and every ref under refs/thimble/ move under refs/thimble-old/<UTC time>/ in one update
+    (refs/heads/mine as heads/mine, refs/thimble/fixes/1 as thimble/fixes/1), and no other ref (a branch mine/wip stays).
+    Any other mine, or a mine while this home has records, stops the request."""
+    run(["git", "worktree", "prune"], cwd=repo, check=False)
+    has = run(["git", "rev-parse", "--verify", "-q", "refs/heads/mine"], cwd=repo, check=False).returncode == 0
+    recs = records()
+    if has and (recs or not _thimbles_mine(repo)):
+        raise FixError(f"your clone {repo} already has a branch named mine; rename it (git branch -m mine "
+                       "mine-old), then ask again")
+    old = [] if recs or _other_live(repo) else [
+        x for x in git("for-each-ref", "--format=%(objectname) %(refname)", "refs/heads/mine", "refs/thimble/",
+                       cwd=repo).splitlines() if x.partition(" ")[2] == "refs/heads/mine"
+        or x.partition(" ")[2].startswith("refs/thimble/")]
+    if not old:
+        return
+    stamp = aside = "refs/thimble-old/" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    n = 1
+    while git("for-each-ref", "--count=1", aside + "/", cwd=repo):
+        n += 1
+        aside = f"{stamp}-{n}"
+    moves = []
+    for line in old:
+        sha, _, ref = line.partition(" ")
+        moves += [f"create {aside}/{ref.removeprefix('refs/')} {sha}", f"delete {ref} {sha}"]
+    run(["git", "update-ref", "--no-deref", "--stdin"], cwd=repo, stdin="\n".join(moves) + "\n")
+
+
+def _thimbles_mine(repo: Path) -> bool:
+    """Whether the clone's mine is one that a deleted thimble home left: no worktree has it checked out, rebases or
+    bisects it (git refuses to move a branch a worktree uses), no worktree is another thimble home's live (which is
+    detached while that home's fixes are off), it tracks no upstream (branch.mine.remote, which thimble never sets), and
+    thimble made or recorded each commit that is only on mine (on no other branch, tag or remote branch; a detached HEAD
+    on top of mine, as in a rebase onto it, does not count): thimble committed it, or it is the very commit that a ref
+    under refs/thimble/fixes/ names (a fix thimble update --continue recorded, which Claude committed as the person).
+    A mine with no commits of its own, such as the release commit, is one."""
+    wts = git("worktree", "list", "--porcelain", cwd=repo).splitlines()
+    if "branch refs/heads/mine" in wts or _other_live(repo):
+        return False
+    if git("config", "--get", "branch.mine.remote", cwd=repo, check=False):
+        return False
+    if run(["git", "branch", "-f", "--no-track", "mine", "refs/heads/mine"], cwd=repo, check=False).returncode != 0:
+        return False
+    me = as_thimble()
+    recorded = set(git("for-each-ref", "--format=%(objectname)", "refs/thimble/fixes/", cwd=repo).split())
+    own = git("log", "--format=%H %cn <%ce>", "refs/heads/mine", "--not", "--exclude=mine", "--branches", "--tags",
+              "--remotes", "--", cwd=repo).splitlines()
+    return all(x.partition(" ")[0] in recorded
+               or x.partition(" ")[2] == f"{me['GIT_COMMITTER_NAME']} <{me['GIT_COMMITTER_EMAIL']}>" for x in own)
+
+
+def _other_live(repo: Path) -> bool:
+    """Whether a worktree of the clone is another thimble home's live (live, with that home's release.json beside it)."""
+    wts = git("worktree", "list", "--porcelain", cwd=repo).splitlines()
+    paths = [Path(x.partition(" ")[2]) for x in wts if x.startswith("worktree ")]
+    return any(p.name == "live" and (p.parent / "release.json").exists() for p in paths)
+
+
+def _follow(rel: dict[str, Any]) -> dict[str, Any]:
+    """Before the first fix goes on (Claude Code's marketplace not on live yet), the release follows the code that runs:
+    when Claude Code's installed plugin (installed_plugins.json), or this kernel's own checkout when it is the clone
+    live came from, is a commit after the release commit (base), as after scripts/install.sh, `claude plugin update`
+    or Claude Code's own update, base moves to it (fetched into live from that clone when live lacks it), and mine with
+    it while mine holds no fix. The release as it is then."""
+    if rel.get("pointed"):
+        return rel
+    live, base = live_dir(), str(rel["base"])
+    src = Path(rel["repo"]) if rel.get("repo") and Path(rel["repo"]).is_dir() else None
+    own = git("rev-parse", "HEAD", cwd=src, check=False) if src and PLUGIN.parent.resolve() == src.resolve() else ""
+    new = base
+    for c in dict.fromkeys(x for x in (_installed_sha(), own) if x and x != base):
+        if not _has(live, c) and src:
+            # a shallow live (a clone of Claude Code's shallow clone) takes it as a shallow commit; a whole live takes it
+            # only with its history (a commit whose parents it lacks is no candidate)
+            shallow = git("rev-parse", "--is-shallow-repository", cwd=live, check=False) == "true"
+            run(["git", "fetch", "-q", "--no-tags", *(["--update-shallow"] if shallow else []), str(src), c], cwd=live,
+                check=False, timeout=600)
+        if run(["git", "rev-list", "-n", "2", c], cwd=live, check=False).returncode == 0 and _later(live, new, c):
+            new = c
+    if new == base:
+        return rel
+    rel = {**rel, "base": new, "version": _version_at(live, new), "updated": time.time()}
+    rel.pop("checkout", None)
+    tag = next((t for t in (git("describe", "--tags", "--exact-match", "--match", "v*", new, cwd=r, check=False)
+                            for r in (live, src) if r) if RELEASE_TAG.match(t)), "")
+    if tag:
+        rel["tag"] = tag
+    else:
+        rel.pop("tag", None)
+    if git("rev-parse", "mine", cwd=live) == base:
+        _unstamp()
+        if git("symbolic-ref", "-q", "HEAD", cwd=live, check=False) == "refs/heads/mine":
+            git("checkout", "-q", "-B", "mine", new, cwd=live)
+        else:
+            git("branch", "-f", "mine", new, cwd=live)
+            git("checkout", "-q", "--detach", new, cwd=live)
+    write_json(home() / "release.json", rel)
+    _write_off_sh(rel)
+    return rel
+
+
+def _later(repo: Path, a: str, b: str) -> bool:
+    """Whether commit b comes after commit a: a is in b's history, or, when neither history holds the other (a shallow
+    clone, as Claude Code's is, lacks the commits between), b was committed later."""
+    if a == b or _ancestor(repo, b, a):
+        return False
+    if _ancestor(repo, a, b):
+        return True
+    ta, tb = (git("log", "-1", "--format=%ct", c, cwd=repo, check=False) for c in (a, b))
+    return ta.isdigit() and tb.isdigit() and int(tb) > int(ta)
+
+
+def place_release(base: str) -> None:
+    """The release checkout at `base`: made when it is missing (or no longer a checkout), and each time put back as
+    the release commit has it, with any file changed in it restored and any file added to it (also an ignored one, such
+    as a module that would shadow one of Python's) removed. A fix changes its copy and live, never this. The launcher
+    (plugin/bin/thimble) does the same before it runs the way back from here. A checkout that is as the release commit
+    has it already is left alone (_pristine), so that thimble's other processes that run from it at the same time (the
+    plugin's list, another session, the browser) never meet it half put back."""
+    d = release_dir()
+    if _is_checkout(str(d)):
+        if not _pristine(d, base):
+            _release_git(d, "checkout", "-q", "-f", "--detach", base)
+            _release_git(d, "clean", "-q", "-ffdx")
+        return
+    if d.exists():
+        shutil.rmtree(d)
+    run(["git", "worktree", "prune"], cwd=live_dir(), check=False)
+    _release_git(live_dir(), "worktree", "add", "-q", "--detach", str(d), base)
+
+
+def _pristine(d: Path, base: str) -> bool:
+    """Whether the checkout `d` is as commit `base` has it: HEAD detached at base, and no file changed, untracked or
+    ignored. One git call. It writes the checkout's index only when the files' times there are stale (a checkout made or
+    put back within the same second), so that the next looks, the launcher's and the browser's too, are quick, and it
+    never waits for the index's lock: when another process's git holds it, it writes nothing."""
+    p = run(["git", "status", "--porcelain=v2", "--branch", "--ignored", "--untracked-files=normal"], cwd=d, check=False)
+    lines = p.stdout.splitlines()
+    return (p.returncode == 0 and f"# branch.oid {base}" in lines and "# branch.head (detached)" in lines
+            and all(x.startswith("# ") for x in lines))
+
+
+# git with no hook of the repository's: in a clone install, the person's own clone's (git-lfs's post-checkout, which
+# fails when git-lfs is not on the kernel's PATH)
+NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
+
+
+def _release_git(d: Path, *args: str) -> None:
+    """git ARGS in `d` for the release checkout, with no hook (NO_HOOKS), tried again for up to 5 s while another git
+    holds the checkout's index (index.lock): the launcher and the browser put the checkout back too, with no lock of
+    thimble's."""
+    for n in range(50):
+        p = run(["git", *NO_HOOKS, *args], cwd=d, check=False)
+        if p.returncode == 0:
+            return
+        if "index.lock" not in p.stderr:
+            break
+        time.sleep(0.1)
+    err = (p.stderr or p.stdout).strip().splitlines()
+    raise FixError(f"{' '.join(['git', *args][:3])} failed: {err[-1] if err else 'no message'}")
 
 
 def is_on() -> bool:
@@ -390,9 +622,12 @@ def _repoint() -> None:
     """Point Claude Code's thimble marketplace at live, once, at the first fix. Claude Code also keeps the source in
     its user settings (extraKnownMarketplaces) and refuses another source for the name until that entry changes, so
     the entry changes first, and nothing else in the file; then Claude Code adds the marketplace from live. Removing
-    the marketplace instead would uninstall thimble and lose its options."""
+    the marketplace instead would uninstall thimble and lose its options. When Claude Code does not add it, the
+    settings are put back as they were, so that the y that called this changes nothing (apply, _swap)."""
     rel = release()
     if rel.get("pointed"):
+        # a shell link made before the release checkout was (to live's launcher) moves to the checkout's
+        _relink_cli()
         return
     if not _marketplace():
         # Claude Code has no thimble marketplace (the browser workbench alone): nothing to point, and nothing to copy
@@ -400,19 +635,30 @@ def _repoint() -> None:
     entry = {"source": "directory", "path": str(live_dir())}
     p = config_dir() / "settings.json"
     try:
-        settings = json.loads(p.read_text())
+        text = p.read_text()
+        settings = json.loads(text)
     except FileNotFoundError:
-        settings = None
+        text, settings = None, None
     except (OSError, ValueError):
         raise FixError(f"thimble cannot read Claude Code's settings ({p}) to load thimble from your fixes")
-    known = (settings or {}).get("extraKnownMarketplaces")
-    if isinstance(known, dict) and isinstance(known.get("thimble"), dict):
-        known["thimble"]["source"] = entry
+
+    def write(t: str) -> None:
         tmp = p.with_suffix(".json.thimble-tmp")
-        tmp.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+        tmp.write_text(t)
         os.chmod(tmp, p.stat().st_mode & 0o777)
         tmp.replace(p)
-    run([claude(), "plugin", "marketplace", "add", str(live_dir())])
+
+    known = (settings or {}).get("extraKnownMarketplaces")
+    changed = isinstance(known, dict) and isinstance(known.get("thimble"), dict)
+    if changed:
+        known["thimble"]["source"] = entry
+        write(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+    try:
+        run([claude(), "plugin", "marketplace", "add", str(live_dir())])
+    except FixError:
+        if changed and text is not None:
+            write(text)
+        raise
     _relink_cli()
     rel["pointed"] = True
     write_json(home() / "release.json", rel)
@@ -442,57 +688,96 @@ def _py_dirs(py: str) -> list[str]:
     return sorted({*dirs, str(Path(real).parent.parent)})
 
 
-def _srt_dir() -> Path:
+def sandbox_dir() -> Path:
+    """The sandbox code the fixer's shell and the quick tests run with (run.mjs, bwrap.sh, the srt pin): the release
+    checkout's, so that a fix that loosens the sandbox does not loosen the one its own fixer and tests run in; this
+    kernel's own before there is a release checkout."""
+    d = release_dir() / "plugin" / "sandbox"
+    return d if (d / "run.mjs").is_file() else PLUGIN / "sandbox"
+
+
+def _srt_dir(root: Path | None = None) -> Path:
+    """Where setup.mjs installs the release's pin of srt under `root` (thimble's home, where a session's start does)."""
     try:
-        pin = json.loads((PLUGIN / "sandbox" / "package.json").read_text())["dependencies"]["@anthropic-ai/sandbox-runtime"]
+        pin = json.loads((sandbox_dir() / "package.json").read_text())["dependencies"]["@anthropic-ai/sandbox-runtime"]
     except (OSError, ValueError, KeyError):
         pin = ""
-    return thimble_home() / "srt" / pin
+    return (root or thimble_home()) / "srt" / pin
 
 
-def sandbox_argv(fid: int | str, path_extra: list[str] | None = None) -> list[str]:
-    """The command that runs one shell command of the fixer, or its tests, in the sandbox runtime: no network, reads
-    the system, the tools it needs and the copy's repository, writes only the copy and its temp folder. The command
-    itself follows as /bin/bash -c CMD. `fid` names the copy: a fix's id, or `update`."""
+def _text_of(p: Path) -> str:
+    try:
+        return p.read_text()
+    except OSError:
+        return ""
+
+
+def _srt() -> Path:
+    """The folder of the release's srt: its pin, installed from its lock file (setup.mjs keeps the lock file it installed
+    from in node_modules/.thimble-lock.json). A session's start installs the srt of the thimble it loads, live's, in
+    thimble's home: that is the release's while live's lock file is the release's. Else the release's own setup.mjs
+    installs the release's in fixes/srt, so that a fix that changes the pin or the lock file does not change the srt its
+    own fixer and tests run in."""
+    lock = _text_of(sandbox_dir() / "package-lock.json")
+    own = _srt_dir(home())
+    for srt in (_srt_dir(), own):
+        if (srt / "node_modules").is_dir() and _text_of(srt / "node_modules" / ".thimble-lock.json") == lock:
+            return srt
+    node = shutil.which("node")
+    if node:
+        run([node, str(sandbox_dir() / "setup.mjs"), "--home", str(home()), "--json"], check=False, timeout=600)
+    if (own / "node_modules").is_dir() and _text_of(own / "node_modules" / ".thimble-lock.json") == lock:
+        return own
+    raise FixError("the sandbox runtime that fixes run in is not installed, and npm could not install it (it needs the npm "
+                   f"registry); node {sandbox_dir() / 'setup.mjs'} --home {home()} says why")
+
+
+def sandbox_argv(fid: int | str, path_extra: list[str] | None = None, net: bool = False) -> list[str]:
+    """The command that runs one shell command of the fixer, or its tests, in the sandbox runtime: reads the system,
+    the tools it needs and the copy's repository, writes only the copy and its temp folder, and reaches no site, or with
+    `net` (the fixer's own commands) only the package registries (REGISTRIES), through srt's proxies. The command itself
+    follows as /bin/bash -c CMD. `fid` names the copy: a fix's id, or `update`."""
     wt, tmp = home() / "work" / str(fid), home() / "tmp" / str(fid)
     tmp.mkdir(parents=True, exist_ok=True)
-    srt = _srt_dir()
-    if not (srt / "node_modules").is_dir():
-        raise FixError("the sandbox runtime is not installed (thimble installs it at session start); start a new "
-                       "session, then ask again")
+    srt = _srt()
+    box = sandbox_dir()
     node = os.path.realpath(shutil.which("node") or "/usr/bin/node")
     py = _python()
     cl = shutil.which(claude())
     tools = [str(Path(node).parent.parent), *_py_dirs(py)]
     if cl:
         tools += [str(Path(cl).parent), str(Path(os.path.realpath(cl)).parent)]
-    # the copy's git folder is live's (a worktree's .git file points into it), or the person's clone's: read only
-    common = git("rev-parse", "--git-common-dir", cwd=wt, check=False)
-    common = str((wt / common).resolve()) if common else ""
+    # the copy's git folder is live's (a worktree's .git file points into it), or the person's clone's: read only. Asked
+    # of live, never of the copy's .git, which the fixer writes and could point at another repository (_own_git)
+    common = git("rev-parse", "--git-common-dir", cwd=live_dir(), check=False) if live_dir().is_dir() else ""
+    common = str((live_dir() / common).resolve()) if common else ""
     linux = platform.system() == "Linux"
     lit = lambda p: {"path": p, "literal": True}  # noqa: E731
     system = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", "/etc"]
     seccomp = str(srt / "node_modules" / "@anthropic-ai" / "sandbox-runtime" / "vendor" / "seccomp")
     # THIMBLE_FIX_READ: more folders the tests read (the browser workbench's page packages, which its copy links)
     extra = [x for x in os.environ.get("THIMBLE_FIX_READ", "").split(os.pathsep) if x.startswith("/")]
-    shown = [*(system + [seccomp] if linux else []), *tools, str(PLUGIN / "sandbox"), str(wt), str(tmp),
+    shown = [*(system + [seccomp] if linux else []), *tools, str(box), str(wt), str(tmp),
              *([common] if common else []), *extra]
     hidden = ["/"] if linux else ["/Users", "/Volumes", "/private/tmp", "/private/var/tmp", "/private/var/folders",
                                    str(Path.home()), str(thimble_home())]
     rules = {
-        "network": {"allowedDomains": [], "deniedDomains": [], **({"allowAllUnixSockets": True} if linux else {})},
+        "network": {"allowedDomains": list(REGISTRIES) if net else [], "deniedDomains": [],
+                    **({"allowAllUnixSockets": True} if linux else {})},
         "filesystem": {"denyRead": [lit(p) for p in dict.fromkeys(hidden)],
                        "allowRead": [lit(p) for p in dict.fromkeys(x for x in shown if x and x != "/")],
                        "allowWrite": [lit(str(wt)), lit(str(tmp))], "denyWrite": []},
-        **({"bwrapPath": str(PLUGIN / "sandbox" / "bwrap.sh")} if linux else {}),
+        **({"bwrapPath": str(box / "bwrap.sh")} if linux else {}),
     }
     py_bin = str(Path(shutil.which(py) or py).parent)
     path = ":".join(dict.fromkeys([*(path_extra or []), *([str(Path(cl).parent)] if cl else []), py_bin,
                                    str(Path(node).parent), "/usr/bin", "/bin"]))
-    return ["/usr/bin/env", "-i", "PATH=/usr/bin:/bin", node, str(PLUGIN / "sandbox" / "run.mjs"), "--srt", str(srt),
-            json.dumps(rules), "--", "/usr/bin/env", "-i", f"PATH={path}", f"HOME={tmp}", f"TMPDIR={tmp}",
-            f"CLAUDE_CONFIG_DIR={tmp / 'claude'}", f"THIMBLE_HOME={tmp / 'thimble'}", f"THIMBLE_PYTHON={py}",
-            "DISABLE_AUTOUPDATER=1", "LANG=C.UTF-8", "/bin/bash", "-c"]
+    # the outer env -i leaves srt only PATH; with `net`, the command keeps what srt adds to that (its proxies), and has
+    # nothing of the person's either way
+    return ["/usr/bin/env", "-i", "PATH=/usr/bin:/bin", node, str(box / "run.mjs"), "--srt", str(srt),
+            json.dumps(rules), "--", "/usr/bin/env", *([] if net else ["-i"]), f"PATH={path}", f"HOME={tmp}",
+            f"TMPDIR={tmp}", f"CLAUDE_CONFIG_DIR={tmp / 'claude'}", f"THIMBLE_HOME={tmp / 'thimble'}",
+            f"THIMBLE_PYTHON={py}", "DISABLE_AUTOUPDATER=1", "LANG=C.UTF-8", "/bin/bash", "-c"]
 
 
 def _has_pytest(py: str) -> bool:
@@ -500,29 +785,300 @@ def _has_pytest(py: str) -> bool:
 
 
 QUICK_TESTS = "claude plugin test plugin"
+# the copy's own launcher and the kernel's command start (thimble --help reads cli.py and the modules it needs) and say
+# no traceback: the launcher, and the kernel run directly, since a launcher that answers --help itself would hide a dead
+# kernel. Each has SMOKE_LIMIT seconds, and then its processes are stopped (exit 124), so that one that hangs does not
+# hold tests.lock for the whole run. On a failure the log ends with what they said and their exit code
+SMOKE_LIMIT = 60
+LAUNCHER_SMOKE = ("(lim() { \"$THIMBLE_PYTHON\" -c 'import os,signal,subprocess as s,sys\n"
+                  "try:p=s.Popen(sys.argv[2:],start_new_session=True)\n"
+                  "except OSError as e:print(e);sys.exit(127)\n"
+                  "try:c=p.wait(int(sys.argv[1]))\n"
+                  "except s.TimeoutExpired:c=124\n"
+                  "try:os.killpg(p.pid,signal.SIGKILL)\n"
+                  "except OSError:pass\n"
+                  "sys.exit(c)' " + str(SMOKE_LIMIT) + " \"$@\"; }\n"
+                  "chk() { n=$1; shift; o=$(lim \"$@\" --help 2>&1); s=$?; case \"$s:$o\" in [1-9]*|0:*Traceback*) "
+                  "printf \"%s\\n%s --help: exit %s\\n\" \"$o\" \"$n\" \"$s\"; return 1;; esac; }\n"
+                  "chk plugin/bin/thimble plugin/bin/thimble && "
+                  "chk plugin/engine/thimble.py \"$THIMBLE_PYTHON\" plugin/engine/thimble.py)")
 
 
 def run_tests(fid: int | str) -> tuple[bool, str]:
-    """The quick tests in the copy, in the sandbox: the hooks tests, and the kernel's when this Python has pytest
-    (THIMBLE_FIX_TESTS, a shell command, replaces them). (passed, the log's last lines)."""
+    """The quick tests in the copy, in the sandbox, with no network: the copy's launcher (LAUNCHER_SMOKE), the hooks
+    tests, and the kernel's when this Python has pytest (THIMBLE_FIX_TESTS, a shell command, replaces them). They run
+    for one fix at a time, since two runs at once make the hooks tests run out of time, and a run that fails runs once
+    more before the tests count as failed. (passed, the log's last lines, which say when they passed only the second
+    time)."""
+    try:
+        argv = _tests_argv(fid)
+    except FixError as e:
+        return False, str(e)
+    return _run_tests(argv, fid)
+
+
+def _tests_argv(fid: int | str) -> list[str]:
+    """The command that runs the quick tests (run_tests) in the copy, in the sandbox."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
     if not cmd:
-        parts = [QUICK_TESTS]
+        parts = [LAUNCHER_SMOKE, QUICK_TESTS]
         if _has_pytest(_python()):
             parts.append('"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider')
         cmd = " && ".join(parts)
-    try:
-        argv = sandbox_argv(fid) + [cmd]
-    except FixError as e:
-        return False, str(e)
+    return sandbox_argv(fid) + [cmd]
+
+
+def _run_tests(argv: list[str], fid: int | str) -> tuple[bool, str]:
+    """run_tests, with the command made already (_tests_argv): the runner gets it from the call that checks the fix."""
+    with Lock("tests.lock"):
+        ok, log = _tests_once(argv, fid)
+        if not ok:
+            first = log
+            ok, log = _tests_once(argv, fid)
+            if ok:
+                log = f"{PASSED_AGAIN}; the first run ended:\n{first}"
+    return ok, log
+
+
+PASSED_AGAIN = "The tests passed only the second time"
+
+
+def _tests_once(argv: list[str], fid: int | str) -> tuple[bool, str]:
+    """One run of the quick tests in the copy: (passed, the log's last lines); the whole log in tmp/<id>/tests.log."""
     try:
         p = subprocess.run(argv, cwd=home() / "work" / str(fid), capture_output=True, text=True, timeout=540)
     except subprocess.TimeoutExpired:
         return False, "the tests ran longer than 9 minutes"
     log = (p.stdout + p.stderr).strip()
     (home() / "tmp" / str(fid)).mkdir(parents=True, exist_ok=True)
-    (home() / "tmp" / str(fid) / "tests.log").write_text(log + "\n")
+    try:
+        _write_new(home() / "tmp" / str(fid) / "tests.log", log + "\n")
+    except OSError:
+        pass  # the log's last lines go on the record either way
     return p.returncode == 0, "\n".join(log.splitlines()[-12:])
+
+
+def _write_new(p: Path, text: str) -> None:
+    """A file thimble writes in a folder that the fixer's sandbox, or its tests', writes too (tmp/<id>/): what is there
+    under the name (a link, a pipe) goes first, and the file is made new (O_EXCL), so that the write never follows a
+    link to a file elsewhere. OSError when it cannot be made (a folder under the name, or a link made again in between)."""
+    p.unlink(missing_ok=True)
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+
+
+def _no_link(p: Path) -> None:
+    """A link under a name in a folder the fixer's sandbox writes (tmp/<id>/) goes, before thimble's git makes or
+    removes a folder there."""
+    if p.is_symlink():
+        p.unlink()
+
+
+TESTS_FAILED = "its tests failed in the sandbox"
+# the log's last lines of a fix whose runner ended before it wrote what came of the tests
+TESTS_STOPPED = "the tests stopped before they finished"
+# the runner: this kernel's Python, isolated (no PYTHON* settings, no folder of the caller's on its path), with its job
+# on stdin; it writes no bytecode (-B), since a kernel that runs from the release checkout would write it there
+RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from kernel import fixes; fixes.tests_runner()"
+
+
+def _guard(fid: int, deadline: float | None) -> int | None:
+    """The fix's guard (tests/<id>.lock): one check of a fix at a time, from before it commits the fixer's change in the
+    copy until the record says that the tests run, or what came of the check (done). No runner holds it. A check that
+    finds it held tries until `deadline` (time.monotonic). The descriptor that holds it, which the caller closes, or None
+    at the deadline."""
+    import fcntl  # noqa: PLC0415
+
+    lock = home() / "tests" / f"{fid}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except BlockingIOError:
+            if deadline is not None and time.monotonic() >= deadline:
+                os.close(fd)
+                return None
+            time.sleep(0.1)
+
+
+def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str],
+                 read: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """The quick tests of a fixer's change in a process of their own (the runner), in a session of its own, apart from
+    the call that checks the change: the tests wait for other fixes' tests and run twice when they fail, which may take
+    longer than Claude Code lets a call run. The record stays working, with `testing` (when they started, and the lock
+    file of this run, which its runner holds while it lives), until the runner writes what came of them (tests_runner).
+    Each run has a lock file of its own, so that the tests of a new round never wait for the runner of the round before.
+    The caller holds the fix's guard (done); this starts nothing when the record says that the tests run or is no longer
+    the one it read (`read`). None: it wrote nothing, and its caller waits for the tests (_wait)."""
+    import fcntl  # noqa: PLC0415
+
+    fid = rec["id"]
+    lock = home() / "tests" / f"{fid}.{secrets.token_hex(8)}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    held = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        # held from before the record says that the tests run, then by the runner, so no wait takes the lock for a
+        # runner that ended (_ended)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        # under the fixes' lock, which a new round takes too (round_)
+        with Lock():
+            now = get(fid)
+            if now.get("testing") or (read is not None and now != read):
+                lock.unlink(missing_ok=True)
+                return None
+            rec = put({**rec, "testing": {"since": time.time(), "lock": str(lock)}})
+        job = {"id": fid, "argv": argv, "title": named, "testing": rec["testing"]}
+        log = _new_log(tmp_dir(fid) / "runner.log")
+        try:
+            p = subprocess.Popen([sys.executable or "python3", "-I", "-B", "-c", RUNNER, str(Path(__file__).resolve().parents[1])],
+                                 stdin=subprocess.PIPE, stdout=log, stderr=log, cwd=home(), start_new_session=True,
+                                 pass_fds=(held,))
+            with p.stdin:
+                p.stdin.write(json.dumps(job).encode())
+        except OSError:
+            lock.unlink(missing_ok=True)  # a runner that did not start is one that ended: the wait for it says so
+        finally:
+            os.close(log)
+    finally:
+        os.close(held)
+    return rec
+
+
+def _new_log(p: Path) -> int:
+    """A new file for the runner's output, or /dev/null. The fixer writes in the same folder, so what it may have left
+    under the name (a link, a pipe) goes first."""
+    try:
+        p.unlink(missing_ok=True)
+        return os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except OSError:
+        return os.open(os.devnull, os.O_WRONLY)
+
+
+def tests_runner() -> None:
+    """The runner (_start_tests), with its job on stdin: the tests as run_tests runs them, then what came of them on the
+    fix's record, as done writes it, marked as not shown yet (`unshown`) until the plugin's line shows it (shown): no
+    session may wait for it any more. A record that went on without them (the fix was removed, a new round took the
+    copy) stays as it is: each write looks again, under the fixes' lock, which a new round and a removal take too. The
+    run's own lock file (_start_tests) goes when the runner ends."""
+    job = json.loads(sys.stdin.read())
+    try:
+        ok, tail = _run_tests(job["argv"], job["id"])
+        rec = get(job["id"])
+        if rec.get("state") != "working" or rec.get("testing") != job["testing"]:
+            return
+        rec.pop("testing")
+        rec = _tested({**rec, "unshown": True}, ok, tail, job["title"])
+        if rec.get("prev") and rec["state"] == "ready":
+            try:
+                settle(rec, job["testing"])
+            except Exception as e:
+                # git stopped the round's new version: the round fails with git's words, never ready with the round's
+                # own change alone, and with no refusal, which no next fixer could answer
+                rec.pop("refused", None)
+                _put_while_waits(job["testing"], {**rec, "state": "failed", "error": str(e)})
+                if not isinstance(e, FixError):
+                    raise
+            return
+        _put_while_waits(job["testing"], rec)
+    finally:
+        Path(job["testing"]["lock"]).unlink(missing_ok=True)
+
+
+def _waits_for(fid: int, mark: dict[str, Any]) -> bool:
+    """Whether the fix's record still waits for the run of its tests that `mark` names: working, with that mark."""
+    now = get(fid)
+    return now.get("state") == "working" and now.get("testing") == mark
+
+
+def _put_while_waits(mark: dict[str, Any], rec: dict[str, Any]) -> None:
+    """The runner's write, under the fixes' lock, and only while the record still waits for the run `mark` names: a new
+    round, or the fix removed, between the runner's look and its write stays as it is."""
+    with Lock():
+        if _waits_for(rec["id"], mark):
+            put(rec)
+
+
+def shown(fid: int | str) -> dict[str, Any]:
+    """The plugin's line showed what came of the fix's tests (tests_runner): it is no longer one to show at a session's
+    start."""
+    with Lock():
+        rec = get(fid)
+        if "unshown" not in rec:
+            return rec
+        rec.pop("unshown")
+        return put(rec)
+
+
+def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None) -> dict[str, Any]:
+    """The record with what came of its tests: ready, named by the fixer's title, or failed, with the refusal that the
+    next fixer in the copy is told (the end of the tests' output)."""
+    rec.update(tests="passed" if ok else "failed", tests_tail=tail, state="ready" if ok else "failed",
+               error=None if ok else TESTS_FAILED)
+    if not ok:
+        rec["refused"] = {"why": TESTS_FAILED, "files": [], "tests": tail}
+    elif named:
+        rec["title"] = named
+    return rec
+
+
+def _wait(fid: int, deadline: float | None) -> dict[str, Any]:
+    """The fix's record once the runner of its tests wrote what came of them, or as soon as the record no longer waits
+    for that runner (a new round took the copy, the fix was removed: working with no `testing`, or another state), or
+    at `deadline` (time.monotonic) as it is then: still working, with `testing`. fixes.jsonl only grows (put), so the
+    record is read again only once it grew."""
+    size = _size(home() / "fixes.jsonl")
+    rec = get(fid)
+    mark = rec.get("testing")
+    if not mark or rec.get("state") != "working":
+        return rec
+    while not _ended(fid, mark):
+        if deadline is not None and time.monotonic() >= deadline:
+            return get(fid)
+        time.sleep(0.1)
+        if _size(home() / "fixes.jsonl") == size:
+            continue
+        size = _size(home() / "fixes.jsonl")
+        rec = get(fid)
+        if rec.get("state") != "working" or rec.get("testing") != mark:
+            return rec
+    return get(fid)
+
+
+def _size(p: Path) -> int:
+    """The file's size, or -1 when it cannot be read."""
+    try:
+        return p.stat().st_size
+    except OSError:
+        return -1
+
+
+def _ended(fid: int, mark: dict[str, Any]) -> bool:
+    """Whether the runner of the tests `mark` names is gone (its lock file is free, or gone). When the record still waits
+    for it, the runner was stopped before it wrote what came of the tests: the fix fails, with no refusal, so that no new
+    round of its fixer starts from it (r starts it again)."""
+    import fcntl  # noqa: PLC0415
+
+    try:
+        fd = os.open(str(mark.get("lock") or ""), os.O_RDWR)
+    except OSError:
+        fd = -1
+    try:
+        if fd >= 0:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return False
+        rec = get(fid)
+        if rec.get("state") == "working" and rec.get("testing") == mark:
+            rec.pop("testing")
+            put({**rec, "state": "failed", "tests": "failed", "tests_tail": TESTS_STOPPED, "error": TESTS_FAILED})
+        return True
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 # ------------------------------------------------------------------ a request
@@ -531,9 +1087,10 @@ def run_tests(fid: int | str) -> tuple[bool, str]:
 REFINABLE = ("on", "off", "ready")
 
 
-def new(words: str, made_in: str = "terminal", title: str | None = None, session: str | None = None) -> dict[str, Any]:
+def new(words: str, made_in: str = "terminal", title: str | None = None, session: str | None = None,
+        asked: str | None = None) -> dict[str, Any]:
     """A request: a copy cut from mine. `session`: the Claude Code session whose fixer works on it; only that session
-    checks it at the fixer's end."""
+    checks it at the fixer's end. `asked`: the person's own words, when Claude wrote `words` from them (_asked_of)."""
     words = (words or "").strip()
     if not words:
         raise FixError("say what should work differently: /thimble-fix make the bar say how many citations failed")
@@ -549,19 +1106,48 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, session
         git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
         _give_types(wt)
         tmp_dir(fid).mkdir(parents=True, exist_ok=True)
-        rec = {"id": fid, "title": (title or short(words)).strip(), "words": [words], "rounds": 1, "made_in": made_in,
-               "created": time.time(), "state": "working", "work": str(wt), "base": base, "commit": None, "files": [],
-               "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
-               "session": session or None}
-        return put(rec)
+        now = time.time()
+        rec = {"id": fid, "title": (title or short(words)).strip(), "words": [], "rounds": 1, "made_in": made_in,
+               "created": now, "started": now, "state": "working", "work": str(wt), "base": base, "commit": None,
+               "files": [], "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
+               "conversation": os.environ.get("THIMBLE_CONVERSATION") or None, "session": session or None}
+        return put(_with_words(rec, [words], asked))
+
+
+def _asked_of(rec: dict[str, Any]) -> list[str | None]:
+    """The person's own words of each round, beside `words`, which Claude wrote from them for the fixer (after the
+    person's /thimble-fix <words>): None for a round with no words of theirs (a fix Claude offered, a record from before
+    thimble kept them)."""
+    asked = list(rec.get("asked") or [])
+    n = len(rec.get("words") or [])
+    return (asked + [None] * n)[:n]
+
+
+def _with_words(rec: dict[str, Any], words: list[str], asked: str | None = None) -> dict[str, Any]:
+    """The record with more words for its fixer (a round's), and the person's own words beside the last of them."""
+    out = {**rec, "words": [*(rec.get("words") or []), *words]}
+    mine = [*_asked_of(rec), *[None] * len(words)]
+    if words and asked and asked.strip():
+        mine[-1] = asked.strip()
+    if any(mine):
+        out["asked"] = mine
+    return out
+
+
+def _asked_field(recs: list[dict[str, Any]]) -> dict[str, Any]:
+    """{asked} for one record made of these records' words in turn (a merge), or {} when none has the person's own."""
+    mine = [a for r in recs for a in _asked_of(r)]
+    return {"asked": mine} if any(mine) else {}
 
 
 def _give_types(wt: Path) -> None:
     """The copy gets the types Claude Code wrote beside the plugin it loads (plugin/.claude-plugin/types: the
     `claude-code` module that plugin/tsconfig.json reads), which git leaves out, so its code type-checks as the person's
-    does. Nothing when Claude Code wrote none."""
+    does. The plugin names the folder it was loaded from (THIMBLE_PLUGIN_ROOT), since this kernel runs from the release
+    checkout. Nothing when Claude Code wrote none."""
     rel = Path(".claude-plugin") / "types"
-    for src in (PLUGIN / rel, live_dir() / "plugin" / rel):
+    loaded = [Path(p) / rel for p in (os.environ.get("THIMBLE_PLUGIN_ROOT"),) if p and p.startswith("/")]
+    for src in (*loaded, PLUGIN / rel, live_dir() / "plugin" / rel):
         if (src / "claude-code").is_dir():
             try:
                 shutil.copytree(src, wt / "plugin" / rel, dirs_exist_ok=True)
@@ -578,24 +1164,41 @@ def again(fid: int | str, session: str | None = None) -> dict[str, Any]:
         raise FixError(f"fix {rec['id']} is {state_word(rec)}, with no refusal to answer")
     if not _is_checkout(rec.get("work")):
         raise FixError(f"fix {rec['id']} has no copy any more; r starts it again in a new copy")
-    rec.update(state="working", error=None, rounds=int(rec.get("rounds") or 1) + 1, **({"session": session} if session else {}))
+    # the same request, tried again: its time and its name go on; what came of the check before is no outcome to show
+    rec.update(state="working", error=None, rounds=int(rec.get("rounds") or 1) + 1,
+               **({"session": session} if session else {}))
+    rec.pop("unshown", None)
     return put(rec)
 
 
-def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, Any]:
+def _fresh(rec: dict[str, Any]) -> dict[str, Any]:
+    """A record that starts a round of its own (new words, or the person's r): its time starts now, and the block of the
+    round before goes."""
+    out = {k: v for k, v in rec.items() if k != "blocked"}
+    return {**out, "started": time.time()}
+
+
+def round_(fid: int | str, words: str, session: str | None = None, asked: str | None = None) -> dict[str, Any]:
     """More words for a fix, whose fixer works in `session`: a new round of the same fix, never a new fix. A fix whose
     copy is still there (working, ready, or refused) gets the round in that copy. A fix that is on, off or ready with
     no copy is changed in place: a new copy holds its change, and its version as it is now (prev) stays on, or off,
     until the person's y puts the new version on (apply), and u goes back to it (undo). A fix that failed, or no longer
-    fits, starts again in a new copy (redo)."""
-    rec = get(fid)
+    fits, starts again in a new copy (redo). `asked`: the person's own words, as in new."""
     words = (words or "").strip()
-    if _is_checkout(rec.get("work")):
-        rec.update(words=[*rec.get("words", []), words], rounds=int(rec.get("rounds") or 1) + 1, state="working",
-                   error=None, **({"session": session} if session else {}))
-        return put(_named_patches(rec, words))
+    # a round in the copy is written under the fixes' lock, which the runner of the round before writes under too
+    with Lock():
+        rec = get(fid)
+        if _is_checkout(rec.get("work")):
+            # words for a fixer that still works go on in its time; any other round starts its own. The tests of the
+            # round before, should they run, are no longer this fix's: their runner writes nothing (tests_runner)
+            rec = rec if rec.get("state") == "working" else _fresh(rec)
+            rec.pop("testing", None)
+            rec.pop("unshown", None)
+            rec.update(rounds=int(rec.get("rounds") or 1) + 1, state="working", error=None,
+                       **({"session": session} if session else {}))
+            return put(_named_patches(_with_words(rec, [words], asked), words))
     if rec.get("state") in ("failed", "redo"):
-        return redo(rec["id"], words, session)
+        return redo(rec["id"], words, session, asked)
     if rec.get("state") not in REFINABLE or not rec.get("commit"):
         raise FixError(f"fix {rec['id']} is {state_word(rec)}; only a fix that is on, off or ready can change")
     if not words:
@@ -607,10 +1210,11 @@ def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, 
         prev = {k: rec.get(k) for k in ("state", "commit", "files", "summary", "title", "tests", "tests_tail", "on_at",
                                          "base", "note")}
         rec.pop("refused", None)
+        rec.pop("unshown", None)
+        rec = _fresh(rec)
         rec.update(state="working", work=str(wt), base=base, prev=prev, error=None, tests=None, note=None,
-                   words=[*rec.get("words", []), words], rounds=int(rec.get("rounds") or 1) + 1,
-                   session=session or rec.get("session"))
-        return put(_named_patches(rec, words))
+                   rounds=int(rec.get("rounds") or 1) + 1, session=session or rec.get("session"))
+        return put(_named_patches(_with_words(rec, [words], asked), words))
 
 
 def _named_patches(rec: dict[str, Any], words: str) -> dict[str, Any]:
@@ -633,7 +1237,10 @@ def _named_patches(rec: dict[str, Any], words: str) -> dict[str, Any]:
             continue
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         path = tmp_dir(rec["id"]) / f"fix-{m}.patch"
-        path.write_text(patch)
+        try:
+            _write_new(path, patch)
+        except OSError:
+            continue  # the fixer is told of no patch it cannot read
         out.append({"id": m, "title": other.get("title") or "", "path": str(path)})
     return {**rec, "patches": out} if out else rec
 
@@ -651,13 +1258,17 @@ def _copy_of(rec: dict[str, Any]) -> tuple[Path, str]:
     git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
     _give_types(wt)
     if rec.get("state") != "on" or not _has_ref(fid):
+        g = _own_git(wt)
+        if g is None:
+            _drop_work({"work": str(wt)})
+            raise FixError(COPY_GONE)
         p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", _fix_ref(rec)], cwd=wt, check=False,
-                env=as_thimble())
+                env={**as_thimble(), **g})
         if p.returncode != 0:
-            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env={**os.environ, **g})
             _drop_work({"work": str(wt)})
             raise FixError(f"fix {fid} does not fit your thimble as it is now; /thimble-fix new <words> makes a new fix")
-        base = git("rev-parse", "HEAD", cwd=wt)
+        base = git("rev-parse", "HEAD", cwd=wt, env={**os.environ, **g})
     tmp_dir(fid).mkdir(parents=True, exist_ok=True)
     return wt, base
 
@@ -671,8 +1282,10 @@ def _fix_ref(rec: dict[str, Any]) -> str:
 
 
 def _numstat(repo: Path, a: str, b: str) -> list[dict[str, Any]]:
+    """The files changed from a to b, each with its lines added and removed (None for a binary file). A file moved is
+    two files, the one it was and the one it is, so that the checks of what a fix changes see both names."""
     out = []
-    for line in git("-c", "core.quotePath=false", "diff", "--numstat", a, b, cwd=repo).splitlines():
+    for line in git("-c", "core.quotePath=false", "diff", "--numstat", "--no-renames", a, b, cwd=repo).splitlines():
         add, dele, path = (line.split("\t", 2) + ["", "", ""])[:3]
         out.append({"path": path, "add": None if add == "-" else int(add), "del": None if dele == "-" else int(dele)})
     return out
@@ -686,43 +1299,127 @@ def _and(words: list[str]) -> str:
     return " and ".join(words) if len(words) < 3 else ", ".join(words[:-1]) + ", and " + words[-1]
 
 
+def _kinds(paths: list[str], kinds: dict[str, tuple[str, ...]]) -> dict[str, list[str]]:
+    """The paths that are one of `kinds`, by the first kind each one is, in the order of `kinds`."""
+    out: dict[str, list[str]] = {}
+    for p in paths:
+        kind = next((k for k, pats in kinds.items() if any(fnmatch.fnmatch(p, pat) for pat in pats)), None)
+        if kind:
+            out.setdefault(kind, []).append(p)
+    return {k: out[k] for k in kinds if k in out}
+
+
 def protected_why(paths: list[str]) -> str:
     """The refusal for a fix that changes protected files: each file, with what it is, and why thimble refuses."""
-    kinds: dict[str, list[str]] = {}
-    for p in paths:
-        kind = next(k for k, pats in PROTECTED_KINDS.items() if any(fnmatch.fnmatch(p, pat) for pat in pats))
-        kinds.setdefault(kind, []).append(p)
-    named = [f"{_and(ps)} ({kind})" for kind, ps in kinds.items()]
-    return f"it changes {_and(named)}; thimble does not apply changes to its safety files"
+    named = [f"{_and(ps)} ({kind})" for kind, ps in _kinds(paths, PROTECTED_KINDS).items()]
+    return (f"it changes {_and(named)}; no fix may change the code that turns fixes off and undoes them, or the scan a "
+            "shared fix goes through")
+
+
+def notice_of(paths: list[str]) -> dict[str, list[str]]:
+    """The files of a fix that the person is told of before they use it, by what each one is (NOTICE_KINDS)."""
+    return _kinds(paths, NOTICE_KINDS)
+
+
+def notice_said(rec: dict[str, Any]) -> str:
+    """The sentence that tells the person what such files a fix changes: `This fix changes the sandbox
+    (plugin/cards/argv.mjs).`, or ''. fix/fixes.ts noticeText says the same."""
+    kinds = rec.get("notice") or {}
+    return f"This fix changes {_and([f'{k} ({_and(ps)})' for k, ps in kinds.items()])}." if kinds else ""
 
 
 def _is_checkout(work: str | None) -> bool:
-    """Whether a fix's copy is there and is still a git checkout of its own (a worktree of live). A record without
-    a copy has work None, which must never read as the kernel's own folder."""
-    if not work or not Path(work).is_dir():
-        return False
-    top = git("rev-parse", "--show-toplevel", cwd=work, check=False)
-    return bool(top) and Path(top).resolve() == Path(work).resolve()
+    """Whether a fix's copy is there and is still a git checkout of its own (a worktree of live, _own_git). A record
+    without a copy has work None, which must never read as the kernel's own folder."""
+    return _own_git(work) is not None
+
+
+# a fix whose copy git may not run in (_own_git): the copy is gone, or something in it changed its git link
+COPY_GONE = ("its copy of thimble was gone or no longer a git checkout, so thimble could not check it; r starts it again "
+             "in a new copy")
+
+
+def _own_git(work: str | Path | None) -> dict[str, str] | None:
+    """What runs git in a worktree of live (a fix's copy, the release checkout, a merge's) on that worktree's own entry
+    in live's repository, as live's records have it, for git's environment: GIT_DIR=<live's git folder>/worktrees/<entry>
+    and GIT_WORK_TREE=<the worktree>. The fixer's sandbox writes its copy, the copy's .git too, which could point git at
+    another repository (the person's clone, whose branch git would move) or at a git folder of the fixer's, whose
+    settings run commands outside the sandbox; so git never reads it. None, and then no git may run in the folder, when
+    it is gone or its .git is not a file that names the entry whose own record names it back."""
+    if not work:
+        return None
+    import stat  # noqa: PLC0415
+
+    wt = Path(work)
+    try:
+        # never through a link, and never waiting on a pipe left under the name
+        fd = os.open(wt / ".git", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        link = os.read(fd, 4096).decode(errors="replace").strip() if stat.S_ISREG(os.fstat(fd).st_mode) else ""
+    finally:
+        os.close(fd)
+    common = git("rev-parse", "--git-common-dir", cwd=live_dir(), check=False) if live_dir().is_dir() else ""
+    if not link.startswith("gitdir:") or not common:
+        return None
+    entry = Path(os.path.realpath(os.path.join(wt, link[len("gitdir:"):].strip())))
+    if entry.parent != (live_dir() / common).resolve() / "worktrees":
+        return None
+    try:
+        back = (entry / "gitdir").read_text().strip()
+    except OSError:
+        return None
+    if not back or os.path.realpath(os.path.join(entry, back)) != os.path.realpath(wt / ".git"):
+        return None
+    return {"GIT_DIR": str(entry), "GIT_WORK_TREE": str(wt)}
 
 
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
-         tests: bool = True, session: str | None = None, cannot: str | None = None) -> dict[str, Any]:
+         tests: bool = True, session: str | None = None, cannot: str | None = None,
+         within: float | None = None) -> dict[str, Any]:
     """The fixer ended: thimble commits its change in the copy, checks what it changed, and runs the quick tests in
     the sandbox. ready, failed (with the reason), or a request with no code. A round of a fix changed in place (prev):
     a ready change becomes the fix's new version, the fix's change and the round's in one commit (settle), which waits
     for the person's y while the version before stays as it was; a round that changed nothing leaves the fix as it was.
     `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
-    `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r."""
+    `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r.
+    The tests run in a process of their own (_start_tests), and done waits for what came of them; with `within`, at
+    most that many seconds, and then it gives the fix as it is: still working, with `testing`. A done of a fix whose
+    tests run starts nothing: it waits for them in the same way, and one with `within` that comes after they ended gives
+    what came of them; such a done may come from any session (/clear and /resume give the session a new id while it
+    waits). Two checks at once take the fix's guard (_guard) in turn, before either commits in the copy: the second
+    then starts nothing and waits as well."""
+    deadline = None if within is None else time.monotonic() + max(within, 0.0)
     rec = get(fid)
+    if (rec.get("state") == "working" and rec.get("testing")) or (within is not None and rec.get("state") != "working"):
+        return _wait(rec["id"], deadline)
     if session and rec.get("session") and rec["session"] != session:
         raise FixError(f"fix {rec['id']} is being made in another Claude Code session, which checks it when its fixer ends")
     if rec.get("state") != "working":
         raise FixError(f"fix {rec['id']} was checked already ({state_word(rec)}), so there is nothing to check")
     if cannot is not None and cannot.strip():
-        rec.pop("refused", None)
-        rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300))
+        # a fixer that cannot do without the files no fix may change: another try cannot do it either (blocked)
+        blocked = protected_of((rec.pop("refused", None) or {}).get("files") or [])
+        rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300),
+                   **({"blocked": blocked} if blocked else {}))
         return put(rec)
-    rec = _done(fid, title, summary, request, tests)
+    # the tests' command before the guard: making it may install the sandbox runtime, which takes minutes
+    try:
+        argv: list[str] | FixError = _tests_argv(rec["id"]) if tests else []
+    except FixError as e:
+        argv = e
+    guard = _guard(rec["id"], deadline)
+    try:
+        checked = None if guard is None else _done(fid, title, summary, request, tests, argv, rec)
+    finally:
+        if guard is not None:
+            os.close(guard)
+    # None: another check of the fix started its tests first or wrote what came of it, a new round took the copy, or the
+    # guard was not free by the deadline
+    if checked is None or checked.get("testing"):
+        return _wait(rec["id"], deadline)
+    rec = checked
     if rec.get("prev") and rec.get("state") == "request":
         return {**_restore(rec), "unchanged": True}
     if rec.get("prev") and rec.get("state") == "ready":
@@ -730,31 +1427,41 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     return rec
 
 
-def settle(rec: dict[str, Any]) -> dict[str, Any]:
+def settle(rec: dict[str, Any], mark: dict[str, Any] | None = None) -> dict[str, Any]:
     """A ready round of a fix changed in place: its new version is the fix's change as it is now (its ref) plus the
     round's change, as one commit on the commit the fix's change sits on, kept under refs/thimble/next/<id> until the
-    person's y. A round's change that does not apply to the fix fails, for r."""
+    person's y. A round's change that does not apply to the fix fails, for r, as does a copy git may not run in
+    (_own_git), which the tests' time gave the fixer's sandbox to change. `mark`: the run of the tests whose runner
+    settles it (tests_runner); a record that no longer waits for that run (a new round took the copy, the fix was
+    removed) stays as it is, and its copy too."""
     wt = Path(rec["work"])
     with Lock():
-        old = git("rev-parse", _fix_ref(rec), cwd=wt)
-        parent = git("rev-parse", f"{old}^", cwd=wt)
+        if mark is not None and not _waits_for(rec["id"], mark):
+            return get(rec["id"])
+        g = _own_git(wt)
+        if g is None:
+            _drop_work(rec)
+            return put({**rec, "state": "failed", "error": COPY_GONE})
+        env, me = {**os.environ, **g}, {**as_thimble(), **g}
+        old = git("rev-parse", _fix_ref(rec), cwd=wt, env=env)
+        parent = git("rev-parse", f"{old}^", cwd=wt, env=env)
         mine = rec["commit"]
-        git("checkout", "-q", "--detach", old, cwd=wt)
-        p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", mine], cwd=wt, check=False, env=as_thimble())
+        git("checkout", "-q", "--detach", old, cwd=wt, env=env)
+        p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", mine], cwd=wt, check=False, env=me)
         if p.returncode != 0:
-            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
-            run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
-            git("checkout", "-q", "--detach", mine, cwd=wt)
+            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env=env)
+            run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
+            git("checkout", "-q", "--detach", mine, cwd=wt, env=env)
             why = f"its change does not fit fix {rec['id']} as it is now"
             return put({**rec, "state": "failed", "error": why})
-        tree = git("write-tree", cwd=wt)
-        run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
-        git("checkout", "-q", "--detach", mine, cwd=wt)
+        tree = git("write-tree", cwd=wt, env=env)
+        run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
+        git("checkout", "-q", "--detach", mine, cwd=wt, env=env)
         commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", parent, "-m",
                      f"{rec['title']}\n\n{rec.get('summary') or ''}\n\nthimble fix {rec['id']}".strip(), cwd=wt,
-                     env=as_thimble())
-        git("update-ref", f"refs/thimble/next/{rec['id']}", commit, cwd=wt)
-        return put({**rec, "commit": commit, "round_commit": mine, "files": _numstat(wt, parent, commit)})
+                     env=me)
+        git("update-ref", f"refs/thimble/next/{rec['id']}", commit, cwd=wt, env=env)
+        return put({**rec, "commit": commit, "round_commit": mine, "files": _numstat(live_dir(), parent, commit)})
 
 
 def _restore(rec: dict[str, Any]) -> dict[str, Any]:
@@ -783,36 +1490,45 @@ def _take_out(fid: int, why: str) -> dict[str, Any]:
     return {"redo": failed}
 
 
-def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool) -> dict[str, Any]:
+def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool,
+          argv: list[str] | FixError, seen: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """done's check, under the fix's guard: `argv` is the tests' command (or why there is none). A record that is no
+    longer the one done read (`seen`) is not checked here: None."""
     rec = get(fid)
-    if not _is_checkout(rec.get("work")):
-        # the copy is gone, or something in it removed its git link: nothing of it can be checked. r makes a new copy
+    read = dict(rec)
+    if seen is not None and rec != seen:
+        return None
+    g = _own_git(rec.get("work"))
+    if g is None:
+        # the copy is gone, or something in it removed or changed its git link: nothing of it can be checked, and no git
+        # runs in it. r makes a new copy
         _drop_work(rec)
-        rec.update(state="failed", commit=None, files=[], tests=None,
-                   error="its copy of thimble was gone or no longer a git checkout, so thimble could not check it; "
-                         "r starts it again in a new copy")
+        rec.update(state="failed", commit=None, files=[], tests=None, error=COPY_GONE)
         return put(rec)
     wt = Path(rec["work"])
+    env = {**os.environ, **g}
     rec.pop("refused", None)
-    # a fix changed in place keeps its name
-    if title and title.strip() and not rec.get("prev"):
-        rec["title"] = short(title, 60)
+    rec.pop("blocked", None)
+    # the fixer's title names the fix once thimble uses its change, so a refused try leaves the name the person saw; a
+    # fix changed in place keeps its name
+    named = short(title, 60) if title and title.strip() and not rec.get("prev") else None
     rec["summary"] = (summary or "").strip()[:2000]
-    git("add", "-A", cwd=wt)
-    changed = run(["git", "diff", "--cached", "--quiet", rec["base"]], cwd=wt, check=False).returncode != 0
+    git("add", "-A", cwd=wt, env=env)
+    changed = run(["git", "diff", "--cached", "--quiet", rec["base"]], cwd=wt, check=False, env=env).returncode != 0
     if request or not changed:
-        git("reset", "-q", "--hard", rec["base"], cwd=wt)
-        rec.update(state="request", files=[], commit=None, tests=None)
+        git("reset", "-q", "--hard", rec["base"], cwd=wt, env=env)
+        rec.update(state="request", files=[], commit=None, tests=None, **({"title": named} if named else {}))
         _drop_work(rec)
         return put(rec)
     # the fix is one commit on the commit its copy was cut from, whatever the copy's own history holds
-    tree = git("write-tree", cwd=wt)
+    tree = git("write-tree", cwd=wt, env=env)
     commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", rec["base"], "-m",
-                 f"{rec['title']}\n\n{rec['summary']}\n\nthimble fix {rec['id']}".strip(), cwd=wt, env=as_thimble())
-    git("reset", "-q", "--hard", commit, cwd=wt)
+                 f"{named or rec['title']}\n\n{rec['summary']}\n\nthimble fix {rec['id']}".strip(), cwd=wt,
+                 env={**as_thimble(), **g})
+    git("reset", "-q", "--hard", commit, cwd=wt, env=env)
     # a round of a fix changed in place: its ref keeps the version the person has until their y
-    git("update-ref", f"refs/thimble/{'next' if rec.get('prev') else 'fixes'}/{rec['id']}", commit, cwd=wt)
-    files = _numstat(wt, rec["base"], commit)
+    git("update-ref", f"refs/thimble/{'next' if rec.get('prev') else 'fixes'}/{rec['id']}", commit, cwd=wt, env=env)
+    files = _numstat(live_dir(), rec["base"], commit)
     rec.update(commit=commit, files=files)
     bad = protected_of([f["path"] for f in files])
     binary = [f["path"] for f in files if f["add"] is None]
@@ -823,15 +1539,12 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
         why = f"it adds or changes a binary file ({binary[0]}); a fix changes text only"
         rec.update(state="failed", tests=None, error=why, refused={"why": why, "files": binary})
         return put(rec)
-    if tests:
-        ok, tail = run_tests(rec["id"])
-        rec.update(tests="passed" if ok else "failed", tests_tail=tail)
-        rec.update(state="ready" if ok else "failed", error=None if ok else "its tests failed in the sandbox")
-        if not ok:
-            rec["refused"] = {"why": "its tests failed in the sandbox", "files": [], "tests": tail}
-    else:
-        rec.update(tests="skipped", state="ready", error=None)
-    return put(rec)
+    if not tests:
+        rec.update(tests="skipped", state="ready", error=None, **({"title": named} if named else {}))
+        return put(rec)
+    if isinstance(argv, FixError):
+        return put(_tested(rec, False, str(argv), named))
+    return _start_tests(rec, named, argv, read)
 
 
 def _drop_work(rec: dict[str, Any]) -> None:
@@ -914,16 +1627,22 @@ def _rebuild(order: list[int]) -> list[int]:
 
 
 def _move(change) -> dict[str, Any]:
-    """Change live (a function of the records), then have Claude Code copy it."""
+    """Change live (a function of the records), then have Claude Code copy it. Before Claude Code loads live (not
+    pointed yet), the release first follows the code that runs (ensure_live), as at a request: a y right after another
+    way updated the plugin (claude plugin update, scripts/install.sh) puts the fix onto that release, not the one before."""
     with Lock():
+        rel = release()
+        if rel and not rel.get("pointed") and (live_dir() / ".git").exists():
+            ensure_live()
         out = change()
         synced = _sync()
     return {**(out or {}), **synced}
 
 
 def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
-    """y: the fix goes on. thimble cherry-picks its commit onto mine, points the marketplace at live the first time,
-    and has Claude Code copy live; the plugin then runs /reload-plugins."""
+    """y: the fix goes on. thimble points the marketplace at live the first time (before anything else, so that a y
+    whose pointing fails changes nothing), cherry-picks the fix's commit onto mine unless mine holds it already, and has
+    Claude Code copy live; the plugin then runs /reload-plugins."""
     rec = get(fid)
     check_ask(rec["id"], secret)
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
@@ -939,21 +1658,27 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
 
     def change():
         live = live_dir()
+        # Claude Code's marketplace on live first: when that fails, mine, the fix's ref and its record stay as they were
+        _repoint()
         _unstamp()
         # a fix the person turns on while all are off: the others come back with it
         git("checkout", "-q", "mine", cwd=live)
         write_json(home() / "state.json", {"on": True})
-        p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{rec['id']}"], cwd=live,
-                check=False, env=as_thimble())
-        if p.returncode != 0:
-            run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
-            r = get(rec["id"])
-            r.update(state="redo", error="it does not fit the fixes you have on")
-            put(r)
-            raise FixError(f"fix {rec['id']} does not fit the fixes you have on; r asks Claude to redo it")
-        new_commit = git("rev-parse", "HEAD", cwd=live)
-        git("update-ref", f"refs/thimble/fixes/{rec['id']}", new_commit, cwd=live)
-        _repoint()
+        ref = f"refs/thimble/fixes/{rec['id']}"
+        if run(["git", "merge-base", "--is-ancestor", ref, "mine"], cwd=live, check=False).returncode == 0:
+            # mine holds the fix's commit already: it goes on as it is, with no empty commit after it
+            new_commit = git("rev-parse", ref, cwd=live)
+        else:
+            p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", ref], cwd=live, check=False,
+                    env=as_thimble())
+            if p.returncode != 0:
+                run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
+                r = get(rec["id"])
+                r.update(state="redo", error="it does not fit the fixes you have on")
+                put(r)
+                raise FixError(f"fix {rec['id']} does not fit the fixes you have on; r asks Claude to redo it")
+            new_commit = git("rev-parse", "HEAD", cwd=live)
+            git("update-ref", ref, new_commit, cwd=live)
         r = get(rec["id"])
         r.update(state="on", on_at=time.time(), commit=new_commit, error=None)
         _drop_work(r)
@@ -970,6 +1695,8 @@ def _swap(fid: int) -> dict[str, Any]:
     rec = get(fid)
     p = rec.get("prev") or {}
     old = git("rev-parse", "-q", "--verify", f"refs/thimble/fixes/{fid}", cwd=live, check=False) or str(p.get("commit") or "")
+    # Claude Code's marketplace on live first: when that fails, mine, the fix's refs and its record stay as they were
+    _repoint()
     _unstamp()
     git("checkout", "-q", "mine", cwd=live)
     write_json(home() / "state.json", {"on": True})
@@ -993,7 +1720,6 @@ def _swap(fid: int) -> dict[str, Any]:
     if old:
         git("update-ref", f"refs/thimble/prev/{fid}", old, cwd=live)
     git("update-ref", "-d", f"refs/thimble/next/{fid}", cwd=live)
-    _repoint()
     r = get(fid)
     new_commit = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
     r.pop("round_commit", None)
@@ -1041,18 +1767,26 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
     rest = [i for i in mine_order if i not in merged_ids]
     on_named = [i for i in mine_order if i in merged_ids]
     wt = tmp_dir(first) / "merge"
+    # the fixer's sandbox writes tmp/<id>/: a link left under the name goes, so that git never removes or fills the
+    # folder it leads to
+    _no_link(wt)
     run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
     shutil.rmtree(wt, ignore_errors=True)
     git("worktree", "add", "-q", "--detach", str(wt), release()["base"], cwd=live)
     try:
+        # the folder is in the fixer's temp folder, which its sandbox writes: git runs on the worktree's own entry
+        g = _own_git(wt)
+        if g is None:
+            raise FixError(COPY_GONE)
+        env, me = {**os.environ, **g}, {**as_thimble(), **g}
         prefix = [release()["base"]]
         for i in rest:
             p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{i}"],
-                    cwd=wt, check=False, env=as_thimble())
+                    cwd=wt, check=False, env=me)
             if p.returncode != 0:
-                run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+                run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env=env)
                 break
-            prefix.append(git("rev-parse", "HEAD", cwd=wt))
+            prefix.append(git("rev-parse", "HEAD", cwd=wt, env=env))
         if on_named:
             start = len([i for i in mine_order[:mine_order.index(on_named[0])] if i not in merged_ids])
             tries = [(k, prefix[k]) for k in range(start, len(prefix))]
@@ -1060,22 +1794,23 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
             tries = [(len(rest), git("rev-parse", f"{refs[code[0]['id']]}^", cwd=live)), (len(rest), prefix[-1])]
         stuck = code[-1]["id"]
         for place, base in tries:
-            git("checkout", "-q", "--detach", base, cwd=wt)
+            git("checkout", "-q", "--detach", base, cwd=wt, env=env)
             for r in code:
                 p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", "--allow-empty", refs[r["id"]]], cwd=wt,
-                        check=False, env=as_thimble())
+                        check=False, env=me)
                 if p.returncode != 0:
                     stuck = r["id"]
-                    run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
-                    run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
+                    run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env=env)
+                    run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
                     break
             else:
-                tree = git("write-tree", cwd=wt)
-                run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
+                tree = git("write-tree", cwd=wt, env=env)
+                run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
                 return {"place": place, "parent": base, "tree": tree, "rest": rest, "code": code, "refs": refs}
         other = first if stuck != first else next(r["id"] for r in code if r["id"] != stuck)
         raise Conflict(first, stuck if stuck != first else other)
     finally:
+        _no_link(wt)
         run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
         run(["git", "worktree", "prune"], cwd=live, check=False)
 
@@ -1116,11 +1851,13 @@ def _merge(recs: list[dict[str, Any]]) -> dict[str, Any]:
             put(x)
         f = get(first["id"])
         _drop_work(f)
+        f.pop("asked", None)
         f.update(title=name, summary=text, commit=commit, base=parent, files=_numstat(live, parent, commit),
                  words=[w for r in recs for w in (r.get("words") or [])], error=None, note=None,
                  rounds=sum(int(r.get("rounds") or 1) for r in recs), merged=[r["id"] for r in recs[1:]],
                  tests=next((r.get("tests") for r in code), None),
-                 state="on" if was_on else "ready" if first.get("state") in ("ready", "request") else first.get("state"))
+                 state="on" if was_on else "ready" if first.get("state") in ("ready", "request") else first.get("state"),
+                 **_asked_field(recs))
         if was_on:
             f["on_at"] = min(float(all_recs[i].get("on_at") or 0) for i in was_on)
         put(f)
@@ -1192,9 +1929,11 @@ def _pending_fold(tgt: dict[str, Any], stray: dict[str, Any]) -> None:
     t = get(tgt["id"])
     prev = {k: t.get(k) for k in ("state", "commit", "files", "summary", "title", "tests", "tests_tail", "on_at", "base",
                                    "note")}
+    asked = _asked_field([t, stray])
+    t.pop("asked", None)
     t.update(prev=prev, state="ready", commit=commit, files=_numstat(live, m["parent"], commit), summary=summary,
              words=[*(t.get("words") or []), *(stray.get("words") or [])], tests=stray.get("tests"),
-             rounds=int(t.get("rounds") or 1) + int(stray.get("rounds") or 1), merged=[stray["id"]], error=None)
+             rounds=int(t.get("rounds") or 1) + int(stray.get("rounds") or 1), merged=[stray["id"]], error=None, **asked)
     put(t)
 
 
@@ -1230,12 +1969,17 @@ def not_now(fid: int | str) -> dict[str, Any]:
     return put(rec)
 
 
-def redo(fid: int | str, words: str = "", session: str | None = None) -> dict[str, Any]:
+def redo(fid: int | str, words: str = "", session: str | None = None, asked: str | None = None) -> dict[str, Any]:
     """r: a new copy, cut from mine as it is now, for the same fix: the fixer gets the person's words again, and the
-    earlier change (tmp/<id>/earlier.patch) to start from."""
+    earlier change (tmp/<id>/earlier.patch) to start from. A fix whose fixer could not do without the files no fix may
+    change (blocked) starts again only with new words."""
     rec = get(fid)
     if rec.get("state") not in ("redo", "pending", "failed", "off", "ready", "request"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}")
+    if rec.get("blocked") and not (words or "").strip():
+        raise FixError(f"fix {rec['id']} needs a change to {_and(rec['blocked'])}, which no fix may make, so another try "
+                       f"would fail the same way; thimble file issue {rec['id']}, in a shell, sends it to thimble's "
+                       "maintainers")
     with Lock():
         ensure_live()
         if rec.get("prev"):
@@ -1255,11 +1999,15 @@ def redo(fid: int | str, words: str = "", session: str | None = None) -> dict[st
             _give_types(wt)
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         if earlier.strip():
-            (tmp_dir(rec["id"]) / "earlier.patch").write_text(earlier)
+            try:
+                _write_new(tmp_dir(rec["id"]) / "earlier.patch", earlier)
+            except OSError:
+                pass  # the new copy starts all the same, without the earlier change to start from
+        rec = _fresh(rec)
+        rec.pop("unshown", None)
         rec.update(state="working", work=str(wt), base=base, error=None, tests=None, rounds=int(rec.get("rounds") or 1) + 1,
-                   session=session or None,
-                   words=[*rec.get("words", []), *([words.strip()] if words.strip() else [])])
-        return put(rec)
+                   session=session or None)
+        return put(_with_words(rec, [words.strip()] if words.strip() else [], asked))
 
 
 def undo(fid: int | str) -> dict[str, Any]:
@@ -1315,10 +2063,12 @@ def remove(fid: int | str) -> dict[str, Any]:
     out: dict[str, Any] = {"id": rec["id"], "title": rec["title"], "reload": False}
     if was_on:
         out = undo(rec["id"])
-    r = get(rec["id"])
-    _drop_work(r)
-    r.update(state="removed")
-    put(r)
+    # under the fixes' lock, which the runner of the fix's tests writes under too (tests_runner)
+    with Lock():
+        r = get(rec["id"])
+        _drop_work(r)
+        r.update(state="removed")
+        put(r)
     return out
 
 
@@ -1404,13 +2154,14 @@ def one_off(fid: int | str) -> dict[str, Any]:
 
 
 def _relink_cli() -> None:
-    """The thimble command in a shell (scripts/install.sh links it and names the link in cli-link) runs live's thimble
-    once Claude Code loads thimble from live."""
+    """The thimble command in a shell (scripts/install.sh links it and names the link in cli-link) runs the release
+    checkout's launcher once Claude Code loads thimble from live: the way back (thimble fix, file, update, reapply) runs
+    from the release, which no fix changes, and the launcher hands the other commands to live's."""
     try:
         link = Path((thimble_home() / "cli-link").read_text().strip())
     except OSError:
         return
-    target = live_dir() / "plugin" / "bin" / "thimble"
+    target = release_dir() / "plugin" / "bin" / "thimble"
     if not link.is_symlink() or not target.exists() or not os.readlink(link).endswith("/plugin/bin/thimble"):
         return
     if Path(os.readlink(link)) == target:
@@ -1419,6 +2170,14 @@ def _relink_cli() -> None:
     tmp.unlink(missing_ok=True)
     tmp.symlink_to(target)
     tmp.replace(link)
+
+
+def _way_back() -> None:
+    """The release checkout at the release commit, and the shell's link on its launcher, before the fixes an update set
+    aside go on again (reapply, continue_): an update that a thimble from before the checkout ran made neither."""
+    place_release(release()["base"])
+    if release().get("pointed"):
+        _relink_cli()
 
 
 # ------------------------------------------------------------------ a new release: thimble update
@@ -1441,9 +2200,10 @@ def _vtuple(tag: str) -> tuple[int, ...]:
     return tuple(int(x) for x in m.groups()) if m else ()
 
 
-def latest_release() -> dict[str, str]:
-    """The newest release, {tag, version, commit, url}: the highest vX.Y.Z tag of thimble's repository. A tag with more
-    after the numbers (v0.11.0-rc1) is not a release."""
+def latest_release() -> dict[str, Any]:
+    """The newest release, {tag, version, commit, url, tags}: the highest vX.Y.Z tag of thimble's repository, and each
+    release tag's commit (tags), which names a release that a clone without tags has. A tag with more after the numbers
+    (v0.11.0-rc1) is not a release."""
     url = update_url()
     p = run(["git", "ls-remote", "--tags", url, "refs/tags/v*"], check=False, timeout=120)
     if p.returncode != 0:
@@ -1461,7 +2221,7 @@ def latest_release() -> dict[str, str]:
     if not tags:
         raise FixError(f"{url} has no release (no tag such as v0.10.3)")
     tag = max(tags, key=_vtuple)
-    return {"tag": tag, "version": tag[1:], "commit": tags[tag], "url": url}
+    return {"tag": tag, "version": tag[1:], "commit": tags[tag], "url": url, "tags": tags}
 
 
 def release_name(rel: dict[str, Any] | None = None) -> str:
@@ -1543,8 +2303,8 @@ def _quoted(words: list[str]) -> str:
 
 
 def _set_aside_files(fid: int) -> list[str]:
-    out = git("-c", "core.quotePath=false", "show", "--name-only", "--format=", f"refs/thimble/fixes/{fid}", cwd=live_dir(),
-              check=False)
+    out = git("-c", "core.quotePath=false", "show", "--name-only", "--no-renames", "--format=", f"refs/thimble/fixes/{fid}",
+              cwd=live_dir(), check=False)
     return [x for x in out.splitlines() if x.strip()]
 
 
@@ -1570,7 +2330,7 @@ def reapply_prompt() -> Path:
             e.append(f"   It did: {' '.join(str(r['summary']).split())}")
         if p.get("old"):
             files = p.get("files") or []
-            e.append(f"   Old change: {p['old']}" + (f" ({', '.join(files)})" if files else ""))
+            e.append(f"   Old change: {_tilde(str(p['old']))}" + (f" ({', '.join(files)})" if files else ""))
         entries.append("\n".join(e))
     try:
         frame = PROMPT_REAPPLY.read_text()
@@ -1590,11 +2350,13 @@ def reapply_prompt() -> Path:
 
 
 def reapply_argv() -> dict[str, Any]:
-    """thimble reapply: Claude Code (claude) in live, with the reapply prompt as its first message."""
+    """thimble reapply: Claude Code (claude) in live, with the reapply prompt as its first message, once the way back
+    runs from the release checkout (_way_back)."""
     if not (live_dir() / ".git").exists():
         raise FixError("you have no fixes: there is nothing to bring back")
     with Lock():
         prompt = reapply_prompt()
+        _way_back()
     return {"argv": [claude(), prompt.read_text()], "cwd": str(live_dir()), "prompt": str(prompt)}
 
 
@@ -1708,6 +2470,17 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         now = latest["version"]
     out: dict[str, Any] = {"from": now, "to": latest["version"], "newer": _is_newer(repo, latest, base, now),
                            "said": "", "reload": False}
+    installed = "" if has_live else _installed_sha()
+    if not check and not out["newer"] and base == latest["commit"] and installed and installed != base:
+        # Claude Code's clone of the marketplace is at the release already (Claude Code refreshed it), while Claude Code
+        # still runs the plugin it had: it copies the release from its clone
+        run([claude(), "plugin", "update", "thimble@thimble"])
+        # the release it had, by the tags read above: Claude Code's clone, one commit deep, has none
+        had = max((t for t, c in latest["tags"].items() if c == installed), key=_vtuple, default="")
+        out.update({"from": had[1:] or _described(repo, installed) or installed[:7], "newer": True, "aside": [],
+                    "reload": True, "said": f"thimble {latest['version']}"})
+        out["lines"] = _summary(out)
+        return out
     if check or not out["newer"]:
         same = now == latest["version"]
         return {**out, "lines": [] if check else [f"thimble {now} is the newest release." if same else
@@ -1731,6 +2504,7 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         rel.update(base=new, version=_version_at(live, new), tag=latest["tag"], updated=time.time())
         write_json(home() / "release.json", rel)
         _write_off_sh(rel)
+        place_release(new)
         d = home() / "pending"
         if aside:
             d.mkdir(parents=True, exist_ok=True)
@@ -1844,6 +2618,7 @@ def _update_dev(check: bool, once: bool, rel: dict[str, Any] | None, src: dict[s
             rel.pop("tag", None)
         write_json(home() / "release.json", rel)
         _write_off_sh(rel)
+        place_release(new)
         key = new[:7]
         back, had = _replay(order)
         recs = records()
@@ -1921,14 +2696,17 @@ def _summary(d: dict[str, Any], paint: Paint | None = None) -> list[str]:
 def continue_() -> dict[str, Any]:
     """thimble update --continue: in the session thimble reapply opened, Claude brought back the set-aside fixes that the
     release still needs, one commit per fix with the fix's title. Each such commit becomes its fix's new version, and the
-    fix is on. A set-aside fix with no commit is left out: the release does it, or it cannot work there, and it leaves
-    the list. A commit that is no set-aside fix's, or that changes a safety file, stops it with nothing recorded, so mine
-    holds only recorded fixes."""
+    fix is on, with no key press. A set-aside fix with no commit is left out: the release does it, or it cannot work
+    there, and it leaves the list. A commit that is no set-aside fix's, that changes a file no fix may change
+    (PROTECTED), or that changes a file the person is told of before they use a fix (NOTICE_KINDS) which its fix did not
+    change before they used it, stops it with nothing recorded, so mine holds only recorded fixes, each with nothing
+    the person was not told of."""
     cur = read_json(home() / "pending" / "current.json")
     if not cur:
         raise FixError("no fixes are set aside, so there is nothing to record; thimble update looks for a new release")
     live = live_dir()
     with Lock():
+        _way_back()
         dirty = [x[3:] for x in run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=live).stdout.splitlines()
                  if x[3:] != PLUGIN_JSON]
         if dirty:
@@ -1958,6 +2736,16 @@ def continue_() -> dict[str, Any]:
                                "run thimble update --continue again")
             if any(f["add"] is None for f in files):
                 raise FixError(f"commit {c[:7]} adds or changes a binary file; a fix changes text only")
+            # of the files the person is told of (the sandbox, the hooks file, the launcher and the rest), only those the
+            # fix changed when they used it, which its line named
+            had = {*((recs[fid].get("pending") or {}).get("files") or []), *_set_aside_files(fid)}
+            new = notice_of([f["path"] for f in files if f["path"] not in had])
+            if new:
+                what = _and([f"{k} ({_and(ps)})" for k, ps in new.items()])
+                raise FixError(f"commit {c[:7]} (“{short(subject, 50)}”) changes {what}, which the fix did not change "
+                               "before: such a change goes on only after the person reads of it and presses y. Take "
+                               "that part out, or leave the fix out and tell the person that /thimble-fix makes it "
+                               "again, then run thimble update --continue again")
             found.append((fid, c, files))
         for fid, c, files in found:
             git("update-ref", f"refs/thimble/fixes/{fid}", c, cwd=live)
@@ -2109,7 +2897,8 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     elif off_ids:
         nxt.append((f"thimble fix on {off_ids[0]}", "turn a fix on (it asks for your key here)"))
     if can_share():
-        nxt.append((f"thimble file issue {first}", f"post fix {first} as a GitHub issue (you check it before it goes)"))
+        nxt.append((f"thimble file issue {first}",
+                    f"a link to GitHub's new-issue form with fix {first}'s text, to read and submit"))
         code = [r["id"] for r in fixes if r.get("state") in ("on", "ready") and r.get("commit") and not r.get("pr")]
         if code:
             nxt.append((f"thimble file pr {code[0]}", f"open a pull request with fix {code[0]}'s code (asks first)"))
@@ -2125,7 +2914,8 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
 def _wrapped(label: str, text: str, width: int) -> list[str]:
     import textwrap  # noqa: PLC0415
 
-    body = textwrap.wrap(text, max(30, width - 16)) or [""]
+    # a path stays whole (package-lock.json)
+    body = textwrap.wrap(text, max(30, width - 16), break_on_hyphens=False) or [""]
     return [f"  {label:<12}  {body[0]}", *[f"  {'':<12}  {x}" for x in body[1:]]]
 
 
@@ -2137,9 +2927,12 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     width = min(width or shutil.get_terminal_size((100, 24)).columns, 100)
     made = f"{_date(r.get('created'))}, {r.get('made_in') or 'terminal'}"
     out = [f"{c('title', r['title'])} · fix {r['id']} · {_state_paint(c, r, is_on())} · {made}"]
-    words = [str(w).strip() for w in r.get("words") or [] if str(w).strip()]
-    for i, w in enumerate(words):
-        out += _wrapped("You asked" if i == 0 else "Then", f'"{" ".join(w.split())}"', width)
+    rounds_said = [(str(w).strip(), str(a or "").strip()) for w, a in zip(r.get("words") or [], _asked_of(r))]
+    for i, (w, a) in enumerate(x for x in rounds_said if x[0] or x[1]):
+        # the person's own words, and the words Claude wrote from them for the fixer when they differ
+        out += _wrapped("You asked" if i == 0 else "Then", f'"{" ".join((a or w).split())}"', width)
+        if a and w and " ".join(a.split()) != " ".join(w.split()):
+            out += _wrapped("Claude wrote", f'"{" ".join(w.split())}"', width)
     if str(r.get("summary") or "").strip():
         out += _wrapped("Claude did", " ".join(str(r["summary"]).split()), width)
     if r.get("pr"):
@@ -2162,12 +2955,15 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     if n:
         out += _wrapped("Changed", " · ".join(x for x in (f"{n} file{'' if n == 1 else 's'}", tests,
                                                           f"{rounds} rounds" if rounds > 1 else "") if x), width)
+    if notice_said(r):
+        out += _wrapped("Note", notice_said(r), width)
     acts: list[tuple[str, str]] = []
     s = r.get("state")
     if s == "pending":
         acts.append(("thimble reapply", "Claude checks it against the release and brings it back"))
     if s in ("on", "off", "ready", "sent") and can_share():
-        acts.append((f"thimble file issue {r['id']}", "post it as a GitHub issue"))
+        acts.append((f"thimble file issue {r['id']}",
+                     "a link to GitHub's new-issue form with its text, to read and submit"))
     if s in ("on", "ready") and r.get("commit") and not r.get("pr") and can_share():
         acts.append((f"thimble file pr {r['id']}", "open a pull request with its code on the public repo (asks first)"))
     if s == "on" and is_on():
@@ -2217,17 +3013,23 @@ def _tilde(p: str) -> str:
 
 
 def _first_line(r: dict[str, Any]) -> str:
+    """The start of the first words of a fix: the person's own when thimble has them, else the words of its request."""
     words = r.get("words") or [""]
-    return next((x.strip() for x in str(words[0]).splitlines() if x.strip()), "")
+    first = next(iter(_asked_of(r)), None) or words[0]
+    return next((x.strip() for x in str(first).splitlines() if x.strip()), "")
 
 
 def diff_of(rec: dict[str, Any]) -> str:
-    repo = Path(rec["work"]) if rec.get("work") and Path(rec["work"]).is_dir() else live_dir()
+    """The fix's change: its commit, from live, or what its copy holds now, with git on the copy's own entry
+    (_own_git); '' for a copy git may not run in."""
     c = rec.get("commit")
     if c:
-        return run(["git", "-c", "core.quotePath=false", "show", "--format=", "--no-color", "--no-ext-diff", c], cwd=repo).stdout
-    if rec.get("work") and Path(rec["work"]).is_dir():
-        return run(["git", "-c", "core.quotePath=false", "diff", "--no-color", rec["base"]], cwd=repo).stdout
+        return run(["git", "-c", "core.quotePath=false", "show", "--format=", "--no-color", "--no-ext-diff", c],
+                   cwd=live_dir()).stdout
+    g = _own_git(rec.get("work"))
+    if g:
+        return run(["git", "-c", "core.quotePath=false", "diff", "--no-color", rec["base"]], cwd=rec["work"],
+                   env={**os.environ, **g}).stdout
     return ""
 
 
@@ -2271,10 +3073,22 @@ def _walk_strings(v: Any, fields: set[str], values: set[str], depth: int = 0) ->
             values.add(s)
 
 
+def _named_files(st: Store) -> list[str]:
+    """The files under the root whose names the scan takes out, relative: those the conversation read, and every file
+    under it, unless the root holds the home folder (the home folder, /), whose walk would list every file of the
+    machine before a word is printed."""
+    from . import sources as S  # noqa: PLC0415
+
+    read = {r for s in st.seen() for f in [s.get("file"), *(s.get("files") or [])] if f and (r := st.rel(str(f)))}
+    if Path.home().resolve().is_relative_to(st.root):
+        return sorted(read)
+    return sorted(read | set(S.list_files(st.root)))
+
+
 def session_terms(st: Store | None) -> dict[str, list[str]]:
     """The person's details for the scan, collected here and now: their machine (user, host, git identity, home) and,
-    with a store, the folder under analysis (its path, file and folder names) and the fields and values of the records
-    Claude read this session."""
+    with a store, the folder under analysis (its path, file and folder names, _named_files) and the fields and values of
+    the records Claude read this session."""
     from . import sources as S  # noqa: PLC0415
 
     t: dict[str, set[str]] = {k: set() for k in ("name", "host", "git", "path", "folder", "file", "field", "value")}
@@ -2304,7 +3118,7 @@ def session_terms(st: Store | None) -> dict[str, list[str]]:
             return len(x) >= 3 and not x.isdigit()
 
         try:
-            rels = S.list_files(st.root)
+            rels = _named_files(st)
         except Exception:  # noqa: BLE001 - a folder that cannot be listed: the machine's terms still count
             rels = []
         for rel in rels:
@@ -2654,17 +3468,19 @@ def cmd(a) -> int:
             if r.get("reload"):
                 print(RELOAD)
         elif verb == "new":
-            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.session))
+            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.session, a.asked))
         elif verb == "round":
-            out_json(round_(a.id, stdin_text() or a.words or "", a.session))
+            out_json(round_(a.id, stdin_text() or a.words or "", a.session, a.asked))
         elif verb == "again":
             out_json(again(a.id, a.session))
         elif verb == "done":
             if a.cannot == "-":
-                out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done"))
+                out_json(done(a.id, session=a.session, cannot=stdin_text() or "it cannot be done", within=a.within))
             else:
                 summary = stdin_text() if a.summary == "-" else (a.summary or "")
-                out_json(done(a.id, a.title, summary, a.request, not a.no_tests, session=a.session))
+                out_json(done(a.id, a.title, summary, a.request, not a.no_tests, session=a.session, within=a.within))
+        elif verb == "shown":
+            out_json(shown(a.id))
         elif verb == "apply":
             if a.ask == "-":
                 out_json(apply(a.id, stdin_text()))
@@ -2698,7 +3514,8 @@ def cmd(a) -> int:
                 if r.get("reload"):
                     print(RELOAD)
         elif verb == "sandbox":
-            out_json(sandbox_argv(int(a.id)))
+            # the fixer's own shell: it may reach the package registries; the tests it runs reach nothing
+            out_json(sandbox_argv(int(a.id), net=True))
         elif verb == "draft":
             d = json.loads(stdin_text() or "{}")
             root = os.environ.get("THIMBLE_ROOT")

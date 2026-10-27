@@ -4,15 +4,16 @@
 // send a fix, the fixer included; the fixer's end puts the fix's line above the bar and sends a notification; d shows
 // what changed; y applies it with a secret only that press holds and reloads the plugins (at the turn's end when Claude
 // is mid-reply; a --plugin-dir session is told to restart); u undoes it; n leaves it ready in the list; /thimble-fix
-// alone says that fixes are listed and managed in a shell. The fixer's shell runs in the sandbox the kernel describes, with a time limit, and its writes
-// stay in its copy. All data is made up. `claude plugin test plugin`.
+// alone says that fixes are listed and managed in a shell; a failed fix's line goes at the next prompt. The fixer's
+// shell runs in the sandbox the kernel describes, with a time limit, its writes stay in its copy, and it publishes
+// nothing to the package registries it reaches. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { busySteps } from '../bar/busy'
-import { fixSlug, fixingWord } from '../fix/fixes'
+import { busyNow, busySteps } from '../bar/busy'
+import { fixSlug, fixingWord, noticeText, refreshFixes } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { notStarted, registerFix, wordsOfSkill } from '../fix/register'
-import { fixesContext } from '../fix/request'
+import { fixesContext, formOf } from '../fix/request'
 import { textOf as screenText, TEXT_ELS } from '../fix/screen'
 import { promptStub } from './stubs'
 
@@ -55,7 +56,7 @@ function setup() {
   const state = new Map<string, unknown>()
   const files = new Map<string, string>()
   const timers: (() => unknown)[] = []
-  const ran: { argv: string[]; stdin?: string }[] = []
+  const ran: { argv: string[]; stdin?: string; env?: Record<string, string> }[] = []
   const spawns: Any[] = []
   const commands: string[] = []
   const opened: string[] = []
@@ -84,9 +85,12 @@ function setup() {
     if (verb === 'new') {
       made = true
       if (stdin) fix.words = [stdin]
+      // the person's own words, which the kernel keeps beside Claude's
+      const own = argv.find(x => x.startsWith('--asked='))
+      if (own) fix.asked = [own.slice('--asked='.length)]
       return ok(fix)
     }
-    // the check refused the change: another round in the same copy; the test's refusal was for the first round only
+    // the check refused the change: another try in the same copy; the test's refusal was for the first try only
     if (verb === 'again') { Object.assign(fix, { state: 'working', rounds: fix.rounds + 1, refuse: null }); return ok(fix) }
     // a round of the fix: in its copy while it has one, else in place (a new copy; the version the person has, prev,
     // stays until y)
@@ -99,12 +103,14 @@ function setup() {
       const t = argv.indexOf('--title')
       // a round of a fix changed in place keeps its name; one that changed no code leaves the fix as it was
       if (fix.prev && argv.includes('--request')) { Object.assign(fix, { ...fix.prev, work: null, prev: null }); return ok({ ...fix, unchanged: true }) }
-      Object.assign(fix, { state: argv.includes('--request') ? 'request' : 'ready', title: t > 0 && !fix.prev ? argv[t + 1] : fix.title, summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }] })
-      // the kernel's check after the fixer's end refused it (fix.refuse is the reason a test gives); a refusal for
-      // safety files is kept on the record (refused) until the next check
-      if (argv.includes('--cannot')) { Object.assign(fix, { state: 'failed', tests: null, error: stdin, refused: null }); return ok(fix) }
-      if (fix.refuse) Object.assign(fix, { state: 'failed', tests: null, error: fix.refuse, refused: /safety files/.test(fix.refuse) ? { why: fix.refuse, files: ['plugin/engine/kernel/privacy.py'] } : { why: fix.refuse, files: [], tests: 'FAIL made-up test' } })
-      else fix.refused = null
+      // the fixer ends saying it cannot be done: after a refusal of files no fix may change, the fix is blocked
+      if (argv.includes('--cannot')) { Object.assign(fix, { state: 'failed', tests: null, error: stdin, refused: null, ...(fix.refused?.files?.length ? { blocked: fix.refused.files } : {}) }); return ok(fix) }
+      Object.assign(fix, { state: argv.includes('--request') ? 'request' : 'ready', summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }] })
+      // the kernel's check after the fixer's end refused it (fix.refuse is the reason a test gives), and the fix keeps
+      // its name; a refusal of files no fix may change is kept on the record (refused) until the next check. A change
+      // it uses takes the fixer's title
+      if (fix.refuse) Object.assign(fix, { state: 'failed', tests: null, error: fix.refuse, refused: /no fix may change/.test(fix.refuse) ? { why: fix.refuse, files: ['plugin/engine/kernel/privacy.py'] } : { why: fix.refuse, files: [], tests: 'FAIL made-up test' } })
+      else Object.assign(fix, { refused: null, title: t > 0 && !fix.prev ? argv[t + 1] : fix.title })
       return ok(fix)
     }
     if (verb === 'apply') {
@@ -123,7 +129,12 @@ function setup() {
       const t = argv.indexOf('--title')
       return ok({ id: ids[0], title: t > 0 ? argv[t + 1] : 'first', merged: ids.slice(1), redo: [], reload: true })
     }
-    if (verb === 'redo') { Object.assign(fix, { state: 'working', refuse: null }); return ok(fix) }
+    // another try: a blocked fix only with new words, as the kernel says
+    if (verb === 'redo') {
+      if (fix.blocked?.length && !stdin) return { exitCode: 1, stdout: '', stderr: 'thimble fix redo: fix 1 needs a change to plugin/engine/kernel/privacy.py, which no fix may make' }
+      Object.assign(fix, { state: 'working', refuse: null, blocked: undefined })
+      return ok(fix)
+    }
     // u after y on a fix changed in place: its version before comes back
     if (verb === 'undo') {
       if (fix.prev) { Object.assign(fix, { ...fix.prev, prev: null }); return ok({ id: 1, reload: true, back: true }) }
@@ -162,7 +173,7 @@ function setup() {
     config: { list: async () => config },
     // the person's rules, as Claude Code reads them: they deny rm -rf
     tool: { check: async (q: Any) => ({ decision: /^rm -rf/.test(String(q.input?.command)) ? 'deny' : 'ask', reason: 'Bash(rm -rf:*) is denied' }) },
-    process: { run: async (argv: string[], o: Any = {}) => { ran.push({ argv, ...(o.stdin != null ? { stdin: o.stdin } : {}) }); return argv.includes('fix') ? kernel(argv, o.stdin) : { exitCode: 0, stdout: '', stderr: '' } } },
+    process: { run: async (argv: string[], o: Any = {}) => { ran.push({ argv, env: o.env, ...(o.stdin != null ? { stdin: o.stdin } : {}) }); return argv.includes('fix') ? kernel(argv, o.stdin) : { exitCode: 0, stdout: '', stderr: '' } } },
     command: { run: async (c: Any) => { commands.push(c.command); return {} }, register: async () => ({ command: 'thimble-fix' }) },
     model: { complete: async (req: Any) => { asked.push(req); return { isAnswered: true, text: JSON.stringify({ title: 'Bar says coverage, not read', wrong: 'The bar said coverage after Claude read a file.', fixed: 'The bar says read.' }) } } },
     ui: { copy: async (o: Any) => { copied.push(o.text); return { isCopied: true } }, toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: () => undefined },
@@ -178,8 +189,9 @@ function setup() {
     for (let n = 0; n < 5 && timers.length; n++) for (const fn of timers.splice(0)) await fn()
     await new Promise(r => setTimeout(r, 5))
   }
-  // the session the plugin names on new, round, redo and done is left out: one test looks at it
-  const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).join(' ').replace(/ --session \S+/, '')).filter(Boolean)
+  // the session the plugin names on new, round, redo and done, how long done waits for the tests, and the person's own
+  // words, are left out: tests look at them apart
+  const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).filter(x => !x.startsWith('--asked=')).join(' ').replace(/ --session \S+/, '').replace(/ --within \S+/, '')).filter(Boolean)
   /** The fixer's end: its agent idles, and its turn's end reaches the hooks. */
   const end = async (answer: string, agentId = 'agent-fixer-1') => {
     for (const a of agents) if (a.id === agentId) a.status = 'idle'
@@ -255,6 +267,10 @@ test("a request forks the session into its copy with a text copy of the screen; 
   })
   expect(seen.at(-1).verdict).toBe('deny')
   expect((await check('tu-9', 'find / -name x')).decision).toBe('ask')
+  // the shell reaches the package registries to add a package, never to publish one or sign in: refused before it runs
+  for (const command of ['npm publish', 'cd pkg && npm --registry=https://registry.npmjs.org/ publish --access public', 'npm login', 'yarn npm publish'])
+    expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-1e', agentId: 'agent-fixer-1', command }, ran)).deny)).toContain('never to publish one')
+  expect((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-1f', agentId: 'agent-fixer-1', command: 'npm install left-pad' }, ran)).result.ran).toBe(boxed('npm install left-pad'))
   // its writes stay in its copy
   expect((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-2', agentId: 'agent-fixer-1', file_path: `${WORK}/plugin/bar/bar.tsx` }, ran)).result.ran).toBe(`${WORK}/plugin/bar/bar.tsx`)
   for (const file_path of ['/made-up/home/notes.txt', `${WORK}/../2/plugin/bar/bar.tsx`, `${HOME}/fixes/work/12/x.ts`]) {
@@ -391,6 +407,315 @@ test("y while Claude is mid-reply: the reload waits for the turn's end, and the 
   expect(textOf((await fixLineRows(t.$, ELS, 160))[0])).toBe(`  ✓ Bar says read for coverage is on · restart Claude Code with --plugin-dir ${HOME}/fixes/live/plugin to load it · u undo`)
 })
 
+test('a fixer that works on across a reload keeps its step and its time on the bar, and the step reads the list this session keeps, not the kernel at each tick', async () => {
+  const s = setup()
+  // the session's clock, in milliseconds since 1970 as Claude Code's; the fix's round started 100 s ago (the kernel's
+  // `started`, in seconds)
+  now = 10 ** 13
+  s.made()
+  s.fix.started = (now - 100000) / 1000
+  s.agents.push({ id: 'agent-fixer-1', status: 'running' })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  // a setting changed, so the plugins reloaded: the module's session start again
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  const shown = await busyNow(s.$)
+  expect(shown?.word).toBe('fixing make the bar say read')
+  expect(shown?.secs).toBeGreaterThanOrEqual(100)
+  const lists = () => s.verbs().filter(v => v.startsWith('list')).length
+  const before = lists()
+  for (let i = 0; i < 5; i++) await s.tick()
+  expect(lists()).toBe(before)
+})
+
+/** The kernel's first `n` answers to done: the fix still working, its tests still running in the kernel's own process.
+ *  Each done call, with the bar's steps while it runs. */
+function stillTesting(s: ReturnType<typeof setup>, n: number): { argv: string[]; timeoutMs: number; steps: string[] }[] {
+  const calls: { argv: string[]; timeoutMs: number; steps: string[] }[] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push({ argv, timeoutMs: o.timeoutMs, steps: busySteps() })
+      if (n-- > 0) return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, state: 'working', testing: { since: 1761200000, lock: `${HOME}/fixes/tests/1.lock` } }), stderr: '' }
+    }
+    return run(argv, o)
+  }
+  return calls
+}
+
+test("while the fix's tests still run, the check asks the kernel again, each call within Claude Code's 10 minutes, with testing <name> on the bar; then the line says what came of them", async () => {
+  const s = setup()
+  const calls = stillTesting(s, 2)
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(3)
+  for (const c of calls) {
+    expect(c.argv).toEqual(expect.arrayContaining(['done', '1', '--summary', '-', '--title', 'Bar says read', '--within', '540']))
+    expect(c.timeoutMs).toBe(600000)
+    expect(c.steps).toContain('testing make the bar say read')
+  }
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
+  expect(busySteps()).not.toContain('testing make the bar say read')
+})
+
+test("a fix whose tests run when the plugins reload is waited for: its fixer's end, taken again, asks the kernel until the tests ended, then shows the line", async () => {
+  const s = setup()
+  s.made()
+  // the fixer ended and its change is being tested; the reload came before the check said what came of it
+  s.agents.push({ id: 'agent-fixer-1', status: 'idle' })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  const calls = stillTesting(s, 1)
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await s.tick()
+  expect(calls.map(c => [c.argv.includes('--within'), c.timeoutMs])).toEqual([[true, 600000], [true, 600000]])
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: make the bar say read · tests pass')
+})
+
+/** The kernel's answers to done, one a call (the fix with these fields), then the fake kernel's own. Each done call,
+ *  with what the bar showed while it ran. */
+function doneSays(s: ReturnType<typeof setup>, answers: Any[]): { argv: string[]; bar: Any }[] {
+  const calls: { argv: string[]; bar: Any }[] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push({ argv, bar: await busyNow(s.$) })
+      const a = answers.shift()
+      if (a) return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, ...a }), stderr: '' }
+    }
+    return run(argv, o)
+  }
+  return calls
+}
+
+const TESTING = { since: 1761200000, lock: `${HOME}/fixes/tests/1.lock` }
+
+test('a new round that took the copy while the tests ran: the check of the round before shows no line', async () => {
+  const s = setup()
+  // more words for the fix while its tests ran: the kernel's next answer is the new round, working, with no tests
+  const calls = doneSays(s, [{ state: 'working', testing: TESTING }, { state: 'working', testing: null }])
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(2)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.notes).toEqual([])
+  expect(s.verbs().some(v => v.startsWith('again'))).toBe(false)
+})
+
+test('the check asks again only while the fix works and its tests run: a fix removed meanwhile ends the asking', async () => {
+  const s = setup()
+  // a record of a fix removed while its tests ran, written with the mark of them
+  const calls = doneSays(s, Array.from({ length: 5 }, () => ({ state: 'removed', testing: TESTING })))
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+})
+
+test('a fix whose tests ran for minutes before a reload: the bar counts testing <name> from their start', async () => {
+  const s = setup()
+  now = 3 * 10 ** 13
+  s.made()
+  Object.assign(s.fix, { started: (now - 300000) / 1000, testing: { since: (now - 200000) / 1000, lock: `${HOME}/fixes/tests/1.lock` } })
+  s.agents.push({ id: 'agent-fixer-1', status: 'idle' })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  const calls = doneSays(s, [{ state: 'ready', tests: 'passed', testing: null }])
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await s.tick()
+  expect(calls[0]?.bar?.word).toBe('testing make the bar say read')
+  expect(calls[0]?.bar?.secs).toBeGreaterThanOrEqual(200)
+})
+
+test("what came of a check that no session waited for gets its line at this session's start, with the notification, Claude told, and the kernel told it was shown; a refused change gets another round", async () => {
+  const s = setup()
+  s.made()
+  // the session ended while the tests ran, and the kernel's runner wrote what came of them, not shown yet
+  Object.assign(s.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', session: 's-fix', unshown: true })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixBy' }, { 1: 'claude' })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await s.tick()
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
+  expect(s.verbs()).toContain('shown 1')
+  const told = ((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['fix-1']).toBe('The thimble fix you started, "Bar says read", is ready and tests pass; the person turns it on with y. Tell the person in one short line.')
+  // another session's outcome is that session's to show
+  const o = setup()
+  o.made()
+  Object.assign(o.fix, { state: 'ready', tests: 'passed', session: 's-other', unshown: true })
+  await o.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  expect(await fixLineRows(o.$, ELS, 110)).toEqual([])
+  expect(o.verbs().some(v => v.startsWith('shown'))).toBe(false)
+  // tests that failed: a new fixer in the same copy, told why, as at the fixer's end
+  const t = setup()
+  t.made()
+  Object.assign(t.fix, { state: 'failed', tests: 'failed', session: 's-fix', unshown: true, error: 'its tests failed in the sandbox', refused: { why: 'its tests failed in the sandbox', files: [], tests: 'FAIL made-up test' } })
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await t.tick()
+  expect(t.verbs()).toContain('again 1')
+  expect(t.spawns.length).toBe(1)
+  expect(String(t.spawns[0].prompt)).toContain('FAIL made-up test')
+})
+
+/** What Claude is told of fix 1 at the person's next prompt, or ''. */
+async function toldOf(s: ReturnType<typeof setup>): Promise<string> {
+  return ((((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>)['fix-1']) ?? ''
+}
+
+test("a new round that took the copy before the check's first answer: the check shows no line and tells Claude nothing", async () => {
+  const s = setup()
+  // the kernel's first answer is already the new round: working, with no tests running
+  const calls = doneSays(s, [{ state: 'working', testing: null, rounds: 2 }])
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.$.state.set({ plugin: 'thimble', key: 'fixBy' }, { 1: 'claude' })
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.notes).toEqual([])
+  expect(await toldOf(s)).not.toContain('did not pass')
+  expect(s.verbs().some(v => v.startsWith('again'))).toBe(false)
+})
+
+test('a fix removed in a shell while its tests ran: the check shows no line, so no r offers to redo a fix that is gone', async () => {
+  const s = setup()
+  // the kernel's answer: the record of the fix removed, with no tests running
+  const calls = doneSays(s, [{ state: 'removed', testing: null }])
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(await fixKey(s.$, 'r')).toBe(null)
+  expect(s.notes).toEqual([])
+  expect(await toldOf(s)).not.toContain('did not pass')
+})
+
+/** Waits a little for what a check not awaited does. */
+async function until(f: () => Promise<boolean> | boolean): Promise<void> {
+  for (let i = 0; i < 200 && !(await f()); i++) await new Promise(r => setTimeout(r, 5))
+}
+
+test("what the kernel's runner wrote just after this session's start read the list gets its line when the look for ended fixers takes the fix", async () => {
+  const s = setup()
+  s.made()
+  Object.assign(s.fix, { session: 's-fix', testing: TESTING })
+  s.agents.push({ id: 'agent-fixer-1', status: 'idle' })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  // the start's read of the list says working; the runner writes what came of the tests before the next read
+  const run = s.$.process.run
+  let lists = 0
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('list') && ++lists === 2) Object.assign(s.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', testing: null, unshown: true })
+    return run(argv, o)
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await until(async () => (await fixLineRows(s.$, ELS, 110)).length > 0)
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
+  expect(s.verbs()).toContain('shown 1')
+  expect(s.verbs().some(v => v.startsWith('done'))).toBe(false)
+})
+
+test('an outcome not shown yet whose refusal a new round answers is marked shown before that round, so no later start shows it or tells Claude again', async () => {
+  const s = setup()
+  s.made()
+  Object.assign(s.fix, { state: 'failed', tests: 'failed', session: 's-fix', unshown: true, error: 'its tests failed in the sandbox', refused: { why: 'its tests failed in the sandbox', files: [], tests: 'FAIL made-up test' } })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await until(() => s.spawns.length > 0)
+  const v = s.verbs()
+  expect(v).toContain('shown 1')
+  expect(v.indexOf('shown 1')).toBeLessThan(v.indexOf('again 1'))
+})
+
+test("after /resume gives the session a new id, an outcome not shown yet of the conversation's fix gets its line: by the conversation the kernel kept, or by this load's own fixers", async () => {
+  // claude --resume: a new session id, the conversation's first launch and its transcript carried
+  const s = setup()
+  s.made()
+  Object.assign(s.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', session: 's-made-up-old', conversation: 's-made-up-old', unshown: true })
+  Object.assign(s.$.session, { id: async () => 's-made-up-resumed', usage: async () => ({ startedAt: 1761100000000 }), messages: async () => [{ role: 'user' }] })
+  s.files.set(`${HOME}/starts/1761100000000.json`, JSON.stringify({ key: 's-made-up-old', sessions: ['s-made-up-old'] }))
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await until(async () => (await fixLineRows(s.$, ELS, 110)).length > 0)
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.verbs()).toContain('shown 1')
+  // /resume inside a running Claude Code: the record names the old session only, and this load started its fixer
+  const t = setup()
+  t.made()
+  Object.assign(t.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', session: 's-made-up-old', unshown: true })
+  await t.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await until(async () => (await fixLineRows(t.$, ELS, 110)).length > 0)
+  expect(textOf((await fixLineRows(t.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(t.verbs()).toContain('shown 1')
+})
+
+test("a round's fixer that ends while the check of the round before waits: its end is kept, and checked with its own words once that check returns", async () => {
+  const s = setup()
+  // the first check's done answers only when the test lets it; by then the new round took the copy
+  let answer: () => void = () => undefined
+  const held = new Promise<void>(r => { answer = r })
+  const calls: { argv: string[]; stdin?: string }[] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push({ argv, stdin: o.stdin })
+      if (calls.length === 1) {
+        await held
+        return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, state: 'working', testing: null }), stderr: '' }
+      }
+    }
+    return run(argv, o)
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+  // the person's follow-up while the check waits: a round of the fix, with a fixer of its own
+  await ask(s, '1 and keep the percent')
+  expect(s.spawns.length).toBe(2)
+  await s.end('Cannot: the percent is not in the data', 'agent-fixer-2')
+  expect(calls.length).toBe(1)
+  answer()
+  await until(async () => calls.length > 1 && (await fixLineRows(s.$, ELS, 110)).length > 0)
+  expect(calls.length).toBe(2)
+  expect(calls[1]!.argv).toEqual(expect.arrayContaining(['done', '1', '--cannot', '-']))
+  expect(calls[1]!.stdin).toBe('the percent is not in the data')
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toContain('did not pass · the percent is not in the data')
+})
+
+test('an end kept while a check waited is not checked when more words started a newer fixer: that fixer\'s own end checks the copy', async () => {
+  const s = setup()
+  let answer: () => void = () => undefined
+  const held = new Promise<void>(r => { answer = r })
+  const calls: string[][] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push(argv)
+      if (calls.length === 1) {
+        await held
+        return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, state: 'working', testing: null }), stderr: '' }
+      }
+    }
+    return run(argv, o)
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  await ask(s, '1 and keep the percent')
+  await s.end('Title: Bar says read percent\nWhat it does: The bar says read 14%.', 'agent-fixer-2')
+  // more words before the first check returned: a third fixer, which still works
+  await ask(s, '1 and say it in the pane too')
+  expect(s.spawns.length).toBe(3)
+  answer()
+  for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 5))
+  expect(calls.length).toBe(1)
+  await s.end('Title: Bar and pane say read percent\nWhat it does: The bar and the pane say read 14%.', 'agent-fixer-3')
+  await until(() => calls.length > 1)
+  expect(calls.length).toBe(2)
+  expect(calls[1]).toEqual(expect.arrayContaining(['--title', 'Bar and pane say read percent']))
+})
+
 test('n leaves the fix ready in the list, where thimble fix apply in a shell turns it on; a fixer that changed nothing leaves a request', async () => {
   const s = setup()
   await requested(s)
@@ -405,9 +730,48 @@ test('n leaves the fix ready in the list, where thimble fix apply in a shell tur
   expect(textOf(await fixLineRows(t.$, ELS, 110))).toContain('Saved as a request with no code: Explain terms of my field')
 })
 
+test("a fix that changes the sandbox, the launcher or dependencies says which in one sentence on the line that asks for y, and in d", async () => {
+  const s = setup()
+  s.fix.notice = { 'the sandbox': ['plugin/cards/argv.mjs'], dependencies: ['browser/frontend/package-lock.json'] }
+  await requested(s, 'Title: Cards draw on Node 26\nWhat it does: The card runner starts with --allow-net.')
+  const said = 'This fix changes the sandbox (plugin/cards/argv.mjs) and dependencies (browser/frontend/package-lock.json).'
+  expect(noticeText(s.fix)).toBe(said)
+  let rows = await fixLineRows(s.$, ELS, 160)
+  expect(rows.map(textOf)).toEqual(['  ✓ thimble fixed: Cards draw on Node 26 · tests pass', `    ${said}`, '    y use it now · d what changed · n later'])
+  await (await fixKey(s.$, 'd'))!.later()
+  rows = await fixLineRows(s.$, ELS, 160)
+  expect(rows.map(textOf)).toContain(`    Note        ${said}`)
+  // y applies it as any fix
+  await (await fixKey(s.$, 'y'))!.later()
+  expect(s.verbs()).toContain('apply 1 --ask -')
+  expect(noticeText({ notice: { 'the launcher': ['plugin/bin/thimble'] } })).toBe('This fix changes the launcher (plugin/bin/thimble).')
+  expect(noticeText({})).toBe('')
+})
+
+test("the plugin runs the kernel with the release checkout's launcher, which no fix changes, once there is one that hands the way back off itself, and names the folder it was loaded from", async () => {
+  const s = setup()
+  await requested(s)
+  // before the first fix the loaded plugin is the release: its launcher
+  expect(s.ran.find(x => x.argv.includes('new'))?.argv[0]).toBe('/made-up/plugin/bin/thimble')
+  // a release checkout from before the hand-off (its launcher names no fixes/release/plugin) runs an older kernel: the
+  // loaded plugin's launcher runs, as that launcher's own guard does
+  s.files.set(`${HOME}/fixes/release/plugin/bin/thimble`, '#!/bin/sh\n# a made-up launcher from before the hand-off\n')
+  await refreshFixes(s.$)
+  expect(s.ran.filter(x => x.argv.includes('list')).at(-1)?.argv[0]).toBe('/made-up/plugin/bin/thimble')
+  s.files.set(`${HOME}/fixes/release/plugin/bin/thimble`, '#!/bin/sh\n# the way back runs from $THIMBLE_HOME/fixes/release/plugin (made up)\n')
+  await (await fixKey(s.$, 'y'))!.later()
+  const apply = s.ran.find(x => x.argv.includes('apply'))!
+  expect(apply.argv[0]).toBe(`${HOME}/fixes/release/plugin/bin/thimble`)
+  expect(apply.env?.THIMBLE_PLUGIN_ROOT).toBe('/made-up/plugin')
+  // the release's kernel writes no bytecode into the release checkout, whatever its launcher says
+  expect(apply.env?.PYTHONDONTWRITEBYTECODE).toBe('1')
+})
+
+const WAY_BACK = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); no fix may change the code that turns fixes off and undoes them, or the scan a shared fix goes through'
+
 test('a refused change goes back to a new fixer in the same copy, told what was refused and why; its next round passes, and the person sees no failure', async () => {
   const s = setup()
-  const why = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files'
+  const why = WAY_BACK
   s.fix.refuse = why
   await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
   expect(s.verbs()).toContain('again 1')
@@ -415,6 +779,9 @@ test('a refused change goes back to a new fixer in the same copy, told what was 
   const second = String(s.spawns[1].prompt)
   expect(second).toContain(`thimble did not use the last change for this fix: ${why}. Your last change is in your copy. Leave plugin/engine/kernel/privacy.py as it is and make the change in other files. When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`)
   expect(String(s.spawns[0].prompt)).not.toContain('did not use the last change')
+  // the same fix, tried again: its name stays (the refused try's title is not used), on the bar too
+  expect(s.spawns[1].name).toBe(s.spawns[0].name)
+  expect(busySteps()).toContain('fixing make the bar say read')
   // no failure line and no notification while the next round works
   expect(textOf(await fixLineRows(s.$, ELS, 110))).not.toContain('did not pass')
   expect(s.notes).toEqual([])
@@ -428,34 +795,64 @@ test('a refused change goes back to a new fixer in the same copy, told what was 
   expect(String(t.spawns[1].prompt)).toContain('thimble did not use the last change for this fix: its tests failed in the sandbox. Your last change is in your copy. The end of their output:\n\nFAIL made-up test\n\nFix what fails.')
 })
 
-test('a fixer that finds the request cannot be met ends with Cannot: the line shows its words, long on a row of its own, short after the title; d shows what changed, r redoes', async () => {
+test("a failed fix's line goes at the next prompt, as a request's does; the fix stays failed in the list, and r is the bar's again", async () => {
+  const s = setup()
+  s.fix.refuse = 'its tests failed in the sandbox'
+  await requested(s)
+  await s.end('Cannot: it needs the scan off', 'agent-fixer-2')
+  expect(textOf(await fixLineRows(s.$, ELS, 110))).toContain('did not pass')
+  await s.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(await fixKey(s.$, 'r')).toBe(null)
+  expect(s.fix.state).toBe('failed')
+  // n dismisses it before then
+  const t = setup()
+  t.fix.refuse = 'its tests failed in the sandbox'
+  await requested(t)
+  await t.end('Cannot: it needs the scan off', 'agent-fixer-2')
+  await (await fixKey(t.$, 'n'))!.later()
+  expect(await fixLineRows(t.$, ELS, 110)).toEqual([])
+  const u = setup()
+  await requested(u, 'Title: Explain terms of my field\nRequest: It needs words only the person knows.')
+  await u.call('prompt.submit', { text: 'Which runs failed?', origin: { kind: 'composer' } })
+  expect(await fixLineRows(u.$, ELS, 110)).toEqual([])
+})
+
+test('a fixer that finds the request cannot be met ends with Cannot: the line shows its words, long on a row of its own, short after the title; d shows what changed, r redoes, n dismisses, and a fix blocked by the files no fix may change offers no r', async () => {
   const s = setup()
   const why = 'The scan is part of what keeps your data private, and a fix may not change it, so notes cannot skip it.'
-  s.fix.refuse = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files'
+  s.fix.refuse = WAY_BACK
   await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
   await s.end(`I could not do this.\n\nCannot: ${why}`, 'agent-fixer-2')
   expect(s.ran.find(x => x.argv.includes('--cannot'))?.stdin).toBe(why)
   let rows = await fixLineRows(s.$, ELS, 110)
-  expect(textOf(rows)).toContain('× Skip the scan for my notes did not pass')
+  expect(textOf(rows)).toContain('× make the bar say read did not pass')
   expect(rows.map((r: Any) => r.props.key)).toEqual(['fix-line-1', 'fix-line-why', 'fix-line-2'])
   expect(textOf(rows[1])).toBe(`    ${why}`)
-  expect(textOf(rows[2])).toBe('    d what changed · r redo · n later')
+  // blocked: another try would fail the same way, so no r
+  expect(textOf(rows[2])).toBe('    d what changed · n dismiss')
+  expect(await fixKey(s.$, 'r')).toBe(null)
   expect(s.notes).toEqual([])
   await (await fixKey(s.$, 'd'))!.later()
   rows = await fixLineRows(s.$, ELS, 110)
   expect(textOf(rows.at(-2))).toBe(`    Changed     1 file · ${why}`)
-  expect(textOf(rows.at(-1))).toBe('    r redo · n later')
-  // r, the person's own: a new fixer, told where the earlier change is
-  await (await fixKey(s.$, 'r'))!.later()
-  expect(s.spawns.length).toBe(3)
-  expect(String(s.spawns[2].prompt)).toContain(`is in ${HOME}/fixes/tmp/1/earlier.patch;`)
+  expect(textOf(rows.at(-1))).toBe('    n dismiss')
+  // a failure another try can mend: r redoes it, the person's own key, and the new fixer is told where the earlier
+  // change is
   const t = setup()
   t.fix.refuse = 'its tests failed in the sandbox'
   await requested(t, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
   await t.end('Cannot: it needs the scan off', 'agent-fixer-2')
   rows = await fixLineRows(t.$, ELS, 110)
-  expect(textOf(rows[0])).toBe('  × Skip the scan for my notes did not pass · it needs the scan off')
+  expect(textOf(rows[0])).toBe('  × make the bar say read did not pass · it needs the scan off')
   expect(rows.map((r: Any) => r.props.key)).not.toContain('fix-line-why')
+  expect(textOf(rows[1])).toBe('    d what changed · r redo · n dismiss')
+  await (await fixKey(t.$, 'd'))!.later()
+  expect(textOf((await fixLineRows(t.$, ELS, 110)).at(-1))).toBe('    r redo · n dismiss')
+  await (await fixKey(t.$, 'r'))!.later()
+  expect(t.verbs()).toContain('redo 1')
+  expect(t.spawns.length).toBe(3)
+  expect(String(t.spawns[2].prompt)).toContain(`is in ${HOME}/fixes/tmp/1/earlier.patch;`)
 })
 
 test('/thimble-fix alone says how to ask and that fixes are listed and managed in a shell; it opens no pane and starts no turn', async () => {
@@ -541,9 +938,11 @@ test('/thimble-fix alone and /thimble-fix update answer at once, with no turn of
   expect(s.spawns).toEqual([])
   // the prompt command stays out of the menu, so the person sees one /thimble-fix
   expect((await s.call('command.describe', { command: 'thimble:thimble-fix', description: 'd', isHidden: false, immediate: false }, async (e: Any) => ({ description: e.description, isHidden: e.isHidden }))).isHidden).toBe(true)
-  // Claude's skill after it: the fixer reads the words as the person's, and Claude is not told of it again
+  // Claude's skill after it: the fixer reads the words as the person's, the kernel keeps the words they typed, and
+  // Claude is not told of it again
   await skillCall(s, "2 make the bar's coverage item bold")
   expect(String(s.spawns[0].prompt)).toContain('The person asked for this change to their thimble:')
+  expect(s.ran.find(x => x.argv.includes('new'))?.argv).toContain('--asked=2')
   expect(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).toEqual({})
   // after two of main's turns (Claude's question, and its answer), a skill call is a fix Claude offered again
   await s.call('command.run', { command: 'thimble-fix', args: 'the bar' })
@@ -686,4 +1085,26 @@ test("the fixes Claude reads, the bar's words and the subagent's name use the fi
   expect(fixesContext([f({ state: 'working', prev: { state: 'on' } }), f({ id: 3, title: 'Bar says read', state: 'off' }), f({ id: 4, state: 'removed' })])).toBe(
     "The person's thimble fixes (start the fix-thimble skill with `N <words>` to change fix N, `new <words>` for a new fix):\n2  \"Click any card element to ask about it\" (on, being changed (working))\n3  \"Bar says read\" (off)")
   expect(fixesContext([])).toBe('')
+})
+
+test("the person's own words reach the kernel beside Claude's, and `N: …` or `new: …` is the form Claude meant", async () => {
+  const f = (o: Any) => ({ id: 2, title: 'Bar says read', words: [], rounds: 1, made_in: 'terminal', created: 0, state: 'on', work: null, commit: 'c', files: [], tests: null, summary: '', error: null, ...o })
+  expect(formOf('2: it breaks when I click', [f({})])).toEqual({ words: 'it breaks when I click', target: 2, fresh: false })
+  expect(formOf('#2 - it breaks', [f({})])).toEqual({ words: 'it breaks', target: 2, fresh: false })
+  expect(formOf('new: Add a way to pick the model', [f({})])).toEqual({ words: 'Add a way to pick the model', target: null, fresh: true })
+  expect(formOf('new-style labels should wrap', [])).toEqual({ words: 'new-style labels should wrap', target: null, fresh: false })
+  expect(formOf('3: no such fix', [f({})])).toEqual({ words: '3: no such fix', target: null, fresh: false })
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  const mine = 'add a feature to customize the model in charge of citations'
+  expect(await s.call('command.run', { command: 'thimble-fix', args: mine }, async () => ({}))).toEqual({})
+  await s.tick()
+  await skillCall(s, 'new: Add a way for the analyst to choose the model that checks citations')
+  const made = s.ran.find(x => x.argv.includes('new'))!
+  expect(made.stdin).toBe('Add a way for the analyst to choose the model that checks citations')
+  expect(made.argv).toContain(`--asked=${mine}`)
+  // d shows their words
+  await s.end('Title: Citations model setting\nWhat it does: The settings pane picks the model that checks citations.')
+  await (await fixKey(s.$, 'd'))!.later()
+  expect((await fixLineRows(s.$, ELS, 160)).map(textOf)).toContain(`    You asked   ${mine}`)
 })

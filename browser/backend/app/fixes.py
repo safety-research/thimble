@@ -9,8 +9,10 @@ The kernel holds every record and makes every change, in the terminal plugin's h
 
     fixes/fixes.jsonl   the records          fixes/live/      the checkout with the fixes that are on (branch mine)
     fixes/work/<id>/    a fix's copy          fixes/tmp/<id>/  its temp folder
+    fixes/release/      the release commit, which no fix changes
 
-This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home.
+This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, from fixes/release once it is there
+(kernel_script), so that no fix can break the clicks that undo it.
 
     ask(c, words, page)      the person's `/thimble-fix <words>` in main's chat, as the terminal's /thimble-fix: main's
                              chat shows the message, and main reads prompts/thimble-fix.md with the words and the
@@ -29,8 +31,9 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home.
                              (`fixing <name>`, or `changing <name>` for a round of a fix the person has): main's chat
                              shows it where main started it, as the card of a subagent with its steps (an `agent`
                              record whose `run` is the round), and its thread shows its whole run
-    its end (settle)         the kernel commits the change, refuses a safety file or a binary file, and runs the tests
-                             of what the change touched (`fix done`); a fix that passes is ready. How it ended is a row
+    its end (settle)         the kernel commits the change, refuses a change to the way back (the fix flow, the privacy
+                             scan) or a binary file, and runs the tests of what the change touched (`fix done`), one fix
+                             at a time; a fix that passes is ready. How it ended is a row
                              in main's chat and in the fix's thread, at the time it ended (note: a `fix` chip): a ready
                              fix asks the person there, Use it now, What changed, Later. Nothing goes on by itself
     the person's clicks      Use it now, or Use it in Your fixes (`fix apply`, with a secret made at the click as the
@@ -152,16 +155,64 @@ def fixing_word(rec: dict[str, Any]) -> str:
 # ------------------------------------------------------------------ the kernel
 
 
+def kernel_script() -> Path:
+    """The kernel `thimble fix` runs: the release checkout's (fixes/release, which the kernel keeps at the release
+    commit), so that a fix to the kernel's own modules cannot break its undo; this tree's before there is one. The
+    checkout is first put back as the release commit has it (_pristine), and runs only when its launcher hands the way
+    back off itself, as the plugin's launcher asks (bin/thimble: it names fixes/release/plugin): a release checkout
+    from before the hand-off runs an older kernel, and this tree's kernel moves it forward."""
+    release = fixes_home() / "release" / "plugin" / "engine" / "thimble.py"
+    if release.is_file():
+        _pristine(fixes_home() / "release")
+    try:
+        hands_off = "fixes/release/plugin" in (release.parents[1] / "bin" / "thimble").read_text(errors="replace")
+    except OSError:
+        hands_off = False
+    return release if hands_off and release.is_file() else plugin_dir() / "engine" / "thimble.py"
+
+
+def _pristine(checkout: Path) -> None:
+    """The release checkout as the release commit (release.json's base) has it, before any of its code runs: a file
+    changed in it is restored and a file added to it removed, as the plugin's launcher and the kernel's place_release
+    do. Nothing when it is not a git checkout of its own, or is so already: one git call, which takes no lock, says so,
+    and the checkout is left alone, so that thimble's other processes that run from it never meet it half put back.
+    git runs no hook of the repository's (in a clone install, the person's own clone's), and tries again for up to 5 s
+    while another git holds the checkout's index (index.lock)."""
+    git = ["git", "-c", "core.hooksPath=/dev/null", "-C", str(checkout)]
+    top = subprocess.run([*git, "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False).stdout
+    if not top.strip() or Path(top.strip()).resolve() != checkout.resolve():
+        return
+    try:
+        base = str(json.loads((fixes_home() / "release.json").read_text()).get("base") or "")
+    except (OSError, ValueError, AttributeError):
+        base = ""
+    base = base if re.fullmatch(r"[0-9a-f]{7,64}", base) else "HEAD"
+    st = subprocess.run([*git, "--no-optional-locks", "status", "--porcelain=v2", "--branch", "--ignored",
+                         "--untracked-files=normal"], capture_output=True, text=True, check=False)
+    lines = st.stdout.splitlines()
+    oid = next((x[len("# branch.oid "):] for x in lines if x.startswith("# branch.oid ")), "")
+    if (st.returncode == 0 and oid and (base == "HEAD" or oid == base) and "# branch.head (detached)" in lines
+            and all(x.startswith("# ") for x in lines)):
+        return
+    for args in (["checkout", "-q", "-f", "--detach", base], ["clean", "-q", "-ffdx"]):
+        for _ in range(50):
+            p = subprocess.run([*git, *args], capture_output=True, text=True, check=False)
+            if p.returncode == 0 or "index.lock" not in p.stderr:
+                break
+            time.sleep(0.1)
+
+
 def kernel(args: list[str], *, stdin: str | None = None, timeout: float = 120, env: dict[str, str] | None = None) -> Ran:
     """`thimble fix ARGS` in the plugin's home. Blocking: call it in a thread."""
-    script = plugin_dir() / "engine" / "thimble.py"
+    script = kernel_script()
     full = {**config.passed_environ(), "THIMBLE_HOME": str(plugin_home()), "PYTHONDONTWRITEBYTECODE": "1",
             **(env or {})}
     if config.CLI_PATH and not full.get("THIMBLE_CLAUDE"):
         full["THIMBLE_CLAUDE"] = config.CLI_PATH
     full.pop("THIMBLE_ROOT", None)
     try:
-        p = subprocess.run([sys.executable, "-I", str(script), "fix", *args], input=stdin or "", capture_output=True,
+        # -B: -I ignores PYTHONDONTWRITEBYTECODE, and the release's kernel would write its bytecode into the checkout
+        p = subprocess.run([sys.executable, "-I", "-B", str(script), "fix", *args], input=stdin or "", capture_output=True,
                            text=True, timeout=timeout, env=full, cwd=str(Path.home()))
     except subprocess.TimeoutExpired:
         return Ran(False, "", f"thimble fix {args[0] if args else ''} took longer than {int(timeout)} s")
@@ -512,14 +563,51 @@ def end_of(answer: str) -> dict[str, Any]:
 
 
 def changed(work: Path, base: str) -> list[str]:
-    """The paths the copy changed since `base`, new files among them."""
+    """The paths the copy changed since `base`, new files among them; none for a copy git may not run in (_own_git),
+    which the kernel's check then fails."""
+    g = _own_git(work)
+    if g is None:
+        return []
+    env = {**os.environ, **g}
     p = subprocess.run(["git", "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=all"],
-                       cwd=work, capture_output=True, text=True)
+                       cwd=work, capture_output=True, text=True, env=env)
     q = subprocess.run(["git", "-c", "core.quotePath=false", "diff", "--name-only", base], cwd=work, capture_output=True,
-                       text=True)
+                       text=True, env=env)
     out = {ln[3:].split(" -> ")[-1] for ln in p.stdout.splitlines() if len(ln) > 3}
     out |= {ln for ln in q.stdout.splitlines() if ln}
     return sorted(out)
+
+
+def _own_git(work: Path) -> dict[str, str] | None:
+    """git's environment for a fix's copy (GIT_DIR, GIT_WORK_TREE): the copy's own worktree entry in live's repository,
+    as live's records have it, never the copy's .git, which the fixer's sandbox writes and could point at another
+    repository, or at a git folder whose settings run commands outside the sandbox (the kernel's _own_git does the
+    same). None when the copy's .git is not a file that names that entry, or the entry does not name the copy back."""
+    import stat  # noqa: PLC0415
+
+    live = fixes_home() / "live"
+    try:
+        fd = os.open(work / ".git", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        link = os.read(fd, 4096).decode(errors="replace").strip() if stat.S_ISREG(os.fstat(fd).st_mode) else ""
+    finally:
+        os.close(fd)
+    common = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=live, capture_output=True, text=True,
+                            check=False).stdout.strip() if live.is_dir() else ""
+    if not link.startswith("gitdir:") or not common:
+        return None
+    entry = Path(os.path.realpath(os.path.join(work, link[len("gitdir:"):].strip())))
+    if entry.parent != (live / common).resolve() / "worktrees":
+        return None
+    try:
+        back = (entry / "gitdir").read_text().strip()
+    except OSError:
+        return None
+    if not back or os.path.realpath(os.path.join(entry, back)) != os.path.realpath(work / ".git"):
+        return None
+    return {"GIT_DIR": str(entry), "GIT_WORK_TREE": str(work)}
 
 
 def tests_for(paths: list[str]) -> str:
@@ -591,7 +679,8 @@ async def settle(fid: int, answer: str) -> None:
                "THIMBLE_FIX_READ": os.pathsep.join(map(str, lent_reads()))}
         args = ["done", str(fid), "--summary", "-", *(["--title", end["title"]] if end["title"] else []),
                 *(["--request"] if end["request"] else [])]
-        r = await asyncio.to_thread(kernel, args, stdin=end["summary"] or " ", timeout=660, env=env)
+        # the tests run for one fix at a time, and once more when they fail (the kernel's run_tests)
+        r = await asyncio.to_thread(kernel, args, stdin=end["summary"] or " ", timeout=2400, env=env)
         done = json.loads(r.out) if r.ok else {}
     except Exception as e:  # noqa: BLE001 — the end is told either way
         r, done = Ran(False, "", str(e)), {}

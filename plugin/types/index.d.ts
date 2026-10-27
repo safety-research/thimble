@@ -35,6 +35,8 @@ declare module 'claude-code' {
       // ---- a card's header (cards/head.ts)
       /** a card's artifact, by card id: { card, status, agentId, until, url?, error? } */
       cardArtifacts: StateFamily<unknown>
+      /** the cards whose artifact is being made, which a reload of the plugin finds again */
+      cardArtifactsNow: string[]
       // ---- v (designer/v.ts)
       /** a design v started, by its key: { key, anchorRow, agentId, status, at, until, error?, cards } */
       designs: StateFamily<unknown>
@@ -122,6 +124,8 @@ declare module 'claude-code' {
       fixUpdated: boolean
       /** after the person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is their request (fix/register.ts) */
       fixAsked: number
+      /** the words the person typed after /thimble-fix, which the kernel keeps beside Claude's (fix/register.ts) */
+      fixAskedWords: string
       /** the strays from before rounds changed a fix in place that the fix's line told of already (fix/register.ts) */
       fixStrays: string[]
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */
@@ -146,15 +150,20 @@ declare module 'claude-code' {
        *  shown, what the version shown did to each (squeeze/cards.ts) */
       squeezeCards: { shown: Record<string, { copy: string; v: number }>; hidden: string[]; did: Record<string, string> }
 
+      // ---- the observer (observer/observer.ts)
+      /** the messages queued for a look or being looked at, and the conversation's key: { session, msgs: [LookMsg] };
+       *  a reload of the plugin queues them again */
+      observerLooks: { session: string; msgs: unknown[] } | null
+
       // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
       /** { v, session, updated, claims, clusters, gaps, read } (claims/store.js) */
       claims: unknown
       /** when the count of claims last went up: the bar's count is bold for a moment after (claims/term.ts) */
       claimsBright: number | null
-      /** the session's first claims: the bar's count pulses (`lit` while on) and says `new` until the pane is opened
+      /** the session's first claims: the bar's count pulses (`lit` while on) (claims/term.ts) */
+      claimsFirst: { lit: boolean } | null
+      /** a look that reads the claims, on demand or after a reply: how many answers it reads, and when it began
        *  (claims/term.ts) */
-      claimsFirst: { lit: boolean; opened: boolean } | null
-      /** a look on demand for the claims: how many answers it reads, and when it began (claims/term.ts) */
       claimsFinding: { n: number; at: number } | null
     }
   }

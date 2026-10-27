@@ -77,6 +77,11 @@ export interface PointerBoxProps {
   /** the highlight the box sits beside: a region's box, or a span's last line */
   rect: Box
   place: Place
+  /** counts the times its field takes the focus: it takes it when the box is drawn first and at each new count, never
+   * when the box only moves with what it is about or comes back (`hidden`) */
+  focus?: number
+  /** what the box is about is off screen: the box is not drawn, and keeps its text and its focus count */
+  hidden?: boolean
   /** the accessible name of the box and its text area */
   label: string
   draft: string
@@ -91,22 +96,22 @@ export interface PointerBoxProps {
   attrs?: Record<string, string | number | undefined>
 }
 
-export function PointerBox({ rect, place, label, draft, onDraft, busy = false, onSubmit, onClose, className, ref, attrs }: PointerBoxProps) {
+export function PointerBox({ rect, place, focus, hidden = false, label, draft, onDraft, busy = false, onSubmit, onClose, className, ref, attrs }: PointerBoxProps) {
   const own = useRef<HTMLElement>(null)
   const boxEl = ref ?? own
   const taRef = useRef<HTMLTextAreaElement>(null)
 
-  // Escape closes the box from anywhere
+  // Escape closes the box from anywhere while it is drawn
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !hidden) {
         e.preventDefault()
         onClose()
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, hidden])
 
   // beside the rect, never on it (boxPlace)
   useLayoutEffect(() => {
@@ -119,9 +124,10 @@ export function PointerBox({ rect, place, label, draft, onDraft, busy = false, o
     const { left, top } = boxPlace(rect, w, el.offsetHeight, vw, vh, place)
     el.style.left = `${left}px`
     el.style.top = `${top}px`
-    taRef.current?.focus()
-  }, [rect, place, boxEl])
+  }, [rect, place, boxEl, hidden])
+  useLayoutEffect(() => taRef.current?.focus(), [focus])
 
+  if (hidden) return null
   return createPortal(
     <div
       ref={boxEl as RefObject<HTMLDivElement>}

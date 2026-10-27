@@ -10,13 +10,14 @@
 // While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey):
 //   [ shorter, ] longer on the picked chip (Length: short · as written · longer · much longer); < > , . the same, unnamed
 //   1–N pick a chip · 0 the original (on a catch-up: no catch-up)
-// Each chip names its two ends either side of its dots (`Interpretation facts ○●○ expert reading`); a press on an end
-// or a dot sets that level. While a rewrite is on its way the old text dims, and the bar's busy line says `rewriting`
-// (term.ts); a version seen before comes back at once.
+// Each chip names its two ends either side of its dots (`Length shorter ○●○○ longer`); a press on a dot sets that
+// level, and a press on an end moves the chip one level toward it, as [ and ] do. While a rewrite is on its way the old
+// text dims, and the bar's busy line says `rewriting` (term.ts); a version seen before comes back at once.
 //   · s close · + a chip in the person's own words (typed as `/rewrite <words>`, with the earlier ones offered as it is typed)
 // The bar names `s close` first while the chips are open, and the chips' row ends with it too (a press there closes them).
 // A click on the chips hands them the keyboard (their Client, chips.tsx): then tab and shift+tab move between the chips,
-// ← and → between the levels, s or ↵ closes them, and + types the chip's words in the chips, until esc gives the keys back.
+// ← and → between the levels, s closes them, and + types the chip's words in the chips, until esc gives the keys back.
+// ↵ does nothing there: a level shows once it is picked, so a ↵ pressed to pick one keeps them open.
 //
 //   state squeezeOpen: {id, focus, edge, typing, held, hint} | null   the record the chips are open on (term.ts ids)
 //   state squeezeOwn: [words]                                          the chips the person typed this session
@@ -27,6 +28,7 @@ import { hintUsed } from '../bar/hints'
 import { markPressed, spansOver } from '../core/answerview'
 import { latestAnswer, pickAnswer } from '../core/answers'
 import { openPane } from '../core/pane'
+import { controlWords } from '../core/selection'
 import { accent } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import type { Take } from '../hooks/keys'
@@ -124,8 +126,8 @@ function rowOf(rec: Rec, at: At): Any[] {
 /** A level that would bring a catch-up to its original: it never stands there (0 shows the replies again). */
 const toOriginal = (rec: Rec, to: At) => !!rec.catchup && isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at: to } }))
 
-/** One chip moved a step: the rewrite asked for, or the edge said when it goes no further. On a catch-up a step that
- *  would land on the original goes on past it. */
+/** One chip moved a step, by a key or a press on one of its ends: the rewrite asked for, or the edge said when it goes
+ *  no further. On a catch-up a step that would land on the original goes on past it. */
 async function step($: Engine, open: Open, cid: string, dir: number, key: string | null): Promise<void> {
   const rec = await recOf($, open.id)
   if (!rec) return
@@ -133,8 +135,8 @@ async function step($: Engine, open: Open, cid: string, dir: number, key: string
   const probe = (a: At) => ({ ...rec, squeeze: { ...rec.squeeze, at: a } })
   let to = stepAt(probe(at), cid, dir) as At | null
   if (to && toOriginal(rec, to)) to = stepAt(probe(to), cid, dir) as At | null
-  if (!to) { await setOpen($, { focus: cid, edge: cid }); return }
-  await setOpen($, { focus: cid, edge: null })
+  if (!to) { await setOpen($, { focus: cid, edge: cid, typing: null }); return }
+  await setOpen($, { focus: cid, edge: null, typing: null })
   await wantLevels($, open.id, to)
   void setLevels($, open.id, to, key).catch(() => undefined)
 }
@@ -287,7 +289,8 @@ export async function promptHasKeys($: Engine, text?: string): Promise<void> {
 }
 
 /** What a key in the chips does, once a click gave them the keyboard: tab and shift+tab move between the chips, ← and
- *  → between the levels, s or ↵ closes them; + types a chip's words, ↵ adds it, tab lets it go. The prompt's keys work too. */
+ *  → between the levels, s closes them, and ↵ does nothing (a ↵ pressed to pick a level keeps them open); + types a
+ *  chip's words, ↵ adds it, tab lets it go. The prompt's keys work too. */
 async function heldKey($: Engine, open: Open, key: string, shift: boolean): Promise<void> {
   const rec = await recOf($, open.id)
   if (!rec) return
@@ -305,7 +308,7 @@ async function heldKey($: Engine, open: Open, key: string, shift: boolean): Prom
   const at0 = Math.max(0, row.findIndex((c: Any) => c.id === open.focus))
   if (key === 'tab') { await setOpen($, { focus: row[(at0 + (shift ? -1 : 1) + row.length) % row.length].id, edge: null }); return }
   if (key === 'left' || key === 'right') { await step($, open, open.focus, key === 'left' ? -1 : 1, null); return }
-  if (key === 'return' || key === 'enter') { await setOpen($, null); return }
+  if (key === 'return' || key === 'enter') return
   if (key === '+') { await setOpen($, { typing: '', edge: null }); return }
   const t = await squeezeKeyTake($, key)
   if (t?.now) await t.now()
@@ -331,6 +334,8 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
     if (r === 'close') { await setOpen($, null); continue }
     const dot = /^lvl-(.+)-(\d+)$/.exec(r)
     if (dot) { await setLevel($, open, dot[1]!, Number(dot[2])); continue }
+    const end = /^step-(.+)-(down|up)$/.exec(r)
+    if (end) { await step($, open, end[1]!, end[2] === 'up' ? 1 : -1, null); continue }
     const cid = r.replace(/^(chip|word)-/, '')
     if (cid !== r) await pressChip($, open, cid)
   }
@@ -421,7 +426,11 @@ async function chipsEl($: Engine, els: Any, id: string, cols: number): Promise<A
   const open = await openNow($)
   if (!open || open.id !== id) return null
   const w = Math.max(30, cols - 2)
-  return els.Box({ key: `sq-${id}`, marginLeft: 2, marginTop: 1, children: [els.Client({ key: `sqchips-${id}`, module: './chips.tsx', width: w, props: await chipsProps($, id, w) })] })
+  const props = await chipsProps($, id, w)
+  // the chips' words, which a double click on one selects, then and once they closed: no answer's words
+  // (core/selection.ts)
+  controlWords('chips', ['s close', 'close', ...((props as Any)?.items ?? []).flatMap((c: Any) => [c.name, c.word, ...(c.levels ?? []), ...(c.ends ?? [])].filter((x: unknown) => typeof x === 'string'))])
+  return els.Box({ key: `sq-${id}`, marginLeft: 2, marginTop: 1, children: [els.Client({ key: `sqchips-${id}`, module: './chips.tsx', width: w, props })] })
 }
 
 /** The text a row shows in place of what Claude wrote: its version (the part written in so far, dim while a rewrite

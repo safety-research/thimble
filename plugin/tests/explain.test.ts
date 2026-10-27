@@ -15,8 +15,9 @@ import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
-import { readText, withAsked } from '../marks/message.js'
-import { rowMarks } from '../marks/store'
+import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
+import { editReply, replyKeyOf, rowMarks } from '../marks/store'
+import { noteRow, startCheck } from '../marks/checker'
 import { citeBar, citeKey, citeWords, placeOf } from '../marks/cite'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
@@ -280,7 +281,7 @@ test('e explains the words selected in an answer, on the row the selection lies 
   const s = setup([LOOK], { complete: reply({ body: 'The client gives up on an upload.', here: '' }) })
   // no answer yet: e is typed, and the bar names no key
   expect(await explainKey(s.$, 'e', 0)).toBe(null)
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER} Then the client gives up.` })
   // the bar names e only while words are selected
   s.$.ui.selection = async () => undefined
   expect(await explainBar(s.$, () => true, false)).toEqual([])
@@ -370,6 +371,45 @@ test('a drag over wrapped rows and paragraphs counts its answer lines: one that 
   }
 })
 
+test("what a click on thimble's controls or Claude Code's own rows leaves selected is no answer's words, nor is a piece of one word; words selected in an answer still are, across rows too", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const text = 'The retry loop in [upload.py](client/upload.py#L7) gives up after three tries, as the [requests docs](https://example.org/docs) describe.\n\n| day | edits |\n|---|---|\n| Mon | 41 |\n| Tue | 17 |\n\nSetting a longer timeout would let slow uploads finish before starting over.'
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    // a click that slid a cell on the bar's `thimble`, a stray drag over Claude Code's busy word: pieces of a word
+    expect(await counts({ text: 'im' })).toBe(false)
+    expect(await counts({ text: 'ting' })).toBe(false)
+    expect(await counts({ text: 'ry lo' })).toBe(false)
+    // in a row of Claude Code's own (the turn's time, a tool call, the person's prompt), though the answer has its words
+    expect(await counts({ text: 'for', requestId: 'turn-time-row' })).toBe(false)
+    expect(await counts({ text: 'Read 1 file', requestId: 'collapsed-tool-row' })).toBe(false)
+    // under the answer, in its row: a card's header, its line and then one of its words, which the answer draws nowhere
+    expect(await counts({ text: 'Edits by day       checking  [ previous heads up · a ask · 0 close', requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'artifact', requestId: 't1-row' })).toBe(false)
+    // words selected in the answer, as it draws them: inside it, from its dot, a table's row, a link with its target,
+    // a drag that begins and ends inside words, and across rows
+    expect(await counts({ text: 'longer', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'gives up after three tries', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: '● The retry loop', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: '│ Mon │ 41    │', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'upload.py (client/upload.py#L7) gives up', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'the requests docs (https://example.org/docs) describe', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'ries, as the requests do', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'ow uploads finish before starting over.\n\n✻ Cooked f' })).toBe(true)
+    expect(await counts({ text: 'Ran 2 shell commands\n\n● The retry loop in upload.py' })).toBe(true)
+  } finally {
+    setOptions({})
+  }
+})
+
 test('a selection over several rows explains its words on the newest answer that holds them; words that are a heads-up open it, unwritten', async () => {
   setOptions({})
   const s = setup([LOOK, reply({ glosses: [], heads: null })], { complete: reply({ body: 'How many tries are left.', here: '' }) })
@@ -395,7 +435,7 @@ test('the selected words are trimmed to one line, and a long selection is cut af
   expect(long.startsWith(`${got.words} `)).toBe(true)
   setOptions({})
   const s = setup([LOOK], { complete: { isAnswered: false, reason: 'aborted' } })
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER}\n\n${long}` })
   s.$.ui.selection = async () => ({ text: long, requestId: 't1-row' })
   await (await explainKey(s.$, 'e', 0))!.later!()
   expect(String((await failLineNow(s.$))?.text)).toContain('the explainer covers its first')
@@ -431,13 +471,13 @@ test('selected words inside a mark open it; words over or across marks get one e
 
 // ------------------------------------------------------------------------------------------------ c: cite
 
-test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is the claims\' again', async () => {
+test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is typed again', async () => {
   setOptions({ citations: 'manual' })
   try {
     const s = setup([LOOK])
     const plain = 'Uploads fail after the retry budget runs out: **41 of the 44** failures came 30 seconds after a drop.'
     await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: plain })
-    // with nothing selected, c is not cite's (the claims take it) and the bar does not name it
+    // with nothing selected, c is not cite's (it is typed) and the bar does not name it
     s.$.ui.selection = async () => undefined
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
@@ -453,7 +493,8 @@ test('with Citations manual, c makes the selected words a citation of their answ
     // the answer reads the words as a citation; squeeze and the claims read them as plain words
     expect(withAsked(plain, [item]).text).toContain('out: [41 of the 44 failures](#) came')
     expect(readText(plain, [item])).toBe(plain.replace('**41 of the 44** failures', '41 of the 44 failures'))
-    // once cited, the same selection no longer waits: c and the bar are the claims' again until words are selected anew
+    // once cited, the same selection no longer waits: c is typed and the bar does not name it until words are
+    // selected anew
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
     s.$.ui.selection = async () => ({ text: '41 of the 44', requestId: 't1-row' })
@@ -461,9 +502,9 @@ test('with Citations manual, c makes the selected words a citation of their answ
     // the same words again open the same citation; words that are not in the answer say so
     await citeWords(s.$, 't1-row', '41 of the 44')
     expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
-    expect(await citeWords(s.$, 't1-row', 'not in this answer')).toContain("isn't in the answer as Claude wrote it")
-    // in any other mode, c is the claims' even with words selected
-    setOptions({ citations: 'auto cite' })
+    expect(await citeWords(s.$, 't1-row', 'not in this answer')).toContain("isn't in the answer")
+    // with Citations off, c is typed even with words selected
+    setOptions({ citations: 'off' })
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
   } finally {
@@ -471,8 +512,191 @@ test('with Citations manual, c makes the selected words a citation of their answ
   }
 })
 
-test('placeOf finds the words as the analyst read them in the text Claude wrote, across its emphasis, on one line', () => {
+test("c finds words on a card's link as they draw, the card's title, and the citation takes in the whole link, which still draws as the title", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const text = 'Edits peak on Mondays, as [Edits by day](card:c1a2b3c4d5) shows above.'
+    const read = 'Edits peak on Mondays, as Edits by day shows above.'
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const drawn = async (row: string) => {
+      const a = withAsked(text, (await rowMarks(s.$, row))!.items)
+      const runs = inline(a.text, 0, a.text.length, marksIn(a.text))
+      return { text: a.text, read: runsText(runs), cited: runs.filter(r => r.mark === 0).map(r => r.s).join('') }
+    }
+    // words of the title: a citation of the whole link, drawn on the title
+    await answered(s, { id: 't1', prompt: 'When are edits made?', text })
+    expect(await citeWords(s.$, 't1-row', 'Edits by day')).toBeUndefined()
+    expect((await rowMarks(s.$, 't1-row'))!.items.map(m => m.words)).toEqual(['Edits by day'])
+    expect(await drawn('t1-row')).toEqual({ text: 'Edits peak on Mondays, as [[Edits by day](card:c1a2b3c4d5)](#) shows above.', read, cited: 'Edits by day' })
+    // words that run across the link, as they draw
+    await answered(s, { id: 't2', prompt: 'And again?', text })
+    expect(await citeWords(s.$, 't2-row', 'as Edits by day shows')).toBeUndefined()
+    expect((await rowMarks(s.$, 't2-row'))!.items.map(m => m.words)).toEqual(['as Edits by day shows'])
+    expect(await drawn('t2-row')).toEqual({ text: 'Edits peak on Mondays, [as [Edits by day](card:c1a2b3c4d5) shows](#) above.', read, cited: 'as Edits by day shows' })
+    expect(readText(text, (await rowMarks(s.$, 't2-row'))!.items)).toBe(text)
+    // a citation stored on part of a link is left out, so the link still draws
+    const part = { n: 9, row: 't3-row', words: 'Edits by day', start: text.indexOf('Edits by'), end: text.indexOf('](card'), status: 'deferred', shown: 'Edits by day', asked: true }
+    expect(withAsked(text, [part]).text).toBe(text)
+  } finally {
+    setOptions({})
+  }
+})
+
+test("c on the words of a file's link or a web link cites them as they draw: the citation takes in the whole link, which still draws as its words", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const text = 'The retry loop in [upload.py](client/upload.py#L3) gives up after [three tries](https://example.org/retries).'
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const drawn = async (row: string) => {
+      const a = withAsked(text, (await rowMarks(s.$, row))!.items)
+      const runs = inline(a.text, 0, a.text.length, marksIn(a.text))
+      return { text: a.text, read: runsText(runs), cited: runs.filter(r => r.mark === 0).map(r => r.s).join('') }
+    }
+    // a file's link: its words, as a citation of the whole link, drawn as its words; the web link draws as before
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text })
+    expect(await citeWords(s.$, 't1-row', 'upload.py')).toBeUndefined()
+    expect((await rowMarks(s.$, 't1-row'))!.items.map(m => m.words)).toEqual(['upload.py'])
+    expect(await drawn('t1-row')).toEqual({ text: 'The retry loop in [[upload.py](client/upload.py#L3)](#) gives up after [three tries](https://example.org/retries).', read: 'The retry loop in upload.py gives up after three tries.', cited: 'upload.py' })
+    // words that run into a web link
+    await answered(s, { id: 't2', prompt: 'And again?', text })
+    expect(await citeWords(s.$, 't2-row', 'after three tries')).toBeUndefined()
+    expect((await rowMarks(s.$, 't2-row'))!.items.map(m => m.words)).toEqual(['after three tries'])
+    expect(await drawn('t2-row')).toEqual({ text: 'The retry loop in [upload.py](client/upload.py#L3) gives up [after [three tries](https://example.org/retries)](#).', read: 'The retry loop in upload.py (client/upload.py#L3) gives up after three tries.', cited: 'after three tries' })
+    expect(readText(text, (await rowMarks(s.$, 't2-row'))!.items)).toBe(text)
+    // words selected with the link's target, as Claude Code draws it after them
+    await answered(s, { id: 't3', prompt: 'Once more?', text })
+    expect(await citeWords(s.$, 't3-row', 'upload.py (client/upload.py#L3) gives up')).toBeUndefined()
+    expect((await rowMarks(s.$, 't3-row'))!.items.map(m => m.words)).toEqual(['upload.py gives up'])
+    expect((await drawn('t3-row')).cited).toBe('upload.py gives up')
+    // a citation stored on part of a link is left out, so the link still draws
+    const part = { n: 9, row: 't4-row', words: 'upload', start: text.indexOf('upload.py'), end: text.indexOf('.py]'), status: 'deferred', shown: 'upload', asked: true }
+    expect(withAsked(text, [part]).text).toBe(text)
+  } finally {
+    setOptions({})
+  }
+})
+
+test('with Citations auto cite, c cites the selected words too: words inside a citation Claude wrote open it, other words become a citation beside it; an answer whose turn still runs waits for its end', async () => {
+  setOptions({ citations: 'auto cite' })
+  try {
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+    // the answer's citation, as the end of its turn stores it: checked once opened
+    await noteRow(s.$, 't1-row', ANSWER)
+    await startCheck(s.$, { turnId: 't1', reason: 'answer' })
+    s.$.ui.open = async () => ({ isPlaced: true })
+    // words inside Claude's citation: the bar names c cite, and c opens that citation
+    s.$.ui.selection = async () => ({ text: '41 of the 44', requestId: 't1-row' })
+    expect((await citeBar(s.$, k => k === 'cite', false)).map(x => `${x.key} ${x.words}`)).toEqual(['c cite'])
+    await (await citeKey(s.$, 'c', 0))!.later!()
+    await settle()
+    expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'citation', n: 1 })
+    expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
+    // other words: a citation of their own, after Claude's
+    s.$.ui.selection = async () => ({ text: 'failures came 30 seconds', requestId: 't1-row' })
+    await (await citeKey(s.$, 'c', 0))!.later!()
+    await settle()
+    expect((await rowMarks(s.$, 't1-row'))!.items.map(m => [m.n, m.words, !!m.asked])).toEqual([[1, '41 of the 44', false], [2, 'failures came 30 seconds', true]])
+    expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'citation', n: 2 })
+    // words of an answer whose turn still runs: the turn's end stores its citations, so c waits for it
+    await answered(s, { id: 't2', prompt: 'And now?', text: 'Nothing changed since then.' })
+    await noteRow(s.$, 't2-row', 'Nothing changed since then.')
+    expect(await citeWords(s.$, 't2-row', 'Nothing changed')).toContain('still answering')
+    // in manual, the turn's end stores no citations, so c cites them at once
+    setOptions({ citations: 'manual' })
+    expect(await citeWords(s.$, 't2-row', 'Nothing changed')).toBeUndefined()
+    expect((await rowMarks(s.$, 't2-row'))!.items.map(m => m.words)).toEqual(['Nothing changed'])
+  } finally {
+    setOptions({})
+  }
+})
+
+test('c finds the selected words in the answer as it draws: words that run into or across a citation open it, as do its corrected words and words over the × of a failed one; other words become a citation at their place in the text Claude wrote', async () => {
+  setOptions({ citations: 'auto cite' })
+  try {
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+    await noteRow(s.$, 't1-row', ANSWER)
+    await startCheck(s.$, { turnId: 't1', reason: 'answer' })
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const key = (await replyKeyOf(s.$, 't1-row'))!
+    const cite = async (text: string) => {
+      s.$.ui.selection = async () => ({ text, requestId: 't1-row' })
+      expect((await citeBar(s.$, k => k === 'cite', false)).map(x => `${x.key} ${x.words}`)).toEqual(['c cite'])
+      await (await citeKey(s.$, 'c', 0))!.later!()
+      await settle()
+      return (await trayNow(s.$))!.stack[0]
+    }
+    // the citation's brackets are not drawn, so words that run into it or across it are found, and open it; while the
+    // tray shows it, c leaves it open
+    for (const words of ['41 of the 44 failures', 'runs out: 41 of the 44', 'out: 41 of the']) expect(await cite(words)).toMatchObject({ row: 't1-row', kind: 'citation', n: 1 })
+    // its check corrected it: the corrected words, drawn in place of Claude's, open it
+    await editReply(s.$, key, r => ({ ...r, items: r.items.map(m => ({ ...m, status: 'corrected', shown: 'all but one of the 44', was: m.words })) }))
+    expect(await cite('all but one of the 44 failures')).toMatchObject({ n: 1 })
+    // failed: the × drawn after it is no word of the answer
+    await editReply(s.$, key, r => ({ ...r, items: r.items.map(m => ({ ...m, status: 'failed', shown: m.words })) }))
+    expect(await cite('the 44 × failures came')).toMatchObject({ n: 1 })
+    expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
+    // words after a corrected citation, and after one asked about before, stand at their place in Claude's text
+    await editReply(s.$, key, r => ({ ...r, items: r.items.map(m => ({ ...m, status: 'corrected', shown: 'all but one of the 44', was: m.words })) }))
+    expect(await cite('came 30 seconds')).toMatchObject({ n: 2 })
+    expect(await cite('after a drop')).toMatchObject({ n: 3 })
+    const items = (await rowMarks(s.$, 't1-row'))!.items
+    expect(items.filter(m => m.asked).map(m => ANSWER.slice(m.start, m.end))).toEqual(['came 30 seconds', 'after a drop'])
+    expect(withAsked(ANSWER, items).text).toContain('[41 of the 44](#) failures [came 30 seconds](#) [after a drop](#).')
+    // in manual, a citation Claude wrote anyway has no check: c on its words says so, rather than to wait for one
+    setOptions({ citations: 'manual' })
+    await answered(s, { id: 't2', prompt: 'How often?', text: 'It failed [3 times](#) today.' })
+    expect(await citeWords(s.$, 't2-row', 'failed 3 times')).toContain('manual does not check')
+  } finally {
+    setOptions({})
+  }
+})
+
+test('words of a sentence a check rewrote: those asked about before step aside so the rewrite stands, and open their citation again; its other words open the citation it was rewritten for; words of another sentence become a citation beside it', async () => {
+  setOptions({ citations: 'auto cite' })
+  try {
+    const text = `${ANSWER} The client gives up after five tries.`
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text })
+    await noteRow(s.$, 't1-row', text)
+    await startCheck(s.$, { turnId: 't1', reason: 'answer' })
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const items = async () => (await rowMarks(s.$, 't1-row'))!.items
+    const opened = async () => (await trayNow(s.$))!.stack[0]
+    // words of the citation's sentence, asked about while the citation waits to be opened; then its check rewrites the
+    // sentence
+    expect(await citeWords(s.$, 't1-row', 'Uploads fail')).toBeUndefined()
+    const rewrite = 'Uploads fail after the retry budget runs out: [43 of the 44] failures came within a minute of a drop.'
+    await editReply(s.$, (await replyKeyOf(s.$, 't1-row'))!, r => ({ ...r, items: r.items.map(m => (m.n === 1 ? { ...m, status: 'corrected', shown: '43 of the 44', was: m.words, rewrite } : m)) }))
+    // the rewrite stands, and the words asked about in it are no citation there
+    expect(withAsked(text, await items()).items.map(m => m.n)).toEqual([1])
+    expect(readText(text, await items())).toBe(`${rewrite.replace('[43 of the 44]', '[43 of the 44](#)')} The client gives up after five tries.`)
+    // those words again open their citation; other words of the sentence, Claude's or the check's, the rewritten one
+    expect(await citeWords(s.$, 't1-row', 'Uploads fail')).toBeUndefined()
+    expect(await opened()).toMatchObject({ n: 2 })
+    for (const words of ['retry budget runs out', 'within a minute']) {
+      expect(await citeWords(s.$, 't1-row', words)).toBeUndefined()
+      expect(await opened()).toMatchObject({ n: 1 })
+    }
+    expect((await items()).length).toBe(2)
+    // words of another sentence: a citation of their own, and the rewrite still stands beside it
+    expect(await citeWords(s.$, 't1-row', 'gives up after five tries')).toBeUndefined()
+    expect(await opened()).toMatchObject({ n: 3 })
+    const drawn = withAsked(text, await items())
+    expect(rewritesIn(drawn.text, drawn.items).text).toBe(`${rewrite.replace('[43 of the 44]', '[43 of the 44](#)')} The client [gives up after five tries](#).`)
+  } finally {
+    setOptions({})
+  }
+})
+
+test('placeOf finds the words as the analyst read them in the text Claude wrote, across its emphasis and the brackets of its citations, on one line', () => {
   expect(placeOf('A **bold claim** here.', 'bold claim here')).toEqual({ start: 2, end: 21 })
+  // a place on a citation's words takes in the whole citation; the × drawn after a failed one is no word of the text
+  expect(placeOf('Of [12 of 40](#) runs.', 'of 40 runs')).toEqual({ start: 3, end: 21 })
+  expect(placeOf('Of [12 of 40](#) runs.', '12 of 40 × runs.')).toEqual({ start: 3, end: 22 })
   expect(placeOf('A **bold claim** here.', 'bold claim')).toEqual({ start: 4, end: 14 })
   expect(placeOf('one  two three', 'one two')).toEqual({ start: 0, end: 8 })
   expect(placeOf('one\ntwo three', 'one two')).toBe(null)

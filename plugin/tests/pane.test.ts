@@ -1,10 +1,13 @@
 // The side pane (core/pane.ts): its trail of the panes it showed, the top row that names esc, which goes back down it (`esc back to …`)
-// or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
+// or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, passing over a pane it can no longer show, and
+// closing when Claude Code does not place the pane it goes back to; and the docked frame that keeps the top row and the input bar at its bottom. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { keyedWords, pressedWords } from '../bar/bar'
-import { closePane, drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
+import { noteViewport } from '../cards/draw'
+import { closePane, drawPane, narrowNotice, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 import { setOptions } from '../settings/features.mjs'
+import { resetThreads } from '../threads/thread'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -98,6 +101,56 @@ test('the pane keeps a trail: esc goes back down it, and on the first pane esc c
   expect(s.isOpen()).toBe(false)
 })
 
+test('going back to a pane Claude Code does not place closes the pane, so the next pane starts a trail of its own', async () => {
+  const s = setup()
+  // the open that goes back waits for Claude Code's close to end (a timer)
+  s.$.clock.after = (_ms: number, fn: () => void) => { setTimeout(fn, 0); return { cancel() {} } }
+  await openPane(s.$, 'threads', {}, 'Threads', { focus: true })
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  // the close mark closed the pane, and the open of the pane under it, the plugin's own, waits unseen in a narrow
+  // terminal
+  const placing = s.$.ui.open
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (117 now)' } }
+  await s.call('ui.close', { id: 'thimble', origin: { kind: 'person' } }, async () => undefined)
+  await new Promise(r => setTimeout(r, 5))
+  expect(await paneNow(s.$)).toBeNull()
+  expect(s.isOpen()).toBe(false)
+  s.$.ui.open = placing
+  await openPane(s.$, 'made-up', {}, 'Made up', { focus: true })
+  expect(textOf(nodes(await draw(s)).find(n => n.props?.key === 'pane-top'))).toBe('esc close')
+})
+
+test('the way back passes over a side thread the conversation no longer holds: the top row and esc go to the pane under it, or close', async () => {
+  resetThreads()
+  const s = setup()
+  // the conversation keeps the thread that was asked; one opened and never asked is gone after a reload
+  const at = '2026-01-02T10:00:00.000Z'
+  const scope = { about: 'p95', mark: { row: 'r1', kind: 'explain', id: 'g1' } }
+  const kept = { id: 'mark-r1-explain-g1', key: 'mark-r1-explain-g1', agentId: null, scope, subject: 'p95', root: '/made-up/data', status: 'done', asks: [{ text: 'What is p95?', scope, sent: '', at }], turns: [{ role: 'person', text: 'What is p95?', at }], at }
+  s.$.session = { id: async () => 's-pane' }
+  s.$.env = { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble' } as Any)[k] }
+  s.$.fs = {
+    list: async (dir: string) => (dir.endsWith('/threads') ? [{ name: `${kept.id}.json`, kind: 'file' }] : []),
+    read: async (p: string) => { if (p.endsWith(`/threads/${kept.id}.json`)) return JSON.stringify(kept); throw new Error(`no file ${p}`) },
+  }
+  const top = async () => textOf(nodes(await draw(s)).find(n => n.props?.key === 'pane-top'))
+  await openPane(s.$, 'thread', { key: kept.key }, 'p95', { focus: true })
+  await openPane(s.$, 'thread', { key: 'mark-r2-explain-g2' }, 'cold cache', { focus: true })
+  await openPane(s.$, 'made-up', { n: 1 }, 'Made up', { focus: true })
+  expect(await top()).toBe('esc back to thread')
+  await s.call('ui.close', { id: 'thimble', origin: { kind: 'person' } }, async () => undefined)
+  expect(await paneNow(s.$)).toMatchObject({ kind: 'thread', args: { key: kept.key } })
+  expect((await paneNow(s.$))?.trail).toBeUndefined()
+  // with only the thread that is gone under it, esc closes the pane, and the top row says so
+  await closePane(s.$)
+  await openPane(s.$, 'thread', { key: 'mark-r2-explain-g2' }, 'cold cache', { focus: true })
+  await openPane(s.$, 'made-up', { n: 2 }, 'Made up', { focus: true })
+  expect(await top()).toBe('esc close')
+  let closed = 0
+  await s.call('ui.close', { id: 'thimble', origin: { kind: 'person' } }, async () => { closed += 1 })
+  expect(closed).toBe(1)
+})
+
 test('docked, the frame takes the pane\'s rows and a row past it, never shown; inline the drawing alone', async () => {
   const s = setup()
   await openPane(s.$, 'threads', {}, 'Threads', { focus: true })
@@ -110,6 +163,22 @@ test('docked, the frame takes the pane\'s rows and a row past it, never shown; i
   const inline = await drawPane(s.$, { requestId: 'thimble', props: { bodyColumns: 70, placement: 'inline', scroll: { offset: 0, bodyRows: 24 } } }, await paneNow(s.$), els)
   expect(nodes(inline).some(n => n.props?.key === 'pane-frame')).toBe(false)
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(false)
+})
+
+test('docked, a drawing far taller than the pane (the settings) leaves the top row with its close, and the line that says how much more there is: only the body gives way', async () => {
+  const s = setup()
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const frame = nodes(await draw(s, 12)).find(n => n.props?.key === 'pane-frame')
+  const parts: Any[] = frame.props.children
+  const body = parts.find(n => n.props?.key === 'pane-body')
+  expect(body.props.flexShrink).toBe(1)
+  // Claude Code's Box and Text shrink unless told otherwise, which would take the frame's rows from every part (this
+  // harness lays nothing out): every part but the body says it keeps its rows
+  for (const n of parts) if (n !== body) expect([n.props.key, n.props.flexShrink]).toEqual([n.props.key, 0])
+  const top = parts.find(n => n.props?.key === 'pane-top')
+  expect(textOf(top)).toContain('esc close')
+  expect(nodes(top).some(n => n.props?.key === 'pane-close')).toBe(true)
+  expect(parts.some(n => n.props?.key === 'pane-more')).toBe(true)
 })
 
 test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below, and the ring lands on its choice set', async () => {
@@ -140,10 +209,9 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   const went: Any[] = []
   const next = async (e: Any) => { went.push(e.element); return {} }
   await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-citations-manual', origin: { kind: 'person' } }, next)
-  // (the first change also saves defaultsAt, settings/term.ts)
-  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
+  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
   await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-claimsMode-auto', origin: { kind: 'person' } }, next)
-  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(1)
+  expect(set.length).toBe(1)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('claimsMode')
   expect(went).toEqual(['mode-citations-manual', 'mode-claimsMode-on demand'])
   // a click on a choice of another row sets it and picks that row, the ring on the choice now set: the tint and the
@@ -154,6 +222,45 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('labels')
   expect(focused.at(-1)).toBe('mode-labels-off')
   setOptions({})
+})
+
+test('a pane a key could not open in a narrow window: the notice offers the click that opens it here; the panes that lay out by their rows ask for them', async () => {
+  const s = setup()
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (118 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
+  expect(await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })).toBe(false)
+  const said = narrowNotice('r', 'r coverage')
+  expect(pressedWords(said, new Map([['r coverage 43% (3/7 files)', () => 'opened']])).find(p => p.press)?.s).toBe('“r coverage”')
+  // a pane drawn inline gets the rows it asks for: the settings, coverage and a citation's evidence ask for theirs
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: true } }
+  for (const kind of ['settings', 'coverage', 'evidence']) {
+    await closePane(s.$)
+    await openPane(s.$, kind, {}, kind, { focus: true })
+    expect(s.opens.at(-1).rows).toBeGreaterThan(20)
+  }
+})
+
+test("in Claude Code's default layout, which sends no click and docks no pane, the notice names /tui fullscreen, with no click; where nothing places panes, it does not say to widen the window", async () => {
+  const s = setup()
+  const named = new Map([['r coverage 43% (3/7 files)', () => 'opened']])
+  try {
+    noteViewport({ isFullscreen: false })
+    s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (80 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
+    expect(await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })).toBe(false)
+    const said = narrowNotice('r', 'r coverage')
+    expect(said).toContain('/tui fullscreen')
+    expect(said).not.toMatch(/click/i)
+    expect(pressedWords(said, named).some(p => p.press)).toBe(false)
+    // no surface here places panes: neither a wider window nor the fullscreen layout opens it
+    s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'no attached surface places panes' } }
+    await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })
+    for (const isFullscreen of [false, true]) {
+      noteViewport({ isFullscreen })
+      expect(narrowNotice('r', 'r coverage')).not.toMatch(/widen|wider|columns|fullscreen|click/i)
+    }
+  } finally {
+    // the tests after it draw in the fullscreen layout
+    noteViewport({ isFullscreen: true })
+  }
 })
 
 test('a key a failure line names is a part of its own, so a click presses it; esc and a key with a modifier are not', async () => {

@@ -6,6 +6,7 @@ import type { GraphDataset, TimelineDataset } from '../lib/types'
 import { chartScript, frameStyle, frameTokens, useCardLibs, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useVisibleSize } from '../lib/visibleSize'
 import { VIZ_SERIES } from '../lib/vizTheme'
+import { bridgeScript, followCmd, fromCardPage, tellCmd } from './cardBridge'
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
@@ -974,8 +975,9 @@ export const clampCustomHeight = (h: number): number => Math.min(CUSTOM_MAX_H, M
 export const CUSTOM_OPEN_MAX_H = 8000
 
 /** A custom card's page in a sandboxed frame, as tall as its content up to CUSTOM_MAX_H; taller pages fade out with a
- * Show all under them. Its head carries the theme, the chart style (chartScript) and the libraries the card names in
- * workspace `ws` (useCardLibs), before the page's own scripts. */
+ * Show all under them. Its head carries the theme, the bridge that tells the page what the ⌘ pointer and the wheel do
+ * in the frame (cardBridge), the chart style (chartScript) and the libraries the card names in workspace `ws`
+ * (useCardLibs), before the page's own scripts. */
 export function CustomFrame({ html, title, height, ws = '', libs }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[] }) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [full, setFull] = useState(() => Math.max(CUSTOM_MIN_H, Math.ceil(typeof height === 'number' ? height : 160)))
@@ -986,24 +988,29 @@ export function CustomFrame({ html, title, height, ws = '', libs }: { html: stri
   const fonts = useFrameFonts()
   const head = useCardLibs(ws, libs)
   // the tokens are read at embed time, once per theme. It waits for the page's fonts and libraries, so the page is drawn once
-  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + chartScript() + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
+  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + bridgeScript() + chartScript() + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (!ref.current || e.source !== ref.current.contentWindow) return
+      const frame = ref.current
+      if (!frame || e.source !== frame.contentWindow) return
       const d = e.data as { type?: unknown; height?: unknown }
       if (d && d.type === SIZE_MESSAGE && typeof d.height === 'number' && Number.isFinite(d.height)) {
         setFull(Math.min(CUSTOM_OPEN_MAX_H, Math.max(CUSTOM_MIN_H, Math.ceil(d.height))))
         setSized(true)
-      }
+      } else if (d && typeof d === 'object') fromCardPage(frame, d)
     }
     window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
+    const offCmd = followCmd(() => ref.current)
+    return () => {
+      window.removeEventListener('message', onMessage)
+      offCmd()
+    }
   }, [])
   const capped = full > CUSTOM_MAX_H
   const h = open ? full : clampCustomHeight(full)
   return (
     <div className={`canvas-card-frame${capped && !open ? ' is-clipped' : ''}`} data-body="" data-settled={sized ? 'true' : 'false'}>
-      {doc != null && <iframe ref={ref} className="canvas-card-html" sandbox="allow-scripts" srcDoc={doc} title={title || 'custom'} style={{ height: h }} />}
+      {doc != null && <iframe ref={ref} className="canvas-card-html" sandbox="allow-scripts" srcDoc={doc} title={title || 'custom'} style={{ height: h }} onLoad={() => tellCmd(ref.current)} />}
       {capped && (
         <button type="button" className="bcell-more" onMouseDown={(e) => e.stopPropagation()} onClick={() => setOpen((v) => !v)}>
           {open ? 'Show less' : 'Show all'}

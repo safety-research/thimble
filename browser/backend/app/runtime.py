@@ -17,7 +17,9 @@ Writes (spec_of). Main and its thread forks write the corpus folder, as Claude C
 analyst turns Settings' "Claude can edit files in this folder" off for the workspace (ledger.corpus_edits); their
 prompt and their Bash, Write and Edit descriptions say which, and name that switch when it is off. thimble's other
 agents (writers, view builds and reviews, checks) and the checker's and proposer's forks never write it. No agent
-writes thimble's private files (PRIVATE_FILES) or the workspace's protected files (protected).
+writes thimble's private files (PRIVATE_FILES) or the workspace's protected files (protected), with one carve-out: a
+view's builder and its reviewer write that view's folder in the protected extension/, and their own folder, alone
+(agent_writes), by the slug of the start the server recorded for them, so no other agent writes a view's files.
 
 What 0.8 did through Claude Code's interactive session and thimble's plugin, the server now does in its place:
 - a browser event (events._publish) starts a turn of main (deliver), or waits for main's turn to end;
@@ -184,6 +186,7 @@ class Conv:
     agent_type: str = ""
     role: str = ""
     values: dict[str, Any] = field(default_factory=dict)
+    key: str = ""  # the key of the start it runs for (subagents' request), such as `view:<slug>` (agent_writes)
     transcript: Transcript | None = None
     queue: list[str] = field(default_factory=list)
     task: asyncio.Task | None = None
@@ -418,7 +421,7 @@ class Space:
                 builtins = [b for b in builtins if b in role["tools"]]
             model = str(conv.values.get("model") or role.get("model") or MAIN_MODEL)
             effort = str(conv.values.get("effort") or role.get("effort") or "")
-            writes = [*subagents.write_dirs(self.c), tmp]
+            writes = [*agent_writes(self.c, conv), tmp]
             edits = None  # writers, view builds and reviews, and checks keep the corpus read-only
             fast = False
             with contextlib.suppress(Exception):
@@ -441,10 +444,31 @@ class Space:
         with contextlib.suppress(Exception):
             if (userconf.load_or_defaults(self.c)[0].get("agents") or {}).get("main", {}).get("web") == "off":
                 builtins = [b for b in builtins if b not in WEB]
+        # a protected folder that holds one of the agent's own write folders is left out, since the agent writes only
+        # in those: a view's builder writes extension/views/<slug> (agent_writes), and nothing else of extension/
+        no_write = [p for p in protected(self.ws) if not any(p in w.parents for w in writes)]
         return Spec(system=system, builtins=runtime_tools.available(builtins) if engine() == "api" else builtins,
                     thimble=names, model=model, effort=effort, cwd=cwd, workspace=self.ws,
                     read_roots=reads, write_roots=writes, private=self.private(), home=tmp, fast=fast,
-                    corpus_edits=edits, no_write=protected(self.ws))
+                    corpus_edits=edits, no_write=no_write)
+
+
+def agent_writes(c: str, conv: Conv) -> list[Path]:
+    """The folders one of thimble's agents writes. A view's builder and its reviewer write that view's folder,
+    extension/views/<slug>, and their own folder, views-work/<slug> (dev.view_work_dir), alone: the slug is the one of
+    the start the server recorded for the agent (Conv.key, `view:<slug>` or `review:<slug>`), never one the agent
+    names. Every other agent writes the agents' work folders (subagents.write_dirs) less the views' folders, which
+    belong to their builders; an agent of a view's role without such a key writes nothing but its temp folder."""
+    from . import dev, subagents, tools, view_tools, views  # noqa: PLC0415
+
+    kinds = {view_tools.BUILDER: tools.VIEW_SESSION, view_tools.REVIEWER: tools.REVIEW_SESSION}
+    views_root = views.views_dir(c)
+    if conv.role in kinds:
+        slug = view_tools.slug_of(conv.key)
+        if tools.session_kind(conv.key) != kinds[conv.role] or not views.SLUG_RE.fullmatch(slug):
+            return []
+        return [views_root / slug, dev.view_work_dir(c, slug)]
+    return [w for w in subagents.write_dirs(c) if w != views_root]
 
 
 def protected(ws: Path) -> list[Path]:
@@ -880,8 +904,11 @@ def _spawn_agent(sp: Space, args: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"no role {role}"}
     agent_id = _agent_id()
     values = dict(args.get("values") or {})
+    # the key of the start this answers, from the server's own record of it (agent_writes)
+    asked = subagents.request(sp.c, str(args.get("request") or "")) or {}
+    key = str(asked.get("key") or "") if asked.get("role") == role else ""
     conv = Conv(sp, agent_id, "agent", agent_id=agent_id, agent_type=subagents.type_name(role), role=role, values=values,
-                transcript=Transcript(sp.sub_path(agent_id), sp.sid, agent_id))
+                key=key, transcript=Transcript(sp.sub_path(agent_id), sp.sid, agent_id))
     sp.convs[agent_id] = conv
     prompt = str(args.get("prompt") or "")
     description = str(args.get("description") or role)
