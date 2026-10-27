@@ -7,8 +7,9 @@ Under $THIMBLE_HOME/fixes:
                      a clone of Claude Code's own clone of the marketplace, at the installed commit (no download); a
                      clone install's (scripts/install.sh --local) is a worktree of that clone, so `mine` shows there.
     release/         the release commit (base) as it is, never changed by a fix: a detached worktree of live's
-                     repository, made with live, moved when base moves, made again when it is missing. The way back runs
-                     from it (place_release), never from live
+                     repository, made with live, moved when base moves, made again when it is missing, and put back as
+                     the release commit has it before the way back runs from it (place_release, the launcher), never
+                     from live
     work/<id>/       a fix's scratch worktree, cut from mine. The fixer edits only here, and its shell runs in the
                      sandbox runtime, which may write only here and in tmp/<id>/, and reach only the package registries
                      (REGISTRIES). Removed after apply or "not now".
@@ -56,7 +57,7 @@ prompt does not list these files. A check that refuses a change (these files, a 
 refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
 to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
 cannot be done (done with `cannot`), which is the failure the person sees. The quick tests run with no network, for one
-fix at a time, and a suite that fails runs once more before the fix fails (run_tests).
+fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix fails (run_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -104,7 +105,8 @@ PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
 # the files a fix may change that the person is told of before they use it, by what each one is: the rest of what keeps
 # them safe, and the packages thimble installs. A file counts as the first kind it matches.
 NOTICE_KINDS = {
-    "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "browser/backend/app/kernel_wrap.py"),
+    "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "plugin/cards/ask.ts", "plugin/cards/runner.mjs",
+                    "browser/backend/app/kernel_wrap.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),
     "a command hook": ("plugin/hooks/temp-allow.sh", "plugin/hooks/temp_allow.py"),
     "the launcher": ("plugin/bin/*",),
@@ -387,12 +389,14 @@ def ensure_live() -> dict[str, Any]:
 
 
 def place_release(base: str) -> None:
-    """The release checkout at `base`: made when it is missing (or no longer a checkout), moved when base moved. Nothing
-    in it is ever changed: a fix changes its copy and live, never this."""
+    """The release checkout at `base`: made when it is missing (or no longer a checkout), and each time put back as
+    the release commit has it, with any file changed in it restored and any file added to it (also an ignored one, such
+    as a module that would shadow one of Python's) removed. A fix changes its copy and live, never this. The launcher
+    (plugin/bin/thimble) does the same before it runs the way back from here."""
     d = release_dir()
     if _is_checkout(str(d)):
-        if git("rev-parse", "HEAD", cwd=d, check=False) != base:
-            git("checkout", "-q", "-f", "--detach", base, cwd=d)
+        git("checkout", "-q", "-f", "--detach", base, cwd=d)
+        git("clean", "-q", "-ffdx", cwd=d)
         return
     if d.exists():
         shutil.rmtree(d)
@@ -442,7 +446,8 @@ def _repoint() -> None:
     """Point Claude Code's thimble marketplace at live, once, at the first fix. Claude Code also keeps the source in
     its user settings (extraKnownMarketplaces) and refuses another source for the name until that entry changes, so
     the entry changes first, and nothing else in the file; then Claude Code adds the marketplace from live. Removing
-    the marketplace instead would uninstall thimble and lose its options."""
+    the marketplace instead would uninstall thimble and lose its options. When Claude Code does not add it, the
+    settings are put back as they were, so that the y that called this changes nothing (apply, _swap)."""
     rel = release()
     if rel.get("pointed"):
         # a shell link made before the release checkout was (to live's launcher) moves to the checkout's
@@ -454,19 +459,30 @@ def _repoint() -> None:
     entry = {"source": "directory", "path": str(live_dir())}
     p = config_dir() / "settings.json"
     try:
-        settings = json.loads(p.read_text())
+        text = p.read_text()
+        settings = json.loads(text)
     except FileNotFoundError:
-        settings = None
+        text, settings = None, None
     except (OSError, ValueError):
         raise FixError(f"thimble cannot read Claude Code's settings ({p}) to load thimble from your fixes")
-    known = (settings or {}).get("extraKnownMarketplaces")
-    if isinstance(known, dict) and isinstance(known.get("thimble"), dict):
-        known["thimble"]["source"] = entry
+
+    def write(t: str) -> None:
         tmp = p.with_suffix(".json.thimble-tmp")
-        tmp.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+        tmp.write_text(t)
         os.chmod(tmp, p.stat().st_mode & 0o777)
         tmp.replace(p)
-    run([claude(), "plugin", "marketplace", "add", str(live_dir())])
+
+    known = (settings or {}).get("extraKnownMarketplaces")
+    changed = isinstance(known, dict) and isinstance(known.get("thimble"), dict)
+    if changed:
+        known["thimble"]["source"] = entry
+        write(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+    try:
+        run([claude(), "plugin", "marketplace", "add", str(live_dir())])
+    except FixError:
+        if changed and text is not None:
+            write(text)
+        raise
     _relink_cli()
     rel["pointed"] = True
     write_json(home() / "release.json", rel)
@@ -592,16 +608,21 @@ def _has_pytest(py: str) -> bool:
 
 
 QUICK_TESTS = "claude plugin test plugin"
+# the copy's own launcher and the kernel's command start (thimble --help reads cli.py and the modules it needs) and say
+# no traceback; on a failure the log ends with what they said and their exit code
+LAUNCHER_SMOKE = ('(o=$(plugin/bin/thimble --help 2>&1); s=$?; case "$s:$o" in [1-9]*|0:*Traceback*) '
+                  'printf "%s\\nplugin/bin/thimble --help: exit %s\\n" "$o" "$s"; false;; esac)')
 
 
 def run_tests(fid: int | str) -> tuple[bool, str]:
-    """The quick tests in the copy, in the sandbox, with no network: the hooks tests, and the kernel's when this Python
-    has pytest (THIMBLE_FIX_TESTS, a shell command, replaces them). They run for one fix at a time, since two runs at
-    once make the hooks tests run out of time, and a run that fails runs once more before the tests count as failed.
-    (passed, the log's last lines, which say when they passed only the second time)."""
+    """The quick tests in the copy, in the sandbox, with no network: the copy's launcher (LAUNCHER_SMOKE), the hooks
+    tests, and the kernel's when this Python has pytest (THIMBLE_FIX_TESTS, a shell command, replaces them). They run
+    for one fix at a time, since two runs at once make the hooks tests run out of time, and a run that fails runs once
+    more before the tests count as failed. (passed, the log's last lines, which say when they passed only the second
+    time)."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
     if not cmd:
-        parts = [QUICK_TESTS]
+        parts = [LAUNCHER_SMOKE, QUICK_TESTS]
         if _has_pytest(_python()):
             parts.append('"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider')
         cmd = " && ".join(parts)
@@ -1099,8 +1120,9 @@ def _move(change) -> dict[str, Any]:
 
 
 def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
-    """y: the fix goes on. thimble cherry-picks its commit onto mine, points the marketplace at live the first time,
-    and has Claude Code copy live; the plugin then runs /reload-plugins."""
+    """y: the fix goes on. thimble points the marketplace at live the first time (before anything else, so that a y
+    whose pointing fails changes nothing), cherry-picks the fix's commit onto mine unless mine holds it already, and has
+    Claude Code copy live; the plugin then runs /reload-plugins."""
     rec = get(fid)
     check_ask(rec["id"], secret)
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
@@ -1116,21 +1138,27 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
 
     def change():
         live = live_dir()
+        # Claude Code's marketplace on live first: when that fails, mine, the fix's ref and its record stay as they were
+        _repoint()
         _unstamp()
         # a fix the person turns on while all are off: the others come back with it
         git("checkout", "-q", "mine", cwd=live)
         write_json(home() / "state.json", {"on": True})
-        p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{rec['id']}"], cwd=live,
-                check=False, env=as_thimble())
-        if p.returncode != 0:
-            run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
-            r = get(rec["id"])
-            r.update(state="redo", error="it does not fit the fixes you have on")
-            put(r)
-            raise FixError(f"fix {rec['id']} does not fit the fixes you have on; r asks Claude to redo it")
-        new_commit = git("rev-parse", "HEAD", cwd=live)
-        git("update-ref", f"refs/thimble/fixes/{rec['id']}", new_commit, cwd=live)
-        _repoint()
+        ref = f"refs/thimble/fixes/{rec['id']}"
+        if run(["git", "merge-base", "--is-ancestor", ref, "mine"], cwd=live, check=False).returncode == 0:
+            # mine holds the fix's commit already: it goes on as it is, with no empty commit after it
+            new_commit = git("rev-parse", ref, cwd=live)
+        else:
+            p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", ref], cwd=live, check=False,
+                    env=as_thimble())
+            if p.returncode != 0:
+                run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
+                r = get(rec["id"])
+                r.update(state="redo", error="it does not fit the fixes you have on")
+                put(r)
+                raise FixError(f"fix {rec['id']} does not fit the fixes you have on; r asks Claude to redo it")
+            new_commit = git("rev-parse", "HEAD", cwd=live)
+            git("update-ref", ref, new_commit, cwd=live)
         r = get(rec["id"])
         r.update(state="on", on_at=time.time(), commit=new_commit, error=None)
         _drop_work(r)
@@ -1147,6 +1175,8 @@ def _swap(fid: int) -> dict[str, Any]:
     rec = get(fid)
     p = rec.get("prev") or {}
     old = git("rev-parse", "-q", "--verify", f"refs/thimble/fixes/{fid}", cwd=live, check=False) or str(p.get("commit") or "")
+    # Claude Code's marketplace on live first: when that fails, mine, the fix's refs and its record stay as they were
+    _repoint()
     _unstamp()
     git("checkout", "-q", "mine", cwd=live)
     write_json(home() / "state.json", {"on": True})
@@ -1170,7 +1200,6 @@ def _swap(fid: int) -> dict[str, Any]:
     if old:
         git("update-ref", f"refs/thimble/prev/{fid}", old, cwd=live)
     git("update-ref", "-d", f"refs/thimble/next/{fid}", cwd=live)
-    _repoint()
     r = get(fid)
     new_commit = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
     r.pop("round_commit", None)
