@@ -43,12 +43,16 @@ function world(on: Any, o: { system: string | null; uid: string; env: Record<str
   on('fs.list', () => ({ value: [] }))
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   const guides: string[] = []
-  on('tool.register', (_$: unknown, e: { name: string; description: string }) => {
-    if (e.name === 'card') guides.push(e.description)
+  const datas: string[] = []
+  on('tool.register', (_$: unknown, e: { name: string; description: string; inputSchema: Any }) => {
+    if (e.name === 'card') {
+      guides.push(e.description)
+      datas.push(e.inputSchema.properties.data.description)
+    }
     return { value: { tool: `mcp__thimble__${e.name}` } }
   })
   on('ui.toast', () => ({ value: undefined }))
-  return { env, set, guides }
+  return { env, set, guides, datas }
 }
 
 test('Claude Code keeps its temp folder where it started, by its own rule on each system', async () => {
@@ -69,6 +73,8 @@ test('Linux with no TMPDIR: Claude Code\'s temp folder stays in /tmp, and the co
   // modules asked for thimble's folder, so the card tool's guide names the same one
   expect(w.set).toEqual([['CLAUDE_CODE_TMPDIR', '/tmp'], ['TMPDIR', '/tmp/claude-1000/thimble']])
   expect(w.guides).toEqual(['Rows in /tmp/claude-1000/thimble.'])
+  // the card tool's data names it by its path too: a command in Claude Code's Bash sandbox has another TMPDIR
+  expect(w.datas[0]).toContain('/tmp/claude-1000/thimble')
   // a reload of the plugin, or a resumed session: nothing moves again
   await $.session.start(START)
   expect(w.set.length).toBe(2)

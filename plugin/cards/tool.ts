@@ -50,11 +50,12 @@ const COPY_LINES = 60
 /** Rows of the screen the card's frame, the prompt box and the bar above it take, besides the card's own. */
 const AROUND_ROWS = 14
 
-const SCHEMA = {
+/** The tool's input, as the model reads it: `temp` is the temp folder, where Claude writes its rows. */
+const schemaOf = (temp: string) => ({
   type: 'object',
   properties: {
     title: { type: 'string', description: 'what the card shows, in a few words; with `id`, leave out to keep the title' },
-    data: { type: 'string', description: 'the path of the JSON file of rows, in this folder or $TMPDIR (may start with $TMPDIR/); with `id`, leave out to keep the rows' },
+    data: { type: 'string', description: `the path of the JSON file of rows, in this folder or in ${temp}; with \`id\`, leave out to keep the rows` },
     view: { type: 'string', description: 'JavaScript that defines function view(props, surface); with `id`, give `edits` instead, or only new `data` to keep the view' },
     edits: {
       type: 'array',
@@ -68,7 +69,7 @@ const SCHEMA = {
       items: { type: 'object', properties: { key: { type: 'string' }, click: { description: 'words the card shows (a click there, as the analyst clicks), or [x, y] in cells', anyOf: [{ type: 'string' }, { type: 'array', items: { type: 'number' } }] } } },
     },
   },
-}
+})
 
 /** The card guide, as the model reads it: card-tool.md with the temp folder and thimble's own keys filled in. The
  *  tool's description, and what a squeeze's request shows of how a card's view is written (squeeze/cards.ts). */
@@ -81,7 +82,7 @@ export async function cardGuide($: Engine): Promise<string> {
 
 /** The tool, as the model reads it. */
 export async function registerCardTool($: Engine): Promise<void> {
-  await $.tool.register({ name: 'card', isDeferred: false, description: await cardGuide($), inputSchema: SCHEMA })
+  await $.tool.register({ name: 'card', isDeferred: false, description: await cardGuide($), inputSchema: schemaOf(await tempDir($)) })
 }
 
 /** Why the person's permission rules refuse this call, or null (step 0 above). */
@@ -110,12 +111,13 @@ async function roots($: Engine): Promise<string[]> {
 async function dataFile($: Engine, raw: string): Promise<{ path?: string; bad?: string }> {
   const p = String(raw ?? '').trim()
   if (!p) return { bad: '`data` is empty: give the path of the JSON file of rows you wrote' }
-  const expanded = p.replace(/^\$\{?TMPDIR\}?(?=\/)/, await tempDir($))
+  const temp = await tempDir($)
+  const expanded = p.replace(/^\$\{?TMPDIR\}?(?=\/)/, temp)
   const path = expanded.startsWith('/') ? expanded : `${await $.session.cwd()}/${expanded}`
   const st = await $.fs.stat(path, { resolve: true }).catch(() => null)
   if (!st || st.kind !== 'file' || !st.realPath) return { bad: `there is no file at ${p}` }
   const real = st.realPath
-  if (!(await roots($)).some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${p} is outside this folder and the temp folder ($TMPDIR); write the data file in one of them` }
+  if (!(await roots($)).some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${p} is outside this folder and the temp folder, ${temp}; write the data file in one of them` }
   if (st.size > MAX_ROWS_BYTES) return { bad: `${p} is ${Math.round(st.size / 1048576)} MB; a card reads at most 64 MB, so write only the rows it shows` }
   return { path: real }
 }

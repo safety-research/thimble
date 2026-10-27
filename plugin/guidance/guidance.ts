@@ -6,11 +6,11 @@
 // Not prompt.context: where an organization manages Claude Code, Claude Code's built-in cc-plugin-sec-default sends
 // that event past the plugins a person installs, and prompt.submit's context reaches Claude on every machine.
 //
-// The temp folder's path is filled in, for the tools that do not expand `$TMPDIR`. The `## ` section of a
-// switched-off feature is left out; while Claude does not cite (Citations manual or off), the citations in the other
-// sections' examples read as plain words. A mode that changes what the analyst does adds one sentence at the end (modesNow):
-// Citations manual, and Minimal. A switch changed later makes a different text, which the next prompt carries beside
-// the copy the conversation holds.
+// The temp folder's path is filled in: in a command Claude Code's Bash sandbox runs, `$TMPDIR` is another folder.
+// The `## ` section of a switched-off feature is left out; while Claude does not cite (Citations manual or off), the
+// citations in the other sections' examples read as plain words. A mode that changes what the analyst does adds one
+// sentence at the end (modesNow): Citations manual, and Minimal. A switch changed later makes a different text, which
+// the next prompt carries beside the copy the conversation holds.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { tempDir } from '../core/home'
