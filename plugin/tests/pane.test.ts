@@ -1,10 +1,12 @@
 // The side pane (core/pane.ts): its trail of the panes it showed, the top row that names esc, which goes back down it (`esc back to …`)
-// or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
+// or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, passing over a pane it can no longer show, and
+// closing when Claude Code does not place the pane it goes back to; and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { keyedWords, pressedWords } from '../bar/bar'
 import { closePane, drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 import { setOptions } from '../settings/features.mjs'
+import { resetThreads } from '../threads/thread'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -96,6 +98,56 @@ test('the pane keeps a trail: esc goes back down it, and on the first pane esc c
   await nodes(await draw(s)).find(n => n.props?.key === 'pane-close').props.onPress()
   expect(await paneNow(s.$)).toBeNull()
   expect(s.isOpen()).toBe(false)
+})
+
+test('going back to a pane Claude Code does not place closes the pane, so the next pane starts a trail of its own', async () => {
+  const s = setup()
+  // the open that goes back waits for Claude Code's close to end (a timer)
+  s.$.clock.after = (_ms: number, fn: () => void) => { setTimeout(fn, 0); return { cancel() {} } }
+  await openPane(s.$, 'threads', {}, 'Threads', { focus: true })
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  // the close mark closed the pane, and the open of the pane under it, the plugin's own, waits unseen in a narrow
+  // terminal
+  const placing = s.$.ui.open
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (117 now)' } }
+  await s.call('ui.close', { id: 'thimble', origin: { kind: 'person' } }, async () => undefined)
+  await new Promise(r => setTimeout(r, 5))
+  expect(await paneNow(s.$)).toBeNull()
+  expect(s.isOpen()).toBe(false)
+  s.$.ui.open = placing
+  await openPane(s.$, 'made-up', {}, 'Made up', { focus: true })
+  expect(textOf(nodes(await draw(s)).find(n => n.props?.key === 'pane-top'))).toBe('esc close')
+})
+
+test('the way back passes over a side thread the conversation no longer holds: the top row and esc go to the pane under it, or close', async () => {
+  resetThreads()
+  const s = setup()
+  // the conversation keeps the thread that was asked; one opened and never asked is gone after a reload
+  const at = '2026-01-02T10:00:00.000Z'
+  const scope = { about: 'p95', mark: { row: 'r1', kind: 'explain', id: 'g1' } }
+  const kept = { id: 'mark-r1-explain-g1', key: 'mark-r1-explain-g1', agentId: null, scope, subject: 'p95', root: '/made-up/data', status: 'done', asks: [{ text: 'What is p95?', scope, sent: '', at }], turns: [{ role: 'person', text: 'What is p95?', at }], at }
+  s.$.session = { id: async () => 's-pane' }
+  s.$.env = { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble' } as Any)[k] }
+  s.$.fs = {
+    list: async (dir: string) => (dir.endsWith('/threads') ? [{ name: `${kept.id}.json`, kind: 'file' }] : []),
+    read: async (p: string) => { if (p.endsWith(`/threads/${kept.id}.json`)) return JSON.stringify(kept); throw new Error(`no file ${p}`) },
+  }
+  const top = async () => textOf(nodes(await draw(s)).find(n => n.props?.key === 'pane-top'))
+  await openPane(s.$, 'thread', { key: kept.key }, 'p95', { focus: true })
+  await openPane(s.$, 'thread', { key: 'mark-r2-explain-g2' }, 'cold cache', { focus: true })
+  await openPane(s.$, 'made-up', { n: 1 }, 'Made up', { focus: true })
+  expect(await top()).toBe('esc back to thread')
+  await s.call('ui.close', { id: 'thimble', origin: { kind: 'person' } }, async () => undefined)
+  expect(await paneNow(s.$)).toMatchObject({ kind: 'thread', args: { key: kept.key } })
+  expect((await paneNow(s.$))?.trail).toBeUndefined()
+  // with only the thread that is gone under it, esc closes the pane, and the top row says so
+  await closePane(s.$)
+  await openPane(s.$, 'thread', { key: 'mark-r2-explain-g2' }, 'cold cache', { focus: true })
+  await openPane(s.$, 'made-up', { n: 2 }, 'Made up', { focus: true })
+  expect(await top()).toBe('esc close')
+  let closed = 0
+  await s.call('ui.close', { id: 'thimble', origin: { kind: 'person' } }, async () => { closed += 1 })
+  expect(closed).toBe(1)
 })
 
 test('docked, the frame takes the pane\'s rows and a row past it, never shown; inline the drawing alone', async () => {

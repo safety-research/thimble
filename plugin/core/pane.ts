@@ -16,7 +16,8 @@
 // pane is open goes on top of it (a citation opened from a side answer stands over that answer); the row at the top
 // names what esc does there, as the bar names a key (`esc back to claim`, on the trail's first pane `esc close`), a click
 // that does the same: Claude Code closes a pane on esc (and on its close mark), and while the trail holds a pane the
-// ui.close hook goes back to it instead.
+// ui.close hook goes back to it instead. The way back passes over a pane the trail can no longer show (a side thread
+// the conversation no longer holds), and a pane Claude Code does not place when the pane goes back to it closes.
 //
 // Docked beside the conversation, the pane keeps its input bar and its key row at its bottom: the drawing above them
 // gets the rows left over (a pane that lays itself out reads them as its `bodyRows`), the side thread's conversation
@@ -36,7 +37,7 @@ import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
 import { drawSettings, settingsFocus } from '../panes/settings'
-import { drawThreadsPane, threadPaneParts, threadUnderSplit } from '../threads/seam'
+import { drawThreadsPane, threadKnown, threadPaneParts, threadUnderSplit } from '../threads/seam'
 import { quiet } from './askcell.js'
 import { dropSelection } from './selection'
 import { cut } from './text.js'
@@ -85,22 +86,37 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   return false
 }
 
-/** Back down the trail: to its pane `to` (an index into it; the last one when left out), the panes over it gone. False
- *  when the trail is empty (the pane is on its first pane). The pane takes the keyboard: the person moves in it. */
+/** Back down the trail: to its pane `to` (an index into it; the last one when left out), the panes over it gone, and a
+ *  pane it can no longer show passed over. False when it holds none it can show (the pane is on its first pane). The
+ *  pane takes the keyboard: the person moves in it. */
 export async function paneBack($: Engine, to?: number, o: { later?: boolean } = {}): Promise<boolean> {
   const now = await paneNow($)
   const trail = now?.trail ?? []
   if (!now || !trail.length) return false
-  const i = to == null ? trail.length - 1 : Math.max(0, Math.min(trail.length - 1, to))
+  let i = to == null ? trail.length - 1 : Math.max(0, Math.min(trail.length - 1, to))
+  while (i >= 0 && !(await canShow($, trail[i]!))) i--
+  if (i < 0) return false
   const e = trail[i]!
   const rest = trail.slice(0, i)
   await $.state.set(NOW, { kind: e.kind, args: e.args, title: e.title, escape: true, ...(e.rows ? { rows: e.rows } : {}), ...(rest.length ? { trail: rest } : {}) })
-  const open = () => $.ui.open({ id: PANE_ID, title: e.title, focus: true, closeOnEscape: true, ...(e.rows ? { rows: e.rows } : {}) })
+  const open = async () => {
+    const r = await $.ui.open({ id: PANE_ID, title: e.title, focus: true, closeOnEscape: true, ...(e.rows ? { rows: e.rows } : {}) })
+    // not placed (the close mark closed the pane, and an open of the plugin's own waits unseen in a narrow terminal):
+    // closed, as openPane closes one, so no unseen pane stays open for the next pane to stand on
+    if (!r.isPlaced) await closePane($)
+  }
   // inside Claude Code's close (esc) the pane is closing, so the open that retitles it and gives it the keyboard back
   // waits until that close was refused
   if (o.later) $.clock.after(0, () => { void open().catch(() => undefined) })
   else await open()
   return true
+}
+
+/** Whether the pane can show a pane of its trail again: not a side thread the conversation no longer holds (one opened
+ *  and never asked, which a reload of the plugin forgets). Yes when it cannot say. */
+async function canShow($: Engine, e: PaneEntry): Promise<boolean> {
+  if (e.kind !== 'thread') return true
+  return threadKnown($, String((e.args as Any)?.key ?? '')).catch(() => true)
 }
 
 /** Whether thimble's pane is open (the person may have closed it); open when Claude Code cannot say. */
@@ -216,7 +232,10 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const kels = noting(els, keys)
     own = null
     arrows = null
-    const top = topRow($, els, now, W)
+    // the top row names the pane esc goes back to: one the trail can still show, as paneBack finds it
+    const live: PaneEntry[] = []
+    for (const x of now.trail ?? []) if (await canShow($, x)) live.push(x)
+    const top = topRow($, els, { ...now, trail: live }, W)
     const T = top.length ? treeRows(top, W) : 0
     // the drawing, then the side thread's conversation under it (both scroll in the room left), then the thread's key row
     // and input bar (`under`, kept at the bottom)
