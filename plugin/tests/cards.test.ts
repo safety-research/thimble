@@ -98,7 +98,9 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
       yield { stream: 'stderr', text: o.runnerEnds.stderr }
       return { value: { code: o.runnerEnds.code, signal: o.runnerEnds.signal } }
     }
-    if (o.runnerHangs) await clock.sleep(60000)
+    // the one that hangs prints a line each second: a wait held through all of the hooks' 5 s of tries is let go once
+    // it was held 10 s of real time (a hook's budget), as on a busy machine, and the runner then seems to end
+    if (o.runnerHangs) for (;;) { await clock.sleep(1000); yield { stream: 'stdout', text: 'starting\n' } }
     return { value: { code: 0, signal: null } }
   })
   on('env.set', () => ({ value: {} }))
