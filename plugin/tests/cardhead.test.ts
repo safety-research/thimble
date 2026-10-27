@@ -2,7 +2,8 @@
 // names the fork it started: while the fork works the card and the bar's busy line say so; its last message's link
 // shows under the card once, with a press that copies it, and a message with no link says why there is none; one press
 // publishes a card once, and a word that starts with p leaves the card's link as it was; a reload of the plugin while
-// a fork publishes loses neither the publish nor its end. All data is made up. `claude plugin test plugin`.
+// a fork publishes loses neither the publish nor its end; main reads the link, or why there is none, with the next
+// prompt. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
@@ -52,7 +53,9 @@ function setup() {
   // what an earlier load of the plugin kept in $.state; a session start (the reload), or only its first `n` hooks
   const kept = (ref: Any, value: unknown) => { state.set(JSON.stringify(ref), value) }
   const start = async (n = Infinity) => { for (const h of hooks['session.start'].slice(0, n)) await h($, { cwd: '/made-up/data' }, async () => ({})) }
-  return { $, E, ended, spawns, clock, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } }, agents, kept, start }
+  // what main reads with the person's next prompt (core/tell.ts)
+  const told = () => Object.values((state.get(JSON.stringify({ plugin: 'thimble', key: 'tell' })) ?? {}) as Record<string, string>).join('\n')
+  return { $, E, ended, spawns, clock, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } }, agents, kept, start, told }
 }
 
 /** A publish an earlier load of the plugin started: its fork, and the card's record. */
@@ -209,4 +212,18 @@ test('at a reload, a publish whose fork Claude Code no longer runs ends as faile
   await s.start()
   expect(await artifactMaking(s.$, 'c-made-up-9')).toBe(false)
   expect(words(await artifactLine(s.$, s.E, 'c-made-up-9'))).toContain('× no artifact')
+})
+
+test("main reads the artifact's link with the person's next prompt, or why no artifact was published", async () => {
+  const s = setup()
+  await launch(s.$, 'c-made-up-10', 'PROMPT artifact', 0).now()
+  await settle()
+  expect(s.told()).toBe('')
+  await s.ended('agent-made-up-1', 'https://claude.ai/artifact/made-up-10')
+  expect(s.told()).toContain('https://claude.ai/artifact/made-up-10')
+  expect(s.told()).toContain('c-made-up-10')
+  await launch(s.$, 'c-made-up-11', 'PROMPT artifact', 0).now()
+  await settle()
+  await s.ended('agent-made-up-2', 'No Artifact tool is available in this session.')
+  expect(s.told()).toContain('No Artifact tool is available in this session')
 })

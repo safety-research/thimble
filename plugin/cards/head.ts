@@ -8,7 +8,8 @@
 //       card at a time: a press while one starts or runs starts nothing. While it works the header says `publishing…`
 //       in place of `p artifact` (draw.ts), the bar's busy line `publishing an artifact`, and the line under the card
 //       that its link will show there; then `↗ <link> · copy` under it (a press on `copy` puts the link on the
-//       clipboard, for a terminal that opens no link), or why there is none.
+//       clipboard, for a terminal that opens no link), or why there is none. Main reads the link, or why there is
+//       none, with the person's next prompt (core/tell.ts).
 //
 // p is a letter too (hooks/keys.ts holds the word window): as with v, the fork is spawned inside the key's own hook,
 // and this module's agent.spawn hook holds it until the window closes, refusing it when a letter came. The card shows
@@ -31,6 +32,7 @@ import { busyWhile } from '../bar/busy'
 import { cardAsk } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { forkOf, spawnFork } from '../core/forks'
+import { tellAtNextPrompt } from '../core/tell'
 import { cut, fenced } from '../core/text.js'
 import { accent } from '../core/theme'
 import { promptText } from '../prompts/prompts'
@@ -203,14 +205,21 @@ export async function artifactLine($: Engine, E: Any, card: string): Promise<Any
   return box([E.Text({ key: 'x', color: 'error', wrap: 'wrap', children: `× no artifact${m.error ? `: ${m.error}` : ''}` })])
 }
 
-/** The fork ended: the link its last message gives, or why it gave none. */
+/** The fork ended: the link its last message gives, or why it gave none. Main reads either with the person's next
+ *  prompt, since the person may ask about the page, which only the account this session publishes with can open. */
 async function finish($: Engine, m: Made, e: { reason: string; answer: string }): Promise<void> {
   if (e.reason === 'aborted') return end($, m, 'cancelled')
   const url = String(e.answer || '').match(LINK)?.[0]
-  if (url) return end($, m, 'done', { url })
-  if (e.reason === 'refusal') return end($, m, 'failed', { error: "the model's safeguards refused it" })
   const said = cut(firstLine(e.answer), 160)
-  return end($, m, 'failed', { error: said || (e.reason === 'error' ? 'the model call failed' : 'the copy gave no link') })
+  const error = url ? '' : e.reason === 'refusal' ? "the model's safeguards refused it" : said || (e.reason === 'error' ? 'the model call failed' : 'the copy gave no link')
+  if (url) await end($, m, 'done', { url })
+  else await end($, m, 'failed', { error })
+  const title = (await metaOf($, m.card).catch(() => null))?.title
+  const card = `the card “${title || m.card}” (id "${m.card}")`
+  await tellAtNextPrompt($, `p:${m.card}`, url
+    ? `The analyst pressed p on ${card}, and a copy of you published it as a new private claude.ai artifact: ${url}. Its link shows under the card. Only the claude.ai account this session publishes with can open it.`
+    : `The analyst pressed p on ${card} to publish it as a claude.ai artifact, and no artifact was published: ${error.replace(/[.\s]+$/, '')}.`)
+    .catch(() => undefined)
 }
 
 /** The artifact a fork makes: as this load holds it, else as $.state keeps it (the plugin was loaded again while the
