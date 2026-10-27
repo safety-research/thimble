@@ -516,3 +516,29 @@ test('a reload of the plugin while one look runs and another waits loses neither
   expect(s.forks.length).toBe(2)
   setOptions({})
 })
+
+test('while the look after a reply reads the claims, the pane says they are being found, in place of f; a reload with no such look left stops saying so', async () => {
+  setOptions({ claimsMode: 'auto' })
+  let answer: (r: unknown) => void = () => undefined
+  const s = setup([new Promise(r => { answer = r })])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed.'] })
+  const draw = () => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 30 } } }, {}, els)
+  const during = await draw()
+  expect(textOf(during)).toContain('Finding the claims of 1 answer')
+  expect(buttons(during).some(b => b.hotkey === 'f')).toBe(false)
+  answer(reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }]))
+  for (let i = 0; i < 100 && !(await claimsStore(s.$)).claims.length; i++) await settle()
+  await settle()
+  const after = await draw()
+  expect(textOf(after)).toContain('Evidence · 1 claim')
+  expect(textOf(after)).not.toContain('Finding')
+  expect(buttons(after).some(b => b.hotkey === 'f')).toBe(false)
+  // the load before this one was finding claims when it stopped: with no look of the claims queued again, the pane
+  // stops saying so
+  await s.$.state.set({ plugin: 'thimble', key: 'claimsFinding' }, { n: 1, at: 0 })
+  resetObserver()
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  expect(textOf(await draw())).not.toContain('Finding')
+  setOptions({})
+})

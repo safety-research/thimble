@@ -55,7 +55,8 @@ const BRIGHT_MS = 1600
  *  apart, and says `new` until the pane is first opened, so a person sees that it appeared. */
 const PULSE = { times: 6, ms: 450 }
 const FIRST = { plugin: 'thimble', key: 'claimsFirst' } as const
-/** The answers a look on demand reads now, and when it began: the pane says the claims are being found. */
+/** The answers a look reads the claims of now (on demand, or after a reply), and when it began: the pane says the
+ *  claims are being found. */
 const FINDING = { plugin: 'thimble', key: 'claimsFinding' } as const
 type First = { lit: boolean; opened: boolean }
 const FILE = 'claims.json'
@@ -224,7 +225,7 @@ export async function claimsToFind($: Engine): Promise<{ answers: number; findin
   return { answers: (await claimsUnread($)).length, finding: f?.n ?? 0 }
 }
 
-/** A look on demand began (n answers) or ended. */
+/** A look that reads the claims of n answers began, or ended. */
 export async function findStart($: Engine, n: number): Promise<void> {
   await $.state.set(FINDING, { n, at: Number(await $.clock.now()) })
 }

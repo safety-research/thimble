@@ -159,7 +159,8 @@ declare module 'claude-code' {
       /** the session's first claims: the bar's count pulses (`lit` while on) and says `new` until the pane is opened
        *  (claims/term.ts) */
       claimsFirst: { lit: boolean; opened: boolean } | null
-      /** a look on demand for the claims: how many answers it reads, and when it began (claims/term.ts) */
+      /** a look that reads the claims, on demand or after a reply: how many answers it reads, and when it began
+       *  (claims/term.ts) */
       claimsFinding: { n: number; at: number } | null
     }
   }

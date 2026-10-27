@@ -35,8 +35,9 @@
 // one of them is on, and a lens whose feature is off has no section in the prompt, no key in the reply and no merge.
 // A lens whose feature has a mode (Claims: auto, on demand, off) joins the look after each reply only in its `auto` mode;
 // else it looks on demand: f in the Claims pane (its ui.press hook here) queues the answers the claims have not read,
-// for a look of that lens alone. While Minimal is on no lens joins the look after each reply; h asks for a look of the
-// heads lens alone at one answer (headsUpsNow).
+// for a look of that lens alone. While a look reads the claims, either way, the pane says they are being found
+// (claims/seam.ts claimsFindStart) in place of f. While Minimal is on no lens joins the look after each reply; h asks
+// for a look of the heads lens alone at one answer (headsUpsNow).
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import { update, type EngineInterface, type Register } from 'claude-code'
 
@@ -106,6 +107,10 @@ const lensAuto = (l: Lens): boolean => lensesAfterReply(l.option)
 
 /** Whether the observer looks after each reply: one of its lenses joins that look. */
 export const observerOn = (): boolean => (LENSES as Lens[]).some(lensAuto)
+
+/** Whether a look at this message reads the claims: a look on demand of the claims', or one after a reply while the
+ *  claims lens joins it. */
+const readsClaims = (m: { only?: string[] }): boolean => (m.only ? m.only.includes('claims') : lensesAfterReply('claims'))
 
 // ------------------------------------------------------------------------------------------------ what it reads
 
@@ -338,10 +343,16 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
   const only = newest.only
   if (only) row.only = only
   const on = () => (only ? (LENSES as Lens[]).some(l => only.includes(l.name) && featureOn(l.option)) : observerOn())
+  // whether the look reads the claims: one on demand (f said so already), or one after a reply the claims lens joins
+  let finds = !!only?.includes('claims')
   try {
     if (!on()) { row.dropped = 'turned off'; return }
     const parts = await lensParts($, only)
     if (!parts.length) { row.skip = 'no lens on'; return }
+    if (parts.some(x => x.lens.name === 'claims')) {
+      finds = true
+      await claimsFindStart($, new Set(batch.map(m => m.turnId)).size)
+    }
     const turns: TurnRec[] = []
     for (const id of [...new Set(batch.map(m => m.turnId))]) { const t = await turnOf($, id); if (t) turns.push(t) }
     const [objects, coverage] = await Promise.all([cardsNow($, turns), coverageNow($)])
@@ -383,8 +394,9 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
   } catch (err) {
     row.error = cut(String((err as Error)?.message || err), 300)
   } finally {
-    // a look for the claims on demand ended, whatever came of it: the pane stops saying they are being found
-    if (only?.includes('claims')) await claimsFindEnd($).catch(() => undefined)
+    // a look that read the claims ended, whatever came of it: the pane stops saying they are being found, unless a look
+    // that waits reads them too
+    if (finds && !S.queue.some(readsClaims)) await claimsFindEnd($).catch(() => undefined)
     // the messages of a look that ended are kept no more; those of one an error stopped (a reload of the plugin under
     // it) wait for the next load
     if (!row.error) await keepLooks($, ms => ms.filter(x => !batch.some(m => queuedKey(m) === queuedKey(x))))
@@ -421,7 +433,13 @@ export const registerObserver: Register = on => {
     } catch {
       // a person is taken to be here
     }
-    try { await requeue($) } catch { /* those looks are lost with the load before */ }
+    try {
+      await requeue($)
+      // no look queued again reads the claims: the pane stops saying they are being found
+      if (!S.queue.some(readsClaims)) await claimsFindEnd($)
+    } catch {
+      // those looks are lost with the load before
+    }
     return r
   }).catch(($, e, next) => next(e))
 
