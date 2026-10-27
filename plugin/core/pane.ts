@@ -32,8 +32,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { failCleared, failLineNow } from '../bar/notice'
+import { barPaneClosed } from '../bar/register'
 import { fullscreenNow } from '../cards/draw'
-import { drawClaimsPane } from '../claims/seam'
+import { claimsPaneClosed, drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
 import { drawCoverage } from '../panes/coverage'
@@ -374,7 +375,11 @@ export const registerPanes: Register = on => {
     if (e.origin?.kind === 'person' && (await paneBack($, undefined, { later: true }).catch(() => false))) return undefined
     // words selected in the pane stay Claude Code's selection after it closes; e and c no longer take them
     await dropSelection($)
-    return next(e)
+    const r = await next(e)
+    // closed, though the bar may not draw again: the next w, r or l opens its pane (claims/seam.ts, bar/register.ts)
+    claimsPaneClosed()
+    barPaneClosed()
+    return r
   }).catch(($, e, next) => next(e))
 
   // the ring moving in the settings pane: within a row it picks that choice, onto another row it lands on its choice set

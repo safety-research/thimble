@@ -10,6 +10,7 @@ import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
 import { claimsStore, claimsToFind, openClaims } from '../claims/term'
+import { registerPanes } from '../core/pane'
 import { failLineNow } from '../bar/notice'
 import { resetPrompts } from '../prompts/prompts'
 import { barRows } from '../bar/bar'
@@ -520,6 +521,34 @@ test('w typed while the pane shows the claims means to close it: when esc, its c
   await claimsBar(s.$, () => true, false)
   await (await claimsKey(s.$, 'w', 0))!.later!()
   expect(s.opened.length).toBe(opens + 1)
+  setOptions({})
+})
+
+test('esc or the close mark closing the claims pane, with no drawing of the bar after, leaves w to open it again', async () => {
+  setOptions({ claimsMode: 'auto' })
+  const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['[Run 4 failed](#).'] })
+  // the pane's own close hook, which Claude Code runs on esc and on the pane's close mark
+  const close: Any[] = []
+  registerPanes(((event: string, a: Any, b?: Any) => { if (event === 'ui.close') close.push(typeof a === 'function' ? a : b); return { catch: () => undefined } }) as never, {} as never)
+  let up = false
+  const open = s.$.ui.open
+  s.$.ui.open = async (o: Any) => { up = true; return open(o) }
+  s.$.ui.close = async () => { up = false }
+  s.$.ui.panes = async () => (up ? [{ id: 'thimble' }] : [])
+  // w opens the pane; the bar draws again beside it
+  expect((await claimsBar(s.$, () => true, false)).map(x => x.key)).toEqual(['w'])
+  await (await claimsKey(s.$, 'w', 0))!.later!()
+  expect(paneNow(s)).toMatchObject({ kind: 'claims' })
+  await claimsBar(s.$, () => true, false)
+  // esc: Claude Code closes the pane, and the bar does not draw again
+  await close[0](s.$, { id: 'thimble', origin: { kind: 'person' } }, async () => { await s.$.ui.close() })
+  expect(up).toBe(false)
+  const opens = s.opened.length
+  await (await claimsKey(s.$, 'w', 0))!.later!()
+  expect(s.opened.length).toBe(opens + 1)
+  expect(up).toBe(true)
   setOptions({})
 })
 

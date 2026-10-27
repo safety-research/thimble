@@ -8,6 +8,8 @@
 //                Each pane takes the keys its key row names (coverage's j k ↵, the labels' number keys that check
 //                records), and esc closes it; coverage's r close is a click, so an r typed in it reaches the prompt,
 //                where it only closes the pane, if it still shows once the word window closed
+//   barPaneClosed  the side pane closed (core/pane.ts): the next r or l opens its pane, though the bar has not drawn
+//                since
 import type { EngineInterface, Register } from 'claude-code'
 
 import { aboveBar } from '../core/answerview'
@@ -32,6 +34,12 @@ const TITLES = { coverage: 'Coverage', labels: 'Labels', settings: 'thimble sett
 /** Which pane the side pane showed as the bar last drew: r or l typed while its own pane shows means to close it.
  *  Kept in memory, so the key reads no state. */
 let drawnPane: string | null = null
+
+/** The side pane closed (esc or its close mark, core/pane.ts), which may draw the bar no more: an r or l then opens
+ *  its pane again. */
+export function barPaneClosed(): void {
+  drawnPane = null
+}
 
 /** Coverage or the labels: open, or closed when the pane shows it. Each takes the keys, so the keys its key row names
  *  act in it, not in the prompt (coverage.tsx, labels/pane.tsx), and esc closes it. A pane a key opened that

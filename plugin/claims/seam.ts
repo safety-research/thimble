@@ -7,6 +7,8 @@
 //   claimsKey($, key, until)           w, while the bar names it: the Claims pane, or closed while the side pane shows
 //                                      it, once the word window closed (a taker as hooks/keys.ts takes it); a w while
 //                                      the bar last drew beside the pane only closes it, if it still shows then
+//   claimsPaneClosed()                 the side pane closed (core/pane.ts): the next w opens the claims, though the bar
+//                                      has not drawn since
 //   claimsBar($, on, preview)          its items at the bar's right (`w 11 claims`, lit when a claim was corrected); a
 //                                      press does what w does. claimsReady: whether it names w, as the plugin loads
 //   claimsState($)                     what the claims lens's digest reads (./lens.mjs): every claim so far and the
@@ -57,6 +59,12 @@ export async function claimsKey($: Engine, key: string, _until: number): Promise
   // it never opens it again
   const close = drawnOpen
   return { later: () => (close ? closeClaims($) : toggleClaims($, true)) }
+}
+
+/** The side pane closed (esc or its close mark, core/pane.ts), which may draw the bar no more: a w then opens the
+ *  claims again. */
+export function claimsPaneClosed(): void {
+  drawnOpen = false
 }
 
 /** The pane closed, while it shows the claims. */
