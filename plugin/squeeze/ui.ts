@@ -28,6 +28,7 @@ import { hintUsed } from '../bar/hints'
 import { markPressed, spansOver } from '../core/answerview'
 import { latestAnswer, pickAnswer } from '../core/answers'
 import { openPane } from '../core/pane'
+import { controlWords } from '../core/selection'
 import { accent } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import type { Take } from '../hooks/keys'
@@ -423,9 +424,13 @@ async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
  *  them while the answer above draws again. */
 async function chipsEl($: Engine, els: Any, id: string, cols: number): Promise<Any | null> {
   const open = await openNow($)
+  // the chips' words, which a double click on one selects: no answer's words (core/selection.ts)
+  if (!open) controlWords('chips', [])
   if (!open || open.id !== id) return null
   const w = Math.max(30, cols - 2)
-  return els.Box({ key: `sq-${id}`, marginLeft: 2, marginTop: 1, children: [els.Client({ key: `sqchips-${id}`, module: './chips.tsx', width: w, props: await chipsProps($, id, w) })] })
+  const props = await chipsProps($, id, w)
+  controlWords('chips', ['s close', 'close', ...((props as Any)?.items ?? []).flatMap((c: Any) => [c.name, c.word, ...(c.levels ?? []), ...(c.ends ?? [])].filter((x: unknown) => typeof x === 'string'))])
+  return els.Box({ key: `sq-${id}`, marginLeft: 2, marginTop: 1, children: [els.Client({ key: `sqchips-${id}`, module: './chips.tsx', width: w, props })] })
 }
 
 /** The text a row shows in place of what Claude wrote: its version (the part written in so far, dim while a rewrite

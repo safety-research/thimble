@@ -281,7 +281,7 @@ test('e explains the words selected in an answer, on the row the selection lies 
   const s = setup([LOOK], { complete: reply({ body: 'The client gives up on an upload.', here: '' }) })
   // no answer yet: e is typed, and the bar names no key
   expect(await explainKey(s.$, 'e', 0)).toBe(null)
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER} Then the client gives up.` })
   // the bar names e only while words are selected
   s.$.ui.selection = async () => undefined
   expect(await explainBar(s.$, () => true, false)).toEqual([])
@@ -371,6 +371,45 @@ test('a drag over wrapped rows and paragraphs counts its answer lines: one that 
   }
 })
 
+test("what a click on thimble's controls or Claude Code's own rows leaves selected is no answer's words, nor is a piece of one word; words selected in an answer still are, across rows too", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const text = 'The retry loop in [upload.py](client/upload.py#L7) gives up after three tries, as the [requests docs](https://example.org/docs) describe.\n\n| day | edits |\n|---|---|\n| Mon | 41 |\n| Tue | 17 |\n\nSetting a longer timeout would let slow uploads finish before starting over.'
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    // a click that slid a cell on the bar's `thimble`, a stray drag over Claude Code's busy word: pieces of a word
+    expect(await counts({ text: 'im' })).toBe(false)
+    expect(await counts({ text: 'ting' })).toBe(false)
+    expect(await counts({ text: 'ry lo' })).toBe(false)
+    // in a row of Claude Code's own (the turn's time, a tool call, the person's prompt), though the answer has its words
+    expect(await counts({ text: 'for', requestId: 'turn-time-row' })).toBe(false)
+    expect(await counts({ text: 'Read 1 file', requestId: 'collapsed-tool-row' })).toBe(false)
+    // under the answer, in its row: a card's header, its line and then one of its words, which the answer draws nowhere
+    expect(await counts({ text: 'Edits by day       checking  [ previous heads up · a ask · 0 close', requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'artifact', requestId: 't1-row' })).toBe(false)
+    // words selected in the answer, as it draws them: inside it, from its dot, a table's row, a link with its target,
+    // a drag that begins and ends inside words, and across rows
+    expect(await counts({ text: 'longer', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'gives up after three tries', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: '● The retry loop', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: '│ Mon │ 41    │', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'upload.py (client/upload.py#L7) gives up', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'the requests docs (https://example.org/docs) describe', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'ries, as the requests do', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'ow uploads finish before starting over.\n\n✻ Cooked f' })).toBe(true)
+    expect(await counts({ text: 'Ran 2 shell commands\n\n● The retry loop in upload.py' })).toBe(true)
+  } finally {
+    setOptions({})
+  }
+})
+
 test('a selection over several rows explains its words on the newest answer that holds them; words that are a heads-up open it, unwritten', async () => {
   setOptions({})
   const s = setup([LOOK, reply({ glosses: [], heads: null })], { complete: reply({ body: 'How many tries are left.', here: '' }) })
@@ -396,7 +435,7 @@ test('the selected words are trimmed to one line, and a long selection is cut af
   expect(long.startsWith(`${got.words} `)).toBe(true)
   setOptions({})
   const s = setup([LOOK], { complete: { isAnswered: false, reason: 'aborted' } })
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER}\n\n${long}` })
   s.$.ui.selection = async () => ({ text: long, requestId: 't1-row' })
   await (await explainKey(s.$, 'e', 0))!.later!()
   expect(String((await failLineNow(s.$))?.text)).toContain('the explainer covers its first')

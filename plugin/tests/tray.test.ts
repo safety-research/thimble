@@ -725,6 +725,26 @@ test("c with words selected reads the selection once and no state at the key, ho
   expect(spawns.length).toBe(2)
 })
 
+test("a double click on one of the bar's items selects its word, which is the bar's, not the answer's that also has it: the bar names neither c nor e; the answer's words, as its row draws them, still count", CITES, async ($, on) => {
+  let selected: Any
+  on('ui.selection', () => ({ value: selected }))
+  await resumed($, on, { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40' }, 's-tray-control', { text: 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.' })
+  expect(textOf(await $.ui.render(above()))).toContain('w evidence')
+  // `evidence`, as a double click on the bar's `w evidence` selects it
+  selected = { text: 'evidence' }
+  let band = textOf(await $.ui.render(above()))
+  expect(band).not.toContain('c cite')
+  expect(band).not.toContain('e explain')
+  // the same word in the answer, among others
+  selected = { text: 'as the evidence shows', requestId: 'row-t1' }
+  expect(textOf(await $.ui.render(above()))).toContain('c cite')
+  // the corrected words the row draws in place of the citation's
+  expect(textOf(await $.ui.render(answer('row-t1', 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.')))).toContain('11 of 40 failed')
+  selected = { text: 'runs, 11 of 40 failed', requestId: 'row-t1' }
+  band = textOf(await $.ui.render(above()))
+  expect(band).toContain('c cite')
+})
+
 test("the Evidence pane's w close is a click alone: a w typed while the pane holds the keyboard reaches the prompt, where it closes the pane once its word window closed, and a question that starts with w is typed whole", CITES, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   on('ui.selection', () => ({ value: undefined }))

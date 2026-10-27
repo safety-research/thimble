@@ -38,6 +38,7 @@ import type { EngineInterface } from 'claude-code'
 import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
+import { controlWords } from '../core/selection'
 import { cut } from '../core/text.js'
 import { rowsAt, rowsKnown, treeRows } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
@@ -382,6 +383,8 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // alone; every card's words are clicks
   const lettered = (await headOwner($))?.id === meta.id
   const word = (key: string, words: string) => [...(lettered ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
+  // their words, which a double click on one selects: no answer's words (core/selection.ts)
+  controlWords('card', ['a ask', 'ask', 'p artifact', 'artifact'])
   const askEl = ask ? E.Box({ key: 'head-keys', flexDirection: 'row', children: [
     E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: word('a', 'ask') }),
     E.Text({ key: 'head-sep', dimColor: true, children: ' · ' }),

@@ -23,6 +23,7 @@ import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
+import { controlWords } from '../core/selection'
 import { cutWords, textWidth } from '../core/text.js'
 import { accent } from '../core/theme'
 import { cardKeyWords } from '../cards/draw'
@@ -139,6 +140,8 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // the presses of the bar's items by their words (`r coverage`), before any is cut: an item the failure line names
   // is a click there too
   const pressOf = new Map([...keys, ...right].filter(x => x.press && x.key).map(x => [`${x.key} ${x.words}`, x.press!] as const))
+  // its items' words, which a double click on one selects: no answer's words (core/selection.ts)
+  if (!preview) controlWords('bar', ['thimble', ...[...keys, ...right].flatMap(x => [x.words, ...(x.key ? [`${x.key} ${x.words}`] : [])])])
   // the cells the bar's first row has left as drawn: `thimble` and two cells, ` · ` between items, two cells between the
   // left and the right
   const lenOf = (xs: Item[]) => xs.reduce((n, x, i) => n + itemLen(x) + (i ? 3 : 0), 0)
