@@ -1,7 +1,8 @@
 // A custom card on the canvas (src/canvas/DataViz.tsx CustomFrame, src/canvas/cardBridge.ts), in a real browser that
 // reports a Mac, on the real board at its opening zoom of 80%: ⌘ held over a box of the card's page lights that box, a
-// ⌘-click on it opens the pointer's box beside it and the thread is about the card with the box's words, and after a
-// click in the card's page, which takes the focus, ⌘ held over the board still shows the pointer.
+// ⌘-click on it opens the pointer's box beside it and the thread is about the card with the box's words, the wheel over
+// the card pans the board as over any other card and a pinch zooms it, and after a click in the card's page, which takes
+// the focus, ⌘ held over the board still shows the pointer.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -109,6 +110,25 @@ test('a ⌘-click on the box opens the pointer\'s box beside it, and the thread 
   await page.press('.pointer-box textarea', 'Enter')
   await page.waitForSelector('.pointer-box', { state: 'detached', timeout: 2000 })
   assert.deepEqual(threads.map((th) => [th.anchor, th.anchor_text]), [['card:c1', 'Harbor']])
+})
+
+test('the wheel over the card pans the board, and a pinch over it zooms the board', async () => {
+  const n = centre(await boxOf('hill'))
+  await page.mouse.move(n.x, n.y)
+  const before = await plane()
+  await page.mouse.wheel(0, 120)
+  await page.waitForTimeout(200)
+  const panned = await plane()
+  assert.ok(Math.abs(panned.y - (before.y - 120)) < 1 && panned.scale === before.scale, `panned up by the turn: ${JSON.stringify({ before, panned })}`)
+  // the card moved with the board: the pinch is over it again
+  const m = centre(await boxOf('hill'))
+  await page.mouse.move(m.x, m.y)
+  assert.equal(await page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName, [m.x, m.y]), 'IFRAME')
+  await page.keyboard.down('Control')
+  await page.mouse.wheel(0, -10)
+  await page.keyboard.up('Control')
+  await page.waitForTimeout(200)
+  assert.ok((await plane()).scale > panned.scale, 'a pinch out zooms in')
 })
 
 test('after a click in the card, which takes the focus, ⌘ held over the board still shows the pointer', async () => {

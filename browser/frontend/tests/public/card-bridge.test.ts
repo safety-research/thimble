@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 // A custom card's bridge (src/canvas/cardBridge.ts): the card's page runs in a sandboxed frame, and the bridge's script
-// first in its head says what the ⌘ pointer does there, as a view's bridge does. On a Mac ⌘ points at the part under the
-// pointer once it has been held alone for about 300 ms, or at once while the page's own pointer is on; a ⌘-click asks
-// about the part at once and selects no text, the page's bare background asks about the whole card, and a key pressed
-// with ⌘ lets go of it. On the page, what the frame says is about the card around the frame, at the frame's box as the
-// zoomed canvas draws it. The frame half runs in a jsdom window of its own.
+// first in its head says what the ⌘ pointer and the wheel do there, as a view's bridge does. On a Mac ⌘ points at the
+// part under the pointer once it has been held alone for about 300 ms, or at once while the page's own pointer is on; a
+// ⌘-click asks about the part at once and selects no text, the page's bare background asks about the whole card, and a
+// key pressed with ⌘ lets go of it. A wheel turn nothing in the page scrolls goes to the page, a pinch always, with the
+// browser's own zoom stopped. On the page, what the frame says is about the card around the frame, at the frame's box as
+// the zoomed canvas draws it, and a wheel turn reaches the boxes around the frame as one over it. The frame half runs in a
+// jsdom window of its own.
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, test } from 'vitest'
 import { bridgeScript, cardBridge, fromCardPage } from '../../src/canvas/cardBridge.ts'
@@ -96,6 +98,45 @@ describe('⌘ in a custom card on a Mac', () => {
   })
 })
 
+describe('the wheel over a custom card', () => {
+  const wheel = (at: Element, init: WheelEventInit) => {
+    const e = new dom.window.WheelEvent('wheel', { bubbles: true, cancelable: true, ...init })
+    at.dispatchEvent(e)
+    return e
+  }
+
+  test('a turn nothing in the page scrolls goes to the page, which scrolls nothing itself', async () => {
+    await load(STATIONS)
+    const e = wheel(el('name'), { deltaY: 40, clientX: 12, clientY: 30 })
+    expect(of('wheel')).toMatchObject([{ deltaY: 40, ctrlKey: false, x: 12, y: 30 }])
+    expect(e.defaultPrevented).toBe(false)
+  })
+
+  test('a turn a box under the pointer can still scroll stays in the page', async () => {
+    await load(`<div id="list" style="overflow-y:auto"><p id="row">row</p></div>`)
+    const list = el('list')
+    Object.defineProperty(list, 'scrollHeight', { value: 400 })
+    Object.defineProperty(list, 'clientHeight', { value: 100 })
+    wheel(el('row'), { deltaY: 40 })
+    expect(of('wheel')).toEqual([])
+    // at its top, a turn up is no longer the box's
+    wheel(el('row'), { deltaY: -40 })
+    expect(of('wheel')).toHaveLength(1)
+  })
+
+  test('a pinch always goes, and the browser does not zoom the frame itself; a turn the page took stays', async () => {
+    await load(`<div id="chart" style="overflow-y:auto">chart</div>`)
+    Object.defineProperty(el('chart'), 'scrollHeight', { value: 400 })
+    Object.defineProperty(el('chart'), 'clientHeight', { value: 100 })
+    const pinch = wheel(el('chart'), { deltaY: -3, ctrlKey: true })
+    expect(of('wheel')).toMatchObject([{ deltaY: -3, ctrlKey: true }])
+    expect(pinch.defaultPrevented).toBe(true)
+    el('chart').addEventListener('wheel', (e) => e.preventDefault())
+    wheel(el('chart'), { deltaY: 3, ctrlKey: true })
+    expect(of('wheel')).toHaveLength(1)
+  })
+})
+
 describe('on the page', () => {
   /** A card on a zoomed board holding a custom card's frame: the frame is 400 px wide and drawn at half that. */
   function card() {
@@ -123,6 +164,14 @@ describe('on the page', () => {
     offAsk()
     expect(at.map((e) => [e.anchor, e.text, e.rect.x, e.rect.width])).toEqual([['card:c1', 'Harbor', 105, 20]])
     expect(asked).toEqual([host])
+  })
+
+  test('a wheel turn the frame passes on reaches the boxes around it as a turn over it, at its place on the page', () => {
+    const { frame, host } = card()
+    const heard: WheelEvent[] = []
+    host.addEventListener('wheel', (e) => heard.push(e))
+    fromCardPage(frame, { type: 'thimble:wheel', deltaX: 0, deltaY: -3, deltaMode: 0, ctrlKey: true, metaKey: false, x: 10, y: 20 } as never)
+    expect(heard.map((e) => [e.target, e.deltaY, e.ctrlKey, e.clientX, e.clientY])).toEqual([[frame, -3, true, 105, 60]])
   })
 
   test("the card's page gets the bridge with the page's own hold", () => {

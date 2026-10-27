@@ -1,12 +1,17 @@
 // A custom card's bridge (canvas/DataViz CustomFrame). The card's page runs in a sandboxed frame the page cannot see
-// into, so a small script in the frame (cardBridge, first in the page's head) says what the ⌘ pointer does there, as a
-// view's bridge does (backend/app/viewer_bridge.js, files/ViewerFrame):
+// into, so a small script in the frame (cardBridge, first in the page's head) says what the ⌘ pointer and the wheel do
+// there, as a view's bridge does (backend/app/viewer_bridge.js, files/ViewerFrame):
 //   point {rect}           frame to page: the part ⌘ points at under the pointer, its box in the frame, so the page's one
 //                          highlight follows the pointer into the frame; {card: true} on the page's bare background,
 //                          which stands for the whole card; rect null once it points at nothing
 //   cite {text, element, rect}
 //                          frame to page: a ⌘-click on a part, which opens the pointer's box beside the part, about the
 //                          card with the part's text; {card: true} on the bare background, a ⌘-click on the card itself
+//   wheel {deltaX, deltaY, deltaMode, ctrlKey, metaKey, x, y}
+//                          frame to page: a wheel turn the card's page did not take (nothing under the pointer scrolls
+//                          that way, and no handler of its own took it), and every pinch or ⌘ turn, which the page turns
+//                          again on the frame, so the canvas pans or zooms as over any other card (files/ViewerFrame
+//                          wheelOver)
 //   cmd {on, cursor, key}  page to frame: the page's ⌘ pointer went on or off, its arrow, and the ask key Settings pick,
 //                          as a view's frame hears it
 // A part is an element marked data-part (with data-part-text when its text is not what to quote), as on a card thimble
@@ -15,7 +20,7 @@
 import { bus } from '../lib/bus'
 import { getAskKey, isMacPlatform, onAskKey } from '../lib/platform'
 import { token } from '../lib/vizTheme'
-import { toPage } from '../files/ViewerFrame'
+import { toPage, wheelOver, type FrameWheel } from '../files/ViewerFrame'
 import { describeElement } from '../pointer/capture'
 import { HOLD_MS } from '../pointer/CmdPointer'
 import { cmdCursors } from '../pointer/cursor'
@@ -148,6 +153,33 @@ export function cardBridge(holdMs: number, mac: boolean): void {
     else if (!pageOn && !ownOn) point(null)
   })
 
+  // Whether a box under the pointer, or the page itself, can still scroll the way the wheel turns most.
+  const scrolls = (t: EventTarget | null, dx: number, dy: number) => {
+    const across = Math.abs(dx) > Math.abs(dy)
+    const d = across ? dx : dy
+    const room = (el: Element) =>
+      across ? (d > 0 ? el.scrollLeft + el.clientWidth < el.scrollWidth - 1 : el.scrollLeft > 0) : d > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0
+    for (let el = t instanceof Element ? t : null; el && el !== document.body && el !== root; el = el.parentElement) {
+      const o = getComputedStyle(el)[across ? 'overflowX' : 'overflowY']
+      if ((o === 'auto' || o === 'scroll') && room(el)) return true
+    }
+    const page = document.scrollingElement
+    return !!page && room(page)
+  }
+  // A turn the page did not take goes to the canvas. A pinch (ctrl) or a ⌘ turn always does, and the browser does not
+  // also zoom or scroll here; any other turn the page's boxes cannot scroll still runs its course, so a page that holds
+  // the card in a scrolling column (a report) still scrolls under it.
+  addEventListener(
+    'wheel',
+    (e) => {
+      if (e.defaultPrevented) return
+      const zoom = e.ctrlKey || e.metaKey
+      if (!zoom && scrolls(e.target, e.deltaX, e.deltaY)) return
+      if (zoom) e.preventDefault()
+      post({ type: P + 'wheel', deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode, ctrlKey: e.ctrlKey, metaKey: e.metaKey, x: e.clientX, y: e.clientY })
+    },
+    { passive: false },
+  )
 }
 
 /** The frame half as a script for the head of the card's page, before the page's own scripts. */
@@ -162,8 +194,8 @@ export interface CardMessage {
   element?: unknown
 }
 
-/** Do on the page what the card's page in `frame` said about the ⌘ pointer (module note). The card it is about is the
- * anchored element around the frame: the card on the board, in focus mode or in a report's figure. */
+/** Do on the page what the card's page in `frame` said about the ⌘ pointer or the wheel (module note). The card it is
+ * about is the anchored element around the frame: the card on the board, in focus mode or in a report's figure. */
 export function fromCardPage(frame: HTMLIFrameElement, d: CardMessage): void {
   const host = frame.parentElement?.closest<HTMLElement>('[data-anchor]') ?? null
   if (d.type === P + 'point') {
@@ -173,6 +205,8 @@ export function fromCardPage(frame: HTMLIFrameElement, d: CardMessage): void {
     if (!host || !anchor) return
     if (d.card) bus.emit('askAbout', { el: host })
     else if (d.rect) bus.emit('pointAt', { anchor, text: String(d.text ?? ''), element: String(d.element ?? ''), rect: toPage(frame, d.rect), frame, info: describeElement(frame) })
+  } else if (d.type === P + 'wheel') {
+    wheelOver(frame, d as FrameWheel)
   }
 }
 

@@ -975,9 +975,9 @@ export const clampCustomHeight = (h: number): number => Math.min(CUSTOM_MAX_H, M
 export const CUSTOM_OPEN_MAX_H = 8000
 
 /** A custom card's page in a sandboxed frame, as tall as its content up to CUSTOM_MAX_H; taller pages fade out with a
- * Show all under them. Its head carries the theme, the bridge that tells the page what the ⌘ pointer does in the frame
- * (cardBridge), the chart style (chartScript) and the libraries the card names in workspace `ws` (useCardLibs), before
- * the page's own scripts. */
+ * Show all under them. Its head carries the theme, the bridge that tells the page what the ⌘ pointer and the wheel do
+ * in the frame (cardBridge), the chart style (chartScript) and the libraries the card names in workspace `ws`
+ * (useCardLibs), before the page's own scripts. */
 export function CustomFrame({ html, title, height, ws = '', libs }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[] }) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [full, setFull] = useState(() => Math.max(CUSTOM_MIN_H, Math.ceil(typeof height === 'number' ? height : 160)))
