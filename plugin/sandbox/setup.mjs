@@ -221,7 +221,7 @@ async function probe() {
       res.on('data', d => { t += d })
       res.on('end', () => { try { resolve(JSON.parse(t)) } catch { resolve({ ok: false, error: `it answered ${res.statusCode}, not JSON` }) } })
     })
-    q.on('error', e => resolve({ ok: false, error: e.message, down: true }))
+    q.on('error', e => resolve({ ok: false, error: e.message }))
     q.end(JSON.stringify(body))
   })
   try {
@@ -249,14 +249,14 @@ function read(path) {
 }
 
 /** Whether the sandbox works as installed: what the machine lacks (with its fix), srt that does not load, and with
- *  --probe a runner that does not start or draw the test card. `again`: a cause that installing srt again may remove,
- *  as no package or setting of the machine explains it. */
+ *  --probe a runner that does not start or draw the test card. `reinstall`: a cause that installing srt again may
+ *  remove, as no package or setting of the machine explains it. */
 async function check() {
   let lacking
   try {
     lacking = await needs()
   } catch (e) {
-    return { why: `the sandbox runtime in ${srt} does not load (${String(e?.message || e).split('\n')[0].slice(0, 200)})`, fix: `Install it again: ${again} --repair`, again: true }
+    return { why: `the sandbox runtime in ${srt} does not load (${String(e?.message || e).split('\n')[0].slice(0, 200)})`, fix: `Install it again: ${again} --repair`, reinstall: true }
   }
   if (lacking) return lacking
   if (!flag('--probe')) return null
@@ -269,7 +269,7 @@ async function check() {
   const fix = userns && platform === 'linux' && read('/proc/sys/kernel/apparmor_restrict_unprivileged_userns') === '1'
     ? 'AppArmor keeps bubblewrap from making its namespaces. Allow them: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0'
     : ''
-  return { why: p.error, fix, again: !fix }
+  return { why: p.error, fix, reinstall: !fix }
 }
 
 async function main() {
@@ -282,7 +282,7 @@ async function main() {
     if (failed) return failed
   }
   const first = await check()
-  if (!first?.again || !flag('--repair')) return first && { why: first.why, fix: first.fix }
+  if (!first?.reinstall || !flag('--repair')) return first && { why: first.why, fix: first.fix }
   // the install there may be damaged (a file of it gone or changed): a new one takes its place, and the check runs again
   const failed = await locked(() => install(true))
   if (failed) return failed
