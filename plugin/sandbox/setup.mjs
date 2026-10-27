@@ -189,7 +189,7 @@ async function probe() {
     }
     await new Promise(r => setTimeout(r, 50))
     const why = said.trim().split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 300)
-    return { error: ended ? `the card runner did not start in the sandbox${why ? ` (${why})` : ''}` : `the card runner did not answer in ${PROBE_MS / 1000} s`, said }
+    return { error: ended ? (why ? `the card runner did not start in the sandbox (${why})` : 'the card runner stopped before it opened its socket, and said nothing') : `the card runner did not answer in ${PROBE_MS / 1000} s`, said }
   } finally {
     child.kill()
     fs.rmSync(dir, { recursive: true, force: true })

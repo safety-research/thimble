@@ -208,6 +208,6 @@ The browser workbench:
   full path.
 - **Cards say that code does not run.** The sandbox does not work here, and the card says why. On Linux, install
   bubblewrap; on a Linux whose AppArmor keeps bubblewrap from making namespaces, the card says how to allow it.
-  `thimble-browser --check-sandbox` tests it again.
+  After the fix, run the card again.
 - **The chat says the credentials failed (401).** It names the credentials it used and the time. Check them in
   Settings; whoever manages the credentials can see the reason on the admin side.
