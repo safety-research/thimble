@@ -75,8 +75,8 @@ def test_a_code_works_once():
     assert re.fullmatch(r"[A-Za-z0-9_-]{32}", key), "a random key of 24 bytes"
     again, none = _claim(code)
     assert _gone(again) and none == ""
-    assert hook_auth.CODE_GONE == ("This sign-in link was already used or has expired. Run `thimble up` in a shell for"
-                                   " a new one, or type /thimble in your terminal.")
+    assert hook_auth.CODE_GONE == ("This sign-in link was already used or has expired. Run `thimble-browser` again for a"
+                                   " new one.")
 
 
 def test_a_code_expires_and_a_newer_code_for_the_workspace_voids_it(monkeypatch):

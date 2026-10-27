@@ -65,13 +65,22 @@ if [ "$demo" = 1 ]; then
   cd "$root/backend" && exec "$py" -m app.cli demo ${setup_args[@]+"${setup_args[@]}"}
 fi
 
-# the page is built the first time, and again when its sources are newer than the build (after a pull, say)
+# quietly CMD...: runs CMD, and shows what it printed only when it fails (as scripts/install.sh does)
+quietly() {
+  local log
+  log="$(mktemp)"
+  if "$@" >"$log" 2>&1; then rm -f "$log"; else cat "$log" >&2; rm -f "$log"; return 1; fi
+}
+
+# the page is built the first time, and again when its sources are newer than the build (after a pull, say); what npm
+# and Vite print (a chunk size warning, npm's update notice) shows only when the build fails, so the link stays in view
 fe="$root/frontend"
 if [ ! -f "$fe/dist/index.html" ] || [ -n "$(find "$fe/src" "$fe/index.html" "$fe/package-lock.json" \
      -newer "$fe/dist/index.html" -print -quit 2>/dev/null)" ]; then
   echo "thimble-browser: building the page..."
-  [ -d "$fe/node_modules" ] || npm --prefix "$fe" ci --no-audit --no-fund
-  npm --prefix "$fe" run build >/dev/null
+  export NPM_CONFIG_UPDATE_NOTIFIER=false
+  [ -d "$fe/node_modules" ] || quietly npm --prefix "$fe" ci --no-audit --no-fund
+  quietly npm --prefix "$fe" run build
 fi
 here="$(cd "${folder:-.}" && pwd -P)"
 cd "$root/backend"

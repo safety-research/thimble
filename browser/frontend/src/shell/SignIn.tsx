@@ -14,8 +14,9 @@ import { bus } from '../lib/bus'
 export const WAY_IN = 'Open the link `thimble-browser` printed in your terminal, or run `thimble-browser` again.'
 /** The line a browser that is not signed in sees. */
 export const SIGN_IN_LINE = `This browser isn't signed in. ${WAY_IN}`
-/** The line when the server refused the link's code with 410 (used, replaced by a newer one, or expired). */
-export const CODE_GONE_LINE = `This link was used or has expired, so this browser isn't signed in. ${WAY_IN}`
+/** The line when the server refused the link's code with 410 (used, replaced by a newer one, or expired). It does not
+ * send the analyst to the link printed in the terminal, which is the link whose code is gone. */
+export const CODE_GONE_LINE = "This link was used or has expired, so this browser isn't signed in. Run `thimble-browser` again for a new one."
 
 type State = 'wait' | 'in' | 'out'
 

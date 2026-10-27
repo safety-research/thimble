@@ -314,7 +314,10 @@ async def _edit(box: Box, a: dict[str, Any]) -> Out:
 
 def _rules(box: Box) -> dict[str, Any]:
     """srt's filesystem rules for a command: the kernel's reads (kernel_wrap.srt_rules) and the box's read roots,
-    writes to the box's write roots alone, and thimble's private files hidden."""
+    writes to the box's write roots alone, and thimble's private files hidden. A denied folder that holds a write root
+    is left out, as runtime.spec_of leaves it out of no_write: on macOS a deny wins over an allow inside it, so a view's
+    builder could not write extension/views/<slug>, and what lies outside the write roots stays unwritable anyway, since
+    srt lets a command write only inside allowWrite."""
     from . import config, kernel_wrap, srt  # noqa: PLC0415
 
     pkg = srt.package(config.REPO_ROOT)
@@ -324,7 +327,8 @@ def _rules(box: Box) -> dict[str, Any]:
                                   hide=[str(p) for p in box.private], home=Path.home(), platform=sys.platform)
     fs = rules["filesystem"]
     fs["allowWrite"] = [str(p) for p in box.write_roots]
-    fs["denyWrite"] = list(dict.fromkeys([*fs.get("denyWrite", []), *map(str, box.private), *map(str, box.no_write)]))
+    deny = dict.fromkeys([*fs.get("denyWrite", []), *map(str, box.private), *map(str, box.no_write)])
+    fs["denyWrite"] = [d for d in deny if not any(Path(d) in w.parents for w in box.write_roots)]
     return rules
 
 
