@@ -558,6 +558,164 @@ test("what came of a check that no session waited for gets its line at this sess
   expect(String(t.spawns[0].prompt)).toContain('FAIL made-up test')
 })
 
+/** What Claude is told of fix 1 at the person's next prompt, or ''. */
+async function toldOf(s: ReturnType<typeof setup>): Promise<string> {
+  return ((((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>)['fix-1']) ?? ''
+}
+
+test("a new round that took the copy before the check's first answer: the check shows no line and tells Claude nothing", async () => {
+  const s = setup()
+  // the kernel's first answer is already the new round: working, with no tests running
+  const calls = doneSays(s, [{ state: 'working', testing: null, rounds: 2 }])
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.$.state.set({ plugin: 'thimble', key: 'fixBy' }, { 1: 'claude' })
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.notes).toEqual([])
+  expect(await toldOf(s)).not.toContain('did not pass')
+  expect(s.verbs().some(v => v.startsWith('again'))).toBe(false)
+})
+
+test('a fix removed in a shell while its tests ran: the check shows no line, so no r offers to redo a fix that is gone', async () => {
+  const s = setup()
+  // the kernel's answer: the record of the fix removed, with no tests running
+  const calls = doneSays(s, [{ state: 'removed', testing: null }])
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(await fixKey(s.$, 'r')).toBe(null)
+  expect(s.notes).toEqual([])
+  expect(await toldOf(s)).not.toContain('did not pass')
+})
+
+/** Waits a little for what a check not awaited does. */
+async function until(f: () => Promise<boolean> | boolean): Promise<void> {
+  for (let i = 0; i < 200 && !(await f()); i++) await new Promise(r => setTimeout(r, 5))
+}
+
+test("what the kernel's runner wrote just after this session's start read the list gets its line when the look for ended fixers takes the fix", async () => {
+  const s = setup()
+  s.made()
+  Object.assign(s.fix, { session: 's-fix', testing: TESTING })
+  s.agents.push({ id: 'agent-fixer-1', status: 'idle' })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  // the start's read of the list says working; the runner writes what came of the tests before the next read
+  const run = s.$.process.run
+  let lists = 0
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('list') && ++lists === 2) Object.assign(s.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', testing: null, unshown: true })
+    return run(argv, o)
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await until(async () => (await fixLineRows(s.$, ELS, 110)).length > 0)
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
+  expect(s.verbs()).toContain('shown 1')
+  expect(s.verbs().some(v => v.startsWith('done'))).toBe(false)
+})
+
+test('an outcome not shown yet whose refusal a new round answers is marked shown before that round, so no later start shows it or tells Claude again', async () => {
+  const s = setup()
+  s.made()
+  Object.assign(s.fix, { state: 'failed', tests: 'failed', session: 's-fix', unshown: true, error: 'its tests failed in the sandbox', refused: { why: 'its tests failed in the sandbox', files: [], tests: 'FAIL made-up test' } })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await until(() => s.spawns.length > 0)
+  const v = s.verbs()
+  expect(v).toContain('shown 1')
+  expect(v.indexOf('shown 1')).toBeLessThan(v.indexOf('again 1'))
+})
+
+test("after /resume gives the session a new id, an outcome not shown yet of the conversation's fix gets its line: by the conversation the kernel kept, or by this load's own fixers", async () => {
+  // claude --resume: a new session id, the conversation's first launch and its transcript carried
+  const s = setup()
+  s.made()
+  Object.assign(s.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', session: 's-made-up-old', conversation: 's-made-up-old', unshown: true })
+  Object.assign(s.$.session, { id: async () => 's-made-up-resumed', usage: async () => ({ startedAt: 1761100000000 }), messages: async () => [{ role: 'user' }] })
+  s.files.set(`${HOME}/starts/1761100000000.json`, JSON.stringify({ key: 's-made-up-old', sessions: ['s-made-up-old'] }))
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await until(async () => (await fixLineRows(s.$, ELS, 110)).length > 0)
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.verbs()).toContain('shown 1')
+  // /resume inside a running Claude Code: the record names the old session only, and this load started its fixer
+  const t = setup()
+  t.made()
+  Object.assign(t.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', session: 's-made-up-old', unshown: true })
+  await t.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await until(async () => (await fixLineRows(t.$, ELS, 110)).length > 0)
+  expect(textOf((await fixLineRows(t.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(t.verbs()).toContain('shown 1')
+})
+
+test("a round's fixer that ends while the check of the round before waits: its end is kept, and checked with its own words once that check returns", async () => {
+  const s = setup()
+  // the first check's done answers only when the test lets it; by then the new round took the copy
+  let answer: () => void = () => undefined
+  const held = new Promise<void>(r => { answer = r })
+  const calls: { argv: string[]; stdin?: string }[] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push({ argv, stdin: o.stdin })
+      if (calls.length === 1) {
+        await held
+        return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, state: 'working', testing: null }), stderr: '' }
+      }
+    }
+    return run(argv, o)
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+  // the person's follow-up while the check waits: a round of the fix, with a fixer of its own
+  await ask(s, '1 and keep the percent')
+  expect(s.spawns.length).toBe(2)
+  await s.end('Cannot: the percent is not in the data', 'agent-fixer-2')
+  expect(calls.length).toBe(1)
+  answer()
+  await until(async () => calls.length > 1 && (await fixLineRows(s.$, ELS, 110)).length > 0)
+  expect(calls.length).toBe(2)
+  expect(calls[1]!.argv).toEqual(expect.arrayContaining(['done', '1', '--cannot', '-']))
+  expect(calls[1]!.stdin).toBe('the percent is not in the data')
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toContain('did not pass · the percent is not in the data')
+})
+
+test('an end kept while a check waited is not checked when more words started a newer fixer: that fixer\'s own end checks the copy', async () => {
+  const s = setup()
+  let answer: () => void = () => undefined
+  const held = new Promise<void>(r => { answer = r })
+  const calls: string[][] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push(argv)
+      if (calls.length === 1) {
+        await held
+        return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, state: 'working', testing: null }), stderr: '' }
+      }
+    }
+    return run(argv, o)
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  await ask(s, '1 and keep the percent')
+  await s.end('Title: Bar says read percent\nWhat it does: The bar says read 14%.', 'agent-fixer-2')
+  // more words before the first check returned: a third fixer, which still works
+  await ask(s, '1 and say it in the pane too')
+  expect(s.spawns.length).toBe(3)
+  answer()
+  for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 5))
+  expect(calls.length).toBe(1)
+  await s.end('Title: Bar and pane say read percent\nWhat it does: The bar and the pane say read 14%.', 'agent-fixer-3')
+  await until(() => calls.length > 1)
+  expect(calls.length).toBe(2)
+  expect(calls[1]).toEqual(expect.arrayContaining(['--title', 'Bar and pane say read percent']))
+})
+
 test('n leaves the fix ready in the list, where thimble fix apply in a shell turns it on; a fixer that changed nothing leaves a request', async () => {
   const s = setup()
   await requested(s)
