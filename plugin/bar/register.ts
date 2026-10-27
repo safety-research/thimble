@@ -11,6 +11,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { aboveBar } from '../core/answerview'
 import { closePane, narrowNotice, openPane, paneNow, PANE_ID } from '../core/pane'
+import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
@@ -107,8 +108,9 @@ export const registerBar: Register = on => {
       const width = Math.max(20, e.props.bodyColumns)
       const rows = await barRows($, els, width, { presses })
       // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
-      // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off
-      const room = Number(e.props.maxRows) > 0 ? Math.max(4, Number(e.props.maxRows) - rows.length - 2) : 0
+      // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off (the
+      // bar's rows as drawn: a failure line or a hint wraps)
+      const room = Number(e.props.maxRows) > 0 ? Math.max(4, Number(e.props.maxRows) - treeRows(rows, width) - 2) : 0
       const above = await aboveBar($, els, width, room)
       return els.Box({ flexDirection: 'column', children: [...(above.length ? [els.Text({ key: 'above-gap', children: ' ' }), ...above] : []), els.Text({ key: 'gap', children: ' ' }), ...rows] })
     } catch {

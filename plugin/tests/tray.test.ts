@@ -3,6 +3,7 @@
 // question typed with it open carries nothing of it and closes the tray; 0 closes it. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
+import { treeRows } from '../core/trail.mjs'
 import { citeTint } from '../marks/view'
 import { evidenceOpener } from '../tray/tray'
 import { promptStub } from './stubs'
@@ -24,6 +25,11 @@ function all(n: Any, out: Any[] = []): Any[] {
   all(n.children, out)
   return out
 }
+/** An element's children, beside its props or in them. */
+function kidsOf(n: Any): Any[] {
+  const c = n?.children ?? n?.props?.children
+  return Array.isArray(c) ? c : c == null ? [] : [c]
+}
 
 // these tests read the citations Claude wrote, as the auto modes draw them
 const CITES = { options: { citations: 'auto cite + verify' } }
@@ -37,7 +43,7 @@ const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, tex
 /** A resumed session with one answer, TEXT (or `more.text`), whose citation the check left as `item` (or whose
  *  citations, a list of items); `more`: the turn's cards, the message's parts and kept files to add (a card's meta.json
  *  under cards/<id>/). */
-async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string> } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
+async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string>; scrolls?: Any[] } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...(more.env ?? {}) })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
@@ -62,7 +68,7 @@ async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { c
   on('tool.register', () => ({ value: undefined }))
   on('command.register', () => ({ value: { command: 'x' } }))
   on('ui.toast', () => ({ value: undefined }))
-  on('ui.scroll', () => ({ value: undefined }))
+  on('ui.scroll', (_$: unknown, e: Any) => { more.scrolls?.push(e); return { value: undefined } })
   on('ui.panes', () => ({ value: [] }))
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
@@ -447,14 +453,14 @@ test('a heads-up on a citation\'s words is one ] away; it shows whole, with no p
   const { clock } = await resumed($, on, QUOTED, 's-tray-4', { parts: HEADS })
   // ]: the heads-up first, not the citation under it
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
-  const band = textOf(await $.ui.render(above(12)))
+  const band = textOf(await $.ui.render(above(40)))
   expect(band).toContain('a ask · 0 close')
   expect(band).toContain('Retried runs count twice')
   expect(band).toContain('but not the failures among the other runs.')
   expect(band).not.toContain('? ask about this heads-up')
   expect(band).toContain('] next citation')
   for (const gone of ['m more', 'lines 1–', 'Your next prompt', 'leave it out', 'Claude can do this', 'o ask']) expect(band).not.toContain(gone)
-  expect(all(await $.ui.render(above(12))).some(n => n.props?.key === 'tray-page')).toBe(false)
+  expect(all(await $.ui.render(above(40))).some(n => n.props?.key === 'tray-page' || n.props?.key === 'tray-window')).toBe(false)
   // ] goes on to the citation, then the explainer after it
   await clock.advance(2000)
   await $.prompt.edit(key(']'))
@@ -462,6 +468,83 @@ test('a heads-up on a citation\'s words is one ] away; it shows whole, with no p
   await clock.advance(2000)
   await $.prompt.edit(key(']'))
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
+})
+
+// a value code computed, the citation's evidence ten lines of output
+const OUTPUT = ['runs: 40', ...Array.from({ length: 8 }, (_, i) => `run ${i + 1}: ok`), 'failed: 12'].join('\n')
+const TALL = {
+  n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'verified', shown: '12 of 40',
+  evidence: { kind: 'computed', by: 'checker', code: 'print("runs:", n)\nfor i, r in enumerate(runs):\n    print(f"run {i + 1}: {r}")\nprint(f"failed: {bad}")', output: OUTPUT, highlight: [[OUTPUT.length - 2, OUTPUT.length]] },
+}
+
+test('a tray taller than the rows the band has over the bar shows its body in a window of them: the band ends with the whole bar, its failure line too, and the dim row under the window says how many more lines there are and shows them', CITES, async ($, on) => {
+  const scrolls: Any[] = []
+  const { clock } = await resumed($, on, TALL, 's-tray-tall', { scrolls })
+  const drawn = async (maxRows: number) => {
+    const band = await $.ui.render(above(maxRows))
+    return { band, rows: kidsOf(band), text: textOf(band), window: all(band).find(n => n.props?.key === 'tray-window-in') }
+  }
+  // the band fits its rows, and its last rows are the bar's, whole, under the tray
+  const fits = (d: Awaited<ReturnType<typeof drawn>>, maxRows: number) => {
+    expect(treeRows(d.band, 100)).toBeLessThanOrEqual(maxRows)
+    const tray = d.rows.findIndex(n => n.props?.key === 'tray-band')
+    expect(tray).toBeGreaterThan(-1)
+    expect(d.rows.slice(tray + 1).map(n => n.props?.key)).toContain('bar')
+    expect(String(d.rows.at(-1)?.props?.key)).toMatch(/^bar/)
+  }
+  const press = async (maxRows: number) => {
+    const ui = await $.ui.mount(above(maxRows))
+    await ui.press({ key: 'tray-scroll' })
+    await ui.unmount()
+    return drawn(maxRows)
+  }
+  // the person's wheel over the band, as Claude Code raises it, and the band's scrolls that reached Claude Code's own
+  const wheel = (by: number) => $.ui.scroll({ component: 'AbovePrompt', requestId: 'above', offset: 0, by, bodyRows: 7, contentRows: 8, origin: { kind: 'person' } } as never)
+  const bandScrolls = () => scrolls.filter(e => e?.component === 'AbovePrompt').length
+  // ] then +: all the code and its ten lines of output
+  const open = async () => {
+    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+  }
+  await open()
+  // the session's start said the card sandbox cannot start here, a failure line that wraps above the bar: the tray
+  // takes the rows left over all of it
+  fits(await drawn(10), 10)
+  // the next prompt takes that line and closes the tray; opened again, in a band of eight rows
+  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
+  await open()
+  let d = await drawn(8)
+  fits(d, 8)
+  // the tray's head and its keys stay; the body shows from its top, the lines under the window counted
+  expect(d.text).toContain('a ask')
+  expect(d.window?.props?.top).toBeUndefined()
+  expect(Number(/↓ (\d+) more line/.exec(d.text)?.[1])).toBeGreaterThan(5)
+  // the wheel over the band moves the window, a row a tick, and the band itself does not move
+  await wheel(2)
+  d = await drawn(8)
+  expect(d.window?.props?.top).toBe(-2)
+  expect(bandScrolls()).toBe(0)
+  // a press on that row shows the next rows
+  d = await press(8)
+  fits(d, 8)
+  expect(d.window?.props?.top).toBeLessThan(-2)
+  // in a band of twelve rows the window is taller: at the last rows it counts the lines above, and a press goes back up
+  d = await drawn(12)
+  for (let i = 0; i < 5 && /↓ \d+ more line/.test(d.text); i++) d = await press(12)
+  fits(d, 12)
+  const above12 = Number(/↑ (\d+) line/.exec(d.text)?.[1])
+  expect(d.window?.props?.top).toBe(-above12)
+  d = await press(12)
+  expect(d.window?.props?.top).toBeUndefined()
+  // a band with the rows for all of it shows it whole, with no window
+  const whole = await drawn(40)
+  expect(whole.window).toBeUndefined()
+  expect(whole.text).toContain('│runs: 40│run 1: ok')
+  // and the wheel over it is Claude Code's again
+  await wheel(1)
+  expect(bandScrolls()).toBe(1)
 })
 
 // a heads-up whose words are a citation's words, or hold them
