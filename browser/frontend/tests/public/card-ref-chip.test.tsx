@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // A card pointed at in a chat reply (`[[card:<id>]]`) is the card's chip: its glyph and its short name, as the chips
 // under a step's Cards are, a click opening the card and a hover showing it (components/RefChip). A file pointed at
-// stays its glyph alone, and a part of a card (a table's cell) too.
+// stays its glyph alone, and a part of a card (a table's cell) too. A value cited from a line of a card's printed output
+// names that output in its hover, in the card and outside it.
 import { act } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
@@ -71,4 +72,27 @@ test("hovering the card's chip shows the card, and a click opens it", async () =
   await settle()
   off()
   expect(refs).toEqual(['card:ab12cd34'])
+})
+
+test("a value's source in a card's printed output names the output it is a line of, in the card and outside it", async () => {
+  const line = '2026-05-16 02:06  Payments 4.12.0 deployed'
+  const excerpt = ['timeline: 12 events', line, '2026-05-16 02:57  Night alert: db connections 181 of 200'].join('\n')
+  vi.spyOn(api, 'resolveRef').mockResolvedValue({ ref: 'card:ab12cd34@out1#L2', kind: 'cell', excerpt, meta: { span: { text: line } } } as unknown as ResolvedRef)
+  const head = async (el: HTMLElement) => {
+    await act(async () => {
+      chip(el, 'card:ab12cd34@out1#L2').focus()
+      await new Promise((r) => setTimeout(r, 200))
+    })
+    const pop = document.body.querySelector('.refchip-pop')
+    return { chip: pop?.querySelector('.refchip-pop-chip')?.textContent, value: pop?.querySelector('.hl')?.textContent }
+  }
+  const inCard = await mount(
+    <div data-cite-home="ab12cd34">
+      <RefChip ref="card:ab12cd34@out1#L2" value="4.12.0" cite workspace="ws" />
+    </div>,
+  )
+  expect(await head(inCard)).toEqual({ chip: 'printed output · line 2', value: '4.12.0' })
+  unmountAll()
+  const outside = await mount(<RefChip ref="card:ab12cd34@out1#L2" value="4.12.0" cite workspace="ws" />)
+  expect(await head(outside)).toEqual({ chip: 'wiki-edits · printed output · line 2', value: '4.12.0' })
 })
