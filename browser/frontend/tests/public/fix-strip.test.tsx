@@ -135,6 +135,27 @@ describe('the row and the notice', () => {
     expect(el.querySelector('button')).toBeNull()
   })
 
+  test("a ready fix that changes the sandbox or dependencies says which in one sentence above Use it now, in the terminal's words", async () => {
+    const notice = 'This fix changes the sandbox (plugin/cards/argv.mjs) and dependencies (browser/frontend/package-lock.json).'
+    fixes = [ready({ notice })]
+    const el = await mount(result())
+    await settle()
+    expect(el.querySelector('.chat-fix-notice')?.textContent).toBe(notice)
+    // under the row's words, above its buttons, before the person clicks Use it now
+    expect([...el.querySelector('.chat-fix')!.children].map((c) => c.className)).toEqual(['chat-fix-line', 'chat-fix-notice', 'chat-fix-acts'])
+    expect(sent).toEqual([])
+    unmountAll()
+    // a fix that changes no such file says nothing more; nor does a row that asks nothing
+    fixes = [ready({ notice: '' })]
+    const plain = await mount(result())
+    await settle()
+    expect(plain.querySelector('.chat-fix-notice')).toBeNull()
+    fixes = [row({ notice })]
+    const on = await mount(result(true, 'Card says how many rows is on', 'fixed'))
+    await settle()
+    expect(on.querySelector('.chat-fix-notice')).toBeNull()
+  })
+
   test('an earlier row of a fix is a quiet line of what it said, with no clicks', async () => {
     fixes = [ready()]
     const el = await mount(result(false, '“Card says how many rows” did not pass: its tests failed', 'failed'))

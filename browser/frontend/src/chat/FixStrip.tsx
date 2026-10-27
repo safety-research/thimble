@@ -4,8 +4,10 @@
 //               where main started it (Rows, AgentCard), whose thread shows its whole run.
 //   FixResult   how the fix ended, a row of main's chat and of the fix's thread at the time it ended (the server's `fix`
 //               chip). The newest row of a fix shows its state now: a fix that passed its checks asks "✓ thimble
-//               fixed: <title> · tests pass" with Use it now, What changed (a few lines, not a diff) and Later. Nothing
-//               goes on by itself: Use it now is the person's click. The server then starts again from the fixed code,
+//               fixed: <title> · tests pass" with Use it now, What changed (a few lines, not a diff) and Later; one
+//               that changes the sandbox, the launcher, dependencies or another such file says which in one sentence
+//               above them, as the terminal's line does (`notice`). Nothing goes on by itself: Use it now is the
+//               person's click. The server then starts again from the fixed code,
 //               the row says "Reloading thimble…", and the page loads the new build by itself when nothing typed would
 //               be lost. A fix that did not pass says why, with Redo. An earlier row, or one the person answered, is a
 //               quiet line of what it said.
@@ -209,6 +211,7 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
         </span>
         {!ask && buttons}
       </div>
+      {ask && row.notice && <p className="chat-fix-notice">{row.notice}</p>}
       {ask && <div className="chat-fix-acts">{buttons}</div>}
       {ask && what && (
         <dl className="chat-fix-what">

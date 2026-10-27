@@ -7,6 +7,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -395,6 +397,33 @@ async def test_later_leaves_the_fix_ready_in_your_fixes_and_use_it_there_puts_it
     await fixes.apply_route(1, analyst)  # Use it, in Your fixes
     await asyncio.sleep(0.4)
     assert fixing.recs[1]["state"] == "on" and fixing.restarts[-1][0] == "fix 1: Card counts rows"
+
+
+NOTICES = [{"the launcher": ["plugin/bin/thimble"]},
+           {"the sandbox": ["plugin/cards/argv.mjs"], "dependencies": ["browser/frontend/package-lock.json"]},
+           {"the sandbox": ["plugin/cards/ask.ts", "plugin/cards/runner.mjs", "plugin/sandbox/run.mjs"],
+            "the hooks file": ["plugin/hooks/hooks.json"], "thimble's scripts": ["scripts/install.sh"]}]
+
+
+async def test_a_ready_fix_that_changes_the_sandbox_says_which_files_in_the_terminal_s_words(fixing, monkeypatch):
+    api_key(monkeypatch, [text("Title: Cards draw on Node 26\nWhat it does: The card runner starts with --allow-net.")])
+    await fixes.request(CORPUS, "cards should draw on Node 26", "")
+    await _ended()
+    row = fixes.status()["fixes"][0]
+    assert (row["kind"], row["notice"]) == ("ready", "")  # it changes no such file
+    # the kinds and files the kernel's record names: one sentence, beside what the row says
+    fixing.recs[1]["notice"] = NOTICES[1]
+    row = fixes.status()["fixes"][0]
+    assert row["notice"] == ("This fix changes the sandbox (plugin/cards/argv.mjs) and dependencies "
+                             "(browser/frontend/package-lock.json).")
+    assert row["said"] == "thimble fixed: Cards draw on Node 26 · tests pass"
+    # the terminal's own sentence, from the kernel's notice_said, for one kind, two, and three with several files
+    code = ("import json, sys; sys.path.insert(0, sys.argv[1]); from kernel.fixes import notice_said; "
+            "print(json.dumps([notice_said({'notice': n}) for n in json.loads(sys.argv[2])]))")
+    p = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(fixes.plugin_dir() / "engine"), json.dumps(NOTICES)],
+                       capture_output=True, text=True, check=True)
+    said = json.loads(p.stdout)
+    assert [fixes.notice_said({"notice": n}) for n in NOTICES] == said and all(s.startswith("This fix changes ") for s in said)
 
 
 async def test_a_ready_notice_goes_once_the_fix_is_on_elsewhere(fixing, monkeypatch):

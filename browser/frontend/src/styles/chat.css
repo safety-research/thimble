@@ -1949,6 +1949,12 @@ button.model-line-part[aria-expanded='true'] {
   gap: 6px;
   padding: 4px 0 0 21px;
 }
+/* what a ready fix changes of the sandbox, the launcher or dependencies, in one sentence under its words */
+.chat-fix-notice {
+  flex: 1 1 100%;
+  margin: 0 0 0 21px;
+  overflow-wrap: anywhere;
+}
 .chat-fix-what {
   flex: 1 1 100%;
   margin: 6px 0 0 21px;
