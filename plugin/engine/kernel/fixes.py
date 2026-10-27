@@ -57,7 +57,7 @@ prompt does not list these files. A check that refuses a change (these files, a 
 refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
 to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
 cannot be done (done with `cannot`), which is the failure the person sees. The quick tests run with no network, for one
-fix at a time, and a suite that fails runs once more before the fix fails (run_tests).
+fix at a time, start the copy's launcher first, and a suite that fails runs once more before the fix fails (run_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -608,16 +608,21 @@ def _has_pytest(py: str) -> bool:
 
 
 QUICK_TESTS = "claude plugin test plugin"
+# the copy's own launcher and the kernel's command start (thimble --help reads cli.py and the modules it needs) and say
+# no traceback; on a failure the log ends with what they said and their exit code
+LAUNCHER_SMOKE = ('(o=$(plugin/bin/thimble --help 2>&1); s=$?; case "$s:$o" in [1-9]*|0:*Traceback*) '
+                  'printf "%s\\nplugin/bin/thimble --help: exit %s\\n" "$o" "$s"; false;; esac)')
 
 
 def run_tests(fid: int | str) -> tuple[bool, str]:
-    """The quick tests in the copy, in the sandbox, with no network: the hooks tests, and the kernel's when this Python
-    has pytest (THIMBLE_FIX_TESTS, a shell command, replaces them). They run for one fix at a time, since two runs at
-    once make the hooks tests run out of time, and a run that fails runs once more before the tests count as failed.
-    (passed, the log's last lines, which say when they passed only the second time)."""
+    """The quick tests in the copy, in the sandbox, with no network: the copy's launcher (LAUNCHER_SMOKE), the hooks
+    tests, and the kernel's when this Python has pytest (THIMBLE_FIX_TESTS, a shell command, replaces them). They run
+    for one fix at a time, since two runs at once make the hooks tests run out of time, and a run that fails runs once
+    more before the tests count as failed. (passed, the log's last lines, which say when they passed only the second
+    time)."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
     if not cmd:
-        parts = [QUICK_TESTS]
+        parts = [LAUNCHER_SMOKE, QUICK_TESTS]
         if _has_pytest(_python()):
             parts.append('"$THIMBLE_PYTHON" -m pytest plugin -q -x -p no:cacheprovider')
         cmd = " && ".join(parts)

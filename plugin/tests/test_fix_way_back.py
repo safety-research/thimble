@@ -152,3 +152,24 @@ def test_a_fix_to_the_card_runner_or_its_ask_gets_the_sandbox_notice_also_when_i
     (wt / "plugin" / "cards" / "runner.mjs").rename(wt / "plugin" / "cards" / "run.mjs")
     b = FX.done(b["id"], "Card runner renamed", "")
     assert b["state"] == "ready" and b["notice"] == {"the sandbox": ["plugin/cards/runner.mjs"]}
+
+
+def test_the_quick_tests_fail_a_fix_that_breaks_the_launcher_or_the_kernels_command_without_pytest(world, monkeypatch):
+    engine = {str(p.relative_to(PLUGIN.parent)): p.read_text() for p in (PLUGIN / "engine").rglob("*.py")
+              if "__pycache__" not in p.parts}
+    release_with(world, {"plugin/bin/thimble": (PLUGIN / "bin" / "thimble").read_text(), **engine})
+    # the default quick tests on a machine whose Python has no pytest; the hooks tests' claude is the fake
+    monkeypatch.delenv("THIMBLE_FIX_TESTS")
+    monkeypatch.setattr(FX, "_has_pytest", lambda py: False)
+    monkeypatch.setenv("PATH", f"{world['bin']}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("THIMBLE_PYTHON", sys.executable)
+    ok = made(world)
+    assert FX.done(ok["id"], "Bar says read", "")["state"] == "ready"
+    broken = {"plugin/engine/kernel/cli.py": lambda t: t.replace("def main(", "def main(:", 1),
+              "plugin/bin/thimble": lambda t: "#!/bin/sh\nexit 9\n"}
+    for path, edit in broken.items():
+        r = FX.new(f"change {path}")
+        p = Path(r["work"]) / path
+        p.write_text(edit(p.read_text()))
+        r = FX.done(r["id"], "A change", "")
+        assert r["state"] == "failed" and r["tests"] == "failed", path
