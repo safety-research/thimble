@@ -33,12 +33,12 @@ Claude asks whether you want both the terminal plugin and the browser workbench 
 ### Manual installation
 
 ```
-git clone https://github.com/safety-research/thimble
-cd thimble
+git clone https://github.com/safety-research/thimble ~/thimble
+cd ~/thimble
 scripts/install.sh
 ```
 
-`scripts/install.sh --no-browser` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
+The browser workbench builds about 1 GB in the checkout and runs from it, so keep it in a folder of its own. `scripts/install.sh --no-browser` installs the terminal plugin alone. [INSTALL.md](INSTALL.md) covers upgrading from 0.9 and what to do when something does not work.
 
 ## Usage
 
