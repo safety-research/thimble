@@ -141,6 +141,8 @@ def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_
     installs the browser workbench."""
     live = tmp_path / "thimble" / "fixes" / "live"
     (live / "plugin" / "bin").mkdir(parents=True)
+    (live / ".git").mkdir()  # a checkout, with the home's release.json beside it
+    (live.parent / "release.json").write_text("{}\n")
     entry = {"source": "directory", "path": str(live)}
     cc = tmp_path / "cc"
     (cc / "plugins").mkdir(parents=True)
@@ -170,6 +172,54 @@ def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_
     assert [x for x in log.read_text().splitlines() if x.startswith("plugin")] == []
     assert "To start the browser workbench, run this in a folder of files:" in lines
     assert (tmp_path / "bin" / "thimble-browser").exists() and not (tmp_path / "bin" / "thimble").exists()
+
+
+def plugin_install(tmp_path, source, claude="exit 0\n"):
+    """scripts/install.sh --no-browser with made-up commands, when Claude Code's marketplace thimble (in its list and in
+    its user settings) is the folder `source`, and this shell's THIMBLE_HOME is tmp_path/thimble. The made-up claude
+    logs each call, says its version, lists no plugin, and else runs `claude`. The run, and the plugin calls."""
+    entry = {"source": "directory", "path": str(source)}
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"source": entry, "installLocation": str(source)}}))
+    (cc / "settings.json").write_text(json.dumps({"extraKnownMarketplaces": {"thimble": {"source": entry}}}))
+    bin_ = tmp_path / "stubs"
+    log = tmp_path / "claude.log"
+    stub(bin_ / "claude", f'echo "$@" >> "{log}"\n'
+         'case "$1 $2" in "--version ") echo "2.1.311 (Claude Code)"; exit 0 ;; "plugin list") echo "[]"; exit 0 ;; esac\n'
+         + claude)
+    stub(bin_ / "node", "echo v22.20.0\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(tmp_path / "thimble")}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    return p, [x for x in log.read_text().splitlines() if x.startswith("plugin")] if log.exists() else []
+
+
+def test_after_the_documented_uninstall_a_marketplace_on_the_deleted_fixes_goes_and_the_plugin_installs(tmp_path):
+    """claude plugin uninstall thimble@thimble, then rm -rf ~/.thimble: Claude Code's marketplace thimble still names
+    the fixes' live folder, which is gone, and Claude Code refuses another source for the name while it does. The
+    install removes that marketplace and installs the plugin as usual."""
+    p, calls = plugin_install(tmp_path, tmp_path / "thimble" / "fixes" / "live")
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert calls == ["plugin marketplace remove thimble", "plugin marketplace add safety-research/thimble",
+                     "plugin list --json", "plugin install thimble@thimble"]
+    assert "loads thimble from your fixes" not in p.stdout
+
+
+def test_a_home_with_fixes_whose_thimble_home_is_not_the_shells_is_left_to_thimble_update(tmp_path):
+    """Claude Code runs with another THIMBLE_HOME than this shell: its marketplace is that home's live folder (a
+    checkout with release.json beside it), and the install leaves the plugin to thimble update all the same."""
+    live = tmp_path / "other-home" / "fixes" / "live"
+    (live / ".git").mkdir(parents=True)
+    (live.parent / "release.json").write_text("{}\n")
+    p, calls = plugin_install(tmp_path, live, '[ "$1 $2" = "plugin marketplace" ] && exit 1\nexit 0\n')
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert calls == []
+    assert (f"Claude Code loads thimble from your fixes ({live.resolve()}), so the plugin is left as it is: run thimble "
+            "update, which updates both products and keeps your fixes.") in p.stdout.splitlines()
 
 
 def test_install_md_updates_with_thimble_update():
