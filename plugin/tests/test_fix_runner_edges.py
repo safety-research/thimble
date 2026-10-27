@@ -1,6 +1,8 @@
 """thimble fix done (engine/kernel/fixes.py) at the edges of the runner that tests a fixer's change: a done that only
-waits works from any session, and two checks at once start one run, the second waiting no longer than its limit. The
-world is test_fixes.py's made-up thimble 0.10.2; slow tests are made with THIMBLE_FIX_TESTS. All data here is made up."""
+waits works from any session; two checks at once start one run, and the second waits no longer than its limit; a new
+round takes the copy from the tests of the round before; and a fix removed while its tests run keeps no mark of them.
+The world is test_fixes.py's made-up thimble 0.10.2; slow tests are made with THIMBLE_FIX_TESTS. All data here is made
+up."""
 from __future__ import annotations
 
 import fcntl
@@ -14,7 +16,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, made, world  # noqa: E402, F401  (world is the fixture)
+from test_fixes import FX, made, sh, world  # noqa: E402, F401  (world is the fixture)
 
 
 def runner_gone(fid: int) -> None:
@@ -89,3 +91,36 @@ def test_two_checks_at_once_start_one_run_and_the_second_waits_no_longer_than_it
     # the first check's runner wrote what came of the tests; nothing wrote over it or ran them again
     assert FX.get(r["id"])["state"] == "ready" and FX.get(r["id"])["tests"] == "passed"
     assert runs.read_text() == "run\n"
+
+
+def test_a_new_round_while_the_tests_run_takes_the_copy_and_its_own_done_checks_the_new_change(world, monkeypatch, tmp_path):
+    runs = tmp_path / "runs.log"
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", f"echo run >> {runs}; sleep 1")
+    r = made(world)
+    assert FX.done(r["id"], "Bar says read", "", within=0.2)["testing"]
+    # more words for the fix while its tests run: a new round in the same copy, which no longer waits for them
+    again = FX.round_(r["id"], "and keep the percent")
+    assert again["state"] == "working" and "testing" not in again and "testing" not in FX.get(r["id"])
+    runner_gone(r["id"])
+    # the runner of the round before wrote nothing
+    assert FX.get(r["id"])["state"] == "working" and FX.get(r["id"])["rounds"] == 2
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("${n}", "${n}%"))
+    got = FX.done(r["id"], "Bar says read percent", "", within=30)
+    assert got["state"] == "ready" and runs.read_text() == "run\nrun\n"
+    assert "read ${n}%" in sh("git", "show", f"{got['commit']}:plugin/bar/bar.tsx", cwd=FX.live_dir())
+
+
+def test_a_fix_removed_while_its_tests_run_keeps_no_mark_of_them(world, monkeypatch):
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "sleep 1")
+    r = made(world)
+    assert FX.done(r["id"], "Bar says read", "", within=0.2)["testing"]
+    FX.remove(r["id"])
+    assert "testing" not in FX.get(r["id"])
+    t0 = time.monotonic()
+    got = FX.done(r["id"], within=30)
+    assert got["state"] == "removed" and "testing" not in got and time.monotonic() - t0 < 1
+    runner_gone(r["id"])
+    assert FX.get(r["id"])["state"] == "removed"
+    # only a working record carries the mark
+    assert "testing" not in FX.put({**got, "state": "failed", "testing": {"since": 1.0, "lock": "made-up.lock"}})

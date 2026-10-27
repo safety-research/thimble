@@ -344,19 +344,26 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   // (engine/kernel/fixes.py done), which may take longer than Claude Code gives a process call (10 minutes,
   // core/test/limits.test.mjs): each call waits for them at most DONE_WAIT_S, and while the fix it gives says that they
   // still run, the next call waits on. A fix whose tests already run (its end taken again after a reload) is waited for
-  // the same way: the kernel starts nothing new for it
+  // the same way: the kernel starts nothing new for it, and the bar counts their time from their start
   const check = () => kernelFix($, [...args, '--within', String(DONE_WAIT_S)], { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 600000 })
+  let had = false
   const r = await busy($, `testing ${fix ? fixName(fix, 28) : `fix ${id}`}`, async () => {
     let got = await check()
-    while (got.ok && jsonOf<Fix>(got.out)?.testing) got = await check()
+    for (let f = jsonOf<Fix>(got.out); got.ok && f?.state === 'working' && f.testing; f = jsonOf<Fix>(got.out)) {
+      had = true
+      got = await check()
+    }
     return got
-  })
+  }, now.testing?.since ? now.testing.since * 1000 : undefined)
   await refreshFixes($)
   if (!r.ok) {
     await setFixLine($, { id, kind: 'problem', said: `“${name}” could not be checked: ${cut(r.err || 'thimble fix done gave nothing', 200)}` })
     return null
   }
   const done = jsonOf<Fix>(r.out)
+  // the tests it waited for no longer count: a new round took over the copy (more words for the fix), and its own end
+  // says what came of it
+  if (had && done?.state === 'working' && !done.testing) return null
   // the check did not use the change (a file no fix may change, a binary file, failing tests): another round in the
   // same copy, under the same name and time
   if (!end.cannot && done?.state === 'failed' && done.refused && done.work) {

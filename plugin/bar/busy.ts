@@ -9,9 +9,9 @@
 //   counting coverage           `thimble coverage`: the bar's count, the coverage pane (bar/counts.ts)
 //   labeling <name>             a --prompt label's model reads (labels/labels.ts)
 //
-//   busy($, word, work)       runs `work` as a job named by its step; its end (or failure) ends the job. tracked()
+//   busy($, word, work, since)  runs `work` as a job named by its step; its end (or failure) ends the job. tracked()
 //                             (telemetry.ts) does this for every model call, so a new call shows without code of its
-//                             own.
+//                             own. `since`, as busyWhile's.
 //   busyWhile($, word, alive, since)  a job that ends when `alive()` says false (checked at each tick): work that
 //                             another hook ends, such as a fork, whose turn ends in turn.complete. `alive()` may give
 //                             new words for the step instead of true, as the work goes on ("checking 3 citations").
@@ -56,10 +56,11 @@ function end($: Engine, id: number): void {
   if (!jobs.size) void $.state.set(BUSY, { frame, n: 0 }).catch(() => undefined)
 }
 
-/** Run `work` as a job the bar shows while it runs. */
-export async function busy<R>($: Engine, word: string, work: () => Promise<R>): Promise<R> {
+/** Run `work` as a job the bar shows while it runs; `since`, when the work began (the session's clock, in
+ *  milliseconds), for work that began before this call. */
+export async function busy<R>($: Engine, word: string, work: () => Promise<R>, since?: number): Promise<R> {
   let id = 0
-  try { id = await begin($, word) } catch { /* the work runs unshown */ }
+  try { id = await begin($, word, undefined, since) } catch { /* the work runs unshown */ }
   try {
     return await work()
   } finally {

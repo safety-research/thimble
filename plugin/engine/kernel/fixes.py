@@ -250,9 +250,12 @@ def get(fid: int | str) -> dict[str, Any]:
 
 def put(rec: dict[str, Any]) -> dict[str, Any]:
     """The record's new state, as one line appended in one write, with the kinds of files it changes that the person is
-    told of (notice), from its files as they are now."""
+    told of (notice), from its files as they are now. Only a working fix's tests run (`testing`): a fix that went on
+    without them (removed while they ran) has no such mark."""
     rec = {**rec, "updated": time.time()}
     rec.pop("notice", None)
+    if rec.get("state") != "working":
+        rec.pop("testing", None)
     notice = notice_of([str(f.get("path") or "") for f in rec.get("files") or []])
     if notice:
         rec["notice"] = notice
@@ -973,8 +976,10 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
     rec = get(fid)
     words = (words or "").strip()
     if _is_checkout(rec.get("work")):
-        # words for a fixer that still works go on in its time; any other round starts its own
+        # words for a fixer that still works go on in its time; any other round starts its own. The tests of the round
+        # before, should they run, are no longer this fix's: their runner writes nothing (tests_runner)
         rec = rec if rec.get("state") == "working" else _fresh(rec)
+        rec.pop("testing", None)
         rec.update(rounds=int(rec.get("rounds") or 1) + 1, state="working", error=None,
                    **({"session": session} if session else {}))
         return put(_named_patches(_with_words(rec, [words], asked), words))
