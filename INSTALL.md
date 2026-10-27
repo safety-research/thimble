@@ -18,7 +18,10 @@ For both:
 
 For the terminal plugin:
 
-- **Claude Code** 2.1.307 or later. Check with `claude --version`.
+- **Claude Code** 2.1.307 or later. Check with `claude --version`. `claude update` updates it, unless a package manager
+  installed it: then that package manager does (`brew upgrade claude-code`,
+  `npm install -g @anthropic-ai/claude-code@latest`, or your system's), and the install names the one for yours. A
+  `claude` session that was open keeps its version: start a new one.
 - **Python 3.10 or later**, on `python3` (or the Python that `THIMBLE_PYTHON` names). thimble's kernel needs nothing
   beyond the standard library.
 - **npm**, which comes with Node.js: the plugin installs the sandbox runtime with it, about 10 MB, in `~/.thimble/srt`.

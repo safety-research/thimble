@@ -80,6 +80,26 @@ ver_ge() {
   return 0
 }
 
+# claude_update: how to update Claude Code, by where its claude lives. A build that a package manager installed (the
+# system's, as an AUR, deb or rpm package; Homebrew; npm) is updated by it: in such a build, `claude update` may only
+# say to use the package manager, or that updates are disabled by your administrator.
+claude_update() {
+  local at
+  at="$(command -v claude)"
+  at="$(cd / && "$py" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$at" 2>/dev/null)" || at="$(command -v claude)"
+  if { pacman -Qo "$at" || dpkg -S "$at" || rpm -qf "$at"; } >/dev/null 2>&1; then
+    say "update it with the package manager that installed $at"
+    return 0
+  fi
+  case "$at" in
+    */Caskroom/* | */Cellar/*) at="${at#*/Caskroom/}"; at="${at#*/Cellar/}"; say "brew upgrade ${at%%/*}" ;;
+    */.claude/local/*) say "claude update" ;;
+    */node_modules/@anthropic-ai/*) say "npm install -g @anthropic-ai/claude-code@latest" ;;
+    /nix/*) say "update it with Nix, which installed it" ;;
+    *) say "claude update (when it says updates are disabled by your administrator, whoever manages this machine updates Claude Code)" ;;
+  esac
+}
+
 # ---- what it needs
 
 macos=0
@@ -109,7 +129,7 @@ if [ "$plugin" = 1 ]; then
   fi
   if command -v claude >/dev/null 2>&1; then
     have="$(claude --version 2>/dev/null | awk '{print $1}')"
-    ver_ge "$have" 2.1.307 || missing+=("Claude Code is $have, and the terminal plugin needs 2.1.307 or later: claude update")
+    ver_ge "$have" 2.1.307 || missing+=("Claude Code is $have, and the terminal plugin needs 2.1.307 or later: $(claude_update)")
   fi
 fi
 

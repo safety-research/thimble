@@ -48,3 +48,46 @@ def test_every_default_of_the_plugin_has_a_form_claude_code_takes():
         assert d != "", key
         if isinstance(d, str) and "options" in field:
             assert d in field["options"], key
+
+
+def stub(path, text):
+    """An executable shell script at path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("#!/bin/sh\n" + text)
+    path.chmod(0o755)
+    return path
+
+
+def needs(tmp_path, claude, stubs=()):
+    """scripts/install.sh --no-browser with only stubs on PATH, where claude is a link to the made-up Claude Code 2.1.283
+    at `claude`: it says what is missing and stops before it installs anything. `stubs`: other commands, by name."""
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "node", "echo v22.20.0\n")
+    stub(claude, 'echo "2.1.283 (Claude Code)"\n')
+    (bin_ / "claude").symlink_to(claude)
+    for name, text in stubs:
+        stub(bin_ / name, text)
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser"], capture_output=True, text=True, env=env)
+    assert p.returncode == 1, p.stdout + p.stderr
+    return next(line for line in p.stdout.splitlines() if "Claude Code is 2.1.283" in line)
+
+
+def test_an_old_claude_code_is_updated_by_what_installed_it(tmp_path):
+    """Claude Code below the plugin's minimum: the fix is the update that reaches it, by where its claude lives. A build
+    from Homebrew, npm or the system's packages does not update itself (its claude update says updates are disabled, or
+    to use the package manager)."""
+    line = needs(tmp_path / "brew", tmp_path / "brew" / "opt" / "homebrew" / "Caskroom" / "claude-code" / "2.1.283" / "claude")
+    assert line.endswith("2.1.307 or later: brew upgrade claude-code")
+    line = needs(tmp_path / "npm", tmp_path / "npm" / "lib" / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js")
+    assert line.endswith("2.1.307 or later: npm install -g @anthropic-ai/claude-code@latest")
+    # a file the system's package manager owns (here a made-up dpkg owns every file), even in npm's layout
+    line = needs(tmp_path / "deb", tmp_path / "deb" / "usr" / "lib" / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js",
+                 [("dpkg", 'exit 0\n')])
+    assert "or later: update it with the package manager that installed" in line
+    # Claude Code's own install updates itself, unless whoever manages the machine turned that off
+    line = needs(tmp_path / "own", tmp_path / "own" / "home" / ".local" / "share" / "claude" / "versions" / "2.1.283")
+    assert "or later: claude update" in line
+    assert "whoever manages this machine" in line
