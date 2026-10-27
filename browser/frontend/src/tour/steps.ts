@@ -251,7 +251,7 @@ const TX_LINES = 76
  * over each run of records whose cell is lit in one colour. A lane is a grid of a row per line of the file's `total`,
  * and a mark spans its records' rows in their cells' colour, so the ruler spans the bar at any height, with no gap
  * between two marks that meet, and shows the records' colours in either theme. */
-export function drawRuler(reader: HTMLElement, total: number): void {
+function drawRuler(reader: HTMLElement, total: number): void {
   const bar = reader.querySelector('.reader-ruler-bar')
   if (!bar) return
   const lanes: { from: number; to: number; colour: string }[][] = []

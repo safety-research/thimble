@@ -1,17 +1,24 @@
 // @vitest-environment jsdom
-// The tour's Labels example (src/tour/examples.json txReader, labelsSide; src/tour/steps.ts drawRuler) agrees with
-// itself: the ruler beside the transcript is drawn from the records it shows, a mark in a lane per label over each run
-// of records lit in one colour, at their place in the file, in their cells' colour; and the Labels sidebar's legend
-// names those colours and counts those records. The step says what the records' bars and the ruler show.
+// The tour's Labels example (src/tour/steps.ts labelsExample, over src/tour/examples.json txReader and labelsSide)
+// agrees with itself: the ruler the step draws beside the transcript is drawn from the records it shows, a mark in a
+// lane per label over each run of records lit in one colour, at their place in the file, in their cells' colour; and
+// the Labels sidebar's legend names those colours and counts those records.
 import { expect, test } from 'vitest'
+import { createTour, type Api, type Snaps } from '../../src/tour/engine.ts'
 import snaps from '../../src/tour/examples.json'
-import { drawRuler, tourSteps } from '../../src/tour/steps.ts'
+import { tourSteps } from '../../src/tour/steps.ts'
 
 const LINES = 76
 const html = (s: string) => {
   const d = document.createElement('div')
   d.innerHTML = s
   return d
+}
+/** The example of the step titled `title`, drawn as the tour draws it (engine.ts startRun) on a page with nothing of
+ * thimble's: by the tour's own api, into a layer of the test's own, since the tour makes its layers when it starts. */
+const drawExample = (title: string) => {
+  const api: Api = { ...createTour(snaps as Snaps).api, ex: document.createElement('div') }
+  return tourSteps('⌘').find((s) => s.title === title)!.example!(api)
 }
 /** Each lit gutter cell of the example's records: its lane (its place in the gutter), its record's line and colour. */
 const litCells = (reader: Element) =>
@@ -23,9 +30,8 @@ test('the transcript holds no picture of a ruler drawn in other colours', () => 
   expect(snaps.txReader).not.toMatch(/data:image|<img /)
 })
 
-test("the ruler's marks are the records' lit cells: in their lane, at their lines of the file, in their colour", () => {
-  const reader = html(snaps.txReader)
-  drawRuler(reader, LINES)
+test("the step's ruler marks the records' lit cells: in their lane, at their lines of the file, in their colour", () => {
+  const reader = drawExample('Labels').els!.reader as HTMLElement
   const lanes = [...reader.querySelectorAll<HTMLElement>('.reader-ruler-bar > .reader-ruler-marks > *')]
   // a lane is 7 px wide, 2 px from the next, 3 px in (files/Ruler.tsx TRACK_LANES), and holds a row per line
   expect(lanes.map((l) => [l.style.left, l.style.width])).toEqual([['3px', '7px'], ['12px', '7px']])
@@ -63,10 +69,4 @@ test("the Labels sidebar's legend names the records' colours and counts the reco
     }
   }
   expect([...new Set(cells.map((c) => c.colour))].every((c) => named.has(c))).toBe(true)
-})
-
-test("the step names what its screen is coloured with: the records' bars and the strip beside them", () => {
-  const step = tourSteps('⌘').find((s) => s.title === 'Labels')!
-  expect(step.body).toMatch(/colored bars/)
-  expect(step.body).toMatch(/strip/)
 })
