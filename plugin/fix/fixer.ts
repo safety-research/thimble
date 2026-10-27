@@ -381,8 +381,9 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   }
   const done = jsonOf<Fix>(r.out)
   // the check no longer counts: a new round took over the copy (more words for the fix), before its tests or while they
-  // ran, and the round's own end says what came of it
-  if (done?.state === 'working' && !done.testing) return null
+  // ran, and the round's own end says what came of it; or the fix went on without it (removed in a shell), which no
+  // line should show as failed
+  if (done && !done.unchanged && !['ready', 'failed', 'request'].includes(done.state)) return null
   return afterCheck($, id, done, fix, !!end.cannot)
 }
 

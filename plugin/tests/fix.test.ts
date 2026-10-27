@@ -578,6 +578,18 @@ test("a new round that took the copy before the check's first answer: the check 
   expect(s.verbs().some(v => v.startsWith('again'))).toBe(false)
 })
 
+test('a fix removed in a shell while its tests ran: the check shows no line, so no r offers to redo a fix that is gone', async () => {
+  const s = setup()
+  // the kernel's answer: the record of the fix removed, with no tests running
+  const calls = doneSays(s, [{ state: 'removed', testing: null }])
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(await fixKey(s.$, 'r')).toBe(null)
+  expect(s.notes).toEqual([])
+  expect(await toldOf(s)).not.toContain('did not pass')
+})
+
 /** Waits a little for what a check not awaited does. */
 async function until(f: () => Promise<boolean> | boolean): Promise<void> {
   for (let i = 0; i < 200 && !(await f()); i++) await new Promise(r => setTimeout(r, 5))
