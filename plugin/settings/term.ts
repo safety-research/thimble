@@ -150,10 +150,11 @@ async function moveRetired($: Engine, saved: Record<string, unknown>): Promise<v
 }
 
 /** A default that moved, saved once where the setting holds the old default (and no retired field's value stands for
- *  it), then defaultsAt set, so a value the person sets afterwards stays. */
+ *  it), then defaultsAt set, so a value the person sets afterwards stays. While no default moved, nothing is saved:
+ *  each save loads the plugin again, and Claude Code says so in the conversation. */
 async function moveDefaults($: Engine): Promise<void> {
   const saved = currentValues()
-  if (saved.defaultsAt === DEFAULTS.at) return
+  if (saved.defaultsAt === DEFAULTS.at || !Object.keys(DEFAULTS.moved).length) return
   const rows = await configRows($)
   const any = rows.values().next().value as ConfigRow | undefined
   if (!any) return

@@ -36,8 +36,8 @@ test('/thimble-settings opens the settings under their headings; a press on a ch
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeDefined()
 
   await pane.press({ key: 'mode-coverage-off' })
-  // the first change saves 0.10.4's moved default first (defaultsAt), then the change
-  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.defaultsAt', value: DEFAULTS.at }), expect.objectContaining({ key: 'thimble@inline.coverage', value: false })])
+  // the change alone: no default moved, so nothing else is saved (each save loads the plugin again)
+  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.coverage', value: false })])
   expect((await pane.find({ key: 'says-coverage' }))?.text).toContain('No Coverage pane.')
   expect(await pane.find({ type: 'Text', text: /^ coverage$/ })).toBeUndefined()
   // Labels is a setting of its own: its item stays
@@ -68,8 +68,8 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^ evidence$/ })).toBeDefined()
   await pane.press({ key: 'mode-citations-manual' })
-  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
-  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('press c to cite')
+  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
+  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('Select words and press c to cite them.')
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
   // off: no c cite, and the claims keep c
   await pane.press({ key: 'mode-citations-off' })
@@ -80,7 +80,7 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   expect((await pane.find({ key: 'sw-minimal' }))?.text).not.toContain('›')
   await pane.press({ key: 'switch-claimsMode' })
   expect((await pane.find({ key: 'sw-claimsMode' }))?.text).not.toContain('›')
-  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(2)
+  expect(set.length).toBe(2)
   await pane.unmount()
 })
 
@@ -197,7 +197,7 @@ test('a mode saved under the old fields moves to Citations at the first session,
   registerSettings(on, { citations: 'auto cite', marks: true, citationChecks: 'auto', cards: true } as never)
   expect(choiceOf('citations')).toBe('auto cite + verify')
   await call('session.start', { isInteractive: true })
-  expect(set.map(e => [e.key, e.value])).toEqual([['thimble@inline.citations', 'auto cite + verify'], ['thimble@inline.citationChecks', 'on demand'], ['thimble@inline.defaultsAt', DEFAULTS.at]])
+  expect(set.map(e => [e.key, e.value])).toEqual([['thimble@inline.citations', 'auto cite + verify'], ['thimble@inline.citationChecks', 'on demand']])
   expect((await call('config.describe', { key: 'thimble@inline.marks', label: 'x', isHidden: false })).isHidden).toBe(true)
   expect((await call('config.describe', { key: 'thimble@inline.citationChecks', label: 'x', isHidden: false })).isHidden).toBe(true)
   expect((await call('config.describe', { key: 'thimble@inline.citations', label: 'x', isHidden: false })).isHidden).toBe(false)
@@ -218,7 +218,7 @@ test('a mode saved under the old fields moves to Citations at the first session,
   expect(featureOn('catchUp')).toBe(false)
   expect(featureOn('coverage')).toBe(false)
   await call('session.start', { isInteractive: true })
-  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['squeezeAnswers', false], ['catchUp', false], ['labels', false], ['coverage', false], ['squeeze', true], ['counts', true], ['squeezeCards', true], ['defaultsAt', DEFAULTS.at]])
+  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['squeezeAnswers', false], ['catchUp', false], ['labels', false], ['coverage', false], ['squeeze', true], ['counts', true], ['squeezeCards', true]])
   expect(featureOn('catchUp')).toBe(false)
   noteChange('catchUp', true)
   expect(featureOn('catchUp')).toBe(true)
@@ -231,16 +231,16 @@ test('a mode saved under the old fields moves to Citations at the first session,
   registerSettings(on, { citations: 'auto cite + check', claims: false, claimsMode: 'on demand' } as never)
   expect(featureOn('claims')).toBe(false)
   await call('session.start', { isInteractive: true })
-  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['citations', 'auto cite + verify'], ['claimsMode', 'off'], ['claims', true], ['defaultsAt', DEFAULTS.at]])
+  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['citations', 'auto cite + verify'], ['claimsMode', 'off'], ['claims', true]])
   expect(choiceOf('citations')).toBe('auto cite + verify')
-  // no default moves: auto cite, which the installer saved as 0.10.3's default, stays; the first session only sets
-  // defaultsAt, hidden from /config
+  // no default moves: auto cite, which the installer saved as 0.10.3's default, stays, and the first session saves
+  // nothing, so Claude Code does not load the plugin again for it; defaultsAt is hidden from /config
   set.length = 0
   Object.assign(rows, { citations: 'auto cite' })
   for (const k of Object.keys(hooks)) delete hooks[k]
-  registerSettings(on, { citations: 'auto cite', defaultsAt: '' } as never)
+  registerSettings(on, { citations: 'auto cite', defaultsAt: 'none' } as never)
   await call('session.start', { isInteractive: true })
-  expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['defaultsAt', DEFAULTS.at]])
+  expect(set).toEqual([])
   expect(choiceOf('citations')).toBe('auto cite')
   expect((await call('config.describe', { key: 'thimble@inline.defaultsAt', label: 'x', isHidden: false })).isHidden).toBe(true)
   set.length = 0
@@ -250,4 +250,47 @@ test('a mode saved under the old fields moves to Citations at the first session,
   expect(set).toEqual([])
   expect(choiceOf('citations')).toBe('auto cite')
   setOptions({})
+})
+
+test('a default that moves is saved once, where the old default stands, with defaultsAt; a value set afterwards stays', async () => {
+  const hooks: Record<string, { fn: Any }[]> = {}
+  const on: Any = (event: string, a: Any, b?: Any) => {
+    ;(hooks[event] ??= []).push({ fn: typeof a === 'function' ? a : b })
+    const reg: Any = { catch: () => reg }
+    return reg
+  }
+  const call = (event: string, e: Any) => {
+    const chain = hooks[event] ?? []
+    const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i]!.fn($, ev, (x: Any) => run(i + 1, x)) : ev)
+    return run(0, e)
+  }
+  const rows: Record<string, boolean | string> = { citations: 'auto cite', cards: true, defaultsAt: 'none' }
+  const set: Any[] = []
+  const $: Any = {
+    plugin: { name: 'thimble' },
+    config: {
+      list: async () => Object.entries(rows).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })),
+      set: async (e: Any) => { set.push(e); rows[String(e.key).split('.').pop()!] = e.value; return {} },
+    },
+  }
+  const was = { at: DEFAULTS.at, moved: DEFAULTS.moved }
+  // a later release that moves Citations' default from auto cite
+  Object.assign(DEFAULTS, { at: '0.10.9', moved: { citations: { from: 'auto cite', to: 'auto cite + verify' } } })
+  try {
+    registerSettings(on, { ...rows } as never)
+    await call('session.start', { isInteractive: true })
+    expect(set.map(e => [String(e.key).split('.').pop(), e.value])).toEqual([['citations', 'auto cite + verify'], ['defaultsAt', '0.10.9']])
+    expect(choiceOf('citations')).toBe('auto cite + verify')
+    // the person sets the old default again: it stays, at this session's start and the next
+    for (const k of Object.keys(hooks)) delete hooks[k]
+    rows.citations = 'auto cite'
+    set.length = 0
+    registerSettings(on, { ...rows } as never)
+    await call('session.start', { isInteractive: true })
+    expect(set).toEqual([])
+    expect(choiceOf('citations')).toBe('auto cite')
+  } finally {
+    Object.assign(DEFAULTS, was)
+    setOptions({})
+  }
 })

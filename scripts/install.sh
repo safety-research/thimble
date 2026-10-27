@@ -80,6 +80,25 @@ ver_ge() {
   return 0
 }
 
+# claude_update: how to update Claude Code, by where its claude lives. A build that a package manager installed (the
+# system's, as an AUR, deb or rpm package; Homebrew; npm) is updated by it: in such a build, `claude update` may only
+# say to use the package manager, or that updates are disabled by your administrator.
+claude_update() {
+  local at
+  at="$(command -v claude)"
+  at="$(cd / && "$py" -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$at" 2>/dev/null)" || at="$(command -v claude)"
+  if { pacman -Qo "$at" || dpkg -S "$at" || rpm -qf "$at"; } >/dev/null 2>&1; then
+    say "update it with the package manager that installed $at"
+    return 0
+  fi
+  case "$at" in
+    */Caskroom/* | */Cellar/*) at="${at#*/Caskroom/}"; at="${at#*/Cellar/}"; say "brew upgrade ${at%%/*}" ;;
+    */node_modules/@anthropic-ai/*) say "npm install -g @anthropic-ai/claude-code@latest" ;;
+    /nix/*) say "update it with Nix, which installed it" ;;
+    *) say "claude update" ;;
+  esac
+}
+
 # ---- what it needs
 
 macos=0
@@ -109,7 +128,7 @@ if [ "$plugin" = 1 ]; then
   fi
   if command -v claude >/dev/null 2>&1; then
     have="$(claude --version 2>/dev/null | awk '{print $1}')"
-    ver_ge "$have" 2.1.307 || missing+=("Claude Code is $have, and the terminal plugin needs 2.1.307 or later: claude update")
+    ver_ge "$have" 2.1.307 || missing+=("Claude Code is $have, and the terminal plugin needs 2.1.307 or later: $(claude_update)")
   fi
 fi
 
@@ -282,7 +301,18 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
 ' || true)"
     if [ -n "$at" ] && [ -f "$at/sandbox/setup.mjs" ]; then
       say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
-      node "$at/sandbox/setup.mjs" --probe || notes+=("cards do not draw until the sandbox works: do what the line above says; the next card tries again, in a running claude session too")
+      # its line (npm's progress goes to stderr, and shows as it comes); when the sandbox does not work yet, the line's
+      # why and fix again in the notes, at the end. The fix, on the line after the why, often ends in a command: it
+      # keeps a line of its own, so that no words follow the command
+      if sandbox="$(node "$at/sandbox/setup.mjs" --probe)"; then
+        say "$sandbox"
+      else
+        say "$sandbox"
+        why="${sandbox%%$'\n'*}"
+        fix="${sandbox#"$why"}"
+        why="${why#thimble: }"
+        notes+=("${why:-cards cannot run yet: the sandbox check failed, as it said above.} The next card tries again${fix:+ after this:$fix}")
+      fi
     fi
     # thimble in a shell (thimble update, thimble fixes): a link to the plugin's own command, as 0.9 had it
     if [ -n "$at" ] && [ -x "$at/bin/thimble" ]; then
@@ -345,9 +375,6 @@ exec $(sq "$browser/scripts/thimble-browser") \"\$@\"
     "(browser/backend/.venv) and the built page $(mb "$built") MB."
 fi
 
-if [ ${#notes[@]} -gt 0 ]; then
-  for n in "${notes[@]}"; do say "Note: $n"; done
-fi
 if [ "$web" = 1 ]; then
   say ""
   say "To start the browser workbench, run this in a folder of files:"
@@ -356,4 +383,9 @@ if [ "$web" = 1 ]; then
   say ""
   say "It starts the server on 127.0.0.1 (port 8300, or the next free one) and prints the page's sign-in link"
   say "(or: thimble-browser FOLDER). browser/README.md says more."
+fi
+# what does not work yet or is left to do, last
+if [ ${#notes[@]} -gt 0 ]; then
+  say ""
+  for n in "${notes[@]}"; do say "Note: $n"; done
 fi

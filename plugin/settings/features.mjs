@@ -124,9 +124,11 @@ export const renamedTo = (key, saved) => (typeof saved === 'string' || typeof sa
  *  `DEFAULTS.at`, the first interactive session saves the new default where the old one stands and sets `defaultsAt`
  *  (term.ts); a value the person sets afterwards stays. None moves now: a value saved at an old default stays, so
  *  no one's settings change under them. `formerly`: the defaults a release had before (0.10.3: Citations auto cite,
- *  Evidence on demand), which the installer may have saved, so a value at one still counts as unset (atDefault). */
+ *  Evidence on demand), which the installer may have saved, so a value at one still counts as unset (atDefault).
+ *  `defaultsAt` starts at `none`, no version, and not empty: the installer gives each field its default, Claude Code
+ *  takes no empty value, and it says a field with no value is not set. */
 export const DEFAULTS = { at: '0.10.4', moved: {}, formerly: { citations: ['auto cite'], claimsMode: ['on demand'] } }
-export const DEFAULTS_FIELD = { defaultsAt: { type: 'string', title: 'Defaults seen (internal)', description: 'The thimble version whose defaults these settings have had.', default: '' } }
+export const DEFAULTS_FIELD = { defaultsAt: { type: 'string', title: 'Defaults seen (internal)', description: 'The thimble version whose defaults these settings have had.', default: 'none' } }
 
 /** The values the moved defaults change in `values`, by feature: {} once `defaultsAt` says they were applied. */
 export function defaultsFrom(values) {

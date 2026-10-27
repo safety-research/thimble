@@ -18,7 +18,10 @@ For both:
 
 For the terminal plugin:
 
-- **Claude Code** 2.1.307 or later. Check with `claude --version`.
+- **Claude Code** 2.1.307 or later. Check with `claude --version`. `claude update` updates it, unless a package manager
+  installed it: then that package manager does (`brew upgrade claude-code`,
+  `npm install -g @anthropic-ai/claude-code@latest`, or your system's), and the install names the one for yours. A
+  `claude` session that was open keeps its version: start a new one.
 - **Python 3.10 or later**, on `python3` (or the Python that `THIMBLE_PYTHON` names). thimble's kernel needs nothing
   beyond the standard library.
 - **npm**, which comes with Node.js: the plugin installs the sandbox runtime with it, about 10 MB, in `~/.thimble/srt`.
@@ -80,11 +83,12 @@ claude "install thimble from https://github.com/safety-research/thimble"
 ```
 
 Claude asks whether you want both products (the default) or the terminal plugin alone, runs the script below, helps
-you fix what is missing, and says how to use what it installed. To do it yourself:
+you fix what is missing, and says how to use what it installed. To do it yourself, clone it into a folder of its own,
+where it stays: the browser workbench builds about 1 GB in the checkout, and runs from it.
 
 ```
-git clone https://github.com/safety-research/thimble
-cd thimble
+git clone https://github.com/safety-research/thimble ~/thimble
+cd ~/thimble
 scripts/install.sh
 ```
 
@@ -104,7 +108,8 @@ until you fix it and run it again. Then it:
    `~/.thimble-browser` readable by you alone), 2 your Claude Code sign-in (it shows that this launches headless Claude
    Code sessions in the background and asks you to confirm), or 3 Workload Identity Federation (the path of its config
    file). It checks the choice with one small call.
-5. says how much disk space the browser workbench takes, and whether the sandbox works on this machine.
+5. says how much disk space the browser workbench takes, and, last, what does not work yet or is left to do, such as a
+   card sandbox that cannot start here, with its fix.
 
 Options:
 
@@ -164,9 +169,11 @@ The browser workbench:
 
 ## Settings
 
-- **The plugin's features.** Citations, Cards (with `v`), Squeeze, Catch-up, Labels and Coverage can each be turned on or
-  off: click `thimble` at the left of the bar or run `/thimble-settings`. Claude Code keeps the values in its settings
-  (`pluginConfigs`). With Citations off, the checker makes no model call.
+- **The plugin's features.** Citations, Cards (`v`), Rewrite (`s`), Catch-up (`b`), Explainers, Heads-ups, Evidence
+  (`c`), Labels (`l`) and Coverage (`r`) can each be turned off, and Citations, Explainers, Heads-ups and Evidence can
+  work after each answer or only when you ask; Minimal sets those four to when you ask. Click `thimble` at the left of
+  the bar or run `/thimble-settings`. Claude Code keeps the values in its settings (`pluginConfigs`). With Citations
+  off, the checker makes no model call.
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
   command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
 - **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).
@@ -188,6 +195,19 @@ before 0.10.0 made in a data folder).
 
 ## When something does not work
 
+The install:
+
+- **Claude Code is older than 2.1.307, and `claude update` says updates are disabled.** A package manager installed
+  Claude Code (Homebrew, npm, or your system's packages, such as an AUR or Nix package), and it updates it: the
+  install names the command for yours. On a machine that an organization manages, whoever manages it updates Claude
+  Code. Then start a new `claude` session: one that was open keeps its version.
+- **Claude Code's own sandbox is on** (`"sandbox": {"enabled": true}` in its settings, so Claude's commands run in
+  it). When Claude installs thimble, the install writes outside the folder (the checkout, such as `~/thimble`, and
+  `~/.claude/plugins`, `~/.thimble`, `~/.thimble-browser`, `~/.local/bin`) and downloads packages, which that sandbox
+  may refuse; Claude then asks to run those commands outside it, or you run `scripts/install.sh` in your own terminal.
+  The install's check of the card sandbox may fail inside Claude Code's sandbox for that reason alone. The check that
+  counts is a card drawn in a new `claude` session: a card that cannot draw says why in the line above the prompt.
+
 The terminal plugin:
 
 - **No line above the prompt, and no citations.** The plugin is not loaded in this session. Check that the folder is
@@ -201,6 +221,12 @@ The terminal plugin:
   cannot reach its registry to install the sandbox, `npm ping` shows why. The next card tries again, with no new
   session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, where
   `<plugin>` is the installed plugin's folder, `~/.claude/plugins/cache/thimble/thimble/<version>`.
+- **The line above the prompt says your Node is too old, though a newer one is installed.** The plugin runs on the
+  `node` that the terminal you start `claude` from finds first. A Node manager (nvm, fnm, asdf) that your shell's
+  startup file does not load is not used, even when the install loaded it in its own commands, as Claude may when it
+  installs thimble. In a new terminal, `command -v node; node --version` says which Node that is. Add the manager's
+  lines to `~/.zshrc` or `~/.bashrc` (or put the newer Node first on your `PATH`), open a new terminal, and start
+  `claude` there: `/reload-plugins` keeps the session's old `PATH`.
 
 The browser workbench:
 

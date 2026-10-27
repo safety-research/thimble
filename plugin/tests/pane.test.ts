@@ -208,10 +208,9 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   const went: Any[] = []
   const next = async (e: Any) => { went.push(e.element); return {} }
   await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-citations-manual', origin: { kind: 'person' } }, next)
-  // (the first change also saves defaultsAt, settings/term.ts)
-  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
+  expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
   await s.call('ui.focus', { component: 'Pane', requestId: 'thimble', element: 'mode-claimsMode-auto', origin: { kind: 'person' } }, next)
-  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(1)
+  expect(set.length).toBe(1)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('claimsMode')
   expect(went).toEqual(['mode-citations-manual', 'mode-claimsMode-on demand'])
   // a click on a choice of another row sets it and picks that row, the ring on the choice now set: the tint and the
