@@ -9,7 +9,8 @@ For both:
 
 - **macOS or Linux.**
 - **Node.js** on your `PATH`: 22.18 or later for the plugin, 22.12 or later for the browser workbench. Check with
-  `node --version`.
+  `node --version`. The plugin is tested on Node 22, 24 and 26, on Linux and macOS, and each week on Node's newest
+  release.
 
 - **bubblewrap, socat and ripgrep**, on Linux, for Anthropic's [sandbox
   runtime](https://github.com/anthropics/sandbox-runtime), which the code Claude writes for a card runs in (on Ubuntu:
@@ -202,6 +203,11 @@ The terminal plugin:
   sandbox, `npm ping` shows why. The next card tries again, with no new session. To test the sandbox by hand, run
   `node <plugin>/sandbox/setup.mjs --probe`, where `<plugin>` is the installed plugin's folder,
   `~/.claude/plugins/cache/thimble/thimble/<version>`.
+- **Cards stopped drawing when Node was updated.** The card runner runs under Node's permission model, and a new Node
+  can refuse something it does (Node 25 refused its socket). The "Cards cannot draw" line, like `setup.mjs --probe`,
+  says how the runner ended and on which Node. Update thimble first (`claude plugin update thimble@thimble`, or
+  `scripts/install.sh` in your checkout): a fix may be out. Until one is, make a tested Node (22, 24 or 26) the first
+  `node` on your `PATH`, start `claude` again, and report the line at https://github.com/safety-research/thimble/issues.
 
 The browser workbench:
 
