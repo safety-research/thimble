@@ -202,6 +202,7 @@ async def test_a_view_s_builder_s_bash_writes_its_folders_alone_on_the_api_engin
         pytest.skip(why)
     from app import dev, views  # noqa: PLC0415
 
+    views.ensure_local(space.ws)  # the manifest is there before any build, as the server makes it
     other = views.views_dir(CORPUS) / "other"
     other.mkdir(parents=True)
     (space.ws / "trusted").mkdir(exist_ok=True)
@@ -213,6 +214,11 @@ async def test_a_view_s_builder_s_bash_writes_its_folders_alone_on_the_api_engin
         out = await runtime_tools.call(box(spec), "Bash", {"command": cmd})
         assert out.text.strip() == want, (p, out.text)
         assert want == "refused" or p.read_text() == "x\n"
+    # a new file beside its folders, in the workspace or the extension, never reaches the disk (on Linux the folders on
+    # the way to them are the sandbox's empty stand-ins)
+    for p in (space.ws / "new.txt", views.local_dir(CORPUS) / "new.json", views.views_dir(CORPUS) / "new" / "view.json"):
+        await runtime_tools.call(box(spec), "Bash", {"command": f"mkdir -p {p.parent}; echo x > {p}"})
+        assert not p.exists(), p
 
 
 async def test_no_other_agent_writes_a_view_s_folder(space, tmp_path):
