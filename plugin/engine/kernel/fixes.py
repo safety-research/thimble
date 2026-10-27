@@ -395,17 +395,20 @@ def ensure_live() -> dict[str, Any]:
 def _leftovers_aside(repo: Path) -> None:
     """Before a clone install's live is made in the person's clone: what a thimble home that was deleted left there
     goes aside, so that nothing of it is lost and the new fixes see none of it. git forgets the worktrees whose folders
-    are gone; then, with no records in this home, thimble's own mine (_thimbles_mine) and every ref under refs/thimble/
-    move under refs/thimble-old/<UTC time>/ in one update (refs/heads/mine as heads/mine, refs/thimble/fixes/1 as
-    thimble/fixes/1). Any other mine, or a mine while this home has records, stops the request."""
+    are gone; then, with no records in this home and no other thimble home's live in the clone (_other_live), thimble's
+    own mine (_thimbles_mine) and every ref under refs/thimble/ move under refs/thimble-old/<UTC time>/ in one update
+    (refs/heads/mine as heads/mine, refs/thimble/fixes/1 as thimble/fixes/1), and no other ref (a branch mine/wip stays).
+    Any other mine, or a mine while this home has records, stops the request."""
     run(["git", "worktree", "prune"], cwd=repo, check=False)
     has = run(["git", "rev-parse", "--verify", "-q", "refs/heads/mine"], cwd=repo, check=False).returncode == 0
     recs = records()
     if has and (recs or not _thimbles_mine(repo)):
         raise FixError(f"your clone {repo} already has a branch named mine; rename it (git branch -m mine "
                        "mine-old), then ask again")
-    old = [] if recs else git("for-each-ref", "--format=%(objectname) %(refname)", "refs/heads/mine", "refs/thimble/",
-                              cwd=repo).splitlines()
+    old = [] if recs or _other_live(repo) else [
+        x for x in git("for-each-ref", "--format=%(objectname) %(refname)", "refs/heads/mine", "refs/thimble/",
+                       cwd=repo).splitlines() if x.partition(" ")[2] == "refs/heads/mine"
+        or x.partition(" ")[2].startswith("refs/thimble/")]
     if not old:
         return
     stamp = aside = "refs/thimble-old/" + time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
@@ -421,17 +424,30 @@ def _leftovers_aside(repo: Path) -> None:
 
 
 def _thimbles_mine(repo: Path) -> bool:
-    """Whether the clone's mine is one that a deleted thimble home left: no worktree has it checked out or is another
-    thimble home's live (which is detached while that home's fixes are off), and thimble committed each commit that is
-    only on mine (on no other branch or tag). A mine with no commits of its own, such as the release commit, is one."""
+    """Whether the clone's mine is one that a deleted thimble home left: no worktree has it checked out, rebases or
+    bisects it (git refuses to move a branch a worktree uses), no worktree is another thimble home's live (which is
+    detached while that home's fixes are off), and thimble made or recorded each commit that is only on mine (on no
+    other branch, tag or remote branch, and not in HEAD's history): thimble committed it, or it is the very commit that a
+    ref under refs/thimble/fixes/ names (a fix thimble update --continue recorded, which Claude committed as the person).
+    A mine with no commits of its own, such as the release commit, is one."""
     wts = git("worktree", "list", "--porcelain", cwd=repo).splitlines()
-    paths = [Path(x.partition(" ")[2]) for x in wts if x.startswith("worktree ")]
-    if "branch refs/heads/mine" in wts or any(p.name == "live" and (p.parent / "release.json").exists() for p in paths):
+    if "branch refs/heads/mine" in wts or _other_live(repo):
+        return False
+    if run(["git", "branch", "-f", "--no-track", "mine", "refs/heads/mine"], cwd=repo, check=False).returncode != 0:
         return False
     me = as_thimble()
-    own = git("log", "--format=%cn <%ce>", "refs/heads/mine", "--not", "--exclude=mine", "--branches", "--tags", "--",
-              cwd=repo).splitlines()
-    return all(x == f"{me['GIT_COMMITTER_NAME']} <{me['GIT_COMMITTER_EMAIL']}>" for x in own)
+    recorded = set(git("for-each-ref", "--format=%(objectname)", "refs/thimble/fixes/", cwd=repo).split())
+    own = git("log", "--format=%H %cn <%ce>", "refs/heads/mine", "--not", "--exclude=mine", "--branches", "--tags",
+              "--remotes", "HEAD", "--", cwd=repo).splitlines()
+    return all(x.partition(" ")[0] in recorded
+               or x.partition(" ")[2] == f"{me['GIT_COMMITTER_NAME']} <{me['GIT_COMMITTER_EMAIL']}>" for x in own)
+
+
+def _other_live(repo: Path) -> bool:
+    """Whether a worktree of the clone is another thimble home's live (live, with that home's release.json beside it)."""
+    wts = git("worktree", "list", "--porcelain", cwd=repo).splitlines()
+    paths = [Path(x.partition(" ")[2]) for x in wts if x.startswith("worktree ")]
+    return any(p.name == "live" and (p.parent / "release.json").exists() for p in paths)
 
 
 def place_release(base: str) -> None:
