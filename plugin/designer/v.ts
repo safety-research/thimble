@@ -35,7 +35,7 @@ import { readKept, writeKept } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
 import { tempDir } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
-import { cut, fenced } from '../core/text.js'
+import { cut, cutWords, fenced } from '../core/text.js'
 import { mainRuns } from '../core/turn'
 import { plainSentence } from '../marks/message.js'
 import { replyOf } from '../marks/store'
@@ -64,6 +64,8 @@ export type Design = {
 const DESCRIPTION = 'card of the last answer (v)'
 /** The most of a card's text copy main reads. */
 const TELL_CHARS = 3000
+/** The most of the fork's last words a failure line quotes, in cells: their first paragraph, cut at a word. */
+const SAID_CELLS = 400
 /** The tools the fork may call; Write only into the temp folder. */
 const TOOLS = new Set(['Read', 'Grep', 'Glob', 'Bash', 'Write', 'mcp__thimble__card'])
 
@@ -75,7 +77,8 @@ const ANSWER_FILE = 'answer.json'
 /** The design that runs (one at a time), as this load of the module holds it; its state is in $.state too. */
 let current: Design | null = null
 
-const firstLine = (s: string) => String(s || '').split('\n').map(l => l.trim()).find(Boolean) || ''
+/** A message's first paragraph, its lines joined. */
+const firstParagraph = (s: string) => (String(s || '').trim().split(/\n\s*\n/)[0] ?? '').split('\n').map(l => l.trim()).filter(Boolean).join(' ')
 const reason = (err: unknown) => cut(String((err as Error)?.message || err), 200)
 const running = () => current?.status === 'held' || current?.status === 'running'
 
@@ -179,7 +182,7 @@ async function finish($: Engine, d: Design, e: { reason: string; answer: string 
     await end($, d, 'failed')
     return noticeLine($, "The model's safeguards refused to draw this card. Another model may draw it: /model.", 'v')
   }
-  const said = cut(firstLine(e.answer), 160)
+  const said = cutWords(firstParagraph(e.answer), SAID_CELLS)
   if (e.reason === 'error') return end($, d, 'failed', `× v could not draw a card: the model call failed${said ? ` (${said})` : ''}.`)
   const drawn: CardMeta[] = []
   for (const id of await anchoredAt($, d.anchorRow)) {

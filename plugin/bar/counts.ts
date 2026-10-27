@@ -75,7 +75,7 @@ export function shareOfFiles(part: number, all: number): string {
 const EMPTY_COVERAGE = { files: [], untouched: {}, groups: [], types: [], total: { files: 0, touched_files: 0, seen_files: 0 } }
 
 /** The folder coverage counts: the one under analysis, else the one the session started in (never the home folder). */
-async function coverageRoot($: Engine): Promise<string | null> {
+export async function coverageRoot($: Engine): Promise<string | null> {
   const root = await rootHere($)
   if (root) return root
   const start = await startDir($)

@@ -18,7 +18,8 @@
 //
 // One look, in order:
 // 1. What the conversation does not show of the work: the cards main drew in the looked-at turns (title and text copy,
-//    cards/draw.ts cardText), and `thimble coverage` of the session.
+//    cards/draw.ts cardText), and `thimble coverage` of the session, which the look waits for a few seconds at most
+//    (COVERAGE_MS) and never runs in the home folder.
 // 2. The pass: one `$.model.fork` over the conversation as main last sent it, so the prompt cache serves that prefix.
 //    Its prompt is the frame (prompts/observer.md) with the enabled lenses' sections (lenses.mjs, compose.mjs), then
 //    the turn template (prompts/observer-turn.md): the messages to read, the evidence, each lens's digest of what
@@ -38,6 +39,7 @@
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
 import type { EngineInterface, Register } from 'claude-code'
 
+import { coverageRoot } from '../bar/counts'
 import { failNotice } from '../bar/notice'
 import { cardText } from '../cards/draw'
 import { metaOf } from '../cards/store'
@@ -45,7 +47,7 @@ import { CLAIMS_FIND, claimsFindEnd, claimsFindStart, claimsLookFailed, claimsMe
 import { messageOf, turnOf, turnOfRow, type TurnRec } from '../core/answers'
 import { isPersonPrompt, oneLine } from '../core/answers.mjs'
 import { textView } from '../core/answerview'
-import { readKept, rootHere, runThimble, startDir, writeKept } from '../core/env'
+import { readKept, runThimble, writeKept } from '../core/env'
 import { modelWhy } from '../core/why.js'
 import { explainMerge, explainState } from '../explain/seam'
 import { sessionKey } from '../hooks/conversation'
@@ -77,6 +79,10 @@ type Part = { lens: Lens; text: string; id: string }
 const LONG_REPLY = 600 // characters: words Claude wrote before it went on working are a reply worth a look from this long
 const LOOK_DELAY = 50 // ms after a message is queued before the worker takes the queue
 const RETRY_MS = 2000 // ms before a failed pass is tried again
+// ms the look waits for its `thimble coverage`, which stops then. The first count of a big folder reads every row of
+// its tables, for minutes; the bar counts the same folder after each turn with all the time that takes
+// (bar/counts.ts), and the kernel keeps the row counts, so a later look's count is quick
+const COVERAGE_MS = 10000
 const COVERAGE_CHARS = 2400
 const CARD_CHARS = 3000
 
@@ -118,11 +124,13 @@ async function cardsNow($: Engine, turns: TurnRec[]): Promise<string> {
   return out.length ? out.join('\n\n') : 'No cards in these turns.'
 }
 
-/** `thimble coverage` of the session: what it read of the folder, in words. */
+/** `thimble coverage` of the session: what it read of the folder, in words. The folder is the one the bar counts
+ *  (bar/counts.ts coverageRoot), so never the home folder, whose walk takes minutes. */
 async function coverageNow($: Engine): Promise<string> {
-  const root = (await rootHere($)) || (await startDir($))
+  const root = await coverageRoot($)
+  if (!root) return 'No folder is under analysis (the session started in the home folder).'
   try {
-    const r = await runThimble($, root, ['coverage'], { session: await sessionKey($), timeoutMs: 90000 })
+    const r = await runThimble($, root, ['coverage'], { session: await sessionKey($), timeoutMs: COVERAGE_MS })
     return r.code === 0 ? cut(r.stdout.trim(), COVERAGE_CHARS) : `(thimble coverage failed: ${cut((r.stderr || r.stdout).trim(), 200)})`
   } catch (err) {
     return `(thimble coverage failed: ${cut(String((err as Error)?.message || err), 200)})`
