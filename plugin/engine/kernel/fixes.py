@@ -1695,10 +1695,35 @@ def _move(change) -> dict[str, Any]:
     return {**(out or {}), **synced}
 
 
+def _live_as_is() -> dict[str, Any]:
+    """What a y changes before it knows that its fix fits the fixes on: the branch or commit live shows, and state.json
+    (None when there is none), for _put_back."""
+    live = live_dir()
+    state = home() / "state.json"
+    return {"branch": run(["git", "symbolic-ref", "-q", "--short", "HEAD"], cwd=live, check=False).stdout.strip(),
+            "head": git("rev-parse", "HEAD", cwd=live), "state": state.read_text() if state.exists() else None}
+
+
+def _put_back(was: dict[str, Any]) -> None:
+    """live and state.json as they were before a y whose fix does not fit the fixes on (_live_as_is): fixes that were
+    all off stay off, and live shows what it showed, its plugin.json with the version it had (_stamp)."""
+    _unstamp()
+    git("checkout", "-q", *([was["branch"]] if was["branch"] else ["--detach", was["head"]]), cwd=live_dir(), hooks=False)
+    state = home() / "state.json"
+    if was["state"] is None:
+        state.unlink(missing_ok=True)
+    else:
+        tmp = state.with_suffix(".json.tmp")
+        tmp.write_text(was["state"])
+        tmp.replace(state)
+    _stamp()
+
+
 def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     """y: the fix goes on. thimble points the marketplace at live the first time (before anything else, so that a y
     whose pointing fails changes nothing), cherry-picks the fix's commit onto mine unless mine holds it already, and has
-    Claude Code copy live; the plugin then runs /reload-plugins."""
+    Claude Code copy live; the plugin then runs /reload-plugins. A fix that does not fit the fixes on leaves live and
+    state.json as they were (_put_back), so a y while every fix is off turns none of them on."""
     rec = get(fid)
     check_ask(rec["id"], secret)
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
@@ -1714,6 +1739,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
 
     def change():
         live = live_dir()
+        was = _live_as_is()
         # Claude Code's marketplace on live first: when that fails, mine, the fix's ref and its record stay as they were
         _repoint()
         _unstamp()
@@ -1729,6 +1755,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
                     env=as_thimble())
             if p.returncode != 0:
                 run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
+                _put_back(was)
                 r = get(rec["id"])
                 r.update(state="redo", error="it does not fit the fixes you have on")
                 put(r)
@@ -1746,11 +1773,13 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
 
 def _swap(fid: int) -> dict[str, Any]:
     """y on a fix changed in place: its new version takes the place of the one before, which stays under
-    refs/thimble/prev/<id> for u. A fix that was on is rebuilt in its place in mine; one that was off goes on last."""
+    refs/thimble/prev/<id> for u. A fix that was on is rebuilt in its place in mine; one that was off goes on last. A new
+    version that does not fit the fixes on leaves live and state.json as they were (_put_back)."""
     live = live_dir()
     rec = get(fid)
     p = rec.get("prev") or {}
     old = git("rev-parse", "-q", "--verify", f"refs/thimble/fixes/{fid}", cwd=live, check=False) or str(p.get("commit") or "")
+    was = _live_as_is()
     # Claude Code's marketplace on live first: when that fails, mine, the fix's refs and its record stay as they were
     _repoint()
     _unstamp()
@@ -1768,6 +1797,7 @@ def _swap(fid: int) -> dict[str, Any]:
     if fid in failed:
         git("update-ref", f"refs/thimble/fixes/{fid}", old, cwd=live)
         _rebuild([i for i in order if p.get("state") == "on" or i != fid])
+        _put_back(was)
         raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; r asks Claude to redo it")
     for i in failed:
         x = get(i)
