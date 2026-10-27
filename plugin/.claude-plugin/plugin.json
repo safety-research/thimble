@@ -135,7 +135,7 @@
       "type": "string",
       "title": "Defaults seen (internal)",
       "description": "The thimble version whose defaults these settings have had.",
-      "default": ""
+      "default": "none"
     }
   }
 }

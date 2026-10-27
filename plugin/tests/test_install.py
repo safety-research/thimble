@@ -39,10 +39,12 @@ def test_the_defaults_are_given_as_claude_code_takes_them(tmp_path):
 
 
 def test_every_default_of_the_plugin_has_a_form_claude_code_takes():
-    """Each default of the real manifest is a boolean or a string; a string default that is an option is one."""
+    """Each default of the real manifest is a boolean or a string; a string default that is an option is one. None is
+    empty: the installer cannot give an empty value, and Claude Code says a field it has no value for is not set."""
     manifest = json.loads((ROOT / "plugin" / ".claude-plugin" / "plugin.json").read_text())
     for key, field in manifest["userConfig"].items():
         d = field.get("default")
         assert isinstance(d, (bool, str)), key
-        if isinstance(d, str) and d and "options" in field:
+        assert d != "", key
+        if isinstance(d, str) and "options" in field:
             assert d in field["options"], key
