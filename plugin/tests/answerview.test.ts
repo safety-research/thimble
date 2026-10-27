@@ -104,10 +104,11 @@ test('a key at an empty prompt reads no state once the plugin has read it: its h
   expect(await press('c')).toEqual({ text: 'c', cursor: 1 })
   expect(gets).toBe(0)
   expect(selections).toBe(1)
-  // w opens the claims once its word window closed: at the key it reads nothing, though words stand selected
+  // w opens the claims while the bar names them, which it does not with no answer: w is typed, and at the key it reads
+  // nothing, though words stand selected
   selected = { text: 'two runs failed', requestId: 'row-t1' }
   selections = 0
-  expect(await press('w')).toEqual({ text: '', cursor: 0 })
+  expect(await press('w')).toEqual({ text: 'w', cursor: 1 })
   expect(gets).toBe(0)
   expect(selections).toBe(0)
 })
@@ -119,7 +120,9 @@ test('the keys read what they need as the plugin loads, so even the first key af
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: promptStub(e.path) ?? '' }))
+  // the conversation's claims, kept from before: the bar names w
+  const claims = JSON.stringify({ v: 2, session: 's-keys-load', claims: [{ id: 'c1', text: 'Run 4 failed.', by: 'claude', said: [] }], clusters: [], gaps: [] })
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: e.path.endsWith('/s-keys-load/claims.json') ? claims : promptStub(e.path) ?? '' }))
   on('fs.write', () => ({ value: undefined }))
   on('fs.list', () => ({ value: [] }))
   on('fs.exists', () => ({ value: false }))
@@ -133,9 +136,61 @@ test('the keys read what they need as the plugin loads, so even the first key af
   on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   gets = 0
-  // the first key, w: taken, and nothing read
+  // the first key, w, which the bar names: taken, and nothing read
   expect(await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'w' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'w' } as never)).toEqual({ text: '', cursor: 0 })
   expect(gets).toBe(0)
+})
+
+const BAND = { plugin: 'thimble', component: 'AbovePrompt', surface: 'terminal', requestId: 'above', props: { hasSurvey: false, isWorking: false, maxRows: 12, bodyColumns: 100, scroll: { offset: 0, bodyRows: 12 }, view: {} }, viewport: { columns: 100, rows: 40, isFullscreen: true } } as never
+
+test('w at an empty prompt is taken only while the bar names it: before any answer it is typed, so a question that starts with w keeps it, and nothing opens', { options: { claimsMode: 'on demand' } }, async ($, on) => {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
+  const clock = mock.clock(on, { now: 0 })
+  on('session.id', () => ({ value: 's-keys-w' }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('session.messages', () => ({ value: [] }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: promptStub(e.path) ?? '' }))
+  on('fs.write', () => ({ value: undefined }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', () => ({ value: false }))
+  on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
+  on('env.set', () => ({ value: {} }))
+  on('tool.register', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'x' } }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('ui.scroll', () => ({ value: undefined }))
+  on('ui.panes', () => ({ value: [] }))
+  const opens: string[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
+  on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
+  on('prompt.submit', (_$: unknown, e: { text: string }) => ({ text: e.text }))
+  on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  // what Claude Code's box does with a key thimble does not take: types it at the cursor
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  const edit = (k: string, text = '') => $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text, cursor: text.length, start: text.length, end: text.length, inputText: k } as never)
+  // no answer yet: the bar names no w, so w is the question's first letter, typed, and the pause after it keeps it
+  expect(textOf(await $.ui.render(BAND))).not.toContain('evidence')
+  expect(await edit('w')).toEqual({ text: 'w', cursor: 1 })
+  await clock.advance(1000)
+  expect(await edit('h', 'w')).toEqual({ text: 'wh', cursor: 2 })
+  await clock.advance(1000)
+  expect(opens).toEqual([])
+  // an answer waits for its claims: the bar names w evidence, and w opens the pane once its word window closed
+  await $.prompt.submit({ text: 'Which runs failed?', origin: { kind: 'composer' } } as never)
+  await $.turn.start({ text: 'Which runs failed?', turnId: 't1' } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-t1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await clock.advance(1000)
+  expect(textOf(await $.ui.render(BAND))).toContain('w evidence')
+  expect(await edit('w')).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(opens).toEqual(['Evidence'])
 })
 
 test("the features' letters are thimble's own, so no card takes them", () => {

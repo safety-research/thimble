@@ -176,7 +176,8 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
   await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed on the [p95 check](#). Run 9 failed on a timeout. The cache was cold.'] })
   await answered(s, { id: 't2', prompt: 'Why?', rows: ['Because of the cache.'] })
-  // c is cite's alone: the claims do not take it
+  // the bar names w, which takes the key; c is cite's alone: the claims do not take it
+  expect((await claimsBar(s.$, () => true, false)).map(x => x.key)).toEqual(['w'])
   expect(await claimsKey(s.$, 'c', 0)).toBe(null)
   const take = await claimsKey(s.$, 'w', 0)
   expect(take?.later).toBeDefined()
@@ -402,6 +403,7 @@ test('w in a terminal too narrow for the pane fails in red with the click on the
   await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['[Run 4 failed](#).'] })
   const line = async () => ((await failLineNow(s.$)) as Any)?.text ?? ''
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
+  await claimsBar(s.$, () => true, false)
   await (await claimsKey(s.$, 'w', 0))!.later!()
   await settle()
   expect(await line()).toBe('w needs a wider terminal: widen the window to show the side pane, or click “w 1 claim”.')

@@ -4,10 +4,10 @@
 // pure functions), graph.js and pane.tsx (the pane), lens.mjs (the observer's claims lens); prompts/lens-claims.md.
 //
 //   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
-//   claimsKey($, key, until)           w: the Claims pane, or closed while the side pane shows it, once the word
-//                                      window closed (a taker as hooks/keys.ts takes it)
+//   claimsKey($, key, until)           w, while the bar names it: the Claims pane, or closed while the side pane shows
+//                                      it, once the word window closed (a taker as hooks/keys.ts takes it)
 //   claimsBar($, on, preview)          its items at the bar's right (`w 11 claims`, lit when a claim was corrected); a
-//                                      press does what w does
+//                                      press does what w does. claimsReady: whether it names w, as the plugin loads
 //   claimsState($)                     what the claims lens's digest reads (./lens.mjs): every claim so far and the
 //                                      clusters, as its {{CLAIMS}}, {{CLUSTERS}} and {{GROWN}} lines
 //   claimsMerge($, look)               what one look of the observer gave for the claims lens (look.out.claims,
@@ -43,8 +43,12 @@ type Any = any
 export const CLAIMS_KEYS = ['w']
 export const CLAIMS_FIND = FIND
 
+/** Whether the bar names w, as it last drew (claimsBar): w acts only then, as r and l act only while the bar names them
+ *  (bar/register.ts barKey). Kept in memory, so the key reads no state. */
+let named = false
+
 export async function claimsKey($: Engine, key: string, _until: number): Promise<Take | null> {
-  if (key !== 'w' || !featureOn('claims')) return null
+  if (key !== 'w' || !named || !featureOn('claims')) return null
   // after the word window, as 0.10 did: `w` that starts a word is typed
   return { later: () => toggleClaims($, true) }
 }
@@ -57,8 +61,19 @@ async function toggleClaims($: Engine, byKey = false): Promise<void> {
 }
 
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  if (!on('claims')) return []
-  if (preview) return [{ id: 'claims', key: 'w', words: 'evidence' }]
+  if (preview) return on('claims') ? [{ id: 'claims', key: 'w', words: 'evidence' }] : []
+  const items = on('claims') ? await barItems($) : []
+  named = items.length > 0
+  return items
+}
+
+/** Whether the bar names w, worked out as the plugin loads (core/answerview.ts keysReady), so a w before the bar's
+ *  first drawing acts as the bar will name it. */
+export async function claimsReady($: Engine): Promise<void> {
+  await claimsBar($, featureOn, false)
+}
+
+async function barItems($: Engine): Promise<BarItem[]> {
   const press = () => toggleClaims($)
   // no claims yet: the pane finds them on demand, so the item shows, without a count, once an answer waits for it
   if (!(await claimCount($))) return (await claimsToFind($)).answers ? [{ id: 'claims', key: 'w', words: 'evidence', press }] : []

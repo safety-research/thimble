@@ -27,7 +27,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { framesIn, noteFrames } from '../cards/draw'
-import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
+import { CLAIMS_KEYS, claimsBar, claimsKey, claimsReady } from '../claims/seam'
 import { EXPLAIN_KEYS, HEADS_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, headsBar, headsKey, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
@@ -219,12 +219,13 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(threadsKey($, key, until), null))
 }
 
-/** What the features' keys read of the state (whether the tray and the squeeze chips hold the keys), read as the plugin
- *  loads: each load starts with nothing kept (a change in the settings loads it again), and the first key would read it
- *  inside the few milliseconds Claude Code gives the key's hook. */
+/** What the features' keys read of the state (whether the tray and the squeeze chips hold the keys, whether the bar
+ *  names w), read as the plugin loads: each load starts with nothing kept (a change in the settings loads it again), and
+ *  the first key would read it inside the few milliseconds Claude Code gives the key's hook. */
 export async function keysReady($: Engine): Promise<void> {
   await safe(trayHolds($), false)
   await safe(squeezeHolds($), false)
+  await safe(claimsReady($), undefined)
 }
 
 // ------------------------------------------------------------------------------------------------ hooks
