@@ -5,6 +5,7 @@
 //   checking 12 citations       the checker forks over a reply's marks (marks/checker.ts)
 //   drawing a card              the designer fork v started, until its first card (designer/v.ts)
 //   improving the card          the designer fork after its first card, until it ends
+//   publishing an artifact      the fork p started on a card, until it ends (cards/head.ts)
 //   counting coverage           `thimble coverage`: the bar's count, the coverage pane (bar/counts.ts)
 //   labeling <name>             a --prompt label's model reads (labels/labels.ts)
 //

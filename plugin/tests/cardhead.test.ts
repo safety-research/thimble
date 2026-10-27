@@ -1,10 +1,11 @@
 // The artifact of a card (cards/head.ts), on a plain engine whose $.agent.spawn runs this module's agent.spawn hook and
-// names the fork it started: while the fork works the card says `creating artifact…`; its last message's link shows
-// under the card, and a message with no link says why there is none; one press publishes a card once, and a word that
-// starts with p leaves the card's link as it was. All data is made up. `claude plugin test plugin`.
+// names the fork it started: while the fork works the card and the bar's busy line say so; its last message's link
+// shows under the card, and a message with no link says why there is none; one press publishes a card once, and a word
+// that starts with p leaves the card's link as it was. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { artifactLine, launch, registerCardHead } from '../cards/head'
+import { busySteps } from '../bar/busy'
+import { artifactLine, artifactMaking, launch, registerCardHead } from '../cards/head'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -20,8 +21,9 @@ function setup() {
   const state = new Map<string, unknown>()
   // the forks Claude Code started: the spawns this module's agent.spawn hook let go
   const spawns: Any[] = []
-  // the clock; a sleep (the word window's) lasts until the test wakes it
-  const clock = { now: 1000, wake: () => undefined as unknown }
+  // the clock; a sleep (the word window's) lasts until the test wakes it, and the timers wait until it ticks
+  const timers: (() => unknown)[] = []
+  const clock = { now: 1000, wake: () => undefined as unknown, tick: async () => { for (const f of timers.splice(0)) f(); await settle() } }
   const started = async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-made-up-${spawns.length}` } }
   const $: Any = {
     state: {
@@ -29,7 +31,7 @@ function setup() {
       set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true } },
     },
     agent: { spawn: async (a: Any) => hooks['agent.spawn'][0]($, a, Object.assign(async () => started(a), { origin: { plugin: 'thimble' } })) },
-    clock: { now: async () => clock.now, sleep: () => new Promise<void>(r => { clock.wake = r }), after: () => ({ cancel() {} }) },
+    clock: { now: async () => clock.now, sleep: () => new Promise<void>(r => { clock.wake = r }), after: (_ms: number, f: () => unknown) => { timers.push(f); return { cancel() {} } } },
     ui: { invalidate: () => undefined },
   }
   const el = (type: string) => (props: Any) => ({ type, props })
@@ -44,12 +46,31 @@ const settle = () => new Promise(r => setTimeout(r, 0))
 
 const words = (n: Any): string => (n == null ? '' : typeof n === 'string' ? n : Array.isArray(n) ? n.map(words).join('') : words(n.props?.children ?? n.props?.label))
 
+// first in the file: the bar's jobs are the module's, and no test before it leaves one that runs
+test('while a fork publishes the card, the bar\'s busy line names the step; it goes once the fork ended', async () => {
+  const { $, ended, clock } = setup()
+  await launch($, 'c-made-up-0', 'PROMPT artifact', 0).now()
+  await settle()
+  expect(busySteps()).toContain('publishing an artifact')
+  // the step shows once it ran a while, and the line ticks
+  clock.now += 1000
+  await clock.tick()
+  await ended('agent-made-up-1', 'https://claude.ai/artifact/made-up-0')
+  // the next tick finds the fork ended
+  await clock.tick()
+  expect(busySteps()).not.toContain('publishing an artifact')
+})
+
 test('a card being made an artifact says so, then shows the link the fork ended with', async () => {
   const { $, E, ended } = setup()
   await launch($, 'c-made-up-1', 'PROMPT artifact', 0).now()
-  await new Promise(r => setTimeout(r, 0))
-  expect(words(await artifactLine($, E, 'c-made-up-1'))).toBe('creating artifact…')
+  await settle()
+  expect(await artifactMaking($, 'c-made-up-1')).toBe(true)
+  const making = words(await artifactLine($, E, 'c-made-up-1'))
+  expect(making).toContain('link')
+  expect(making).not.toContain('×')
   await ended('agent-made-up-1', 'Published.\nhttps://claude.ai/artifact/made-up-123')
+  expect(await artifactMaking($, 'c-made-up-1')).toBe(false)
   const line = await artifactLine($, E, 'c-made-up-1')
   const link = line.props.children.find((c: Any) => c.type === 'Link')
   expect(link.props.href).toBe('https://claude.ai/artifact/made-up-123')

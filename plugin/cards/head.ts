@@ -5,8 +5,9 @@
 //   a   a side thread about the card, as a click on `ask` starts (core/answerview.ts cardAsk)
 //   p   a private claude.ai artifact of the card: a fork of the conversation (core/forks.ts, kind `artifact`, with
 //       prompts/artifact.md) publishes it with its Artifact tool, and its last message is the link. One publish of a
-//       card at a time: a press while one starts or runs starts nothing. While it works the card says `creating
-//       artifact…`, then `↗ <link>` under it, or why there is none.
+//       card at a time: a press while one starts or runs starts nothing. While it works the header says `publishing…`
+//       in place of `p artifact` (draw.ts), the bar's busy line `publishing an artifact`, and the line under the card
+//       that its link will show there; then `↗ <link>` under it, or why there is none.
 //
 // p is a letter too (hooks/keys.ts holds the word window): as with v, the fork is spawned inside the key's own hook,
 // and this module's agent.spawn hook holds it until the window closes, refusing it when a letter came. The card shows
@@ -15,11 +16,13 @@
 //
 //   headKey($, key, until)      what a or p does at an empty prompt now (hooks/keys.ts asks), or null when it types
 //   startArtifact($, id, until) p's work, from the key or a click on `artifact`
+//   artifactMaking($, id)       whether the card's artifact is being made now
 //   artifactLine($, E, id)      the line under a card about its artifact, or null
 //
 //   state: cardArtifacts (each card's artifact, by card id)
 import type { EngineInterface, Register } from 'claude-code'
 
+import { busyWhile } from '../bar/busy'
 import { cardAsk } from '../core/answerview'
 import { forkOf, spawnFork } from '../core/forks'
 import { cut, fenced } from '../core/text.js'
@@ -49,6 +52,8 @@ export type Made = {
 
 /** The words the fork shows as in /tasks, and how this module's agent.spawn hook knows the spawn as p's. */
 const DESCRIPTION = 'artifact of a card (p)'
+/** The busy line's step while a fork publishes a card. */
+const STEP = 'publishing an artifact'
 /** The most of a card's text copy the fork reads. */
 const COPY_CHARS = 4000
 const MADE = { plugin: 'thimble', key: 'cardArtifacts' } as const
@@ -91,7 +96,7 @@ async function promptOf($: Engine, card: string): Promise<string | null> {
 }
 
 /** The fork, spawned while the key's or the click's own hook runs (the agent.spawn hook below holds it for the word
- *  window). */
+ *  window). Once Claude Code names it, the card and the bar show that it works. */
 async function spawn($: Engine, m: Made, prompt: string): Promise<void> {
   try {
     const r = await spawnFork($, { kind: 'artifact', prompt, description: DESCRIPTION })
@@ -100,6 +105,7 @@ async function spawn($: Engine, m: Made, prompt: string): Promise<void> {
     m.agentId = r.agentId
     m.status = 'running'
     await save($, m)
+    await busyWhile($, STEP, () => m.status === 'running')
   } catch (err) {
     await end($, m, 'failed', { error: reason(err) })
   } finally {
@@ -146,12 +152,18 @@ export async function headKey($: Engine, key: string, until: number): Promise<{ 
   return startArtifact($, meta.id, until)
 }
 
-/** The line under a card about its artifact: being made, its link, or why there is none. Null when it has none. */
+/** Whether the card's artifact is being made now: its header says `publishing…` in place of `p artifact`. */
+export async function artifactMaking($: Engine, card: string): Promise<boolean> {
+  return working(await madeOf($, card))
+}
+
+/** The line under a card about its artifact: being made, and where its link will show; its link; or why there is
+ *  none. Null when it has none. */
 export async function artifactLine($: Engine, E: Any, card: string): Promise<Any | null> {
   const m = await madeOf($, card)
   if (!m || m.status === 'cancelled') return null
   const box = (children: Any[]) => E.Box({ key: `artifact-${card}`, marginLeft: 4, children })
-  if (working(m)) return box([E.Text({ key: 'w', dimColor: true, children: 'creating artifact…' })])
+  if (working(m)) return box([E.Text({ key: 'w', dimColor: true, children: 'publishing a private claude.ai artifact… its link shows here' })])
   if (m.status === 'done' && m.url) return box([E.Text({ key: 'a', dimColor: true, children: '↗ ' }), E.Link({ key: 'l', href: m.url, label: m.url })])
   return box([E.Text({ key: 'x', color: 'error', wrap: 'wrap', children: `× no artifact${m.error ? `: ${m.error}` : ''}` })])
 }

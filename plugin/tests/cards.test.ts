@@ -38,7 +38,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string>; spawned?: Promise<unknown> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -79,7 +79,9 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   const runs: string[][] = []
   // the forks a card's header starts (cards/head.ts)
   const forks: Any[] = []
-  on('agent.spawn', (_$: unknown, e: Any) => { forks.push(e); return { model: 'claude-made-up' } as never })
+  // (Claude Code alone names the agent it started, so a fork started here gets no id, and ends as failed; with
+  // `spawned`, only once that promise settled)
+  on('agent.spawn', async (_$: unknown, e: Any) => { forks.push(e); await o.spawned; return { model: 'claude-made-up' } as never })
   let setups = 0
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
     runs.push(e.argv)
@@ -760,6 +762,33 @@ test('p on the card the keys reach starts the fork that makes an artifact of it,
   expect(w.forks.length).toBe(1)
   expect(w.forks[0].description).toBe('artifact of a card (p)')
   expect(w.forks[0].prompt).toContain('PROMPT artifact')
+})
+
+test('a click on `artifact` says `publishing…` in its place at once, and the line under the card says where the link will show; a fork that cannot start says why', async ($, on) => {
+  let started: (v?: unknown) => void = () => undefined
+  const w = world(on, { spawned: new Promise(r => { started = r }) })
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_42', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const row = await shown($, callRow('toolu_made_up_42', input))
+  const drawn = async () => elements(await $.ui.render({ plugin: 'thimble', ...(callRow('toolu_made_up_42', input) as Any) }))
+  const head = async () => textOf((await drawn()).find(n => n.props?.key === 'head-keys'))
+  const under = async () => textOf((await drawn()).find(n => n.props?.key === `artifact-${id}`))
+  const pressed = row.press({ key: `card-artifact-${id}` })
+  for (let i = 0; i < 200 && !w.forks.length; i++) await new Promise(r => setTimeout(r, 10))
+  expect(w.forks.length).toBe(1)
+  // while Claude Code starts the fork: the header says so where the click was, and p is no key of the card's
+  expect(await head()).toContain('publishing')
+  expect(await head()).not.toContain('artifact')
+  expect(await under()).toContain('link')
+  // Claude Code named no agent: the card says why there is no artifact, and `artifact` is a click again
+  started()
+  await pressed
+  for (let i = 0; i < 200 && (await head()).includes('publishing'); i++) await new Promise(r => setTimeout(r, 10))
+  expect(await head()).toContain('artifact')
+  expect(await under()).toContain('× no artifact')
+  await row.unmount()
 })
 
 test("a view's own Button under the pointer: the whole row shows highlighted, its words inverse and its bar inverted on the highlight", async () => {
