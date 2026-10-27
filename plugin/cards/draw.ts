@@ -38,7 +38,7 @@ import type { EngineInterface } from 'claude-code'
 import { failCleared, failNotice } from '../bar/notice'
 import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
-import { controlWords } from '../core/selection'
+import { controlWords, titleWords } from '../core/selection'
 import { cut } from '../core/text.js'
 import { rowsAt, rowsKnown, treeRows } from '../core/trail.mjs'
 import { accent, themeNow, type Theme } from '../core/theme'
@@ -230,8 +230,9 @@ export function noteShown($: Engine, ids: string[], onScreen: { first: number; l
     if (shown.get(id) !== now) {
       shown.set(id, now)
       changed = true
-      // off screen, its header's words are no control's (core/selection.ts); on screen, its frame draws them again
-      if (!now) controlWords(`card ${id}`, [])
+      // off screen, its header's words are no control's and its title no press (core/selection.ts); on screen, its
+      // frame draws them again
+      if (!now) { controlWords(`card ${id}`, []); titleWords(id, null, '') }
     }
   }
   if (changed) $.clock.after(0, () => $.ui.invalidate('ui.render'))
@@ -356,8 +357,12 @@ export async function cardKeyWords($: Engine): Promise<{ key: string; words: str
  *  (a copy in the side pane is the conversation's drawing, cut at the frame's edge, so no row of it wraps). */
 export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: number; indent?: number } = {}): Promise<Any> {
   const E = $.ui.resolve(e) as Any
+  const row = String(e.requestId ?? '')
   // a card the version of its answer shown now leaves out (a squeeze's): nothing in its place
-  if (await cardHidden($, meta.id)) return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', children: [] })
+  if (await cardHidden($, meta.id)) {
+    titleWords(meta.id, row, '')
+    return E.Box({ key: `frame-${meta.id}`, flexDirection: 'column', children: [] })
+  }
   // `indent`: columns the drawing that holds the card takes on its left beyond an answer's (a catch-up's rule)
   const inside = cardWidth(e.viewport?.columns ? e.viewport.columns - (o.indent ?? 0) : undefined)
   const width = Math.max(inside, Math.floor(o.layout ?? 0))
@@ -383,6 +388,9 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   const whole = sel ? await cardAsk($, meta.id, meta.title) : ask
   const title = E.Text({ key: 'title', bold: true, wrap: 'wrap', children: meta.title })
   const titled = whole ? E.Button({ key: 'title-ask', plain: true, label: `ask about ${whole.label}`, onPress: whole.press, hover: quiet(`card-title-${meta.id}`), children: [title] }) : title
+  // that press's words in the row the card is drawn in, while it is on screen: a piece of them a click on it left
+  // selected is no answer's words, unless the answer holds them too (core/selection.ts)
+  titleWords(meta.id, row, whole && shown.get(meta.id) !== false ? meta.title : '')
   // at the title's right, in thimble's color, its header's keys: ask (a side thread about the card, whose question
   // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
   // alone; every card's words are clicks

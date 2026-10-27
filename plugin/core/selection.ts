@@ -15,10 +15,13 @@
 //     rows. Across rows, the first line may start inside a word and the last end inside one; a line alone, outside the
 //     transcript, stands there whole (a piece of the prompt's suggestion or of Claude Code's busy word is none)
 // A selection in a row of Claude's whose lines are none of these words (a card's body under the answer, a list Claude
-// Code numbers anew, a table's cells wrapped, a sign Claude wrote as an entity) counts whole, as the row's. None counts
-// that lay, when first seen, on one of thimble's own controls drawn then (controlWords): one line inside a control's
-// words, as a click that slid a cell leaves (`im` of the bar's `thimble`, `it` of `c cite`) or a double click selects
-// (a chip's `longer`); a selection is first seen anew once another was made.
+// Code numbers anew, a table's cells wrapped, a sign Claude wrote as an entity) counts whole, as the row's, but for one
+// line with no word in it (`●○` of a chip's dots) or one that lay, when first seen, inside the title of a card drawn
+// then in that row (titleWords: a press that asks about the card, `Ru` of `Runs by status`; its words the row holds,
+// `runs`, are the row's). None counts that lay, when first seen, on one of thimble's own controls drawn then
+// (controlWords): one line inside a control's words, as a click that slid a cell leaves (`im` of the bar's `thimble`,
+// `it` of `c cite`, `1 ` of a chip's `1 Length`) or a double click selects (a chip's `longer`); a selection is first
+// seen anew once another was made.
 //
 //   answerSelection($)   the selection's words that lie in Claude's answers, a line at a time: a drag that starts on a
 //                        row of Claude Code's own (`Ran 3 shell commands`, the answer's ● dot) keeps the answer's lines;
@@ -33,6 +36,8 @@
 //   controlWords(at, words, o) the words of thimble's own controls drawn now `at` the bar, a card's header, the chips
 //                        or the tray (none once that place is gone), kept in memory; `o.inRow`: drawn in a row of the
 //                        transcript (a card's header, the chips), not above the prompt
+//   titleWords(card, row, title)   the title a card draws now in a row of the transcript, a press that asks about the
+//                        card (none once the card leaves the screen), kept in memory
 //
 // state: selectionDone, the selection dropped and the ones e and c took, by row and words: kept across the plugin's
 // loads, since a change in the settings loads it again while the same selection stands
@@ -76,8 +81,10 @@ const asWhole = (s: string) => s.replace(LEAD, '').replace(/\s+/g, ' ').trim().t
 // the words each row of Claude's draws now, and the words of thimble's controls drawn now, by where they are drawn
 const shown = new Map<string, { raw: string; text: string }>()
 const controls = new Map<string, { inRow: boolean; words: string[] }>()
-// the selection as first seen (its key), and whether it lay on one of thimble's controls then
-let seen: { key: string; onControl: boolean } | null = null
+// the titles the cards draw now, by card: the words of each, by the row it is drawn in
+const titles = new Map<string, Map<string, string>>()
+// the selection as first seen (its key), and whether it lay then on one of thimble's controls, or on a card's title
+let seen: { key: string; onControl: boolean; onTitle: boolean } | null = null
 
 /** A row of Claude's that holds the words `raw` draws `text` now (marks/register.ts: the version shown in place of
  *  Claude's, corrected citations among them). */
@@ -93,15 +100,33 @@ export function controlWords(at: string, words: string[], o: { inRow?: boolean }
   controls.set(at, { inRow: !!o.inRow, words: words.map(asWhole).filter(Boolean) })
 }
 
-/** Whether the selection lay on one of thimble's controls when it was first seen, kept until another is made: one
- *  line inside the words of a control drawn then where it lies (in a row, a card's header or the chips; else any). */
-function onControl(sel: Sel): boolean {
+/** The title the card `card` draws now in the row `row` of the transcript, a press that asks about the card ('' where
+ *  it draws none); `row` null: it draws none in any row (it left the screen). The row may hold its words too, so they
+ *  hold a selection only where none of the row's words do (answerSelectionOf). */
+export function titleWords(card: string, row: string | null, title: string): void {
+  const rows = titles.get(card) ?? new Map<string, string>()
+  const words = asWhole(title)
+  if (row === null) rows.clear()
+  else if (words) rows.set(row, words)
+  else rows.delete(row)
+  if (rows.size) titles.set(card, rows)
+  else titles.delete(card)
+}
+
+/** Where the selection lay when it was first seen, kept until another is made: one line inside the words of a control
+ *  drawn then where it lies (in a row, a card's header or the chips; else any), or inside the title of a card drawn
+ *  then in its row. */
+function firstSeen(sel: Sel): { onControl: boolean; onTitle: boolean } {
   const key = selKey(sel)
-  if (seen?.key === key) return seen.onControl
+  if (seen?.key === key) return seen
   const whole = sel.text.trim().includes('\n') ? '' : asWhole(sel.text)
-  const on = !!whole && [...controls.values()].some(c => (c.inRow || !sel.requestId) && c.words.some(w => w.includes(whole)))
-  seen = { key, onControl: on }
-  return on
+  const row = sel.requestId
+  seen = {
+    key,
+    onControl: !!whole && [...controls.values()].some(c => (c.inRow || !row) && c.words.some(w => w.includes(whole))),
+    onTitle: !!whole && !!row && [...titles.values()].some(t => !!t.get(row)?.includes(whole)),
+  }
+  return seen
 }
 
 /** The ways a row's words are read, each as its words: as written, with each link's target after its words as Claude
@@ -156,7 +181,8 @@ export async function answerSelectionOf($: Engine, sel: Sel | undefined): Promis
   // none selected: the next selection is seen anew
   if (!sel?.text?.trim()) { seen = null; return undefined }
   // on one of thimble's controls: a click on it left it selected
-  if (onControl(sel) || selKey(sel) === (await doneNow($)).dropped) return undefined
+  const at = firstSeen(sel)
+  if (at.onControl || selKey(sel) === (await doneNow($)).dropped) return undefined
   const lines = sel.text.split('\n')
   const worded = lines.map((line, i) => (wordsOf(line).length ? i : -1)).filter(i => i >= 0)
   const [first, last] = [worded[0], worded[worded.length - 1]]
@@ -177,8 +203,9 @@ export async function answerSelectionOf($: Engine, sel: Sel | undefined): Promis
     // none of Claude's words: its citations' words as the row draws them, corrected (marks/register.ts drawAnswer)
     if (!kept.length) kept = keep(corrected(own, (await rowMarks($, sel.requestId).catch(() => null))?.items ?? []))
     // none still: words the row draws otherwise (a card's body, a list Claude Code numbers anew, a table's wrapped
-    // cells, a sign written as an entity), whole
-    if (!kept.length) return sel
+    // cells, a sign written as an entity), whole; but not one line with no word in it, nor one on a card's title, as
+    // a click that slid a cell leaves (on a chip's dots, on the title that asks about the card)
+    if (!kept.length) return sel.text.trim().includes('\n') || (worded.length > 0 && !at.onTitle) ? sel : undefined
   } else {
     const rows = await textRows($).catch(() => [] as string[])
     kept = keep((await Promise.all(rows.map(async row => readings(row, (await messageOf($, row))?.text ?? '')))).flat())

@@ -19,7 +19,7 @@ import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../m
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
 import { noteRow, startCheck } from '../marks/checker'
 import { citeBar, citeKey, citeWords, placeOf } from '../marks/cite'
-import { controlWords } from '../core/selection'
+import { controlWords, titleWords } from '../core/selection'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
@@ -465,6 +465,54 @@ test("a selection in an answer's row whose lines are none of its words as compar
     expect(await counts({ text: 'R&D uploads', requestId: 't1-row' })).toBe(true)
     // in a row of Claude Code's own, still none
     expect(await counts({ text: 'Mon  ████████ 41', requestId: 'collapsed-tool-row' })).toBe(false)
+  } finally {
+    setOptions({})
+  }
+})
+
+test("a line selected in an answer's row with no word in it, as a click that slid a cell over signs leaves (a chip's dots, +, a card's frame, a chart's bar), counts for none; a chart label with its bar still counts", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text: 'Uploads stopped twice on Monday.' })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    for (const piece of ['●○', '○●', '+', '╭─', '██', '██ \n']) expect(await counts({ text: piece, requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'Mon  ████████ 41', requestId: 't1-row' })).toBe(true)
+  } finally {
+    setOptions({})
+  }
+})
+
+test("a piece of a card's title, a press that asks about the card, is no answer's words in the row the card is drawn in, where the answer does not hold it; in another answer's row, and once the card left the screen, it counts as the row's", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text: 'Uploads stop once the retry budget runs out.' })
+    await answered(s, { id: 't2', prompt: 'When?', text: 'Mostly on Mondays.' })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    // a card drawn under the first answer
+    titleWords('c-made-up', 't1-row', 'Retry budget by day')
+    expect(await counts({ text: 'by d', requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'Retry budget by day', requestId: 't1-row' })).toBe(false)
+    // words of the answer that the title holds too
+    expect(await counts({ text: 'budget', requestId: 't1-row' })).toBe(true)
+    // in the other answer's row
+    expect(await counts({ text: 'by d', requestId: 't2-row' })).toBe(true)
+    // the card left the screen
+    titleWords('c-made-up', null, '')
+    expect(await counts({ text: 'by d', requestId: 't1-row' })).toBe(true)
   } finally {
     setOptions({})
   }

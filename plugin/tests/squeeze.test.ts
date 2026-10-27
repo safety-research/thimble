@@ -486,6 +486,37 @@ test('while a click holds the keys in the chips, ↵ keeps them open, and s clos
   await ui.unmount()
 })
 
+test("a click that slid a cell on the chips leaves a piece of what they draw selected in the answer's row, a chip's digit, its dots, its level words or +: no c cite or e explain, once s closed them too; words of the answer selected after count", { options: { citations: 'manual' } }, async ($, on) => {
+  let selected: Any
+  on('ui.selection', () => ({ value: selected }))
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  const counts = (band: string) => {
+    expect(band.includes('c cite')).toBe(band.includes('e explain'))
+    return band.includes('c cite')
+  }
+  for (const piece of ['1 ', '2 ', '●○', '○●', '○○', '· a', '+']) {
+    selected = undefined
+    await t.bar()
+    await t.press('s')
+    // the chips under the answer draw it: `1 Length shorter ○●○○ longer · as written`, `2 Background novice ○○●○
+    // expert`, `+`, `s close`
+    expect(textOf((await chipsDrawn($, 'row-t1', LONG)).tree)).toContain(piece)
+    // the click left it selected, in the answer's row; the chips hold the keys
+    selected = { text: piece, requestId: 'row-t1' }
+    expect(counts(await t.bar())).toBe(false)
+    // s closes them, and the selection stands
+    await t.press('s')
+    expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeUndefined()
+    expect(counts(await t.bar())).toBe(false)
+  }
+  // words of the answer, selected once the chips closed
+  selected = undefined
+  await t.bar()
+  selected = { text: 'cache key', requestId: 'row-t1' }
+  expect(counts(await t.bar())).toBe(true)
+})
+
 test('the rewrite starts from the corrected citations: the request holds the corrected value alone, and names no correction', async ($, on) => {
   // a resumed session: the check corrected the reply's citation
   const at = LONG.indexOf('[3 of 12](#)')
