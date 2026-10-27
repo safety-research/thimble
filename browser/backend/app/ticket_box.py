@@ -44,6 +44,7 @@ from . import cli, config, kernel_wrap, runtime_cc, srt
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TZ", "USER", "LOGNAME", "TERM")
 PROBE_S = 60.0
 KILL_WAIT_S = 5.0
+TERM_AGAIN_S = 1.0  # while srt runs after a SIGTERM, the next comes this long after (_end_group)
 HEALTH_WAIT_S = 90.0
 
 SRT_FAILED = "thimble's sandbox runtime could not start a sandbox: {why}"
@@ -222,10 +223,13 @@ def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
 
 
 async def _end_group(proc: asyncio.subprocess.Process) -> None:
-    """SIGTERM to the process group, then SIGKILL after KILL_WAIT_S. srt removes the empty files it puts in the working
-    directory for the box's run only when it gets to exit, so a SIGKILL first would leave them in the worktree. A
-    process of the run in a session of its own, which the group's signals miss, gets SIGKILL once the group has ended:
-    a bwrap that srt started just as the run was stopped could outlive srt before its --die-with-parent took hold."""
+    """SIGTERM to the process group, again each TERM_AGAIN_S while srt runs, then SIGKILL after KILL_WAIT_S. srt removes
+    the empty files it puts in the working directory for the box's run only when it gets to exit, so a SIGKILL first
+    would leave them in the worktree. A SIGTERM that comes while srt starts goes to the cleanup handler its sandbox
+    manager registers first, which does not end it, and the command it then starts never hears of it: the next SIGTERM
+    reaches srt's own handler, which ends the command, so srt cleans up and exits. A process of the run in a session of
+    its own, which the group's signals miss, gets SIGKILL once the group has ended: a bwrap that srt started as the run
+    was stopped could outlive srt before its --die-with-parent took hold."""
     from . import procs  # noqa: PLC0415
 
     left: set[tuple[int, str]] = set()  # (pid, start time) of the run's processes outside its group
@@ -238,12 +242,16 @@ async def _end_group(proc: asyncio.subprocess.Process) -> None:
 
     look()
     _signal_group(proc, signal.SIGTERM)
-    end = time.monotonic() + KILL_WAIT_S
-    while proc.returncode is None and time.monotonic() < end:
+    start = time.monotonic()
+    again = start + TERM_AGAIN_S
+    while proc.returncode is None and time.monotonic() < start + KILL_WAIT_S:
         with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(proc.wait(), 0.1)
         if proc.returncode is None:
             look()
+            if time.monotonic() >= again:
+                _signal_group(proc, signal.SIGTERM)
+                again = time.monotonic() + TERM_AGAIN_S
     if proc.returncode is None:
         _signal_group(proc, signal.SIGKILL)
         await proc.wait()
@@ -277,8 +285,10 @@ async def _run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float, env: 
         await _end_group(proc)
         return -1, f"timed out after {timeout:.0f} s"
     except asyncio.CancelledError:
-        _signal_group(proc, signal.SIGTERM)
-        asyncio.get_running_loop().call_later(KILL_WAIT_S, _signal_group, proc, signal.SIGKILL)
+        loop = asyncio.get_running_loop()  # as _end_group, without waiting: SIGTERM until srt ends, then SIGKILL
+        for i in range(int(KILL_WAIT_S / TERM_AGAIN_S)):
+            loop.call_later(i * TERM_AGAIN_S, _signal_group, proc, signal.SIGTERM)
+        loop.call_later(KILL_WAIT_S, _signal_group, proc, signal.SIGKILL)
         raise
     return proc.returncode if proc.returncode is not None else -1, out.decode("utf-8", "replace")
 
