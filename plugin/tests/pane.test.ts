@@ -208,16 +208,16 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   s.$.ui.focus = async (a: Any) => { focused.push(a.key); return {} }
   await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
   await draw(s)
-  // Minimal first, then Citations and Cards
+  // Minimal first, then Citations and Checker
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
   await draw(s)
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
-  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('cards')
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('checkerModel')
   await draw(s)
   expect(await scrollPane(s.$, { by: -1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
-  expect(focused).toEqual(['mode-citations-auto cite + verify', 'mode-cards-on', 'mode-citations-auto cite + verify'])
+  expect(focused).toEqual(['mode-citations-auto cite + verify', 'mode-checkerModel-same as Claude', 'mode-citations-auto cite + verify'])
   // the ring moving along the row picked (← →, tab) sets the choice it lands on; onto another row it lands on that
   // row's choice set, picks that row and changes nothing
   const set: Any[] = []
