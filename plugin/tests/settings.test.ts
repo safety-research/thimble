@@ -331,4 +331,7 @@ test('while the browser workbench is installed, the settings name the command th
   files['/made-up/home/.thimble-browser/checkout'] = '/made-up/thimble/browser\n'
   files['/made-up/thimble/browser/scripts/thimble-browser'] = '#!/bin/sh'
   expect(await named()).toContain('run thimble-browser in this folder')
+  // the checkout was deleted, as INSTALL.md's uninstall says, while the workbench's home still names it
+  delete files['/made-up/thimble/browser/scripts/thimble-browser']
+  expect(await named()).toBeUndefined()
 })
