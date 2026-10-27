@@ -190,9 +190,9 @@ def test_a_fix_asked_in_the_home_folder_lists_none_of_its_files_and_the_shell_sa
     monkeypatch.chdir(tmp_path)
     real = sources.list_files
 
-    def listed(root, until=None):
+    def listed(root):
         assert Path(root).resolve() != home.resolve(), "the scan listed the home folder"
-        return real(root, until)
+        return real(root)
 
     monkeypatch.setattr(sources, "list_files", listed)
     FX.write_json(SH.share_dir(r["id"]) / "given.json",
@@ -204,3 +204,35 @@ def test_a_fix_asked_in_the_home_folder_lists_none_of_its_files_and_the_shell_sa
     took = next(x for x in cap.out.splitlines() if "privacy check" in x)
     assert "1 file name" in took and " 1 name" in took
     assert "board-7.jsonl" not in cap.out and "dana-made-up" not in cap.out
+
+
+def test_a_failed_fixs_issue_says_why_it_could_not_be_done_and_what_claude_tried(world, monkeypatch, opened):
+    # a fix whose fixer could not do without the privacy scan, which no fix may change: its line sends it here
+    monkeypatch.setattr(FX, "session_terms", lambda st: {})
+    r = FX.new("let the scan skip my notes")
+    (Path(r["work"]) / "plugin" / "engine" / "kernel").mkdir(parents=True)
+    (Path(r["work"]) / "plugin" / "engine" / "kernel" / "privacy.py").write_text("def scan(*a): return [], []\n")
+    FX.done(r["id"], "Scan skips notes", "The scan skips the notes you name.")
+    FX.again(r["id"])
+    r = FX.done(r["id"], cannot="The scan keeps your data private, and a fix may not change it.")
+    assert r["state"] == "failed" and r["blocked"] and r["commit"]
+    body = SH.share(r["id"])["body"]
+    assert body.startswith("### What was wrong\n\nlet the scan skip my notes\n\n### Why it could not be done here\n\n"
+                           "The scan keeps your data private, and a fix may not change it.\n\n### What Claude tried\n\n"
+                           "The scan skips the notes you name.\n\n")
+    assert "How it was fixed" not in body and body.rstrip().endswith("· asked through `thimble fix`")
+
+
+def test_the_scan_of_a_large_folders_names_finds_the_same_details_in_a_moment():
+    from kernel import privacy as P  # noqa: PLC0415
+
+    # a folder of 100,000 files: a name and a stem each, which the scan looked for with a regular expression each (40 s)
+    names = [f"run-{i:06d}.jsonl" for i in range(100000)]
+    text = "After Claude read run-000042.jsonl, dana-made-up saw the bar say coverage.\n" * 20
+    t = time.monotonic()
+    many, _ = P.scan({"issue": text}, {"file": names + [n[:-6] for n in names], "name": ["dana-made-up"]}, None,
+                     use_gitleaks=False)
+    took = time.monotonic() - t
+    few, _ = P.scan({"issue": text}, {"file": ["run-000042.jsonl"], "name": ["dana-made-up"]}, None, use_gitleaks=False)
+    assert many == few and {h["found"] for h in many} == {"run-000042.jsonl", "dana-made-up"}
+    assert took < 15, took

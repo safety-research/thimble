@@ -28,7 +28,6 @@ import shutil
 import sqlite3
 import sys
 import tempfile
-import time
 from collections import defaultdict
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
@@ -90,19 +89,16 @@ def file_kind(path: Path) -> str:
     return kind_of(path) or MEDIA_KIND.get(path.suffix.lower(), "file")
 
 
-def list_files(root: Path, until: float | None = None) -> list[str]:
+def list_files(root: Path) -> list[str]:
     """Every file under root that coverage counts, relative, sorted: the sources, and the other files that are not
     hidden (a PDF, an image, a binary). A link counts as what it points to, so a working folder of links to a
     dataset's files and folders is the dataset; each folder is walked once (a link back up is not followed again),
-    and a broken link is no file. Nothing is written anywhere. `until`: a time.monotonic() after which no other
-    folder is walked (the privacy scan's names, which must not hold a command for minutes)."""
+    and a broken link is no file. Nothing is written anywhere."""
     out: list[str] = []
     walked: set[tuple[int, int]] = set()
 
     # by os.scandir and plain strings: a folder of 100,000 files is walked in well under a second
     def walk(d: str, rel: str) -> None:
-        if until is not None and time.monotonic() > until:
-            return
         try:
             s = os.stat(d)
             if (s.st_dev, s.st_ino) in walked:

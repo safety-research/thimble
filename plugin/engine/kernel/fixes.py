@@ -2499,19 +2499,16 @@ def _walk_strings(v: Any, fields: set[str], values: set[str], depth: int = 0) ->
             values.add(s)
 
 
-WALK_S = 2.0  # how long the scan lists the names of a folder's files, at most
-
-
 def _named_files(st: Store) -> list[str]:
     """The files under the root whose names the scan takes out, relative: those the conversation read, and every file
-    a walk of WALK_S seconds lists, unless the root holds the home folder (the home folder, /), whose walk would list
-    every file of the machine before a word is printed."""
+    under it, unless the root holds the home folder (the home folder, /), whose walk would list every file of the
+    machine before a word is printed."""
     from . import sources as S  # noqa: PLC0415
 
     read = {r for s in st.seen() for f in [s.get("file"), *(s.get("files") or [])] if f and (r := st.rel(str(f)))}
     if Path.home().resolve().is_relative_to(st.root):
         return sorted(read)
-    return sorted(read | set(S.list_files(st.root, until=time.monotonic() + WALK_S)))
+    return sorted(read | set(S.list_files(st.root)))
 
 
 def session_terms(st: Store | None) -> dict[str, list[str]]:

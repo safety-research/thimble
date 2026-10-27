@@ -164,7 +164,10 @@ def scan(parts: dict[str, str], session: dict[str, Iterable[str]] | None = None,
             if x and "\n" not in x:
                 terms.append((kind, x))
     terms.sort(key=lambda kt: -len(kt[1]))
-    present = {where: [(k, x) for k, x in terms if next(iter(_finds(text, x, k)), None)] for where, text in parts.items()}
+    # _finds matches only where the term is in the text, so a plain substring check comes first: a large folder's
+    # hundreds of thousands of names then cost a moment, not a regular expression each
+    present = {where: [(k, x) for k, x in terms if x in text and next(iter(_finds(text, x, k)), None)]
+               for where, text in parts.items()}
     generic_words = sorted({x for p in present.values() for k, x in p if _passes(k, x)} - allowed)
     public = known(generic_words) if (known and generic_words) else set()
     hits: list[dict] = []
