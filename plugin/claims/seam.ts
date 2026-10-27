@@ -6,7 +6,8 @@
 //   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   claimsKey($, key, until)           w: the Claims pane, or closed while the side pane shows it, once the word
 //                                      window closed (a taker as hooks/keys.ts takes it)
-//   claimsBar($, on, preview)          its items at the bar's right (`w 11 claims`, lit when a claim was corrected)
+//   claimsBar($, on, preview)          its items at the bar's right (`w 11 claims`, lit when a claim was corrected); a
+//                                      press does what w does
 //   claimsState($)                     what the claims lens's digest reads (./lens.mjs): every claim so far and the
 //                                      clusters, as its {{CLAIMS}}, {{CLUSTERS}} and {{GROWN}} lines
 //   claimsMerge($, look)               what one look of the observer gave for the claims lens (look.out.claims,
@@ -44,22 +45,29 @@ export const CLAIMS_FIND = FIND
 
 export async function claimsKey($: Engine, key: string, _until: number): Promise<Take | null> {
   if (key !== 'w' || !featureOn('claims')) return null
-  // after the word window, as 0.10 did: `w` that starts a word is typed. While the side pane shows the claims, w
-  // closes it, as r and l close theirs (bar/register.ts)
-  return { later: async () => ((await paneShows($, 'claims')) ? closePane($) : openClaims($, {}, true)) }
+  // after the word window, as 0.10 did: `w` that starts a word is typed
+  return { later: () => toggleClaims($, true) }
+}
+
+/** w, or a press on the bar's item: the Claims pane, or closed while the side pane shows it, as r and l do for theirs
+ *  (bar/register.ts). `byKey`: w at the prompt (term.ts openClaims). */
+async function toggleClaims($: Engine, byKey = false): Promise<void> {
+  if (await paneShows($, 'claims').catch(() => false)) await closePane($)
+  else await openClaims($, {}, byKey)
 }
 
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('claims')) return []
   if (preview) return [{ id: 'claims', key: 'w', words: 'evidence' }]
+  const press = () => toggleClaims($)
   // no claims yet: the pane finds them on demand, so the item shows, without a count, once an answer waits for it
-  if (!(await claimCount($))) return (await claimsToFind($)).answers ? [{ id: 'claims', key: 'w', words: 'evidence', press: () => openClaims($) }] : []
+  if (!(await claimCount($))) return (await claimsToFind($)).answers ? [{ id: 'claims', key: 'w', words: 'evidence', press }] : []
   const words = await claimsBarWords($)
   // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims. The session's
   // first claims: the count pulses
   const first = await claimsFresh($)
   const look = first.lit || await claimsLit($) ? { color: accent() } : {}
-  return [{ id: 'claims', key: 'w', words, ...look, ...(first.lit || await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
+  return [{ id: 'claims', key: 'w', words, ...look, ...(first.lit || await claimsBright($) ? { bold: true } : {}), press }]
 }
 
 export async function claimsState($: Engine): Promise<Record<string, unknown>> {

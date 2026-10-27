@@ -419,6 +419,32 @@ test('w in a terminal too narrow for the pane fails in red with the click on the
   expect(await line()).toBe('w needs a wider terminal: widen the window to show the side pane, or click “w 1 claim”.')
 })
 
+test("a press on the bar's claims item does what w does: it opens the pane, and closes it while the side pane shows the claims", async () => {
+  setOptions({ claimsMode: 'auto' })
+  const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['[Run 4 failed](#).'] })
+  const closed: Any[] = []
+  s.$.ui.close = async (o: Any) => { closed.push(o) }
+  s.$.ui.panes = async () => []
+  const press = async () => { await (await claimsBar(s.$, () => true, false))[0]!.press!() }
+  await press()
+  expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence', focus: true })
+  expect(paneNow(s)).toMatchObject({ kind: 'claims' })
+  // the side pane shows the claims: the press closes it, and opens nothing
+  s.$.ui.panes = async () => [{ id: 'thimble' }]
+  const opens = s.opened.length
+  await press()
+  expect(closed).toEqual([{ id: 'thimble' }])
+  expect(paneNow(s)).toBe(null)
+  expect(s.opened.length).toBe(opens)
+  // closed, the press opens it again
+  s.$.ui.panes = async () => []
+  await press()
+  expect(s.opened.length).toBe(opens + 1)
+  expect(paneNow(s)).toMatchObject({ kind: 'claims' })
+})
+
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
   setOptions({ claimsMode: 'auto' })
   const s = setup([reply([{ claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures' }])])
