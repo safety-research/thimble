@@ -392,7 +392,8 @@ def test_the_install_recommends_the_workbench_s_claude_code_sign_in_to_a_subscri
     subscription. The question in a terminal (claude_access.setup) is the browser's server tests'."""
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
     ask = text.split(" 4. When the workbench was installed", 1)[1].split(" Then: ", 1)[0]
-    assert "Claude Code sign-in (say that it is recommended when they have a Claude subscription)" in ask, ask
+    sign_in = ask.split("Claude Code sign-in", 1)[1].split(", an Anthropic API key", 1)[0]
+    assert "recommended" in sign_in and "Claude subscription" in sign_in, ask
     note = next(line for line in whole_install(tmp_path).stdout.splitlines()
                 if line.startswith("Note: Claude access is not set up yet."))
     assert "Their Claude Code sign-in, recommended when they have a Claude subscription, only after they accept" in note
