@@ -755,6 +755,29 @@ async def test_a_run_whose_first_sigterm_is_swallowed_still_cleans_up_before_its
             os.killpg(proc.pid, signal.SIGKILL)
 
 
+async def test_a_run_stopped_at_its_timeout_takes_away_the_stand_ins_srt_left(tmp_path, monkeypatch):
+    """srt sent SIGTERM while it starts leaves the empty stand-ins bwrap makes for the dotfiles srt protects in the
+    working directory: the run takes away each name new since it started that is still empty, and nothing else."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "a.txt").write_text("a")
+    (tree / ".env").write_text("")  # the worktree's own, empty, there before the run
+
+    def argv(self, cmd):  # srt as that SIGTERM leaves it: bwrap's stand-ins made, and an exit with no cleanup
+        for name in (".bashrc", ".mcp.json"):
+            (tree / name).touch()
+        (tree / ".claude").mkdir()
+        (tree / ".made-by-the-check").write_text("kept")
+        (tree / "made.txt").touch()
+        return ["sh", "-c", "trap 'exit 0' TERM; while :; do sleep 0.05; done"]
+
+    monkeypatch.setattr(ticket_box.Box, "argv", argv)
+    box = ticket_box.Box(tree, tmp_path / "cache", tmp_path / "srt")
+    code, out = await ticket_box.run(box, ["sleep", "60"], cwd=tree, timeout=1)
+    assert code == -1 and "timed out" in out
+    assert sorted(p.name for p in tree.iterdir()) == [".env", ".made-by-the-check", "a.txt", "made.txt"]
+
+
 def test_a_preview_server_gets_a_private_server_json_so_a_local_tool_can_use_its_token_routes(tmp_path):
     """A server no supervisor starts (a box's preview, like the dev stack) still has a token, or a local tool could
     use none of its token routes (hook_auth.guarded): ticket_box.seed_home writes it, readable by the owner alone,

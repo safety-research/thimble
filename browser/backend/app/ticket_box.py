@@ -272,7 +272,30 @@ async def run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float,
         return await _run(box, cmd, cwd=cwd, timeout=timeout, env=box.environ(env, tmp=tmp))
 
 
+def _remove_stand_ins(cwd: Path, before: set[str]) -> None:
+    """Remove what is left of the empty stand-ins srt's bwrap makes in the working directory for the dotfiles srt
+    protects (.bashrc, .mcp.json, .claude, ...): a name new since the run started that begins with a dot and is still an
+    empty file or folder, as srt's own cleanup takes them. srt leaves them when a SIGTERM comes while it starts: its
+    sandbox manager's handler resets its list of them before bwrap has made them."""
+    try:
+        names = [p for p in cwd.iterdir() if p.name.startswith(".") and p.name not in before]
+    except OSError:
+        return
+    for p in names:
+        with contextlib.suppress(OSError):
+            if p.is_symlink():
+                continue
+            if p.is_file() and p.stat().st_size == 0:
+                p.unlink()
+            elif p.is_dir() and not any(p.iterdir()):
+                p.rmdir()
+
+
 async def _run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float, env: dict[str, str]) -> tuple[int, str]:
+    try:
+        before = {p.name for p in cwd.iterdir()}
+    except OSError:
+        before = set()
     try:
         proc = await asyncio.create_subprocess_exec(*box.argv(cmd), cwd=str(cwd), env=env,
                                                     stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
@@ -283,6 +306,7 @@ async def _run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float, env: 
         out, _ = await asyncio.wait_for(proc.communicate(), timeout)
     except asyncio.TimeoutError:
         await _end_group(proc)
+        _remove_stand_ins(cwd, before)
         return -1, f"timed out after {timeout:.0f} s"
     except asyncio.CancelledError:
         loop = asyncio.get_running_loop()  # as _end_group, without waiting: SIGTERM until srt ends, then SIGKILL
