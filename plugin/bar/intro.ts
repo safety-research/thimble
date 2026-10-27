@@ -1,6 +1,7 @@
 // intro.ts: the hint at the first session thimble runs in, which says where its settings are. The bar shows it as
-// its other hints (bar.tsx), in place of its keys. It goes after INTRO_MS, at the next key thimble takes, or at the
-// person's first prompt, and no later session or reload shows it again.
+// its other hints (bar.tsx), in place of its keys, with a legend above it once: the colors of the heads-ups and the
+// explainers in answers, and the keys that act on selected words. It goes after INTRO_MS, at the next key thimble
+// takes, or at the person's first prompt, and no later session or reload shows it again.
 //
 //   introHint($)       the hint's words, or null once it went
 //   introDone($)       the person's first prompt or key: the hint goes
