@@ -627,6 +627,28 @@ test('an outcome not shown yet whose refusal a new round answers is marked shown
   expect(v.indexOf('shown 1')).toBeLessThan(v.indexOf('again 1'))
 })
 
+test("after /resume gives the session a new id, an outcome not shown yet of the conversation's fix gets its line: by the conversation the kernel kept, or by this load's own fixers", async () => {
+  // claude --resume: a new session id, the conversation's first launch and its transcript carried
+  const s = setup()
+  s.made()
+  Object.assign(s.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', session: 's-made-up-old', conversation: 's-made-up-old', unshown: true })
+  Object.assign(s.$.session, { id: async () => 's-made-up-resumed', usage: async () => ({ startedAt: 1761100000000 }), messages: async () => [{ role: 'user' }] })
+  s.files.set(`${HOME}/starts/1761100000000.json`, JSON.stringify({ key: 's-made-up-old', sessions: ['s-made-up-old'] }))
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await until(async () => (await fixLineRows(s.$, ELS, 110)).length > 0)
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.verbs()).toContain('shown 1')
+  // /resume inside a running Claude Code: the record names the old session only, and this load started its fixer
+  const t = setup()
+  t.made()
+  Object.assign(t.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', session: 's-made-up-old', unshown: true })
+  await t.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await until(async () => (await fixLineRows(t.$, ELS, 110)).length > 0)
+  expect(textOf((await fixLineRows(t.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(t.verbs()).toContain('shown 1')
+})
+
 test("a round's fixer that ends while the check of the round before waits: its end is kept, and checked with its own words once that check returns", async () => {
   const s = setup()
   // the first check's done answers only when the test lets it; by then the new round took the copy

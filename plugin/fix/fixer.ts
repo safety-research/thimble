@@ -37,6 +37,7 @@ import { spawnFork } from '../core/forks'
 import { thimbleHome } from '../core/home'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
+import { sessionKey } from '../hooks/conversation'
 import { promptText } from '../prompts/prompts'
 import { type Fix, type Refusal, fixesDir, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
 import { screenCopy } from './screen'
@@ -74,6 +75,16 @@ export async function ownFixes($: Engine, fixes: Fix[]): Promise<Fix[]> {
   const sid = await sessionIdNow($)
   const started = new Set(Object.values(await fixers($)))
   return fixes.filter(f => (f.session ? f.session === sid : started.has(f.id)))
+}
+
+/** The fixes whose outcome, not shown yet, this conversation shows at its start: this session's (ownFixes), those of the
+ *  conversation it continues (the kernel keeps the conversation a fix was asked in, and a /resume gives the session a
+ *  new id), and those whose fixer this load started. */
+export async function outcomesHere($: Engine, fixes: Fix[]): Promise<Fix[]> {
+  const own = new Set((await ownFixes($, fixes)).map(f => f.id))
+  const key = await sessionKey($).catch(() => '')
+  const started = new Set(Object.values(await fixers($)))
+  return fixes.filter(f => own.has(f.id) || (!!key && f.conversation === key) || started.has(f.id))
 }
 
 /** The fix a fixer agent works on, or null when the agent is no fixer. */

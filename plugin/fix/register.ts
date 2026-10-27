@@ -42,7 +42,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
-import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes, recoverFixers, watch } from './fixer'
+import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
 import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { fixesContext, request } from './request'
@@ -191,8 +191,9 @@ export const registerFix: Register = on => {
         busyFixer($, f)
         watch($, f.id)
       }
-      // what came of a check that the kernel's runner wrote while no session waited for it: its line now
-      for (const f of await ownFixes($, (list?.fixes ?? []).filter(f => f.unshown && ['ready', 'failed'].includes(f.state)))) await fixerEnded($, {}, f.id, f)
+      // what came of a check that the kernel's runner wrote while no session waited for it: its line now, also in a
+      // conversation resumed with a new session id
+      for (const f of await outcomesHere($, (list?.fixes ?? []).filter(f => f.unshown && ['ready', 'failed'].includes(f.state)))) await fixerEnded($, {}, f.id, f)
       await recoverFixers($, working)
       // a newer release: one line says so, once per session (a reload starts the module again)
       if (list?.pointed && !(await $.state.get(UPDATED)).value) {

@@ -48,6 +48,8 @@ export type Fix = {
   patches?: { id: number; title: string; path: string }[]
   /** the Claude Code session whose fixer works on it (new, round, redo): only that session ends it */
   session?: string | null
+  /** the conversation the fix was asked in (THIMBLE_CONVERSATION at new): a /resume keeps it, with a new session */
+  conversation?: string | null
   /** the last check did not use the change, and why; kept until the next check, so that the next fixer in the copy
    *  (another round, at once, or r) is told */
   refused?: Refusal | null
