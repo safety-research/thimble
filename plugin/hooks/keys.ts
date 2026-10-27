@@ -5,7 +5,7 @@
 //   v        designer/v.ts vKey      a card of the last answer
 //   …        core/answerview.ts restoredKey   the keys of the features that act on answers: the tray's, a large label
 //                                    run's ask, the squeeze chips' and s, { } over the answers, the explainers' (e:
-//                                    the selected words), c, t
+//                                    the selected words), c (a citation of the selected words), w (the claims), t
 //   a p      cards/head.ts headKey   the header of the card the keys reach: a ask, p artifact
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them

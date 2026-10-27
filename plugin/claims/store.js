@@ -583,8 +583,8 @@ export function clearGap(store, turn) {
   return store
 }
 
-/** The note c lights with for one turn, or '' to stay dim: only a correction lights it. New claims alone light nothing:
- *  c's count in the bar says they came. The bar draws it after the count: `c ● 12 claims, 1 corrected`. */
+/** The note w lights with for one turn, or '' to stay dim: only a correction lights it. New claims alone light nothing:
+ *  w's count in the bar says they came. The bar draws it after the count: `w ● 12 claims, 1 corrected`. */
 export function noteFor(res) {
   const fixed = res?.revised?.length || 0
   if (fixed) return `${fixed} corrected`

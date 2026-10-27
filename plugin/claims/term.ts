@@ -1,14 +1,14 @@
 // term.ts: Claims in the terminal. The conversation's claims are kept in claims.json in its kept folder (core/env.ts
-// keptDir; store.js says the shape); the observer's look adds each answer's (its claims lens, lens.mjs); c opens the
-// Claims pane at the right (pane.tsx, graph.js: the claims as a graph in clusters); c on the bar counts them.
+// keptDir; store.js says the shape); the observer's look adds each answer's (its claims lens, lens.mjs); w opens the
+// Claims pane at the right (pane.tsx, graph.js: the claims as a graph in clusters); w on the bar counts them.
 //
 //   the store    claimsStore / saveClaims: held in $.state for the drawing, written to the kept folder for a resumed
 //                conversation
 //   a look       claimsDigest (what the lens reads: every claim so far and the clusters) and lookClaims (the lens's
-//                claims placed by their words in the looked-at turns' messages, with the citations near them); c is
+//                claims placed by their words in the looked-at turns' messages, with the citations near them); w is
 //                lit on the bar for the answer only when a claim was corrected (store.js noteFor), as a `claims` part
 //                of that answer (core/answers.ts setPart)
-//   the pane     c opens the Claims pane (core/pane.ts kind `claims`), which takes the keyboard
+//   the pane     w opens the Claims pane (core/pane.ts kind `claims`), which takes the keyboard, and closes it
 //   on demand    unless Claims is auto, no look after a reply reads the claims: f in the pane finds
 //                those of the answers they have not read (claimsUnread; the store keeps the answers read, `read`), as
 //                a look of the claims lens alone (observer/observer.ts findClaimsNow); claimsToFind says how many
@@ -34,7 +34,7 @@ type Engine = EngineInterface
 type Any = any
 type Store = ReturnType<typeof emptyStore> & Record<string, Any>
 type Place = { row: string; by: 'person' | 'claude'; turn: number | null; text: string }
-/** What c shows for one answer: lit with a note when a look corrected a claim in it. */
+/** What w shows for one answer: lit with a note when a look corrected a claim in it. */
 export type ClaimsPart = { lit: true; note: string; claims: string[] }
 /** The pane's arguments: the claim picked, else the cluster chosen (its key: graph.js groupKey), the last turn when it
  *  was chosen; with a cluster, `cur` its list's current claim (from 0); with a claim, `open` while its evidence
@@ -52,13 +52,13 @@ const BRIGHT = { plugin: 'thimble', key: 'claimsBright' } as const
 /** How long the bar's count is bold after new claims, as in 0.10. */
 const BRIGHT_MS = 1600
 /** The first claims of a session: the bar's count pulses (in thimble's color, then plain) this many times this far
- *  apart, and says `new` until the pane is first opened, so a person sees that it appeared. */
+ *  apart, so a person sees that it appeared. */
 const PULSE = { times: 6, ms: 450 }
 const FIRST = { plugin: 'thimble', key: 'claimsFirst' } as const
 /** The answers a look reads the claims of now (on demand, or after a reply), and when it began: the pane says the
  *  claims are being found. */
 const FINDING = { plugin: 'thimble', key: 'claimsFinding' } as const
-type First = { lit: boolean; opened: boolean }
+type First = { lit: boolean }
 const FILE = 'claims.json'
 
 // ------------------------------------------------------------------------------------------------ the store
@@ -101,18 +101,16 @@ function pulse($: Engine): void {
   for (let i = 0; i <= 2 * PULSE.times; i++) {
     $.clock.after(i * PULSE.ms, () => {
       void (async () => {
-        const was = (await $.state.get(FIRST)).value as First | null | undefined
-        await $.state.set(FIRST, { lit: i < 2 * PULSE.times && i % 2 === 0, opened: !!was?.opened })
+        await $.state.set(FIRST, { lit: i < 2 * PULSE.times && i % 2 === 0 })
       })().catch(() => undefined)
     })
   }
 }
 
-/** How the bar's count draws attention after the session's first claims: `lit` while it pulses on, `fresh` from then
- *  until the pane was first opened. */
-export async function claimsFresh($: Engine): Promise<{ lit: boolean; fresh: boolean }> {
+/** How the bar's count draws attention after the session's first claims: `lit` while it pulses on. */
+export async function claimsFresh($: Engine): Promise<{ lit: boolean }> {
   const f = (await $.state.get(FIRST)).value as First | null | undefined
-  return { lit: !!f?.lit, fresh: !!f && !f.opened }
+  return { lit: !!f?.lit }
 }
 
 /** A /clear or a /resume (hooks/turnover.ts): the new conversation's claims are held before anything draws their
@@ -174,7 +172,7 @@ export async function claimsDigest($: Engine): Promise<{ claims: { CLAIMS: strin
   return { claims: { CLAIMS: lines.claims, CLUSTERS: lines.clusters, GROWN: grown.length ? `\nGrown clusters, which you can rename or split:\n${grownLines(grown)}\n` : '' } }
 }
 
-/** The lens's claims of one look into the store, placed by their words in the looked-at messages; c lit for the
+/** The lens's claims of one look into the store, placed by their words in the looked-at messages; w lit for the
  *  newest answer when a claim was corrected. */
 export async function lookClaims($: Engine, look: Look): Promise<void> {
   const store = await claimsStore($)
@@ -233,9 +231,9 @@ export async function findEnd($: Engine): Promise<void> {
   await $.state.set(FINDING, null)
 }
 
-// ------------------------------------------------------------------------------------------------ the bar and c
+// ------------------------------------------------------------------------------------------------ the bar and w
 
-/** c on the bar: `c 11 claims`, in the lit color when a claim of the answer the keys act on was corrected. */
+/** w on the bar: `w 11 claims`, in the lit color when a claim of the answer the keys act on was corrected. */
 /** Whether the bar's count is bold now: for a moment after the count went up. */
 export async function claimsBright($: Engine): Promise<boolean> {
   const at = (await $.state.get(BRIGHT)).value
@@ -255,16 +253,15 @@ export async function claimsLit($: Engine): Promise<boolean> {
   return !!lit?.note
 }
 
-/** c or a press on the bar's count: the Claims pane, holding the keyboard. `byKey`: c at the prompt opened it, which
+/** w or a press on the bar's count: the Claims pane, holding the keyboard. `byKey`: w at the prompt opened it, which
  *  Claude Code places only in a wide terminal (a press at any width, core/pane.ts), so the notice names the bar's
  *  item, a click on which opens it. */
 export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false): Promise<void> {
   await reloadClaims($)
-  await $.state.set(FIRST, { lit: false, opened: true }).catch(() => undefined)
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
-  const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
-  if (byKey) failNotice($, narrowNotice('c', words), 'pane:claims')
+  const words = `w ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
+  if (byKey) failNotice($, narrowNotice('w', words), 'pane:claims')
   else failNotice($, 'Claude Code did not open the Evidence pane here.', 'pane:claims')
 }
 

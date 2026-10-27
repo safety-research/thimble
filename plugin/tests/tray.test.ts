@@ -43,7 +43,7 @@ const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, tex
 /** A resumed session with one answer, TEXT (or `more.text`), whose citation the check left as `item` (or whose
  *  citations, a list of items); `more`: the turn's cards, the message's parts and kept files to add (a card's meta.json
  *  under cards/<id>/). */
-async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string>; scrolls?: Any[] } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
+async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string>; scrolls?: Any[]; panes?: () => Any[] } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...(more.env ?? {}) })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
@@ -69,7 +69,7 @@ async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { c
   on('command.register', () => ({ value: { command: 'x' } }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.scroll', (_$: unknown, e: Any) => { more.scrolls?.push(e); return { value: undefined } })
-  on('ui.panes', () => ({ value: [] }))
+  on('ui.panes', () => ({ value: more.panes?.() ?? [] }) as never)
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-made-up', agentId: `agent-repair-${spawns.length}` } as never })
@@ -625,7 +625,8 @@ test("an explainer's or a heads-up's links to a file's lines draw as the answer'
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
-test('c cites the selected words in auto cite + verify too: while they wait the bar says c cite in place of the claims, and c opens their citation in the tray; with none selected, c opens Evidence', CITES, async ($, on) => {
+test('c cites the selected words in auto cite + verify too: while they wait the bar says c cite beside the claims\' w evidence, and c opens their citation in the tray; with none selected, c is a letter of the prompt, and w opens Evidence', CITES, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   const opens: Any[] = []
   on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
   let selected: Any = { text: 'failed on the p95 check', requestId: 'row-t1' }
@@ -633,24 +634,31 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   let gets = 0
   on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
   const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-cite')
+  // the claims keep their item on the bar while words wait: c and w each name one thing
   let band = textOf(await $.ui.render(above()))
   expect(band).toContain('c cite')
-  expect(band).not.toContain('c evidence')
+  expect(band).toContain('w evidence')
   expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
-  // the words are a citation of their own, open in the tray, and its check started; the selection no longer waits, so
-  // the bar names the claims again
+  // the words are a citation of their own, open in the tray, and its check started; the selection no longer waits
   band = textOf(await $.ui.render(above(40)))
   expect(band).toContain('failed on the p95 check')
   expect(band).toContain('a ask · 0 close')
   expect(spawns.length).toBe(1)
   expect(band).not.toContain('c cite')
-  expect(band).toContain('c evidence')
-  // with nothing selected, c opens Evidence; the open tray's citation, which c does not act on, is not read for the key
+  expect(band).toContain('w evidence')
+  // with nothing selected, c is typed and opens nothing, as q, a letter no one takes (the first such letter reads what
+  // the cards' keys need, once); at the key c reads the selection and none of the state: the open tray's citation,
+  // which c does not act on, is not read for it
   selected = undefined
+  expect(await $.prompt.edit(key('q'))).toEqual({ text: 'q', cursor: 1 })
   gets = 0
-  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: 'c', cursor: 1 })
   expect(gets).toBe(0)
+  await clock.advance(1000)
+  expect(opens).toEqual([])
+  // w opens Evidence
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
   expect(opens).toEqual(['Evidence'])
 })
@@ -668,12 +676,89 @@ test('with Evidence off, c cites the selected words, and with none selected c is
   // the words are a citation of their own, open in the tray, and its check started
   expect(textOf(await $.ui.render(above(40)))).toContain('failed on the p95 check')
   expect(spawns.length).toBe(1)
-  // nothing selected: c is typed, and opens nothing
+  // nothing selected: c is typed, and opens nothing; so is w, whose pane is off
   selected = undefined
   expect(textOf(await $.ui.render(above(40)))).not.toContain('c cite')
   expect(await $.prompt.edit(key('c'))).toEqual({ text: 'c', cursor: 1 })
   await clock.advance(1000)
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: 'w', cursor: 1 })
+  await clock.advance(1000)
   expect(opens).toEqual([])
+})
+
+test("c with words selected reads the selection once and no state at the key, however many answers the session holds: whether they wait is kept from the bar's drawing, and words selected since are checked in full", CITES, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  // words dragged over more than one row: Claude Code names no row, so they are looked for in every answer
+  let selected: Any = { text: 'failed on the p95 check' }
+  let selections = 0
+  on('ui.selection', () => { selections++; return { value: selected } })
+  let gets = 0
+  on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
+  // sixty answers after the one that holds the words
+  const kept: Record<string, string> = {}
+  for (let n = 2; n <= 61; n++) {
+    kept[`answers/t${n}.json`] = JSON.stringify({ v: 1, turn: { turnId: `t${n}`, n, prompt: { text: `and run ${n}?`, by: 'composer', row: `row-q${n}` }, rows: [`row-t${n}`], answer: `row-t${n}`, reason: 'answer', startedAt: n, endedAt: n, labels: [], cards: [], seq: 0 }, msgs: [{ row: `row-t${n}`, turnId: `t${n}`, text: `Run ${n} passed every check.`, at: n }] })
+  }
+  const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-cite-long', { kept })
+  // the bar draws, and names c cite
+  expect(textOf(await $.ui.render(above()))).toContain('c cite')
+  // c: one read of the selection, none of the state, within the hook's few milliseconds
+  gets = 0
+  selections = 0
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  expect(gets).toBe(0)
+  expect(selections).toBe(1)
+  await clock.advance(1000)
+  // the words are a citation of their own, open in the tray, and its check started
+  expect(textOf(await $.ui.render(above(40)))).toContain('failed on the p95 check')
+  expect(spawns.length).toBe(1)
+  // cited, the selection no longer waits: c is typed, and reads no state either (q, a letter no one takes, first reads
+  // what the cards' keys need, once)
+  expect(await $.prompt.edit(key('q'))).toEqual({ text: 'q', cursor: 1 })
+  gets = 0
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: 'c', cursor: 1 })
+  expect(gets).toBe(0)
+  // words selected since the bar last drew: the key checks them in full, and c cites them
+  selected = { text: 'Run 7 passed every check' }
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(spawns.length).toBe(2)
+})
+
+test("the Evidence pane's w close is a click alone: a w typed while the pane holds the keyboard reaches the prompt, where it closes the pane once its word window closed, and a question that starts with w is typed whole", CITES, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  on('ui.selection', () => ({ value: undefined }))
+  // the side pane as Claude Code keeps it: up from an open until a close
+  let up = false
+  const opens: Any[] = []
+  const closes: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); up = true; return { value: { isPlaced: true } } as never })
+  on('ui.close', (_$: unknown, e: Any) => { closes.push(e.id); up = false; return { value: undefined } as never })
+  const { clock } = await resumed($, on, QUOTED, 's-tray-wclose', { panes: () => (up ? [{ id: 'thimble', title: 'Evidence' }] : []) })
+  expect(textOf(await $.ui.render(above()))).toContain('w evidence')
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(opens).toEqual(['Evidence'])
+  // the pane's key row ends with w close, a click alone: no Button of the pane takes w, so Claude Code types a w typed
+  // in the pane into the prompt
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Evidence', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  const buttons = all(pane).filter(n => n.type === 'Button')
+  expect(buttons.filter(b => b.props.hotkey === 'w')).toEqual([])
+  const close = buttons.find(b => String(b.key ?? b.props.key) === 'key-w')
+  expect([close?.props.label, textOf(close)]).toEqual(['close', 'w: close'])
+  // that w, alone: the pane closes once its word window closed
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(closes).toEqual(['thimble'])
+  // open again: a question that starts with w, typed on, is a word, whole in the prompt, and the pane stays
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(opens).toEqual(['Evidence', 'Evidence'])
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  expect(await $.prompt.edit(key('h'))).toEqual({ text: 'wh', cursor: 2 })
+  expect(await $.prompt.edit({ ...(key('y') as Any), text: 'wh', cursor: 2, start: 2, end: 2 } as never)).toEqual({ text: 'why', cursor: 3 })
+  await clock.advance(1000)
+  expect(closes).toEqual(['thimble'])
 })
 
 test('a sentence the check rewrote draws as rewritten, its citation corrected, though the analyst asked about other words of it: those step aside', CITES, async ($, on) => {

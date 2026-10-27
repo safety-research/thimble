@@ -8,10 +8,12 @@
 // sentence a check rewrote, which is the check's; a card's link reads as its title, and a new citation on any of its
 // words takes in the whole link, which still draws as the title.
 //
-// c is also the Claims pane's key: c cites only while words are selected that it has not cited yet, which the bar shows
-// as `c cite` (beside `e explain`, the claims' item set aside meanwhile); else c opens the claims (core/answerview.ts
-// asks which once the word window closed).
+// c only cites: it acts while words are selected that it has not cited yet, which the bar shows as `c cite` (beside
+// `e explain`; the claims keep their item at the right, under their own key, w); with none, c is typed into the prompt.
+// Whether words wait reads every answer's words, so it is kept in memory for the selection the bar last drew with, and
+// c's key reads the selection alone while that one stands.
 //
+//   CITE_KEYS                             its letter at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   citeKey($, key), citeBar, citeShown   c at an empty prompt while words wait, `c cite` on the bar
 //   citeWords($, row, words)              the citation of these words on that answer: an existing one (Claude's, or
 //                                         one asked before) when the words stand inside or across it, or in a
@@ -23,7 +25,7 @@ import { SPIN } from '../bar/busy'
 import { howTo, hintUsed } from '../bar/hints'
 import { failCleared, hintLine } from '../bar/notice'
 import { answerRows, messageOf, turnOfRow } from '../core/answers'
-import { answerSelection, selectionUsed, usedBy } from '../core/selection'
+import { answerSelectionOf, selectionKey, selectionNow, selectionUsed, usedBy, type Sel } from '../core/selection'
 import { pickedWords } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { claudeCites, featureOn } from '../settings/features.mjs'
@@ -34,6 +36,9 @@ import { askedWords, cardLinksIn, carrier, codeRanges, marksIn, rewritesIn, sent
 import { editReply, newReply, replyKeyOf, replyOf, type MarkItem } from './store'
 
 type Engine = EngineInterface
+
+/** c is thimble's own whether or not Citations is on: no card takes it. */
+export const CITE_KEYS = ['c']
 
 /** The sign drawn after a citation, with the space before it (× after a failed one, the turning glyph after one being
  *  checked: marks/view.ts): no word of the answer. */
@@ -174,11 +179,21 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
   await showCitation($, row, next)
 }
 
+// Whether words wait for c (citeShown), as this module last worked it out, for the selection Claude Code answered then:
+// at each drawing of the bar (citeBar) and as c cites them. Claude Code gives a key's hook a few milliseconds of its own
+// time, and the full check reads the state of every answer, so many reads in a long session: c's key reads the selection
+// alone and takes this while the selection is the same (citeKey), as the other keys read what their modules keep
+// (squeeze/ui.ts, tray/tray.ts).
+let waitKept: { sel: string; shown: boolean } | null = null
+
 /** c, or a click on `c cite`: the words the analyst last selected with the mouse, on the answer they lie in (else
  *  the newest answer that holds them), cited and found in the files. */
 export async function citeSelection($: Engine): Promise<void> {
-  const sel = await answerSelection($)
+  const raw = await selectionNow($)
+  const sel = await answerSelectionOf($, raw)
   await selectionUsed($, 'cite', sel)
+  // cited, or none to cite: c no longer cites this selection
+  waitKept = { sel: selectionKey(raw), shown: false }
   const { words } = pickedWords(sel?.text ?? '')
   if (!words) { await howTo($, 'cite', 'select a passage in an answer and press c to verify the claim.', 'cite'); return }
   await failCleared($, 'cite')
@@ -191,20 +206,31 @@ export async function citeSelection($: Engine): Promise<void> {
 }
 
 /** Whether c cites now: Citations is on, an answer exists, and words are selected that c has not cited yet (Claude
- *  Code answers the last selection until the person selects again, so once c has cited it, c opens the claims again). */
+ *  Code answers the last selection until the person selects again, so once c has cited it, c is typed again). */
 export async function citeShown($: Engine): Promise<boolean> {
   if (!featureOn('cite')) return false
-  const sel = await answerSelection($)
-  if (!pickedWords(sel?.text ?? '').words || (await usedBy($, 'cite', sel))) return false
-  return (await answerRows($).catch(() => [])).length > 0
+  return shownFor($, await selectionNow($))
+}
+
+/** citeShown of a selection read before, kept for c's key (waitKept). */
+async function shownFor($: Engine, raw: Sel | undefined): Promise<boolean> {
+  const sel = await answerSelectionOf($, raw)
+  const shown = !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'cite', sel)) && (await answerRows($).catch(() => [])).length > 0
+  waitKept = { sel: selectionKey(raw), shown }
+  return shown
 }
 
 /** c at an empty prompt while words wait to be cited (citeShown): after the word window (a c that starts a word is
- *  typed), the selected words are cited. Else c is the claims' (claims/seam.ts claimsKey). It reads the selection, so
- *  core/answerview.ts asks it at the key only while the claims do not take c. */
+ *  typed), the selected words are cited; with none, c is typed. Whether words wait is read in the key's hook, since a
+ *  key done once the window closed can no longer be typed, within the few milliseconds Claude Code gives the hook (past
+ *  them, Claude Code types the key): one read of the selection, and none of the state while it is the selection the bar
+ *  last drew with (waitKept); a selection made since is checked in full. */
 export async function citeKey($: Engine, key: string, _until: number): Promise<Take | null> {
-  if (key !== 'c' || !(await citeShown($))) return null
-  return { later: () => citeSelection($) }
+  if (key !== 'c' || !featureOn('cite')) return null
+  const raw = await selectionNow($)
+  const kept = waitKept
+  const shown = kept && kept.sel === selectionKey(raw) ? kept.shown : await shownFor($, raw)
+  return shown ? { later: () => citeSelection($) } : null
 }
 
 /** `c cite` on the bar while c cites (citeShown); a click does what c does. The settings' preview shows it, as it would

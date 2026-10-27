@@ -10,7 +10,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { aboveBar } from '../core/answerview'
-import { closePane, narrowNotice, openPane, paneNow, PANE_ID } from '../core/pane'
+import { closePane, narrowNotice, openPane, paneShows } from '../core/pane'
 import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
@@ -27,12 +27,6 @@ type Any = any
 export const BAR_KEYS = ['r', 'l']
 
 const TITLES = { coverage: 'Coverage', labels: 'Labels', settings: 'thimble settings' } as const
-
-/** Whether the side pane shows this kind now. */
-async function paneShows($: Engine, kind: string): Promise<boolean> {
-  if ((await paneNow($))?.kind !== kind) return false
-  return (await $.ui.panes()).some(p => p.id === PANE_ID)
-}
 
 /** Coverage or the labels: open, or closed when the pane shows it. Each takes the keys, so the keys its key row names
  *  act in it, not in the prompt (coverage.tsx, labels/pane.tsx), and esc closes it. A pane a key opened that

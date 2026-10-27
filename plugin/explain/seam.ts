@@ -46,7 +46,7 @@ import { fullscreenNow } from '../cards/draw'
 import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
 import type { MarkRef, Span } from '../core/answerview'
 import { textView } from '../core/answerview'
-import { answerSelection, selectionUsed, usedBy } from '../core/selection'
+import { answerSelection, selectionKey, selectionNow, selectionUsed, usedBy } from '../core/selection'
 import { themeNow } from '../core/theme'
 import { tellOpened } from '../core/engaged'
 import { commentsText } from '../core/engaged.mjs'
@@ -470,8 +470,9 @@ let watching = 0
 
 /** The bar names `e explain` and `c cite` only while words are selected, and Claude Code tells no hook when the
  *  person selects: so while its fullscreen layout is drawn (the only one that reports a selection), the selection is
- *  read every SELECTION_MS and the bar drawn again when one starts or ends. One watch per load of the plugin; a watch of an
- *  earlier load stops at its next read. */
+ *  read every SELECTION_MS and the bar drawn again when one starts or ends, or other words are selected (c's key reads
+ *  whether words wait as the bar last drew it for the selection, marks/cite.ts). One watch per load of the plugin; a
+ *  watch of an earlier load stops at its next read. */
 function watchSelection($: Engine): void {
   const mine = ++watching
   let had = ''
@@ -479,7 +480,7 @@ function watchSelection($: Engine): void {
     if (mine !== watching) return
     try {
       if (fullscreenNow() === true && (featureOn('explain') || featureOn('cite'))) {
-        const has = `${await selectionWaits($)} ${await wordsSelected($)}`
+        const has = `${await selectionWaits($)} ${await wordsSelected($)} ${selectionKey(await selectionNow($))}`
         if (has !== had) { had = has; $.ui.invalidate('ui.render') }
       }
     } catch {
