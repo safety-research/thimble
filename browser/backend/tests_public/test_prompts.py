@@ -224,3 +224,32 @@ def test_the_lens_checks_say_what_the_terminal_lenses_say(check):
     browser = _shared((REPO / "prompts" / "checks" / f"{check}.md").read_text("utf-8"))
     terminal = _shared((REPO.parent / "plugin" / "prompts" / f"{LENS_TEXTS[check]}.md").read_text("utf-8"))
     assert browser and browser == terminal
+
+
+def _examples(text: str) -> list[list[str]]:
+    """The example blocks of a prompt's text: each run of lines indented by four spaces, its lines stripped."""
+    blocks: list[list[str]] = []
+    run: list[str] = []
+    for line in text.splitlines() + [""]:
+        if line.startswith("    ") and line.strip():
+            run.append(line.strip())
+        elif run:
+            blocks.append(run)
+            run = []
+    return blocks
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_takes_a_request_for_a_dashboard_as_a_view(mode, monkeypatch):
+    """Main's prompt says what a view is for, a page the analyst keeps and comes back to, and pairs a request for a
+    dashboard with propose_view and a question about the records with add_card; propose_view's description takes the
+    request in the analyst's own words, such as a dashboard, so main does not answer it with cards."""
+    from app import tools
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    agents = prompts.section("main", "thimble's agents", mode)
+    pairs = [b for b in _examples(agents) if all(line.startswith("Analyst") for line in b)]
+    assert any("dashboard" in line and line.endswith("propose_view") for b in pairs for line in b)
+    assert any(line.endswith("add_card") for b in pairs for line in b)
+    assert "dashboard" in tools.descriptions()["propose_view"]
+
