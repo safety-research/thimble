@@ -6,16 +6,16 @@
 // reload of the module, or a session started from inside another one, finds it there already).
 //
 // A TMPDIR. Claude writes the files it makes for thimble (a card's rows) in the session's temp folder, and the texts
-// call it `$TMPDIR`. The session's commands get thimble's own (core/home.ts tempDir: `thimble/` in the person's
-// TMPDIR, else the home's tmp/), so `$TMPDIR` in a command is the folder the texts name, and no such file lands in a
-// folder other users can read.
+// call it `$TMPDIR`. The session's commands get thimble's own (core/home.ts tempDir), so `$TMPDIR` in a command is the
+// folder the texts name, and no such file lands in a folder other users can read.
 //
 // Claude Code's own temp folder stays where it started. Claude Code keeps it, `claude-<uid>/`, in CLAUDE_CODE_TMPDIR,
 // else in /tmp on macOS and in TMPDIR elsewhere, and looks it up again for each command: a command in its Bash sandbox
 // gets that folder as its TMPDIR and writes there the folder it ended in, while the sandbox lets commands write only
 // the folder Claude Code started with. A TMPDIR moved alone would take Claude Code's folder along on Linux, out of the
-// sandbox's reach, and every sandboxed command would fail. So CLAUDE_CODE_TMPDIR is set first to where Claude Code
-// keeps its folder, unless the person set it, and TMPDIR moves only once it is.
+// sandbox's reach, and every sandboxed command would fail. So first, before anything asks for thimble's temp folder,
+// CLAUDE_CODE_TMPDIR is set to where Claude Code keeps its folder, unless the person set it, and TMPDIR moves only once
+// it is. thimble's temp folder is `thimble/` in Claude Code's, so a sandboxed command can write it too.
 import type { EngineInterface, Register } from 'claude-code'
 
 import { tempDir } from '../core/home'
@@ -77,6 +77,8 @@ async function keepClaudeTemp($: Engine): Promise<boolean> {
 export const registerPath: Register = on => {
   // the cwd matcher keeps this hook apart from the other modules' (one hook per event and matcher in a module)
   on('session.start', { cwd: /^\// }, async ($, e, next) => {
+    // before the later modules' hooks, which are the first to ask for thimble's temp folder
+    const kept = await keepClaudeTemp($).catch(() => false)
     const r = await next(e)
     try {
       await putBinFirst($)
@@ -85,7 +87,7 @@ export const registerPath: Register = on => {
     }
     try {
       const dir = await tempDir($)
-      if ((await $.env.get('TMPDIR')) !== dir && (await keepClaudeTemp($))) await $.env.set('TMPDIR', dir)
+      if (kept && (await $.env.get('TMPDIR')) !== dir) await $.env.set('TMPDIR', dir)
     } catch {
       // the texts name thimble's temp folder by its path
     }

@@ -57,6 +57,22 @@ def test_a_command_in_thimbles_temp_folder_keeps_the_start_folders_records(tmp_p
     assert STORE.find_root(temp) == temp.resolve()
 
 
+def test_thimbles_folder_in_claude_codes_temp_folder_is_a_temp_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # thimble/ in Claude Code's temp folder, found by CLAUDE_CODE_TMPDIR; and in a command in Claude Code's Bash
+    # sandbox, whose TMPDIR is Claude Code's temp folder, as thimble/ in TMPDIR. Claude Code's own files beside it are
+    # not thimble's
+    claude = tmp_path / "cc" / f"claude-{os.getuid()}"
+    temp = claude / "thimble"
+    temp.mkdir(parents=True)
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(tmp_path / "cc"))
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "elsewhere"))
+    assert STORE.in_temp(temp / "rows.jsonl") and not STORE.in_temp(claude / "cwd-1a2b")
+    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(claude))
+    monkeypatch.setenv("TMPDIR", str(claude))
+    assert STORE.in_temp(temp / "rows.jsonl") and not STORE.in_temp(claude / "cwd-1a2b")
+
+
 @pytest.mark.skipif(os.geteuid() == 0, reason="root may write in any folder")
 def test_a_folder_thimble_may_not_write_in_is_found_by_the_records_kept_for_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     data = tmp_path / "data"

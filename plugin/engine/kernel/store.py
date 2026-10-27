@@ -102,9 +102,13 @@ def _holding(start: Path, conversation: str | None = None) -> Path | None:
 def temp_folders() -> list[Path]:
     """thimble's temp folders, as real paths (the plugin's core/home.ts tempDir, hooks/temp_allow.py temp_folders): the
     session's commands get thimble's folder as their TMPDIR, so TMPDIR itself when it is a folder named thimble, then
-    thimble/ in TMPDIR, then $THIMBLE_HOME/tmp; only those that exist."""
+    thimble/ in Claude Code's temp folder (claude-<uid>/ in CLAUDE_CODE_TMPDIR), then thimble/ in TMPDIR (a command in
+    Claude Code's Bash sandbox gets Claude Code's temp folder as its TMPDIR), then $THIMBLE_HOME/tmp; only those that
+    exist."""
     tmp = (os.environ.get("TMPDIR") or "").rstrip("/")
+    claude = (os.environ.get("CLAUDE_CODE_TMPDIR") or "").rstrip("/")
     cands = [Path(tmp)] if tmp and os.path.basename(os.path.realpath(tmp)) == "thimble" else []
+    cands += [Path(claude) / f"claude-{os.getuid()}" / "thimble"] if claude else []
     cands += ([Path(tmp) / "thimble"] if tmp else []) + [thimble_home() / "tmp"]
     out: list[Path] = []
     for c in cands:

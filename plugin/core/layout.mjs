@@ -18,7 +18,8 @@
 //                                   (engine/kernel/store.py)
 //   folders/<folder>/labels/        the labels of thimble 0.10 and before, one set per folder: kept, never shown
 //   run/                            the card runner's socket (cards/ask.ts)
-//   tmp/                            the temp folder of a session that has no TMPDIR (core/home.ts tempDir)
+//   tmp/                            the temp folder of a session whose Claude Code temp folder and TMPDIR can hold none
+//                                   (core/home.ts tempDir)
 //
 // <conversation> is safeName of the conversation's key; <folder> is folderName of the folder's real path.
 
