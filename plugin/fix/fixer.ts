@@ -339,11 +339,12 @@ export async function fixerEnded($: Engine, e: Any, id: number, checked?: Fix): 
   } finally {
     ending.delete(id)
   }
-  // the end that came while this check waited is the newer one: its own check now
+  // the end that came while this check waited is the newer one: its own check now, unless more words started a fixer
+  // after it, whose own end checks the copy
   const kept = later.get(id)
   if (kept) {
     later.delete(id)
-    await fixerEnded($, kept, id)
+    if (!(await newerFixer($, id, String(kept.agentId ?? '')))) await fixerEnded($, kept, id)
     return
   }
   if (!again) return
@@ -354,6 +355,17 @@ export async function fixerEnded($: Engine, e: Any, id: number, checked?: Fix): 
     await kernelFix($, ['done', String(id), '--cannot', '-'], { stdin: bad, timeoutMs: 60000 })
     await refreshFixes($)
     await setFixLine($, { id, kind: 'failed' })
+  }
+}
+
+/** Whether a fixer of the fix other than `agentId` still works: more words started it after `agentId` ended. */
+async function newerFixer($: Engine, id: number, agentId: string): Promise<boolean> {
+  const others = Object.entries(await fixers($)).filter(([a, f]) => f === id && a !== agentId).map(([a]) => a)
+  if (!others.length) return false
+  try {
+    return (await $.agent.list()).some(a => others.includes(a.id) && ['pending', 'running', 'waiting'].includes(String(a.status)))
+  } catch {
+    return false
   }
 }
 

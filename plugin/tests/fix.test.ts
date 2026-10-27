@@ -683,6 +683,39 @@ test("a round's fixer that ends while the check of the round before waits: its e
   expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toContain('did not pass · the percent is not in the data')
 })
 
+test('an end kept while a check waited is not checked when more words started a newer fixer: that fixer\'s own end checks the copy', async () => {
+  const s = setup()
+  let answer: () => void = () => undefined
+  const held = new Promise<void>(r => { answer = r })
+  const calls: string[][] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push(argv)
+      if (calls.length === 1) {
+        await held
+        return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, state: 'working', testing: null }), stderr: '' }
+      }
+    }
+    return run(argv, o)
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  await ask(s, '1 and keep the percent')
+  await s.end('Title: Bar says read percent\nWhat it does: The bar says read 14%.', 'agent-fixer-2')
+  // more words before the first check returned: a third fixer, which still works
+  await ask(s, '1 and say it in the pane too')
+  expect(s.spawns.length).toBe(3)
+  answer()
+  for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 5))
+  expect(calls.length).toBe(1)
+  await s.end('Title: Bar and pane say read percent\nWhat it does: The bar and the pane say read 14%.', 'agent-fixer-3')
+  await until(() => calls.length > 1)
+  expect(calls.length).toBe(2)
+  expect(calls[1]).toEqual(expect.arrayContaining(['--title', 'Bar and pane say read percent']))
+})
+
 test('n leaves the fix ready in the list, where thimble fix apply in a shell turns it on; a fixer that changed nothing leaves a request', async () => {
   const s = setup()
   await requested(s)
