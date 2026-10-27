@@ -1,5 +1,5 @@
 // request.ts: a request for a change, as the fix-thimble skill makes it (after the person's /thimble-fix <words>, or on
-// Claude's own), and r (redo) on a fix that failed or no longer fits. Each makes the copy with the kernel, then starts
+// Claude's own), and y (try again) on a fix that failed, or redo of one that no longer fits. Each makes the copy with the kernel, then starts
 // the fixer in it. Claude decides whether the words follow up on a fix the person has: /thimble-fix gives it the list of
 // their fixes (register.ts), and it starts the skill with one of these forms:
 //
@@ -67,11 +67,12 @@ export async function request($: Engine, said: string, by: Asker = 'person', tel
     await refreshFixes($)
     let sent: { isDelivered?: boolean; reason?: string } | undefined
     try {
-      sent = await $.session.send({ to: { agentId: live.agentId }, text: roundText(fix, who, words) } as never) as never
+      // the person's own words, as they typed them, where they typed any; else Claude's
+      sent = await $.session.send({ to: { agentId: live.agentId }, text: roundText(fix, who, asked.trim() || words) } as never) as never
     } catch (err) {
       sent = { isDelivered: false, reason: String((err as Error)?.message || err) }
     }
-    if (!sent?.isDelivered) return { text: `× The fork ${fixingWord(fix)} did not get these words (${cut(String(sent?.reason || 'not delivered'), 160)}). They are kept with the fix: once it ends, r redoes it with them.`, fix, failed: true, round: true }
+    if (!sent?.isDelivered) return { text: `× The fork ${fixingWord(fix)} did not get these words (${cut(String(sent?.reason || 'not delivered'), 160)}). They are kept with the fix: once it ends, y tries it again with them.`, fix, failed: true, round: true }
     return { text: `The fork ${fixingWord(fix)} has these words too. Keep going.`, fix, failed: false, round: true, live: true }
   }
   // the fix named, else (no form) the one the line shows while its copy is still there: a round of it
@@ -106,7 +107,8 @@ export function roundText(fix: Fix, who: string, words: string): string {
   return `${who} adds to this fix (round ${fix.rounds}): ${words}`
 }
 
-/** r: the fix again, in a new copy cut from your thimble as it is now, with the earlier change to start from. */
+/** y on a failed fix: the fix again, in a new copy cut from your thimble as it is now, with the earlier change to start
+ *  from. */
 export async function redoFix($: Engine, id: number): Promise<string | null> {
   const r = await kernelFix($, ['redo', String(id)], { timeoutMs: 180000, doing: 'making a copy of thimble' })
   const fix = r.ok ? jsonOf<Fix>(r.out) : null

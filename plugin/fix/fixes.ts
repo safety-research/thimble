@@ -51,7 +51,7 @@ export type Fix = {
   /** the conversation the fix was asked in (THIMBLE_CONVERSATION at new): a /resume keeps it, with a new session */
   conversation?: string | null
   /** the last check did not use the change, and why; kept until the next check, so that the next fixer in the copy
-   *  (another round, at once, or r) is told */
+   *  (another round, at once, or y on the failed line) is told */
   refused?: Refusal | null
   /** the files no fix may change that its fixer could not do without, when it ended with `Cannot:`: another try fails
    *  the same way, so its failed line offers none */
@@ -106,7 +106,7 @@ export function fixSlug(f: Pick<Fix, 'id' | 'title'>): string {
 export type Refusal = { why: string; files: string[]; tests?: string }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
- *  u), failed (d what changed · r redo · n dismiss), request (no code), a new release with the fixes replayed on it
+ *  u), failed (y try again · d what it tried · n dismiss), request (no code), a new release with the fixes replayed on it
  *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
  *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
 export type FixLine = {
