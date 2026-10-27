@@ -18,7 +18,7 @@
 // that does the same: Claude Code closes a pane on esc (and on its close mark), and while the trail holds a pane the
 // ui.close hook goes back to it instead.
 //
-// Docked beside the conversation, the pane keeps its input bar and its key row at its bottom: the drawing above them
+// Docked beside the conversation, the pane keeps its top row, and its input bar and key row at its bottom: the drawing
 // gets the rows left over (a pane that lays itself out reads them as its `bodyRows`), the side thread's conversation
 // follows it, and when the two are taller than that room they scroll in it with the wheel and ↑ ↓ (the ui.scroll
 // hook), the end shown when the conversation grows. In a pane whose drawing fits, ↑ and ↓ press the
@@ -194,7 +194,7 @@ function topRow($: Engine, els: Any, now: PaneNow, W: number): Any[] {
   const btn = Button({ key: under ? 'pane-back' : 'pane-close', plain: true, label: under ? 'back' : 'close the pane', hover: quiet(under ? 'pane-back' : 'pane-close'), onPress: () => (under ? paneBack($) : closePane($)), children: [
     ...key, Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: words }),
   ] })
-  return [Box({ key: 'pane-top', flexDirection: 'row', justifyContent: name ? 'space-between' : 'flex-end', width: W, children: [
+  return [Box({ key: 'pane-top', flexDirection: 'row', flexShrink: 0, justifyContent: name ? 'space-between' : 'flex-end', width: W, children: [
     ...(name ? [Text({ key: 'pane-name', bold: true, children: name })] : []),
     Box({ key: 'pane-top-right', flexDirection: 'row', flexShrink: 1, children: [btn] }),
   ] })]
@@ -254,7 +254,12 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     scrolled.by = Math.max(0, Math.min(over, scrolled.by))
     laid = { id, pinned: true, over, keys, own, arrows }
     const left = over - scrolled.by
-    const cue = over > 0 ? els.Text({ key: 'pane-more', dimColor: true, wrap: 'truncate-end', children: left > 0 ? `↓ ${left} more row${left === 1 ? '' : 's'} · scroll or ↓` : `↑ ${over} row${over === 1 ? '' : 's'} above · scroll or ↑` }) : null
+    // in the frame only the body gives way: Claude Code's Box and Text shrink unless told otherwise, so beside a drawing
+    // far taller than the frame the top row and this cue would shrink to nothing (a Box holds the cue: a Text takes no
+    // flexShrink of its own)
+    const cue = over > 0 ? els.Box({ key: 'pane-more', flexShrink: 0, children: [
+      els.Text({ key: 'w', dimColor: true, wrap: 'truncate-end', children: left > 0 ? `↓ ${left} more row${left === 1 ? '' : 's'} · scroll or ↓` : `↑ ${over} row${over === 1 ? '' : 's'} above · scroll or ↑` }),
+    ] }) : null
     const body = els.Box({ key: 'pane-body', flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden', children: [
       els.Box({ key: 'pane-body-in', flexDirection: 'column', flexShrink: 0, ...(scrolled.by ? { position: 'relative', top: -scrolled.by } : {}), children: [drawn, ...conv] }),
     ] })

@@ -1,5 +1,5 @@
 // The side pane (core/pane.ts): its trail of the panes it showed, the top row that names esc, which goes back down it (`esc back to …`)
-// or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, and the docked frame that keeps the input bar at its bottom. All data is made up. `claude plugin test plugin`.
+// or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, and the docked frame that keeps the top row and the input bar at its bottom. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { keyedWords, pressedWords } from '../bar/bar'
@@ -110,6 +110,22 @@ test('docked, the frame takes the pane\'s rows and a row past it, never shown; i
   const inline = await drawPane(s.$, { requestId: 'thimble', props: { bodyColumns: 70, placement: 'inline', scroll: { offset: 0, bodyRows: 24 } } }, await paneNow(s.$), els)
   expect(nodes(inline).some(n => n.props?.key === 'pane-frame')).toBe(false)
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(false)
+})
+
+test('docked, a drawing far taller than the pane (the settings) leaves the top row with its close, and the line that says how much more there is: only the body gives way', async () => {
+  const s = setup()
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const frame = nodes(await draw(s, 12)).find(n => n.props?.key === 'pane-frame')
+  const parts: Any[] = frame.props.children
+  const body = parts.find(n => n.props?.key === 'pane-body')
+  expect(body.props.flexShrink).toBe(1)
+  // Claude Code's Box and Text shrink unless told otherwise, which would take the frame's rows from every part (this
+  // harness lays nothing out): every part but the body says it keeps its rows
+  for (const n of parts) if (n !== body) expect([n.props.key, n.props.flexShrink]).toEqual([n.props.key, 0])
+  const top = parts.find(n => n.props?.key === 'pane-top')
+  expect(textOf(top)).toContain('esc close')
+  expect(nodes(top).some(n => n.props?.key === 'pane-close')).toBe(true)
+  expect(parts.some(n => n.props?.key === 'pane-more')).toBe(true)
 })
 
 test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below, and the ring lands on its choice set', async () => {
