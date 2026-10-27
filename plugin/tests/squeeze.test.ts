@@ -440,6 +440,34 @@ test('a press on a chip\'s end moves it one level toward that end, as [ and ] do
   await ui.unmount()
 })
 
+test('while a click holds the keys in the chips, ↵ keeps them open, ↑ and ↓ move between the chips and ← and → between the levels, and s closes them', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  const chips = async () => (await chipsDrawn($, 'row-t1', LONG)).client?.props.props
+  const picked = async () => (await chips()).items.find((c: Any) => c.picked)?.id
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  // a click on the dot where Background stands picks it, and gives the chips the keys
+  await ui.press({ key: 'lvl-familiarity-2' })
+  expect(await picked()).toBe('familiarity')
+  // ↵ keeps them open, and the bar names the arrows
+  await ui.key({ key: 'return' })
+  expect(await chips()).toBeDefined()
+  expect(await t.bar()).toContain('↑↓')
+  // ↑ the chip before, ↓ the next, round the row
+  await ui.key({ key: 'up' })
+  expect(await picked()).toBe('length')
+  await ui.key({ key: 'up' })
+  expect(await picked()).toBe('familiarity')
+  await ui.key({ key: 'down' })
+  expect(await picked()).toBe('length')
+  await ui.key({ key: 'right' })
+  expect((await chips()).items.find((c: Any) => c.id === 'length').level).toBe(2)
+  await ui.key({ key: 's' })
+  expect(await chips()).toBeUndefined()
+  await ui.unmount()
+})
+
 test('the rewrite starts from the corrected citations: the request holds the corrected value alone, and names no correction', async ($, on) => {
   // a resumed session: the check corrected the reply's citation
   const at = LONG.indexOf('[3 of 12](#)')
