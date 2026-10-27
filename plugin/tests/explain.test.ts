@@ -540,6 +540,10 @@ test('c finds the selected words in the answer as it draws: words that run into 
     const items = (await rowMarks(s.$, 't1-row'))!.items
     expect(items.filter(m => m.asked).map(m => ANSWER.slice(m.start, m.end))).toEqual(['came 30 seconds', 'after a drop'])
     expect(withAsked(ANSWER, items).text).toContain('[41 of the 44](#) failures [came 30 seconds](#) [after a drop](#).')
+    // in manual, a citation Claude wrote anyway has no check: c on its words says so, rather than to wait for one
+    setOptions({ citations: 'manual' })
+    await answered(s, { id: 't2', prompt: 'How often?', text: 'It failed [3 times](#) today.' })
+    expect(await citeWords(s.$, 't2-row', 'failed 3 times')).toContain('manual does not check')
   } finally {
     setOptions({})
   }

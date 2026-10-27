@@ -128,7 +128,9 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
   // words inside or across a citation the answer draws (Claude's, or asked before) open it
   const marks = marksIn(shown)
   const hit = marks.findIndex(m => at.start < m.end && at.end > m.start)
-  if (hit >= 0 && !asked.items[hit]) return 'those words are in a citation still being checked; try again in a moment.'
+  // a citation with no check stored: one whose check starts at the end of its turn, or, in manual, one Claude wrote
+  // anyway, which no check is for
+  if (hit >= 0 && !asked.items[hit]) return claudeCites() ? 'those words are in a citation still being checked; try again in a moment.' : 'those words are in a citation Claude wrote, which Citations manual does not check; select words outside it.'
   // so do words asked about before that it does not draw; and words of a sentence a check rewrote open the citation it
   // was rewritten for, since the sentence is the check's and holds no citation asked about (message.js withAsked)
   const place = writtenPlace(shown, asked, at)
