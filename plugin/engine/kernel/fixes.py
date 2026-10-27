@@ -2726,7 +2726,8 @@ def draft(fid: int | str, title: str, summary: str, st: Store | None) -> dict[st
         named, _ = P.scan({"diff": "\n".join(added)}, {k: v for k, v in terms.items() if k != "path"}, known,
                           use_gitleaks=False)
         if named:
-            raise FixError("a new file of the fix is named after your data; ask Claude to give it a made-up name (r)")
+            raise FixError(f"a new file of the fix is named after your data. In Claude Code, /thimble-fix {rec['id']} give "
+                           "the new file a made-up name asks Claude to rename it")
     repo_paths = [(str(live_dir()) + os.sep, ""), (str(PLUGIN) + os.sep, "plugin/")]
     hits, notes = P.scan({k: v for k, v in held_parts.items() if k != "diff"}, words_terms, known, repo_paths, allow=[base])
     if "diff" in held_parts:

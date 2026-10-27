@@ -280,7 +280,7 @@ def test_a_file_a_fix_moves_counts_as_both_its_names(world):
 def test_the_way_back_runs_from_a_checkout_of_the_release_that_no_fix_changes(world, monkeypatch, capsys):
     from kernel import cli  # noqa: PLC0415
 
-    release_with(world, {"plugin/sandbox/run.mjs": "// the release's launcher\n"})
+    release_with(world, {"plugin/sandbox/run.mjs": "// the release's sandbox code\n"})
     r = made(world)
     # made with live, at the release commit; a fix that goes on changes live, never this checkout
     rel = FX.release_dir()

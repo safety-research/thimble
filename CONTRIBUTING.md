@@ -23,8 +23,8 @@ Once you have fixes (thimble fix), Claude Code loads thimble from `~/.thimble/fi
 `thimble update` moves thimble and your fixes onto the commit you checked out. The way back from a fix (`thimble fix`,
 `thimble file`, `thimble update`, the fixer's sandbox and the tests it runs) runs from `~/.thimble/fixes/release`, a
 checkout of that commit which no fix changes. A fix may change any text file but the fix flow and the privacy scan
-(`plugin/engine/kernel/fixes.py`, PROTECTED_KINDS), and the line that asks whether to use it names the sandbox, hook,
-launcher, script and lock files it changes.
+(`plugin/engine/kernel/fixes.py`, PROTECTED_KINDS), and the line that asks whether to use it names the files it changes
+of the sandbox, the hooks file and the command hooks, the launcher, thimble's scripts and the lock files (NOTICE_KINDS).
 
 The browser workbench runs from the checkout too: `thimble-browser FOLDER` builds the page again when its sources
 changed, so an edit to the page shows when you start it again.

@@ -46,7 +46,7 @@ scripts/install.sh
 
 Run `claude` in a folder with files you'd like to analyze. thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off; `/plugin` turns thimble off.
 
-When thimble does something wrong, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble, and a key puts the change to use, or not; a fix that changes the sandbox, a hook, the launcher or a package says so first. A fix never changes the way back: `thimble fix off` in a shell, or `sh ~/.thimble/fixes/off.sh` when thimble does not load, brings back the plain release. In a shell, `thimble file issue N` gives a link to GitHub's new-issue form with fix N's text, which you read and submit there, and `thimble file pr N` shows you the text and the code, then opens a pull request with them.
+When thimble does something wrong, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble, and a key puts the change to use, or not; a fix that changes the sandbox, the hooks file or a command hook, the launcher or a package says so first. A fix never changes the way back: `thimble fix off` in a shell, or `sh ~/.thimble/fixes/off.sh` when thimble does not load, brings back the plain release. In a shell, `thimble file issue N` gives a link to GitHub's new-issue form with fix N's text, which you read and submit there, and `thimble file pr N` shows you the text and the code, then opens a pull request with them.
 
 ![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
 
