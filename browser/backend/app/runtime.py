@@ -444,17 +444,38 @@ class Space:
         return Spec(system=system, builtins=runtime_tools.available(builtins) if engine() == "api" else builtins,
                     thimble=names, model=model, effort=effort, cwd=cwd, workspace=self.ws,
                     read_roots=reads, write_roots=writes, private=self.private(), home=tmp, fast=fast,
-                    corpus_edits=edits, no_write=protected(self.ws))
+                    corpus_edits=edits, no_write=protected(self.ws, writes))
 
 
-def protected(ws: Path) -> list[Path]:
+def protected(ws: Path, writes: list[Path] | tuple[Path, ...] = ()) -> list[Path]:
     """The workspace's files no agent writes, as the kernels' sandbox keeps them (kernel_wrap.srt_rules): its hidden
     files and lock, and its read-only files and folders. They matter where a write root holds the workspace, as a
-    corpus folder that holds thimble's home would."""
+    corpus folder that holds thimble's home would. A read-only folder that holds one of `writes` (the local extension,
+    whose views/ the view builds write) is replaced by what it holds beside the way down to that write root: a deny on
+    the folder would win over the write root inside it, in Claude Code's Edit rules, the sandbox's denyWrite and the
+    API engine's Box alike, and no build could write its view."""
     from . import kernel_wrap  # noqa: PLC0415
 
-    return [ws / n for n in (*kernel_wrap.HIDDEN_FILES, *kernel_wrap.LOCK_FILES, *kernel_wrap.READ_ONLY_FILES,
-                             *kernel_wrap.READ_ONLY_DIRS)]
+    roots = [Path(os.path.realpath(w)) for w in writes]
+    out = [ws / n for n in (*kernel_wrap.HIDDEN_FILES, *kernel_wrap.LOCK_FILES, *kernel_wrap.READ_ONLY_FILES)]
+    for n in kernel_wrap.READ_ONLY_DIRS:
+        out += _beside_writes(ws / n, roots)
+    return out
+
+
+def _beside_writes(d: Path, roots: list[Path]) -> list[Path]:
+    """`d` itself when it holds none of the write roots `roots`; else what it holds now, but the write roots and, in
+    place of a folder on the way down to one, that folder's own parts the same way."""
+    real = Path(os.path.realpath(d))
+    if any(real == r for r in roots):
+        return []
+    if not any(real in r.parents for r in roots):
+        return [d]
+    try:
+        kids = sorted(d.iterdir())
+    except OSError:
+        return []
+    return [p for k in kids for p in _beside_writes(k, roots)]
 
 
 def _read_json(p: Path) -> dict[str, Any]:

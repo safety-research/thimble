@@ -6,6 +6,7 @@ Both engines honor the switch: the Messages API's tools (runtime_tools.Box, its 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -135,3 +136,30 @@ def test_the_checker_s_fork_never_writes_the_corpus(space, monkeypatch):
     with pytest.raises(Stop):
         asyncio.run(runtime_api.fork_stream(CORPUS, "check", model="claude-opus-5-5", effort=None))
     assert space.corpus not in seen["write_roots"] and seen["write_roots"]
+
+
+async def test_an_agent_writes_the_views_folder_of_the_read_only_local_extension(space, tmp_path):
+    """The local extension is read-only (kernel_wrap.READ_ONLY_DIRS), but its views/ is a write root of the agents
+    (subagents.WORK_DIRS), where a view build writes its view: the deny on the extension must not cover it, in either
+    engine, while the extension's manifest stays thimble's."""
+    from app import views  # noqa: PLC0415
+
+    views.ensure_local(space.ws)
+    folder = views.views_dir(CORPUS) / "posts"
+    folder.mkdir()
+    manifest = views.local_dir(CORPUS) / views.LOCAL_MANIFEST
+    spec = specs(space)["writer"]
+    assert views.views_dir(CORPUS) in spec.write_roots
+
+    got = await runtime_tools.call(box(spec), "Write", {"file_path": str(folder / "view.json"), "content": "{}"})
+    assert not got.is_error and (folder / "view.json").read_text() == "{}", got.text
+    before = manifest.read_text()
+    got = await runtime_tools.call(box(spec), "Write", {"file_path": str(manifest), "content": "x"})
+    assert got.is_error and manifest.read_text() == before
+
+    cc = runtime_cc.settings(spec, True, tmp_path)
+    fs, deny = cc["sandbox"]["filesystem"], cc["permissions"]["deny"]
+    out = views.views_dir(CORPUS)
+    assert not any(out == p or p in out.parents for p in map(Path, fs["denyWrite"]))
+    assert f"Edit(/{views.local_dir(CORPUS)}/**)" not in deny and f"Edit(/{manifest})" in deny
+    assert str(manifest) in fs["denyWrite"] and str(space.ws / "trusted") in fs["denyWrite"]
