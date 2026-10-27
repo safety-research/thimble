@@ -39,7 +39,8 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
    (`nvm use`, fnm, asdf) is not that one. After a change to Node, check what a new terminal finds:
    `$SHELL -ic 'command -v node; node --version'`.
 4. When the workbench was installed, set up how it reaches Claude before you reply. Ask with your question tool:
-   their Claude Code sign-in, an Anthropic API key, or Workload Identity Federation (WIF). Then:
+   their Claude Code sign-in (say that it is recommended when they have a Claude subscription), an Anthropic API key,
+   or Workload Identity Federation (WIF). Then:
    - **Claude Code sign-in**: show this text and get a yes: "This uses your Claude subscription through Claude Code
      and will launch headless Claude Code sessions in the background." Run `thimble-browser --setup --how claude-code
      --yes`.

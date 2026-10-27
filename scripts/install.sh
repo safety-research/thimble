@@ -20,9 +20,10 @@ workspaces (0.10 cannot open them), and the commands that remove 0.9.
   The browser workbench (thimble 0.8's browser mode), from this checkout: the server (uv sync in browser/backend,
     with its test extras), the page and the sandbox runtime (npm ci in browser/frontend, then a build), and a
     thimble-browser launcher in ~/.local/bin. It says how much disk space this takes, about 1 GB. Then it asks how
-    the workbench reaches Claude: 1 an Anthropic API key (the default), 2 your Claude Code sign-in (it launches
-    headless Claude Code sessions, so it asks you to confirm), 3 Workload Identity Federation (a config file), checks
-    the choice and saves it in ~/.thimble-browser. The page asks the same when this step was skipped.
+    the workbench reaches Claude: 1 an Anthropic API key (the default), 2 your Claude Code sign-in (recommended if
+    you have a Claude subscription; it launches headless Claude Code sessions, so it asks you to confirm), 3 Workload
+    Identity Federation (a config file), checks the choice and saves it in ~/.thimble-browser. The page asks the same
+    when this step was skipped.
 Running it again is safe, and updates both.
 
   --no-browser   install the terminal plugin only
@@ -450,7 +451,7 @@ exec $(sq "$browser/scripts/thimble-browser") \"\$@\"
     fi
   elif ! access status >/dev/null 2>&1; then
     # no terminal to ask in (an agent runs this script, or --no-setup): whoever runs it asks the person
-    notes+=("Claude access is not set up yet. Ask the person which way the workbench reaches Claude, then set it with thimble-browser --setup, which checks that Claude answers. Their Claude Code sign-in, only after they accept \"This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in the background.\": --how claude-code --yes. An Anthropic API key: --key-file FILE, a file they write themselves from the clipboard (never take a key in a chat, and never read that file). Workload Identity Federation: --how wif --wif-file FILE (--find-wif lists the config files it finds). Skipped, the page asks at its first start")
+    notes+=("Claude access is not set up yet. Ask the person which way the workbench reaches Claude, then set it with thimble-browser --setup, which checks that Claude answers. Their Claude Code sign-in, recommended when they have a Claude subscription, only after they accept \"This uses your Claude subscription through Claude Code and will launch headless Claude Code sessions in the background.\": --how claude-code --yes. An Anthropic API key: --key-file FILE, a file they write themselves from the clipboard (never take a key in a chat, and never read that file). Workload Identity Federation: --how wif --wif-file FILE (--find-wif lists the config files it finds). Skipped, the page asks at its first start")
   fi
 
   kb() { du -sk "$1" 2>/dev/null | awk '{print $1}' || echo 0; }
