@@ -160,6 +160,35 @@ def pytest_runtest_call(item):
     return out
 
 
+def _data_files() -> dict[str, tuple]:
+    """Each path under the suite's shared data folder (DATA: mini and the corpora tests make there) with its size and
+    modification time, a folder with neither."""
+    out: dict[str, tuple] = {}
+    for d, dirs, files in os.walk(DATA):
+        for n in dirs + files:
+            p = os.path.join(d, n)
+            try:
+                st = os.lstat(p)
+            except OSError:
+                continue
+            out[os.path.relpath(p, DATA)] = ("dir",) if n in dirs else (st.st_size, st.st_mtime_ns)
+    return out
+
+
+@pytest.fixture(autouse=True)
+def _shared_data_untouched():
+    """A test that leaves a change in the shared data folder fails: every later test in its worker would read it, as a
+    .claude/ left in mini once made test_runtime's sandbox test fail after test_agent_programs. A test that writes into
+    a corpus works on its own copy (data_tmp)."""
+    before = _data_files()
+    yield
+    after = _data_files()
+    if after != before:
+        changed = sorted(set(before) ^ set(after) | {k for k in set(before) & set(after) if before[k] != after[k]})
+        pytest.fail(f"the test changed the suite's shared data folder ({DATA}), which later tests read: "
+                    f"{', '.join(changed[:8])}; write into a copy (data_tmp)", pytrace=False)
+
+
 @pytest.fixture()
 def mini_dir() -> Path:
     """The generated `mini` corpus. Tests that write into a corpus copy it first."""

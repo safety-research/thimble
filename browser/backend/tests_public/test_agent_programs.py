@@ -387,7 +387,7 @@ async def test_a_program_s_session_gets_a_short_private_tmpdir_and_a_required_sa
     assert got["tmp"] in box["filesystem"]["allowWrite"]
 
 
-def test_a_program_s_session_loads_thimble_s_plugin_once(tmp_path, workspaces_tmp, monkeypatch):
+def test_a_program_s_session_loads_thimble_s_plugin_once(tmp_path, workspaces_tmp, data_tmp, monkeypatch):
     """A program's session loads thimble's plugin from --plugin-dir alone: its --settings turn off each thimble@* the
     analyst's user, project or local settings enable, which would load a second MCP server and second hooks; other
     plugins stay as they are."""
