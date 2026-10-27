@@ -18,7 +18,7 @@
     "citations": {
       "type": "string",
       "title": "Citations",
-      "description": "auto cite + verify: Claude cites its claims, and a second Claude verifies each after the answer; for answers you will rely on, it costs the most tokens. auto cite: Claude cites its claims, and each is verified when you open it; for spot checks, it costs fewer tokens. manual: Claude cites nothing; for a check now and then, it costs tokens only when you ask. off: no citations and no tokens. In every mode but off, select words and press c to cite and verify them.",
+      "description": "auto cite + verify: Claude cites what each answer rests on, and a second Claude verifies each citation after each answer. auto cite: Claude cites, and a citation is verified when you open it, which spends fewer tokens. manual: select words and press c to cite them. off: no citations.",
       "options": [
         "auto cite + verify",
         "auto cite",
