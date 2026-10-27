@@ -51,7 +51,7 @@ function setup() {
     ui: { invalidate: () => undefined },
   }
   const el = (type: string) => (props: Any) => ({ type, props })
-  const E = { Box: el('Box'), Text: el('Text'), Link: el('Link') }
+  const E = { Box: el('Box'), Text: el('Text'), Link: el('Link'), Button: el('Button') }
   const ended = async (agentId: string, answer: string, reason = 'answer') => {
     for (const h of hooks['turn.complete']) await h($, { agentId, reason, answer }, async () => ({}))
   }
@@ -134,6 +134,23 @@ test('a card being made an artifact says so, then shows the link the fork ended 
   expect(link.props.href).toBe('https://claude.ai/artifact/made-up-123')
   // the address shows once
   expect(words(line).split('https://claude.ai/artifact/made-up-123').length - 1).toBe(1)
+})
+
+test("the artifact's link has a copy button after it: a click puts the link on the clipboard of the surface the press came from", async () => {
+  const { $, E, ended } = setup()
+  const copied: Any[] = []
+  $.ui.copy = async (o: Any) => { copied.push(o); return { isCopied: true } }
+  await launch($, 'c-made-up-14', 'PROMPT artifact', 0).now()
+  await settle()
+  // while the fork works there is no link to copy
+  expect(JSON.stringify(await artifactLine($, E, 'c-made-up-14'))).not.toContain('"Button"')
+  await ended('agent-made-up-1', 'https://claude.ai/artifact/made-up-14')
+  const line = await artifactLine($, E, 'c-made-up-14')
+  expect(words(line)).toBe('↗ https://claude.ai/artifact/made-up-14 · copy')
+  const button = line.props.children.find((c: Any) => c.type === 'Button')
+  expect(button.props.label).toBe('copy the link')
+  await button.props.onPress({ surface: 'terminal' })
+  expect(copied).toEqual([{ text: 'https://claude.ai/artifact/made-up-14', surface: 'terminal' }])
 })
 
 test('a fork that publishes nothing says why under the card; a card with no artifact has no line', async () => {

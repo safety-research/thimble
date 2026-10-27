@@ -6,7 +6,8 @@
 //   p   a private claude.ai artifact of the card: a fork of the conversation (core/forks.ts, kind `artifact`, with
 //       prompts/artifact.md) publishes it with its Artifact tool, and its last message is the link. One publish of a
 //       card at a time: a press while one starts or runs starts nothing. While it works the card says `creating
-//       artifact…`, and the bar's busy line `publishing an artifact`; then `↗ <link>` under it, or why there is none.
+//       artifact…`, and the bar's busy line `publishing an artifact`; then `↗ <link> · copy` under it (a click on copy
+//       puts the link on the clipboard), or why there is none.
 //       Main reads the link, or why there is none, with the person's next prompt (core/tell.ts).
 //
 // p is a letter too (hooks/keys.ts holds the word window): as with v, the fork is spawned inside the key's own hook,
@@ -27,9 +28,11 @@ import { update, type EngineInterface, type Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
 import { cardAsk } from '../core/answerview'
+import { quiet } from '../core/askcell.js'
 import { forkOf, spawnFork } from '../core/forks'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut, fenced } from '../core/text.js'
+import { accent } from '../core/theme'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { featureOn } from '../settings/features.mjs'
@@ -167,14 +170,23 @@ export async function headKey($: Engine, key: string, until: number): Promise<{ 
   return startArtifact($, meta.id, until)
 }
 
-/** The line under a card about its artifact: being made, its link, or why there is none. Null when it has none. */
+/** The line under a card about its artifact: being made, its link and a click that copies it, or why there is none.
+ *  Null when it has none. */
 export async function artifactLine($: Engine, E: Any, card: string): Promise<Any | null> {
   const m = await madeOf($, card)
   if (!m || m.status === 'cancelled') return null
   const box = (children: Any[]) => E.Box({ key: `artifact-${card}`, marginLeft: 4, children })
   if (working(m)) return box([E.Text({ key: 'w', dimColor: true, children: 'creating artifact…' })])
-  // the link with no label, which Claude Code draws as the address alone (with a label: the label, then the address)
-  if (m.status === 'done' && m.url) return box([E.Text({ key: 'a', dimColor: true, children: '↗ ' }), E.Link({ key: 'l', href: m.url })])
+  // the link with no label, which Claude Code draws as the address alone (with a label: the label, then the address);
+  // `copy` after it puts the link on the clipboard of the surface the press came from
+  if (m.status === 'done' && m.url) {
+    const url = m.url
+    return box([
+      E.Text({ key: 'a', dimColor: true, children: '↗ ' }), E.Link({ key: 'l', href: url }), E.Text({ key: 's', dimColor: true, children: ' · ' }),
+      E.Button({ key: `artifact-copy-${card}`, plain: true, label: 'copy the link', hover: quiet(`artifact-copy-${card}`), onPress: (press: Any) => $.ui.copy({ text: url, ...(press?.surface ? { surface: press.surface } : {}) }),
+        children: [E.Text({ key: 'c', color: accent(), children: 'copy' })] }),
+    ])
+  }
   return box([E.Text({ key: 'x', color: 'error', wrap: 'wrap', children: `× no artifact${m.error ? `: ${m.error}` : ''}` })])
 }
 
