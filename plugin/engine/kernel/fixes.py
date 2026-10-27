@@ -707,8 +707,28 @@ def _tests_once(argv: list[str], fid: int | str) -> tuple[bool, str]:
         return False, "the tests ran longer than 9 minutes"
     log = (p.stdout + p.stderr).strip()
     (home() / "tmp" / str(fid)).mkdir(parents=True, exist_ok=True)
-    (home() / "tmp" / str(fid) / "tests.log").write_text(log + "\n")
+    try:
+        _write_new(home() / "tmp" / str(fid) / "tests.log", log + "\n")
+    except OSError:
+        pass  # the log's last lines go on the record either way
     return p.returncode == 0, "\n".join(log.splitlines()[-12:])
+
+
+def _write_new(p: Path, text: str) -> None:
+    """A file thimble writes in a folder that the fixer's sandbox, or its tests', writes too (tmp/<id>/): what is there
+    under the name (a link, a pipe) goes first, and the file is made new (O_EXCL), so that the write never follows a
+    link to a file elsewhere. OSError when it cannot be made (a folder under the name, or a link made again in between)."""
+    p.unlink(missing_ok=True)
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+
+
+def _no_link(p: Path) -> None:
+    """A link under a name in a folder the fixer's sandbox writes (tmp/<id>/) goes, before thimble's git makes or
+    removes a folder there."""
+    if p.is_symlink():
+        p.unlink()
 
 
 TESTS_FAILED = "its tests failed in the sandbox"
@@ -983,7 +1003,7 @@ def _named_patches(rec: dict[str, Any], words: str) -> dict[str, Any]:
             continue
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         path = tmp_dir(rec["id"]) / f"fix-{m}.patch"
-        path.write_text(patch)
+        _write_new(path, patch)
         out.append({"id": m, "title": other.get("title") or "", "path": str(path)})
     return {**rec, "patches": out} if out else rec
 
@@ -1433,6 +1453,9 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
     rest = [i for i in mine_order if i not in merged_ids]
     on_named = [i for i in mine_order if i in merged_ids]
     wt = tmp_dir(first) / "merge"
+    # the fixer's sandbox writes tmp/<id>/: a link left under the name goes, so that git never removes or fills the
+    # folder it leads to
+    _no_link(wt)
     run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
     shutil.rmtree(wt, ignore_errors=True)
     git("worktree", "add", "-q", "--detach", str(wt), release()["base"], cwd=live)
@@ -1468,6 +1491,7 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
         other = first if stuck != first else next(r["id"] for r in code if r["id"] != stuck)
         raise Conflict(first, stuck if stuck != first else other)
     finally:
+        _no_link(wt)
         run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
         run(["git", "worktree", "prune"], cwd=live, check=False)
 
@@ -1656,7 +1680,7 @@ def redo(fid: int | str, words: str = "", session: str | None = None, asked: str
             _give_types(wt)
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         if earlier.strip():
-            (tmp_dir(rec["id"]) / "earlier.patch").write_text(earlier)
+            _write_new(tmp_dir(rec["id"]) / "earlier.patch", earlier)
         rec = _fresh(rec)
         rec.update(state="working", work=str(wt), base=base, error=None, tests=None, rounds=int(rec.get("rounds") or 1) + 1,
                    session=session or None)
