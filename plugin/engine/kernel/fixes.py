@@ -168,16 +168,19 @@ def push_git() -> str:
 
 
 def run(cmd: list[str], cwd: str | Path | None = None, env: dict[str, str] | None = None, check: bool = True,
-        stdin: str | None = None, timeout: float | None = 300) -> subprocess.CompletedProcess:
+        stdin: str | None = None, timeout: float | None = 300,
+        said: list[str] | None = None) -> subprocess.CompletedProcess:
+    """`cmd`; a failure is a FixError that names the command (`said`, when the person reads it otherwise)."""
+    said = said or cmd
     try:
         p = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, input=stdin, timeout=timeout)
     except FileNotFoundError:
-        raise FixError(f"{cmd[0]} is not installed")
+        raise FixError(f"{said[0]} is not installed")
     except subprocess.TimeoutExpired:
-        raise FixError(f"{' '.join(cmd[:3])} took longer than {int(timeout or 0)} s")
+        raise FixError(f"{' '.join(said[:3])} took longer than {int(timeout or 0)} s")
     if check and p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
-        raise FixError(f"{' '.join(cmd[:3])} failed: {err[-1] if err else 'no message'}")
+        raise FixError(f"{' '.join(said[:3])} failed: {err[-1] if err else 'no message'}")
     return p
 
 
@@ -191,8 +194,12 @@ def as_thimble() -> dict[str, str]:
             "GIT_COMMITTER_NAME": "thimble", "GIT_COMMITTER_EMAIL": "thimble@localhost"}
 
 
-def git(*args: str, cwd: str | Path, env: dict[str, str] | None = None, check: bool = True) -> str:
-    return run(["git", *args], cwd=cwd, env=env, check=check).stdout.strip()
+def git(*args: str, cwd: str | Path, env: dict[str, str] | None = None, check: bool = True, hooks: bool = True) -> str:
+    """git ARGS; with hooks False, with no hook of the repository's (NO_HOOKS): thimble's own calls that make or move a
+    fix's copy, or move live for a fix, which a hook of the person's clone (git-lfs's, with no git-lfs on the PATH)
+    would fail."""
+    return run(["git", *([] if hooks else NO_HOOKS), *args], cwd=cwd, env=env, check=check,
+               said=["git", *args]).stdout.strip()
 
 
 def read_json(p: Path) -> Any:
@@ -364,8 +371,8 @@ if [ -n "$release" ] && [ "$(git -C "$release" rev-parse --show-toplevel 2>/dev/
   git -c core.hooksPath=/dev/null -C "$release" clean -q -ffdx 2>/dev/null
 fi
 live={live_q}
-git -C "$live" checkout -q -- {plugin_json} 2>/dev/null
-git -C "$live" checkout -q --detach {base} || {{ echo "thimble: could not show the release in $live"; exit 1; }}
+git -c core.hooksPath=/dev/null -C "$live" checkout -q -- {plugin_json} 2>/dev/null
+git -c core.hooksPath=/dev/null -C "$live" checkout -q --detach {base} || {{ echo "thimble: could not show the release in $live"; exit 1; }}
 printf '{{"on": false}}\\n' > {state_q}
 {claude} plugin update thimble@thimble >/dev/null 2>&1
 echo "thimble is the plain release again; your fixes are kept (thimble fix on). In Claude Code, type /reload-plugins."
@@ -402,7 +409,7 @@ def ensure_live() -> dict[str, Any]:
         git("checkout", "-q", "-b", "mine", commit, cwd=live)
     else:
         _leftovers_aside(repo)
-        git("worktree", "add", "-q", "-b", "mine", str(live), commit, cwd=repo)
+        git("worktree", "add", "-q", "-b", "mine", str(live), commit, cwd=repo, hooks=False)
     # the release's tag when the commit has one (v0.10.2), for its name in the list and in thimble update
     tag = git("describe", "--tags", "--exact-match", "--match", "v*", commit, cwd=live, check=False)
     rel = {"kind": src["kind"], "source": src["url"], "repo": str(repo), "entry": src.get("entry"), "base": commit,
@@ -1103,7 +1110,7 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, session
             shutil.rmtree(wt)
         base = head()
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+        git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir(), hooks=False)
         _give_types(wt)
         tmp_dir(fid).mkdir(parents=True, exist_ok=True)
         now = time.time()
@@ -1255,7 +1262,7 @@ def _copy_of(rec: dict[str, Any]) -> tuple[Path, str]:
         shutil.rmtree(wt)
     base = head()
     wt.parent.mkdir(parents=True, exist_ok=True)
-    git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+    git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir(), hooks=False)
     _give_types(wt)
     if rec.get("state") != "on" or not _has_ref(fid):
         g = _own_git(wt)
@@ -1477,17 +1484,17 @@ def settle(rec: dict[str, Any], mark: dict[str, Any] | None = None) -> dict[str,
         old = git("rev-parse", _fix_ref(rec), cwd=wt, env=env)
         parent = git("rev-parse", f"{old}^", cwd=wt, env=env)
         mine = rec["commit"]
-        git("checkout", "-q", "--detach", old, cwd=wt, env=env)
+        git("checkout", "-q", "--detach", old, cwd=wt, env=env, hooks=False)
         p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", mine], cwd=wt, check=False, env=me)
         if p.returncode != 0:
             run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env=env)
             run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
-            git("checkout", "-q", "--detach", mine, cwd=wt, env=env)
+            git("checkout", "-q", "--detach", mine, cwd=wt, env=env, hooks=False)
             why = f"its change does not fit fix {rec['id']} as it is now"
             return put({**rec, "state": "failed", "error": why})
         tree = git("write-tree", cwd=wt, env=env)
         run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
-        git("checkout", "-q", "--detach", mine, cwd=wt, env=env)
+        git("checkout", "-q", "--detach", mine, cwd=wt, env=env, hooks=False)
         commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", parent, "-m",
                      f"{rec['title']}\n\n{rec.get('summary') or ''}\n\nthimble fix {rec['id']}".strip(), cwd=wt,
                      env=me)
@@ -1515,9 +1522,9 @@ def _take_out(fid: int, why: str) -> dict[str, Any]:
         x.update(state="redo", error=why)
         put(x)
     if is_on():
-        git("checkout", "-q", "mine", cwd=live_dir())
+        git("checkout", "-q", "mine", cwd=live_dir(), hooks=False)
     else:
-        git("checkout", "-q", "--detach", release()["base"], cwd=live_dir())
+        git("checkout", "-q", "--detach", release()["base"], cwd=live_dir(), hooks=False)
     return {"redo": failed}
 
 
@@ -1653,7 +1660,7 @@ def _rebuild(order: list[int]) -> list[int]:
     not apply any more, which then need a redo."""
     rel, live = release(), live_dir()
     _unstamp()
-    git("checkout", "-q", "-B", "mine", rel["base"], cwd=live)
+    git("checkout", "-q", "-B", "mine", rel["base"], cwd=live, hooks=False)
     failed = []
     for fid in order:
         ref = f"refs/thimble/fixes/{fid}"
@@ -1702,7 +1709,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
         _repoint()
         _unstamp()
         # a fix the person turns on while all are off: the others come back with it
-        git("checkout", "-q", "mine", cwd=live)
+        git("checkout", "-q", "mine", cwd=live, hooks=False)
         write_json(home() / "state.json", {"on": True})
         ref = f"refs/thimble/fixes/{rec['id']}"
         if run(["git", "merge-base", "--is-ancestor", ref, "mine"], cwd=live, check=False).returncode == 0:
@@ -1738,7 +1745,7 @@ def _swap(fid: int) -> dict[str, Any]:
     # Claude Code's marketplace on live first: when that fails, mine, the fix's refs and its record stay as they were
     _repoint()
     _unstamp()
-    git("checkout", "-q", "mine", cwd=live)
+    git("checkout", "-q", "mine", cwd=live, hooks=False)
     write_json(home() / "state.json", {"on": True})
     git("update-ref", f"refs/thimble/fixes/{fid}", rec["commit"], cwd=live)
     order = _on_ids(records())
@@ -1812,7 +1819,7 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
     _no_link(wt)
     run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
     shutil.rmtree(wt, ignore_errors=True)
-    git("worktree", "add", "-q", "--detach", str(wt), release()["base"], cwd=live)
+    git("worktree", "add", "-q", "--detach", str(wt), release()["base"], cwd=live, hooks=False)
     try:
         # the folder is in the fixer's temp folder, which its sandbox writes: git runs on the worktree's own entry
         g = _own_git(wt)
@@ -1834,7 +1841,7 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
             tries = [(len(rest), git("rev-parse", f"{refs[code[0]['id']]}^", cwd=live)), (len(rest), prefix[-1])]
         stuck = code[-1]["id"]
         for place, base in tries:
-            git("checkout", "-q", "--detach", base, cwd=wt, env=env)
+            git("checkout", "-q", "--detach", base, cwd=wt, env=env, hooks=False)
             for r in code:
                 p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", "--allow-empty", refs[r["id"]]], cwd=wt,
                         check=False, env=me)
@@ -1910,9 +1917,9 @@ def _merge(recs: list[dict[str, Any]]) -> dict[str, Any]:
                 x.update(state="redo", error=f"it did not fit once fixes {_and([str(r['id']) for r in recs])} merged")
                 put(x)
             if is_on():
-                git("checkout", "-q", "mine", cwd=live)
+                git("checkout", "-q", "mine", cwd=live, hooks=False)
             else:
-                git("checkout", "-q", "--detach", release()["base"], cwd=live)
+                git("checkout", "-q", "--detach", release()["base"], cwd=live, hooks=False)
         return {"id": first["id"], "title": name, "merged": [r["id"] for r in recs[1:]], "redo": failed}
 
     return _move(change)
@@ -2035,7 +2042,7 @@ def redo(fid: int | str, words: str = "", session: str | None = None, asked: str
             if wt.exists():
                 shutil.rmtree(wt)
             base = head()
-            git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+            git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir(), hooks=False)
             _give_types(wt)
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         if earlier.strip():
@@ -2087,9 +2094,9 @@ def _back(fid: int) -> dict[str, Any]:
         x.update(state="redo", error=f"it did not fit once fix {fid} went back")
         put(x)
     if is_on():
-        git("checkout", "-q", "mine", cwd=live)
+        git("checkout", "-q", "mine", cwd=live, hooks=False)
     else:
-        git("checkout", "-q", "--detach", release()["base"], cwd=live)
+        git("checkout", "-q", "--detach", release()["base"], cwd=live, hooks=False)
     r = get(fid)
     r["commit"] = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
     put(r)
