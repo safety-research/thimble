@@ -281,3 +281,15 @@ def test_install_md_says_when_each_way_updates_the_plugin():
     assert "`claude plugin update thimble@thimble` until you use its first fix" in update
     assert ("the first fix you ask for, or a `thimble update` that moves to a new commit of your checkout, sets them aside"
             in update and "it tracks no upstream" in update)
+
+
+def test_install_md_says_how_a_plugin_without_a_clone_updates_after_its_first_fix():
+    """Without a clone, no thimble command is in the shell; after the first fix, claude plugin update leaves the plugin
+    as it is, and thimble update refuses inside Claude Code. INSTALL.md's update gives what works: live's launcher, run
+    by its path in a shell, which passes update to the release checkout when there is one."""
+    text = " ".join((ROOT / "INSTALL.md").read_text().split())
+    update = text.split("## Update and uninstall", 1)[1].split(" ## ", 1)[0]
+    assert ("Without a clone, your shell does not find `thimble`: run "
+            "`~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of "
+            "`~/.thimble`).") in update
+    assert (ROOT / "plugin" / "bin" / "thimble").is_file()
