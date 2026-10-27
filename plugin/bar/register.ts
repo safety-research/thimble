@@ -12,6 +12,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { aboveBar } from '../core/answerview'
 import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
+import { findWorkbench } from '../panes/settings'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
 import { introDone, introHint } from './intro'
@@ -62,10 +63,12 @@ export async function barKey($: Engine, k: string): Promise<{ later: () => Promi
 }
 
 export const registerBar: Register = on => {
-  // /thimble-settings, and the counts of this load (a new or resumed session, a reload, a switch turned on)
+  // /thimble-settings, and the counts of this load (a new or resumed session, a reload, a switch turned on); the
+  // settings name the browser workbench's command while it is installed
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const r = await next(e)
     needCounts($)
+    await findWorkbench($).catch(() => undefined)
     try {
       await $.command.register({ name: 'thimble-settings', description: "thimble's settings: turn citations, cards, and the bar's coverage and labels on or off", immediate: true })
     } catch {

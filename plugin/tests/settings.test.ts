@@ -4,6 +4,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { DEFAULTS, choiceOf, citationsFrom, featureOn, noteChange, setOptions, valueIn } from '../settings/features.mjs'
 import { registerSettings, settingsAction, settleMinimal } from '../settings/term'
+import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -291,4 +292,43 @@ test('a default that moves is saved once, where the old default stands, with def
     Object.assign(DEFAULTS, was)
     setOptions({})
   }
+})
+
+test('while the browser workbench is installed, the settings name the command that opens it; without it, they do not', async ($, on) => {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
+  mock.clock(on, { now: 0 })
+  mock.store(on)
+  const files: Record<string, string> = {}
+  on('session.id', () => ({ value: 's-settings' }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('session.messages', () => ({ value: [] }))
+  on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: e.path in files }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: files[e.path] ?? promptStub(e.path) ?? '' }))
+  on('fs.write', () => ({ value: undefined }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
+  on('env.set', () => ({ value: {} }))
+  on('tool.register', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'thimble-settings' } }))
+  on('process.run', (_$: unknown, e: { argv: string[] }) => ({ value: { exitCode: 0, stdout: '', stderr: '', ...(tempRun(e.argv) ?? {}), isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('config.list', () => ({ value: [] }))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['the engine'] }) as never)
+  // the settings, opened after a load of the plugin
+  const named = async () => {
+    await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+    await $.command.run({ command: 'thimble-settings', args: '' } as never)
+    const pane = await $.ui.mount(PANE)
+    const said = (await pane.find({ type: 'Text', text: /thimble-browser/ }))?.text
+    await pane.unmount()
+    return said
+  }
+  expect(await named()).toBeUndefined()
+  // scripts/install.sh kept the browser folder of its checkout in the workbench's home, and the launcher is there
+  files['/made-up/home/.thimble-browser/checkout'] = '/made-up/thimble/browser\n'
+  files['/made-up/thimble/browser/scripts/thimble-browser'] = '#!/bin/sh'
+  expect(await named()).toContain('run thimble-browser in this folder')
 })

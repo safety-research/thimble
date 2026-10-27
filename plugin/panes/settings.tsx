@@ -5,7 +5,8 @@
 // set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). Minimal reads
 // `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); turning it on sets the rows
 // it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
-// tinted across the pane, with no mark of its own (a `›` there read as a row that opens).
+// tinted across the pane, with no mark of its own (a `›` there read as a row that opens). At the foot, the keys, and
+// the command that opens the browser workbench, while it is installed.
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
@@ -54,6 +55,18 @@ function parseKey(key: string | undefined): { s: Switch; c: string | null } | nu
 async function pickedNow($: Engine): Promise<string> {
   const k = (await $.state.get(PICKED)).value as string | undefined
   return ROWS.some(s => s.key === k) ? k! : ROWS[0]!.key
+}
+
+/** Whether the browser workbench is installed, so the pane names the command that opens it: scripts/install.sh keeps
+ *  the browser/ folder of the checkout it installed from in the workbench's home (`checkout`), and the launcher runs
+ *  that folder's scripts/thimble-browser. Found at each load's session start (bar/register.ts), not in a drawing,
+ *  whose calls stop when a newer drawing replaces it. */
+let workbench = false
+
+export async function findWorkbench($: Engine): Promise<void> {
+  const home = String((await $.env.get('THIMBLE_BROWSER_HOME')) || `${(await $.env.get('HOME')) || '.'}/.thimble-browser`).replace(/\/+$/, '')
+  const at = (await $.fs.exists(`${home}/checkout`)) ? String(await $.fs.read(`${home}/checkout`)).trim() : ''
+  workbench = !!at && (await $.fs.exists(`${at}/scripts/thimble-browser`))
 }
 
 /** Set a choice: on and off are a switch's true and false. */
@@ -135,5 +148,6 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
     Box({ key: 'preview', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1, width, children: bar }),
     ...rows,
     Box({ key: 'foot', marginTop: 1, children: [Text({ dimColor: true, children: '↑↓ setting · ←→ choice' })] }),
+    ...(workbench ? [Box({ key: 'workbench', width, children: [Text({ dimColor: true, wrap: 'wrap', children: 'The browser workbench: run thimble-browser in this folder, in a terminal.' })] })] : []),
   ] })
 }
