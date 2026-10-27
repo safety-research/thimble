@@ -102,7 +102,8 @@ test('setup.mjs installs srt in thimble\'s home, and the sandbox works here', ()
 test('in the sandbox: the card copies read, nothing else of the files; writes only in its own folder', () => {
   const fs = 'const fs = require("fs"); const t = f => { try { return f() } catch (e) { return e.code } }'
   assert.equal(inSandbox(`${fs}; console.log(t(() => fs.readFileSync(${JSON.stringify(join(cards, 'rows.json'))}, "utf8")))`), '[]')
-  assert.equal(inSandbox(`${fs}; console.log(t(() => fs.readFileSync(${JSON.stringify(join(secret, 'key.txt'))}, "utf8")))`), 'ENOENT')
+  // a hidden file: bwrap leaves it out of the runner's files, and Seatbelt refuses to open it
+  assert.equal(inSandbox(`${fs}; console.log(t(() => fs.readFileSync(${JSON.stringify(join(secret, 'key.txt'))}, "utf8")))`), s.platform === 'linux' ? 'ENOENT' : 'EPERM')
   // on Linux bwrap makes the folders that lead to a shown path, empty but for that path: a checkout in the home folder
   // (as on a CI runner) shows the home folder with the one folder that leads to it, and nothing else of it
   const home = homedir()
@@ -118,7 +119,14 @@ test('in the sandbox: no network, and no variable of the session\'s', () => {
   const out = inSandbox('require("net").connect(80, "1.1.1.1").on("connect", () => console.log("connected")).on("error", e => console.log(e.code))')
   assert.notEqual(out, 'connected')
   assert.notEqual(inSandbox('fetch("https://example.com").then(() => console.log("fetched"), () => console.log("no"))'), 'fetched')
-  assert.deepEqual(JSON.parse(inSandbox('console.log(JSON.stringify(Object.keys(process.env)))')), ['PATH'])
+  const vars = JSON.parse(inSandbox('console.log(JSON.stringify(process.env))'))
+  // macOS gives every process __CF_USER_TEXT_ENCODING, the user's number and text encoding (0x1F5:0:0), which holds
+  // nothing of the session
+  if (s.platform === 'darwin' && '__CF_USER_TEXT_ENCODING' in vars) {
+    assert.match(vars.__CF_USER_TEXT_ENCODING, /^0x[0-9A-F]+(:(0x)?[0-9A-F]+){2}$/i)
+    delete vars.__CF_USER_TEXT_ENCODING
+  }
+  assert.deepEqual(Object.keys(vars), ['PATH'])
 })
 
 test('the probe\'s runner starts with a temp folder too long for a socket in it, and the folder stays empty', () => {
