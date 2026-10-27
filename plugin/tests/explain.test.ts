@@ -19,6 +19,7 @@ import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../m
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
 import { noteRow, startCheck } from '../marks/checker'
 import { citeBar, citeKey, citeWords, placeOf } from '../marks/cite'
+import { controlWords } from '../core/selection'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
@@ -391,9 +392,13 @@ test("what a click on thimble's controls or Claude Code's own rows leaves select
     // in a row of Claude Code's own (the turn's time, a tool call, the person's prompt), though the answer has its words
     expect(await counts({ text: 'for', requestId: 'turn-time-row' })).toBe(false)
     expect(await counts({ text: 'Read 1 file', requestId: 'collapsed-tool-row' })).toBe(false)
-    // under the answer, in its row: a card's header, its line and then one of its words, which the answer draws nowhere
+    // under the answer, in its row, a card on screen: its header's line, one of its words, which a click on it selects,
+    // and a piece of one, which the answer draws nowhere
+    controlWords('card c-made-up', ['a ask', 'ask', 'p artifact', 'artifact'], { inRow: true })
     expect(await counts({ text: 'Edits by day       checking  [ previous heads up · a ask · 0 close', requestId: 't1-row' })).toBe(false)
     expect(await counts({ text: 'artifact', requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'as', requestId: 't1-row' })).toBe(false)
+    controlWords('card c-made-up', [], { inRow: true })
     // words selected in the answer, as it draws them: inside it, from its dot, a table's row, a link with its target,
     // a drag that begins and ends inside words, and across rows
     expect(await counts({ text: 'longer', requestId: 't1-row' })).toBe(true)

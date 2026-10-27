@@ -227,7 +227,12 @@ export function noteShown($: Engine, ids: string[], onScreen: { first: number; l
         end = start
       }
     }
-    if (shown.get(id) !== now) { shown.set(id, now); changed = true }
+    if (shown.get(id) !== now) {
+      shown.set(id, now)
+      changed = true
+      // off screen, its header's words are no control's (core/selection.ts); on screen, its frame draws them again
+      if (!now) controlWords(`card ${id}`, [])
+    }
   }
   if (changed) $.clock.after(0, () => $.ui.invalidate('ui.render'))
 }
@@ -383,8 +388,9 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // alone; every card's words are clicks
   const lettered = (await headOwner($))?.id === meta.id
   const word = (key: string, words: string) => [...(lettered ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
-  // their words, which a double click on one selects: no answer's words (core/selection.ts)
-  controlWords('card', ['a ask', 'ask', 'p artifact', 'artifact'])
+  // their words, which a click on one leaves selected: no answer's words while the card is on screen
+  // (core/selection.ts)
+  controlWords(`card ${meta.id}`, shown.get(meta.id) === false ? [] : ['a ask', 'ask', 'p artifact', 'artifact'], { inRow: true })
   const askEl = ask ? E.Box({ key: 'head-keys', flexDirection: 'row', children: [
     E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: word('a', 'ask') }),
     E.Text({ key: 'head-sep', dimColor: true, children: ' · ' }),

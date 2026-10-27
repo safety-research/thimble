@@ -745,6 +745,54 @@ test("a double click on one of the bar's items selects its word, which is the ba
   expect(band).toContain('c cite')
 })
 
+test("a click on thimble's controls that slid a cell leaves a piece of their words selected, no answer's words though the answer holds it whole: on the bar, the tray and a card's header on screen; once those are gone, their words in an answer count again", CITES, async ($, on) => {
+  let selected: Any
+  on('ui.selection', () => ({ value: selected }))
+  const text = 'Of the runs, [12 of 40](#) failed on the p95 check: it is in a sweep where 0 runs pass, so ask before you close it as done.'
+  const id = 'c0123456789ad'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_9', agentId: 'a-made-up', anchorRow: 'row-t1', keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_9: { version: 1 } }, at: 1 }
+  const { clock } = await resumed($, on, QUOTED, 's-tray-slid', { text, kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  const counts = async (sel: Any) => {
+    // a selection made anew: none in between, as the click that makes it takes the one before down
+    selected = undefined
+    await $.ui.render(above(40))
+    selected = sel
+    const band = textOf(await $.ui.render(above(40)))
+    expect(band.includes('c cite')).toBe(band.includes('e explain'))
+    return band.includes('c cite')
+  }
+  // words of the answer: the bar names c and e
+  expect(await counts({ text: 'failed on the p95 check', requestId: 'row-t1' })).toBe(true)
+  // a click on the bar's `e explain` as it names it, then on `s rewrite` and `thimble`
+  selected = { text: 'in' }
+  expect(textOf(await $.ui.render(above(40)))).not.toContain('c cite')
+  expect(textOf(await $.ui.render(above(40)))).not.toContain('e explain')
+  expect(await counts({ text: 'it' })).toBe(false)
+  expect(await counts({ text: 'im' })).toBe(false)
+  // the tray open: a click on its `a ask` or `0 close`
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(textOf(await $.ui.render(above(40)))).toContain('a ask · 0 close')
+  expect(await counts({ text: 'a' })).toBe(false)
+  expect(await counts({ text: 'as' })).toBe(false)
+  expect(await counts({ text: '0 ' })).toBe(false)
+  // the answer's own words still count while the tray is open
+  expect(await counts({ text: 'a sweep', requestId: 'row-t1' })).toBe(true)
+  // a card under the answer, on screen: a click on its header's `p artifact` or `a ask`, in the answer's row
+  expect(textOf(await $.ui.render(answer('row-t1', text)))).toContain('Runs by status')
+  expect(await counts({ text: 'p', requestId: 'row-t1' })).toBe(false)
+  expect(await counts({ text: 'as', requestId: 'row-t1' })).toBe(false)
+  // the tray closed and the card out of view: those words in the answer count again
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(textOf(await $.ui.render(above(40)))).not.toContain('0 close')
+  await $.ui.render({ ...(answer('row-t1', text) as Any), props: { text, isFirstOfReply: true, onScreen: null } } as never)
+  await clock.advance(10)
+  expect(await counts({ text: 'close', requestId: 'row-t1' })).toBe(true)
+  expect(await counts({ text: 'ask', requestId: 'row-t1' })).toBe(true)
+  expect(await counts({ text: 'as', requestId: 'row-t1' })).toBe(true)
+})
+
 test("c on words selected since the bar last drew reads a few states at most, however many answers: the selection's watch works out whether they wait as it sees them, and the key's own check reads the newest turns alone", CITES, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   let selected: Any = { text: 'failed on the p95 check', requestId: 'row-t1' }
