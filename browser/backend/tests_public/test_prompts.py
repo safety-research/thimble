@@ -255,6 +255,22 @@ def test_main_takes_a_request_for_a_dashboard_as_a_view(mode, monkeypatch):
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
+    """Main's prompt shows a reply sized to its question, each beside a bad reply: a casual question answered in a few
+    sentences without a card, and a question about how something works answered with its steps in order and a diagram
+    card, where the bad reply is a table."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    blocks = _examples(prompts.section("main", "Chat and cards", mode))
+    casual = next(b for b in blocks if b[0].startswith("Analyst") and "folder" in b[0])
+    good = next(line for line in casual if line.startswith("Good"))
+    assert "card:" not in good and good.count(". ") <= 2
+    assert any(line.startswith("Bad") for line in casual)
+    how = next(b for b in blocks if b[0].startswith("Analyst") and "how does" in b[0].lower())
+    assert any(line.startswith("Good") for line in how) and any("diagram" in line for line in how)
+    assert any(line.startswith("Bad") and "table" in line for line in how)
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
     """Main's prompt says where a fact comes from: what a project does from its code, which shows it now, in main's own
     words, since the checker finds words copied from a README in the README; and a README or a design note only for
