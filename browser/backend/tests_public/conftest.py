@@ -148,6 +148,26 @@ def pytest_sessionfinish(session, exitstatus):
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """A test with a time limit of its own longer than the suite's (pytest.mark.timeout) gets faulthandler's dump of
+    every thread's stack a little before its own limit, not at the suite's faulthandler_timeout (pyproject.toml), where
+    a long test that is still working would look stuck."""
+    import faulthandler
+
+    m = item.get_closest_marker("timeout")
+    limit = float(m.args[0]) if m is not None and m.args else 0.0
+    try:
+        suite = float(item.config.getini("timeout") or 0)  # pytest-timeout's
+        if limit <= suite or not float(item.config.getini("faulthandler_timeout") or 0):
+            return
+        from _pytest.faulthandler import fault_handler_stderr_fd_key
+
+        faulthandler.dump_traceback_later(limit - 10, file=item.config.stash[fault_handler_stderr_fd_key])
+    except (ValueError, ImportError, KeyError):  # no pytest-timeout, or another pytest: the suite's dump time stands
+        pass
+
+
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_call(item):
     """A test during which the audit hook refused a connection to a live thimble server's port fails, naming the port,

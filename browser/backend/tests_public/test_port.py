@@ -227,14 +227,23 @@ def _health(home: Path) -> dict:
         return json.loads(r.read())
 
 
+def _app_main_imports() -> None:
+    """Skip where app.main does not import in this tree, which the server `up` starts imports: tried in this process,
+    which runs the same Python on the same tree, rather than in a new one, which a busy machine takes long to start."""
+    try:
+        import app.main  # noqa: F401, PLC0415
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"app.main does not import in this tree: {type(e).__name__}: {e}"[:300])
+
+
+# each step is a subprocess with a time limit of its own, so the test cannot hang; its time is two servers' start, which
+# a machine its parallel runs keep busy makes several times longer
+@pytest.mark.timeout(300)
 def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp_path, fake_claude):
     """Two installs (THIMBLE_HOMEs) whose server.json both name one free port: the first starts there, the second
     finds another install's server there and starts on a free port; each `up` again finds its own server, each reader
     of each home finds its own, and stopping one leaves the other running."""
-    probe = subprocess.run([sys.executable, "-c", "import app.main"], cwd=BACKEND, capture_output=True, text=True,
-                           timeout=120, env={**os.environ, "THIMBLE_SKIP_KEY": "1"})
-    if probe.returncode != 0:
-        pytest.skip("app.main does not import in this tree: " + probe.stderr.strip().splitlines()[-1][:200])
+    _app_main_imports()
     held = _held()
     shared = held.getsockname()[1]
     held.close()
@@ -250,12 +259,12 @@ def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp
         homes[name] = h
         envs[name] = {**_clean_env(dict(os.environ)), "THIMBLE_HOME": str(h),
                       "THIMBLE_DATA_DIR": str(d.parent), "THIMBLE_WORKSPACES_DIR": str(tmp_path / f"ws-{name}"),
-                      "THIMBLE_CLAUDE_BIN": os.environ.get("THIMBLE_CLAUDE_BIN", "")}
+                      "THIMBLE_CLAUDE_BIN": os.environ.get("THIMBLE_CLAUDE_BIN", ""), "THIMBLE_START_WAIT_S": "100"}
 
     def up(name: str) -> list[str]:
         cwd = Path(envs[name]["THIMBLE_DATA_DIR"]) / "mini"
         out = subprocess.run([sys.executable, "-m", "app.cli", "server", "up", "--cwd", str(cwd)], cwd=BACKEND,
-                             env=envs[name], capture_output=True, text=True, timeout=90)
+                             env=envs[name], capture_output=True, text=True, timeout=120)
         assert out.returncode == 0, out
         return out.stdout.splitlines()
 

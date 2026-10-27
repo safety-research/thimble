@@ -188,6 +188,11 @@ def corpora(tmp_path, monkeypatch, workspaces_tmp) -> Path:
     return d
 
 
+# a whole check of a view with its headless page, every check state and every choice of the kit's controls: each
+# headless run ends at views' own limit (SHOT_TIMEOUT_S, SHOT_STATE_S per state), which grows only while an answer
+# of the reader runs, and the reader runs in this process on the test's few records, so the test cannot hang; its
+# time is Chromium's work, which a machine its parallel runs keep busy makes several times longer
+@pytest.mark.timeout(300)
 @pytest.mark.parametrize("name", ["inbox", "wiki"])
 async def test_a_kit_view_passes_the_checks(name, corpora, inproc, bound, tmp_path):
     if why := views.build_problem():
@@ -259,6 +264,7 @@ def _prs(n: int) -> str:
     return "\n".join(out) + "\n"
 
 
+@pytest.mark.timeout(300)  # as test_a_kit_view_passes_the_checks
 async def test_a_forge_view_drawn_with_the_text_passes_the_checks(tmp_path, monkeypatch, workspaces_tmp, inproc, bound):
     """Pull requests as the kit's cards, each body in GitHub's markdown drawn by thimble.text (with the parser the
     interface builds, kit/markdown.js) in the card and whole in the side panel, its #123 mentions links to their pull

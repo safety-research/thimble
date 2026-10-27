@@ -384,15 +384,18 @@ def _uvicorns_on(p: int) -> list[int]:
     return out
 
 
+# each step is a subprocess with a time limit of its own, so the test cannot hang; its time is a server's start, which a
+# machine its parallel runs keep busy makes several times longer
+@pytest.mark.timeout(300)
 def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, data, tmp_path, fake_claude):
-    probe = subprocess.run([sys.executable, "-c", "import app.main"], cwd=BACKEND, capture_output=True, text=True, timeout=120,
-                           env={**os.environ, "THIMBLE_SKIP_KEY": "1"})
-    if probe.returncode != 0:
-        pytest.skip("app.main does not import in this tree: " + probe.stderr.strip().splitlines()[-1][:200])
+    try:  # in this process, which runs the same Python on the same tree, rather than in a new one
+        import app.main  # noqa: F401, PLC0415
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"app.main does not import in this tree: {type(e).__name__}: {e}"[:300])
     port = _free_port()
     # a session the launcher started, with the plugin's hooks on, so /thimble prints the URL alone
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port),
-           "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws")}
+           "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws"), "THIMBLE_START_WAIT_S": "100"}
     env.pop("THIMBLE_DEV", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
         env.pop(k, None)
@@ -400,7 +403,7 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
     pid = None
     try:
         t0 = time.monotonic()
-        out = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=90)
+        out = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=120)
         first = time.monotonic() - t0
         lines = out.stdout.splitlines()
         # the link's line alone: the workspace holds nothing from an earlier run, so there is nothing to resume

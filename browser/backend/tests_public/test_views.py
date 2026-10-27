@@ -1086,6 +1086,11 @@ async def test_every_worked_example_answers_the_checks_over_its_sample(name, sam
     assert not rep["coverage"]["not_shown"]["count"] and rep["coverage"]["derived"], "every file is read, and what the reader made is listed"
 
 
+# a whole check of a view with its headless page, every check state and every choice of the kit's controls: each
+# headless run ends at views' own limit (SHOT_TIMEOUT_S, SHOT_STATE_S per state), which grows only while an answer
+# of the reader runs, and the reader runs in this process on the test's few records, so the test cannot hang; its
+# time is Chromium's work, which a machine its parallel runs keep busy makes several times longer
+@pytest.mark.timeout(300)
 @pytest.mark.parametrize("name", sorted(EXAMPLES))
 async def test_every_worked_example_s_page_loads_headless_at_its_first_place(name, samples, inproc, bound, tmp_path):
     """The whole check a view ticket's session runs, the headless page included, where this machine has Node and the

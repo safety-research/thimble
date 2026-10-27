@@ -97,7 +97,9 @@ PORT_SCAN = 50  # the ports above a taken one that pick_port tries in turn, befo
 BACKEND_DIR = config.REPO_ROOT / "backend"
 FRONTEND_DIR = config.REPO_ROOT / "frontend"
 PLUGIN_DIR = config.REPO_ROOT / "plugin"
-WAIT_S = 20.0
+# how long a command waits for a server it started to answer; THIMBLE_START_WAIT_S sets another, as the tests that
+# start real servers do for a machine their parallel runs keep busy
+WAIT_S = float(os.environ.get("THIMBLE_START_WAIT_S") or 20.0)
 LOCK_WAIT_S = 30.0
 STOP_WAIT_S = 6.0
 # how long the server has, after its SIGTERM, to stop its agents and end (runtime.stop_all) before what is left of its
