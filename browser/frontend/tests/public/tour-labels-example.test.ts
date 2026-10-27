@@ -2,10 +2,10 @@
 // The tour's Labels example (src/tour/examples.json txReader, labelsSide; src/tour/steps.ts drawRuler) agrees with
 // itself: the ruler beside the transcript is drawn from the records it shows, a mark in a lane per label over each run
 // of records lit in one colour, at their place in the file, in their cells' colour; and the Labels sidebar's legend
-// names those colours and counts those records.
+// names those colours and counts those records. The step says what the records' bars and the ruler show.
 import { expect, test } from 'vitest'
 import snaps from '../../src/tour/examples.json'
-import { drawRuler } from '../../src/tour/steps.ts'
+import { drawRuler, tourSteps } from '../../src/tour/steps.ts'
 
 const LINES = 76
 const html = (s: string) => {
@@ -63,4 +63,10 @@ test("the Labels sidebar's legend names the records' colours and counts the reco
     }
   }
   expect([...new Set(cells.map((c) => c.colour))].every((c) => named.has(c))).toBe(true)
+})
+
+test("the step names what its screen is coloured with: the records' bars and the strip beside them", () => {
+  const step = tourSteps('⌘').find((s) => s.title === 'Labels')!
+  expect(step.body).toMatch(/colored bars/)
+  expect(step.body).toMatch(/strip/)
 })

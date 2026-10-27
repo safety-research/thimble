@@ -653,7 +653,7 @@ async function walk(page: Page, tag: string, send = false) {
     return { open: real?.getAttribute('data-section') ?? null, same, inside, apart: rd.right <= side.left + 0.5, pressed: document.querySelector('.shell-side-btn[data-side="labels"]')?.getAttribute('aria-pressed') ?? null }
   })
   assert.ok(lay.open === 'labels' && lay.same && lay.inside && lay.apart && lay.pressed === 'true', `${tag} 3: the Labels sidebar is open with the example over it, beside the transcript ${JSON.stringify(lay)}`)
-  assert.equal(await body(page), 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.', `${tag} 3: what a label is`)
+  assert.equal(await body(page), 'A label sorts records into values, by a rule or by Claude’s reading. Each record’s colored bars show its values, one per label, and the strip at the right shows where they fall in the whole file. Labels, at the top, lists the labels and their colors. Open one to see its records and correct them.', `${tag} 3: what a label is, and what its bars and the strip show`)
   // the ruler shows the records' colours where they are: every lit cell of a record on line L has a mark in its lane,
   // in the colour its bar shows, over (L − 1)/76 to L/76 of the ruler, and no mark has a colour no bar shows
   const ruler = await page.evaluate(() => {
