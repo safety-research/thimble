@@ -745,6 +745,43 @@ test("a double click on one of the bar's items selects its word, which is the ba
   expect(band).toContain('c cite')
 })
 
+test("c on words selected since the bar last drew reads a few states at most, however many answers: the selection's watch works out whether they wait as it sees them, and the key's own check reads the newest turns alone", CITES, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  let selected: Any = { text: 'failed on the p95 check', requestId: 'row-t1' }
+  let selections = 0
+  on('ui.selection', () => { selections++; return { value: selected } })
+  let gets = 0
+  on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
+  // sixty answers after the one that holds the words
+  const kept: Record<string, string> = {}
+  for (let n = 2; n <= 61; n++) {
+    kept[`answers/t${n}.json`] = JSON.stringify({ v: 1, turn: { turnId: `t${n}`, n, prompt: { text: `and run ${n}?`, by: 'composer', row: `row-q${n}` }, rows: [`row-t${n}`], answer: `row-t${n}`, reason: 'answer', startedAt: n, endedAt: n, labels: [], cards: [], seq: 0 }, msgs: [{ row: `row-t${n}`, turnId: `t${n}`, text: `Run ${n} passed every check.`, at: n }] })
+  }
+  const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-cite-tick', { kept })
+  // the answer and the bar draw, in the fullscreen layout, whose selection the watch reads; the bar names c cite
+  await $.ui.render(answer('row-t1', TEXT))
+  expect(textOf(await $.ui.render(above()))).toContain('c cite')
+  // other words selected, which the watch sees at its next read; the bar has not drawn since: c reads the selection
+  // alone, within the hook's few milliseconds
+  selected = { text: 'Run 7 passed every check', requestId: 'row-t7' }
+  await clock.advance(400)
+  gets = 0
+  selections = 0
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  expect(gets).toBe(0)
+  expect(selections).toBe(1)
+  await clock.advance(1000)
+  expect(spawns.length).toBe(1)
+  // words selected the moment before c, before the watch's next read: the key checks them itself, reading the
+  // answer they lie in and the newest turns, not every one
+  selected = { text: 'Run 9 passed every check', requestId: 'row-t9' }
+  gets = 0
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  expect(gets).toBeLessThan(8)
+  await clock.advance(1000)
+  expect(spawns.length).toBe(2)
+})
+
 test("the Evidence pane's w close is a click alone: a w typed while the pane holds the keyboard reaches the prompt, where it closes the pane once its word window closed, and a question that starts with w is typed whole", CITES, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   on('ui.selection', () => ({ value: undefined }))

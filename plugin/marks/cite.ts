@@ -24,7 +24,7 @@ import type { BarItem } from '../bar/bar'
 import { SPIN } from '../bar/busy'
 import { howTo, hintUsed } from '../bar/hints'
 import { failCleared, hintLine } from '../bar/notice'
-import { answerRows, messageOf, turnOfRow } from '../core/answers'
+import { answerRows, messageOf, turnIds, turnOf, turnOfRow } from '../core/answers'
 import { answerSelectionOf, selectionKey, selectionNow, selectionUsed, usedBy, type Sel } from '../core/selection'
 import { pickedWords } from '../explain/seam'
 import type { Take } from '../hooks/keys'
@@ -191,10 +191,10 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
 }
 
 // Whether words wait for c (citeShown), as this module last worked it out, for the selection Claude Code answered then:
-// at each drawing of the bar (citeBar) and as c cites them. Claude Code gives a key's hook a few milliseconds of its own
-// time, and the full check reads the state of every answer, so many reads in a long session: c's key reads the selection
-// alone and takes this while the selection is the same (citeKey), as the other keys read what their modules keep
-// (squeeze/ui.ts, tray/tray.ts).
+// at each drawing of the bar (citeBar), as the selection's watch sees a new one (explain/seam.ts watchSelection) and
+// as c cites them. Claude Code gives a key's hook a few milliseconds of its own time, and the full check reads the
+// state of every answer, so many reads in a long session: c's key reads the selection alone and takes this while the
+// selection is the same (citeKey), as the other keys read what their modules keep (squeeze/ui.ts, tray/tray.ts).
 let waitKept: { sel: string; shown: boolean } | null = null
 
 /** c, or a click on `c cite`: the words the analyst last selected with the mouse, on the answer they lie in (else
@@ -226,9 +226,16 @@ export async function citeShown($: Engine): Promise<boolean> {
 /** citeShown of a selection read before, kept for c's key (waitKept). */
 async function shownFor($: Engine, raw: Sel | undefined): Promise<boolean> {
   const sel = await answerSelectionOf($, raw)
-  const shown = !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'cite', sel)) && (await answerRows($).catch(() => [])).length > 0
+  const shown = !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'cite', sel)) && (await answered($))
   waitKept = { sel: selectionKey(raw), shown }
   return shown
+}
+
+/** Whether an answer exists: the newest turns first, so it reads one or two of them, never every turn. */
+async function answered($: Engine): Promise<boolean> {
+  const ids = await turnIds($).catch(() => [] as string[])
+  for (let k = ids.length - 1; k >= 0; k--) if ((await turnOf($, ids[k]!).catch(() => null))?.answer) return true
+  return false
 }
 
 /** c at an empty prompt while words wait to be cited (citeShown): after the word window (a c that starts a word is
