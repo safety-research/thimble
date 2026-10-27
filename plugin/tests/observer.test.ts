@@ -1,7 +1,8 @@
 // The observer's look (observer/observer.ts): after main's turn answers, one fork of the conversation reads the answer
 // with the enabled lenses' sections; a long reply in the middle of a turn is read with the answer; nothing runs while
-// every feature it serves is off; a reply that cannot be read is tried once more, then said on the failure line. All
-// data is made up. `claude plugin test plugin`.
+// every feature it serves is off; its count of what the session read waits a few seconds at most, and none runs in the
+// home folder; a reply that cannot be read is tried once more, then said on the failure line. All data is made up.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
@@ -177,6 +178,36 @@ test('a reply with a card is one answer: the words above and after the card are 
   expect(s.forks[0]).toContain('These are the logs of a build farm')
   expect(s.forks[0]).toContain('The card shows the failures start')
   expect(s.forks[0]).not.toContain('Reading the logs now.')
+})
+
+test('in a session started in the home folder a look runs no `thimble coverage`, and its prompt says no folder is counted', async () => {
+  setOptions({})
+  const s = setup([READ])
+  const env: Record<string, string> = { THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp', HOME: '/made-up/home', THIMBLE_START: '/made-up/home' }
+  s.$.env.get = async (k: string) => env[k]
+  await answered(s, { id: 't1', prompt: 'What is in these folders?', rows: ['Notes, photos and a few projects.'] })
+  expect(s.forks.length).toBe(1)
+  expect(s.ran.some(a => a.includes('coverage'))).toBe(false)
+  expect(s.forks[0]).toMatch(/READ .*home folder/)
+})
+
+test('a count of what the session read that runs past a few seconds is stopped, and the look goes on without it', async () => {
+  setOptions({})
+  const s = setup([READ])
+  const limits: number[] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any) => {
+    if (!argv.includes('coverage')) return run(argv, o)
+    limits.push(Number(o?.timeoutMs))
+    // Claude Code stops a run at its time limit, and says so
+    throw new Error(`thimble: $.process.run(${argv[0]}) aborted: still running after ${o?.timeoutMs} ms`)
+  }
+  await answered(s, { id: 't1', prompt: 'How many runs failed?', rows: ['Two runs failed, both on the p95 check.'] })
+  expect(limits.length).toBe(1)
+  expect(limits[0]).toBeLessThanOrEqual(10000)
+  expect(s.forks.length).toBe(1)
+  expect(s.forks[0]).toContain('READ ')
+  expect(s.forks[0]).not.toContain('Claude read 3 of 7 files.')
 })
 
 test("a reply that cannot be read is tried once more, then the failure line says what is missing and why", async () => {
