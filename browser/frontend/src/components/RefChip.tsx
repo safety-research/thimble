@@ -17,7 +17,7 @@ import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../l
 import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
 import { callDetail, callFile, callTarget } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
-import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
+import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, readableText, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
 import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
@@ -215,9 +215,12 @@ export function citedTable(r: ResolvedRef, col: string, row: string): { grid: Gr
 const OWN_TABLES = '.outputs-html table'
 const OWN_BOX = '.bcell-output, .bdetail-artifact'
 
+/** The card a whole card's ref resolved to, which its hover shows (CellPreview): a card that runs code, and a data card
+ * with no outputs (a custom card, a note, an example), whose excerpt is its source rather than what it shows; null for
+ * a plan, whose excerpt lists its steps (and a step's ref, its step). */
 function cellOf(r: ResolvedRef): Cell | null {
   const rec = r.record
-  if (r.kind !== 'cell' || !rec || typeof rec !== 'object' || typeof rec.id !== 'string' || !Array.isArray(rec.outputs)) return null
+  if (r.kind !== 'cell' || !rec || typeof rec !== 'object' || typeof rec.id !== 'string' || rec.kind === 'plan') return null
   return rec as Cell
 }
 
@@ -662,7 +665,8 @@ function LinesPreview({ lines, from, to, value }: CitedLines & { value?: string 
   )
 }
 
-/** The cell's question over its primary artifact. */
+/** The cell's question over its primary artifact; a card with none shows its text (a note's) or its takeaway, read as
+ * words. */
 function CellPreview({ ws, cell, fitWidth }: { ws: string; cell: Cell; fitWidth?: number }) {
   const concepts = useConcepts(ws)
   const pick = primaryArtifact(cell.outputs)
@@ -680,6 +684,8 @@ function CellPreview({ ws, cell, fitWidth }: { ws: string; cell: Cell; fitWidth?
         </div>
       ) : cell.text ? (
         <div className="refchip-pop-note">{cell.text.slice(0, EXCERPT_MAX)}</div>
+      ) : cell.takeaway ? (
+        <div className="refchip-pop-note">{readableText(cell.takeaway).slice(0, EXCERPT_MAX)}</div>
       ) : null}
     </div>
   )

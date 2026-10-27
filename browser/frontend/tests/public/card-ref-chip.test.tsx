@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // A card pointed at in a chat reply (`[[card:<id>]]`) is the card's chip: its glyph and its short name, as the chips
 // under a step's Cards are, a click opening the card and a hover showing it (components/RefChip). A file pointed at
-// stays its glyph alone, and a part of a card (a table's cell) too.
+// stays its glyph alone, and a part of a card (a table's cell) too. A card that shows no output of code (a custom card)
+// shows its question and takeaway in the hover, never the source of its page; a plan's hover lists its steps.
 import { act } from 'react'
 import { afterEach, beforeAll, expect, test, vi } from 'vitest'
 import { ChatMarkdown } from '../../src/chat/markdown.tsx'
@@ -71,4 +72,44 @@ test("hovering the card's chip shows the card, and a click opens it", async () =
   await settle()
   off()
   expect(refs).toEqual(['card:ab12cd34'])
+})
+
+test("hovering a custom card's chip shows its question and takeaway as words, never its page's source", async () => {
+  vi.spyOn(api, 'cellNames').mockResolvedValue([])
+  const html = '<style>.bar{fill:var(--viz-2)} h3{margin:0 0 6px}</style><div class="bars">…</div>'
+  vi.spyOn(api, 'resolveRef').mockResolvedValue({
+    ref: 'card:ab12cd34',
+    kind: 'cell',
+    excerpt: html,
+    record: { id: 'ab12cd34', kind: 'custom', title: 'Which station is wettest?', takeaway: 'North gets [twice the rain](#) of Harbor, [[1,204|card:ab12cd34]] mm a year.', payload: { html } },
+  } as unknown as ResolvedRef)
+  const el = await mount(<ChatMarkdown text="I drew the stations side by side [[card:ab12cd34]]." />)
+  await act(async () => {
+    chip(el, 'card:ab12cd34').focus()
+    await new Promise((r) => setTimeout(r, 200))
+  })
+  const pop = document.body.querySelector<HTMLElement>('.refchip-pop')!
+  expect(pop.textContent).toContain('Which station is wettest?')
+  expect(pop.textContent).toContain('North gets twice the rain of Harbor, 1,204 mm a year.')
+  expect(pop.textContent).not.toContain('<style')
+  expect(pop.textContent).not.toContain('](#)')
+})
+
+test("hovering a plan's chip lists its steps", async () => {
+  vi.spyOn(api, 'cellNames').mockResolvedValue([])
+  const steps = '1. [done] Load the nightly runs\n2. [running · 4 m] Count the failures per night\n3. [todo] Compare the weeks before and after the change'
+  vi.spyOn(api, 'resolveRef').mockResolvedValue({
+    ref: 'card:ab12cd34',
+    kind: 'cell',
+    excerpt: steps,
+    record: { id: 'ab12cd34', kind: 'plan', title: 'Did the failures start after the change?', payload: { steps: [] } },
+  } as unknown as ResolvedRef)
+  const el = await mount(<ChatMarkdown text="Here is the plan [[card:ab12cd34]]." />)
+  await act(async () => {
+    chip(el, 'card:ab12cd34').focus()
+    await new Promise((r) => setTimeout(r, 200))
+  })
+  const pop = document.body.querySelector<HTMLElement>('.refchip-pop')!
+  expect(pop.textContent).toContain('2. [running · 4 m] Count the failures per night')
+  expect(pop.textContent).toContain('3. [todo] Compare the weeks before and after the change')
 })

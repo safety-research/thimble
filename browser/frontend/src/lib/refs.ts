@@ -386,6 +386,19 @@ export function splitValueRef(token: string): { value?: string; ref: string } {
   return { value, ref: token.slice(i + 1).trim() }
 }
 
+/** What a stored sentence's text says without its citations: a cited value and a mark's words stay, a bare citation
+ * goes with the space before it, whitespace squeezed. For a thread's anchor text, the Checks list, a figure's caption
+ * and a card's takeaway in a hover. */
+export function readableText(text: string): string {
+  return text
+    .replace(/(?<![[!])\[([^[\]\n]+)\]\(#\)/g, '$1')
+    .replace(/\[\[([^\[\]|]*)\|[^\[\]]*\]\]/g, '$1')
+    .replace(/\s*\[\[[^\[\]]*\]\]\s*(?=[.,;:!?])/g, '')
+    .replace(/\[\[[^\[\]]*\]\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 /** A citation's text as the analyst reads it: a whole number of five digits or more, or of four outside the years 1800
  * to 2199, takes thousands separators (`6355` reads `6,355`), sign and decimals kept; numbers with a leading zero, ids
  * and other text are left as written. */
