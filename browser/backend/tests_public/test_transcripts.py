@@ -682,6 +682,23 @@ def test_lines_inside_a_tool_call_start_no_turn(chats, monkeypatch):
                                 (9, "Assistant")]
 
 
+def test_a_markdown_transcript_whose_turns_hold_tool_calls_opens_in_transcript(chats):
+    """In markdown the share of turn lines is taken over the file's own lines, not the lines of the code it quotes: an
+    agent's transcript whose turns hold long tool calls in code blocks is sure (Transcript first), as the same text is
+    in a .txt file; a document quoting an example exchange keeps Rendered first
+    (test_markdown_quoting_an_example_exchange_keeps_rendered_first)."""
+    call = ("**Tool call: Bash**\n\n```bash\npython - <<'EOF'\ntry:\n    import parser\nexcept ImportError as e:\n"
+            "    print(e)\nEOF\n```\n\n```\nTraceback (most recent call last):\n  File \"<stdin>\", line 2, in <module>\n"
+            "ModuleNotFoundError: No module named 'parser'\n```\n\n")
+    doc = ("# Session\n\n## User\n\nWhy does the parser fail?\n\n## Assistant\n\nI will run it.\n\n" + call * 4
+           + "## Assistant\n\nThe parser module is missing.\n\n## User\n\nInstall it.\n\n## Assistant\n\nDone.\n")
+    for name in ("agent.md", "agent-copy.txt"):
+        (chats / "logs" / name).write_text(doc)
+        got = transcripts.sniff(chats / "logs" / name, f"logs/{name}")
+        assert got == {"format": "text", "score": transcripts.STRONG, "style": "heading",
+                       "speakers": ["assistant", "user"]}, name
+
+
 def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():
     """A harness that logs each tool call with its result on its own line, between the agent's spoken turns: the tool
     turns count toward the transcript, so it is strong (Transcript the default), with `tools` set for the view, even

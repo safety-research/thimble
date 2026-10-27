@@ -1520,27 +1520,31 @@ def _fence_closes(fence: str, line: str) -> bool:
     return bool(m) and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip()
 
 
-def _style_hits(lines: list[str], style: str) -> list[tuple[str, dict[str, Any]]]:
-    """The lines of a head that start turns in `style`, as text_turns reads them. A line inside a fenced block of code
-    starts a turn only for a speaker who spoke outside one before it (in a style of DISTINCT_STYLES, for anyone), which
-    ends a block left open (a message cut inside its code); in aider's history, never."""
+def _style_hits(lines: list[str], style: str) -> tuple[list[tuple[str, dict[str, Any]]], int]:
+    """The lines of a head that start turns in `style`, as text_turns reads them, and how many lines its fenced blocks
+    of code hold. A line inside a block starts a turn only for a speaker who spoke outside one before it (in a style
+    of DISTINCT_STYLES, for anyone), which ends a block left open (a message cut inside its code); in aider's history,
+    never."""
     hits: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
     fence: str | None = None
+    code = 0
     for ln in lines:
         got = _turn_match(ln, style)
         if fence is not None and (got is None or style == "aider" or (
                 style not in DISTINCT_STYLES and got[0]["speaker"].lower() not in seen)):
+            code += 1
             if _fence_closes(fence, ln):
                 fence = None
             continue
         if got is None:
             fence = _fence_opened(ln)
+            code += fence is not None
             continue
         hits.append((ln, got[0]))
         seen.add(got[0]["speaker"].lower())
         fence = None if style == "aider" else _fence_opened(ln[got[1]:])
-    return hits
+    return hits, code
 
 
 # the first line of a front matter: a YAML `key:`, a TOML `key =` or a TOML `[table]`
@@ -1565,18 +1569,19 @@ def front_matter_lines(lines: list[str]) -> int:
 def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     """A text or markdown chat log: the style whose turn lines recur most in the head, with at least two speakers who
     take turns, one of them more than once. In markdown, which reads well rendered, the sniff is sure only when turn
-    lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first. A
-    front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's nested keys),
-    nor the lines inside a fenced block of code (_style_hits)."""
+    lines are at least a fifth of the head's own lines, so a document quoting an example exchange keeps Rendered first;
+    the lines of its fenced blocks of code are the code's, so an agent's turns full of tool calls read as the transcript
+    they are. A front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's
+    nested keys), nor the lines inside a block of code (_style_hits)."""
     raw = text.split("\n")
     lines = [ln for ln in raw[front_matter_lines(raw):] if ln.strip()][:TEXT_HEAD_LINES]
     if len(lines) < 2:
         return None
-    best: tuple[float, str, int, dict[str, int]] | None = None
+    best: tuple[float, str, int, dict[str, int], int] | None = None
     for name, _ in STYLES:
         counts: dict[str, int] = {}
         turns = 0
-        hits = _style_hits(lines, name)
+        hits, code = _style_hits(lines, name)
         if name == "colon" and hits:
             # a chat log's turns start at its shallowest indent, a YAML file's repeated keys under parents shallower
             # than them: only the shallowest indent that two `Word:` lines share counts
@@ -1603,13 +1608,13 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
             continue
         rank = turns + 2 * roles
         if best is None or rank > best[0]:
-            best = (rank, name, turns, counts)
+            best = (rank, name, turns, counts, code)
     if best is None:
         return None
-    _, name, turns, counts = best
+    _, name, turns, counts, code = best
     roles = sum(n for s, n in counts.items() if s in ROLE_WORDS)
     strong = name in ("cc", "aider") or (
-        (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines)))
+        (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines) - code))
     out: dict[str, Any] = {"format": "text", "score": STRONG if strong else WEAK, "style": name}
     if name not in DISTINCT_STYLES and name != "aider":
         # a heading, a bold label or a `Word:` line starts a turn only for a speaker the head shows taking turns
