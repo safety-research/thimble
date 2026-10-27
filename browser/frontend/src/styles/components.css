@@ -1218,11 +1218,6 @@ a.card:hover {
 .tt-summary:hover {
   background: transparent;
 }
-/* the folded card's way back to main, before the current thread's name, as tall as a row's ⋯ */
-.tt-back.btn {
-  height: 20px;
-  gap: 4px;
-}
 /* a row's ancestors' guide lines, one per level under each ancestor's chevron (files.css .files-guide) */
 .tt-guide {
   position: absolute;

@@ -1,7 +1,7 @@
 // The tour's steps (the shape engine.ts takes): which surface each needs, what it points at, where its popover sits,
 // what it says and what it brings; and what the welcome before them says. Every example is the tour's own
-// (examples.json, captured from real thimble markup, and the views step's example view), each marked Example; a step
-// that asks the analyst to act acts only on that example, so nothing reaches the server.
+// (examples.json, captured from real thimble markup; all but the views step's are marked Example); a step that asks the
+// analyst to act acts only on that example, so nothing reaches the server.
 import { TRACK_LANES } from '../files/Ruler'
 import { setMarkup, type Api, type Example, type Step } from './engine'
 import reportFigs from './report-figs.json'
@@ -121,8 +121,6 @@ const viewsExample = (api: Api): Example => {
     realBody = () => api.q('[data-panel="files"] .files-body')
   const bar = api.snap('timelineBar', 'tour-ex-viewsbar')
   bar.style.background = api.groundOf(realBar())
-  // its badge at the bar's end, after New view, where it covers nothing of the bar or the view
-  api.tag(bar.querySelector<HTMLElement>('.files-views') ?? bar)
   const body = document.createElement('div')
   body.className = 'tour-ex-viewbody'
   body.style.background = api.groundOf(realBody())
@@ -588,7 +586,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
       scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
       title: 'Labels',
-      body: 'A label sorts records into values, by a rule or by Claude’s reading. Each record’s colored bars show its values, one per label, and the strip at the right shows where they fall in the whole file. Labels, at the top, lists the labels and their colors. Open one to see its records and correct them.',
+      body: 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.',
     },
     {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
