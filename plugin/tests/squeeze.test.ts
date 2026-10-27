@@ -3,13 +3,14 @@
 // the original back with no call; with two replies since the person's last prompt, b writes one catch-up of them below
 // the newest, while the replies still show, with their explainers on its words and their cards moved into it; keys
 // pressed in a row make one rewrite, and the latest one shows. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { cardWidth } from '../cards/draw'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { resetSqueeze } from '../squeeze/term'
 import Chips from '../squeeze/chips.tsx'
+import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

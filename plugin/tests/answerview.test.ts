@@ -1,12 +1,13 @@
 // Where the features that act on answers draw (core/answerview.ts, marks/view.ts, marks/register.ts): a feature's spans
 // on a row's words, checked and drawn; the margin that asks a side thread about a passage; the answer the person
 // picked with { drawn with ▸; and the features' keys, which no card takes. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { checkSpans, restoredKeys, type Span } from '../core/answerview'
 import { ownKeys } from '../hooks/keys'
 import { marksIn } from '../marks/message.js'
 import { messageEl } from '../marks/view'
+import { test } from './kit'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

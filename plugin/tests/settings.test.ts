@@ -1,9 +1,10 @@
 // The settings pane: /thimble-settings opens it with the keys, it shows the bar as the switches leave it, and a press on
 // a switch turns it off through Claude Code ($.config.set). All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { DEFAULTS, choiceOf, citationsFrom, featureOn, noteChange, setOptions, valueIn } from '../settings/features.mjs'
 import { registerSettings, settingsAction, settleMinimal } from '../settings/term'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

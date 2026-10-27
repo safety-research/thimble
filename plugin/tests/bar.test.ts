@@ -1,7 +1,7 @@
 // The bar above the prompt and its panes, through the whole hooks module: its items per switch and state, a failure's
 // line, and the coverage pane drawn from `thimble coverage --json`. All data is made up.
 // `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
 import { busyNow, busyWhile, SPIN } from '../bar/busy'
@@ -14,6 +14,7 @@ import { textWidth } from '../core/text.js'
 import { accent, themeLast } from '../core/theme'
 import { markColors } from '../explain/place.mjs'
 import { PRESET, setOptions } from '../settings/features.mjs'
+import { test } from './kit'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

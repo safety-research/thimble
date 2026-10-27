@@ -1,10 +1,11 @@
 // What a session shows and tells belongs to its conversation (hooks/conversation.ts, hooks/turnover.ts): a new
 // conversation in the same folder (a new session, a /clear) starts with none of the earlier one's labels, texts for
 // Claude, answers or counts, and a resumed one gets its own back. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { labelsDir, rootHere } from '../core/env'
 import { labelsDirOf } from '../core/layout.mjs'
+import { test } from './kit'
 import { tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

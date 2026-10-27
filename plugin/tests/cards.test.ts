@@ -2,12 +2,13 @@
 // the one Client with the runner's tree; a new version draws in the card's place; a key at an empty prompt, and a burst
 // of keys, reach the card on screen that takes them; a card a designer fork drew draws under its answer. The runner is answered here, at http.fetch (cards/test/runner.test.mjs tests the real one).
 // All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import Card from '../cards/client'
 import { cardWidth } from '../cards/draw'
 import { callLine } from '../cards/register'
 import { treeRows } from '../core/trail.mjs'
+import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

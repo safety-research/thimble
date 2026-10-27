@@ -1,11 +1,12 @@
 // The cite and explain tray (tray/): ] at an empty prompt opens it on the acting answer's first citation, which draws in
 // focus; its card shows the check and the evidence, its keys show in the bar; a press on a citation opens it too; a
 // question typed with it open carries nothing of it and closes the tray; 0 closes it. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { treeRows } from '../core/trail.mjs'
 import { citeTint } from '../marks/view'
 import { evidenceOpener } from '../tray/tray'
+import { test } from './kit'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

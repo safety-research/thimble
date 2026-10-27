@@ -1,10 +1,11 @@
 // The whole hooks module in one session: it loads, a session starts with the plugin's bin/ first on the PATH
 // (hooks/path.ts), a prompt goes through, and the line above the prompt draws, with a failure line on it, without
 // throwing. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { labelsDirOf } from '../core/layout.mjs'
 import { binFirst } from '../hooks/path'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

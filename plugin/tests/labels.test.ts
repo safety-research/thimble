@@ -2,11 +2,12 @@
 // starts the model's reads beside the session, the bar's busy line names the label while they run, Claude hears the
 // counts with the next prompt, and a call that failed shows the failure line in the person's words. The kernel and the
 // model are stand-ins; all data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { paneNow } from '../core/pane'
 import { rerunLabel } from '../labels/edit'
 import { drawLabels, labelEdit, openLabels } from '../labels/pane'
+import { test } from './kit'
 import { promptStub, tempRun } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
