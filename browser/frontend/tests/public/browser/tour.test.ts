@@ -16,11 +16,11 @@
 //     bars; the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
 //     height, the cutout and the example sidebar still and the ruler's thumb following, and the wheel over the ruler
 //     too;
-//   - step 5: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
-//     another or anything of the view, nothing of the tour (a badge, the popover, the views bar) meets it, there is no
-//     label control (the page draws its own), the line under the name starts where the name does, the unreadable line
-//     is counted in the line's ink, and the page's Only these shows as thimble's filter chip with how many events it
-//     hides, which the chip clears;
+//   - step 5: the Example badge stands in the example's views bar and meets none of its items; inside the example view
+//     the wheel and a click work and reach nothing else; in its head no item meets another or anything of the view,
+//     nothing of the tour (a badge, the popover, the views bar) meets it, there is no label control (the page draws its
+//     own), the line under the name starts where the name does, the unreadable line is counted in the line's ink, and
+//     the page's Only these shows as thimble's filter chip with how many events it hides, which the chip clears;
 //   - step 6: the card is in plain words; on its first entry the demo plays once the card is in place, comes to rest on
 //     08:04 as its source shows and the card holds still;
 //   - step 7: in the ⌘-click demo the key badge stands inside the card and over none of its text; then "⌘-click here"
@@ -729,7 +729,22 @@ async function walk(page: Page, tag: string, send = false) {
   await onStep(page, 4, 'Views')
   await measure(page, `${tag} 4`)
   assert.equal(await page.evaluate(() => document.querySelector('.tour-ex-viewsbar .seg-opt.active')?.textContent?.trim()), 'Timeline', `${tag} 4: the Timeline example is on`)
-  assert.equal(await page.evaluate(() => !!document.querySelector('.tour-ex-viewbody .tour-tag')), false, `${tag} 4: no Example badge on the view`)
+  // the example's Example badge stands in its views bar, after its items, and meets none of them; the view has none
+  const badge = await page.evaluate(() => {
+    const bar = document.querySelector('.tour-ex-viewsbar')!
+    const tag = bar.querySelector('.tour-tag')
+    if (!tag) return null
+    const t = tag.getBoundingClientRect(),
+      B = bar.getBoundingClientRect()
+    const items = [...bar.querySelectorAll('.seg-opt, .seg-remove, .files-views-new')].map((e) => e.getBoundingClientRect())
+    return {
+      text: tag.textContent,
+      inBar: t.left >= B.left - 0.5 && t.right <= B.right + 0.5 && t.top >= B.top - 0.5 && t.bottom <= B.bottom + 0.5,
+      hits: items.filter((r) => r.right > t.left && r.left < t.right && r.bottom > t.top && r.top < t.bottom).length,
+      onView: !!document.querySelector('.tour-ex-viewbody .tour-tag'),
+    }
+  })
+  assert.ok(badge && badge.text === 'Example' && badge.inBar && !badge.hits && !badge.onView, `${tag} 4: the Example badge sits in the views bar, covering none of it, and not on the view ${JSON.stringify(badge)}`)
   await page.waitForFunction(() => {
     const f = document.querySelector<HTMLIFrameElement>('.tour-ex-viewbody iframe')
     return !!f?.contentDocument?.querySelector<HTMLIFrameElement>('.view-pane-frame')?.contentDocument?.getElementById('list')

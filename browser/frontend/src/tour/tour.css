@@ -341,3 +341,10 @@ body[data-cmd] .tour-ex .tour-try {
   display: inline-block;
   margin: 0 0 8px 0;
 }
+
+/* The views step: the example's badge at the end of its views bar, in the bar's row, after New view. */
+.tour-ex-viewsbar .tour-tag {
+  position: static;
+  flex: none;
+  margin-left: auto;
+}
