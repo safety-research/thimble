@@ -295,7 +295,50 @@ elif named:
     say "Claude Code loads thimble from your fixes ($fixes_live), so the plugin is left as it is: run thimble update, which updates both products and keeps your fixes."
   elif command -v claude >/dev/null 2>&1; then
     if [ -n "$gone" ]; then
-      claude plugin marketplace remove thimble
+      # when only Claude Code's settings name that folder, its list has no marketplace thimble: remove says that it is
+      # not found and changes nothing, and Claude Code refuses the add below while its settings name thimble from
+      # another source. Then the install removes thimble from the settings itself, only when they name it at that folder
+      # or in it (written to a new file, which then replaces settings.json, with its mode)
+      if removed="$(claude plugin marketplace remove thimble 2>&1)"; then
+        say "$removed"
+      else
+        case "$removed" in
+          *"not found"*)
+            (cd / && "$py" -c '
+import json, os, sys, tempfile
+gone = sys.argv[1]
+at = os.path.join(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude"), "settings.json")
+real = os.path.realpath(at)  # when settings.json is a link, the file it links to changes
+try:
+    with open(real, encoding="utf-8") as f:
+        d = json.load(f)
+    src = d["extraKnownMarketplaces"]["thimble"]["source"]
+    p = os.path.realpath(src["path"]) if src.get("source") == "directory" else ""
+except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    p = ""
+if not p or (p != gone and not p.startswith(gone + os.sep)):
+    sys.exit(0)  # the settings do not name thimble at that folder: the add says what is wrong, if anything is
+del d["extraKnownMarketplaces"]["thimble"]
+try:
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(real), prefix=".settings.json.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(d, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.chmod(tmp, os.stat(real).st_mode & 0o7777)
+        os.replace(tmp, real)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+except OSError as e:
+    sys.exit("install.sh: could not remove the marketplace thimble from %s (%s), and Claude Code adds it again only "
+             "after that. Remove extraKnownMarketplaces.thimble from that file, then run scripts/install.sh again."
+             % (at, e.strerror or e))
+print("Removed the marketplace thimble from %s: its folder %s is gone." % (at, gone))
+' "$gone") ;;
+          *) say "$removed" >&2; exit 1 ;;
+        esac
+      fi
     fi
     claude plugin marketplace add "$source"
     if claude plugin list --json 2>/dev/null | grep -q '"thimble@thimble"'; then
@@ -361,6 +404,9 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
     say "The plugin works in a new claude session, in a folder of data files that you trust."
   else
     say "Claude Code (the claude command) is not installed. Install it, then run:"
+    if [ -n "$gone" ]; then
+      say "  claude plugin marketplace remove thimble"
+    fi
     say "  claude plugin marketplace add $source"
     say "  claude plugin install thimble@thimble"
   fi

@@ -4,6 +4,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { keyedWords, pressedWords } from '../bar/bar'
+import { barKey, registerBar } from '../bar/register'
 import { noteViewport } from '../cards/draw'
 import { closePane, drawPane, narrowNotice, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 import { setOptions } from '../settings/features.mjs'
@@ -99,6 +100,26 @@ test('the pane keeps a trail: esc goes back down it, and on the first pane esc c
   await nodes(await draw(s)).find(n => n.props?.key === 'pane-close').props.onPress()
   expect(await paneNow(s.$)).toBeNull()
   expect(s.isOpen()).toBe(false)
+})
+
+test('esc or the close mark closing the pane, with no drawing of the bar after, leaves r to open coverage again', async () => {
+  const s = setup()
+  // the bar's drawing beside the pane notes which pane it was drawn beside
+  const bar: Record<string, Any[]> = {}
+  registerBar(((event: string, a: Any, b?: Any) => { (bar[event] ??= []).push(typeof a === 'function' ? a : b); return { catch: () => undefined } }) as never, {} as never)
+  s.$.ui.resolve = () => els
+  const drawBar = () => bar['ui.render']![0](s.$, { props: { hasSurvey: false, bodyColumns: 100, maxRows: 12 } }, async () => null)
+  // the folder's coverage is counted, so the bar names r
+  await s.$.state.set({ plugin: 'thimble', key: 'counts' }, { coverage: '43% (3/7 files)', labels: 0, gen: 1, error: null })
+  await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })
+  await drawBar()
+  // esc: Claude Code closes the pane, and the bar does not draw again
+  await s.call('ui.close', { id: 'thimble', origin: { kind: 'person' } }, async () => { await s.$.ui.close() })
+  expect(s.isOpen()).toBe(false)
+  const opens = s.opens.length
+  await (await barKey(s.$, 'r'))!.later()
+  expect(s.opens.length).toBe(opens + 1)
+  expect(s.isOpen()).toBe(true)
 })
 
 test('going back to a pane Claude Code does not place closes the pane, so the next pane starts a trail of its own', async () => {

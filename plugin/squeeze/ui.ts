@@ -420,16 +420,29 @@ async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   }
 }
 
+/** What the chips draw from their props, each a press (chips.tsx): each chip's digit and name, its ends, its dots,
+ *  the words of its level, its levels; + with what is typed after it; s close. */
+function chipsWords(props: Any): string[] {
+  const items: Any[] = Array.isArray(props?.items) ? props.items : []
+  const typed = typeof props?.plus === 'string' ? `+ ${props.plus}▏` : '+'
+  return ['s close', 'close', typed, ...items.flatMap(c => {
+    const levels: unknown[] = Array.isArray(c.levels) ? c.levels : []
+    const dots = levels.map((_, i) => (i === c.level ? '●' : '○')).join('')
+    return [`${c.n} ${c.name}`, c.name, ...(c.ends ?? []), dots, `· ${c.word}`, c.word, ...levels]
+  })].filter((x: unknown): x is string => typeof x === 'string')
+}
+
 /** The chips under the record `id`, when they are open on it: their Client, keyed so a click keeps the keyboard in
  *  them while the answer above draws again. */
 async function chipsEl($: Engine, els: Any, id: string, cols: number): Promise<Any | null> {
   const open = await openNow($)
+  // what the chips draw, which a click on it leaves selected: no answer's words while they are drawn
+  // (core/selection.ts)
+  if (!open) controlWords('chips', [])
   if (!open || open.id !== id) return null
   const w = Math.max(30, cols - 2)
   const props = await chipsProps($, id, w)
-  // the chips' words, which a double click on one selects, then and once they closed: no answer's words
-  // (core/selection.ts)
-  controlWords('chips', ['s close', 'close', ...((props as Any)?.items ?? []).flatMap((c: Any) => [c.name, c.word, ...(c.levels ?? []), ...(c.ends ?? [])].filter((x: unknown) => typeof x === 'string'))])
+  controlWords('chips', chipsWords(props), { inRow: true })
   return els.Box({ key: `sq-${id}`, marginLeft: 2, marginTop: 1, children: [els.Client({ key: `sqchips-${id}`, module: './chips.tsx', width: w, props })] })
 }
 

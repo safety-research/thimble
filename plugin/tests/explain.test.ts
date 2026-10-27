@@ -19,6 +19,7 @@ import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../m
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
 import { noteRow, startCheck } from '../marks/checker'
 import { citeBar, citeKey, citeWords, placeOf } from '../marks/cite'
+import { controlWords, titleWords } from '../core/selection'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
@@ -391,9 +392,13 @@ test("what a click on thimble's controls or Claude Code's own rows leaves select
     // in a row of Claude Code's own (the turn's time, a tool call, the person's prompt), though the answer has its words
     expect(await counts({ text: 'for', requestId: 'turn-time-row' })).toBe(false)
     expect(await counts({ text: 'Read 1 file', requestId: 'collapsed-tool-row' })).toBe(false)
-    // under the answer, in its row: a card's header, its line and then one of its words, which the answer draws nowhere
-    expect(await counts({ text: 'Edits by day       checking  [ previous heads up · a ask · 0 close', requestId: 't1-row' })).toBe(false)
+    // under the answer, in its row, a card on screen: one of its header's words, which a click on it selects, and a
+    // piece of one; its header's whole line counts as the row's, as a card's body does
+    controlWords('card c-made-up', ['a ask', 'ask', 'p artifact', 'artifact'], { inRow: true })
     expect(await counts({ text: 'artifact', requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'as', requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'Edits by day       checking  [ previous heads up · a ask · 0 close', requestId: 't1-row' })).toBe(true)
+    controlWords('card c-made-up', [], { inRow: true })
     // words selected in the answer, as it draws them: inside it, from its dot, a table's row, a link with its target,
     // a drag that begins and ends inside words, and across rows
     expect(await counts({ text: 'longer', requestId: 't1-row' })).toBe(true)
@@ -405,6 +410,109 @@ test("what a click on thimble's controls or Claude Code's own rows leaves select
     expect(await counts({ text: 'ries, as the requests do', requestId: 't1-row' })).toBe(true)
     expect(await counts({ text: 'ow uploads finish before starting over.\n\n✻ Cooked f' })).toBe(true)
     expect(await counts({ text: 'Ran 2 shell commands\n\n● The retry loop in upload.py' })).toBe(true)
+  } finally {
+    setOptions({})
+  }
+})
+
+test('words selected in a Chinese or a Japanese answer count, inside a sentence, in no row and across its rows: the bar names e and c', async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: '上传为什么失败？', text: '上传失败是因为重试次数用完了：四十四次失败中有四十一次发生在断网三十秒之后。' })
+    await answered(s, { id: 't2', prompt: 'アップロードはなぜ失敗しますか？', text: 'アップロードは再試行の上限に達すると失敗します。ネットワークが切れてから三十秒後に止まります。' })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    // a phrase inside a sentence, in its row
+    expect(await counts({ text: '重试次数', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: '再試行の上限', requestId: 't2-row' })).toBe(true)
+    // in no row: a line alone, and a drag across the rows the answer wraps on
+    expect(await counts({ text: '重试次数用完了' })).toBe(true)
+    expect(await counts({ text: 'ネットワークが切れて' })).toBe(true)
+    expect(await counts({ text: '四十四次失败中\n有四十一次发生在' })).toBe(true)
+    // words no answer holds are none
+    expect(await counts({ text: '下载' })).toBe(false)
+  } finally {
+    setOptions({})
+  }
+})
+
+test("a selection in an answer's row whose lines are none of its words as compared counts whole, as the row draws them: a card's body, a list Claude Code numbers anew, a table whose cells wrap, a sign written as an entity", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const text = 'R&amp;D uploads stopped twice.\n\n3. Retry the upload\n7. Raise the timeout\n\n| day | note | edits |\n|---|---|---|\n| Mon | uploads retried twice | 41 |'
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    // a chart label in the body of a card drawn under the answer, in its row
+    expect(await counts({ text: 'Mon  ████████ 41', requestId: 't1-row' })).toBe(true)
+    // the list as Claude Code numbers it
+    expect(await counts({ text: '1. Retry the upload\n2. Raise the timeout', requestId: 't1-row' })).toBe(true)
+    // a table line whose cells wrap
+    expect(await counts({ text: '│ Mon │ uploads retried │ 41    │', requestId: 't1-row' })).toBe(true)
+    // the entity as its sign
+    expect(await counts({ text: 'R&D uploads', requestId: 't1-row' })).toBe(true)
+    // in a row of Claude Code's own, still none
+    expect(await counts({ text: 'Mon  ████████ 41', requestId: 'collapsed-tool-row' })).toBe(false)
+  } finally {
+    setOptions({})
+  }
+})
+
+test("a line selected in an answer's row with no word in it, as a click that slid a cell over signs leaves (a chip's dots, +, a card's frame, a chart's bar), counts for none; a chart label with its bar still counts", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text: 'Uploads stopped twice on Monday.' })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    for (const piece of ['●○', '○●', '+', '╭─', '██', '██ \n']) expect(await counts({ text: piece, requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'Mon  ████████ 41', requestId: 't1-row' })).toBe(true)
+  } finally {
+    setOptions({})
+  }
+})
+
+test("a piece of a card's title, a press that asks about the card, is no answer's words in the row the card is drawn in, where the answer does not hold it; in another answer's row, and once the card left the screen, it counts as the row's", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text: 'Uploads stop once the retry budget runs out.' })
+    await answered(s, { id: 't2', prompt: 'When?', text: 'Mostly on Mondays.' })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    // a card drawn under the first answer
+    titleWords('c-made-up', 't1-row', 'Retry budget by day')
+    expect(await counts({ text: 'by d', requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'Retry budget by day', requestId: 't1-row' })).toBe(false)
+    // words of the answer that the title holds too
+    expect(await counts({ text: 'budget', requestId: 't1-row' })).toBe(true)
+    // in the other answer's row
+    expect(await counts({ text: 'by d', requestId: 't2-row' })).toBe(true)
+    // the card left the screen
+    titleWords('c-made-up', null, '')
+    expect(await counts({ text: 'by d', requestId: 't1-row' })).toBe(true)
   } finally {
     setOptions({})
   }

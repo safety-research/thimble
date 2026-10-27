@@ -563,10 +563,10 @@ def end_of(answer: str) -> dict[str, Any]:
 
 
 def changed(work: Path, base: str) -> list[str]:
-    """The paths the copy changed since `base`, new files among them; none for a copy git may not run in (_own_git),
-    which the kernel's check then fails."""
+    """The paths the copy changed since `base`, new files among them; none for a copy git may not run in (_own_git,
+    _nested_git), which the kernel's check then fails."""
     g = _own_git(work)
-    if g is None:
+    if g is None or _nested_git(work):
         return []
     env = {**os.environ, **g}
     p = subprocess.run(["git", "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=all"],
@@ -608,6 +608,27 @@ def _own_git(work: Path) -> dict[str, str] | None:
     if not back or os.path.realpath(os.path.join(entry, back)) != os.path.realpath(work / ".git"):
         return None
     return {"GIT_DIR": str(entry), "GIT_WORK_TREE": str(work)}
+
+
+def _nested_git(work: Path) -> bool:
+    """Whether the copy holds a git repository of its own below its top (sub/.git, a folder, a file or a link), whose
+    settings (core.fsmonitor) git that reads the copy's files would run outside the sandbox (the kernel's _nested_git
+    does the same). Each folder is also asked for .git as git asks; the walk follows no link, and a folder it cannot read
+    counts."""
+    top = os.fspath(work)
+    stuck: list[OSError] = []
+    for d, dirs, files in os.walk(top, onerror=stuck.append):
+        if d == top:
+            # the copy's own .git, its link to live's repository (_own_git)
+            dirs[:] = [n for n in dirs if n != ".git"]
+            files = [n for n in files if n != ".git"]
+        if ".git" in dirs or ".git" in files:
+            return True
+        for n in dirs:
+            sub = os.path.join(d, n)
+            if not os.path.islink(sub) and os.path.lexists(os.path.join(sub, ".git")):
+                return True
+    return bool(stuck)
 
 
 def tests_for(paths: list[str]) -> str:

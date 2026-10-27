@@ -745,6 +745,87 @@ test("a double click on one of the bar's items selects its word, which is the ba
   expect(band).toContain('c cite')
 })
 
+test("a click on thimble's controls that slid a cell leaves a piece of their words selected, no answer's words though the answer holds it whole: on the bar, the tray and a card's header on screen; once those are gone, their words in an answer count again", CITES, async ($, on) => {
+  let selected: Any
+  on('ui.selection', () => ({ value: selected }))
+  const text = 'Of the runs, [12 of 40](#) failed on the p95 check: it is in a sweep where 0 runs pass, so ask before you close it as done.'
+  const id = 'c0123456789ad'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_9', agentId: 'a-made-up', anchorRow: 'row-t1', keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_9: { version: 1 } }, at: 1 }
+  const { clock } = await resumed($, on, QUOTED, 's-tray-slid', { text, kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  const counts = async (sel: Any) => {
+    // a selection made anew: none in between, as the click that makes it takes the one before down
+    selected = undefined
+    await $.ui.render(above(40))
+    selected = sel
+    const band = textOf(await $.ui.render(above(40)))
+    expect(band.includes('c cite')).toBe(band.includes('e explain'))
+    return band.includes('c cite')
+  }
+  // words of the answer: the bar names c and e
+  expect(await counts({ text: 'failed on the p95 check', requestId: 'row-t1' })).toBe(true)
+  // a click on the bar's `e explain` as it names it, then on `s rewrite` and `thimble`
+  selected = { text: 'in' }
+  expect(textOf(await $.ui.render(above(40)))).not.toContain('c cite')
+  expect(textOf(await $.ui.render(above(40)))).not.toContain('e explain')
+  expect(await counts({ text: 'it' })).toBe(false)
+  expect(await counts({ text: 'im' })).toBe(false)
+  // the tray open: a click on its `a ask` or `0 close`
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(textOf(await $.ui.render(above(40)))).toContain('a ask · 0 close')
+  expect(await counts({ text: 'a' })).toBe(false)
+  expect(await counts({ text: 'as' })).toBe(false)
+  expect(await counts({ text: '0 ' })).toBe(false)
+  // the answer's own words still count while the tray is open
+  expect(await counts({ text: 'a sweep', requestId: 'row-t1' })).toBe(true)
+  // a card under the answer, on screen: a click on its header's `p artifact` or `a ask`, in the answer's row
+  expect(textOf(await $.ui.render(answer('row-t1', text)))).toContain('Runs by status')
+  expect(await counts({ text: 'p', requestId: 'row-t1' })).toBe(false)
+  expect(await counts({ text: 'as', requestId: 'row-t1' })).toBe(false)
+  // the tray closed and the card out of view: those words in the answer count again
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(textOf(await $.ui.render(above(40)))).not.toContain('0 close')
+  await $.ui.render({ ...(answer('row-t1', text) as Any), props: { text, isFirstOfReply: true, onScreen: null } } as never)
+  await clock.advance(10)
+  expect(await counts({ text: 'close', requestId: 'row-t1' })).toBe(true)
+  expect(await counts({ text: 'ask', requestId: 'row-t1' })).toBe(true)
+  expect(await counts({ text: 'as', requestId: 'row-t1' })).toBe(true)
+})
+
+test("a click that slid a cell on a card's title, a press that asks about the card, leaves a piece of it selected in the answer's row: the bar names neither c nor e; the card's body, a chart label and a word of the answer that the title holds too still count", CITES, async ($, on) => {
+  let selected: Any
+  on('ui.selection', () => ({ value: selected }))
+  const text = 'Of the runs, [12 of 40](#) failed on the p95 check: it is in a sweep where 0 runs pass, so ask before you close it as done.'
+  const id = 'c0123456789ae'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_8', agentId: 'a-made-up', anchorRow: 'row-t1', keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_8: { version: 1 } }, at: 1 }
+  await resumed($, on, QUOTED, 's-tray-title', { text, kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  const counts = async (sel: Any) => {
+    // a selection made anew: none in between, as the click that makes it takes the one before down
+    selected = undefined
+    await $.ui.render(above(40))
+    selected = sel
+    const band = textOf(await $.ui.render(above(40)))
+    expect(band.includes('c cite')).toBe(band.includes('e explain'))
+    return band.includes('c cite')
+  }
+  // the card under the answer, on screen: its title is a press that asks about it
+  const title = all(await $.ui.render(answer('row-t1', text))).find(n => n.type === 'Button' && String(n.props?.label).startsWith('ask about') && textOf(n) === 'Runs by status')
+  expect(title).toBeDefined()
+  // a click on it that slid a cell: at its start, inside a word, over a space, a word the answer does not hold, and
+  // the whole title
+  for (const piece of ['Ru', 'ns', 'tu', 'y ', 'by', 'Runs by status']) expect(await counts({ text: piece, requestId: 'row-t1' })).toBe(false)
+  // a word of the answer that the title holds too
+  expect(await counts({ text: 'runs', requestId: 'row-t1' })).toBe(true)
+  expect(await counts({ text: 'Runs', requestId: 'row-t1' })).toBe(true)
+  // the card's body, in the answer's row: a word of its table, a chart label
+  expect(await counts({ text: 'passed', requestId: 'row-t1' })).toBe(true)
+  expect(await counts({ text: 'passed  ████████████ 28', requestId: 'row-t1' })).toBe(true)
+  // the card out of view: words selected in the row count as its own again
+  await $.ui.render({ ...(answer('row-t1', text) as Any), props: { text, isFirstOfReply: true, onScreen: null } } as never)
+  expect(await counts({ text: 'by', requestId: 'row-t1' })).toBe(true)
+})
+
 test("c on words selected since the bar last drew reads a few states at most, however many answers: the selection's watch works out whether they wait as it sees them, and the key's own check reads the newest turns alone", CITES, async ($, on) => {
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
   let selected: Any = { text: 'failed on the p95 check', requestId: 'row-t1' }

@@ -168,16 +168,19 @@ def push_git() -> str:
 
 
 def run(cmd: list[str], cwd: str | Path | None = None, env: dict[str, str] | None = None, check: bool = True,
-        stdin: str | None = None, timeout: float | None = 300) -> subprocess.CompletedProcess:
+        stdin: str | None = None, timeout: float | None = 300,
+        said: list[str] | None = None) -> subprocess.CompletedProcess:
+    """`cmd`; a failure is a FixError that names the command (`said`, when the person reads it otherwise)."""
+    said = said or cmd
     try:
         p = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, input=stdin, timeout=timeout)
     except FileNotFoundError:
-        raise FixError(f"{cmd[0]} is not installed")
+        raise FixError(f"{said[0]} is not installed")
     except subprocess.TimeoutExpired:
-        raise FixError(f"{' '.join(cmd[:3])} took longer than {int(timeout or 0)} s")
+        raise FixError(f"{' '.join(said[:3])} took longer than {int(timeout or 0)} s")
     if check and p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
-        raise FixError(f"{' '.join(cmd[:3])} failed: {err[-1] if err else 'no message'}")
+        raise FixError(f"{' '.join(said[:3])} failed: {err[-1] if err else 'no message'}")
     return p
 
 
@@ -191,8 +194,12 @@ def as_thimble() -> dict[str, str]:
             "GIT_COMMITTER_NAME": "thimble", "GIT_COMMITTER_EMAIL": "thimble@localhost"}
 
 
-def git(*args: str, cwd: str | Path, env: dict[str, str] | None = None, check: bool = True) -> str:
-    return run(["git", *args], cwd=cwd, env=env, check=check).stdout.strip()
+def git(*args: str, cwd: str | Path, env: dict[str, str] | None = None, check: bool = True, hooks: bool = True) -> str:
+    """git ARGS; with hooks False, with no hook of the repository's (NO_HOOKS): thimble's own calls that make or move a
+    fix's copy, or move live (for a fix, or to follow the release before the first fix goes on), which a hook of the
+    person's clone (git-lfs's, with no git-lfs on the PATH) would fail."""
+    return run(["git", *([] if hooks else NO_HOOKS), *args], cwd=cwd, env=env, check=check,
+               said=["git", *args]).stdout.strip()
 
 
 def read_json(p: Path) -> Any:
@@ -364,30 +371,39 @@ if [ -n "$release" ] && [ "$(git -C "$release" rev-parse --show-toplevel 2>/dev/
   git -c core.hooksPath=/dev/null -C "$release" clean -q -ffdx 2>/dev/null
 fi
 live={live_q}
-git -C "$live" checkout -q -- {plugin_json} 2>/dev/null
-git -C "$live" checkout -q --detach {base} || {{ echo "thimble: could not show the release in $live"; exit 1; }}
+git -c core.hooksPath=/dev/null -C "$live" checkout -q -- {plugin_json} 2>/dev/null
+git -c core.hooksPath=/dev/null -C "$live" checkout -q --detach {base} || {{ echo "thimble: could not show the release in $live"; exit 1; }}
 printf '{{"on": false}}\\n' > {state_q}
 {claude} plugin update thimble@thimble >/dev/null 2>&1
 echo "thimble is the plain release again; your fixes are kept (thimble fix on). In Claude Code, type /reload-plugins."
 """
 
 
+def _off_sh(rel: dict[str, Any]) -> str:
+    """off.sh as this kernel writes it for the release `rel`."""
+    off = home() / "off.sh"
+    return OFF_SH.format(off=off, live=live_dir(), live_q=shlex.quote(str(live_dir())), plugin_json=PLUGIN_JSON,
+                         base=shlex.quote(rel["base"]), state_q=shlex.quote(str(home() / "state.json")),
+                         claude=shlex.quote(claude()), release_q=shlex.quote(str(release_dir())))
+
+
 def _write_off_sh(rel: dict[str, Any]) -> None:
     off = home() / "off.sh"
-    off.write_text(OFF_SH.format(off=off, live=live_dir(), live_q=shlex.quote(str(live_dir())), plugin_json=PLUGIN_JSON,
-                                 base=shlex.quote(rel["base"]), state_q=shlex.quote(str(home() / "state.json")),
-                                 claude=shlex.quote(claude()), release_q=shlex.quote(str(release_dir()))))
+    off.write_text(_off_sh(rel))
     off.chmod(0o755)
 
 
 def ensure_live() -> dict[str, Any]:
     """live, made at the first request, with the release checkout beside it: nothing the person runs changes until the
     first fix goes on. Until then, the release follows the code that runs (_follow), so that the release checkout is
-    never older than it."""
+    never older than it. A home that has live gets off.sh as this kernel writes it when its text is another: an older
+    thimble's (the update that installs this one runs the older kernel)."""
     rel = release()
     live = live_dir()
     if rel and (live / ".git").exists():
         rel = _follow(rel)
+        if _text_of(home() / "off.sh") != _off_sh(rel):
+            _write_off_sh(rel)
         place_release(rel["base"])
         return rel
     src = find_source()
@@ -402,7 +418,7 @@ def ensure_live() -> dict[str, Any]:
         git("checkout", "-q", "-b", "mine", commit, cwd=live)
     else:
         _leftovers_aside(repo)
-        git("worktree", "add", "-q", "-b", "mine", str(live), commit, cwd=repo)
+        git("worktree", "add", "-q", "-b", "mine", str(live), commit, cwd=repo, hooks=False)
     # the release's tag when the commit has one (v0.10.2), for its name in the list and in thimble update
     tag = git("describe", "--tags", "--exact-match", "--match", "v*", commit, cwd=live, check=False)
     rel = {"kind": src["kind"], "source": src["url"], "repo": str(repo), "entry": src.get("entry"), "base": commit,
@@ -510,10 +526,10 @@ def _follow(rel: dict[str, Any]) -> dict[str, Any]:
     if git("rev-parse", "mine", cwd=live) == base:
         _unstamp()
         if git("symbolic-ref", "-q", "HEAD", cwd=live, check=False) == "refs/heads/mine":
-            git("checkout", "-q", "-B", "mine", new, cwd=live)
+            git("checkout", "-q", "-B", "mine", new, cwd=live, hooks=False)
         else:
             git("branch", "-f", "mine", new, cwd=live)
-            git("checkout", "-q", "--detach", new, cwd=live)
+            git("checkout", "-q", "--detach", new, cwd=live, hooks=False)
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
     return rel
@@ -1103,7 +1119,7 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, session
             shutil.rmtree(wt)
         base = head()
         wt.parent.mkdir(parents=True, exist_ok=True)
-        git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+        git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir(), hooks=False)
         _give_types(wt)
         tmp_dir(fid).mkdir(parents=True, exist_ok=True)
         now = time.time()
@@ -1255,7 +1271,7 @@ def _copy_of(rec: dict[str, Any]) -> tuple[Path, str]:
         shutil.rmtree(wt)
     base = head()
     wt.parent.mkdir(parents=True, exist_ok=True)
-    git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+    git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir(), hooks=False)
     _give_types(wt)
     if rec.get("state") != "on" or not _has_ref(fid):
         g = _own_git(wt)
@@ -1375,6 +1391,37 @@ def _own_git(work: str | Path | None) -> dict[str, str] | None:
     return {"GIT_DIR": str(entry), "GIT_WORK_TREE": str(wt)}
 
 
+def _nested_git(work: str | Path) -> bool:
+    """Whether the copy holds a git repository of its own below its top (sub/.git, a folder, a file or a link): git that
+    reads the copy's files (add, status, diff) runs git in such a repository, outside the sandbox, with its settings
+    (core.fsmonitor), so no git may read them (COPY_GONE). Each folder is also asked for .git as git asks, which a file
+    system that ignores case answers for .GIT too. The walk follows no link, and a folder it cannot read counts."""
+    top = os.fspath(work)
+    stuck: list[OSError] = []
+    for d, dirs, files in os.walk(top, onerror=stuck.append):
+        if d == top:
+            # the copy's own .git, its link to live's repository (_own_git)
+            dirs[:] = [n for n in dirs if n != ".git"]
+            files = [n for n in files if n != ".git"]
+        if ".git" in dirs or ".git" in files:
+            return True
+        for n in dirs:
+            sub = os.path.join(d, n)
+            if not os.path.islink(sub) and os.path.lexists(os.path.join(sub, ".git")):
+                return True
+    return bool(stuck)
+
+
+def _gitlinks(wt: Path, env: dict[str, str], base: str) -> list[str]:
+    """The paths the copy's index has as a gitlink (mode 160000, a commit of another repository, which git add records
+    for a repository inside the copy) that `base` does not have as it is. git reads the index and base's tree only."""
+    index = run(["git", "ls-files", "-s", "-z"], cwd=wt, env=env).stdout.split("\0")
+    tree = run(["git", "ls-tree", "-r", "-z", base], cwd=wt, env=env).stdout.split("\0")
+    had = {(x.split()[2], x.partition("\t")[2]) for x in tree if x.startswith("160000 ")}
+    now = {(x.split()[1], x.partition("\t")[2]) for x in index if x.startswith("160000 ")}
+    return sorted(p for _, p in now - had)
+
+
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
          tests: bool = True, session: str | None = None, cannot: str | None = None,
          within: float | None = None) -> dict[str, Any]:
@@ -1431,32 +1478,32 @@ def settle(rec: dict[str, Any], mark: dict[str, Any] | None = None) -> dict[str,
     """A ready round of a fix changed in place: its new version is the fix's change as it is now (its ref) plus the
     round's change, as one commit on the commit the fix's change sits on, kept under refs/thimble/next/<id> until the
     person's y. A round's change that does not apply to the fix fails, for r, as does a copy git may not run in
-    (_own_git), which the tests' time gave the fixer's sandbox to change. `mark`: the run of the tests whose runner
-    settles it (tests_runner); a record that no longer waits for that run (a new round took the copy, the fix was
-    removed) stays as it is, and its copy too."""
+    (_own_git, _nested_git), which the tests' time gave the fixer's sandbox to change. `mark`: the run of the tests
+    whose runner settles it (tests_runner); a record that no longer waits for that run (a new round took the copy, the
+    fix was removed) stays as it is, and its copy too."""
     wt = Path(rec["work"])
     with Lock():
         if mark is not None and not _waits_for(rec["id"], mark):
             return get(rec["id"])
         g = _own_git(wt)
-        if g is None:
+        if g is None or _nested_git(wt):
             _drop_work(rec)
             return put({**rec, "state": "failed", "error": COPY_GONE})
         env, me = {**os.environ, **g}, {**as_thimble(), **g}
         old = git("rev-parse", _fix_ref(rec), cwd=wt, env=env)
         parent = git("rev-parse", f"{old}^", cwd=wt, env=env)
         mine = rec["commit"]
-        git("checkout", "-q", "--detach", old, cwd=wt, env=env)
+        git("checkout", "-q", "--detach", old, cwd=wt, env=env, hooks=False)
         p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", mine], cwd=wt, check=False, env=me)
         if p.returncode != 0:
             run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env=env)
             run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
-            git("checkout", "-q", "--detach", mine, cwd=wt, env=env)
+            git("checkout", "-q", "--detach", mine, cwd=wt, env=env, hooks=False)
             why = f"its change does not fit fix {rec['id']} as it is now"
             return put({**rec, "state": "failed", "error": why})
         tree = git("write-tree", cwd=wt, env=env)
         run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
-        git("checkout", "-q", "--detach", mine, cwd=wt, env=env)
+        git("checkout", "-q", "--detach", mine, cwd=wt, env=env, hooks=False)
         commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", parent, "-m",
                      f"{rec['title']}\n\n{rec.get('summary') or ''}\n\nthimble fix {rec['id']}".strip(), cwd=wt,
                      env=me)
@@ -1484,9 +1531,9 @@ def _take_out(fid: int, why: str) -> dict[str, Any]:
         x.update(state="redo", error=why)
         put(x)
     if is_on():
-        git("checkout", "-q", "mine", cwd=live_dir())
+        git("checkout", "-q", "mine", cwd=live_dir(), hooks=False)
     else:
-        git("checkout", "-q", "--detach", release()["base"], cwd=live_dir())
+        git("checkout", "-q", "--detach", release()["base"], cwd=live_dir(), hooks=False)
     return {"redo": failed}
 
 
@@ -1499,12 +1546,10 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     if seen is not None and rec != seen:
         return None
     g = _own_git(rec.get("work"))
-    if g is None:
-        # the copy is gone, or something in it removed or changed its git link: nothing of it can be checked, and no git
-        # runs in it. r makes a new copy
-        _drop_work(rec)
-        rec.update(state="failed", commit=None, files=[], tests=None, error=COPY_GONE)
-        return put(rec)
+    if g is None or _nested_git(rec["work"]):
+        # the copy is gone, something in it removed or changed its git link, or it holds a repository of its own
+        # (_nested_git): nothing of it can be checked, and no git runs in it. r makes a new copy
+        return _copy_gone(rec)
     wt = Path(rec["work"])
     env = {**os.environ, **g}
     rec.pop("refused", None)
@@ -1514,6 +1559,10 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     named = short(title, 60) if title and title.strip() and not rec.get("prev") else None
     rec["summary"] = (summary or "").strip()[:2000]
     git("add", "-A", cwd=wt, env=env)
+    if _gitlinks(wt, env, rec["base"]):
+        # a repository made in the copy after the walk, which git add recorded: no gitlink goes into a fix's commit,
+        # and no more git runs in the copy
+        return _copy_gone(rec)
     changed = run(["git", "diff", "--cached", "--quiet", rec["base"]], cwd=wt, check=False, env=env).returncode != 0
     if request or not changed:
         git("reset", "-q", "--hard", rec["base"], cwd=wt, env=env)
@@ -1545,6 +1594,13 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     if isinstance(argv, FixError):
         return put(_tested(rec, False, str(argv), named))
     return _start_tests(rec, named, argv, read)
+
+
+def _copy_gone(rec: dict[str, Any]) -> dict[str, Any]:
+    """done's check of a copy git may not run in: its copy goes, and the fix fails, for r."""
+    _drop_work(rec)
+    rec.update(state="failed", commit=None, files=[], tests=None, error=COPY_GONE)
+    return put(rec)
 
 
 def _drop_work(rec: dict[str, Any]) -> None:
@@ -1613,7 +1669,7 @@ def _rebuild(order: list[int]) -> list[int]:
     not apply any more, which then need a redo."""
     rel, live = release(), live_dir()
     _unstamp()
-    git("checkout", "-q", "-B", "mine", rel["base"], cwd=live)
+    git("checkout", "-q", "-B", "mine", rel["base"], cwd=live, hooks=False)
     failed = []
     for fid in order:
         ref = f"refs/thimble/fixes/{fid}"
@@ -1662,7 +1718,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
         _repoint()
         _unstamp()
         # a fix the person turns on while all are off: the others come back with it
-        git("checkout", "-q", "mine", cwd=live)
+        git("checkout", "-q", "mine", cwd=live, hooks=False)
         write_json(home() / "state.json", {"on": True})
         ref = f"refs/thimble/fixes/{rec['id']}"
         if run(["git", "merge-base", "--is-ancestor", ref, "mine"], cwd=live, check=False).returncode == 0:
@@ -1698,7 +1754,7 @@ def _swap(fid: int) -> dict[str, Any]:
     # Claude Code's marketplace on live first: when that fails, mine, the fix's refs and its record stay as they were
     _repoint()
     _unstamp()
-    git("checkout", "-q", "mine", cwd=live)
+    git("checkout", "-q", "mine", cwd=live, hooks=False)
     write_json(home() / "state.json", {"on": True})
     git("update-ref", f"refs/thimble/fixes/{fid}", rec["commit"], cwd=live)
     order = _on_ids(records())
@@ -1772,7 +1828,7 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
     _no_link(wt)
     run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
     shutil.rmtree(wt, ignore_errors=True)
-    git("worktree", "add", "-q", "--detach", str(wt), release()["base"], cwd=live)
+    git("worktree", "add", "-q", "--detach", str(wt), release()["base"], cwd=live, hooks=False)
     try:
         # the folder is in the fixer's temp folder, which its sandbox writes: git runs on the worktree's own entry
         g = _own_git(wt)
@@ -1794,7 +1850,7 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
             tries = [(len(rest), git("rev-parse", f"{refs[code[0]['id']]}^", cwd=live)), (len(rest), prefix[-1])]
         stuck = code[-1]["id"]
         for place, base in tries:
-            git("checkout", "-q", "--detach", base, cwd=wt, env=env)
+            git("checkout", "-q", "--detach", base, cwd=wt, env=env, hooks=False)
             for r in code:
                 p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", "--allow-empty", refs[r["id"]]], cwd=wt,
                         check=False, env=me)
@@ -1870,9 +1926,9 @@ def _merge(recs: list[dict[str, Any]]) -> dict[str, Any]:
                 x.update(state="redo", error=f"it did not fit once fixes {_and([str(r['id']) for r in recs])} merged")
                 put(x)
             if is_on():
-                git("checkout", "-q", "mine", cwd=live)
+                git("checkout", "-q", "mine", cwd=live, hooks=False)
             else:
-                git("checkout", "-q", "--detach", release()["base"], cwd=live)
+                git("checkout", "-q", "--detach", release()["base"], cwd=live, hooks=False)
         return {"id": first["id"], "title": name, "merged": [r["id"] for r in recs[1:]], "redo": failed}
 
     return _move(change)
@@ -1995,7 +2051,7 @@ def redo(fid: int | str, words: str = "", session: str | None = None, asked: str
             if wt.exists():
                 shutil.rmtree(wt)
             base = head()
-            git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
+            git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir(), hooks=False)
             _give_types(wt)
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         if earlier.strip():
@@ -2047,9 +2103,9 @@ def _back(fid: int) -> dict[str, Any]:
         x.update(state="redo", error=f"it did not fit once fix {fid} went back")
         put(x)
     if is_on():
-        git("checkout", "-q", "mine", cwd=live)
+        git("checkout", "-q", "mine", cwd=live, hooks=False)
     else:
-        git("checkout", "-q", "--detach", release()["base"], cwd=live)
+        git("checkout", "-q", "--detach", release()["base"], cwd=live, hooks=False)
     r = get(fid)
     r["commit"] = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
     put(r)
@@ -3021,13 +3077,13 @@ def _first_line(r: dict[str, Any]) -> str:
 
 def diff_of(rec: dict[str, Any]) -> str:
     """The fix's change: its commit, from live, or what its copy holds now, with git on the copy's own entry
-    (_own_git); '' for a copy git may not run in."""
+    (_own_git); '' for a copy git may not run in (_own_git, _nested_git)."""
     c = rec.get("commit")
     if c:
         return run(["git", "-c", "core.quotePath=false", "show", "--format=", "--no-color", "--no-ext-diff", c],
                    cwd=live_dir()).stdout
     g = _own_git(rec.get("work"))
-    if g:
+    if g and not _nested_git(rec["work"]):
         return run(["git", "-c", "core.quotePath=false", "diff", "--no-color", rec["base"]], cwd=rec["work"],
                    env={**os.environ, **g}).stdout
     return ""
