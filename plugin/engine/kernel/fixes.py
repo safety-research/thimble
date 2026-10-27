@@ -928,17 +928,21 @@ def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None) -> dict
 
 
 def _wait(fid: int, deadline: float | None) -> dict[str, Any]:
-    """The fix's record once the runner of its tests wrote what came of them, or at `deadline` (time.monotonic) as it
-    is then: still working, with `testing`."""
-    while True:
+    """The fix's record once the runner of its tests wrote what came of them, or as soon as the record no longer waits
+    for that runner (a new round took the copy, the fix was removed: working with no `testing`, or another state), or
+    at `deadline` (time.monotonic) as it is then: still working, with `testing`."""
+    rec = get(fid)
+    mark = rec.get("testing")
+    if not mark or rec.get("state") != "working":
+        return rec
+    while not _ended(fid, mark):
+        if deadline is not None and time.monotonic() >= deadline:
+            return get(fid)
+        time.sleep(0.1)
         rec = get(fid)
-        mark = rec.get("testing")
-        if not mark or rec.get("state") != "working":
+        if rec.get("state") != "working" or rec.get("testing") != mark:
             return rec
-        while not _ended(fid, mark):
-            if deadline is not None and time.monotonic() >= deadline:
-                return get(fid)
-            time.sleep(0.1)
+    return get(fid)
 
 
 def _ended(fid: int, mark: dict[str, Any]) -> bool:

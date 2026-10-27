@@ -349,11 +349,9 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   // still run, the next call waits on. A fix whose tests already run (its end taken again after a reload) is waited for
   // the same way: the kernel starts nothing new for it, and the bar counts their time from their start
   const check = () => kernelFix($, [...args, '--within', String(DONE_WAIT_S)], { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 600000 })
-  let had = false
   const r = await busy($, `testing ${fix ? fixName(fix, 28) : `fix ${id}`}`, async () => {
     let got = await check()
     for (let f = jsonOf<Fix>(got.out); got.ok && f?.state === 'working' && f.testing; f = jsonOf<Fix>(got.out)) {
-      had = true
       got = await check()
     }
     return got
@@ -364,9 +362,9 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
     return null
   }
   const done = jsonOf<Fix>(r.out)
-  // the tests it waited for no longer count: a new round took over the copy (more words for the fix), and its own end
-  // says what came of it
-  if (had && done?.state === 'working' && !done.testing) return null
+  // the check no longer counts: a new round took over the copy (more words for the fix), before its tests or while they
+  // ran, and the round's own end says what came of it
+  if (done?.state === 'working' && !done.testing) return null
   return afterCheck($, id, done, fix, !!end.cannot)
 }
 

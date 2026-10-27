@@ -558,6 +558,26 @@ test("what came of a check that no session waited for gets its line at this sess
   expect(String(t.spawns[0].prompt)).toContain('FAIL made-up test')
 })
 
+/** What Claude is told of fix 1 at the person's next prompt, or ''. */
+async function toldOf(s: ReturnType<typeof setup>): Promise<string> {
+  return ((((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>)['fix-1']) ?? ''
+}
+
+test("a new round that took the copy before the check's first answer: the check shows no line and tells Claude nothing", async () => {
+  const s = setup()
+  // the kernel's first answer is already the new round: working, with no tests running
+  const calls = doneSays(s, [{ state: 'working', testing: null, rounds: 2 }])
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.$.state.set({ plugin: 'thimble', key: 'fixBy' }, { 1: 'claude' })
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.notes).toEqual([])
+  expect(await toldOf(s)).not.toContain('did not pass')
+  expect(s.verbs().some(v => v.startsWith('again'))).toBe(false)
+})
+
 test('n leaves the fix ready in the list, where thimble fix apply in a shell turns it on; a fixer that changed nothing leaves a request', async () => {
   const s = setup()
   await requested(s)
