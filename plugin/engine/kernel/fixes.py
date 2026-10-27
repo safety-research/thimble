@@ -116,7 +116,8 @@ PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
 # them safe, and the packages thimble installs. A file counts as the first kind it matches.
 NOTICE_KINDS = {
     "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "plugin/cards/ask.ts", "plugin/cards/runner.mjs",
-                    "browser/backend/app/kernel_wrap.py"),
+                    "browser/backend/app/kernel_wrap.py", "browser/backend/app/kernel_srt.mjs",
+                    "browser/backend/app/srt.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),
     "a command hook": ("plugin/hooks/temp-allow.sh", "plugin/hooks/temp_allow.py"),
     "the launcher": ("plugin/bin/*",),
@@ -355,6 +356,13 @@ def find_source() -> dict[str, Any]:
 OFF_SH = """#!/bin/sh
 # Back to the plain thimble release, also when thimble does not load: sh {off}
 # It shows the release commit in {live} and has Claude Code copy it. Your fixes stay: `thimble fix on` brings them back.
+# First the release checkout, which `thimble fix` runs from, goes back to the release commit as it has it, also when a
+# file in it (its launcher) was changed, with no hook of the repository's.
+release=$(cd {release_q} 2>/dev/null && pwd -P)
+if [ -n "$release" ] && [ "$(git -C "$release" rev-parse --show-toplevel 2>/dev/null)" = "$release" ]; then
+  git -c core.hooksPath=/dev/null -C "$release" checkout -q -f --detach {base} 2>/dev/null
+  git -c core.hooksPath=/dev/null -C "$release" clean -q -ffdx 2>/dev/null
+fi
 live={live_q}
 git -C "$live" checkout -q -- {plugin_json} 2>/dev/null
 git -C "$live" checkout -q --detach {base} || {{ echo "thimble: could not show the release in $live"; exit 1; }}
@@ -368,7 +376,7 @@ def _write_off_sh(rel: dict[str, Any]) -> None:
     off = home() / "off.sh"
     off.write_text(OFF_SH.format(off=off, live=live_dir(), live_q=shlex.quote(str(live_dir())), plugin_json=PLUGIN_JSON,
                                  base=shlex.quote(rel["base"]), state_q=shlex.quote(str(home() / "state.json")),
-                                 claude=shlex.quote(claude())))
+                                 claude=shlex.quote(claude()), release_q=shlex.quote(str(release_dir()))))
     off.chmod(0o755)
 
 
@@ -523,16 +531,50 @@ def place_release(base: str) -> None:
     """The release checkout at `base`: made when it is missing (or no longer a checkout), and each time put back as
     the release commit has it, with any file changed in it restored and any file added to it (also an ignored one, such
     as a module that would shadow one of Python's) removed. A fix changes its copy and live, never this. The launcher
-    (plugin/bin/thimble) does the same before it runs the way back from here."""
+    (plugin/bin/thimble) does the same before it runs the way back from here. A checkout that is as the release commit
+    has it already is left alone (_pristine), so that thimble's other processes that run from it at the same time (the
+    plugin's list, another session, the browser) never meet it half put back."""
     d = release_dir()
     if _is_checkout(str(d)):
-        git("checkout", "-q", "-f", "--detach", base, cwd=d)
-        git("clean", "-q", "-ffdx", cwd=d)
+        if not _pristine(d, base):
+            _release_git(d, "checkout", "-q", "-f", "--detach", base)
+            _release_git(d, "clean", "-q", "-ffdx")
         return
     if d.exists():
         shutil.rmtree(d)
     run(["git", "worktree", "prune"], cwd=live_dir(), check=False)
-    git("worktree", "add", "-q", "--detach", str(d), base, cwd=live_dir())
+    _release_git(live_dir(), "worktree", "add", "-q", "--detach", str(d), base)
+
+
+def _pristine(d: Path, base: str) -> bool:
+    """Whether the checkout `d` is as commit `base` has it: HEAD detached at base, and no file changed, untracked or
+    ignored. One git call. It writes the checkout's index only when the files' times there are stale (a checkout made or
+    put back within the same second), so that the next looks, the launcher's and the browser's too, are quick, and it
+    never waits for the index's lock: when another process's git holds it, it writes nothing."""
+    p = run(["git", "status", "--porcelain=v2", "--branch", "--ignored", "--untracked-files=normal"], cwd=d, check=False)
+    lines = p.stdout.splitlines()
+    return (p.returncode == 0 and f"# branch.oid {base}" in lines and "# branch.head (detached)" in lines
+            and all(x.startswith("# ") for x in lines))
+
+
+# git with no hook of the repository's: in a clone install, the person's own clone's (git-lfs's post-checkout, which
+# fails when git-lfs is not on the kernel's PATH)
+NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
+
+
+def _release_git(d: Path, *args: str) -> None:
+    """git ARGS in `d` for the release checkout, with no hook (NO_HOOKS), tried again for up to 5 s while another git
+    holds the checkout's index (index.lock): the launcher and the browser put the checkout back too, with no lock of
+    thimble's."""
+    for n in range(50):
+        p = run(["git", *NO_HOOKS, *args], cwd=d, check=False)
+        if p.returncode == 0:
+            return
+        if "index.lock" not in p.stderr:
+            break
+        time.sleep(0.1)
+    err = (p.stderr or p.stdout).strip().splitlines()
+    raise FixError(f"{' '.join(['git', *args][:3])} failed: {err[-1] if err else 'no message'}")
 
 
 def is_on() -> bool:
@@ -702,9 +744,10 @@ def sandbox_argv(fid: int | str, path_extra: list[str] | None = None, net: bool 
     tools = [str(Path(node).parent.parent), *_py_dirs(py)]
     if cl:
         tools += [str(Path(cl).parent), str(Path(os.path.realpath(cl)).parent)]
-    # the copy's git folder is live's (a worktree's .git file points into it), or the person's clone's: read only
-    common = git("rev-parse", "--git-common-dir", cwd=wt, check=False)
-    common = str((wt / common).resolve()) if common else ""
+    # the copy's git folder is live's (a worktree's .git file points into it), or the person's clone's: read only. Asked
+    # of live, never of the copy's .git, which the fixer writes and could point at another repository (_own_git)
+    common = git("rev-parse", "--git-common-dir", cwd=live_dir(), check=False) if live_dir().is_dir() else ""
+    common = str((live_dir() / common).resolve()) if common else ""
     linux = platform.system() == "Linux"
     lit = lambda p: {"path": p, "literal": True}  # noqa: E731
     system = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", "/etc"]
@@ -740,9 +783,22 @@ def _has_pytest(py: str) -> bool:
 
 QUICK_TESTS = "claude plugin test plugin"
 # the copy's own launcher and the kernel's command start (thimble --help reads cli.py and the modules it needs) and say
-# no traceback; on a failure the log ends with what they said and their exit code
-LAUNCHER_SMOKE = ('(o=$(plugin/bin/thimble --help 2>&1); s=$?; case "$s:$o" in [1-9]*|0:*Traceback*) '
-                  'printf "%s\\nplugin/bin/thimble --help: exit %s\\n" "$o" "$s"; false;; esac)')
+# no traceback: the launcher, and the kernel run directly, since a launcher that answers --help itself would hide a dead
+# kernel. Each has SMOKE_LIMIT seconds, and then its processes are stopped (exit 124), so that one that hangs does not
+# hold tests.lock for the whole run. On a failure the log ends with what they said and their exit code
+SMOKE_LIMIT = 60
+LAUNCHER_SMOKE = ("(lim() { \"$THIMBLE_PYTHON\" -c 'import os,signal,subprocess as s,sys\n"
+                  "try:p=s.Popen(sys.argv[2:],start_new_session=True)\n"
+                  "except OSError as e:print(e);sys.exit(127)\n"
+                  "try:c=p.wait(int(sys.argv[1]))\n"
+                  "except s.TimeoutExpired:c=124\n"
+                  "try:os.killpg(p.pid,signal.SIGKILL)\n"
+                  "except OSError:pass\n"
+                  "sys.exit(c)' " + str(SMOKE_LIMIT) + " \"$@\"; }\n"
+                  "chk() { n=$1; shift; o=$(lim \"$@\" --help 2>&1); s=$?; case \"$s:$o\" in [1-9]*|0:*Traceback*) "
+                  "printf \"%s\\n%s --help: exit %s\\n\" \"$o\" \"$n\" \"$s\"; return 1;; esac; }\n"
+                  "chk plugin/bin/thimble plugin/bin/thimble && "
+                  "chk plugin/engine/thimble.py \"$THIMBLE_PYTHON\" plugin/engine/thimble.py)")
 
 
 def run_tests(fid: int | str) -> tuple[bool, str]:
@@ -820,7 +876,7 @@ TESTS_FAILED = "its tests failed in the sandbox"
 # the log's last lines of a fix whose runner ended before it wrote what came of the tests
 TESTS_STOPPED = "the tests stopped before they finished"
 # the runner: this kernel's Python, isolated (no PYTHON* settings, no folder of the caller's on its path), with its job
-# on stdin
+# on stdin; it writes no bytecode (-B), since a kernel that runs from the release checkout would write it there
 RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from kernel import fixes; fixes.tests_runner()"
 
 
@@ -874,7 +930,7 @@ def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str],
         job = {"id": fid, "argv": argv, "title": named, "testing": rec["testing"]}
         log = _new_log(tmp_dir(fid) / "runner.log")
         try:
-            p = subprocess.Popen([sys.executable or "python3", "-I", "-c", RUNNER, str(Path(__file__).resolve().parents[1])],
+            p = subprocess.Popen([sys.executable or "python3", "-I", "-B", "-c", RUNNER, str(Path(__file__).resolve().parents[1])],
                                  stdin=subprocess.PIPE, stdout=log, stderr=log, cwd=home(), start_new_session=True,
                                  pass_fds=(held,))
             with p.stdin:
@@ -1199,13 +1255,17 @@ def _copy_of(rec: dict[str, Any]) -> tuple[Path, str]:
     git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
     _give_types(wt)
     if rec.get("state") != "on" or not _has_ref(fid):
+        g = _own_git(wt)
+        if g is None:
+            _drop_work({"work": str(wt)})
+            raise FixError(COPY_GONE)
         p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", _fix_ref(rec)], cwd=wt, check=False,
-                env=as_thimble())
+                env={**as_thimble(), **g})
         if p.returncode != 0:
-            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env={**os.environ, **g})
             _drop_work({"work": str(wt)})
             raise FixError(f"fix {fid} does not fit your thimble as it is now; /thimble-fix new <words> makes a new fix")
-        base = git("rev-parse", "HEAD", cwd=wt)
+        base = git("rev-parse", "HEAD", cwd=wt, env={**os.environ, **g})
     tmp_dir(fid).mkdir(parents=True, exist_ok=True)
     return wt, base
 
@@ -1266,12 +1326,50 @@ def notice_said(rec: dict[str, Any]) -> str:
 
 
 def _is_checkout(work: str | None) -> bool:
-    """Whether a fix's copy is there and is still a git checkout of its own (a worktree of live). A record without
-    a copy has work None, which must never read as the kernel's own folder."""
-    if not work or not Path(work).is_dir():
-        return False
-    top = git("rev-parse", "--show-toplevel", cwd=work, check=False)
-    return bool(top) and Path(top).resolve() == Path(work).resolve()
+    """Whether a fix's copy is there and is still a git checkout of its own (a worktree of live, _own_git). A record
+    without a copy has work None, which must never read as the kernel's own folder."""
+    return _own_git(work) is not None
+
+
+# a fix whose copy git may not run in (_own_git): the copy is gone, or something in it changed its git link
+COPY_GONE = ("its copy of thimble was gone or no longer a git checkout, so thimble could not check it; r starts it again "
+             "in a new copy")
+
+
+def _own_git(work: str | Path | None) -> dict[str, str] | None:
+    """What runs git in a worktree of live (a fix's copy, the release checkout, a merge's) on that worktree's own entry
+    in live's repository, as live's records have it, for git's environment: GIT_DIR=<live's git folder>/worktrees/<entry>
+    and GIT_WORK_TREE=<the worktree>. The fixer's sandbox writes its copy, the copy's .git too, which could point git at
+    another repository (the person's clone, whose branch git would move) or at a git folder of the fixer's, whose
+    settings run commands outside the sandbox; so git never reads it. None, and then no git may run in the folder, when
+    it is gone or its .git is not a file that names the entry whose own record names it back."""
+    if not work:
+        return None
+    import stat  # noqa: PLC0415
+
+    wt = Path(work)
+    try:
+        # never through a link, and never waiting on a pipe left under the name
+        fd = os.open(wt / ".git", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        link = os.read(fd, 4096).decode(errors="replace").strip() if stat.S_ISREG(os.fstat(fd).st_mode) else ""
+    finally:
+        os.close(fd)
+    common = git("rev-parse", "--git-common-dir", cwd=live_dir(), check=False) if live_dir().is_dir() else ""
+    if not link.startswith("gitdir:") or not common:
+        return None
+    entry = Path(os.path.realpath(os.path.join(wt, link[len("gitdir:"):].strip())))
+    if entry.parent != (live_dir() / common).resolve() / "worktrees":
+        return None
+    try:
+        back = (entry / "gitdir").read_text().strip()
+    except OSError:
+        return None
+    if not back or os.path.realpath(os.path.join(entry, back)) != os.path.realpath(wt / ".git"):
+        return None
+    return {"GIT_DIR": str(entry), "GIT_WORK_TREE": str(wt)}
 
 
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
@@ -1329,32 +1427,38 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
 def settle(rec: dict[str, Any], mark: dict[str, Any] | None = None) -> dict[str, Any]:
     """A ready round of a fix changed in place: its new version is the fix's change as it is now (its ref) plus the
     round's change, as one commit on the commit the fix's change sits on, kept under refs/thimble/next/<id> until the
-    person's y. A round's change that does not apply to the fix fails, for r. `mark`: the run of the tests whose runner
+    person's y. A round's change that does not apply to the fix fails, for r, as does a copy git may not run in
+    (_own_git), which the tests' time gave the fixer's sandbox to change. `mark`: the run of the tests whose runner
     settles it (tests_runner); a record that no longer waits for that run (a new round took the copy, the fix was
     removed) stays as it is, and its copy too."""
     wt = Path(rec["work"])
     with Lock():
         if mark is not None and not _waits_for(rec["id"], mark):
             return get(rec["id"])
-        old = git("rev-parse", _fix_ref(rec), cwd=wt)
-        parent = git("rev-parse", f"{old}^", cwd=wt)
+        g = _own_git(wt)
+        if g is None:
+            _drop_work(rec)
+            return put({**rec, "state": "failed", "error": COPY_GONE})
+        env, me = {**os.environ, **g}, {**as_thimble(), **g}
+        old = git("rev-parse", _fix_ref(rec), cwd=wt, env=env)
+        parent = git("rev-parse", f"{old}^", cwd=wt, env=env)
         mine = rec["commit"]
-        git("checkout", "-q", "--detach", old, cwd=wt)
-        p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", mine], cwd=wt, check=False, env=as_thimble())
+        git("checkout", "-q", "--detach", old, cwd=wt, env=env)
+        p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", mine], cwd=wt, check=False, env=me)
         if p.returncode != 0:
-            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
-            run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
-            git("checkout", "-q", "--detach", mine, cwd=wt)
+            run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env=env)
+            run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
+            git("checkout", "-q", "--detach", mine, cwd=wt, env=env)
             why = f"its change does not fit fix {rec['id']} as it is now"
             return put({**rec, "state": "failed", "error": why})
-        tree = git("write-tree", cwd=wt)
-        run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
-        git("checkout", "-q", "--detach", mine, cwd=wt)
+        tree = git("write-tree", cwd=wt, env=env)
+        run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
+        git("checkout", "-q", "--detach", mine, cwd=wt, env=env)
         commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", parent, "-m",
                      f"{rec['title']}\n\n{rec.get('summary') or ''}\n\nthimble fix {rec['id']}".strip(), cwd=wt,
-                     env=as_thimble())
-        git("update-ref", f"refs/thimble/next/{rec['id']}", commit, cwd=wt)
-        return put({**rec, "commit": commit, "round_commit": mine, "files": _numstat(wt, parent, commit)})
+                     env=me)
+        git("update-ref", f"refs/thimble/next/{rec['id']}", commit, cwd=wt, env=env)
+        return put({**rec, "commit": commit, "round_commit": mine, "files": _numstat(live_dir(), parent, commit)})
 
 
 def _restore(rec: dict[str, Any]) -> dict[str, Any]:
@@ -1391,36 +1495,37 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     read = dict(rec)
     if seen is not None and rec != seen:
         return None
-    if not _is_checkout(rec.get("work")):
-        # the copy is gone, or something in it removed its git link: nothing of it can be checked. r makes a new copy
+    g = _own_git(rec.get("work"))
+    if g is None:
+        # the copy is gone, or something in it removed or changed its git link: nothing of it can be checked, and no git
+        # runs in it. r makes a new copy
         _drop_work(rec)
-        rec.update(state="failed", commit=None, files=[], tests=None,
-                   error="its copy of thimble was gone or no longer a git checkout, so thimble could not check it; "
-                         "r starts it again in a new copy")
+        rec.update(state="failed", commit=None, files=[], tests=None, error=COPY_GONE)
         return put(rec)
     wt = Path(rec["work"])
+    env = {**os.environ, **g}
     rec.pop("refused", None)
     rec.pop("blocked", None)
     # the fixer's title names the fix once thimble uses its change, so a refused try leaves the name the person saw; a
     # fix changed in place keeps its name
     named = short(title, 60) if title and title.strip() and not rec.get("prev") else None
     rec["summary"] = (summary or "").strip()[:2000]
-    git("add", "-A", cwd=wt)
-    changed = run(["git", "diff", "--cached", "--quiet", rec["base"]], cwd=wt, check=False).returncode != 0
+    git("add", "-A", cwd=wt, env=env)
+    changed = run(["git", "diff", "--cached", "--quiet", rec["base"]], cwd=wt, check=False, env=env).returncode != 0
     if request or not changed:
-        git("reset", "-q", "--hard", rec["base"], cwd=wt)
+        git("reset", "-q", "--hard", rec["base"], cwd=wt, env=env)
         rec.update(state="request", files=[], commit=None, tests=None, **({"title": named} if named else {}))
         _drop_work(rec)
         return put(rec)
     # the fix is one commit on the commit its copy was cut from, whatever the copy's own history holds
-    tree = git("write-tree", cwd=wt)
+    tree = git("write-tree", cwd=wt, env=env)
     commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", rec["base"], "-m",
                  f"{named or rec['title']}\n\n{rec['summary']}\n\nthimble fix {rec['id']}".strip(), cwd=wt,
-                 env=as_thimble())
-    git("reset", "-q", "--hard", commit, cwd=wt)
+                 env={**as_thimble(), **g})
+    git("reset", "-q", "--hard", commit, cwd=wt, env=env)
     # a round of a fix changed in place: its ref keeps the version the person has until their y
-    git("update-ref", f"refs/thimble/{'next' if rec.get('prev') else 'fixes'}/{rec['id']}", commit, cwd=wt)
-    files = _numstat(wt, rec["base"], commit)
+    git("update-ref", f"refs/thimble/{'next' if rec.get('prev') else 'fixes'}/{rec['id']}", commit, cwd=wt, env=env)
+    files = _numstat(live_dir(), rec["base"], commit)
     rec.update(commit=commit, files=files)
     bad = protected_of([f["path"] for f in files])
     binary = [f["path"] for f in files if f["add"] is None]
@@ -1661,14 +1766,19 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
     shutil.rmtree(wt, ignore_errors=True)
     git("worktree", "add", "-q", "--detach", str(wt), release()["base"], cwd=live)
     try:
+        # the folder is in the fixer's temp folder, which its sandbox writes: git runs on the worktree's own entry
+        g = _own_git(wt)
+        if g is None:
+            raise FixError(COPY_GONE)
+        env, me = {**os.environ, **g}, {**as_thimble(), **g}
         prefix = [release()["base"]]
         for i in rest:
             p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{i}"],
-                    cwd=wt, check=False, env=as_thimble())
+                    cwd=wt, check=False, env=me)
             if p.returncode != 0:
-                run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
+                run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env=env)
                 break
-            prefix.append(git("rev-parse", "HEAD", cwd=wt))
+            prefix.append(git("rev-parse", "HEAD", cwd=wt, env=env))
         if on_named:
             start = len([i for i in mine_order[:mine_order.index(on_named[0])] if i not in merged_ids])
             tries = [(k, prefix[k]) for k in range(start, len(prefix))]
@@ -1676,18 +1786,18 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
             tries = [(len(rest), git("rev-parse", f"{refs[code[0]['id']]}^", cwd=live)), (len(rest), prefix[-1])]
         stuck = code[-1]["id"]
         for place, base in tries:
-            git("checkout", "-q", "--detach", base, cwd=wt)
+            git("checkout", "-q", "--detach", base, cwd=wt, env=env)
             for r in code:
                 p = run(["git", *THIMBLE_ID, "cherry-pick", "--no-commit", "--allow-empty", refs[r["id"]]], cwd=wt,
-                        check=False, env=as_thimble())
+                        check=False, env=me)
                 if p.returncode != 0:
                     stuck = r["id"]
-                    run(["git", "cherry-pick", "--abort"], cwd=wt, check=False)
-                    run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
+                    run(["git", "cherry-pick", "--abort"], cwd=wt, check=False, env=env)
+                    run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
                     break
             else:
-                tree = git("write-tree", cwd=wt)
-                run(["git", "reset", "-q", "--hard"], cwd=wt, check=False)
+                tree = git("write-tree", cwd=wt, env=env)
+                run(["git", "reset", "-q", "--hard"], cwd=wt, check=False, env=env)
                 return {"place": place, "parent": base, "tree": tree, "rest": rest, "code": code, "refs": refs}
         other = first if stuck != first else next(r["id"] for r in code if r["id"] != stuck)
         raise Conflict(first, stuck if stuck != first else other)
@@ -2899,12 +3009,16 @@ def _first_line(r: dict[str, Any]) -> str:
 
 
 def diff_of(rec: dict[str, Any]) -> str:
-    repo = Path(rec["work"]) if rec.get("work") and Path(rec["work"]).is_dir() else live_dir()
+    """The fix's change: its commit, from live, or what its copy holds now, with git on the copy's own entry
+    (_own_git); '' for a copy git may not run in."""
     c = rec.get("commit")
     if c:
-        return run(["git", "-c", "core.quotePath=false", "show", "--format=", "--no-color", "--no-ext-diff", c], cwd=repo).stdout
-    if rec.get("work") and Path(rec["work"]).is_dir():
-        return run(["git", "-c", "core.quotePath=false", "diff", "--no-color", rec["base"]], cwd=repo).stdout
+        return run(["git", "-c", "core.quotePath=false", "show", "--format=", "--no-color", "--no-ext-diff", c],
+                   cwd=live_dir()).stdout
+    g = _own_git(rec.get("work"))
+    if g:
+        return run(["git", "-c", "core.quotePath=false", "diff", "--no-color", rec["base"]], cwd=rec["work"],
+                   env={**os.environ, **g}).stdout
     return ""
 
 

@@ -10,7 +10,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { busyNow, busySteps } from '../bar/busy'
-import { fixSlug, fixingWord, noticeText } from '../fix/fixes'
+import { fixSlug, fixingWord, noticeText, refreshFixes } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { notStarted, registerFix, wordsOfSkill } from '../fix/register'
 import { fixesContext, formOf } from '../fix/request'
@@ -748,16 +748,23 @@ test("a fix that changes the sandbox, the launcher or dependencies says which in
   expect(noticeText({})).toBe('')
 })
 
-test("the plugin runs the kernel with the release checkout's launcher, which no fix changes, once there is one, and names the folder it was loaded from", async () => {
+test("the plugin runs the kernel with the release checkout's launcher, which no fix changes, once there is one that hands the way back off itself, and names the folder it was loaded from", async () => {
   const s = setup()
   await requested(s)
   // before the first fix the loaded plugin is the release: its launcher
   expect(s.ran.find(x => x.argv.includes('new'))?.argv[0]).toBe('/made-up/plugin/bin/thimble')
-  s.files.set(`${HOME}/fixes/release/plugin/bin/thimble`, '#!/bin/sh\n')
+  // a release checkout from before the hand-off (its launcher names no fixes/release/plugin) runs an older kernel: the
+  // loaded plugin's launcher runs, as that launcher's own guard does
+  s.files.set(`${HOME}/fixes/release/plugin/bin/thimble`, '#!/bin/sh\n# a made-up launcher from before the hand-off\n')
+  await refreshFixes(s.$)
+  expect(s.ran.filter(x => x.argv.includes('list')).at(-1)?.argv[0]).toBe('/made-up/plugin/bin/thimble')
+  s.files.set(`${HOME}/fixes/release/plugin/bin/thimble`, '#!/bin/sh\n# the way back runs from $THIMBLE_HOME/fixes/release/plugin (made up)\n')
   await (await fixKey(s.$, 'y'))!.later()
   const apply = s.ran.find(x => x.argv.includes('apply'))!
   expect(apply.argv[0]).toBe(`${HOME}/fixes/release/plugin/bin/thimble`)
   expect(apply.env?.THIMBLE_PLUGIN_ROOT).toBe('/made-up/plugin')
+  // the release's kernel writes no bytecode into the release checkout, whatever its launcher says
+  expect(apply.env?.PYTHONDONTWRITEBYTECODE).toBe('1')
 })
 
 const WAY_BACK = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); no fix may change the code that turns fixes off and undoes them, or the scan a shared fix goes through'
