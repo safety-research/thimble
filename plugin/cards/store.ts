@@ -45,7 +45,13 @@ export type CardMeta = {
   errorWidth?: number | null // the width a drawing failed at, when the failure was a drawing's: it holds only at that width
   calls: Record<string, CardCall> // each call of the card, by its tool_use_id
   at: number
+  by?: string // who drew the version on screen: main's turn (`turn:<id>`) or a fork's run (`agent:<id>`)
+  fix?: CardFix // the version on screen replaced one an earlier answer showed
 }
+/** A version that replaced one an earlier answer showed (drawn in a later turn of main's, or by a later run of a fork):
+ *  `was` the version that answer showed, `change` what Claude said the version changes and why (the call's `change`;
+ *  '' when it said nothing). A later version of the same turn keeps it, and adds its own words when it gives some. */
+export type CardFix = { version: number; was: number; change: string }
 /** The runner's drawing of a card: `seq` is the runner's answer it came from, so an older answer never replaces it.
  *  `width`, `theme` and `tree` are the runner's newest drawing, at the width the runner holds the card at, for a
  *  terminal theme (core/theme.ts; absent in a drawing kept before themes: dark); `others` are its drawings at other
