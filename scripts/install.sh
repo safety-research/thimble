@@ -295,7 +295,16 @@ elif named:
     say "Claude Code loads thimble from your fixes ($fixes_live), so the plugin is left as it is: run thimble update, which updates both products and keeps your fixes."
   elif command -v claude >/dev/null 2>&1; then
     if [ -n "$gone" ]; then
-      claude plugin marketplace remove thimble
+      # when only Claude Code's settings name that folder, its list has no marketplace thimble: remove says that it is
+      # not found, which leaves nothing to remove, and the add below replaces the settings' source
+      if removed="$(claude plugin marketplace remove thimble 2>&1)"; then
+        say "$removed"
+      else
+        case "$removed" in
+          *"not found"*) ;;
+          *) say "$removed" >&2; exit 1 ;;
+        esac
+      fi
     fi
     claude plugin marketplace add "$source"
     if claude plugin list --json 2>/dev/null | grep -q '"thimble@thimble"'; then
@@ -361,6 +370,9 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
     say "The plugin works in a new claude session, in a folder of data files that you trust."
   else
     say "Claude Code (the claude command) is not installed. Install it, then run:"
+    if [ -n "$gone" ]; then
+      say "  claude plugin marketplace remove thimble"
+    fi
     say "  claude plugin marketplace add $source"
     say "  claude plugin install thimble@thimble"
   fi

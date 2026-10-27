@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -174,20 +176,23 @@ def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_
     assert (tmp_path / "bin" / "thimble-browser").exists() and not (tmp_path / "bin" / "thimble").exists()
 
 
-def plugin_install(tmp_path, source, claude="exit 0\n"):
-    """scripts/install.sh --no-browser with made-up commands, when Claude Code's marketplace thimble (in its list and in
-    its user settings) is the folder `source`, and this shell's THIMBLE_HOME is tmp_path/thimble. The made-up claude
-    logs each call, says its version, lists no plugin, and else runs `claude`. The run, and the plugin calls."""
+def plugin_install(tmp_path, source, claude="exit 0\n", listed=True):
+    """scripts/install.sh --no-browser with made-up commands, when Claude Code's marketplace thimble (in its list unless
+    `listed` is false, and in its user settings) is the folder `source`, and this shell's THIMBLE_HOME is
+    tmp_path/thimble. The made-up claude logs each call, says its version, lists no plugin, and else runs `claude`; with
+    `claude` None, there is no claude command. The run, and the plugin calls."""
     entry = {"source": "directory", "path": str(source)}
     cc = tmp_path / "cc"
     (cc / "plugins").mkdir(parents=True)
-    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"source": entry, "installLocation": str(source)}}))
+    known = {"thimble": {"source": entry, "installLocation": str(source)}} if listed else {}
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps(known))
     (cc / "settings.json").write_text(json.dumps({"extraKnownMarketplaces": {"thimble": {"source": entry}}}))
     bin_ = tmp_path / "stubs"
     log = tmp_path / "claude.log"
-    stub(bin_ / "claude", f'echo "$@" >> "{log}"\n'
-         'case "$1 $2" in "--version ") echo "2.1.311 (Claude Code)"; exit 0 ;; "plugin list") echo "[]"; exit 0 ;; esac\n'
-         + claude)
+    if claude is not None:
+        stub(bin_ / "claude", f'echo "$@" >> "{log}"\n'
+             'case "$1 $2" in "--version ") echo "2.1.311 (Claude Code)"; exit 0 ;; "plugin list") echo "[]"; exit 0 ;; esac\n'
+             + claude)
     stub(bin_ / "node", "echo v22.20.0\n")
     home = tmp_path / "home"
     home.mkdir()
@@ -220,6 +225,37 @@ def test_a_home_with_fixes_whose_thimble_home_is_not_the_shells_is_left_to_thimb
     assert calls == []
     assert (f"Claude Code loads thimble from your fixes ({live.resolve()}), so the plugin is left as it is: run thimble "
             "update, which updates both products and keeps your fixes.") in p.stdout.splitlines()
+
+
+def test_without_claude_the_commands_it_prints_first_remove_a_marketplace_on_the_deleted_fixes(tmp_path):
+    """No claude command, and Claude Code's marketplace thimble still names the fixes' live folder, which is gone: the
+    commands to run once Claude Code is installed remove that marketplace before they add thimble's."""
+    if any((Path(d) / "claude").exists() for d in ("/usr/bin", "/bin")):
+        pytest.skip("this machine has a claude in /usr/bin or /bin, which the install finds")
+    p, _ = plugin_install(tmp_path, tmp_path / "thimble" / "fixes" / "live", None)
+    assert p.returncode == 0, p.stdout + p.stderr
+    lines = p.stdout.splitlines()
+    at = lines.index("Claude Code (the claude command) is not installed. Install it, then run:")
+    assert lines[at + 1:at + 4] == ["  claude plugin marketplace remove thimble",
+                                    "  claude plugin marketplace add safety-research/thimble",
+                                    "  claude plugin install thimble@thimble"]
+
+
+def test_a_marketplace_on_the_deleted_fixes_that_only_the_settings_name_is_nothing_to_remove(tmp_path):
+    """Claude Code's list has no marketplace thimble, and only its user settings name the fixes' live folder, which is
+    gone: claude plugin marketplace remove thimble fails, as Claude Code's does, with "Marketplace 'thimble' not found".
+    The install takes it as nothing to remove, shows no failure, and installs the plugin as usual. Another failure of
+    the remove still stops the install, with what Claude Code said."""
+    remove = '[ "$1 $2 $3" = "plugin marketplace remove" ] && { echo "%s" >&2; exit 1; }\nexit 0\n'
+    p, calls = plugin_install(tmp_path, tmp_path / "thimble" / "fixes" / "live",
+                              remove % "Failed to remove marketplace: Marketplace 'thimble' not found", listed=False)
+    assert p.returncode == 0, p.stdout + p.stderr
+    assert calls == ["plugin marketplace remove thimble", "plugin marketplace add safety-research/thimble",
+                     "plugin list --json", "plugin install thimble@thimble"]
+    assert "not found" not in p.stdout + p.stderr
+    other = tmp_path / "other"
+    p, calls = plugin_install(other, other / "thimble" / "fixes" / "live", remove % "made-up failure", listed=False)
+    assert p.returncode == 1 and "made-up failure" in p.stderr and calls == ["plugin marketplace remove thimble"]
 
 
 def test_install_md_updates_with_thimble_update():
