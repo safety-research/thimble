@@ -1,8 +1,9 @@
 """thimble fix and thimble update after thimble was updated another way than thimble update (scripts/install.sh, claude
 plugin update, Claude Code's own update): while no fix is on, the release and its checkout follow the code that runs,
 and a release checkout from before the launcher's hand-off runs nothing; a record an earlier thimble stored tells of
-the sandbox; the reapply prompt names the old change from the home folder. The world is test_fixes.py's made-up thimble
-0.10.2; `claude` is a fake. All data here is made up."""
+the sandbox; thimble update brings Claude Code's plugin to the release its clone has; the reapply prompt names the old
+change from the home folder. The world is test_fixes.py's made-up thimble 0.10.2; `claude` is a fake. All data here is
+made up."""
 from __future__ import annotations
 
 import json
@@ -145,3 +146,20 @@ def test_the_reapply_prompt_names_the_old_change_from_the_home_folder(world, ups
     text = FX.reapply_prompt().read_text()
     assert f"   Old change: ~/th/fixes/pending/0.10.3/fix-{r['id']}.patch (plugin/bar/bar.tsx)" in text
     assert str(tmp_path) not in text
+
+
+def test_update_brings_claude_codes_plugin_to_the_release_its_clone_has(world, upstream, monkeypatch):
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    new = upstream({"plugin/notes.md": "made-up note\n"}, "v0.10.3")
+    # Claude Code refreshed its clone of the marketplace, at the release, and still runs 0.10.2; no fix was made
+    reclone(world)
+    before = len(calls(world))
+    out = FX.update()
+    assert calls(world)[before:] == ["plugin update thimble@thimble"]
+    assert (out["newer"], out["to"], out["aside"], out["reload"]) == (True, "0.10.3", [], True)
+    assert out["lines"] == [f"Updated thimble {world['base'][:7]} → 0.10.3 (terminal plugin)", "",
+                            "Then  Terminal: /reload-plugins in Claude Code"]
+    assert not FX.live_dir().exists()
+    # once Claude Code runs the release, it is the newest
+    installed(world, new)
+    assert FX.update()["lines"] == ["thimble 0.10.3 is the newest release."]

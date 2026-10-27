@@ -2199,6 +2199,15 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         now = latest["version"]
     out: dict[str, Any] = {"from": now, "to": latest["version"], "newer": _is_newer(repo, latest, base, now),
                            "said": "", "reload": False}
+    installed = "" if has_live else _installed_sha()
+    if not check and not out["newer"] and base == latest["commit"] and installed and installed != base:
+        # Claude Code's clone of the marketplace is at the release already (Claude Code refreshed it), while Claude Code
+        # still runs the plugin it had: it copies the release from its clone
+        run([claude(), "plugin", "update", "thimble@thimble"])
+        out.update({"from": _described(repo, installed) or installed[:7], "newer": True, "aside": [], "reload": True,
+                    "said": f"thimble {latest['version']}"})
+        out["lines"] = _summary(out)
+        return out
     if check or not out["newer"]:
         same = now == latest["version"]
         return {**out, "lines": [] if check else [f"thimble {now} is the newest release." if same else
