@@ -5,15 +5,21 @@ time. The world is test_fixes.py's made-up thimble 0.10.2; slow tests are made w
 made up."""
 from __future__ import annotations
 
+import fcntl
+import io
+import json
+import os
 import sys
 import threading
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_fix_runner_edges import runner_gone  # noqa: E402
-from test_fixes import FX, made, sh, world  # noqa: E402, F401  (world is the fixture)
+from test_fixes import FX, made, on_fix, sh, world  # noqa: E402, F401  (world is the fixture)
 
 
 def mark_of(fid: int) -> dict:
@@ -56,7 +62,7 @@ def test_the_tests_of_a_new_round_start_while_the_runner_of_the_round_before_sti
     p.write_text(p.read_text().replace("${n}", "${n}%"))
     # the round's check starts its own run at once, with a lock of its own, while the runner before still runs
     got = FX.done(r["id"], "Bar says read percent", "", within=1)
-    assert got["state"] == "working" and got["testing"] and got["testing"]["lock"] != first["lock"]
+    assert got["state"] == "working" and (got.get("testing") or {}).get("lock") not in (None, first["lock"])
     got = FX.done(r["id"], within=30)
     assert got["state"] == "ready" and got["tests"] == "passed" and got["title"] == "Bar says read percent"
     runner_gone(r["id"])
@@ -100,3 +106,107 @@ def test_two_checks_at_once_commit_in_the_copy_one_at_a_time_and_the_second_comm
     assert adds == ["a"]
     assert got["a"]["state"] == "ready" and got["b"]["state"] == "ready" and runs.read_text() == "run\n"
     assert sh("git", "rev-parse", f"refs/thimble/fixes/{r['id']}", cwd=FX.live_dir()) == FX.get(r["id"])["commit"]
+
+
+def held_mark(monkeypatch, tmp_path: Path) -> list[int]:
+    """_start_tests made to write the mark of a run whose lock this test holds, as a runner would, and to start no
+    runner: the test runs the runner itself (run_here). The descriptors that hold the locks, to close at the end."""
+    fds: list[int] = []
+
+    def start(rec, named, argv, *rest):
+        lock = tmp_path / f"made-up-run-{rec['id']}.lock"
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        fds.append(fd)
+        return FX.put({**rec, "testing": {"since": time.time(), "lock": str(lock)}})
+
+    monkeypatch.setattr(FX, "_start_tests", start)
+    return fds
+
+
+def run_here(monkeypatch, fid: int, title: str | None) -> None:
+    """The runner of the fix's tests, in this process, with its job on stdin as _start_tests gives it."""
+    job = {"id": fid, "argv": ["/bin/bash", "-c", "true"], "title": title, "testing": FX.get(fid)["testing"]}
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(job)))
+    FX.tests_runner()
+
+
+def step_in(monkeypatch, where: str, act) -> list[threading.Thread]:
+    """`act`, in a thread of its own, while the runner is between its look at the record and its write ("look": as it
+    makes what came of the tests) or at its write ("write"), waited for at most 2 s: a step that waits for the fixes'
+    lock goes on after the write."""
+    threads: list[threading.Thread] = []
+
+    def fire() -> None:
+        th = threading.Thread(target=act)
+        threads.append(th)
+        th.start()
+        th.join(2)
+
+    if where == "look":
+        tested = FX._tested
+
+        def hooked(*a, **k):
+            if not threads:
+                fire()
+            return tested(*a, **k)
+
+        monkeypatch.setattr(FX, "_tested", hooked)
+    else:
+        put = FX.put
+
+        def hooked(rec):
+            if rec.get("unshown") and not threads:
+                fire()
+            return put(rec)
+
+        monkeypatch.setattr(FX, "put", hooked)
+    return threads
+
+
+@pytest.mark.parametrize("where", ["look", "write"])
+def test_a_new_round_that_comes_while_the_runner_writes_what_came_of_the_tests_stays_as_it_is(world, monkeypatch, tmp_path, where):
+    fds = held_mark(monkeypatch, tmp_path)
+    r = made(world)
+    assert FX.done(r["id"], "Bar says read", "", within=0)["testing"]
+    threads = step_in(monkeypatch, where, lambda: FX.round_(r["id"], "and keep the percent"))
+    run_here(monkeypatch, r["id"], "Bar says read")
+    for th in threads:
+        th.join(30)
+    got = FX.get(r["id"])
+    assert threads and got["state"] == "working" and got["rounds"] == 2 and got["words"][-1] == "and keep the percent"
+    for fd in fds:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("where", ["look", "write"])
+def test_a_fix_removed_while_the_runner_writes_what_came_of_the_tests_stays_removed(world, monkeypatch, tmp_path, where):
+    fds = held_mark(monkeypatch, tmp_path)
+    r = made(world)
+    assert FX.done(r["id"], "Bar says read", "", within=0)["testing"]
+    threads = step_in(monkeypatch, where, lambda: FX.remove(r["id"]))
+    run_here(monkeypatch, r["id"], "Bar says read")
+    for th in threads:
+        th.join(30)
+    assert threads and FX.get(r["id"])["state"] == "removed"
+    for fd in fds:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("where", ["look", "write"])
+def test_a_new_round_while_the_runner_settles_a_fix_changed_in_place_stays_as_it_is(world, monkeypatch, tmp_path, where):
+    a = on_fix(world)
+    r = FX.round_(a["id"], "it breaks when I click")
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("${n}", "${n ?? 0}"))
+    fds = held_mark(monkeypatch, tmp_path)
+    assert FX.done(r["id"], None, "The read item works when clicked.", within=0)["testing"]
+    threads = step_in(monkeypatch, where, lambda: FX.round_(r["id"], "and when I press it twice"))
+    run_here(monkeypatch, r["id"], None)
+    for th in threads:
+        th.join(30)
+    got = FX.get(r["id"])
+    assert threads and got["state"] == "working" and got["rounds"] == r["rounds"] + 1 and got["prev"]["state"] == "on"
+    assert got["words"][-1] == "and when I press it twice"
+    for fd in fds:
+        os.close(fd)

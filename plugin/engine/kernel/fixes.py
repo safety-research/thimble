@@ -864,11 +864,13 @@ def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str],
         # held from before the record says that the tests run, then by the runner, so no wait takes the lock for a
         # runner that ended (_ended)
         fcntl.flock(held, fcntl.LOCK_EX)
-        now = get(fid)
-        if now.get("testing") or (read is not None and now != read):
-            lock.unlink(missing_ok=True)
-            return None
-        rec = put({**rec, "testing": {"since": time.time(), "lock": str(lock)}})
+        # under the fixes' lock, which a new round takes too (round_)
+        with Lock():
+            now = get(fid)
+            if now.get("testing") or (read is not None and now != read):
+                lock.unlink(missing_ok=True)
+                return None
+            rec = put({**rec, "testing": {"since": time.time(), "lock": str(lock)}})
         job = {"id": fid, "argv": argv, "title": named, "testing": rec["testing"]}
         log = _new_log(tmp_dir(fid) / "runner.log")
         try:
@@ -900,7 +902,8 @@ def tests_runner() -> None:
     """The runner (_start_tests), with its job on stdin: the tests as run_tests runs them, then what came of them on the
     fix's record, as done writes it, marked as not shown yet (`unshown`) until the plugin's line shows it (shown): no
     session may wait for it any more. A record that went on without them (the fix was removed, a new round took the
-    copy) stays as it is. The run's own lock file (_start_tests) goes when the runner ends."""
+    copy) stays as it is: each write looks again, under the fixes' lock, which a new round and a removal take too. The
+    run's own lock file (_start_tests) goes when the runner ends."""
     job = json.loads(sys.stdin.read())
     try:
         ok, tail = _run_tests(job["argv"], job["id"])
@@ -911,18 +914,32 @@ def tests_runner() -> None:
         rec = _tested({**rec, "unshown": True}, ok, tail, job["title"])
         if rec.get("prev") and rec["state"] == "ready":
             try:
-                settle(rec)
+                settle(rec, job["testing"])
             except Exception as e:
                 # git stopped the round's new version: the round fails with git's words, never ready with the round's
                 # own change alone, and with no refusal, which no next fixer could answer
                 rec.pop("refused", None)
-                put({**rec, "state": "failed", "error": str(e)})
+                _put_while_waits(job["testing"], {**rec, "state": "failed", "error": str(e)})
                 if not isinstance(e, FixError):
                     raise
             return
-        put(rec)
+        _put_while_waits(job["testing"], rec)
     finally:
         Path(job["testing"]["lock"]).unlink(missing_ok=True)
+
+
+def _waits_for(fid: int, mark: dict[str, Any]) -> bool:
+    """Whether the fix's record still waits for the run of its tests that `mark` names: working, with that mark."""
+    now = get(fid)
+    return now.get("state") == "working" and now.get("testing") == mark
+
+
+def _put_while_waits(mark: dict[str, Any], rec: dict[str, Any]) -> None:
+    """The runner's write, under the fixes' lock, and only while the record still waits for the run `mark` names: a new
+    round, or the fix removed, between the runner's look and its write stays as it is."""
+    with Lock():
+        if _waits_for(rec["id"], mark):
+            put(rec)
 
 
 def shown(fid: int | str) -> dict[str, Any]:
@@ -1094,16 +1111,18 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
     no copy is changed in place: a new copy holds its change, and its version as it is now (prev) stays on, or off,
     until the person's y puts the new version on (apply), and u goes back to it (undo). A fix that failed, or no longer
     fits, starts again in a new copy (redo). `asked`: the person's own words, as in new."""
-    rec = get(fid)
     words = (words or "").strip()
-    if _is_checkout(rec.get("work")):
-        # words for a fixer that still works go on in its time; any other round starts its own. The tests of the round
-        # before, should they run, are no longer this fix's: their runner writes nothing (tests_runner)
-        rec = rec if rec.get("state") == "working" else _fresh(rec)
-        rec.pop("testing", None)
-        rec.update(rounds=int(rec.get("rounds") or 1) + 1, state="working", error=None,
-                   **({"session": session} if session else {}))
-        return put(_named_patches(_with_words(rec, [words], asked), words))
+    # a round in the copy is written under the fixes' lock, which the runner of the round before writes under too
+    with Lock():
+        rec = get(fid)
+        if _is_checkout(rec.get("work")):
+            # words for a fixer that still works go on in its time; any other round starts its own. The tests of the
+            # round before, should they run, are no longer this fix's: their runner writes nothing (tests_runner)
+            rec = rec if rec.get("state") == "working" else _fresh(rec)
+            rec.pop("testing", None)
+            rec.update(rounds=int(rec.get("rounds") or 1) + 1, state="working", error=None,
+                       **({"session": session} if session else {}))
+            return put(_named_patches(_with_words(rec, [words], asked), words))
     if rec.get("state") in ("failed", "redo"):
         return redo(rec["id"], words, session, asked)
     if rec.get("state") not in REFINABLE or not rec.get("commit"):
@@ -1288,12 +1307,16 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     return rec
 
 
-def settle(rec: dict[str, Any]) -> dict[str, Any]:
+def settle(rec: dict[str, Any], mark: dict[str, Any] | None = None) -> dict[str, Any]:
     """A ready round of a fix changed in place: its new version is the fix's change as it is now (its ref) plus the
     round's change, as one commit on the commit the fix's change sits on, kept under refs/thimble/next/<id> until the
-    person's y. A round's change that does not apply to the fix fails, for r."""
+    person's y. A round's change that does not apply to the fix fails, for r. `mark`: the run of the tests whose runner
+    settles it (tests_runner); a record that no longer waits for that run (a new round took the copy, the fix was
+    removed) stays as it is, and its copy too."""
     wt = Path(rec["work"])
     with Lock():
+        if mark is not None and not _waits_for(rec["id"], mark):
+            return get(rec["id"])
         old = git("rev-parse", _fix_ref(rec), cwd=wt)
         parent = git("rev-parse", f"{old}^", cwd=wt)
         mine = rec["commit"]
@@ -1899,10 +1922,12 @@ def remove(fid: int | str) -> dict[str, Any]:
     out: dict[str, Any] = {"id": rec["id"], "title": rec["title"], "reload": False}
     if was_on:
         out = undo(rec["id"])
-    r = get(rec["id"])
-    _drop_work(r)
-    r.update(state="removed")
-    put(r)
+    # under the fixes' lock, which the runner of the fix's tests writes under too (tests_runner)
+    with Lock():
+        r = get(rec["id"])
+        _drop_work(r)
+        r.update(state="removed")
+        put(r)
     return out
 
 
