@@ -87,10 +87,9 @@ def test_an_old_claude_code_is_updated_by_what_installed_it(tmp_path):
     line = needs(tmp_path / "deb", tmp_path / "deb" / "usr" / "lib" / "node_modules" / "@anthropic-ai" / "claude-code" / "cli.js",
                  [("dpkg", 'exit 0\n')])
     assert "or later: update it with the package manager that installed" in line
-    # Claude Code's own install updates itself, unless whoever manages the machine turned that off
+    # Claude Code's own install updates itself
     line = needs(tmp_path / "own", tmp_path / "own" / "home" / ".local" / "share" / "claude" / "versions" / "2.1.283")
     assert "or later: claude update" in line
-    assert "whoever manages this machine" in line
 
 
 def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):

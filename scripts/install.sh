@@ -93,10 +93,9 @@ claude_update() {
   fi
   case "$at" in
     */Caskroom/* | */Cellar/*) at="${at#*/Caskroom/}"; at="${at#*/Cellar/}"; say "brew upgrade ${at%%/*}" ;;
-    */.claude/local/*) say "claude update" ;;
     */node_modules/@anthropic-ai/*) say "npm install -g @anthropic-ai/claude-code@latest" ;;
     /nix/*) say "update it with Nix, which installed it" ;;
-    *) say "claude update (when it says updates are disabled by your administrator, whoever manages this machine updates Claude Code)" ;;
+    *) say "claude update" ;;
   esac
 }
 

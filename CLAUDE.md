@@ -30,7 +30,7 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
    1 GB in it, and `thimble-browser` runs from it. Run `scripts/install.sh` in the checkout, with `--no-browser` for
    the plugin alone, and `--no-setup` (step 4 asks instead). Add `--local` when the source is a local folder, so the
    plugin comes from it. The script prints a few dozen lines, one or two per step, and with the workbench it runs for
-   a few minutes (uv sync, npm ci and a build of the page): say so before it starts. It checks what is missing first,
+   a few minutes (uv sync, npm ci and a build of the page). It checks what is missing first,
    one line each, and installs nothing until all of it is there. Tell the user what is missing and the command that
    fixes it, run that command only when the user agrees, then run the script again.
 
@@ -38,12 +38,8 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
    starts from a terminal, on the `node` that terminal finds first: a Node that only your own command loads
    (`nvm use`, fnm, asdf) is not that one. After a change to Node, check what a new terminal finds:
    `$SHELL -ic 'command -v node; node --version'`.
-4. When the workbench was installed, set up how it reaches Claude before you reply. Ask with your question tool, and
-   say whom each way fits, since the names mean little to most people: their Claude Code sign-in is the one to
-   recommend to someone with a Claude subscription (Pro, Max, Team or Enterprise), which the workbench's use then
-   counts against; an Anthropic API key fits someone who has one, from the Claude Console, and wants that use billed
-   to it; Workload Identity Federation (WIF) fits someone whose organization set it up and gave them its config file.
-   Then:
+4. When the workbench was installed, set up how it reaches Claude before you reply. Ask with your question tool:
+   their Claude Code sign-in, an Anthropic API key, or Workload Identity Federation (WIF). Then:
    - **Claude Code sign-in**: show this text and get a yes: "This uses your Claude subscription through Claude Code
      and will launch headless Claude Code sessions in the background." Run `thimble-browser --setup --how claude-code
      --yes`.
