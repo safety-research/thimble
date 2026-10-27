@@ -135,3 +135,82 @@ def test_the_checker_s_fork_never_writes_the_corpus(space, monkeypatch):
     with pytest.raises(Stop):
         asyncio.run(runtime_api.fork_stream(CORPUS, "check", model="claude-opus-5-5", effort=None))
     assert space.corpus not in seen["write_roots"] and seen["write_roots"]
+
+
+# --------------------------------------------------------------------------- a view's own folders (runtime.agent_writes)
+
+
+def agent(sp: runtime.Space, role: str, key: str = "") -> runtime.Spec:
+    return sp.spec_of(runtime.Conv(sp, "a2", "agent", agent_id="a2", role=role, key=key))
+
+
+async def write(spec: runtime.Spec, path) -> runtime_tools.Out:
+    return await runtime_tools.call(box(spec), "Write", {"file_path": str(path), "content": "x"})
+
+
+async def test_a_view_s_builder_and_reviewer_write_its_folder_and_their_own_alone(space, tmp_path):
+    from app import dev, views  # noqa: PLC0415
+
+    folder, other = views.views_dir(CORPUS) / "posts", views.views_dir(CORPUS) / "other"
+    work = dev.view_work_dir(CORPUS, "posts")
+    other.mkdir(parents=True)
+    for role, key in (("view-builder", "view:posts"), ("view-reviewer", "review:posts")):
+        spec = agent(space, role, key)
+        assert spec.write_roots[:2] == [folder, work] and len(spec.write_roots) == 3, role
+        for p in (folder / "view.json", work / "draft.py"):
+            got = await write(spec, p)
+            assert not got.is_error and p.read_text() == "x", (role, got.text)
+        # another view, the extension's own files, the views' state, a way out by .. or by a link: refused
+        (folder / "out").symlink_to(other)
+        for p in (other / "view.json", views.local_dir(CORPUS) / "extension.json", space.ws / "views" / "x.json",
+                  space.ws / "registry" / "x", folder / ".." / "other" / "view.json", folder / "out" / "view.json",
+                  space.ws / "writers" / "x.md", space.corpus / "x.txt"):
+            got = await write(spec, p)
+            assert got.is_error and not p.exists(), (role, p)
+        (folder / "out").unlink()
+        # Claude Code's settings: Edit and the sandbox's writes allowed in the two folders, extension/ no longer denied
+        # (a deny would win over the allow), the other protected folders still denied
+        cc = runtime_cc.settings(spec, True, tmp_path)
+        assert f"Edit(/{folder}/**)" in cc["permissions"]["allow"] and f"Edit(/{work}/**)" in cc["permissions"]["allow"]
+        assert not any("/extension" in r for r in cc["permissions"]["deny"])
+        assert f"Edit(/{space.ws / 'registry'}/**)" in cc["permissions"]["deny"]
+        fs = cc["sandbox"]["filesystem"]
+        assert str(folder) in fs["allowWrite"] and str(views.views_dir(CORPUS)) not in fs["allowWrite"]
+        assert str(views.local_dir(CORPUS)) not in fs["denyWrite"] and str(space.ws / "trusted") in fs["denyWrite"]
+
+
+async def test_no_other_agent_writes_a_view_s_folder(space, tmp_path):
+    from app import views  # noqa: PLC0415
+
+    folder = views.views_dir(CORPUS) / "posts"
+    folder.mkdir(parents=True)
+    others = {"writer": agent(space, "writer", "writer:report"), "main": space.spec_of(space.main),
+              # a view's role whose start names no view, another view's kind or a slug that is no slug
+              "builder without a key": agent(space, "view-builder"),
+              "builder with a review's key": agent(space, "view-builder", "review:posts"),
+              "reviewer with a build's key": agent(space, "view-reviewer", "view:posts"),
+              "builder with a path for a slug": agent(space, "view-builder", "view:../../trusted")}
+    for who, spec in others.items():
+        assert views.local_dir(CORPUS) in spec.no_write, who
+        assert not any(w == folder or folder in w.parents or w in folder.parents for w in spec.write_roots), who
+        got = await write(spec, folder / "view.json")
+        assert got.is_error and not (folder / "view.json").exists(), who
+        deny = runtime_cc.settings(spec, True, tmp_path)["permissions"]["deny"]
+        assert f"Edit(/{views.local_dir(CORPUS)}/**)" in deny, who
+    for who in ("builder without a key", "builder with a review's key", "reviewer with a build's key",
+                "builder with a path for a slug"):
+        assert len(others[who].write_roots) == 1, who  # its temp folder alone
+
+
+async def test_an_agent_takes_the_key_of_the_start_the_server_recorded(space, monkeypatch):
+    from app import subagents  # noqa: PLC0415
+
+    monkeypatch.setattr(runtime, "_spawn_task", lambda coro, name: coro.close())
+    rid = subagents.new_request(CORPUS, "start", "view:posts", {"prompt": "p"}, {}, subagents.CLICK, role="view-builder")
+    got = runtime._spawn_agent(space, {"role": "view-builder", "request": rid})
+    assert space.convs[got["agentId"]].key == "view:posts"
+    # another role's request, or none: no key
+    got = runtime._spawn_agent(space, {"role": "view-reviewer", "request": rid})
+    assert space.convs[got["agentId"]].key == ""
+    got = runtime._spawn_agent(space, {"role": "view-builder"})
+    assert space.convs[got["agentId"]].key == ""
