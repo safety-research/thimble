@@ -1,7 +1,8 @@
 // The artifact of a card (cards/head.ts), on a plain engine whose $.agent.spawn runs this module's agent.spawn hook and
 // names the fork it started: while the fork works the card and the bar's busy line say so; its last message's link
-// shows under the card, and a message with no link says why there is none; one press publishes a card once, and a word
-// that starts with p leaves the card's link as it was. All data is made up. `claude plugin test plugin`.
+// shows under the card once, with a press that copies it, and a message with no link says why there is none; one press
+// publishes a card once, and a word that starts with p leaves the card's link as it was. All data is made up.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
@@ -25,6 +26,8 @@ function setup() {
   const timers: (() => unknown)[] = []
   const clock = { now: 1000, wake: () => undefined as unknown, tick: async () => { for (const f of timers.splice(0)) f(); await settle() } }
   const started = async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-made-up-${spawns.length}` } }
+  const copies: Any[] = []
+  let copyGoes: Any = { isCopied: true }
   const $: Any = {
     state: {
       get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }),
@@ -32,19 +35,27 @@ function setup() {
     },
     agent: { spawn: async (a: Any) => hooks['agent.spawn'][0]($, a, Object.assign(async () => started(a), { origin: { plugin: 'thimble' } })) },
     clock: { now: async () => clock.now, sleep: () => new Promise<void>(r => { clock.wake = r }), after: (_ms: number, f: () => unknown) => { timers.push(f); return { cancel() {} } } },
-    ui: { invalidate: () => undefined },
+    // the clipboard: what each copy put there, and how the copy went
+    ui: { invalidate: () => undefined, copy: async (a: Any) => { copies.push(a); return copyGoes } },
   }
   const el = (type: string) => (props: Any) => ({ type, props })
-  const E = { Box: el('Box'), Text: el('Text'), Link: el('Link') }
+  const E = { Box: el('Box'), Text: el('Text'), Link: el('Link'), Button: el('Button') }
   const ended = async (agentId: string, answer: string, reason = 'answer') => {
     for (const h of hooks['turn.complete']) await h($, { agentId, reason, answer }, async () => ({}))
   }
-  return { $, E, ended, spawns, clock }
+  return { $, E, ended, spawns, clock, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } } }
 }
 
 const settle = () => new Promise(r => setTimeout(r, 0))
 
-const words = (n: Any): string => (n == null ? '' : typeof n === 'string' ? n : Array.isArray(n) ? n.map(words).join('') : words(n.props?.children ?? n.props?.label))
+// the words as Claude Code draws them: a Link with words of its own (children, a label) draws them, then its address
+const words = (n: Any): string => {
+  if (n == null) return ''
+  if (typeof n === 'string') return n
+  if (Array.isArray(n)) return n.map(words).join('')
+  const own = words(n.props?.children ?? n.props?.label)
+  return n.type === 'Link' ? (own ? `${own} ${n.props.href}` : n.props.href) : own
+}
 
 // first in the file: the bar's jobs are the module's, and no test before it leaves one that runs
 test('while a fork publishes the card, the bar\'s busy line names the step; it goes once the fork ended', async () => {
@@ -74,6 +85,25 @@ test('a card being made an artifact says so, then shows the link the fork ended 
   const line = await artifactLine($, E, 'c-made-up-1')
   const link = line.props.children.find((c: Any) => c.type === 'Link')
   expect(link.props.href).toBe('https://claude.ai/artifact/made-up-123')
+  // the address shows once
+  expect(words(line).split('https://claude.ai/artifact/made-up-123').length - 1).toBe(1)
+})
+
+test('a press on `copy` beside the link puts the link on the clipboard of the surface pressed on, and says whether it took', async () => {
+  const { $, E, ended, copies, copyFails } = setup()
+  await launch($, 'c-made-up-6', 'PROMPT artifact', 0).now()
+  await settle()
+  await ended('agent-made-up-1', 'https://claude.ai/artifact/made-up-6')
+  const copy = async () => (await artifactLine($, E, 'c-made-up-6')).props.children.find((c: Any) => c.type === 'Button')
+  expect(words(await copy())).toBe('copy')
+  await (await copy()).props.onPress({ surface: 'terminal' })
+  expect(copies).toEqual([{ text: 'https://claude.ai/artifact/made-up-6', surface: 'terminal' }])
+  expect(words(await copy())).toBe('copied')
+  // a terminal with no clipboard: the press says so, and the link stays to select
+  copyFails('no-clipboard')
+  await (await copy()).props.onPress({ surface: 'terminal' })
+  expect(words(await copy())).toContain('no clipboard')
+  expect(words(await artifactLine($, E, 'c-made-up-6'))).toContain('https://claude.ai/artifact/made-up-6')
 })
 
 test('a fork that publishes nothing says why under the card; a card with no artifact has no line', async () => {
