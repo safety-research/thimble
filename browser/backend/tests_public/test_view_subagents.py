@@ -498,6 +498,22 @@ async def test_a_builder_stopped_after_its_last_attempt_ends_as_finish_view_said
     assert "repair 1 of" in bridge.ops("spawn")[-1]["prompt"] and _prop(slug).get("error") != dev.VIEW_STOPPED
 
 
+async def test_a_repair_s_builder_reads_at_most_error_chars_of_the_last_builder_s_long_report(board, bridge, gates):
+    """A builder that ended on a long report and no view: the repair's builder reads the report as it reads the gate's
+    and finish_view's, at most ERROR_CHARS of it, though the notice takes it whole (for its first sentence and its
+    last)."""
+    slug = _earlier()
+    agent = await _started(slug, route=subagents.FOLLOW_ON)
+    report = " ".join(["I could not build Posts.", *["Every write to its folder was refused."] * 30,
+                       "To finish, copy the draft into the view's folder."])
+    assert len(report) > dev.ERROR_CHARS
+    subagents.run_ended(CORPUS, agent, "done", report, source="handback")
+    await _until(lambda: len(bridge.ops("spawn")) == 2, "no repair started from what failed")
+    prompt = bridge.ops("spawn")[-1]["prompt"]
+    assert "repair 1 of" in prompt and report[:dev.ERROR_CHARS] in prompt
+    assert "To finish, copy the draft" not in prompt
+
+
 async def test_a_reviewer_a_change_stopped_leaves_the_folder_to_the_change_s_builder(board, bridge, gates, pictures):
     slug = _propose(asked=True)
     reviewer, _ = await _reviewed(slug)

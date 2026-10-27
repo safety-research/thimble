@@ -3425,8 +3425,9 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
                or " ".join(str(report or "").split()) or "the checks did not pass")
     first = next((ln for ln in failure.splitlines() if ln.startswith(("problem: ", "bad ", "page: "))), "")
     # a builder's long report shows on the chip and in the notice as its first sentence and its last, where it says
-    # what to do (notices.gist), never as a head cut mid-word
-    shown =first[:ERROR_CHARS] or notices.gist(failure, notices.REASON_CHARS)
+    # what to do (notices.gist), never as a head cut mid-word. A repair's builder gets its first ERROR_CHARS, as it
+    # gets the gate's report and finish_view's (both kept cut there).
+    shown = first[:ERROR_CHARS] or notices.gist(failure, notices.REASON_CHARS)
     log.warning("the view %s/%s was not built: %s", c, slug, shown)
     if prop.get("revision"):
         views.end_revision(c, slug, shown, failed_change=str(prop.get("change") or ""))
@@ -3438,7 +3439,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         if run.chat and agents.meta_or_none(c, str(run.chat)) is not None:
             Log(agents.Recorder(c, str(run.chat))).stage(REPAIR_LINE.format(n=done + 1, of=VIEW_REPAIRS))
         _view_runs[(c, slug)] = _Build(route=subagents.FOLLOW_ON)
-        ans = await start_build(c, slug, subagents.FOLLOW_ON, repair=repair_text(failure, done + 1))
+        ans = await start_build(c, slug, subagents.FOLLOW_ON, repair=repair_text(failure[:ERROR_CHARS], done + 1))
         if ans.refused and ans.kind != subagents.LIMIT:
             log.info("%s: the repair of %s did not start: %s", c, slug, ans.reason)
         return
