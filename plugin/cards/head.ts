@@ -4,11 +4,14 @@
 //
 //   a   a side thread about the card, as a click on `ask` starts (core/answerview.ts cardAsk)
 //   p   a private claude.ai artifact of the card: a fork of the conversation (core/forks.ts, kind `artifact`, with
-//       prompts/artifact.md) publishes it with its Artifact tool, and its last message is the link. While it works
-//       the card says `creating artifact…`, then `↗ <link>` under it, or why there is none.
+//       prompts/artifact.md) publishes it with its Artifact tool, and its last message is the link. One publish of a
+//       card at a time: a press while one starts or runs starts nothing. While it works the card says `creating
+//       artifact…`, then `↗ <link>` under it, or why there is none.
 //
 // p is a letter too (hooks/keys.ts holds the word window): as with v, the fork is spawned inside the key's own hook,
-// and this module's agent.spawn hook holds it until the window closes, refusing it when a letter came.
+// and this module's agent.spawn hook holds it until the window closes, refusing it when a letter came. The card shows
+// the publish once the window closed with no letter, so a word that starts with p leaves the card, and its link, as
+// they were. A click has no window, and shows at once.
 //
 //   headKey($, key, until)      what a or p does at an empty prompt now (hooks/keys.ts asks), or null when it types
 //   startArtifact($, id, until) p's work, from the key or a click on `artifact`
@@ -35,7 +38,7 @@ export const HEAD_KEYS = ['a', 'p']
 
 export type Made = {
   card: string
-  /** held: the word window is open; running: the fork works; the rest: it ended */
+  /** held: the fork waits to start; running: the fork works; the rest: it ended */
   status: 'held' | 'running' | 'done' | 'failed' | 'cancelled'
   agentId: string | null
   /** when the word window closes: the spawn waits until then */
@@ -54,10 +57,14 @@ const LINK = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/
 
 /** The artifact each card has, as this load of the module holds it; $.state holds it too. */
 const made = new Map<string, Made>()
+/** The publishes whose fork is starting: held for a key's word window, or spawned and not yet named by Claude Code. */
+const starting = new Set<Made>()
 
 const firstLine = (s: string) => String(s || '').split('\n').map(l => l.trim()).find(Boolean) || ''
 const reason = (err: unknown) => cut(String((err as Error)?.message || err), 200)
 const working = (m: Made | null | undefined) => m?.status === 'held' || m?.status === 'running'
+/** Whether a publish of the card starts or runs now, as this load knows it. */
+const making = (card: string) => [...starting].some(m => m.card === card && m.status === 'held') || working(made.get(card))
 
 async function madeOf($: Engine, card: string): Promise<Made | null> {
   return made.get(card) ?? (((await $.state.get({ ...MADE, id: card })).value ?? null) as Made | null)
@@ -95,6 +102,8 @@ async function spawn($: Engine, m: Made, prompt: string): Promise<void> {
     await save($, m)
   } catch (err) {
     await end($, m, 'failed', { error: reason(err) })
+  } finally {
+    starting.delete(m)
   }
 }
 
@@ -102,22 +111,25 @@ async function spawn($: Engine, m: Made, prompt: string): Promise<void> {
  *  `until` 0; a key's: when its word window closes). Null when nothing starts: the card has no version, or its
  *  artifact is still being made. */
 export async function startArtifact($: Engine, card: string, until: number): Promise<{ now: () => Promise<unknown>; undo: () => Promise<unknown> } | null> {
-  if (!featureOn('cards') || working(await madeOf($, card))) return null
+  if (!featureOn('cards') || making(card) || working(await madeOf($, card))) return null
   const prompt = await promptOf($, card)
   return prompt ? launch($, card, prompt, until) : null
 }
 
 /** The fork for a card's artifact, with its prompt made: `now` starts it (inside the hook that calls it), `undo`
- *  lets it go while the word window holds it. */
+ *  lets it go while the word window holds it. A press while another of the card's publishes starts or runs (a double
+ *  click, p and a click) starts nothing. A click shows on the card at once; a key's publish shows once its spawn goes. */
 export function launch($: Engine, card: string, prompt: string, until: number): { now: () => Promise<unknown>; undo: () => Promise<unknown> } {
   const m: Made = { card, status: 'held', agentId: null, until }
   return {
     now: async () => {
-      await save($, m)
+      if (making(card)) return
+      starting.add(m)
       void spawn($, m, prompt)
+      if (!until) await save($, m)
     },
     undo: async () => {
-      if (m.status === 'held') await end($, m, 'cancelled')
+      if (m.status === 'held') m.status = 'cancelled'
     },
   }
 }
@@ -195,7 +207,7 @@ export const registerCardHead: Register = on => {
   // p's spawn waits out the word window, and is refused when a letter came in it
   on('agent.spawn', { description: DESCRIPTION }, async ($, e, next) => {
     if (next.origin.plugin !== 'thimble') return next(e)
-    const m = [...made.values()].find(x => x.status === 'held')
+    const m = [...starting].filter(x => x.status === 'held').at(-1)
     if (!m) return next(e)
     const left = m.until - Number(await $.clock.now())
     if (left > 0) await $.clock.sleep(left)
