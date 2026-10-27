@@ -22,7 +22,7 @@
 //     is counted in the line's ink, and the page's Only these shows as thimble's filter chip with how many events it
 //     hides, which the chip clears;
 //   - step 6: the card is in plain words; on its first entry the demo plays once the card is in place, comes to rest on
-//     08:04 as its source shows and the card holds still;
+//     08:04 as its source shows, headed by the printed output it is a line of, and the card holds still;
 //   - step 7: in the ⌘-click demo the key badge stands inside the card and over none of its text; then "⌘-click here"
 //     points at the end of an entry and covers no text and not the popover, until the first try; a real ⌘-drag on the
 //     example card picks only the words dragged over and its ask box lies inside the cutout;
@@ -839,6 +839,7 @@ async function walk(page: Page, tag: string, send = false) {
   // 5 Cards: the demo shows the source of 08:04; the card is in plain words; a real hover on a value shows its source
   await onStep(page, 5, 'Cards on the Canvas')
   await page.waitForFunction(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .hl')?.textContent === '08:04', null, { timeout: 8000 })
+  assert.equal(await page.evaluate(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .refchip-pop-head')?.textContent), 'printed output · line 8', `${tag} 5: the source names the printed output its line is from`)
   // on its first entry the demo plays once the card is in place: the pointer shows soon after Next, glides and comes to
   // rest on 08:04 as its source shows, and the card holds still
   const r7 = judge7(await takeLog7(page))
