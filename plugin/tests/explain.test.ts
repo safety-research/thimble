@@ -392,12 +392,12 @@ test("what a click on thimble's controls or Claude Code's own rows leaves select
     // in a row of Claude Code's own (the turn's time, a tool call, the person's prompt), though the answer has its words
     expect(await counts({ text: 'for', requestId: 'turn-time-row' })).toBe(false)
     expect(await counts({ text: 'Read 1 file', requestId: 'collapsed-tool-row' })).toBe(false)
-    // under the answer, in its row, a card on screen: its header's line, one of its words, which a click on it selects,
-    // and a piece of one, which the answer draws nowhere
+    // under the answer, in its row, a card on screen: one of its header's words, which a click on it selects, and a
+    // piece of one; its header's whole line counts as the row's, as a card's body does
     controlWords('card c-made-up', ['a ask', 'ask', 'p artifact', 'artifact'], { inRow: true })
-    expect(await counts({ text: 'Edits by day       checking  [ previous heads up · a ask · 0 close', requestId: 't1-row' })).toBe(false)
     expect(await counts({ text: 'artifact', requestId: 't1-row' })).toBe(false)
     expect(await counts({ text: 'as', requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'Edits by day       checking  [ previous heads up · a ask · 0 close', requestId: 't1-row' })).toBe(true)
     controlWords('card c-made-up', [], { inRow: true })
     // words selected in the answer, as it draws them: inside it, from its dot, a table's row, a link with its target,
     // a drag that begins and ends inside words, and across rows
@@ -437,6 +437,34 @@ test('words selected in a Chinese or a Japanese answer count, inside a sentence,
     expect(await counts({ text: '四十四次失败中\n有四十一次发生在' })).toBe(true)
     // words no answer holds are none
     expect(await counts({ text: '下载' })).toBe(false)
+  } finally {
+    setOptions({})
+  }
+})
+
+test("a selection in an answer's row whose lines are none of its words as compared counts whole, as the row draws them: a card's body, a list Claude Code numbers anew, a table whose cells wrap, a sign written as an entity", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const text = 'R&amp;D uploads stopped twice.\n\n3. Retry the upload\n7. Raise the timeout\n\n| day | note | edits |\n|---|---|---|\n| Mon | uploads retried twice | 41 |'
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    // a chart label in the body of a card drawn under the answer, in its row
+    expect(await counts({ text: 'Mon  ████████ 41', requestId: 't1-row' })).toBe(true)
+    // the list as Claude Code numbers it
+    expect(await counts({ text: '1. Retry the upload\n2. Raise the timeout', requestId: 't1-row' })).toBe(true)
+    // a table line whose cells wrap
+    expect(await counts({ text: '│ Mon │ uploads retried │ 41    │', requestId: 't1-row' })).toBe(true)
+    // the entity as its sign
+    expect(await counts({ text: 'R&D uploads', requestId: 't1-row' })).toBe(true)
+    // in a row of Claude Code's own, still none
+    expect(await counts({ text: 'Mon  ████████ 41', requestId: 'collapsed-tool-row' })).toBe(false)
   } finally {
     setOptions({})
   }

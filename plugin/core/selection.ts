@@ -14,9 +14,11 @@
 //   - in no row (a drag across rows, or outside the transcript: the bar, a pane, the prompt): any of Claude's text
 //     rows. Across rows, the first line may start inside a word and the last end inside one; a line alone, outside the
 //     transcript, stands there whole (a piece of the prompt's suggestion or of Claude Code's busy word is none)
-// None counts that lay, when first seen, on one of thimble's own controls drawn then (controlWords): one line inside a
-// control's words, as a click that slid a cell leaves (`im` of the bar's `thimble`, `it` of `c cite`) or a double click
-// selects (a chip's `longer`); a selection is first seen anew once another was made.
+// A selection in a row of Claude's whose lines are none of these words (a card's body under the answer, a list Claude
+// Code numbers anew, a table's cells wrapped, a sign Claude wrote as an entity) counts whole, as the row's. None counts
+// that lay, when first seen, on one of thimble's own controls drawn then (controlWords): one line inside a control's
+// words, as a click that slid a cell leaves (`im` of the bar's `thimble`, `it` of `c cite`) or a double click selects
+// (a chip's `longer`); a selection is first seen anew once another was made.
 //
 //   answerSelection($)   the selection's words that lie in Claude's answers, a line at a time: a drag that starts on a
 //                        row of Claude Code's own (`Ran 3 shell commands`, the answer's ● dot) keeps the answer's lines;
@@ -174,6 +176,9 @@ export async function answerSelectionOf($: Engine, sel: Sel | undefined): Promis
     kept = keep(readings(sel.requestId, own))
     // none of Claude's words: its citations' words as the row draws them, corrected (marks/register.ts drawAnswer)
     if (!kept.length) kept = keep(corrected(own, (await rowMarks($, sel.requestId).catch(() => null))?.items ?? []))
+    // none still: words the row draws otherwise (a card's body, a list Claude Code numbers anew, a table's wrapped
+    // cells, a sign written as an entity), whole
+    if (!kept.length) return sel
   } else {
     const rows = await textRows($).catch(() => [] as string[])
     kept = keep((await Promise.all(rows.map(async row => readings(row, (await messageOf($, row))?.text ?? '')))).flat())
