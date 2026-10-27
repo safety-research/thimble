@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 // The view proposal above the chat's composer (src/chat/ProposalCard.tsx): the oldest open proposal (a `suggested` row
 // with `offered`), with its name and what it shows in view, never behind a click, and not the task it names, and what
-// Accept starts; Accept and
-// Reject are clicks of their own routes, each tracked; a click in the first ARM_MS does nothing; an Accept that cannot
-// start says why under the buttons.
+// Accept starts; Accept and Reject are clicks of their own routes, each tracked; a click in the first ARM_MS does
+// nothing; an Accept that cannot start says why under the buttons.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { ARM_MS } from '../../src/chat/PermissionCard.tsx'
