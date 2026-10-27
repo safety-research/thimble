@@ -7,6 +7,8 @@
 //   cancel    the page dropped a fetch, so its reader's call is cancelled; closing the frame or loading another page in
 //             it cancels every fetch still running
 //   cite      a ⌘-click inside the frame opens the pointer's box on that element
+//   wheel     in a card's frame, a wheel turn its page did not take, turned again on the frame (wheelOver), so the
+//             canvas pans or zooms as over any other card
 //   navigate  another place, opened the way a chip opens it (lib/teleport)
 //   size      the height the page needs, used when the frame sizes to its content (`fit`)
 //   reveal    a box of the page to bring into view: the boxes around the frame scroll to it (revealBox), and the
@@ -176,10 +178,35 @@ export function colourScript(state: unknown): string {
   return `<script>window.__thimbleColour=${json}</script>`
 }
 
-/** A rect the frame reports, in the page's coordinates. */
+/** A rect the frame reports, in the page's coordinates: moved to where the frame is and scaled as it is drawn, since a
+ * card's frame on a zoomed canvas is drawn larger or smaller than its own pixels. */
 export function toPage(frame: HTMLIFrameElement, r: { left: number; top: number; width: number; height: number }): DOMRect {
   const f = frame.getBoundingClientRect()
-  return new DOMRect(f.left + r.left, f.top + r.top, r.width, r.height)
+  const k = frame.offsetWidth > 0 ? f.width / frame.offsetWidth : 1
+  return new DOMRect(f.left + (frame.clientLeft + r.left) * k, f.top + (frame.clientTop + r.top) * k, r.width * k, r.height * k)
+}
+
+/** A wheel turn a card's page did not take (`wheel`): its deltas and keys as the frame heard them, and where the pointer
+ * was in the frame. */
+export interface FrameWheel {
+  deltaX: number
+  deltaY: number
+  deltaMode: number
+  ctrlKey: boolean
+  metaKey: boolean
+  x: number
+  y: number
+}
+
+/** The wheel turn a card's page did not take, turned again on its frame, so the boxes around the frame hear a turn over
+ * it: on the canvas the board pans or zooms (canvas/Canvas.tsx), as over any other card. The deltas are the frame's as
+ * they are, which a zoom does not scale; the point is the page's. */
+export function wheelOver(frame: HTMLIFrameElement, w: FrameWheel): void {
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  const at = toPage(frame, { left: num(w.x), top: num(w.y), width: 0, height: 0 })
+  frame.dispatchEvent(
+    new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: num(w.deltaX), deltaY: num(w.deltaY), deltaMode: num(w.deltaMode), ctrlKey: w.ctrlKey === true, metaKey: w.metaKey === true, clientX: at.left, clientY: at.top }),
+  )
 }
 
 /** Scroll each scrolling box around `from`, innermost first, so the page box `r` sits in view, a third of the way down
@@ -655,6 +682,9 @@ export function ViewerFrame({ ws, slug, targetRef, path, pathPicked, title, fit,
         }
         case P + 'point':
           bus.emit('pointHover', { rect: d.rect ? toPage(frame, d.rect) : null })
+          return
+        case P + 'wheel':
+          if (drawn.current) wheelOver(frame, d as FrameWheel)
           return
         case P + 'reveal':
           if (!d.rect) return

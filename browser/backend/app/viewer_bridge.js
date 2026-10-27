@@ -23,6 +23,9 @@
 //                          page's corner, with a Cancel button, after WAIT_SHOWN_MS
 //   cite {ref, text, ...}  frame to page: a ⌘-click on an element with data-anchor, or on any other part of the view
 //                          (its legend, a control, the empty page), asked about as the view itself, `view:<slug>`
+//   wheel {deltaX, deltaY, deltaMode, ctrlKey, metaKey, x, y}
+//                          frame to page, in a card's frame: a wheel turn the page did not take, and every pinch or ⌘
+//                          turn, which the page turns again on the frame, so the canvas pans or zooms
 //   init {mode, data, args, width, card, key}
 //                          page to frame, in a card's frame (cardtypes.py): what the card stored, which the page draws
 //                          with no fetch (window.thimble.onInit); mode is card, full or render, `card` its id, and `key`
@@ -851,6 +854,35 @@
     },
     true,
   )
+  // In a card's frame, a wheel turn the page did not take is the canvas's, as over any other card (wheel): none of the
+  // page's own handlers took it, and nothing under the pointer, nor the page itself, scrolls further that way. A pinch
+  // (ctrl) or a ⌘ turn always goes, and the browser does not also zoom or scroll here. The page turns it again on the
+  // frame (files/ViewerFrame wheelOver), so the canvas pans or zooms.
+  function scrollsFurther(t, dx, dy) {
+    var across = Math.abs(dx) > Math.abs(dy)
+    var d = across ? dx : dy
+    function room(el) {
+      if (across) return d > 0 ? el.scrollLeft + el.clientWidth < el.scrollWidth - 1 : el.scrollLeft > 0
+      return d > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0
+    }
+    for (var el = t && t.nodeType === 1 ? t : null; el && el !== document.body && el !== document.documentElement; el = el.parentElement) {
+      var o = getComputedStyle(el)[across ? 'overflowX' : 'overflowY']
+      if ((o === 'auto' || o === 'scroll') && room(el)) return true
+    }
+    return !!document.scrollingElement && room(document.scrollingElement)
+  }
+  if (cardMode)
+    addEventListener(
+      'wheel',
+      function (e) {
+        if (e.defaultPrevented) return
+        var zoom = e.ctrlKey || e.metaKey
+        if (!zoom && scrollsFurther(e.target, e.deltaX, e.deltaY)) return
+        if (zoom) e.preventDefault()
+        post({ type: P + 'wheel', deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode, ctrlKey: e.ctrlKey, metaKey: e.metaKey, x: e.clientX, y: e.clientY })
+      },
+      { passive: false },
+    )
   // The labels the analyst turns on, drawn over the records the view shows: every data-anchor that appears is reported
   // (anchors), and the page answers with the marks of those records (labels). A marked element gets data-thimble-label
   // and a bar in the first label's colour along its left edge, drawn as a box-shadow added to the view's own

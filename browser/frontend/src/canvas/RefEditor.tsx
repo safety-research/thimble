@@ -1,8 +1,11 @@
-// A takeaway as the analyst edits it: text, with each cited number and bare ref as a token the caret cannot enter, so
-// it deletes whole. On save every token is written back as its `[[value|ref]]` markup. The field is a contenteditable
-// built once from the markup and read back from its nodes (never re-rendered while open), so the browser's editing and
-// React do not fight over it. Enter keeps the text, Shift+Enter breaks the line, Escape reverts. A paste is plain text.
+// A takeaway as the analyst edits it: text, with each cited number, bare ref and claim's mark (`[words](#)`, which a
+// takeaway's numbers are mostly written as) as a token the caret cannot enter, so it deletes whole. On save every token
+// is written back as the markup it came from. The field is a contenteditable built once from the markup and read back
+// from its nodes (never re-rendered while open), so the browser's editing and React do not fight over it. Enter keeps
+// the text, Shift+Enter breaks the line, Escape reverts. A paste is plain text. There is no spell check: a takeaway names
+// the data's own words (files, fields, values), which a spell check marks as typos.
 import { useEffect, useLayoutEffect, useRef, type ClipboardEvent, type KeyboardEvent } from 'react'
+import { marksIn } from '../../../../plugin/marks/message.js'
 import { BARE_SRC } from '../chat/markdown'
 import { Icon, type IconName } from '../components/Icon'
 import { compactLabel, refIcon, refTone } from '../components/RefChip'
@@ -14,19 +17,29 @@ const TOKEN_RE = new RegExp(`${BRACKET_SRC}|${BARE_SRC}`, 'g')
 /** the glyphs a token may carry, drawn once by React in a hidden template and copied into the tokens */
 const GLYPHS: IconName[] = [...new Set<IconName>(['cell', 'group', 'label', 'thread', 'file', 'report', 'view', 'cite', 'terminal', ...FILE_GLYPHS])]
 
-/** One run of the markup: text as it is, or a ref token with the markup it came from. */
-export type RefPart = { text: string } | { raw: string; ref: string; value?: string }
+/** One run of the markup: text as it is, or a token with the markup it came from: a ref, with the value it cites, or a
+ * claim's mark, its words the value, with no ref. */
+export type RefPart = { text: string } | { raw: string; ref: string | null; value?: string }
 
-/** The markup cut into text and ref tokens (`[[value|ref]]`, `[[ref]]`, a bare `card:<id>`), in order. */
+/** The markup cut into text and tokens (`[[value|ref]]`, `[[ref]]`, a bare `card:<id>`, a mark `[words](#)`, found as
+ * plugin/marks/message.js finds them), in order; a ref inside a mark's words stays in the mark. */
 export function refParts(markup: string): RefPart[] {
-  const out: RefPart[] = []
-  let last = 0
+  const tokens: { at: number; end: number; part: RefPart }[] = marksIn(markup).map((m) => ({ at: m.start, end: m.end, part: { raw: markup.slice(m.start, m.end), ref: null, value: m.words.replace(/\*\*|__|`/g, '') } }))
+  const marks = tokens.slice()
   for (const m of markup.matchAll(TOKEN_RE)) {
     const at = m.index ?? 0
-    if (at > last) out.push({ text: markup.slice(last, at) })
+    const end = at + m[0].length
+    if (marks.some((k) => at < k.end && end > k.at)) continue
     const tok = m[1] != null ? splitValueRef(m[1].trim()) : { ref: m[2] }
-    out.push({ raw: m[0], ref: tok.ref, value: tok.value })
-    last = at + m[0].length
+    tokens.push({ at, end, part: { raw: m[0], ref: tok.ref, value: tok.value } })
+  }
+  tokens.sort((a, b) => a.at - b.at)
+  const out: RefPart[] = []
+  let last = 0
+  for (const t of tokens) {
+    if (t.at > last) out.push({ text: markup.slice(last, t.at) })
+    out.push(t.part)
+    last = t.end
   }
   if (last < markup.length) out.push({ text: markup.slice(last) })
   return out
@@ -57,20 +70,19 @@ function glyph(tpl: HTMLElement | null, name: IconName): Node | null {
   return tpl?.querySelector(`.icon-${name}`)?.cloneNode(true) ?? null
 }
 
-/** A token's element: a cited number as the card draws it (the number itself, underlined as a citation), a bare ref
- * as its chip (RefChip refTone). */
+/** A token's element: a cited number or a mark's words as the card draws them (the words themselves, underlined as a
+ * citation), a bare ref as its chip (RefChip refTone). */
 function tokenEl(part: Extract<RefPart, { raw: string }>, tpl: HTMLElement | null): HTMLElement {
   const el = document.createElement('span')
   el.contentEditable = 'false'
   el.dataset.raw = part.raw
-  el.dataset.ref = part.ref
-  const icon = refIcon(part.ref)
-  if (part.value != null) {
+  if (part.ref != null) el.dataset.ref = part.ref
+  if (part.value != null || part.ref == null) {
     el.className = 'refedit-token refchip refchip-value refchip-citation'
-    el.append(part.value)
+    el.append(part.value ?? '')
   } else {
     el.className = `refedit-token chip chip-ref chip-tone-${refTone(part.ref)}`
-    const g = glyph(tpl, icon) as Element | null
+    const g = glyph(tpl, refIcon(part.ref)) as Element | null
     if (g) {
       g.classList.add('chip-ico')
       el.append(g)
@@ -160,7 +172,7 @@ export function RefEditor({ value, onDone, className, label, at, multiline = fal
         role="textbox"
         aria-multiline="true"
         aria-label={label}
-        spellCheck
+        spellCheck={false}
         onKeyDown={onKey}
         onPaste={onPaste}
         onDrop={(e) => e.preventDefault()}
