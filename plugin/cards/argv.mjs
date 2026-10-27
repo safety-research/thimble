@@ -1,24 +1,41 @@
-// argv.mjs: the command that starts the card runner (runner.mjs) in Anthropic's sandbox runtime (srt), for the hooks
-// (ask.ts), sandbox/setup.mjs's check and the tests alike. Pure: no `$`, no file system.
+// argv.mjs: the command that starts the card runner (runner.mjs) in Anthropic's sandbox runtime (srt), and how the
+// runner ended and what it said, for the hooks (ask.ts), sandbox/setup.mjs's check and the tests alike. Pure: no `$`,
+// no file system.
 //
-//   runnerCommand({plugin, node, nodeVersion, cards, run, sock})   the runner itself: Node's permission model (it reads
-//       the plugin's cards/ code, core/text.js and the session's card copies, writes only its own folder `run`, and on
-//       Node 25 and later, whose model covers the network too, may make its socket), no code made from strings, at most
-//       1 GB of memory. The browser workbench starts the same command (cardrunner.py).
+//   runnerCommand({plugin, node, grants, cards, run, sock})   the runner itself: Node's permission model (it reads the
+//       plugin's cards/ code, core/text.js and the session's card copies, writes only its own folder `run`, and has
+//       each of GRANTS that its Node takes), no code made from strings, at most 1 GB of memory
 //   runnerRules({platform, plugin, node, srt, cards, run, home, thimbleHome})   srt's rules for it: no network (no
 //       domain is allowed; only the runner's own Unix socket), writes only `run`, and reads only the runner's code, the
 //       card copies, `run`, and the Node it runs on with what Node needs of the system (Linux: everything else is
 //       hidden; macOS: the folders that hold people's files, the home folder and thimble's home are hidden)
 //   runnerArgv({..., path})   the whole command: run.mjs, with an environment that holds only PATH and the runner's
 //       own folder, wraps an empty environment (`env -i`) and runnerCommand in srt with runnerRules
+//   endOf({code, signal}, signals)   how a process ended: `exit 1`, `SIGKILL`, or, with the system's numbers of the
+//       signals (os.constants.signals, which the hooks do not have), `exit 137 (SIGKILL)`
+//   saidOf(stderr)   what a process said as it ended, in one line: the error and its code when Node reported one,
+//       else its last two lines
 //
-// `node` is the absolute path of the Node binary (process.execPath), `nodeVersion` its version (as setup.mjs says it),
-// `srt` the folder srt is installed in (setup.mjs), `run` the runner's own folder (mode 700), which holds its socket
-// `sock` (a path of at most SOCKET_MAX characters) and is its TMPDIR. srt itself makes no socket for the runner: it
-// starts no proxy, since no domain is allowed.
+// `node` is the absolute path of the Node binary (process.execPath), `grants` whether it takes each of GRANTS (as
+// setup.mjs says it, {'--allow-net': true}), `srt` the folder srt is installed in (setup.mjs), `run` the runner's own
+// folder (mode 700), which holds its socket `sock` (a path of at most SOCKET_MAX characters) and is its TMPDIR. srt
+// itself makes no socket for the runner: it starts no proxy, since no domain is allowed.
 
 // the longest path of the runner's socket: a Unix socket's path holds at most 108 bytes on Linux, 104 on macOS
 export const SOCKET_MAX = 100
+
+// how much of what the runner writes to stderr the hooks and setup.mjs keep, its end: the whole report Node prints when
+// an error ends a process, a few KB at most
+export const SAID_MAX = 8000
+
+// the grants the runner needs beyond its files, where its Node's permission model covers what it does: Node 25 and
+// later refuse its listen() on its socket without --allow-net. A Node whose model does not cover it refuses the flag,
+// so the runner gets each grant only where its Node takes it; srt's rules keep the network away from it all the same.
+// A grant that a new Node comes to require for the runner goes here. setup.mjs reads whether a Node takes it from the
+// flags that Node allows in NODE_OPTIONS (process.allowedNodeEnvironmentFlags), which hold every --allow-* flag so far;
+// a grant kept out of NODE_OPTIONS would read as refused on every Node, and setup.mjs would have to try it instead
+// (`node --permission <grant> -e 0`)
+export const GRANTS = ['--allow-net']
 
 // Linux: what is shown of the system, for Node and the shell srt starts it from
 export const LINUX_SYSTEM = ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/lib32', '/etc/ld.so.cache']
@@ -31,13 +48,10 @@ const trim = p => String(p).replace(/\/+$/, '') || '/'
 const parent = p => trim(p).replace(/\/[^/]*$/, '') || '/'
 const literal = path => ({ path, literal: true })
 
-export function runnerCommand({ plugin, node = 'node', nodeVersion = '', cards, run, sock }) {
+export function runnerCommand({ plugin, node = 'node', grants = {}, cards, run, sock }) {
   const here = trim(plugin)
-  // Node 25 and later refuse the runner's listen() without --allow-net (older Node refuses the flag); srt's rules keep
-  // the network away from it
-  const net = Number(String(nodeVersion).split('.')[0]) >= 25 ? ['--allow-net'] : []
   return [
-    node, '--permission', ...net, `--allow-fs-read=${here}/cards`, `--allow-fs-read=${here}/core/text.js`, `--allow-fs-read=${cards}`,
+    node, '--permission', ...GRANTS.filter(g => grants?.[g] === true), `--allow-fs-read=${here}/cards`, `--allow-fs-read=${here}/core/text.js`, `--allow-fs-read=${cards}`,
     `--allow-fs-write=${run}`, '--disallow-code-generation-from-strings', '--max-old-space-size=1024',
     `${here}/cards/runner.mjs`, sock,
   ]
@@ -73,12 +87,38 @@ export function runnerRules({ platform, plugin, node, srt, cards, run, home, thi
   }
 }
 
-export function runnerArgv({ plugin, node, nodeVersion, srt, cards, run, sock, platform, home, thimbleHome, path = '/usr/bin:/bin' }) {
+export function runnerArgv({ plugin, node, grants, srt, cards, run, sock, platform, home, thimbleHome, path = '/usr/bin:/bin' }) {
   const here = trim(plugin)
   const rules = runnerRules({ platform, plugin, node, srt, cards, run, home, thimbleHome })
   return [
     'env', '-i', `PATH=${path}`, `HOME=${run}`, `TMPDIR=${run}`, `CLAUDE_CODE_TMPDIR=${run}`, 'LANG=C.UTF-8',
     node, `${here}/sandbox/run.mjs`, '--srt', trim(srt), JSON.stringify(rules), '--',
-    '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', ...runnerCommand({ plugin, node, nodeVersion, cards, run, sock }),
+    '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', ...runnerCommand({ plugin, node, grants, cards, run, sock }),
   ]
+}
+
+/** How a process ended, from its exit status: `exit 1`, `SIGKILL`, or `exit 137 (SIGKILL)`, since run.mjs, which starts
+ *  the runner, exits with 128 and the number of the signal that stopped its command; `signals` names those numbers. */
+export function endOf({ code, signal }, signals = {}) {
+  if (code === null) return String(signal)
+  const by = code > 128 ? Object.keys(signals).find(s => signals[s] === code - 128) : ''
+  return `exit ${code}${by ? ` (${by})` : ''}`
+}
+
+// the report Node prints when an error ends a process: the line of code that threw, the error's own line (`Error: …`,
+// `TypeError [ERR_…]: …`), its stack, its properties (`code: 'ERR_ACCESS_DENIED'`), and last Node's version
+const NODE_ERROR = /^\s*\w*(Error|Exception)( \[\w+\])?: .*/m
+const NODE_CODE = /^\s*code: '([^']+)'/m
+
+/** What a process said on stderr as it ended, in one line of at most 300 characters: the error and its code when Node
+ *  reported one, since a report's last lines (the stack, `}`, Node's version) say nothing of why; else its last two
+ *  lines, but Node's version. '' when it said nothing. */
+export function saidOf(stderr) {
+  const text = String(stderr || '')
+  const error = NODE_ERROR.exec(text)
+  if (!error) return text.split('\n').map(l => l.trim()).filter(l => l && !/^Node\.js v\d/.test(l)).slice(-2).join(' ').slice(0, 300)
+  const line = error[0].trim()
+  const code = NODE_CODE.exec(text.slice(error.index))?.[1]
+  const tail = code && !line.includes(code) ? ` (${code})` : ''
+  return `${line.slice(0, 300 - tail.length)}${tail}`
 }

@@ -12,7 +12,7 @@ import { runnerArgv } from '../argv.mjs'
 
 const PLUGIN = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '')
 
-/** The sandbox from setup.mjs: {ok, node, nodeVersion, srt, platform, why, fix}. */
+/** The sandbox from setup.mjs: {ok, node, nodeVersion, grants, srt, platform, why, fix}. */
 export function sandbox() {
   const r = spawnSync(process.execPath, [join(PLUGIN, 'sandbox', 'setup.mjs'), '--json'], { encoding: 'utf8', timeout: 300000 })
   return JSON.parse(String(r.stdout).trim().split('\n').pop() || '{}')
@@ -24,7 +24,7 @@ export async function startRunner(cards) {
   if (!s.ok) throw new Error(`the sandbox does not work here: ${s.why}. ${s.fix}`)
   const run = mkdtempSync(join(tmpdir(), 'thimble-run-'))
   const sock = join(run, 'cards.sock')
-  const argv = runnerArgv({ plugin: PLUGIN, node: s.node, nodeVersion: s.nodeVersion, srt: s.srt, platform: s.platform, cards, run, sock, home: homedir(), thimbleHome: process.env.THIMBLE_HOME, path: process.env.PATH })
+  const argv = runnerArgv({ plugin: PLUGIN, node: s.node, grants: s.grants, srt: s.srt, platform: s.platform, cards, run, sock, home: homedir(), thimbleHome: process.env.THIMBLE_HOME, path: process.env.PATH })
   const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'ignore', 'pipe'] })
   let said = ''
   child.stderr.on('data', d => { said += d })

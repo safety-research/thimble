@@ -3,11 +3,15 @@
 # things:
 #
 #   scan            scripts/scan.sh over the new commits, with its generic patterns (CI has no private lists)
-#   plugin          the terminal plugin: its validation, hooks tests, Node tests (the card runner in its sandbox, with
-#                   bubblewrap, socat and ripgrep) and Python tests
+#   plugin          the terminal plugin, on Linux and macOS, each on Node 22.18 (the plugin's minimum), 24 and 26 (the
+#                   newest): its validation, hooks tests, Node tests (the card runner in its sandbox under that Node's
+#                   permission model: bubblewrap, socat and ripgrep on Linux, Seatbelt on macOS) and Python tests
 #   parity          the browser's shared prompts still apply to the plugin's texts (browser/prompts/shared.json)
 #   browser-server  the browser workbench's server tests, with bubblewrap and the sandbox runtime
 #   browser-page    the browser workbench's page: type check, unit tests and build
+#
+# Once a week the plugin job alone runs on Node's newest release, on both systems, so a new Node that keeps the card
+# runner from starting (Node 25 refused its socket) fails a check before people meet it.
 #
 # Each test has a time limit of its own (scripts/check.sh), so a test that hangs fails with its name and its stack, and
 # each job a timeout-minutes a few times its usual length, so a job that stalls anyway ends rather than holding a runner.
@@ -23,17 +27,21 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
   workflow_dispatch:
+  # Mondays: the plugin job on Node's newest release
+  schedule:
+    - cron: '17 5 * * 1'
 
 permissions:
   contents: read
 
 concurrency:
-  group: checks-${{ github.ref }}
+  # the weekly run has a group of its own, so it and a push to main never cancel each other
+  group: checks-${{ github.event_name == 'schedule' && 'weekly' || github.ref }}
   cancel-in-progress: true
 
 jobs:
   scan:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -55,7 +63,14 @@ jobs:
 
   plugin:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false  # each system and Node says for itself whether it works
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        # 22.18 itself, the plugin's minimum (setup-node's 22 would be the newest 22); the weekly run: Node's newest
+        # release (setup-node's 'current'), whatever its number
+        node: ${{ fromJSON(github.event_name == 'schedule' && '["current"]' || '["22.18", 24, 26]') }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
       CLAUDE_CODE_VERSION: 2.1.307
@@ -66,7 +81,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
@@ -81,7 +96,9 @@ jobs:
           uv pip install --python "$RUNNER_TEMP/py/bin/python" pandas pytest pytest-timeout
           echo "THIMBLE_PYTHON=$RUNNER_TEMP/py/bin/python" >> "$GITHUB_ENV"
 
+      # on Linux only: macOS has its own sandbox, Seatbelt (sandbox-exec)
       - name: Install the sandbox's system packages, and let bubblewrap make its namespaces (the runner's AppArmor keeps it from them)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y bubblewrap socat ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -99,7 +116,7 @@ jobs:
         run: scripts/check.sh python
 
   parity:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -119,7 +136,7 @@ jobs:
         run: scripts/check.sh parity
 
   browser-server:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -184,7 +201,7 @@ jobs:
         run: scripts/check.sh server
 
   browser-page:
-    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -201,11 +218,12 @@ jobs:
       - name: Type check, unit tests and build (after npm ci)
         run: scripts/check.sh page
 
-  # the check main's ruleset requires: it passes only when every job above passed
+  # the check main's ruleset requires: it passes only when every job above passed (each system and Node of plugin)
   checks:
     needs: [scan, plugin, parity, browser-server, browser-page]
-    # a skipped required job counts as passed, so this one runs, and fails, whatever the others did (a draft runs none)
-    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    # a skipped required job counts as passed, so this one runs, and fails, whatever the others did (a draft runs none,
+    # and the weekly run only plugin, whose own failure says it)
+    if: always() && github.event_name != 'schedule' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
