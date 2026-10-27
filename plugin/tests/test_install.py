@@ -95,7 +95,8 @@ def test_an_old_claude_code_is_updated_by_what_installed_it(tmp_path):
 
 def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     """A whole install, with made-up commands, whose card sandbox does not work yet: its line, and the why and fix in
-    it, come again at the end, after the browser workbench's start lines, so what is left to do is said last."""
+    it, come again at the end, after the browser workbench's start lines, so what is left to do is said last. The fix
+    ends in a command, and no words follow it, so that it can be copied and run as it is."""
     market = tmp_path / "market"
     (market / ".claude-plugin").mkdir(parents=True)
     (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
@@ -109,7 +110,8 @@ def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     bin_ = tmp_path / "stubs"
     # node's version, and setup.mjs --probe, which says why the sandbox does not work and its fix
     stub(bin_ / "node", 'case "$1" in --version) echo v22.20.0 ;;\n'
-         '*) echo "thimble: cards cannot run yet: the made-up runner did not start."; echo "  Run the made-up fix."; exit 1 ;; esac\n')
+         '*) echo "thimble: cards cannot run yet: the made-up runner did not start."\n'
+         '   echo "  Install them: sudo made-up-get install bubblewrap socat"; exit 1 ;; esac\n')
     stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
     stub(bin_ / "uv", '[ "$1" = --version ] && echo "uv 0.9.0"\nexit 0\n')
     stub(bin_ / "npm", "exit 0\n")
@@ -126,6 +128,9 @@ def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     notes = lines[start:]
     while notes and not notes[0].startswith("Note: "):
         notes.pop(0)
-    # from the first note on, every line is a note, and one of them is the sandbox's, with its why and its fix
-    assert notes and all(line.startswith("Note: ") for line in notes), lines
-    assert any("the made-up runner did not start. Run the made-up fix." in line for line in notes), notes
+    # from the first note on, every line is a note, or the fix of one, indented under it
+    assert notes and all(line.startswith(("Note: ", "  ")) for line in notes), lines
+    # one of them is the sandbox's: its why, then its fix, whose command comes last
+    said = [n.strip() for n in "\n".join(notes).split("Note: ") if n.strip()]
+    sandbox = next((n for n in said if "the made-up runner did not start." in n), "")
+    assert sandbox.endswith("Install them: sudo made-up-get install bubblewrap socat"), said

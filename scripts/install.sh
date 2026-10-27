@@ -303,14 +303,16 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
     if [ -n "$at" ] && [ -f "$at/sandbox/setup.mjs" ]; then
       say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
       # its line (npm's progress goes to stderr, and shows as it comes); when the sandbox does not work yet, the line's
-      # why and fix again in the notes, at the end
+      # why and fix again in the notes, at the end. The fix, on the line after the why, often ends in a command: it
+      # keeps a line of its own, so that no words follow the command
       if sandbox="$(node "$at/sandbox/setup.mjs" --probe)"; then
         say "$sandbox"
       else
         say "$sandbox"
-        sandbox="${sandbox#thimble: }"
-        sandbox="${sandbox//$'\n'  / }"
-        notes+=("${sandbox:-cards cannot run yet: the sandbox check failed, as it said above.} The next card tries again")
+        why="${sandbox%%$'\n'*}"
+        fix="${sandbox#"$why"}"
+        why="${why#thimble: }"
+        notes+=("${why:-cards cannot run yet: the sandbox check failed, as it said above.} The next card tries again${fix:+ after this:$fix}")
       fi
     fi
     # thimble in a shell (thimble update, thimble fixes): a link to the plugin's own command, as 0.9 had it
