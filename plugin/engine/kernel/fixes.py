@@ -379,22 +379,31 @@ echo "thimble is the plain release again; your fixes are kept (thimble fix on). 
 """
 
 
+def _off_sh(rel: dict[str, Any]) -> str:
+    """off.sh as this kernel writes it for the release `rel`."""
+    off = home() / "off.sh"
+    return OFF_SH.format(off=off, live=live_dir(), live_q=shlex.quote(str(live_dir())), plugin_json=PLUGIN_JSON,
+                         base=shlex.quote(rel["base"]), state_q=shlex.quote(str(home() / "state.json")),
+                         claude=shlex.quote(claude()), release_q=shlex.quote(str(release_dir())))
+
+
 def _write_off_sh(rel: dict[str, Any]) -> None:
     off = home() / "off.sh"
-    off.write_text(OFF_SH.format(off=off, live=live_dir(), live_q=shlex.quote(str(live_dir())), plugin_json=PLUGIN_JSON,
-                                 base=shlex.quote(rel["base"]), state_q=shlex.quote(str(home() / "state.json")),
-                                 claude=shlex.quote(claude()), release_q=shlex.quote(str(release_dir()))))
+    off.write_text(_off_sh(rel))
     off.chmod(0o755)
 
 
 def ensure_live() -> dict[str, Any]:
     """live, made at the first request, with the release checkout beside it: nothing the person runs changes until the
     first fix goes on. Until then, the release follows the code that runs (_follow), so that the release checkout is
-    never older than it."""
+    never older than it. A home that has live gets off.sh as this kernel writes it when its text is another: an older
+    thimble's (the update that installs this one runs the older kernel)."""
     rel = release()
     live = live_dir()
     if rel and (live / ".git").exists():
         rel = _follow(rel)
+        if _text_of(home() / "off.sh") != _off_sh(rel):
+            _write_off_sh(rel)
         place_release(rel["base"])
         return rel
     src = find_source()

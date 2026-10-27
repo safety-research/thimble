@@ -1,8 +1,8 @@
 """thimble fix (engine/kernel/fixes.py) in a clone whose post-checkout hook fails, as git-lfs's does when git-lfs is not on
 the kernel's PATH: thimble's own git calls that make or move a fix's copy, and the checkouts of live that put a fix on or
 take it out, run no hook of the clone's, so the person can make, apply and undo a fix, change it in place, redo it and
-merge fixes, and off.sh shows the release. The world is test_fixes.py's made-up thimble 0.10.2. All data here is
-made up."""
+merge fixes, and off.sh shows the release. A home an older thimble made gets the off.sh this kernel writes. The world is
+test_fixes.py's made-up thimble 0.10.2. All data here is made up."""
 from __future__ import annotations
 
 import os
@@ -142,3 +142,16 @@ def test_off_sh_shows_the_release_in_a_clone_with_a_failing_post_checkout_hook(w
     assert sh("git", "rev-parse", "HEAD", cwd=FX.live_dir()) == world["base"] and not FX.is_on()
     assert "coverage ${n}" in live_file("plugin/bar/bar.tsx") and not ran.exists()
 
+
+def test_an_existing_home_gets_the_off_sh_this_kernel_writes(world):
+    made(world)
+    off = FX.home() / "off.sh"
+    now = off.read_text()
+    # what an older thimble wrote, which the update that installs this one keeps: it runs the older kernel
+    off.write_text(now.replace("git -c core.hooksPath=/dev/null -C \"$live\"", "git -C \"$live\"") + "# an older one\n")
+    FX.new("one more change")
+    assert off.read_text() == now and os.access(off, os.X_OK)
+    # an off.sh as this kernel writes it stays as it is
+    was = off.stat()
+    FX.ensure_live()
+    assert (off.stat().st_ino, off.stat().st_mtime_ns) == (was.st_ino, was.st_mtime_ns)
