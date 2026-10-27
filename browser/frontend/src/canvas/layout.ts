@@ -3,8 +3,11 @@
 // The board is an infinite plane of frames (groups) and cards (cells). A frame's children are laid out by its flow (a
 // column, or a row for a split group) in order: the group's cards, with a nested group after `order` of them. A child
 // with a `pos` is placed free inside the frame. A thread's frame that no one has placed stands right of the card it is
-// about. A collapsed frame shows its nested groups and its first card, with the edges of the others stacked under it. Root frames sit at their `pos`, or below the root before them; loose cards sit
-// at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
+// about. A frame that holds no card of its own and one frame in its flow shares that frame's box, so a card in a path
+// of frames stands in one box (Canvas names the path in one title row). A collapsed frame shows its nested groups and
+// its first card, with the edges of the others stacked under it; a lone card folds to its question, and a frame with
+// no card of its own shows its title alone. Root frames sit at their `pos`, or below the root before them; loose cards
+// sit at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
@@ -23,6 +26,8 @@ export const MIN_FRAME_W = 260
 export const MIN_FRAME_H = HEAD + 40
 /** the room under a collapsed frame's card for the stacked edges */
 export const DECK = 14
+/** the height a collapsed frame's lone card folds to: its question (the card's least height, canvas.css .canvas-card) */
+export const FOLD_H = 72
 /** where the first root frame sits, and the gap under a root before the next one */
 export const ROOT_X = 40
 export const ROOT_Y = 60
@@ -175,8 +180,22 @@ export interface Layout {
   rects: Map<string, Rect>
   /** the cards drawn with the edges of the others under them (the first card of a collapsed frame of several) */
   decks: Set<string>
+  /** the cards drawn folded to their question, FOLD_H tall (the lone card of a collapsed frame) */
+  folded: Set<string>
+  /** each frame that shares its box with the one frame it holds, to that frame */
+  wraps: Map<string, string>
   /** each frame's depth, 0 at the root */
   depth: Map<string, number>
+}
+
+/** Whether a frame holds anything a collapse folds: a card of its own or a frame. Pure. */
+export const foldable = (board: Board, id: string): boolean => board.cells.some((c) => c.parent === id) || board.groups.some((g) => g.parent === id)
+
+/** The frames a title row names, from `id` down: `id`, then the frame each one shares its box with (Layout.wraps). */
+export function pathOf(lay: Pick<Layout, 'wraps'>, id: string): string[] {
+  const out = [id]
+  for (let k = lay.wraps.get(id); k && !out.includes(k); k = lay.wraps.get(k)) out.push(k)
+  return out
 }
 
 /** A card's height: its own, else the measured content, else a guess until it is measured. */
@@ -190,17 +209,33 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
   const rel = new Map<string, Pos>()
   const size = new Map<string, { w: number; h: number }>()
   const decks = new Set<string>()
+  const folded = new Set<string>()
+  const wraps = new Map<string, string>()
   const shown = (g: BoardGroup): Kid[] => {
     const all = kidsOf(board, g.id)
     if (open.has(g.id)) return all
     // collapsed: the nested groups and the first card, in their flow order, each at its flow place; a thread's frame
-    // still stands beside that card when it is about it
+    // still stands beside that card when it is about it. With no card of its own, its title alone.
     const first = all.find((k) => k.t === 'c' && !k.it.pos) ?? all.find((k) => k.t === 'c')
+    if (!first) return []
     const kept: Kid[] = all.filter((k) => k.t === 'g' || k === first)
     return kept.map((k) => (k.t === 'g' ? { t: 'g', it: { ...k.it, pos: null, beside: k.it.beside && k.it.beside === first?.it.id ? k.it.beside : null } } : { t: 'c', it: { ...k.it, pos: null } }))
   }
+  const cardH = (c: BoardCell): number => (folded.has(c.id) ? FOLD_H : cellHeight(c, heights))
   const measure = (g: BoardGroup): { w: number; h: number } => {
     const ks = shown(g)
+    const cards = board.cells.filter((c) => c.parent === g.id).length
+    // no card of its own and one frame in its flow: the two share that frame's box
+    const only = ks.length === 1 && ks[0].t === 'g' && !ks[0].it.pos && !ks[0].it.beside && !cards ? ks[0].it : null
+    if (only) {
+      const s = measure(only)
+      rel.set(only.id, { x: 0, y: 0 })
+      wraps.set(g.id, only.id)
+      size.set(g.id, s)
+      return s
+    }
+    // a collapsed frame's lone card folds to its question
+    if (!open.has(g.id) && cards === 1) for (const k of ks) if (k.t === 'c') folded.add(k.it.id)
     let x = PAD
     let y = HEAD
     let maxW = 0
@@ -210,7 +245,7 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
     const besides: { k: Kid & { t: 'g' }; at: Pos | null; card: BoardCell | null }[] = []
     for (const k of ks) {
       if (k.t === 'g' && k.it.beside) continue
-      const s = k.t === 'g' ? measure(k.it) : { w: k.it.w, h: cellHeight(k.it, heights) }
+      const s = k.t === 'g' ? measure(k.it) : { w: k.it.w, h: cardH(k.it) }
       const title = k.t === 'g' ? TITLE : 0
       let p: Pos
       if (k.it.pos) p = k.it.pos
@@ -246,7 +281,6 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
       maxW = Math.max(maxW, p.x + s.w)
       maxH = Math.max(maxH, p.y + s.h)
     }
-    const cards = board.cells.filter((c) => c.parent === g.id).length
     const deck = !open.has(g.id) && cards > 1
     if (deck) {
       const first = ks.find((k) => k.t === 'c')
@@ -267,7 +301,7 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
     for (const k of shown(g)) {
       const p = rel.get(k.it.id)!
       if (k.t === 'g') place(k.it, x + p.x, y + p.y, d + 1)
-      else rects.set(k.it.id, { x: x + p.x, y: y + p.y, w: k.it.w, h: cellHeight(k.it, heights) })
+      else rects.set(k.it.id, { x: x + p.x, y: y + p.y, w: k.it.w, h: cardH(k.it) })
     }
   }
   let topY = ROOT_Y
@@ -283,7 +317,7 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
     rects.set(c.id, { x: p.x, y: p.y, w: c.w, h })
     if (!c.pos) topY += h + GAP
   }
-  return { rects, decks, depth }
+  return { rects, decks, folded, wraps, depth }
 }
 
 /** Whether frame `id` is `of` or nested anywhere under it. */
@@ -685,14 +719,17 @@ export const centerOn = (view: View, x: number, y: number, vw: number, vh: numbe
 /** The zoom the canvas opens a frame or a card at, at least: the default's, where a card's text reads. A view zoomed in
  * further keeps its own zoom. */
 export const READABLE_SCALE = DEFAULT_VIEW.scale
-/** the screen room above a frame's title when the view opens on the frame, and beside it when it is wider than the room */
+/** the screen room beside a frame when the view opens on the frame and it is wider than the room */
 export const OPEN_MARGIN = 32
+/** the screen room the bar at the top of the board takes (canvas.css .bctl-top: 14 px down, 34 px tall) and a gap:
+ * what the canvas places a frame's title or a card's top under, so the bar covers neither */
+export const BAR_ROOM = 56
 
 /** `view` at a zoom that reads: its own, or READABLE_SCALE when it is zoomed out further. */
 export const readable = (view: View): View => (view.scale >= READABLE_SCALE ? view : { ...view, scale: READABLE_SCALE })
 
 /**
- * The view that opens on the frame at `r` from its top, at a readable zoom, its title OPEN_MARGIN below the viewport's
+ * The view that opens on the frame at `r` from its top, at a readable zoom, its title BAR_ROOM below the viewport's
  * top, centred across the viewport less `right` (or at its left margin when wider). Pure.
  */
 export function openOn(view: View, r: Rect, vw: number, right = 0): View {
@@ -700,7 +737,30 @@ export function openOn(view: View, r: Rect, vw: number, right = 0): View {
   const room = Math.max(100, vw - right)
   const w = r.w * scale
   const x = w + 2 * OPEN_MARGIN > room ? OPEN_MARGIN - r.x * scale : (room - w) / 2 - r.x * scale
-  return { scale, x, y: OPEN_MARGIN + TITLE * scale - r.y * scale }
+  return { scale, x, y: BAR_ROOM + TITLE * scale - r.y * scale }
+}
+
+/**
+ * The same zoom, panned to the card at `r`: centred across the viewport, and down it too, but never higher than
+ * BAR_ROOM below the viewport's top, so a card taller than the room under the bar shows from its top. Pure.
+ */
+export function showCard(view: View, r: Rect, vw: number, vh: number): View {
+  const top = Math.max(BAR_ROOM, (vh - r.h * view.scale) / 2)
+  return { ...view, x: vw / 2 - (r.x + r.w / 2) * view.scale, y: top - r.y * view.scale }
+}
+
+/**
+ * Where a box of `w` × `h` (plane px) stands in `area` (the plane the viewport shows) clear of `taken` by GAP: the first
+ * place, row by row from the area's top left, or null when none is clear. Pure.
+ */
+export function freeSpot(area: Rect, w: number, h: number, taken: readonly Rect[]): Pos | null {
+  const step = GAP * 2
+  for (let y = area.y; y + h <= area.y + area.h; y += step)
+    for (let x = area.x; x + w <= area.x + area.w; x += step) {
+      const box = { x: x - GAP, y: y - GAP, w: w + 2 * GAP, h: h + 2 * GAP }
+      if (!taken.some((t) => overlaps(box, t))) return { x: Math.round(x), y: Math.round(y) }
+    }
+  return null
 }
 
 /** The frame the canvas first opens on: the orientation's deck (the root frame of role exploration), else the root frame

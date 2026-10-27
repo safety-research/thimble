@@ -6,6 +6,9 @@
 //   - no <style>, which would restyle every svg on the page; a `*` rule's stroke and fill move to the root;
 //   - ids are prefixed per figure, so figures never share clip paths or glyphs;
 //   - fonts and thimble's matplotlibrc colours become the page's tokens; a white background is dropped;
+//   - matplotlib's black and white are the paper's ink and paper, so they turn with the paper: black that it leaves
+//     unwritten (a text's or a shape's fill, which SVG paints black) takes the ink from the root, and white the card's
+//     paper, so a black name on a white or a clear box reads on every paper;
 //   - it keeps its aspect and never grows past its natural width.
 // The DOM half needs a browser (DOMParser); restyle and rootDecls are pure.
 import { purifySvg } from './sanitize'
@@ -36,7 +39,13 @@ const COLOURS: Record<string, { fill: string; stroke: string }> = {
   '#000000': { fill: 'var(--text-primary)', stroke: 'var(--viz-ink-1)' },
   '#000': { fill: 'var(--text-primary)', stroke: 'var(--viz-ink-1)' },
   black: { fill: 'var(--text-primary)', stroke: 'var(--viz-ink-1)' },
+  '#ffffff': both('var(--surface-card)'),
+  '#fff': both('var(--surface-card)'),
+  white: both('var(--surface-card)'),
 }
+
+/** The fill the root gives what declares none: SVG paints it black, which is where matplotlib leaves its black. */
+export const ROOT_FILL = 'fill: var(--text-primary)'
 
 /**
  * A figure element's style attribute rewritten for the page (module note): the families in the page's faces, the
@@ -63,8 +72,8 @@ export function restyle(style: string, background = false): string {
         if (m && SANS_FIRST.test(m[2])) return ` font: ${m[1]} var(--font-body)`
         return decl
       }
-      if ((prop === 'fill' || prop === 'stroke') && COLOURS[v]) return ` ${prop}: ${COLOURS[v][prop]}`
       if (prop === 'fill' && background && (v === '#ffffff' || v === '#fff' || v === 'white')) return ' fill: none'
+      if ((prop === 'fill' || prop === 'stroke') && COLOURS[v]) return ` ${prop}: ${COLOURS[v][prop]}`
       return decl
     })
     .join(';')
@@ -114,7 +123,7 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
   const styles = Array.from(svg.getElementsByTagName('style'))
   const inherited = styles.map((st) => rootDecls(st.textContent ?? '')).filter(Boolean).join('; ')
   for (const st of styles) st.remove()
-  if (inherited) svg.setAttribute('style', [svg.getAttribute('style'), inherited].filter(Boolean).join('; '))
+  svg.setAttribute('style', [ROOT_FILL, svg.getAttribute('style'), inherited].filter(Boolean).join('; '))
   // links keep their content, not their target
   for (const a of Array.from(svg.getElementsByTagName('a'))) {
     while (a.firstChild) a.parentNode?.insertBefore(a.firstChild, a)
