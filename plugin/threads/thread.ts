@@ -36,7 +36,7 @@ import { partOf } from '../core/answers'
 import { tellAsked } from '../core/engaged'
 import { readKept, rootHere, startDir, writeKept, keptDir } from '../core/env'
 import { forkOf, spawnFork } from '../core/forks'
-import { openPane } from '../core/pane'
+import { narrowNotice, openPane } from '../core/pane'
 import { tellAtNextPrompt } from '../core/tell'
 import { checkAnswer } from '../marks/checker'
 import { rowMarks } from '../marks/store'
@@ -449,7 +449,7 @@ export async function openThreadOn($: Engine, scope: ThreadScope, o: { key?: str
   // open: a notice that a key could not open it goes
   if (placed) await failCleared($, 'pane:threads')
   if (!placed) {
-    if (o.key) failNotice($, `${o.key.split(' ')[0]} needs a wider terminal: widen the window to show the side pane, or click “${o.key}”${o.where ? ` ${o.where}` : ''}.`, 'pane:threads')
+    if (o.key) failNotice($, narrowNotice(o.key.split(' ')[0]!, o.key, o.where), 'pane:threads')
     else failNotice($, 'Claude Code did not open the side thread here.', 'pane:threads')
   }
   return placed
@@ -461,7 +461,7 @@ export async function listThreads($: Engine, o: { fromKey?: boolean } = {}): Pro
   const placed = await openPane($, 'threads', {}, 'Threads', { focus: true })
   if (placed) await failCleared($, 'pane:threads')
   if (!placed && o.fromKey) {
-    failNotice($, `t needs a wider terminal: widen the window to show the side pane, or click “t ${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}”.`, 'pane:threads')
+    failNotice($, narrowNotice('t', `t ${threadCount() === 1 ? '1 thread' : `${threadCount()} threads`}`), 'pane:threads')
   }
   return placed
 }

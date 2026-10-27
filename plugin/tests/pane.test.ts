@@ -3,7 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { keyedWords, pressedWords } from '../bar/bar'
-import { closePane, drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
+import { closePane, drawPane, narrowNotice, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 import { setOptions } from '../settings/features.mjs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -154,6 +154,32 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('labels')
   expect(focused.at(-1)).toBe('mode-labels-off')
   setOptions({})
+})
+
+test('a pane a key could not open in a narrow window: the notice says how wide the window must be and how wide it is, as Claude Code said, and offers the click that opens it here; the panes that lay out by their rows ask for them', async () => {
+  const s = setup()
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (118 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
+  expect(await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })).toBe(false)
+  const said = narrowNotice('r', 'r coverage')
+  expect(said).toContain('144 columns')
+  expect(said).toContain('118')
+  expect(pressedWords(said, new Map([['r coverage 43% (3/7 files)', () => 'opened']])).find(p => p.press)?.s).toBe('“r coverage”')
+  // once the pane had opened (110 columns then), the notice names that width
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 110 columns (100 now, an id the person opened before)' } }
+  await openPane(s.$, 'claims', {}, 'Evidence', { focus: true, rows: 36 })
+  expect(narrowNotice('c', 'c 3 claims')).toContain('110 columns or more (this one has 100)')
+  // Claude Code gives no width: the notice still offers the click
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false } }
+  await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })
+  expect(narrowNotice('r', 'r coverage')).not.toMatch(/\d/)
+  expect(narrowNotice('r', 'r coverage')).toContain('“r coverage”')
+  // a pane drawn inline gets the rows it asks for: the settings, coverage and a citation's evidence ask for theirs
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: true } }
+  for (const kind of ['settings', 'coverage', 'evidence']) {
+    await closePane(s.$)
+    await openPane(s.$, kind, {}, kind, { focus: true })
+    expect(s.opens.at(-1).rows).toBeGreaterThan(20)
+  }
 })
 
 test('a key a failure line names is a part of its own, so a click presses it; esc and a key with a modifier are not', async () => {

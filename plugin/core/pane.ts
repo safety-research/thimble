@@ -54,11 +54,31 @@ const NOW = { plugin: 'thimble', key: 'pane' } as const
 export type PaneEntry = { kind: string; args: unknown; title: string; rows?: number }
 export type PaneNow = { kind: string; args: unknown; title?: string; escape?: boolean; rows?: number; trail?: PaneEntry[] }
 
+/** The rows a kind asks for, as the claims and the labels ask for theirs. Claude Code draws a pane inline after a click
+ *  in a narrow window, and always in its default layout: as tall as the pane asks, within its bounds (a third of the
+ *  window in the fullscreen layout, all but a few rows in the default one); a pane that asks for none gets a third.
+ *  Docked beside the conversation, a pane takes the window's height whatever it asks. */
+const ROWS: Record<string, number> = { settings: 40, coverage: 28, evidence: 28 }
+
+/** How wide the window must be for a key to open the pane, and how wide it is, as Claude Code said when it did not
+ *  place the last open (`unasked below 144 columns (118 now)`); null when it gave no width. */
+let narrow: { needs: number; has: number } | null = null
+
+/** What the failure line says when a key at the prompt (`key`) could not open the side pane: the width the pane needs,
+ *  when Claude Code said it, and the bar's item a click on which opens the pane here at any width (its `words`, and
+ *  `where` they stand when not on the bar). */
+export function narrowNotice(key: string, words: string, where = ''): string {
+  const click = `click “${words}”${where ? ` ${where}` : ''} to open it here`
+  return narrow
+    ? `${key} opens the side pane in a window of ${narrow.needs} columns or more (this one has ${narrow.has}): widen it, or ${click}.`
+    : `${key} opens the side pane in a wider window: widen it, or ${click}.`
+}
+
 /** `focus`: the person opened it (a key, a click, a command), so it takes the keyboard and Esc closes it. Answers
  *  whether the pane is on screen; once it is, the notice that said the side pane could not open (`pane:…`) goes.
  *  Claude Code places a pane at any width only when the person's own command, prompt or click opened it; a key at the
  *  prompt is none of these, so below 144 columns (110 once the person opened the pane before) the pane would wait
- *  unseen until the terminal grows. Such a pane is closed, and the caller says why. */
+ *  unseen until the terminal grows. Such a pane is closed, and the caller says why (narrowNotice). */
 /** Claude Code sets `closeOnEscape` and `rows` anew on each open, so an open that only redraws the pane with other
  *  arguments (a key in it: j, v, a page) keeps those the open pane has; else Esc would stop closing it after one key.
  *  The pane shown before goes on the trail, or this one takes its place (trail.mjs nextTrail); `under` goes under it. */
@@ -66,7 +86,7 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   const was = await paneNow($)
   const open = was ? await isOpen($) : false
   const escape = Boolean(o.focus || (open && was?.escape))
-  const rows = o.rows ?? (open && was?.kind === kind ? was?.rows : undefined)
+  const rows = o.rows ?? (open && was?.kind === kind ? was?.rows : undefined) ?? ROWS[kind]
   const trail = nextTrail(was, open, kind, args) as PaneEntry[]
   // `under`: the pane esc goes back to, when the trail does not already end on it (a label opened from under an answer
   // goes back to all the labels)
@@ -74,6 +94,8 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   if (o.under && !(last?.kind === o.under.kind && JSON.stringify(last.args ?? null) === JSON.stringify(o.under.args ?? null))) trail.push(o.under)
   await $.state.set(NOW, { kind, args, title, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}), ...(trail.length ? { trail } : {}) })
   const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
+  const why = /below (\d+) columns \((\d+) now/.exec(String((r as { reason?: string }).reason ?? ''))
+  narrow = r.isPlaced || !why ? null : { needs: Number(why[1]), has: Number(why[2]) }
   if (r.isPlaced) {
     // the line that said the side pane could not open (a narrow terminal: `pane:<kind>`) goes once it is open, on
     // whatever it shows

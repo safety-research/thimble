@@ -10,7 +10,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { aboveBar } from '../core/answerview'
-import { closePane, openPane, paneNow, PANE_ID } from '../core/pane'
+import { closePane, narrowNotice, openPane, paneNow, PANE_ID } from '../core/pane'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
@@ -35,7 +35,8 @@ async function paneShows($: Engine, kind: string): Promise<boolean> {
 
 /** Coverage or the labels: open, or closed when the pane shows it. Each takes the keys, so the keys its key row names
  *  act in it, not in the prompt (coverage.tsx, labels/pane.tsx), and esc closes it. A pane a key opened that
- *  Claude Code did not place (a narrow terminal, core/pane.ts) is said in the bar, with the click that opens it. */
+ *  Claude Code did not place (a narrow terminal, core/pane.ts) is said in the bar: the width it needs, and the click
+ *  that opens it. */
 async function togglePane($: Engine, kind: 'coverage' | 'labels', byKey = false): Promise<void> {
   if (await paneShows($, kind)) { await closePane($); return }
   if (kind === 'coverage') void recount($).catch(() => undefined)
@@ -47,7 +48,7 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels', byKey = false)
   const n = (await countsNow($))?.labels ?? 0
   const shown = kind === 'labels' ? `${n.toLocaleString('en-US')} label${n === 1 ? '' : 's'}` : 'coverage'
   const key = kind === 'labels' ? 'l' : 'r'
-  failNotice($, `${key} needs a wider terminal: widen the window to show the side pane, or click “${key} ${shown}”.`, `pane:${kind}`)
+  failNotice($, narrowNotice(key, `${key} ${shown}`), `pane:${kind}`)
 }
 
 /** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */
