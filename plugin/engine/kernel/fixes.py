@@ -1375,6 +1375,37 @@ def _own_git(work: str | Path | None) -> dict[str, str] | None:
     return {"GIT_DIR": str(entry), "GIT_WORK_TREE": str(wt)}
 
 
+def _nested_git(work: str | Path) -> bool:
+    """Whether the copy holds a git repository of its own below its top (sub/.git, a folder, a file or a link): git that
+    reads the copy's files (add, status, diff) runs git in such a repository, outside the sandbox, with its settings
+    (core.fsmonitor), so no git may read them (COPY_GONE). Each folder is also asked for .git as git asks, which a file
+    system that ignores case answers for .GIT too. The walk follows no link, and a folder it cannot read counts."""
+    top = os.fspath(work)
+    stuck: list[OSError] = []
+    for d, dirs, files in os.walk(top, onerror=stuck.append):
+        if d == top:
+            # the copy's own .git, its link to live's repository (_own_git)
+            dirs[:] = [n for n in dirs if n != ".git"]
+            files = [n for n in files if n != ".git"]
+        if ".git" in dirs or ".git" in files:
+            return True
+        for n in dirs:
+            sub = os.path.join(d, n)
+            if not os.path.islink(sub) and os.path.lexists(os.path.join(sub, ".git")):
+                return True
+    return bool(stuck)
+
+
+def _gitlinks(wt: Path, env: dict[str, str], base: str) -> list[str]:
+    """The paths the copy's index has as a gitlink (mode 160000, a commit of another repository, which git add records
+    for a repository inside the copy) that `base` does not have as it is. git reads the index and base's tree only."""
+    index = run(["git", "ls-files", "-s", "-z"], cwd=wt, env=env).stdout.split("\0")
+    tree = run(["git", "ls-tree", "-r", "-z", base], cwd=wt, env=env).stdout.split("\0")
+    had = {(x.split()[2], x.partition("\t")[2]) for x in tree if x.startswith("160000 ")}
+    now = {(x.split()[1], x.partition("\t")[2]) for x in index if x.startswith("160000 ")}
+    return sorted(p for _, p in now - had)
+
+
 def done(fid: int | str, title: str | None = None, summary: str = "", request: bool = False,
          tests: bool = True, session: str | None = None, cannot: str | None = None,
          within: float | None = None) -> dict[str, Any]:
@@ -1431,15 +1462,15 @@ def settle(rec: dict[str, Any], mark: dict[str, Any] | None = None) -> dict[str,
     """A ready round of a fix changed in place: its new version is the fix's change as it is now (its ref) plus the
     round's change, as one commit on the commit the fix's change sits on, kept under refs/thimble/next/<id> until the
     person's y. A round's change that does not apply to the fix fails, for r, as does a copy git may not run in
-    (_own_git), which the tests' time gave the fixer's sandbox to change. `mark`: the run of the tests whose runner
-    settles it (tests_runner); a record that no longer waits for that run (a new round took the copy, the fix was
-    removed) stays as it is, and its copy too."""
+    (_own_git, _nested_git), which the tests' time gave the fixer's sandbox to change. `mark`: the run of the tests
+    whose runner settles it (tests_runner); a record that no longer waits for that run (a new round took the copy, the
+    fix was removed) stays as it is, and its copy too."""
     wt = Path(rec["work"])
     with Lock():
         if mark is not None and not _waits_for(rec["id"], mark):
             return get(rec["id"])
         g = _own_git(wt)
-        if g is None:
+        if g is None or _nested_git(wt):
             _drop_work(rec)
             return put({**rec, "state": "failed", "error": COPY_GONE})
         env, me = {**os.environ, **g}, {**as_thimble(), **g}
@@ -1499,12 +1530,10 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     if seen is not None and rec != seen:
         return None
     g = _own_git(rec.get("work"))
-    if g is None:
-        # the copy is gone, or something in it removed or changed its git link: nothing of it can be checked, and no git
-        # runs in it. r makes a new copy
-        _drop_work(rec)
-        rec.update(state="failed", commit=None, files=[], tests=None, error=COPY_GONE)
-        return put(rec)
+    if g is None or _nested_git(rec["work"]):
+        # the copy is gone, something in it removed or changed its git link, or it holds a repository of its own
+        # (_nested_git): nothing of it can be checked, and no git runs in it. r makes a new copy
+        return _copy_gone(rec)
     wt = Path(rec["work"])
     env = {**os.environ, **g}
     rec.pop("refused", None)
@@ -1514,6 +1543,10 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     named = short(title, 60) if title and title.strip() and not rec.get("prev") else None
     rec["summary"] = (summary or "").strip()[:2000]
     git("add", "-A", cwd=wt, env=env)
+    if _gitlinks(wt, env, rec["base"]):
+        # a repository made in the copy after the walk, which git add recorded: no gitlink goes into a fix's commit,
+        # and no more git runs in the copy
+        return _copy_gone(rec)
     changed = run(["git", "diff", "--cached", "--quiet", rec["base"]], cwd=wt, check=False, env=env).returncode != 0
     if request or not changed:
         git("reset", "-q", "--hard", rec["base"], cwd=wt, env=env)
@@ -1545,6 +1578,13 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     if isinstance(argv, FixError):
         return put(_tested(rec, False, str(argv), named))
     return _start_tests(rec, named, argv, read)
+
+
+def _copy_gone(rec: dict[str, Any]) -> dict[str, Any]:
+    """done's check of a copy git may not run in: its copy goes, and the fix fails, for r."""
+    _drop_work(rec)
+    rec.update(state="failed", commit=None, files=[], tests=None, error=COPY_GONE)
+    return put(rec)
 
 
 def _drop_work(rec: dict[str, Any]) -> None:
@@ -3021,13 +3061,13 @@ def _first_line(r: dict[str, Any]) -> str:
 
 def diff_of(rec: dict[str, Any]) -> str:
     """The fix's change: its commit, from live, or what its copy holds now, with git on the copy's own entry
-    (_own_git); '' for a copy git may not run in."""
+    (_own_git); '' for a copy git may not run in (_own_git, _nested_git)."""
     c = rec.get("commit")
     if c:
         return run(["git", "-c", "core.quotePath=false", "show", "--format=", "--no-color", "--no-ext-diff", c],
                    cwd=live_dir()).stdout
     g = _own_git(rec.get("work"))
-    if g:
+    if g and not _nested_git(rec["work"]):
         return run(["git", "-c", "core.quotePath=false", "diff", "--no-color", rec["base"]], cwd=rec["work"],
                    env={**os.environ, **g}).stdout
     return ""
