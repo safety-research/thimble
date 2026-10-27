@@ -1,8 +1,8 @@
 // The sandbox the card runner runs in (Anthropic's sandbox runtime, srt): its rules (cards/argv.mjs) on any machine,
 // then, on this machine, a process under those rules: it reads no file but the ones the rules name, writes only its own
 // folder, has no network and no variable of the session's. setup.mjs installs srt in the test's THIMBLE_HOME, says
-// which of the runner's grants its Node takes, and names the system packages srt lacks with the one command that
-// installs them. All paths and names are made up.
+// which of the runner's grants its Node takes, names the system packages srt lacks with the one command that installs
+// them, and says how a runner that did not start ended, and on which Node. All paths and names are made up.
 //   node --test plugin/sandbox/test/sandbox.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -151,6 +151,37 @@ test('the probe\'s runner starts with a temp folder too long for a socket in it,
   const got = JSON.parse(r.stdout)
   assert.equal(got.ok, true, `${got.why}. ${got.fix}`)
   assert.deepEqual(readdirSync(long), [])
+})
+
+/** setup.mjs's probe (its JSON, or with `json` false the line it prints) in a THIMBLE_HOME of its own, whose sandbox
+ *  runtime is a made-up one that runs the shell command `command` in place of the card runner. */
+function probeWith(command, json = true) {
+  const home = mkdtempSync(join(dir, 'home-'))
+  const pkg = join(home, 'srt', s.version, 'node_modules', '@anthropic-ai', 'sandbox-runtime')
+  mkdirSync(join(pkg, 'dist'), { recursive: true })
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@anthropic-ai/sandbox-runtime', version: s.version, type: 'module', main: 'dist/index.js' }))
+  writeFileSync(join(pkg, 'dist', 'index.js'), `export const SandboxRuntimeConfigSchema = { parse: rules => rules }
+export const SandboxManager = { checkDependencies: () => ({ errors: [], warnings: [] }), updateConfig() {}, cleanupAfterCommand() {}, wrapWithSandbox: async () => ${JSON.stringify(command)} }\n`)
+  // the lock file it was installed from, by which setup.mjs knows it is installed
+  writeFileSync(join(home, 'srt', s.version, 'node_modules', '.thimble-lock.json'), readFileSync(join(PLUGIN, 'sandbox', 'package-lock.json'), 'utf8'))
+  const r = spawnSync(s.node, [SETUP, ...(json ? ['--json'] : []), '--probe'], { encoding: 'utf8', timeout: 60000, env: { PATH: process.env.PATH, THIMBLE_HOME: home } })
+  return json ? JSON.parse(r.stdout) : r.stdout
+}
+
+test('a runner that ends before it opens its socket: the probe says how it ended and on which Node, also when it said nothing', () => {
+  const node = `Node ${s.nodeVersion} (${s.node})`
+  // as the runner ended on Node 25 without --allow-net: exit 0, and not a word
+  const silent = probeWith('true')
+  assert.equal(silent.ok, false)
+  assert.match(silent.why, /exit 0\b/)
+  assert.ok(silent.why.includes(node), silent.why)
+  const said = probeWith("sh -c 'echo made-up: no socket >&2; exit 7'")
+  assert.match(said.why, /exit 7\b.*made-up: no socket/)
+  assert.ok(said.why.includes(node), said.why)
+  // a signal stopped it: run.mjs exits with 128 and the signal's number
+  assert.match(probeWith("sh -c 'kill -KILL $$'").why, /SIGKILL/)
+  // the line it prints says why
+  assert.match(probeWith('true', false), /cards cannot run yet: .*exit 0/)
 })
 
 test('the sandbox starts its command with the system\'s bash, also when PATH finds another bash first', () => {
