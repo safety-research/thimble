@@ -1438,8 +1438,13 @@ def _rebuild(order: list[int]) -> list[int]:
 
 
 def _move(change) -> dict[str, Any]:
-    """Change live (a function of the records), then have Claude Code copy it."""
+    """Change live (a function of the records), then have Claude Code copy it. Before Claude Code loads live (not
+    pointed yet), the release first follows the code that runs (ensure_live), as at a request: a y right after another
+    way updated the plugin (claude plugin update, scripts/install.sh) puts the fix onto that release, not the one before."""
     with Lock():
+        rel = release()
+        if rel and not rel.get("pointed") and (live_dir() / ".git").exists():
+            ensure_live()
         out = change()
         synced = _sync()
     return {**(out or {}), **synced}
