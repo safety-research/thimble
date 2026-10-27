@@ -4690,10 +4690,24 @@ def _quit(signum: int, _frame: Any) -> None:
     raise Quit(signum)
 
 
+STOPPING_LINE = BROWSER_LINE.format(what="stopping the server and its agents...")
+INTERRUPTED_LINE = "thimble {cmd}: interrupted"
+
+
+def _say(*lines: str) -> None:
+    """Print `lines`, dropping those a closed terminal can no longer take."""
+    for ln in lines:
+        try:
+            print(ln, flush=True)
+        except OSError:  # the terminal is gone
+            pass
+
+
 def hold_until_quit(sleep: Callable[[float], None] = time.sleep) -> None:
-    """Hold the terminal until Ctrl-C, or until the terminal closes or the launcher is told to end, then stop the
-    server (stop), which stops every agent it runs first (runtime.stop_all). A second signal does not cut that stop
-    short, and lines a closed terminal can no longer take are dropped. `sleep` is a seam for tests."""
+    """Hold the terminal until Ctrl-C, or until the terminal closes or the launcher is told to end, then say at once
+    that the server stops and stop it (stop), which stops every agent it runs first (runtime.stop_all) and takes some
+    seconds. A second signal does not cut that stop short, and lines a closed terminal can no longer take are dropped.
+    `sleep` is a seam for tests."""
     sigs = (signal.SIGINT, signal.SIGHUP, signal.SIGTERM)
     before = {sig: signal.getsignal(sig) for sig in sigs}
     for sig in (signal.SIGHUP, signal.SIGTERM):
@@ -4704,14 +4718,27 @@ def hold_until_quit(sleep: Callable[[float], None] = time.sleep) -> None:
     except (KeyboardInterrupt, Quit):
         for sig in sigs:
             signal.signal(sig, signal.SIG_IGN)
-        for ln in ["", *stop()]:
-            try:
-                print(ln, flush=True)
-            except OSError:  # the terminal is gone
-                pass
+        _say("", STOPPING_LINE)
+        _say(*stop())
     finally:
         for sig, handler in before.items():
             signal.signal(sig, handler)
+
+
+def interrupted(args: argparse.Namespace) -> int:
+    """Ctrl-C before a command was done (for thimble-browser, before it held the terminal: hold_until_quit): one line in
+    place of Python's traceback, and 130, as a shell gives a command that Ctrl-C ended. A server thimble-browser started
+    on this run is stopped, since no terminal holds it any more; one that ran before it is left running."""
+    _say("", INTERRUPTED_LINE.format(cmd=args.cmd))
+    started = LAST_START.get("pid")
+    if args.cmd == "browser" and not getattr(args, "detach", False) and started and pid_alive(started):
+        before = signal.signal(signal.SIGINT, signal.SIG_IGN)  # a second Ctrl-C does not cut the stop short
+        try:
+            _say(STOPPING_LINE)
+            _say(*stop())
+        finally:
+            signal.signal(signal.SIGINT, before)
+    return 130
 
 
 def cmd_server_status(args: argparse.Namespace) -> int:
@@ -4839,6 +4866,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         return int(args.fn(args) or 0)
+    except KeyboardInterrupt:
+        return interrupted(args)
     except Exception as e:  # noqa: BLE001
         _log(f"{args.cmd} failed: {type(e).__name__}: {e}\n{traceback.format_exc()}")
         if args.cmd in ("up", "ensure"):
