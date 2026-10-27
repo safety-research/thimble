@@ -25,7 +25,7 @@ import os from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { GRANTS, SAID_MAX, SOCKET_MAX, runnerArgv, saidOf } from '../cards/argv.mjs'
+import { GRANTS, SAID_MAX, SOCKET_MAX, endOf, runnerArgv, saidOf } from '../cards/argv.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN = dirname(HERE)
@@ -171,14 +171,6 @@ function probeDir() {
   return null
 }
 
-/** How a process ended, from its exit event: `exit 1`, `SIGKILL`, or `exit 137 (SIGKILL)`, since run.mjs, which the
- *  probe starts, exits with 128 and the number of the signal that stopped its command. */
-function endOf({ code, signal }) {
-  if (code === null) return String(signal)
-  const by = code > 128 ? Object.keys(os.constants.signals).find(s => os.constants.signals[s] === code - 128) : ''
-  return `exit ${code}${by ? ` (${by})` : ''}`
-}
-
 /** Start the card runner in the sandbox, as the hooks do, and wait for its answer: '' and the time it took, or why not. */
 async function probe() {
   const dir = probeDir()
@@ -207,7 +199,7 @@ async function probe() {
     if (!ended) return { error: `the card runner did not answer in ${PROBE_MS / 1000} s`, said }
     // how it ended and on which Node: what says why when it said nothing, as when Node 25 refused its socket
     const why = saidOf(said)
-    const how = `ended with ${endOf(ended)} on ${thisNode}`
+    const how = `ended with ${endOf(ended, os.constants.signals)} on ${thisNode}`
     return { error: why ? `the card runner did not start in the sandbox: it ${how}, and said: ${why}` : `the card runner ${how} before it opened its socket, and said nothing`, said }
   } finally {
     child.kill()

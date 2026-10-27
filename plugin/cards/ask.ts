@@ -29,14 +29,14 @@
 // session ends. The runner is started from a timer, so its life is the hooks module's and not the life of the hook
 // that first needed it: it ends when the session ends or the module reloads, or when the conversation changes
 // (/clear), whose cards a new runner reads.
-import type { EngineInterface } from 'claude-code'
+import type { EngineInterface, ProcessSpawnResult } from 'claude-code'
 
 import { failNotice, noticeLine } from '../bar/notice'
 import { tempDir, thimbleHome } from '../core/home'
 import { runDir, shortHash } from '../core/layout.mjs'
 import { themeNow } from '../core/theme'
 import { sessionKey } from '../hooks/conversation'
-import { SAID_MAX, SOCKET_MAX, runnerArgv, saidOf } from './argv.mjs'
+import { SAID_MAX, SOCKET_MAX, endOf, runnerArgv, saidOf } from './argv.mjs'
 import { cardsDir } from './store'
 
 type Engine = EngineInterface
@@ -53,6 +53,7 @@ const downOf = (s: Sandbox): Down => ({ why: sandboxWhy(s), machine: !!s.fix })
 const START_MS = 5000
 // npm installs srt the first time: seconds, longer on a slow network
 const SETUP_MS = 300000
+// `exit`: once the runner ended, how, on which Node, and what it said
 const runner = { up: false, starting: null as Promise<Down | null> | null, exit: '', sock: '', stop: null as null | (() => void), current: null as object | null }
 let works: Sandbox | null = null
 
@@ -142,7 +143,9 @@ async function post($: Engine, sock: string, op: string, body: unknown): Promise
   return JSON.parse(r.text)
 }
 
-/** Start the runner in the sandbox and wait until it answers; null when it answers, else why it did not. */
+/** Start the runner in the sandbox and wait until it answers; null when it answers, else why it did not: why
+ *  setup.mjs's own runner does not start either, or, when that one starts, how this one ended, on which Node, and what
+ *  it said, or that it did not answer in time. */
 async function start($: Engine, sock: string): Promise<Down | null> {
   const s = await sandbox($)
   if (!s.ok) return downOf(s)
@@ -164,16 +167,24 @@ async function start($: Engine, sock: string): Promise<Down | null> {
   $.clock.after(0, () => {
     void (async () => {
       let said = ''
+      let end: ProcessSpawnResult | undefined
       try {
         const child = $.process.spawn({ argv })
         runner.stop = () => { void child.return?.(undefined as never) }
-        for await (const piece of child) if (piece.stream === 'stderr') said = `${said}${piece.text}`.slice(-SAID_MAX)
+        // pulled by hand, as a for-await loop drops what the stream returns at its end: how the runner ended
+        for (;;) {
+          const piece = await child.next()
+          if (piece.done) { end = piece.value; break }
+          if (piece.value.stream === 'stderr') said = `${said}${piece.value.text}`.slice(-SAID_MAX)
+        }
       } catch (err) {
         said = String((err as Error)?.message || err)
       }
       if (runner.current !== mine) return
       runner.up = false
-      runner.exit = saidOf(said) || 'it stopped'
+      // worded as setup.mjs's probe words it; what it said alone when it could not start, or was stopped
+      const words = saidOf(said)
+      runner.exit = end ? `it ended with ${endOf(end)} on Node ${s.nodeVersion} (${s.node}), and said${words ? `: ${words}` : ' nothing'}` : words || 'it stopped'
       // its folder goes with it; a runner started after it (current) makes the folder again
       await removeFolder($, sock)
     })()
@@ -192,12 +203,14 @@ async function start($: Engine, sock: string): Promise<Down | null> {
     if (runner.exit) break
     await $.clock.sleep(20)
   }
+  // how it ended, when it ended by itself: stopping it ends it too
+  const ended = runner.exit
   runner.stop?.()
   if (refused) return { why: `Claude Code refuses thimble's requests to its card runner in this session: ${refused}`, machine: true }
   // what kept it from starting: setup.mjs starts a runner of its own in the sandbox, and says why that one does not start
   const probed = await setup($, true)
   if (!probed.ok) return downOf(probed)
-  return { why: `the card runner did not start in its sandbox${runner.exit ? ` (${runner.exit})` : ''}` }
+  return { why: ended ? `the card runner did not start in its sandbox: ${ended}` : `the card runner did not answer in ${START_MS / 1000} s` }
 }
 
 /** The session ends: the runner stops, and its folder goes. */

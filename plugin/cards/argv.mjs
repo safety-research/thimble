@@ -1,5 +1,6 @@
-// argv.mjs: the command that starts the card runner (runner.mjs) in Anthropic's sandbox runtime (srt), and what it said
-// when it ended, for the hooks (ask.ts), sandbox/setup.mjs's check and the tests alike. Pure: no `$`, no file system.
+// argv.mjs: the command that starts the card runner (runner.mjs) in Anthropic's sandbox runtime (srt), and how the
+// runner ended and what it said, for the hooks (ask.ts), sandbox/setup.mjs's check and the tests alike. Pure: no `$`,
+// no file system.
 //
 //   runnerCommand({plugin, node, grants, cards, run, sock})   the runner itself: Node's permission model (it reads the
 //       plugin's cards/ code, core/text.js and the session's card copies, writes only its own folder `run`, and has
@@ -10,6 +11,8 @@
 //       hidden; macOS: the folders that hold people's files, the home folder and thimble's home are hidden)
 //   runnerArgv({..., path})   the whole command: run.mjs, with an environment that holds only PATH and the runner's
 //       own folder, wraps an empty environment (`env -i`) and runnerCommand in srt with runnerRules
+//   endOf({code, signal}, signals)   how a process ended: `exit 1`, `SIGKILL`, or, with the system's numbers of the
+//       signals (os.constants.signals, which the hooks do not have), `exit 137 (SIGKILL)`
 //   saidOf(stderr)   what a process said as it ended, in one line: the error and its code when Node reported one,
 //       else its last two lines
 //
@@ -89,6 +92,14 @@ export function runnerArgv({ plugin, node, grants, srt, cards, run, sock, platfo
     node, `${here}/sandbox/run.mjs`, '--srt', trim(srt), JSON.stringify(rules), '--',
     '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', ...runnerCommand({ plugin, node, grants, cards, run, sock }),
   ]
+}
+
+/** How a process ended, from its exit status: `exit 1`, `SIGKILL`, or `exit 137 (SIGKILL)`, since run.mjs, which starts
+ *  the runner, exits with 128 and the number of the signal that stopped its command; `signals` names those numbers. */
+export function endOf({ code, signal }, signals = {}) {
+  if (code === null) return String(signal)
+  const by = code > 128 ? Object.keys(signals).find(s => signals[s] === code - 128) : ''
+  return `exit ${code}${by ? ` (${by})` : ''}`
 }
 
 // the report Node prints when an error ends a process: the line of code that threw, the error's own line (`Error: …`,

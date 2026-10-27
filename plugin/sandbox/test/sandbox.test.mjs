@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { GRANTS, runnerArgv, runnerRules, saidOf } from '../../cards/argv.mjs'
+import { GRANTS, endOf, runnerArgv, runnerRules, saidOf } from '../../cards/argv.mjs'
 import { sandbox } from '../../cards/test/start.mjs'
 
 const PLUGIN = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '')
@@ -83,6 +83,15 @@ test('what the runner said as it ended, in one line: the error and its code from
   assert.equal(saidOf('bwrap: setting up uid map: Permission denied\n'), 'bwrap: setting up uid map: Permission denied')
   assert.equal(saidOf('one\ntwo\n  three\n\nNode.js v26.1.0\n'), 'two three')
   assert.equal(saidOf(''), '')
+})
+
+test('how the runner ended: its exit status or the signal, and the signal of a status above 128 where the caller knows their numbers', () => {
+  assert.match(endOf({ code: 0, signal: null }), /exit 0\b/)
+  assert.match(endOf({ code: null, signal: 'SIGTERM' }), /SIGTERM/)
+  // run.mjs, which starts the runner, exits with 128 and the number of the signal that stopped it
+  assert.match(endOf({ code: 137, signal: null }, { SIGKILL: 9 }), /137.*SIGKILL/)
+  // the hooks, which have no numbers of the signals
+  assert.match(endOf({ code: 137, signal: null }), /exit 137\b/)
 })
 
 test('a Node too old for srt is told the plugin\'s minimum, the one scripts/install.sh and the hooks name; the check stays at srt\'s floor', () => {
