@@ -6,9 +6,14 @@ Under $THIMBLE_HOME/fixes:
                      commit plus one commit per fix that is on, in the order they went on. A GitHub install's live is
                      a clone of Claude Code's own clone of the marketplace, at the installed commit (no download); a
                      clone install's (scripts/install.sh --local) is a worktree of that clone, so `mine` shows there.
+    release/         the release commit (base) as it is, never changed by a fix: a detached worktree of live's
+                     repository, made with live, moved when base moves, made again when it is missing. The way back runs
+                     from it (place_release), never from live
     work/<id>/       a fix's scratch worktree, cut from mine. The fixer edits only here, and its shell runs in the
-                     sandbox runtime, which may write only here and in tmp/<id>/. Removed after apply or "not now".
+                     sandbox runtime, which may write only here and in tmp/<id>/, and reach only the package registries
+                     (REGISTRIES). Removed after apply or "not now".
     tmp/<id>/        the fixer's home and temp folder in the sandbox, and the log of the tests thimble ran
+    tests.lock       the quick tests run for one fix at a time
     fixes.jsonl      every request: one line per change of a fix's record; the last line of an id is its record
     release.json     where the release came from: the install's kind, its source, Claude Code's marketplace entry
                      before the first fix, the release commit (base) and its version
@@ -34,13 +39,22 @@ plugin from live into its own cache (`claude plugin update`), and the session lo
 is never edited here. Because Claude Code names a copy by the plugin's version, live's plugin.json carries the
 release's version with the commit of mine after it (0.10.2+fix.4e1a9c2), written in live's working tree only.
 
-A fix may not change the files that keep the person safe (PROTECTED): the fix flow, the privacy scan, the sandbox and
-its settings, the hooks file and its command hooks, the launcher, thimble's scripts, and lock files. Binary files are
-refused too. thimble checks this when the fixer ends (done); the fixer's prompt does not list these files. A check that
-refuses a change (these files, a binary file, failing tests) keeps the refusal on the record (refused: why, the files,
-the tests' output) until the next check, and the plugin gives it back to a fixer in the same copy (again): the fixer
-puts the change elsewhere or fixes the tests, or ends saying why it cannot be done (done with `cannot`), which is the
-failure the person sees.
+The way back from a fix runs from the release checkout, so no fix can break its own undo, not even one that changes the
+launcher or the kernel's modules: the plugin runs `thimble fix` with release/'s launcher (fix/fixes.ts kernelFix); the
+shell's `thimble` is a link to it (_relink_cli), and the launcher runs `thimble fix`, `thimble file`, `thimble update`
+and `thimble reapply` from release/ and the rest (label, coverage, which Claude runs) from live, so a fix to them works;
+the fixer's shell and the quick tests run in release/'s sandbox (sandbox_dir); off.sh runs no thimble code at all.
+
+A fix may not change the way back (PROTECTED): the fix flow, which turns fixes off and undoes them, and the privacy scan
+a shared fix goes through. Binary files are refused too. It may change the rest (NOTICE), such as the sandbox, the hooks
+file and its command hooks, the launcher, thimble's scripts and lock files (a package added from REGISTRIES): its record
+names the kinds and the files (notice), and the line that asks whether to use it says them in one sentence, as thimble
+fix show does. thimble checks this when the fixer ends (done); the fixer's prompt does not list these files. A check
+that refuses a change (these files, a binary file, failing tests) keeps the refusal on the record (refused: why, the
+files, the tests' output) until the next check, and the plugin gives it back to a fixer in the same copy (again): the
+fixer puts the change elsewhere or fixes the tests, or ends saying why it cannot be done (done with `cannot`), which is
+the failure the person sees. The quick tests run with no network, for one fix at a time, and a suite that fails runs
+once more before the fix fails (run_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -74,8 +88,8 @@ STATES = ("working", "ready", "failed", "on", "off", "redo", "pending", "request
           "merged")
 PLUGIN_JSON = "plugin/.claude-plugin/plugin.json"
 
-# the files a fix may not change, by what each one is: what keeps undo, off, the sandbox and the scan working (fnmatch
-# patterns over the repository's paths). The refusal names each file with what it is.
+# the files a fix may not change, by what each one is: the way back, which turns fixes off and undoes them, and the scan
+# a shared fix goes through (fnmatch patterns over the repository's paths). The refusal names each file with what it is.
 PROTECTED_KINDS = {
     "the fix flow": ("plugin/engine/kernel/fixes.py", "plugin/engine/kernel/share.py", "plugin/fix/*",
                      "plugin/prompts/fixer.md", "plugin/prompts/fix-draft.md", "plugin/prompts/fix-merge.md",
@@ -83,14 +97,20 @@ PROTECTED_KINDS = {
                      "browser/backend/app/fixes.py", "browser/backend/app/fix_share.py", "browser/frontend/src/fixes/share*",
                      "browser/frontend/src/chat/FixStrip.tsx", "browser/frontend/src/chat/fix.ts"),
     "the privacy scan": ("plugin/engine/kernel/privacy.py",),
+}
+PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
+# the files a fix may change that the person is told of before they use it, by what each one is: the rest of what keeps
+# them safe, and the packages thimble installs. A file counts as the first kind it matches.
+NOTICE_KINDS = {
     "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "browser/backend/app/kernel_wrap.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),
     "a command hook": ("plugin/hooks/temp-allow.sh", "plugin/hooks/temp_allow.py"),
     "the launcher": ("plugin/bin/*",),
     "thimble's scripts": ("scripts/*", "browser/scripts/*"),
-    "a lock file": ("*package-lock.json", "*yarn.lock", "*pnpm-lock.yaml", "*uv.lock", "*poetry.lock", "*Cargo.lock"),
+    "dependencies": ("*package-lock.json", "*yarn.lock", "*pnpm-lock.yaml", "*uv.lock", "*poetry.lock", "*Cargo.lock"),
 }
-PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
+# the sites the fixer's own shell commands may reach, so that a fix can add a package; the quick tests reach none
+REGISTRIES = ("registry.npmjs.org", "pypi.org", "files.pythonhosted.org")
 
 
 class FixError(Exception):
@@ -106,6 +126,10 @@ def home() -> Path:
 
 def live_dir() -> Path:
     return home() / "live"
+
+
+def release_dir() -> Path:
+    return home() / "release"
 
 
 def work_dir(fid: int) -> Path:
@@ -214,8 +238,13 @@ def get(fid: int | str) -> dict[str, Any]:
 
 
 def put(rec: dict[str, Any]) -> dict[str, Any]:
-    """The record's new state, as one line appended in one write."""
+    """The record's new state, as one line appended in one write, with the kinds of files it changes that the person is
+    told of (notice), from its files as they are now."""
     rec = {**rec, "updated": time.time()}
+    rec.pop("notice", None)
+    notice = notice_of([str(f.get("path") or "") for f in rec.get("files") or []])
+    if notice:
+        rec["notice"] = notice
     home().mkdir(parents=True, exist_ok=True)
     line = json.dumps(rec, ensure_ascii=False) + "\n"
     fd = os.open(home() / "fixes.jsonl", os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
@@ -227,13 +256,17 @@ def put(rec: dict[str, Any]) -> dict[str, Any]:
 
 
 class Lock:
-    """One change of live at a time (a key press and a session start at once)."""
+    """One change of live at a time (a key press and a session start at once); with `name` tests.lock, one run of the
+    quick tests at a time."""
+
+    def __init__(self, name: str = "fixes.lock"):
+        self.name = name
 
     def __enter__(self):
         import fcntl  # noqa: PLC0415
 
         home().mkdir(parents=True, exist_ok=True)
-        self.f = open(home() / "fixes.lock", "w")
+        self.f = open(home() / self.name, "w")
         fcntl.flock(self.f, fcntl.LOCK_EX)
         return self
 
@@ -317,10 +350,12 @@ def _write_off_sh(rel: dict[str, Any]) -> None:
 
 
 def ensure_live() -> dict[str, Any]:
-    """live, made at the first request: nothing the person runs changes until the first fix goes on."""
+    """live, made at the first request, with the release checkout beside it: nothing the person runs changes until the
+    first fix goes on."""
     rel = release()
     live = live_dir()
     if rel and (live / ".git").exists():
+        place_release(rel["base"])
         return rel
     src = find_source()
     repo, commit = Path(src["repo"]), src["commit"]
@@ -345,7 +380,22 @@ def ensure_live() -> dict[str, Any]:
            **({"tag": tag} if RELEASE_TAG.match(tag) else {})}
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
+    place_release(commit)
     return rel
+
+
+def place_release(base: str) -> None:
+    """The release checkout at `base`: made when it is missing (or no longer a checkout), moved when base moved. Nothing
+    in it is ever changed: a fix changes its copy and live, never this."""
+    d = release_dir()
+    if _is_checkout(str(d)):
+        if git("rev-parse", "HEAD", cwd=d, check=False) != base:
+            git("checkout", "-q", "-f", "--detach", base, cwd=d)
+        return
+    if d.exists():
+        shutil.rmtree(d)
+    run(["git", "worktree", "prune"], cwd=live_dir(), check=False)
+    git("worktree", "add", "-q", "--detach", str(d), base, cwd=live_dir())
 
 
 def is_on() -> bool:
@@ -393,6 +443,8 @@ def _repoint() -> None:
     the marketplace instead would uninstall thimble and lose its options."""
     rel = release()
     if rel.get("pointed"):
+        # a shell link made before the release checkout was (to live's launcher) moves to the checkout's
+        _relink_cli()
         return
     if not _marketplace():
         # Claude Code has no thimble marketplace (the browser workbench alone): nothing to point, and nothing to copy
@@ -442,24 +494,44 @@ def _py_dirs(py: str) -> list[str]:
     return sorted({*dirs, str(Path(real).parent.parent)})
 
 
+def sandbox_dir() -> Path:
+    """The sandbox code the fixer's shell and the quick tests run with (run.mjs, bwrap.sh, the srt pin): the release
+    checkout's, so that a fix that loosens the sandbox does not loosen the one its own fixer and tests run in; this
+    kernel's own before there is a release checkout."""
+    d = release_dir() / "plugin" / "sandbox"
+    return d if (d / "run.mjs").is_file() else PLUGIN / "sandbox"
+
+
 def _srt_dir() -> Path:
     try:
-        pin = json.loads((PLUGIN / "sandbox" / "package.json").read_text())["dependencies"]["@anthropic-ai/sandbox-runtime"]
+        pin = json.loads((sandbox_dir() / "package.json").read_text())["dependencies"]["@anthropic-ai/sandbox-runtime"]
     except (OSError, ValueError, KeyError):
         pin = ""
     return thimble_home() / "srt" / pin
 
 
-def sandbox_argv(fid: int | str, path_extra: list[str] | None = None) -> list[str]:
-    """The command that runs one shell command of the fixer, or its tests, in the sandbox runtime: no network, reads
-    the system, the tools it needs and the copy's repository, writes only the copy and its temp folder. The command
-    itself follows as /bin/bash -c CMD. `fid` names the copy: a fix's id, or `update`."""
-    wt, tmp = home() / "work" / str(fid), home() / "tmp" / str(fid)
-    tmp.mkdir(parents=True, exist_ok=True)
+def _srt() -> Path:
+    """The folder of the release's srt. A session's start installs the srt of the thimble it loads, live's, so the
+    release's own setup.mjs installs the release's when a fix changed the pin."""
     srt = _srt_dir()
+    node = shutil.which("node")
+    if not (srt / "node_modules").is_dir() and node:
+        run([node, str(sandbox_dir() / "setup.mjs"), "--home", str(thimble_home()), "--json"], check=False, timeout=600)
     if not (srt / "node_modules").is_dir():
         raise FixError("the sandbox runtime is not installed (thimble installs it at session start); start a new "
                        "session, then ask again")
+    return srt
+
+
+def sandbox_argv(fid: int | str, path_extra: list[str] | None = None, net: bool = False) -> list[str]:
+    """The command that runs one shell command of the fixer, or its tests, in the sandbox runtime: reads the system,
+    the tools it needs and the copy's repository, writes only the copy and its temp folder, and reaches no site, or with
+    `net` (the fixer's own commands) only the package registries (REGISTRIES), through srt's proxies. The command itself
+    follows as /bin/bash -c CMD. `fid` names the copy: a fix's id, or `update`."""
+    wt, tmp = home() / "work" / str(fid), home() / "tmp" / str(fid)
+    tmp.mkdir(parents=True, exist_ok=True)
+    srt = _srt()
+    box = sandbox_dir()
     node = os.path.realpath(shutil.which("node") or "/usr/bin/node")
     py = _python()
     cl = shutil.which(claude())
@@ -475,24 +547,27 @@ def sandbox_argv(fid: int | str, path_extra: list[str] | None = None) -> list[st
     seccomp = str(srt / "node_modules" / "@anthropic-ai" / "sandbox-runtime" / "vendor" / "seccomp")
     # THIMBLE_FIX_READ: more folders the tests read (the browser workbench's page packages, which its copy links)
     extra = [x for x in os.environ.get("THIMBLE_FIX_READ", "").split(os.pathsep) if x.startswith("/")]
-    shown = [*(system + [seccomp] if linux else []), *tools, str(PLUGIN / "sandbox"), str(wt), str(tmp),
+    shown = [*(system + [seccomp] if linux else []), *tools, str(box), str(wt), str(tmp),
              *([common] if common else []), *extra]
     hidden = ["/"] if linux else ["/Users", "/Volumes", "/private/tmp", "/private/var/tmp", "/private/var/folders",
                                    str(Path.home()), str(thimble_home())]
     rules = {
-        "network": {"allowedDomains": [], "deniedDomains": [], **({"allowAllUnixSockets": True} if linux else {})},
+        "network": {"allowedDomains": list(REGISTRIES) if net else [], "deniedDomains": [],
+                    **({"allowAllUnixSockets": True} if linux else {})},
         "filesystem": {"denyRead": [lit(p) for p in dict.fromkeys(hidden)],
                        "allowRead": [lit(p) for p in dict.fromkeys(x for x in shown if x and x != "/")],
                        "allowWrite": [lit(str(wt)), lit(str(tmp))], "denyWrite": []},
-        **({"bwrapPath": str(PLUGIN / "sandbox" / "bwrap.sh")} if linux else {}),
+        **({"bwrapPath": str(box / "bwrap.sh")} if linux else {}),
     }
     py_bin = str(Path(shutil.which(py) or py).parent)
     path = ":".join(dict.fromkeys([*(path_extra or []), *([str(Path(cl).parent)] if cl else []), py_bin,
                                    str(Path(node).parent), "/usr/bin", "/bin"]))
-    return ["/usr/bin/env", "-i", "PATH=/usr/bin:/bin", node, str(PLUGIN / "sandbox" / "run.mjs"), "--srt", str(srt),
-            json.dumps(rules), "--", "/usr/bin/env", "-i", f"PATH={path}", f"HOME={tmp}", f"TMPDIR={tmp}",
-            f"CLAUDE_CONFIG_DIR={tmp / 'claude'}", f"THIMBLE_HOME={tmp / 'thimble'}", f"THIMBLE_PYTHON={py}",
-            "DISABLE_AUTOUPDATER=1", "LANG=C.UTF-8", "/bin/bash", "-c"]
+    # the outer env -i leaves srt only PATH; with `net`, the command keeps what srt adds to that (its proxies), and has
+    # nothing of the person's either way
+    return ["/usr/bin/env", "-i", "PATH=/usr/bin:/bin", node, str(box / "run.mjs"), "--srt", str(srt),
+            json.dumps(rules), "--", "/usr/bin/env", *([] if net else ["-i"]), f"PATH={path}", f"HOME={tmp}",
+            f"TMPDIR={tmp}", f"CLAUDE_CONFIG_DIR={tmp / 'claude'}", f"THIMBLE_HOME={tmp / 'thimble'}",
+            f"THIMBLE_PYTHON={py}", "DISABLE_AUTOUPDATER=1", "LANG=C.UTF-8", "/bin/bash", "-c"]
 
 
 def _has_pytest(py: str) -> bool:
@@ -503,8 +578,10 @@ QUICK_TESTS = "claude plugin test plugin"
 
 
 def run_tests(fid: int | str) -> tuple[bool, str]:
-    """The quick tests in the copy, in the sandbox: the hooks tests, and the kernel's when this Python has pytest
-    (THIMBLE_FIX_TESTS, a shell command, replaces them). (passed, the log's last lines)."""
+    """The quick tests in the copy, in the sandbox, with no network: the hooks tests, and the kernel's when this Python
+    has pytest (THIMBLE_FIX_TESTS, a shell command, replaces them). They run for one fix at a time, since two runs at
+    once make the hooks tests run out of time, and a run that fails runs once more before the tests count as failed.
+    (passed, the log's last lines, which say when they passed only the second time)."""
     cmd = os.environ.get("THIMBLE_FIX_TESTS")
     if not cmd:
         parts = [QUICK_TESTS]
@@ -515,6 +592,21 @@ def run_tests(fid: int | str) -> tuple[bool, str]:
         argv = sandbox_argv(fid) + [cmd]
     except FixError as e:
         return False, str(e)
+    with Lock("tests.lock"):
+        ok, log = _tests_once(argv, fid)
+        if not ok:
+            first = log
+            ok, log = _tests_once(argv, fid)
+            if ok:
+                log = f"{PASSED_AGAIN}; the first run ended:\n{first}"
+    return ok, log
+
+
+PASSED_AGAIN = "The tests passed only the second time"
+
+
+def _tests_once(argv: list[str], fid: int | str) -> tuple[bool, str]:
+    """One run of the quick tests in the copy: (passed, the log's last lines); the whole log in tmp/<id>/tests.log."""
     try:
         p = subprocess.run(argv, cwd=home() / "work" / str(fid), capture_output=True, text=True, timeout=540)
     except subprocess.TimeoutExpired:
@@ -559,9 +651,11 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, session
 def _give_types(wt: Path) -> None:
     """The copy gets the types Claude Code wrote beside the plugin it loads (plugin/.claude-plugin/types: the
     `claude-code` module that plugin/tsconfig.json reads), which git leaves out, so its code type-checks as the person's
-    does. Nothing when Claude Code wrote none."""
+    does. The plugin names the folder it was loaded from (THIMBLE_PLUGIN_ROOT), since this kernel runs from the release
+    checkout. Nothing when Claude Code wrote none."""
     rel = Path(".claude-plugin") / "types"
-    for src in (PLUGIN / rel, live_dir() / "plugin" / rel):
+    loaded = [Path(p) / rel for p in (os.environ.get("THIMBLE_PLUGIN_ROOT"),) if p and p.startswith("/")]
+    for src in (*loaded, PLUGIN / rel, live_dir() / "plugin" / rel):
         if (src / "claude-code").is_dir():
             try:
                 shutil.copytree(src, wt / "plugin" / rel, dirs_exist_ok=True)
@@ -686,14 +780,33 @@ def _and(words: list[str]) -> str:
     return " and ".join(words) if len(words) < 3 else ", ".join(words[:-1]) + ", and " + words[-1]
 
 
+def _kinds(paths: list[str], kinds: dict[str, tuple[str, ...]]) -> dict[str, list[str]]:
+    """The paths that are one of `kinds`, by the first kind each one is, in the order of `kinds`."""
+    out: dict[str, list[str]] = {}
+    for p in paths:
+        kind = next((k for k, pats in kinds.items() if any(fnmatch.fnmatch(p, pat) for pat in pats)), None)
+        if kind:
+            out.setdefault(kind, []).append(p)
+    return {k: out[k] for k in kinds if k in out}
+
+
 def protected_why(paths: list[str]) -> str:
     """The refusal for a fix that changes protected files: each file, with what it is, and why thimble refuses."""
-    kinds: dict[str, list[str]] = {}
-    for p in paths:
-        kind = next(k for k, pats in PROTECTED_KINDS.items() if any(fnmatch.fnmatch(p, pat) for pat in pats))
-        kinds.setdefault(kind, []).append(p)
-    named = [f"{_and(ps)} ({kind})" for kind, ps in kinds.items()]
-    return f"it changes {_and(named)}; thimble does not apply changes to its safety files"
+    named = [f"{_and(ps)} ({kind})" for kind, ps in _kinds(paths, PROTECTED_KINDS).items()]
+    return (f"it changes {_and(named)}; no fix may change the code that turns fixes off and undoes them, or the scan a "
+            "shared fix goes through")
+
+
+def notice_of(paths: list[str]) -> dict[str, list[str]]:
+    """The files of a fix that the person is told of before they use it, by what each one is (NOTICE_KINDS)."""
+    return _kinds(paths, NOTICE_KINDS)
+
+
+def notice_said(rec: dict[str, Any]) -> str:
+    """The sentence that tells the person what such files a fix changes: `This fix changes the sandbox
+    (plugin/cards/argv.mjs).`, or ''. fix/fixes.ts noticeText says the same."""
+    kinds = rec.get("notice") or {}
+    return f"This fix changes {_and([f'{k} ({_and(ps)})' for k, ps in kinds.items()])}." if kinds else ""
 
 
 def _is_checkout(work: str | None) -> bool:
@@ -1404,13 +1517,14 @@ def one_off(fid: int | str) -> dict[str, Any]:
 
 
 def _relink_cli() -> None:
-    """The thimble command in a shell (scripts/install.sh links it and names the link in cli-link) runs live's thimble
-    once Claude Code loads thimble from live."""
+    """The thimble command in a shell (scripts/install.sh links it and names the link in cli-link) runs the release
+    checkout's launcher once Claude Code loads thimble from live: the way back (thimble fix, file, update, reapply) runs
+    from the release, which no fix changes, and the launcher hands the other commands to live's."""
     try:
         link = Path((thimble_home() / "cli-link").read_text().strip())
     except OSError:
         return
-    target = live_dir() / "plugin" / "bin" / "thimble"
+    target = release_dir() / "plugin" / "bin" / "thimble"
     if not link.is_symlink() or not target.exists() or not os.readlink(link).endswith("/plugin/bin/thimble"):
         return
     if Path(os.readlink(link)) == target:
@@ -1731,6 +1845,7 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         rel.update(base=new, version=_version_at(live, new), tag=latest["tag"], updated=time.time())
         write_json(home() / "release.json", rel)
         _write_off_sh(rel)
+        place_release(new)
         d = home() / "pending"
         if aside:
             d.mkdir(parents=True, exist_ok=True)
@@ -1844,6 +1959,7 @@ def _update_dev(check: bool, once: bool, rel: dict[str, Any] | None, src: dict[s
             rel.pop("tag", None)
         write_json(home() / "release.json", rel)
         _write_off_sh(rel)
+        place_release(new)
         key = new[:7]
         back, had = _replay(order)
         recs = records()
@@ -1922,8 +2038,8 @@ def continue_() -> dict[str, Any]:
     """thimble update --continue: in the session thimble reapply opened, Claude brought back the set-aside fixes that the
     release still needs, one commit per fix with the fix's title. Each such commit becomes its fix's new version, and the
     fix is on. A set-aside fix with no commit is left out: the release does it, or it cannot work there, and it leaves
-    the list. A commit that is no set-aside fix's, or that changes a safety file, stops it with nothing recorded, so mine
-    holds only recorded fixes."""
+    the list. A commit that is no set-aside fix's, or that changes a file no fix may change (PROTECTED), stops it with
+    nothing recorded, so mine holds only recorded fixes."""
     cur = read_json(home() / "pending" / "current.json")
     if not cur:
         raise FixError("no fixes are set aside, so there is nothing to record; thimble update looks for a new release")
@@ -2125,7 +2241,8 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
 def _wrapped(label: str, text: str, width: int) -> list[str]:
     import textwrap  # noqa: PLC0415
 
-    body = textwrap.wrap(text, max(30, width - 16)) or [""]
+    # a path stays whole (package-lock.json)
+    body = textwrap.wrap(text, max(30, width - 16), break_on_hyphens=False) or [""]
     return [f"  {label:<12}  {body[0]}", *[f"  {'':<12}  {x}" for x in body[1:]]]
 
 
@@ -2157,11 +2274,15 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     elif r.get("error"):
         out += _wrapped("Why", str(r["error"]), width)
     tests = {"passed": "tests pass", "failed": "tests fail", "skipped": "tests not run"}.get(str(r.get("tests") or ""), "")
+    if tests == "tests pass" and str(r.get("tests_tail") or "").startswith(PASSED_AGAIN):
+        tests = "tests pass (the second time)"
     n = len(files) or len(p.get("files") or [])
     rounds = int(r.get("rounds") or 1)
     if n:
         out += _wrapped("Changed", " · ".join(x for x in (f"{n} file{'' if n == 1 else 's'}", tests,
                                                           f"{rounds} rounds" if rounds > 1 else "") if x), width)
+    if notice_said(r):
+        out += _wrapped("Note", notice_said(r), width)
     acts: list[tuple[str, str]] = []
     s = r.get("state")
     if s == "pending":
@@ -2698,7 +2819,8 @@ def cmd(a) -> int:
                 if r.get("reload"):
                     print(RELOAD)
         elif verb == "sandbox":
-            out_json(sandbox_argv(int(a.id)))
+            # the fixer's own shell: it may reach the package registries; the tests it runs reach nothing
+            out_json(sandbox_argv(int(a.id), net=True))
         elif verb == "draft":
             d = json.loads(stdin_text() or "{}")
             root = os.environ.get("THIMBLE_ROOT")

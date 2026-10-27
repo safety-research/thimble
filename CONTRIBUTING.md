@@ -20,7 +20,11 @@ session start or after `/reload-plugins`. To load it for one session only, witho
 a folder of data files with `claude --plugin-dir /path/to/thimble/plugin`.
 
 Once you have fixes (thimble fix), Claude Code loads thimble from `~/.thimble/fixes/live` instead: after `git pull`,
-`thimble update` moves thimble and your fixes onto the commit you checked out.
+`thimble update` moves thimble and your fixes onto the commit you checked out. The way back from a fix (`thimble fix`,
+`thimble file`, `thimble update`, the fixer's sandbox and the tests it runs) runs from `~/.thimble/fixes/release`, a
+checkout of that commit which no fix changes. A fix may change any text file but the fix flow and the privacy scan
+(`plugin/engine/kernel/fixes.py`, PROTECTED_KINDS), and the line that asks whether to use it names the sandbox, hook,
+launcher, script and lock files it changes.
 
 The browser workbench runs from the checkout too: `thimble-browser FOLDER` builds the page again when its sources
 changed, so an edit to the page shows when you start it again.

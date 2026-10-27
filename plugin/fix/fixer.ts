@@ -6,8 +6,9 @@
 //                               now (screen.ts); the bar shows `fixing <name>` with its time (`changing <name>` for a
 //                               round of a fix the person has); the subagent is named after the fix (fix-<slug>)
 //   fixerCall($, e, id)         each of its tool calls: Bash runs in the sandbox runtime (the kernel's `fix sandbox`
-//                               gives the command's start: no network, reads only the system, its tools and the copy,
-//                               writes only the copy and its temp folder), in the foreground, for at most 5 minutes;
+//                               gives the command's start: reads only the system, its tools and the copy, writes only
+//                               the copy and its temp folder, reaches only the package registries, by the release's
+//                               sandbox code), in the foreground, for at most 5 minutes;
 //                               Write and Edit only in the copy; its other calls as they are
 //   fixerCheck($, e)            a Bash call thimble put in the sandbox needs no dialog, as Claude Code's own sandboxed
 //                               commands need none, unless the person's rules deny the command; its other calls go
@@ -16,8 +17,8 @@
 //   fixerEnded($, e)            its end: thimble commits the change in the copy and runs the tests (`thimble fix done`),
 //                               then the line above the bar asks whether to use it (y; the person's key applies it), and
 //                               Claude Code sends a notification. When Claude started the fix, Claude is told, so that it
-//                               can tell the person. When the check does not use the change (a safety file, a binary
-//                               file, failing tests), a new fixer gets another round in the same copy at once
+//                               can tell the person. When the check does not use the change (a file no fix may change,
+//                               a binary file, failing tests), a new fixer gets another round in the same copy at once
 //                               (`thimble fix again`), told why; the person sees a failure only when a fixer ends with
 //                               `Cannot: <why>`.
 //
@@ -86,7 +87,7 @@ export function changingText(f: Fix): string {
 
 /** For the next fixer after the check did not use a change (another round in the same copy, or r in a new one): what
  *  was refused and why, so that it puts the change elsewhere or fixes the tests, or says why it cannot. The prompt does
- *  not list the safety files; this names only the ones the change touched. `earlier`: r, whose copy is new. */
+ *  not list the files no fix may change; this names only the ones the change touched. `earlier`: r, whose copy is new. */
 export function refusedText(r: Refusal, earlier: boolean): string {
   const where = earlier ? 'The earlier change is not in your copy' : 'Your last change is in your copy'
   const fix = r.files?.length
@@ -194,7 +195,8 @@ function watch($: Engine, id: number): void {
 async function sandboxOf($: Engine, id: number): Promise<string[] | string> {
   const all = ((await $.state.get(BOX)).value ?? {}) as Record<string, string[]>
   if (all[String(id)]) return all[String(id)]!
-  const r = await kernelFix($, ['sandbox', String(id)], { timeoutMs: 30000 })
+  // minutes when the release's sandbox runtime must be installed first (a fix changed live's pin)
+  const r = await kernelFix($, ['sandbox', String(id)], { timeoutMs: 300000 })
   const argv = r.ok ? jsonOf<string[]>(r.out) : null
   if (!Array.isArray(argv) || !argv.length) return cut(r.err || 'the sandbox could not be set up', 220)
   await $.state.set(BOX, { ...(((await $.state.get(BOX)).value ?? {}) as Record<string, string[]>), [String(id)]: argv } as never)
@@ -323,14 +325,16 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   const args = end.cannot
     ? ['done', String(id), '--cannot', '-']
     : ['done', String(id), '--summary', '-', ...(end.title ? ['--title', end.title] : []), ...(end.request ? ['--request'] : [])]
-  const r = await kernelFix($, args, { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 600000, doing: `testing ${fix ? fixName(fix, 28) : `fix ${id}`}` })
+  // the tests of one fix at a time, each run once more when it fails (engine/kernel/fixes.py run_tests): the wait for
+  // another fix's tests counts too
+  const r = await kernelFix($, args, { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 2400000, doing: `testing ${fix ? fixName(fix, 28) : `fix ${id}`}` })
   await refreshFixes($)
   if (!r.ok) {
     await setFixLine($, { id, kind: 'problem', said: `“${name}” could not be checked: ${cut(r.err || 'thimble fix done gave nothing', 200)}` })
     return null
   }
   const done = jsonOf<Fix>(r.out)
-  // the check did not use the change (a safety file, a binary file, failing tests): another round in the same copy
+  // the check did not use the change (a file no fix may change, a binary file, failing tests): another round in the same copy
   if (!end.cannot && done?.state === 'failed' && done.refused && done.work) {
     const a = await kernelFix($, ['again', String(id)], { timeoutMs: 60000 })
     const next = a.ok ? jsonOf<Fix>(a.out) : null

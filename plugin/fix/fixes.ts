@@ -1,6 +1,7 @@
 // fixes.ts: the person's fixes as the hooks module knows them, and what the person's keys do to them. The kernel
 // (`thimble fix …`, engine/kernel/fixes.py) holds the records and makes every change to live; this module calls it as
-// the person's own command and keeps what the bar and the line draw.
+// the person's own command, with the launcher of the release checkout (~/.thimble/fixes/release), which no fix changes,
+// so that no fix can break the keys that undo it, and keeps what the bar and the line draw.
 //
 //   refreshFixes($)          the kernel's list, into $.state fixes
 //   fixLineNow($), setFixLine  the one line above the bar for one fix (line.ts draws it)
@@ -50,6 +51,8 @@ export type Fix = {
   /** the last check did not use the change, and why; kept until the next check, so that the next fixer in the copy
    *  (another round, at once, or r) is told */
   refused?: Refusal | null
+  /** the kinds of files it changes that the person is told of before they use it, by kind (the sandbox, dependencies…) */
+  notice?: Record<string, string[]>
 }
 /** A fix as the person and Claude read it in a session: its name (its title), cut to `n` cells. The number is the
  *  shell's handle (thimble fix off 2), never the name. */
@@ -60,6 +63,14 @@ export const isChange = (f: Pick<Fix, 'prev'>): boolean => !!f.prev
 
 /** The bar's step while a fixer works: `fixing <name>` for a new fix, `changing <name>` for a fix the person has. */
 export const fixingWord = (f: Fix): string => `${isChange(f) ? 'changing' : 'fixing'} ${fixName(f, 28)}`
+
+/** The sentence that tells the person what such files a fix changes before they use it: `This fix changes the sandbox
+ *  (plugin/cards/argv.mjs).`, or '' (engine/kernel/fixes.py notice_said says the same). */
+export function noticeText(f: Pick<Fix, 'notice'>): string {
+  const and = (xs: string[]) => (xs.length < 3 ? xs.join(' and ') : `${xs.slice(0, -1).join(', ')}, and ${xs.at(-1)}`)
+  const kinds = Object.entries(f.notice ?? {})
+  return kinds.length ? `This fix changes ${and(kinds.map(([k, ps]) => `${k} (${and(ps)})`))}.` : ''
+}
 
 /** The fixer's subagent, by the fix's name: `fix-click-card-elements`. A new fix's name is the start of the person's
  *  words until the fixer gives it a title. */
@@ -75,7 +86,7 @@ export function fixSlug(f: Pick<Fix, 'id' | 'title'>): string {
   return `fix-${slug || f.id}`
 }
 
-/** Why the check did not use a fixer's change: the files it may not change (safety files, a binary file), or the end of
+/** Why the check did not use a fixer's change: the files it may not change (the way back, a binary file), or the end of
  *  the tests' output when they failed. */
 export type Refusal = { why: string; files: string[]; tests?: string }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
@@ -109,9 +120,18 @@ export async function kernelFix($: Engine, args: string[], o: { stdin?: string; 
     if (sid) args = [...args, '--session', sid]
   }
   const root = (await rootHere($)) || (await startDir($))
-  const call = () => runThimble($, root, ['fix', ...args], { timeoutMs: o.timeoutMs ?? 120000, ...(o.stdin != null ? { stdin: o.stdin } : {}) })
+  const bin = await releaseLauncher($)
+  const call = () => runThimble($, root, ['fix', ...args], { timeoutMs: o.timeoutMs ?? 120000, ...(bin ? { bin } : {}), ...(o.stdin != null ? { stdin: o.stdin } : {}) })
   const r = o.doing ? await busy($, o.doing, call) : await call()
   return { ok: r.code === 0, out: r.stdout, err: r.stderr.trim().replace(/^thimble fix \w+: /, '') }
+}
+
+/** The launcher of the release checkout, which the kernel keeps at the release commit (engine/kernel/fixes.py
+ *  place_release), when there is one; else undefined, and the loaded plugin's runs, which is the release before the
+ *  first fix. */
+async function releaseLauncher($: Engine): Promise<string | undefined> {
+  const bin = `${fixesDir(await thimbleHome($))}/release/plugin/bin/thimble`
+  return (await $.fs.exists(bin).catch(() => false)) ? bin : undefined
 }
 
 /** The kernel's JSON answer, or null. */

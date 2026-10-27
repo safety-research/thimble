@@ -1,7 +1,8 @@
 // The sandbox the card runner runs in (Anthropic's sandbox runtime, srt): its rules (cards/argv.mjs) on any machine,
 // then, on this machine, a process under those rules: it reads no file but the ones the rules name, writes only its own
-// folder, has no network and no variable of the session's. setup.mjs installs srt in the test's THIMBLE_HOME, and names
-// the system packages srt lacks with the one command that installs them. All paths and names are made up.
+// folder, has no network and no variable of the session's; with rules that allow a site, as thimble fix's fixer has,
+// that site alone. setup.mjs installs srt in the test's THIMBLE_HOME, and names the system packages srt lacks with the
+// one command that installs them. All paths and names are made up.
 //   node --test plugin/sandbox/test/sandbox.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -119,6 +120,19 @@ test('in the sandbox: no network, and no variable of the session\'s', () => {
   assert.notEqual(out, 'connected')
   assert.notEqual(inSandbox('fetch("https://example.com").then(() => console.log("fetched"), () => console.log("no"))'), 'fetched')
   assert.deepEqual(JSON.parse(inSandbox('console.log(JSON.stringify(Object.keys(process.env)))')), ['PATH'])
+})
+
+test('in the sandbox, with rules that allow a site (the fixer\'s shell, thimble fix): that site, through srt\'s proxies, and no other', t => {
+  if (!existsSync('/usr/bin/curl')) return t.skip('no curl on this machine')
+  const rules = { ...rulesHere(), network: { ...rulesHere().network, allowedDomains: ['registry.npmjs.org'] } }
+  const status = url => `curl -s -m 30 -o /dev/null -w '%{http_code}\\n' ${url}`
+  const r = spawnSync(s.node, [join(PLUGIN, 'sandbox', 'run.mjs'), '--srt', s.srt, JSON.stringify(rules), '--', '/usr/bin/env', '/bin/sh', '-c',
+    `echo "$HTTPS_PROXY"; ${status('https://registry.npmjs.org/')}; ${status('https://example.com/')}`],
+  { encoding: 'utf8', timeout: 120000, env: { PATH: '/usr/bin:/bin' } })
+  const [proxy, registry, other] = r.stdout.trim().split('\n')
+  assert.match(proxy, /@localhost:\d+$/, r.stderr)
+  assert.equal(registry, '200')
+  assert.notEqual(other, '200')
 })
 
 test('the probe\'s runner starts with a temp folder too long for a socket in it, and the folder stays empty', () => {

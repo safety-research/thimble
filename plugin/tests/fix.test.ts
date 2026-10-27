@@ -9,7 +9,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
-import { fixSlug, fixingWord } from '../fix/fixes'
+import { fixSlug, fixingWord, noticeText } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { notStarted, registerFix, wordsOfSkill } from '../fix/register'
 import { fixesContext } from '../fix/request'
@@ -55,7 +55,7 @@ function setup() {
   const state = new Map<string, unknown>()
   const files = new Map<string, string>()
   const timers: (() => unknown)[] = []
-  const ran: { argv: string[]; stdin?: string }[] = []
+  const ran: { argv: string[]; stdin?: string; env?: Record<string, string> }[] = []
   const spawns: Any[] = []
   const commands: string[] = []
   const opened: string[] = []
@@ -100,10 +100,10 @@ function setup() {
       // a round of a fix changed in place keeps its name; one that changed no code leaves the fix as it was
       if (fix.prev && argv.includes('--request')) { Object.assign(fix, { ...fix.prev, work: null, prev: null }); return ok({ ...fix, unchanged: true }) }
       Object.assign(fix, { state: argv.includes('--request') ? 'request' : 'ready', title: t > 0 && !fix.prev ? argv[t + 1] : fix.title, summary: stdin, commit: 'c0ffee1', tests: 'passed', files: [{ path: 'plugin/bar/bar.tsx', add: 1, del: 1 }] })
-      // the kernel's check after the fixer's end refused it (fix.refuse is the reason a test gives); a refusal for
-      // safety files is kept on the record (refused) until the next check
+      // the kernel's check after the fixer's end refused it (fix.refuse is the reason a test gives); a refusal of files
+      // no fix may change is kept on the record (refused) until the next check
       if (argv.includes('--cannot')) { Object.assign(fix, { state: 'failed', tests: null, error: stdin, refused: null }); return ok(fix) }
-      if (fix.refuse) Object.assign(fix, { state: 'failed', tests: null, error: fix.refuse, refused: /safety files/.test(fix.refuse) ? { why: fix.refuse, files: ['plugin/engine/kernel/privacy.py'] } : { why: fix.refuse, files: [], tests: 'FAIL made-up test' } })
+      if (fix.refuse) Object.assign(fix, { state: 'failed', tests: null, error: fix.refuse, refused: /no fix may change/.test(fix.refuse) ? { why: fix.refuse, files: ['plugin/engine/kernel/privacy.py'] } : { why: fix.refuse, files: [], tests: 'FAIL made-up test' } })
       else fix.refused = null
       return ok(fix)
     }
@@ -162,7 +162,7 @@ function setup() {
     config: { list: async () => config },
     // the person's rules, as Claude Code reads them: they deny rm -rf
     tool: { check: async (q: Any) => ({ decision: /^rm -rf/.test(String(q.input?.command)) ? 'deny' : 'ask', reason: 'Bash(rm -rf:*) is denied' }) },
-    process: { run: async (argv: string[], o: Any = {}) => { ran.push({ argv, ...(o.stdin != null ? { stdin: o.stdin } : {}) }); return argv.includes('fix') ? kernel(argv, o.stdin) : { exitCode: 0, stdout: '', stderr: '' } } },
+    process: { run: async (argv: string[], o: Any = {}) => { ran.push({ argv, env: o.env, ...(o.stdin != null ? { stdin: o.stdin } : {}) }); return argv.includes('fix') ? kernel(argv, o.stdin) : { exitCode: 0, stdout: '', stderr: '' } } },
     command: { run: async (c: Any) => { commands.push(c.command); return {} }, register: async () => ({ command: 'thimble-fix' }) },
     model: { complete: async (req: Any) => { asked.push(req); return { isAnswered: true, text: JSON.stringify({ title: 'Bar says coverage, not read', wrong: 'The bar said coverage after Claude read a file.', fixed: 'The bar says read.' }) } } },
     ui: { copy: async (o: Any) => { copied.push(o.text); return { isCopied: true } }, toast: (t: string) => { toasts.push(t) }, notify: async (text: string, o: Any = {}) => { notes.push({ text, title: o.title }); return { isSent: true } }, log: () => undefined, open: async (o: Any) => { opened.push(o.id); return { isPlaced: true } }, panes: async () => opened.map(id => ({ id })), close: async () => ({}), invalidate: () => undefined },
@@ -405,9 +405,41 @@ test('n leaves the fix ready in the list, where thimble fix apply in a shell tur
   expect(textOf(await fixLineRows(t.$, ELS, 110))).toContain('Saved as a request with no code: Explain terms of my field')
 })
 
+test("a fix that changes the sandbox, the launcher or dependencies says which in one sentence on the line that asks for y, and in d", async () => {
+  const s = setup()
+  s.fix.notice = { 'the sandbox': ['plugin/cards/argv.mjs'], dependencies: ['browser/frontend/package-lock.json'] }
+  await requested(s, 'Title: Cards draw on Node 26\nWhat it does: The card runner starts with --allow-net.')
+  const said = 'This fix changes the sandbox (plugin/cards/argv.mjs) and dependencies (browser/frontend/package-lock.json).'
+  expect(noticeText(s.fix)).toBe(said)
+  let rows = await fixLineRows(s.$, ELS, 160)
+  expect(rows.map(textOf)).toEqual(['  ✓ thimble fixed: Cards draw on Node 26 · tests pass', `    ${said}`, '    y use it now · d what changed · n later'])
+  await (await fixKey(s.$, 'd'))!.later()
+  rows = await fixLineRows(s.$, ELS, 160)
+  expect(rows.map(textOf)).toContain(`    Note        ${said}`)
+  // y applies it as any fix
+  await (await fixKey(s.$, 'y'))!.later()
+  expect(s.verbs()).toContain('apply 1 --ask -')
+  expect(noticeText({ notice: { 'the launcher': ['plugin/bin/thimble'] } })).toBe('This fix changes the launcher (plugin/bin/thimble).')
+  expect(noticeText({})).toBe('')
+})
+
+test("the plugin runs the kernel with the release checkout's launcher, which no fix changes, once there is one, and names the folder it was loaded from", async () => {
+  const s = setup()
+  await requested(s)
+  // before the first fix the loaded plugin is the release: its launcher
+  expect(s.ran.find(x => x.argv.includes('new'))?.argv[0]).toBe('/made-up/plugin/bin/thimble')
+  s.files.set(`${HOME}/fixes/release/plugin/bin/thimble`, '#!/bin/sh\n')
+  await (await fixKey(s.$, 'y'))!.later()
+  const apply = s.ran.find(x => x.argv.includes('apply'))!
+  expect(apply.argv[0]).toBe(`${HOME}/fixes/release/plugin/bin/thimble`)
+  expect(apply.env?.THIMBLE_PLUGIN_ROOT).toBe('/made-up/plugin')
+})
+
+const WAY_BACK = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); no fix may change the code that turns fixes off and undoes them, or the scan a shared fix goes through'
+
 test('a refused change goes back to a new fixer in the same copy, told what was refused and why; its next round passes, and the person sees no failure', async () => {
   const s = setup()
-  const why = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files'
+  const why = WAY_BACK
   s.fix.refuse = why
   await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
   expect(s.verbs()).toContain('again 1')
@@ -431,7 +463,7 @@ test('a refused change goes back to a new fixer in the same copy, told what was 
 test('a fixer that finds the request cannot be met ends with Cannot: the line shows its words, long on a row of its own, short after the title; d shows what changed, r redoes', async () => {
   const s = setup()
   const why = 'The scan is part of what keeps your data private, and a fix may not change it, so notes cannot skip it.'
-  s.fix.refuse = 'it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files'
+  s.fix.refuse = WAY_BACK
   await requested(s, 'Title: Skip the scan for my notes\nWhat it does: The scan skips the notes you name.')
   await s.end(`I could not do this.\n\nCannot: ${why}`, 'agent-fixer-2')
   expect(s.ran.find(x => x.argv.includes('--cannot'))?.stdin).toBe(why)

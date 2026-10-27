@@ -507,3 +507,14 @@ def test_the_tests_read_the_real_packages_also_when_the_server_runs_from_live(tm
     assert set(fixes.lent_reads()) == {(real / "backend" / ".venv").resolve(), (real / "frontend" / "node_modules").resolve()}
     fixes.lend(copy)
     assert os.readlink(copy / "frontend" / "node_modules" / "vite") == str((real / "frontend" / "node_modules" / "vite").resolve())
+
+
+def test_the_kernel_runs_from_the_release_checkout_once_there_is_one(tmp_path, monkeypatch):
+    """The way back runs from the release, which no fix changes (plugin/engine/kernel/fixes.py): a fix to live's kernel
+    cannot break the clicks that undo it."""
+    monkeypatch.setenv(fixes.PLUGIN_HOME_ENV, str(tmp_path / "home"))
+    assert fixes.kernel_script() == fixes.plugin_dir() / "engine" / "thimble.py"
+    release = tmp_path / "home" / "fixes" / "release" / "plugin" / "engine" / "thimble.py"
+    release.parent.mkdir(parents=True)
+    release.write_text("print('made-up kernel')\n")
+    assert fixes.kernel_script() == release

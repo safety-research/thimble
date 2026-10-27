@@ -193,25 +193,131 @@ def test_off_and_on_and_off_sh(world):
     assert "coverage ${n}" in live_file("plugin/bar/bar.tsx") and not FX.is_on()
 
 
-def test_a_fix_may_not_touch_what_keeps_the_person_safe(world):
+WAY_BACK = "no fix may change the code that turns fixes off and undoes them, or the scan a shared fix goes through"
+
+
+def test_a_fix_may_not_change_the_way_back_and_its_record_names_the_safety_files_it_changes(world):
     r = FX.new("let fixes skip the scan")
     (Path(r["work"]) / "plugin" / "engine" / "kernel").mkdir(parents=True)
     (Path(r["work"]) / "plugin" / "engine" / "kernel" / "privacy.py").write_text("def scan(*a): return [], []\n")
     r = FX.done(r["id"], "Skip the scan", "")
     # the refusal names each file with what it is, and why
-    assert r["state"] == "failed" and r["error"] == (
-        "it changes plugin/engine/kernel/privacy.py (the privacy scan); thimble does not apply changes to its safety files")
+    assert r["state"] == "failed" and r["error"] == f"it changes plugin/engine/kernel/privacy.py (the privacy scan); {WAY_BACK}"
     with pytest.raises(FX.FixError):
         FX.apply(r["id"], press(r["id"]))
     b = FX.new("an image")
     (Path(b["work"]) / "plugin" / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00")
     assert FX.done(b["id"], "Logo", "")["state"] == "failed"
-    c = FX.new("a new lock file")
-    (Path(c["work"]) / "plugin" / "sandbox" / "package-lock.json").write_text("{}\n")
-    assert "package-lock.json" in FX.done(c["id"], "Lock", "")["error"]
-    assert FX.protected_why(["plugin/fix/line.ts", "plugin/fix/pane.tsx", "scripts/install.sh"]) == (
-        "it changes plugin/fix/line.ts and plugin/fix/pane.tsx (the fix flow) and scripts/install.sh (thimble's scripts); "
-        "thimble does not apply changes to its safety files")
+    assert FX.protected_why(["plugin/fix/line.ts", "plugin/engine/kernel/privacy.py", "plugin/fix/pane.tsx"]) == (
+        "it changes plugin/fix/line.ts and plugin/fix/pane.tsx (the fix flow) and plugin/engine/kernel/privacy.py (the "
+        f"privacy scan); {WAY_BACK}")
+    # the sandbox, the launcher, thimble's scripts and lock files may change: the record names them by kind, and the
+    # person reads the sentence before they press y, and in thimble fix show
+    c = FX.new("cards draw on Node 26")
+    wt = Path(c["work"])
+    for path in ("plugin/cards/argv.mjs", "plugin/sandbox/package-lock.json", "browser/frontend/package-lock.json",
+                 "plugin/bin/thimble", "scripts/install.sh"):
+        (wt / path).parent.mkdir(parents=True, exist_ok=True)
+        (wt / path).write_text("made-up\n")
+    c = FX.done(c["id"], "Cards draw on Node 26", "The card runner starts with --allow-net.")
+    assert c["state"] == "ready" and c["title"] == "Cards draw on Node 26"
+    assert c["notice"] == {"the sandbox": ["plugin/cards/argv.mjs", "plugin/sandbox/package-lock.json"],
+                           "the launcher": ["plugin/bin/thimble"], "thimble's scripts": ["scripts/install.sh"],
+                           "dependencies": ["browser/frontend/package-lock.json"]}
+    said = ("This fix changes the sandbox (plugin/cards/argv.mjs and plugin/sandbox/package-lock.json), the launcher "
+            "(plugin/bin/thimble), thimble's scripts (scripts/install.sh), and dependencies "
+            "(browser/frontend/package-lock.json).")
+    assert FX.notice_said(c) == said
+    assert said in " ".join(" ".join(FX.show_lines(c["id"])).split())
+    FX.apply(c["id"], press(c["id"]))
+    assert FX.get(c["id"])["state"] == "on" and FX.get(c["id"])["notice"] == c["notice"]
+    assert (FX.live_dir() / "plugin" / "cards" / "argv.mjs").read_text() == "made-up\n"
+    # a fix that changes none of them has no notice
+    d = made(world)
+    assert "notice" not in FX.done(d["id"], "Bar says read", "") and FX.notice_said(FX.get(d["id"])) == ""
+
+
+def release_with(w, files: dict[str, str]) -> str:
+    """The installed release with these files too: a commit of the made-up thimble, which Claude Code installed."""
+    for path, text in files.items():
+        p = w["rel"] / path
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+        if path.startswith("plugin/bin/"):
+            p.chmod(0o755)
+    sh("git", "add", "-A", cwd=w["rel"])
+    sh("git", "commit", "-q", "-m", "made-up release files", cwd=w["rel"])
+    head = sh("git", "rev-parse", "HEAD", cwd=w["rel"])
+    installed = json.loads((w["cc"] / "plugins" / "installed_plugins.json").read_text())
+    installed["plugins"]["thimble@thimble"][0]["gitCommitSha"] = head
+    (w["cc"] / "plugins" / "installed_plugins.json").write_text(json.dumps(installed))
+    w["base"] = head
+    return head
+
+
+def test_the_way_back_runs_from_a_checkout_of_the_release_that_no_fix_changes(world, monkeypatch, capsys):
+    from kernel import cli  # noqa: PLC0415
+
+    release_with(world, {"plugin/sandbox/run.mjs": "// the release's launcher\n"})
+    r = made(world)
+    # made with live, at the release commit; a fix that goes on changes live, never this checkout
+    rel = FX.release_dir()
+    assert sh("git", "rev-parse", "HEAD", cwd=rel) == world["base"]
+    r = FX.done(r["id"], "Bar says read", "")
+    FX.apply(r["id"], press(r["id"]))
+    assert "read ${n}" in live_file("plugin/bar/bar.tsx")
+    assert "coverage ${n}" in (rel / "plugin" / "bar" / "bar.tsx").read_text()
+    # the sandbox the fixer and its tests run in is the release's: a fix that loosens live's does not loosen it
+    assert FX.sandbox_dir() == rel / "plugin" / "sandbox"
+    srt = FX.thimble_home() / "srt"  # the made-up package.json pins nothing
+    (srt / "node_modules").mkdir(parents=True)
+    b = FX.new("add a package")
+    rules = lambda argv: json.loads(argv[argv.index("--srt") + 2])  # noqa: E731
+    fixer, tests = world["real_sandbox"](b["id"], net=True), world["real_sandbox"](b["id"])
+    assert fixer[fixer.index("--srt") - 1] == str(rel / "plugin" / "sandbox" / "run.mjs")
+    # the fixer's own commands reach the package registries, through srt's proxies (no env -i drops them); the tests
+    # reach nothing
+    assert rules(fixer)["network"]["allowedDomains"] == ["registry.npmjs.org", "pypi.org", "files.pythonhosted.org"]
+    assert rules(tests)["network"]["allowedDomains"] == []
+    assert fixer[fixer.index("--") + 1:][:2] != ["/usr/bin/env", "-i"]
+    assert tests[tests.index("--") + 1:][:2] == ["/usr/bin/env", "-i"]
+    # `thimble fix sandbox N`, which the plugin runs for the fixer's shell, gives the fixer's
+    monkeypatch.setattr(FX, "sandbox_argv", world["real_sandbox"])
+    assert cli.main(["fix", "sandbox", str(b["id"])]) == 0
+    assert rules(json.loads(capsys.readouterr().out))["network"]["allowedDomains"] == list(FX.REGISTRIES)
+    # made again when it is missing
+    import shutil  # noqa: PLC0415
+
+    shutil.rmtree(rel)
+    FX.new("one more change")
+    assert sh("git", "rev-parse", "HEAD", cwd=rel) == world["base"]
+
+
+def test_the_tests_run_for_one_fix_at_a_time_and_once_more_before_they_fail(world, monkeypatch, tmp_path):
+    import threading  # noqa: PLC0415
+
+    # a suite that fails once and passes the second time: the fix is ready, and the record says so
+    flag = tmp_path / "ran-once"
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", f"test -f {flag} || {{ touch {flag}; echo made-up-flake; exit 1; }}")
+    r = FX.done(made(world)["id"], "Bar says read", "")
+    assert r["state"] == "ready" and r["tests"] == "passed"
+    assert r["tests_tail"].startswith("The tests passed only the second time") and "made-up-flake" in r["tests_tail"]
+    assert "tests pass (the second time)" in "\n".join(FX.show_lines(r["id"]))
+    # one that fails twice fails
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "echo made-up-failure >> runs.log; false")
+    t = FX.done(made(world)["id"], "Bar says read", "")
+    assert t["state"] == "failed" and (Path(t["work"]) / "runs.log").read_text() == "made-up-failure\n" * 2
+    # one fix at a time: while another fix's tests run, the next waits for them
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    u = made(world)
+    got: list = []
+    with FX.Lock("tests.lock"):
+        th = threading.Thread(target=lambda: got.append(FX.run_tests(u["id"])))
+        th.start()
+        time.sleep(0.5)
+        assert th.is_alive() and got == []
+    th.join(30)
+    assert got and got[0][0] is True
 
 
 def test_a_refused_change_goes_back_to_the_fixer_in_the_same_copy_and_the_next_round_passes(world, monkeypatch):
@@ -490,6 +596,7 @@ def test_update_sets_the_fixes_aside_and_reapply_brings_back_what_the_release_st
     live = FX.live_dir()
     assert sh("git", "rev-parse", "mine", cwd=live) == new and "coverage ${n}" in live_file("plugin/bar/bar.tsx")
     assert FX.release()["tag"] == "v0.10.3" and FX.release()["base"] == new and new in (FX.home() / "off.sh").read_text()
+    assert sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == new  # the way back runs from the new release
     for fid in (a, b, c):
         r = FX.get(fid)
         assert r["state"] == "pending" and r["note"] == "set aside at the update to 0.10.3"
@@ -650,6 +757,7 @@ def test_dev_install_update_moves_live_to_the_checkouts_head_and_replays_the_fix
     # fix a applies as it is and is on again; the checkout already has b; c's file changed there, so Claude fits it
     assert (out["back"], out["had"], out["aside"]) == ([a], [b], [c])
     assert FX.release()["base"] == new and sh("git", "rev-parse", "mine^", cwd=live) == new
+    assert sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == new
     assert "read ${n}" in live_file("plugin/bar/bar.tsx") and live_file("plugin/legend.ts") == "const legend = `quiet`\n"
     assert (live / "plugin" / "other.md").exists()
     assert FX.get(a)["state"] == "on" and FX.get(a)["commit"] == sh("git", "rev-parse", "mine", cwd=live)
@@ -843,39 +951,54 @@ def test_thimble_fixes_fix_show_and_the_shell_commands(world, upstream, capsys, 
     assert cli.main(["--help"]) == 0 and "thimble file" not in capsys.readouterr().out
 
 
-def test_the_shell_command_is_a_link_that_follows_live(world, tmp_path, monkeypatch):
+def test_the_shell_command_runs_the_way_back_from_the_release_and_the_rest_from_live(world, tmp_path, monkeypatch):
     """scripts/install.sh links bin/thimble to the plugin's command and names the link in cli-link; once Claude Code
-    loads thimble from live, the link runs live's. A link to 0.10's command is no 0.9 left behind."""
-    cmd = world["rel"] / "plugin" / "bin" / "thimble"
-    cmd.parent.mkdir(parents=True)
+    loads thimble from live, the link runs the release checkout's launcher, which runs thimble fix, file, update and
+    reapply itself and hands the rest to live's. A link to 0.10's command is no 0.9 left behind."""
     real = Path(__file__).resolve().parents[1] / "bin" / "thimble"
-    cmd.write_text(real.read_text())
-    cmd.chmod(0o755)
-    (world["rel"] / "plugin" / "engine").mkdir()
-    (world["rel"] / "plugin" / "engine" / "thimble.py").write_text("import sys\nprint('made-up kernel', *sys.argv[1:])\n")
-    sh("git", "add", "-A", cwd=world["rel"])
-    sh("git", "commit", "-q", "-m", "the command", cwd=world["rel"])
-    installed = json.loads((world["cc"] / "plugins" / "installed_plugins.json").read_text())
-    installed["plugins"]["thimble@thimble"][0]["gitCommitSha"] = sh("git", "rev-parse", "HEAD", cwd=world["rel"])
-    (world["cc"] / "plugins" / "installed_plugins.json").write_text(json.dumps(installed))
+    release_with(world, {"plugin/bin/thimble": real.read_text(),
+                         "plugin/engine/thimble.py": "import sys\nprint('made-up kernel', *sys.argv[1:])\n"})
+    cmd = world["rel"] / "plugin" / "bin" / "thimble"
     home = tmp_path / "home"
     link = home / ".local" / "bin" / "thimble"
     link.parent.mkdir(parents=True)
     link.symlink_to(cmd)
     FX.home().mkdir(parents=True, exist_ok=True)
     (FX.home().parent / "cli-link").write_text(f"{link}\n")
+    # a fix of the kernel's own command: live's kernel says so
     r = made(world)
+    (Path(r["work"]) / "plugin" / "engine" / "thimble.py").write_text("import sys\nprint('fixed kernel', *sys.argv[1:])\n")
     FX.done(r["id"], "Bar says read", "")
     FX.apply(r["id"], press(r["id"]))
-    assert os.readlink(link) == str(FX.live_dir() / "plugin" / "bin" / "thimble")
-    # the link runs the kernel of the plugin it points at, from any folder
-    p = subprocess.run([str(link), "--help"], capture_output=True, text=True, cwd=tmp_path,
-                       env={**os.environ, "THIMBLE_PYTHON": sys.executable})
-    assert p.returncode == 0 and p.stdout == "made-up kernel --help\n"
+    assert os.readlink(link) == str(FX.release_dir() / "plugin" / "bin" / "thimble")
+
+    def ran(launcher: Path, *args: str) -> str:
+        p = subprocess.run([str(launcher), *args], capture_output=True, text=True, cwd=tmp_path,
+                           env={**os.environ, "THIMBLE_PYTHON": sys.executable})
+        return p.stdout.strip() or f"exit {p.returncode}"
+
+    # from any folder: the way back from the release, the rest from live, so a fix to them works; live's own launcher,
+    # which Claude's Bash tool runs, hands the way back to the release too
+    live_cmd = FX.live_dir() / "plugin" / "bin" / "thimble"
+    assert ran(link, "fix", "list") == "made-up kernel fix list"
+    assert ran(link, "file", "issue", "1") == "made-up kernel file issue 1"
+    assert ran(link, "label") == "fixed kernel label" and ran(link, "--help") == "fixed kernel --help"
+    assert ran(live_cmd, "fixes") == "made-up kernel fixes" and ran(live_cmd, "coverage") == "fixed kernel coverage"
+    # a fix may change the launcher (its record says so), and one that breaks live's leaves the way back working
+    b = FX.new("a launcher that fails")
+    (Path(b["work"]) / "plugin" / "bin" / "thimble").write_text("#!/bin/sh\nexit 9\n")
+    b = FX.done(b["id"], "Launcher fails", "")
+    assert b["notice"] == {"the launcher": ["plugin/bin/thimble"]}
+    FX.apply(b["id"], press(b["id"]))
+    assert ran(link, "label") == "exit 9" and ran(link, "fix", "off") == "made-up kernel fix off"
+    # the link is 0.10's, also while the release checkout is gone (a home moved)
     script = Path(__file__).resolve().parents[2] / "scripts" / "thimble09.py"
-    p = subprocess.run([sys.executable, str(script), "report"], capture_output=True, text=True,
-                       env={**os.environ, "HOME": str(home), "CLAUDE_CONFIG_DIR": str(world["cc"])})
-    assert p.returncode == 0 and p.stdout.strip() == ""
+    for gone in (False, True):
+        if gone:
+            os.rename(FX.release_dir(), tmp_path / "moved")
+        p = subprocess.run([sys.executable, str(script), "report"], capture_output=True, text=True,
+                           env={**os.environ, "HOME": str(home), "CLAUDE_CONFIG_DIR": str(world["cc"])})
+        assert p.returncode == 0 and p.stdout.strip() == "", gone
 
 
 def test_a_data_file_named_like_one_of_thimbles_goes_from_the_words_and_stays_in_the_diff(world, monkeypatch):

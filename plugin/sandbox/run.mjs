@@ -7,11 +7,12 @@
 //
 // --srt names the folder srt is installed in (it holds node_modules): the plugin's is <THIMBLE_HOME>/srt/<version>,
 // which setup.mjs installs, the browser's browser/server/sandbox. The rules are srt's configuration: filesystem rules,
-// and a network rule that allows no domain, so the command has no network at all; on Linux also bwrapPath, the bwrap.sh
-// beside this file. --print prints the wrapped command (on macOS, with the Seatbelt profile srt made of the rules)
-// instead of running it. This process stays the command's parent, passes SIGTERM and SIGHUP on, stops the command when
-// the process that started it is gone (a long-lived command, such as the card runner, would stay otherwise), and exits
-// with the command's status, or with 3 when the sandbox could not be set up.
+// and a network rule that allows no domain, so the command has no network at all, or (thimble fix's fixer) the few
+// sites it may reach, through srt's proxies; on Linux also bwrapPath, the bwrap.sh beside this file. --print prints the
+// wrapped command (on macOS, with the Seatbelt profile srt made of the rules) instead of running it. This process stays
+// the command's parent, passes SIGTERM and SIGHUP on, stops the command when the process that started it is gone (a
+// long-lived command, such as the card runner, would stay otherwise), and exits with the command's status, or with 3
+// when the sandbox could not be set up.
 import { spawn } from 'node:child_process'
 import { accessSync, constants as fsConstants } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -59,8 +60,10 @@ try {
   SandboxManager = srt.SandboxManager
   const rules = srt.SandboxRuntimeConfigSchema.parse(JSON.parse(rulesJson))
   // The rules become srt's configuration (bwrapPath is read only from there) without initialize(), which would start
-  // the network proxies that a command with no network does not need.
-  SandboxManager.updateConfig(rules)
+  // the network proxies that a command with no network does not need. Rules that allow sites (the fixer's shell) start
+  // them: the command reaches those sites, and no other, through the proxies this process runs while it runs.
+  if (rules.network.allowedDomains.length) await SandboxManager.initialize(rules)
+  else SandboxManager.updateConfig(rules)
   wrapped = await SandboxManager.wrapWithSandbox(command, systemBash(), rules)
 } catch (e) {
   console.error(`the sandbox could not be set up: ${e instanceof Error ? e.message : String(e)}`)

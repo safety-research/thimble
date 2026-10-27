@@ -195,6 +195,10 @@ The terminal plugin:
 - **`thimble: command not found` in Claude's Bash calls.** The same: the plugin is not loaded.
 - **A line above the prompt says something failed.** It says what failed and why, and what to try when there is
   something to try. It goes when you type your next prompt.
+- **thimble misbehaves, or does not load, after you used a fix.** `thimble fix off N` in a shell turns off fix N, and
+  `thimble fix off` all of them; `sh ~/.thimble/fixes/off.sh` does the same when thimble does not load, and runs no
+  thimble code. Then type `/reload-plugins`. These run from `~/.thimble/fixes/release`, a copy of the release that no
+  fix changes, so a fix cannot break them, not even one that changed the launcher or the sandbox.
 - **"Cards cannot draw: cards run only in Anthropic's sandbox runtime, which cannot start here".** Cards never run
   without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
   ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, the command that allows it; when npm

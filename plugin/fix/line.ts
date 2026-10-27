@@ -2,6 +2,7 @@
 // prompt (hooks/keys.ts asks fixKey first while the line shows):
 //
 //   ready     ✓ thimble fixed: <title> · tests pass
+//               This fix changes the sandbox (plugin/cards/argv.mjs).   (a fix that changes such files: fixes.ts noticeText)
 //               y use it now · d what changed · n later
 //             (a round of a fix the person has: ✓ thimble changed: <title> · tests pass; the version they have stays
 //             until y, and d shows each round's words)
@@ -10,6 +11,7 @@
 //               You asked   <the words>
 //               Claude did  <what it does>
 //               Changed     2 files · tests pass
+//               Note        This fix changes the sandbox (plugin/cards/argv.mjs).
 //               y use it now · n later
 //   applied   ✓ <title> is on · thimble reloaded · u undo (or: reloads when Claude finishes; or, in a session that
 //               If thimble stops loading: sh …/off.sh       loads thimble with --plugin-dir, the restart that loads it)
@@ -33,7 +35,7 @@ import { quiet } from '../core/askcell.js'
 import { cut, textWidth } from '../core/text.js'
 import { accent } from '../core/theme'
 import { testsWord } from './fixer'
-import { applyFix, type Fix, fixesDir, fixesNow, fixLineNow, fixName, fixOf, notNow, setFixLine, shownPath, undoFix } from './fixes'
+import { applyFix, type Fix, fixesDir, fixesNow, fixLineNow, fixName, fixOf, noticeText, notNow, setFixLine, shownPath, undoFix } from './fixes'
 import { redoFix } from './request'
 
 type Engine = EngineInterface
@@ -95,7 +97,8 @@ function keysRow(els: Any, keys: [string, string][], press: (k: string) => unkno
 /** How many files a fix changed: `2 files`. */
 const filesWord = (f: Fix) => `${(f.files || []).length} file${(f.files || []).length === 1 ? '' : 's'}`
 
-/** What changed, in a few rows (d): the person's words, what Claude did, and what it changed. */
+/** What changed, in a few rows (d): the person's words, what Claude did, what it changed, and the files the person
+ *  is told of (noticeText). */
 function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
   const { Box, Text } = els
   const room = Math.max(20, width - 16)
@@ -110,6 +113,7 @@ function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
     ...words.map((w, i) => row(`fix-what-asked-${i}`, i ? 'then' : 'You asked', cut(w, room * 2))),
     ...(f.summary ? [row('fix-what-did', 'Claude did', cut(f.summary, room * 3))] : []),
     row('fix-what-changed', 'Changed', changed),
+    ...(noticeText(f) ? [row('fix-what-notice', 'Note', noticeText(f))] : []),
   ]
 }
 
@@ -133,9 +137,12 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   let first: Any[] = []
   let second: Any[] = []
   let why: Any[] = []
+  let note: Any[] = []
   if (l.kind === 'ready' && f) {
-    // a round of a fix the person has: its new version, which y puts in place of the one they have
+    // a round of a fix the person has: its new version, which y puts in place of the one they have; a fix that changes
+    // the files the person is told of says which, in a row of its own, before they press y
     first = [Text({ key: 'g', color: 'success', children: '✓ ' }), Text({ key: 'h', bold: true, children: f.prev ? 'thimble changed: ' : 'thimble fixed: ' }), Text({ key: 't', bold: true, children: title }), dim('m', ` · ${testsWord(f)}`)]
+    if (noticeText(f)) note = [Text({ key: 'w', wrap: 'wrap', children: `  ${noticeText(f)}` })]
     second = keysRow(els, [['y', 'use it now'], ['d', 'what changed'], ['n', 'later']], press)
   } else if (l.kind === 'applied') {
     const off = await shownPath($, `${fixesDir(await thimbleHome($))}/off.sh`)
@@ -170,6 +177,6 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
   } else if (l.kind === 'problem') {
     first = [Text({ key: 't', color: 'error', wrap: 'wrap', children: `× ${l.said || `${f ? `“${fixName(f)}”` : `fix ${l.id}`} did not go through`}` })]
   } else return []
-  return [row('fix-line-1', first), ...(why.length ? [row('fix-line-why', why)] : []),
+  return [row('fix-line-1', first), ...(why.length ? [row('fix-line-why', why)] : []), ...(note.length ? [row('fix-line-notice', note)] : []),
     ...(second.length ? [Box({ key: 'fix-line-2', flexDirection: 'row', flexWrap: 'wrap', width, children: second })] : [])]
 }
