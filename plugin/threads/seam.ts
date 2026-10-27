@@ -11,6 +11,8 @@
 //                                      it is about, its turns, its input)
 //   threadPaneParts($, e, args, els)   one thread's pane in two parts: what it is about with its turns, and the key row
 //                                      with the input bar, which the docked pane keeps at its bottom (core/pane.ts)
+//   threadKnown($, key)                whether the thread `key` is this conversation's, so the side pane can show it
+//                                      again: its way back passes over one that is not (core/pane.ts)
 //   openThread($, scope, {key})        the side pane on the thread about `scope` (a new one, or the one already about
 //                                      it), its input taking the keys: the tray's `a` on a mark, a claim's question in
 //                                      the claims pane; true when it opened. `key`: the bar's words that open it where
@@ -39,7 +41,7 @@ import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
 import { askHere, drawThreads, rowsUnder as roomUnder, threadParts, threadUnder as under, threadUnderParts, type PaneEdit } from './pane'
-import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadsBright } from './thread'
+import { listThreads, openThreadOn, registerThreads as register, restoreThreads, threadCardAnchor as anchor, threadCount, threadFor, threadOf, threadsBright } from './thread'
 import { cardPart, elementPart, partAbout } from './threads.mjs'
 
 type Engine = EngineInterface
@@ -83,7 +85,16 @@ export async function drawThreadsPane($: Engine, e: Any, kind: 'threads' | 'thre
 }
 
 export async function threadPaneParts($: Engine, e: Any, args: unknown, els: Any): Promise<{ body: unknown[]; bottom: unknown[] }> {
+  // a drawing made right after a reload reads the kept threads itself
+  await restoreThreads($).catch(() => undefined)
   return threadParts($, e, els, args)
+}
+
+/** Whether the thread `key` is this conversation's, read back from its kept folder first. A thread opened and never
+ *  asked is kept in memory only, so a reload of the plugin forgets it. */
+export async function threadKnown($: Engine, key: string): Promise<boolean> {
+  await restoreThreads($)
+  return !!threadOf(key)
 }
 
 /** The first question asked in the thread about `scope`, or null when it has none; read again when a thread changes. */

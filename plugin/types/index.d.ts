@@ -146,6 +146,11 @@ declare module 'claude-code' {
        *  shown, what the version shown did to each (squeeze/cards.ts) */
       squeezeCards: { shown: Record<string, { copy: string; v: number }>; hidden: string[]; did: Record<string, string> }
 
+      // ---- the observer (observer/observer.ts)
+      /** the messages queued for a look or being looked at, and the conversation's key: { session, msgs: [LookMsg] };
+       *  a reload of the plugin queues them again */
+      observerLooks: { session: string; msgs: unknown[] } | null
+
       // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
       /** { v, session, updated, claims, clusters, gaps, read } (claims/store.js) */
       claims: unknown
@@ -154,7 +159,8 @@ declare module 'claude-code' {
       /** the session's first claims: the bar's count pulses (`lit` while on) and says `new` until the pane is opened
        *  (claims/term.ts) */
       claimsFirst: { lit: boolean; opened: boolean } | null
-      /** a look on demand for the claims: how many answers it reads, and when it began (claims/term.ts) */
+      /** a look that reads the claims, on demand or after a reply: how many answers it reads, and when it began
+       *  (claims/term.ts) */
       claimsFinding: { n: number; at: number } | null
     }
   }

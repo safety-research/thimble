@@ -12,7 +12,8 @@
 //                                      look.out.clusters), placed by their words in the look's messages
 //   claimsLookFailed($, look, why)     a look that gave nothing: the turn's claims are missing, and why
 //   claimsUnread($)                    the answered turns whose answers the claims have not read (found on demand)
-//   claimsFindStart($, n), claimsFindEnd($)   a look on demand for the claims of n answers began, or ended
+//   claimsFindStart($, n), claimsFindEnd($)   a look that reads the claims of n answers (on demand, or after a reply)
+//                                      began, or ended
 //   CLAIMS_FIND                        the address of f's Button in the pane (the observer's ui.press hook finds)
 //   drawClaimsPane($, e, args, els)    the side pane of kind `claims` (core/pane.ts)
 //   claimsThreadScope($, args)         what the side thread under the claims pane is about: the claim selected, the

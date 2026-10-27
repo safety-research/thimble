@@ -9,7 +9,7 @@ import { registerTell } from '../core/tell'
 import { resetEngaged } from '../core/engaged'
 import { askHere, drawThreads, passageRuns, threadUnder, threadUnderParts } from '../threads/pane'
 import { keptDir } from '../core/env'
-import { openThread, threadCardAnchor, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
+import { openThread, threadCardAnchor, threadKnown, threadOnCard, threadPaneParts, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { threadKey } from '../threads/threads.mjs'
 import { promptStub } from './stubs'
@@ -441,6 +441,23 @@ test("a heads-up's thread shows it as the tray does: named a heads-up, its links
   expect(point.type).toBe('Box')
   expect(point.props.flexDirection).toBe('row')
   expect(textOf(point.props.children[0])).toBe('▎ ')
+})
+
+test("a thread's pane drawn right after a reload of the plugin reads the kept thread; the side pane knows a thread no longer held", async () => {
+  const s = setup()
+  const asked = askHere(s.$, SCOPE, 'why so many?')
+  await settle()
+  s.go()
+  await asked
+  s.answer('agent-1', 'Most stopped early (runs.jsonl).')
+  await s.call('turn.complete', { turnId: 'f1', agentId: 'agent-1', reason: 'answer', answer: '', isAborted: false }, async () => ({ text: '' }))
+  // the reload: the module's memory starts again, and the thread is in the conversation's kept folder
+  resetThreads()
+  const p = await threadPaneParts(s.$, { props: { bodyColumns: 80, scroll: { bodyRows: 40 } } }, { key: KEY }, els)
+  expect(textOf(p.body)).toContain('why so many?')
+  expect(textOf(p.body)).not.toContain('no longer in the session')
+  expect(await threadKnown(s.$, KEY)).toBe(true)
+  expect(await threadKnown(s.$, 'mark-row-made-up-2-citation-1')).toBe(false)
 })
 
 // The pane reads a running thread's turns every few seconds. A read that started before the fork ended, and ends after
