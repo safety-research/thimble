@@ -6,6 +6,7 @@ Both engines honor the switch: the Messages API's tools (runtime_tools.Box, its 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -177,6 +178,41 @@ async def test_a_view_s_builder_and_reviewer_write_its_folder_and_their_own_alon
         fs = cc["sandbox"]["filesystem"]
         assert str(folder) in fs["allowWrite"] and str(views.views_dir(CORPUS)) not in fs["allowWrite"]
         assert str(views.local_dir(CORPUS)) not in fs["denyWrite"] and str(space.ws / "trusted") in fs["denyWrite"]
+
+
+def test_a_view_s_builder_s_bash_rules_deny_no_folder_that_holds_one_it_writes(space):
+    """srt's rules for the Bash of a view's builder on the Messages API (runtime_tools._rules): no denied folder holds a
+    folder it writes, since on macOS a denied folder wins over an allowed one inside it, as runtime.spec_of leaves such a
+    folder out of no_write; the other protected folders stay denied, and every other agent keeps extension/ denied."""
+    from app import dev, views  # noqa: PLC0415
+
+    fs = runtime_tools._rules(box(agent(space, "view-builder", "view:posts")))["filesystem"]
+    folder, work = views.views_dir(CORPUS) / "posts", dev.view_work_dir(CORPUS, "posts")
+    assert str(folder) in fs["allowWrite"] and str(work) in fs["allowWrite"]
+    assert not [(d, a) for d in fs["denyWrite"] for a in fs["allowWrite"] if d == a or Path(d) in Path(a).parents]
+    assert str(space.ws / "trusted") in fs["denyWrite"] and str(space.ws / "registry") in fs["denyWrite"]
+    writer = runtime_tools._rules(box(agent(space, "writer", "writer:report")))["filesystem"]
+    assert str(views.local_dir(CORPUS)) in writer["denyWrite"]
+
+
+async def test_a_view_s_builder_s_bash_writes_its_folders_alone_on_the_api_engine(space):
+    """In the sandbox, the Bash of a view's builder on the Messages API writes its view's folder and its own work
+    folder, and neither another view, the extension's manifest nor the folder the hooks trust."""
+    if why := runtime_tools.sandbox_reason():
+        pytest.skip(why)
+    from app import dev, views  # noqa: PLC0415
+
+    other = views.views_dir(CORPUS) / "other"
+    other.mkdir(parents=True)
+    (space.ws / "trusted").mkdir(exist_ok=True)
+    spec = agent(space, "view-builder", "view:posts")
+    for p, want in ((views.views_dir(CORPUS) / "posts" / "view.json", "written"),
+                    (dev.view_work_dir(CORPUS, "posts") / "draft.py", "written"), (other / "view.json", "refused"),
+                    (views.local_dir(CORPUS) / "extension.json", "refused"), (space.ws / "trusted" / "x", "refused")):
+        cmd = f"(echo x > {p}) 2>/dev/null && echo written || echo refused"
+        out = await runtime_tools.call(box(spec), "Bash", {"command": cmd})
+        assert out.text.strip() == want, (p, out.text)
+        assert want == "refused" or p.read_text() == "x\n"
 
 
 async def test_no_other_agent_writes_a_view_s_folder(space, tmp_path):
