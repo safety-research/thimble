@@ -739,11 +739,15 @@ TESTS_STOPPED = "the tests stopped before they finished"
 RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from kernel import fixes; fixes.tests_runner()"
 
 
-def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str]) -> dict[str, Any]:
+def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str], deadline: float | None = None,
+                 read: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """The quick tests of a fixer's change in a process of their own (the runner), in a session of its own, apart from
     the call that checks the change: the tests wait for other fixes' tests and run twice when they fail, which may take
     longer than Claude Code lets a call run. The record stays working, with `testing` (when they started, and the lock
-    file the runner holds while it lives), until the runner writes what came of them (tests_runner)."""
+    file the runner holds while it lives), until the runner writes what came of them (tests_runner).
+    Another check of the same fix may hold the fix's lock (it started the tests first): this one tries for it until
+    `deadline` (time.monotonic), and once it holds it, starts nothing when the record says that the tests run or is no
+    longer the one it read (`read`). None: it wrote nothing, and its caller waits for the tests (_wait)."""
     import fcntl  # noqa: PLC0415
 
     fid = rec["id"]
@@ -753,7 +757,17 @@ def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str]) -> dic
     try:
         # held from before the record says that the tests run, then by the runner, so no wait takes the lock for a
         # runner that ended (_ended)
-        fcntl.flock(held, fcntl.LOCK_EX)
+        while True:
+            try:
+                fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if deadline is not None and time.monotonic() >= deadline:
+                    return None
+                time.sleep(0.1)
+        now = get(fid)
+        if now.get("testing") or (read is not None and now != read):
+            return None
         rec = put({**rec, "testing": {"since": time.time(), "lock": str(lock)}})
         job = {"id": fid, "argv": argv, "title": named, "testing": rec["testing"]}
         log = _new_log(tmp_dir(fid) / "runner.log")
@@ -1108,13 +1122,14 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     The tests run in a process of their own (_start_tests), and done waits for what came of them; with `within`, at
     most that many seconds, and then it gives the fix as it is: still working, with `testing`. A done of a fix whose
     tests run starts nothing: it waits for them in the same way, and one with `within` that comes after they ended gives
-    what came of them."""
+    what came of them; such a done may come from any session (/clear and /resume give the session a new id while it
+    waits)."""
     deadline = None if within is None else time.monotonic() + max(within, 0.0)
     rec = get(fid)
+    if (rec.get("state") == "working" and rec.get("testing")) or (within is not None and rec.get("state") != "working"):
+        return _wait(rec["id"], deadline)
     if session and rec.get("session") and rec["session"] != session:
         raise FixError(f"fix {rec['id']} is being made in another Claude Code session, which checks it when its fixer ends")
-    if rec.get("testing") or (within is not None and rec.get("state") != "working"):
-        return _wait(rec["id"], deadline)
     if rec.get("state") != "working":
         raise FixError(f"fix {rec['id']} was checked already ({state_word(rec)}), so there is nothing to check")
     if cannot is not None and cannot.strip():
@@ -1123,9 +1138,11 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
         rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300),
                    **({"blocked": blocked} if blocked else {}))
         return put(rec)
-    rec = _done(fid, title, summary, request, tests)
-    if rec.get("testing"):
+    checked = _done(fid, title, summary, request, tests, deadline)
+    # None: another check of the fix started its tests first, or the record went on while this one made its commit
+    if checked is None or checked.get("testing"):
         return _wait(rec["id"], deadline)
+    rec = checked
     if rec.get("prev") and rec.get("state") == "request":
         return {**_restore(rec), "unchanged": True}
     if rec.get("prev") and rec.get("state") == "ready":
@@ -1186,8 +1203,10 @@ def _take_out(fid: int, why: str) -> dict[str, Any]:
     return {"redo": failed}
 
 
-def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool) -> dict[str, Any]:
+def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool,
+          deadline: float | None = None) -> dict[str, Any] | None:
     rec = get(fid)
+    read = dict(rec)
     if not _is_checkout(rec.get("work")):
         # the copy is gone, or something in it removed its git link: nothing of it can be checked. r makes a new copy
         _drop_work(rec)
@@ -1235,7 +1254,7 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
         argv = _tests_argv(rec["id"])
     except FixError as e:
         return put(_tested(rec, False, str(e), named))
-    return _start_tests(rec, named, argv)
+    return _start_tests(rec, named, argv, deadline, read)
 
 
 def _drop_work(rec: dict[str, Any]) -> None:
