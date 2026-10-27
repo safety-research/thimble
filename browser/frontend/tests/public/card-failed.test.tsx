@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 // A card whose run failed (src/canvas/bodies.tsx, src/components/Outputs.tsx ErrorOut): its body is the error's one
-// line, its name and its message's first line, with the traceback under Show traceback, and the card says it failed, so
-// an attempt that failed while Claude goes on with the card is no wall of red. An error drawn anywhere but on a card
-// (the card's details) shows whole.
-import { act } from 'react'
+// line, its name and its message's first line, without the traceback, and the card says it failed, so an attempt that
+// failed while Claude goes on with the card is no wall of red. An error drawn anywhere but on a card (the card's
+// details) shows whole.
 import { afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest'
 import { CellCard } from '../../src/canvas/Cell.tsx'
 import { CanvasContext } from '../../src/canvas/context.ts'
@@ -48,24 +47,15 @@ function card(c: Cell) {
   )
 }
 
-test("a failed card's body is the error's one line, its traceback under Show traceback, and the card says it failed", async () => {
+test("a failed card's body is the error's one line, without its traceback, and the card says it failed", async () => {
   const el = await card(failed)
   await settle()
   const error = () => el.querySelector<HTMLElement>('.bcell-output .outputs-error')!.textContent
   expect(error()).toBe('ValueError: No runs match the filter.')
   expect(el.querySelector('.bcell-failed')?.textContent).toContain('failed')
-  const toggle = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Show traceback')!
-  await act(async () => toggle.click())
-  expect(error()).toContain("The column 'status' holds only")
-  expect(error()).toContain("----> 6 rate = failures(runs, status='flaky')")
-  expect(error()).not.toContain('\u001b')
-  await act(async () => toggle.click())
-  expect(toggle.textContent).toBe('Show traceback')
-  expect(error()).not.toContain('Cell In[2]')
 })
 
-test('an error drawn off a card shows whole, with nothing to unfold', async () => {
+test('an error drawn off a card shows whole', async () => {
   const el = await mount(<Output bundle={ERR} />)
   expect(el.textContent).toContain("----> 6 rate = failures(runs, status='flaky')")
-  expect(el.querySelector('button')).toBeNull()
 })

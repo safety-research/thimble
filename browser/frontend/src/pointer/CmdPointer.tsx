@@ -13,10 +13,9 @@
 // to another tab, a collapsed frame, a pan or a scroll that takes it out of its pane, or a popover over the page hides
 // it, its text kept, and it comes back beside the element when the element is back (onScreen). Its field takes the
 // focus when the box opens; coming back, only when it had the focus as it went and the focus has gone nowhere since, so
-// it never takes the focus from a field the analyst went on in. Escape closes a hidden box too, but for one a popover
-// hides, whose Escape that is; a send under way goes on. ⌘ here stands for the ask key Settings picks (lib/platform
-// pointKeyHeld): ⌘ by default, or ⌥, which then holds alone for HOLD_MS on a Mac as ⌘ does, and lets go at a key pressed
-// with it (⌥ types a letter's accent there); off a Mac, Ctrl or Alt, at once.
+// it never takes the focus from a field the analyst went on in. A send under way goes on. ⌘ here stands for the ask key
+// Settings picks (lib/platform pointKeyHeld): ⌘ by default, or ⌥, which then holds alone for HOLD_MS on a Mac as ⌘
+// does, and lets go at a key pressed with it (⌥ types a letter's accent there); off a Mac, Ctrl or Alt, at once.
 import { useEffect, useRef, useState } from 'react'
 import { agentTinted } from '../lib/agentKey'
 import { api } from '../lib/api'

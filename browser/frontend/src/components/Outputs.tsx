@@ -435,10 +435,9 @@ function Vega({ spec, fitWidth, card, labels }: { spec: unknown; fitWidth?: numb
 }
 
 /** An error: its name and message, then its traceback, cut at `maxLines`. On a card (`fold`) it is one line, its name
- * and its message's first line, with the rest under Show traceback: a run that failed while Claude goes on with the
- * card reads as one line, and the card's details show the error whole. */
+ * and its message's first line: a run that failed while Claude goes on with the card reads as one line, and the card's
+ * details show the error whole. */
 function ErrorOut({ err, maxLines, fold = false }: { err: any; maxLines?: number; fold?: boolean }) {
-  const [open, setOpen] = useState(false)
   const ename = String(err?.ename ?? 'Error')
   const evalue = String(err?.evalue ?? '')
   let tb: string[] = Array.isArray(err?.traceback) ? err.traceback.map((l: unknown) => stripAnsi(asText(l))) : []
@@ -446,24 +445,16 @@ function ErrorOut({ err, maxLines, fold = false }: { err: any; maxLines?: number
     const body = capLines(tb.join('\n'), Math.max(1, maxLines - 1))
     tb = body ? [body] : []
   }
-  const foldable = fold && tb.length > 0
-  const folded = foldable && !open
+  const folded = fold && tb.length > 0
   const said = folded ? evalue.split('\n')[0] : evalue
   return (
-    <>
-      <pre className={`outputs-text outputs-error${folded ? ' outputs-error-folded' : ''}`}>
-        <span className="outputs-error-head">
-          {ename}
-          {said ? `: ${said}` : ''}
-        </span>
-        {tb.length && !folded ? '\n' + tb.join('\n') : ''}
-      </pre>
-      {foldable && (
-        <button type="button" className="bcell-more" onMouseDown={(e) => e.stopPropagation()} onClick={() => setOpen((v) => !v)}>
-          {open ? 'Hide traceback' : 'Show traceback'}
-        </button>
-      )}
-    </>
+    <pre className="outputs-text outputs-error">
+      <span className="outputs-error-head">
+        {ename}
+        {said ? `: ${said}` : ''}
+      </span>
+      {tb.length && !folded ? '\n' + tb.join('\n') : ''}
+    </pre>
   )
 }
 

@@ -169,8 +169,17 @@ export function plainOf(text: string): string {
   return walk(parseInline(text))
 }
 
-/** What a stored sentence's text says without its citations (lib/refs). */
-export { readableText } from '../lib/refs'
+/** What a stored sentence's text says without its citations: a cited value and a mark's words stay, a bare citation
+ * goes with the space before it, whitespace squeezed. For a thread's anchor text, the Checks list and a figure's caption. */
+export function readableText(text: string): string {
+  return text
+    .replace(/(?<![[!])\[([^[\]\n]+)\]\(#\)/g, '$1')
+    .replace(/\[\[([^\[\]|]*)\|[^\[\]]*\]\]/g, '$1')
+    .replace(/\s*\[\[[^\[\]]*\]\]\s*(?=[.,;:!?])/g, '')
+    .replace(/\[\[[^\[\]]*\]\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
 /** What a block's text says without its citations, for a thread's anchor text. */
 export function readableOf(content: readonly InlinePart[] | undefined): string {

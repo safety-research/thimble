@@ -3,8 +3,7 @@
 // it with its text, and the focus stays where it is; when a pan takes the element out of the pane that clips it, the box
 // hides, its text kept, and comes back once the element is in sight again; a popover opened over the page (Settings, a
 // menu) hides the box and its highlight until it closes, Escape there being the popover's. Back, the box leaves the
-// focus where it is, and takes it again only when it had it as it went and nothing has taken it since; Escape closes a
-// box hidden off its pane.
+// focus where it is, and takes it again only when it had it as it went and nothing has taken it since.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, test } from 'vitest'
@@ -136,15 +135,4 @@ test('a box that had the focus as it went takes it back, unless the focus went t
   assert.equal(await focused(), 'other', 'the field keeps the focus')
   assert.equal(await page.inputValue('#other'), ' and')
   assert.equal(await page.inputValue('.pointer-box textarea'), 'why is this so high')
-})
-
-test('Escape closes the box while a pan has hidden it', async () => {
-  await moveCard(900, 260)
-  assert.equal(await boxShown(), false)
-  await page.keyboard.press('Escape')
-  await moveCard(200, 160)
-  // longer than a hidden box takes to find its element again
-  await page.waitForTimeout(600)
-  assert.equal(await boxShown(), false, 'the box does not come back')
-  assert.equal(await hlOn(), false)
 })

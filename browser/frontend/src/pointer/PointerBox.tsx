@@ -1,8 +1,7 @@
 // The pointer box: the overlay beside the highlight, never over it, holding only the input ("Ask about this…"); its
 // accessible label names what was picked. A span of text or a tab takes the box under its last line (or over it); a
 // region takes it to its right, or its left when that stays inside the region's pane, else under; a region inside a
-// cell takes it beside the cell. ↵ sends, esc closes, a hidden box too unless a popover is open, whose Escape that is;
-// the caller releases the highlight on close.
+// cell takes it beside the cell. ↵ sends, esc closes; the caller releases the highlight on close.
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { TextArea } from '../components/Field'
@@ -81,7 +80,7 @@ export interface PointerBoxProps {
   /** counts the times its field takes the focus: it takes it when the box is drawn first and at each new count, never
    * when the box only moves with what it is about or comes back (`hidden`) */
   focus?: number
-  /** what the box is about is off screen: the box is not drawn, and keeps its text, its focus count and its Escape */
+  /** what the box is about is off screen: the box is not drawn, and keeps its text and its focus count */
   hidden?: boolean
   /** the accessible name of the box and its text area */
   label: string
@@ -102,10 +101,10 @@ export function PointerBox({ rect, place, focus, hidden = false, label, draft, o
   const boxEl = ref ?? own
   const taRef = useRef<HTMLTextAreaElement>(null)
 
-  // Escape closes the box from anywhere, while it is hidden too, unless a popover is open: that Escape is the popover's
+  // Escape closes the box from anywhere while it is drawn
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !(hidden && document.querySelector('.popover'))) {
+      if (e.key === 'Escape' && !hidden) {
         e.preventDefault()
         onClose()
       }

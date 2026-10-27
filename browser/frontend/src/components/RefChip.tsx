@@ -17,7 +17,7 @@ import { callOutput, callWords, fetchCall, onCallWords, outputLines } from '../l
 import { cellLabel, conceptLabel, ensureCellName, ensureConceptName, hasCellName, hasConceptName, onCellNames } from '../lib/cellName'
 import { callDetail, callFile, callTarget } from '../chat/model'
 import { pointKeyHeld } from '../lib/platform'
-import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, readableText, refLabel, shownValue } from '../lib/refs'
+import { cardPartLabel, cellSpanLabel, decodeLabel, hiddenPath, isEvidenceRef, parseRef, refLabel, shownValue } from '../lib/refs'
 import { CITED, cellShown, cellWindow, citedLines, findCell, locateCell, readTable, restoreScroll, scrollWithin, valueSpan, visibleWithin, type At, type Grid, type Scrolled } from '../lib/tableCell'
 import { quoteSpanRef } from '../lib/quoteFind'
 import { teleport } from '../lib/teleport'
@@ -665,8 +665,7 @@ function LinesPreview({ lines, from, to, value }: CitedLines & { value?: string 
   )
 }
 
-/** The cell's question over its primary artifact; a card with none shows its text (a note's) or its takeaway, read as
- * words. */
+/** The cell's question over its primary artifact. */
 function CellPreview({ ws, cell, fitWidth }: { ws: string; cell: Cell; fitWidth?: number }) {
   const concepts = useConcepts(ws)
   const pick = primaryArtifact(cell.outputs)
@@ -684,8 +683,6 @@ function CellPreview({ ws, cell, fitWidth }: { ws: string; cell: Cell; fitWidth?
         </div>
       ) : cell.text ? (
         <div className="refchip-pop-note">{cell.text.slice(0, EXCERPT_MAX)}</div>
-      ) : cell.takeaway ? (
-        <div className="refchip-pop-note">{readableText(cell.takeaway).slice(0, EXCERPT_MAX)}</div>
       ) : null}
     </div>
   )
