@@ -5,7 +5,9 @@
 //
 //   answerSelection($)   the selection's words that lie in Claude's answers, a line at a time: a drag that starts on a
 //                        row of Claude Code's own (`Ran 3 shell commands`, the answer's ● dot) keeps the answer's lines;
-//                        undefined when no line is an answer's
+//                        undefined when no line is an answer's (answerSelectionOf: of a selection read before)
+//   selectionNow($), selectionKey(sel)   Claude Code's selection as it answers it, and what tells one selection from
+//                        another ('' for none)
 //   dropSelection($)     the pane closes: a selection outside the transcript (the pane's) is dropped
 //   selectionUsed($, by, sel), usedBy($, by, sel)   e or c took this selection, so the bar stops naming that key
 //                        for it until words are selected anew
@@ -17,11 +19,14 @@ import type { EngineInterface } from 'claude-code'
 import { messageOf, textRows } from './answers'
 
 type Engine = EngineInterface
-type Sel = { text: string; requestId?: string }
+export type Sel = { text: string; requestId?: string }
 
 const DONE = { plugin: 'thimble', key: 'selectionDone' } as const
 type Done = { dropped?: string; explain?: string; cite?: string }
 const selKey = (sel: Sel) => `${sel.requestId ?? ''}\n${sel.text}`
+
+/** What tells a selection from another: its row and its words; '' for none. */
+export const selectionKey = (sel: Sel | undefined): string => (sel ? selKey(sel) : '')
 
 async function doneNow($: Engine): Promise<Done> {
   return ((await $.state.get(DONE).catch(() => null))?.value ?? {}) as Done
@@ -37,12 +42,16 @@ const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/
 const lineWords = (line: string) => plain(line.replace(/^[\s●⏺⎿▎│]+/u, ''))
 
 /** Claude Code's selection; none where it reports none. */
-async function selectionNow($: Engine): Promise<Sel | undefined> {
+export async function selectionNow($: Engine): Promise<Sel | undefined> {
   try { return await $.ui.selection() } catch { return undefined }
 }
 
 export async function answerSelection($: Engine): Promise<Sel | undefined> {
-  const sel = await selectionNow($)
+  return answerSelectionOf($, await selectionNow($))
+}
+
+/** answerSelection of a selection read before (selectionNow), so a key that read it reads it no more. */
+export async function answerSelectionOf($: Engine, sel: Sel | undefined): Promise<Sel | undefined> {
   if (!sel?.text?.trim() || selKey(sel) === (await doneNow($)).dropped) return undefined
   const own = sel.requestId ? (await messageOf($, sel.requestId))?.text : undefined
   const answers = own != null ? [own] : await Promise.all((await textRows($).catch(() => [] as string[]))

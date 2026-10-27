@@ -686,6 +686,45 @@ test('with Evidence off, c cites the selected words, and with none selected c is
   expect(opens).toEqual([])
 })
 
+test("c with words selected reads the selection once and no state at the key, however many answers the session holds: whether they wait is kept from the bar's drawing, and words selected since are checked in full", CITES, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  // words dragged over more than one row: Claude Code names no row, so they are looked for in every answer
+  let selected: Any = { text: 'failed on the p95 check' }
+  let selections = 0
+  on('ui.selection', () => { selections++; return { value: selected } })
+  let gets = 0
+  on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
+  // sixty answers after the one that holds the words
+  const kept: Record<string, string> = {}
+  for (let n = 2; n <= 61; n++) {
+    kept[`answers/t${n}.json`] = JSON.stringify({ v: 1, turn: { turnId: `t${n}`, n, prompt: { text: `and run ${n}?`, by: 'composer', row: `row-q${n}` }, rows: [`row-t${n}`], answer: `row-t${n}`, reason: 'answer', startedAt: n, endedAt: n, labels: [], cards: [], seq: 0 }, msgs: [{ row: `row-t${n}`, turnId: `t${n}`, text: `Run ${n} passed every check.`, at: n }] })
+  }
+  const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-cite-long', { kept })
+  // the bar draws, and names c cite
+  expect(textOf(await $.ui.render(above()))).toContain('c cite')
+  // c: one read of the selection, none of the state, within the hook's few milliseconds
+  gets = 0
+  selections = 0
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  expect(gets).toBe(0)
+  expect(selections).toBe(1)
+  await clock.advance(1000)
+  // the words are a citation of their own, open in the tray, and its check started
+  expect(textOf(await $.ui.render(above(40)))).toContain('failed on the p95 check')
+  expect(spawns.length).toBe(1)
+  // cited, the selection no longer waits: c is typed, and reads no state either (q, a letter no one takes, first reads
+  // what the cards' keys need, once)
+  expect(await $.prompt.edit(key('q'))).toEqual({ text: 'q', cursor: 1 })
+  gets = 0
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: 'c', cursor: 1 })
+  expect(gets).toBe(0)
+  // words selected since the bar last drew: the key checks them in full, and c cites them
+  selected = { text: 'Run 7 passed every check' }
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(spawns.length).toBe(2)
+})
+
 test('a sentence the check rewrote draws as rewritten, its citation corrected, though the analyst asked about other words of it: those step aside', CITES, async ($, on) => {
   const fixed = { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40', rewrite: 'Of the runs, [11 of 40] failed on the p99 check.' }
   const asked = { n: 2, row: 'row-t1', words: 'failed on the p95 check', start: 27, end: 50, sentence: 'Of the runs, [12 of 40] [failed on the p95 check].', status: 'deferred', shown: 'failed on the p95 check', asked: true }
