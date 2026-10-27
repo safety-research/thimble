@@ -17,7 +17,10 @@ Under $THIMBLE_HOME/fixes:
                      and of the process that ran them (runner.log)
     srt/<pin>/       the release's sandbox runtime, once live's pin or lock file is not the release's (_srt)
     tests.lock       the quick tests run for one fix at a time
-    tests/<id>.lock  held by the process that runs a fix's quick tests (the runner) while it lives
+    tests/<id>.lock  the fix's guard: one check of the fix at a time, from before it commits the fixer's change until the
+                     record says that its tests run (done)
+    tests/<id>.<run>.lock  a lock file of each run of a fix's quick tests, held by the process that runs them (the
+                     runner) while it lives, and gone after it
     fixes.jsonl      every request: one line per change of a fix's record; the last line of an id is its record
     release.json     where the release came from: the install's kind, its source, Claude Code's marketplace entry
                      before the first fix, the release commit (base) and its version
@@ -821,34 +824,49 @@ TESTS_STOPPED = "the tests stopped before they finished"
 RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from kernel import fixes; fixes.tests_runner()"
 
 
-def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str], deadline: float | None = None,
+def _guard(fid: int, deadline: float | None) -> int | None:
+    """The fix's guard (tests/<id>.lock): one check of a fix at a time, from before it commits the fixer's change in the
+    copy until the record says that the tests run, or what came of the check (done). No runner holds it. A check that
+    finds it held tries until `deadline` (time.monotonic). The descriptor that holds it, which the caller closes, or None
+    at the deadline."""
+    import fcntl  # noqa: PLC0415
+
+    lock = home() / "tests" / f"{fid}.lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except BlockingIOError:
+            if deadline is not None and time.monotonic() >= deadline:
+                os.close(fd)
+                return None
+            time.sleep(0.1)
+
+
+def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str],
                  read: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """The quick tests of a fixer's change in a process of their own (the runner), in a session of its own, apart from
     the call that checks the change: the tests wait for other fixes' tests and run twice when they fail, which may take
     longer than Claude Code lets a call run. The record stays working, with `testing` (when they started, and the lock
-    file the runner holds while it lives), until the runner writes what came of them (tests_runner).
-    Another check of the same fix may hold the fix's lock (it started the tests first): this one tries for it until
-    `deadline` (time.monotonic), and once it holds it, starts nothing when the record says that the tests run or is no
-    longer the one it read (`read`). None: it wrote nothing, and its caller waits for the tests (_wait)."""
+    file of this run, which its runner holds while it lives), until the runner writes what came of them (tests_runner).
+    Each run has a lock file of its own, so that the tests of a new round never wait for the runner of the round before.
+    The caller holds the fix's guard (done); this starts nothing when the record says that the tests run or is no longer
+    the one it read (`read`). None: it wrote nothing, and its caller waits for the tests (_wait)."""
     import fcntl  # noqa: PLC0415
 
     fid = rec["id"]
-    lock = home() / "tests" / f"{fid}.lock"
+    lock = home() / "tests" / f"{fid}.{secrets.token_hex(8)}.lock"
     lock.parent.mkdir(parents=True, exist_ok=True)
     held = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
     try:
         # held from before the record says that the tests run, then by the runner, so no wait takes the lock for a
         # runner that ended (_ended)
-        while True:
-            try:
-                fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if deadline is not None and time.monotonic() >= deadline:
-                    return None
-                time.sleep(0.1)
+        fcntl.flock(held, fcntl.LOCK_EX)
         now = get(fid)
         if now.get("testing") or (read is not None and now != read):
+            lock.unlink(missing_ok=True)
             return None
         rec = put({**rec, "testing": {"since": time.time(), "lock": str(lock)}})
         job = {"id": fid, "argv": argv, "title": named, "testing": rec["testing"]}
@@ -860,7 +878,7 @@ def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str], deadli
             with p.stdin:
                 p.stdin.write(json.dumps(job).encode())
         except OSError:
-            pass  # a runner that did not start is one that ended: the wait for it says so
+            lock.unlink(missing_ok=True)  # a runner that did not start is one that ended: the wait for it says so
         finally:
             os.close(log)
     finally:
@@ -882,26 +900,29 @@ def tests_runner() -> None:
     """The runner (_start_tests), with its job on stdin: the tests as run_tests runs them, then what came of them on the
     fix's record, as done writes it, marked as not shown yet (`unshown`) until the plugin's line shows it (shown): no
     session may wait for it any more. A record that went on without them (the fix was removed, a new round took the
-    copy) stays as it is."""
+    copy) stays as it is. The run's own lock file (_start_tests) goes when the runner ends."""
     job = json.loads(sys.stdin.read())
-    ok, tail = _run_tests(job["argv"], job["id"])
-    rec = get(job["id"])
-    if rec.get("state") != "working" or rec.get("testing") != job["testing"]:
-        return
-    rec.pop("testing")
-    rec = _tested({**rec, "unshown": True}, ok, tail, job["title"])
-    if rec.get("prev") and rec["state"] == "ready":
-        try:
-            settle(rec)
-        except Exception as e:
-            # git stopped the round's new version: the round fails with git's words, never ready with the round's own
-            # change alone, and with no refusal, which no next fixer could answer
-            rec.pop("refused", None)
-            put({**rec, "state": "failed", "error": str(e)})
-            if not isinstance(e, FixError):
-                raise
-        return
-    put(rec)
+    try:
+        ok, tail = _run_tests(job["argv"], job["id"])
+        rec = get(job["id"])
+        if rec.get("state") != "working" or rec.get("testing") != job["testing"]:
+            return
+        rec.pop("testing")
+        rec = _tested({**rec, "unshown": True}, ok, tail, job["title"])
+        if rec.get("prev") and rec["state"] == "ready":
+            try:
+                settle(rec)
+            except Exception as e:
+                # git stopped the round's new version: the round fails with git's words, never ready with the round's
+                # own change alone, and with no refusal, which no next fixer could answer
+                rec.pop("refused", None)
+                put({**rec, "state": "failed", "error": str(e)})
+                if not isinstance(e, FixError):
+                    raise
+            return
+        put(rec)
+    finally:
+        Path(job["testing"]["lock"]).unlink(missing_ok=True)
 
 
 def shown(fid: int | str) -> dict[str, Any]:
@@ -946,9 +967,9 @@ def _wait(fid: int, deadline: float | None) -> dict[str, Any]:
 
 
 def _ended(fid: int, mark: dict[str, Any]) -> bool:
-    """Whether the runner of the tests `mark` names is gone (its lock file is free). When the record still waits for it,
-    the runner was stopped before it wrote what came of the tests: the fix fails, with no refusal, so that no new round
-    of its fixer starts from it (r starts it again)."""
+    """Whether the runner of the tests `mark` names is gone (its lock file is free, or gone). When the record still waits
+    for it, the runner was stopped before it wrote what came of the tests: the fix fails, with no refusal, so that no new
+    round of its fixer starts from it (r starts it again)."""
     import fcntl  # noqa: PLC0415
 
     try:
@@ -1228,7 +1249,8 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     most that many seconds, and then it gives the fix as it is: still working, with `testing`. A done of a fix whose
     tests run starts nothing: it waits for them in the same way, and one with `within` that comes after they ended gives
     what came of them; such a done may come from any session (/clear and /resume give the session a new id while it
-    waits)."""
+    waits). Two checks at once take the fix's guard (_guard) in turn, before either commits in the copy: the second
+    then starts nothing and waits as well."""
     deadline = None if within is None else time.monotonic() + max(within, 0.0)
     rec = get(fid)
     if (rec.get("state") == "working" and rec.get("testing")) or (within is not None and rec.get("state") != "working"):
@@ -1243,8 +1265,19 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
         rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300),
                    **({"blocked": blocked} if blocked else {}))
         return put(rec)
-    checked = _done(fid, title, summary, request, tests, deadline)
-    # None: another check of the fix started its tests first, or the record went on while this one made its commit
+    # the tests' command before the guard: making it may install the sandbox runtime, which takes minutes
+    try:
+        argv: list[str] | FixError = _tests_argv(rec["id"]) if tests else []
+    except FixError as e:
+        argv = e
+    guard = _guard(rec["id"], deadline)
+    try:
+        checked = None if guard is None else _done(fid, title, summary, request, tests, argv, rec)
+    finally:
+        if guard is not None:
+            os.close(guard)
+    # None: another check of the fix started its tests first or wrote what came of it, a new round took the copy, or the
+    # guard was not free by the deadline
     if checked is None or checked.get("testing"):
         return _wait(rec["id"], deadline)
     rec = checked
@@ -1309,9 +1342,13 @@ def _take_out(fid: int, why: str) -> dict[str, Any]:
 
 
 def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool,
-          deadline: float | None = None) -> dict[str, Any] | None:
+          argv: list[str] | FixError, seen: dict[str, Any] | None = None) -> dict[str, Any] | None:
+    """done's check, under the fix's guard: `argv` is the tests' command (or why there is none). A record that is no
+    longer the one done read (`seen`) is not checked here: None."""
     rec = get(fid)
     read = dict(rec)
+    if seen is not None and rec != seen:
+        return None
     if not _is_checkout(rec.get("work")):
         # the copy is gone, or something in it removed its git link: nothing of it can be checked. r makes a new copy
         _drop_work(rec)
@@ -1355,11 +1392,9 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
     if not tests:
         rec.update(tests="skipped", state="ready", error=None, **({"title": named} if named else {}))
         return put(rec)
-    try:
-        argv = _tests_argv(rec["id"])
-    except FixError as e:
-        return put(_tested(rec, False, str(e), named))
-    return _start_tests(rec, named, argv, deadline, read)
+    if isinstance(argv, FixError):
+        return put(_tested(rec, False, str(argv), named))
+    return _start_tests(rec, named, argv, read)
 
 
 def _drop_work(rec: dict[str, Any]) -> None:

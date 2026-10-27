@@ -24,6 +24,8 @@
 //                               (`thimble fix again`), told why; the person sees a failure only when a fixer ends with
 //                               `Cannot: <why>`. What came of a check that no session waited for is shown the same way
 //                               at the session's start (`checked`), and the kernel told it was shown (`thimble fix shown`).
+//                               An end that comes while another check of the same fix waits (a new round's fixer) is
+//                               kept, and checked once that check returns.
 //
 //   state: fixers (agentId → the fix's id), fixBy (the fixes Claude started, by their id), fixerBox (the sandbox
 //          command's start, by the fix's id)
@@ -303,10 +305,19 @@ const ending = new Set<number>()
  *  minutes Claude Code gives a process call. */
 const DONE_WAIT_S = 540
 
+/** A fixer's end that came while another check of the same fix waited (a new round's fixer ended before the check of
+ *  the round before returned), by the fix's id: taken once that check returns. */
+const later = new Map<number, Any>()
+
 /** `checked`: what came of a check that no session waited for (the kernel's runner wrote it while the session was gone
  *  or the plugin reloaded), shown now as at the fixer's end. */
 export async function fixerEnded($: Engine, e: Any, id: number, checked?: Fix): Promise<void> {
-  if (ending.has(id)) return
+  if (ending.has(id)) {
+    // kept, never dropped: a look for ended fixers would take the copy later with no answer, and lose its title, its
+    // summary and its Cannot: or Request: line
+    if (!checked) later.set(id, e)
+    return
+  }
   ending.add(id)
   let again: Fix | null = null
   try {
@@ -316,6 +327,13 @@ export async function fixerEnded($: Engine, e: Any, id: number, checked?: Fix): 
     await setFixLine($, { id, kind: 'problem', said: `${f ? `“${fixName(f)}”` : `Fix ${id}`} could not be checked: ${cut(String((err as Error)?.message || err), 200)}. thimble fix list, in a shell, lists it.` }).catch(() => undefined)
   } finally {
     ending.delete(id)
+  }
+  // the end that came while this check waited is the newer one: its own check now
+  const kept = later.get(id)
+  if (kept) {
+    later.delete(id)
+    await fixerEnded($, kept, id)
+    return
   }
   if (!again) return
   // the check did not use the change: a new fixer in the same copy, told why (firstMessage); a fixer that cannot start
@@ -424,7 +442,8 @@ export async function recoverFixers($: Engine, working: Fix[]): Promise<void> {
     return
   }
   for (const f of working) {
-    if (starting.has(f.id)) continue
+    // a fix whose check runs is that check's: only a fixer's own end waits for it (fixerEnded)
+    if (starting.has(f.id) || ending.has(f.id)) continue
     const ids = Object.entries(map).filter(([, id]) => id === f.id).map(([a]) => a)
     if (ids.some(a => alive.has(a))) continue
     await fixerEnded($, { agentId: ids[0] ?? '', answer: '' }, f.id)

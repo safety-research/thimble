@@ -21,18 +21,24 @@ from test_fixes import FX, made, on_fix, sh, world  # noqa: E402, F401  (world i
 
 
 def runner_gone(fid: int) -> None:
-    """Once the runner of the fix's tests ended: the lock it holds while it lives is free."""
-    fd = os.open(FX.home() / "tests" / f"{fid}.lock", os.O_RDWR)
-    try:
-        for _ in range(600):
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return
-            except BlockingIOError:
-                time.sleep(0.05)
-        raise AssertionError("the runner never ended")
-    finally:
-        os.close(fd)
+    """Once every runner of the fix's tests ended: the lock file each run has (tests/<id>.<run>.lock), which its runner
+    holds while it lives, is free, or gone."""
+    for p in (FX.home() / "tests").glob(f"{fid}.*.lock"):
+        try:
+            fd = os.open(p, os.O_RDWR)
+        except FileNotFoundError:
+            continue
+        try:
+            for _ in range(600):
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    time.sleep(0.05)
+            else:
+                raise AssertionError("the runner never ended")
+        finally:
+            os.close(fd)
 
 
 def test_a_done_that_only_waits_for_the_tests_works_from_any_session(world, monkeypatch):

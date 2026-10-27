@@ -578,6 +578,45 @@ test("a new round that took the copy before the check's first answer: the check 
   expect(s.verbs().some(v => v.startsWith('again'))).toBe(false)
 })
 
+/** Waits a little for what a check not awaited does. */
+async function until(f: () => Promise<boolean> | boolean): Promise<void> {
+  for (let i = 0; i < 200 && !(await f()); i++) await new Promise(r => setTimeout(r, 5))
+}
+
+test("a round's fixer that ends while the check of the round before waits: its end is kept, and checked with its own words once that check returns", async () => {
+  const s = setup()
+  // the first check's done answers only when the test lets it; by then the new round took the copy
+  let answer: () => void = () => undefined
+  const held = new Promise<void>(r => { answer = r })
+  const calls: { argv: string[]; stdin?: string }[] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push({ argv, stdin: o.stdin })
+      if (calls.length === 1) {
+        await held
+        return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, state: 'working', testing: null }), stderr: '' }
+      }
+    }
+    return run(argv, o)
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await ask(s, "make the bar's coverage item say read")
+  await s.end('Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+  // the person's follow-up while the check waits: a round of the fix, with a fixer of its own
+  await ask(s, '1 and keep the percent')
+  expect(s.spawns.length).toBe(2)
+  await s.end('Cannot: the percent is not in the data', 'agent-fixer-2')
+  expect(calls.length).toBe(1)
+  answer()
+  await until(async () => calls.length > 1 && (await fixLineRows(s.$, ELS, 110)).length > 0)
+  expect(calls.length).toBe(2)
+  expect(calls[1]!.argv).toEqual(expect.arrayContaining(['done', '1', '--cannot', '-']))
+  expect(calls[1]!.stdin).toBe('the percent is not in the data')
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toContain('did not pass · the percent is not in the data')
+})
+
 test('n leaves the fix ready in the list, where thimble fix apply in a shell turns it on; a fixer that changed nothing leaves a request', async () => {
   const s = setup()
   await requested(s)
