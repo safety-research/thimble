@@ -36,7 +36,7 @@ declare module 'claude-code' {
       /** a card's artifact, by card id: { card, status, agentId, until, url?, error? } */
       cardArtifacts: StateFamily<unknown>
       // ---- v (designer/v.ts)
-      /** a design v started, by its key: { key, anchorRow, agentId, status, at, until, error?, answer?, cards } */
+      /** a design v started, by its key: { key, anchorRow, agentId, status, at, until, error?, cards } */
       designs: StateFamily<unknown>
       /** the key of the design that runs now, which the bar names */
       designNow: string | null

@@ -1,11 +1,10 @@
 // v at an empty prompt and the designer fork it starts (designer/v.ts). Through the whole hooks module: v spawns the
 // designer fork with designer.md once the word window has passed, and a v whose prompt cannot be made types v and says
 // why. On a plain engine whose $.agent.spawn names the fork it started: its cards anchor to the answer v was pressed on,
-// the busy line names it while it runs, its end says why it drew no card (and Claude reads all of it), and a card call
-// with the id of main's card draws a card of its own. All data is made up. `claude plugin test plugin`.
+// the busy line names it while it runs, its end says why it drew no card, and a card call with the id of main's card
+// draws a card of its own. All data is made up. `claude plugin test plugin`.
 import { expect, mock, test } from 'claude-code/testing'
 
-import { keyedWords } from '../bar/bar'
 import { busySteps } from '../bar/busy'
 import { failLineNow } from '../bar/notice'
 import { metaOf } from '../cards/store'
@@ -176,23 +175,17 @@ test("the fork's cards anchor to the answer v was pressed on, and a fork that dr
   expect(await designAnchor(s.$, 'agent-1')).toBe(null)
 })
 
-test("a fork that drew none: the failure line quotes its first paragraph, cut at a word only when long, then says what to do; the design keeps all it said, and Claude reads it with the next prompt", async () => {
+test("a fork that drew none: the failure line quotes its first paragraph, cut at a word only when long", async () => {
   const words = (n: number, from = 0) => Array.from({ length: n }, (_, i) => `word${from + i}`).join(' ')
   // a first paragraph of about 300 characters, on two lines, shows whole
   const s = setup()
   await pressV(s)
-  const key = (await s.$.state.get({ plugin: 'thimble', key: 'designNow' })).value
   const first = [`The card tool gave no answer to the call: ${words(20)}`, `${words(20, 20)}.`]
   const answer = `${first.join('\n')}\n\nThe second paragraph.`
   await s.call('turn.complete', end('answer', answer), async () => ({ text: '' }))
   const line = await s.failLine()
   expect(line).toContain(`“${first.join(' ')}”`)
   expect(line).not.toContain('The second paragraph.')
-  expect(line.slice(line.lastIndexOf('”') + 1).trim()).not.toBe('')
-  expect(((await s.$.state.get({ plugin: 'thimble', key: 'designs', id: key })).value as Any).answer).toBe(answer)
-  const told = Object.values(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).join('\n')
-  expect(told).toContain(first[0])
-  expect(told).toContain('The second paragraph.')
 
   // one of about 900 characters is cut at a word's end
   const t = setup()
@@ -204,18 +197,6 @@ test("a fork that drew none: the failure line quotes its first paragraph, cut at
   const kept = quote.slice(0, -1)
   expect(long.startsWith(kept)).toBe(true)
   expect(long[kept.length]).toBe(' ')
-})
-
-test('a design that ends with no card and no words, or whose model call failed, says that v draws it again, a press of v', async () => {
-  const s = setup()
-  await pressV(s)
-  await s.call('turn.complete', end('answer', ''), async () => ({ text: '' }))
-  expect(keyedWords(await s.failLine()).some(p => p.key === 'v')).toBe(true)
-  const t = setup()
-  await pressV(t)
-  await t.call('turn.complete', end('error', 'API Error: 529 the API is overloaded.'), async () => ({ text: '' }))
-  expect(await t.failLine()).toContain('(API Error: 529 the API is overloaded.)')
-  expect(keyedWords(await t.failLine()).some(p => p.key === 'v')).toBe(true)
 })
 
 test("a refused design says that the model's safeguards refused it, and how to switch models, as a notice, not a failure", async () => {

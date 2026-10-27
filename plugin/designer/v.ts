@@ -1,9 +1,9 @@
 // v.ts: the designer step. At an empty prompt, v starts a fork of the conversation in the background (core/forks.ts,
 // kind `designer`, with prompts/designer.md). The fork lists a few forms for main's last answer, picks one, draws it
 // with the `card` tool and fixes it from the card's text copy. Its cards draw under the answer v was pressed on; the
-// busy line says `drawing a card`, then `improving the card` once one is on screen. Main reads the cards it drew with
-// the person's next prompt; when it drew none, the failure line quotes the start of its last message, and main reads
-// all of it.
+// busy line says `drawing a card`, then `improving the card` once one is on screen; its last message never reaches
+// main, but main reads the cards it drew
+// with the person's next prompt.
 //
 // v is a letter too (hooks/keys.ts holds the word window: a letter typed right after v means the person types a word,
 // "very"). The fork is spawned inside the keys' prompt.edit hook, so Claude Code skips only that hook for the fork and
@@ -56,15 +56,13 @@ export type Design = {
   /** when the word window closes: the spawn waits until then */
   until: number
   error?: string
-  /** the fork's last words, whole, when it ended without a card (the failure line quotes their start) */
-  answer?: string
   /** the cards the design drew */
   cards: string[]
 }
 
 /** The words the fork shows as in /tasks, and how this module's agent.spawn hook knows the spawn as v's. */
 const DESCRIPTION = 'card of the last answer (v)'
-/** The most of a card's text copy, or of the fork's last words, main reads. */
+/** The most of a card's text copy main reads. */
 const TELL_CHARS = 3000
 /** The most of the fork's last words a failure line quotes, in cells: their first paragraph, cut at a word. */
 const SAID_CELLS = 400
@@ -176,7 +174,7 @@ async function start($: Engine, d: Design, prompt: string): Promise<void> {
   }
 }
 
-/** The fork ended: main reads the cards it drew, or the person and main read why it drew none. */
+/** The fork ended: main reads the cards it drew, or the person reads why it drew none. */
 async function finish($: Engine, d: Design, e: { reason: string; answer: string }): Promise<void> {
   if (e.reason === 'aborted') return end($, d, 'cancelled')
   if (e.reason === 'refusal') {
@@ -184,27 +182,15 @@ async function finish($: Engine, d: Design, e: { reason: string; answer: string 
     await end($, d, 'failed')
     return noticeLine($, "The model's safeguards refused to draw this card. Another model may draw it: /model.", 'v')
   }
-  // a failure line quotes the start of the fork's last words, whole up to a few lines; the design keeps all of them
-  const answer = String(e.answer || '').trim()
-  const said = cutWords(firstParagraph(answer), SAID_CELLS)
-  if (e.reason === 'error') {
-    if (answer) d.answer = answer
-    return end($, d, 'failed', `× v could not draw a card: the model call failed${said ? ` (${said})` : ''}. Press v to draw it again.`)
-  }
+  const said = cutWords(firstParagraph(e.answer), SAID_CELLS)
+  if (e.reason === 'error') return end($, d, 'failed', `× v could not draw a card: the model call failed${said ? ` (${said})` : ''}.`)
   const drawn: CardMeta[] = []
   for (const id of await anchoredAt($, d.anchorRow)) {
     const meta = await metaOf($, id)
     if (meta && meta.agentId === d.agentId) drawn.push(meta)
   }
   d.cards = drawn.map(m => m.id)
-  if (!drawn.length) {
-    if (!answer) return end($, d, 'failed', '× v drew no card. Press v to draw it again.')
-    // main reads all of it with the person's next prompt, so the person can ask it what went wrong: a fault of
-    // thimble's, which Claude may offer to fix, or a card the answer does not hold
-    d.answer = answer
-    await tellAtNextPrompt($, `v:${d.key}`, `The analyst pressed v on your last answer, and a copy of you drew no card under it. The analyst read the start of its last message on thimble's failure line; all of it:\n\n${fenced(cut(answer, TELL_CHARS))}`)
-    return end($, d, 'failed', `× v drew no card. The copy that drew it ended with: “${said}” Claude reads all of it with your next prompt: ask Claude what went wrong.`)
-  }
+  if (!drawn.length) return end($, d, 'failed', `× v drew no card.${said ? ` The copy that drew it ended with: “${said}”` : ''}`)
   const copies: string[] = []
   for (const m of drawn) copies.push(`“${m.title}” (id "${m.id}"), as drawn now:\n${fenced(cut(await cardText($, m.id), TELL_CHARS))}`)
   const what = drawn.length === 1 ? 'a card' : `${drawn.length} cards`
