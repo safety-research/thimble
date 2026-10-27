@@ -641,9 +641,10 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, session
         git("worktree", "add", "-q", "--detach", str(wt), base, cwd=live_dir())
         _give_types(wt)
         tmp_dir(fid).mkdir(parents=True, exist_ok=True)
+        now = time.time()
         rec = {"id": fid, "title": (title or short(words)).strip(), "words": [words], "rounds": 1, "made_in": made_in,
-               "created": time.time(), "state": "working", "work": str(wt), "base": base, "commit": None, "files": [],
-               "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
+               "created": now, "started": now, "state": "working", "work": str(wt), "base": base, "commit": None,
+               "files": [], "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
                "session": session or None}
         return put(rec)
 
@@ -671,9 +672,18 @@ def again(fid: int | str, session: str | None = None) -> dict[str, Any]:
     if rec.get("state") != "failed" or not rec.get("refused"):
         raise FixError(f"fix {rec['id']} is {state_word(rec)}, with no refusal to answer")
     if not _is_checkout(rec.get("work")):
-        raise FixError(f"fix {rec['id']} has no copy any more; r starts it again in a new copy")
-    rec.update(state="working", error=None, rounds=int(rec.get("rounds") or 1) + 1, **({"session": session} if session else {}))
+        raise FixError(f"fix {rec['id']} has no copy any more; y on its line starts it again in a new copy")
+    # the same request, tried again: its time and its name go on, and the bar says which try it is (tries)
+    rec.update(state="working", error=None, rounds=int(rec.get("rounds") or 1) + 1,
+               tries=int(rec.get("tries") or 1) + 1, **({"session": session} if session else {}))
     return put(rec)
+
+
+def _fresh(rec: dict[str, Any]) -> dict[str, Any]:
+    """A record that starts a round of its own (new words, or the person's y to try again): its time starts now, and the
+    tries and the block of the round before go."""
+    out = {k: v for k, v in rec.items() if k not in ("tries", "blocked")}
+    return {**out, "started": time.time()}
 
 
 def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, Any]:
@@ -685,6 +695,8 @@ def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, 
     rec = get(fid)
     words = (words or "").strip()
     if _is_checkout(rec.get("work")):
+        # words for a fixer that still works go on in its time; any other round starts its own
+        rec = rec if rec.get("state") == "working" else _fresh(rec)
         rec.update(words=[*rec.get("words", []), words], rounds=int(rec.get("rounds") or 1) + 1, state="working",
                    error=None, **({"session": session} if session else {}))
         return put(_named_patches(rec, words))
@@ -701,6 +713,7 @@ def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, 
         prev = {k: rec.get(k) for k in ("state", "commit", "files", "summary", "title", "tests", "tests_tail", "on_at",
                                          "base", "note")}
         rec.pop("refused", None)
+        rec = _fresh(rec)
         rec.update(state="working", work=str(wt), base=base, prev=prev, error=None, tests=None, note=None,
                    words=[*rec.get("words", []), words], rounds=int(rec.get("rounds") or 1) + 1,
                    session=session or rec.get("session"))
@@ -825,15 +838,18 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     a ready change becomes the fix's new version, the fix's change and the round's in one commit (settle), which waits
     for the person's y while the version before stays as it was; a round that changed nothing leaves the fix as it was.
     `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
-    `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r."""
+    `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for
+    another try."""
     rec = get(fid)
     if session and rec.get("session") and rec["session"] != session:
         raise FixError(f"fix {rec['id']} is being made in another Claude Code session, which checks it when its fixer ends")
     if rec.get("state") != "working":
         raise FixError(f"fix {rec['id']} was checked already ({state_word(rec)}), so there is nothing to check")
     if cannot is not None and cannot.strip():
-        rec.pop("refused", None)
-        rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300))
+        # a fixer that cannot do without the files no fix may change: another try cannot do it either (blocked)
+        blocked = protected_of((rec.pop("refused", None) or {}).get("files") or [])
+        rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300),
+                   **({"blocked": blocked} if blocked else {}))
         return put(rec)
     rec = _done(fid, title, summary, request, tests)
     if rec.get("prev") and rec.get("state") == "request":
@@ -846,7 +862,7 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
 def settle(rec: dict[str, Any]) -> dict[str, Any]:
     """A ready round of a fix changed in place: its new version is the fix's change as it is now (its ref) plus the
     round's change, as one commit on the commit the fix's change sits on, kept under refs/thimble/next/<id> until the
-    person's y. A round's change that does not apply to the fix fails, for r."""
+    person's y. A round's change that does not apply to the fix fails, for another try."""
     wt = Path(rec["work"])
     with Lock():
         old = git("rev-parse", _fix_ref(rec), cwd=wt)
@@ -903,25 +919,27 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
         _drop_work(rec)
         rec.update(state="failed", commit=None, files=[], tests=None,
                    error="its copy of thimble was gone or no longer a git checkout, so thimble could not check it; "
-                         "r starts it again in a new copy")
+                         "y on its line starts it again in a new copy")
         return put(rec)
     wt = Path(rec["work"])
     rec.pop("refused", None)
-    # a fix changed in place keeps its name
-    if title and title.strip() and not rec.get("prev"):
-        rec["title"] = short(title, 60)
+    rec.pop("blocked", None)
+    # the fixer's title names the fix once thimble uses its change, so a refused try leaves the name the person saw; a
+    # fix changed in place keeps its name
+    named = short(title, 60) if title and title.strip() and not rec.get("prev") else None
     rec["summary"] = (summary or "").strip()[:2000]
     git("add", "-A", cwd=wt)
     changed = run(["git", "diff", "--cached", "--quiet", rec["base"]], cwd=wt, check=False).returncode != 0
     if request or not changed:
         git("reset", "-q", "--hard", rec["base"], cwd=wt)
-        rec.update(state="request", files=[], commit=None, tests=None)
+        rec.update(state="request", files=[], commit=None, tests=None, **({"title": named} if named else {}))
         _drop_work(rec)
         return put(rec)
     # the fix is one commit on the commit its copy was cut from, whatever the copy's own history holds
     tree = git("write-tree", cwd=wt)
     commit = git(*THIMBLE_ID, "commit-tree", tree, "-p", rec["base"], "-m",
-                 f"{rec['title']}\n\n{rec['summary']}\n\nthimble fix {rec['id']}".strip(), cwd=wt, env=as_thimble())
+                 f"{named or rec['title']}\n\n{rec['summary']}\n\nthimble fix {rec['id']}".strip(), cwd=wt,
+                 env=as_thimble())
     git("reset", "-q", "--hard", commit, cwd=wt)
     # a round of a fix changed in place: its ref keeps the version the person has until their y
     git("update-ref", f"refs/thimble/{'next' if rec.get('prev') else 'fixes'}/{rec['id']}", commit, cwd=wt)
@@ -944,6 +962,8 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
             rec["refused"] = {"why": "its tests failed in the sandbox", "files": [], "tests": tail}
     else:
         rec.update(tests="skipped", state="ready", error=None)
+    if rec["state"] == "ready" and named:
+        rec["title"] = named
     return put(rec)
 
 
@@ -1042,7 +1062,8 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}, so there is nothing to apply")
     if rec.get("state") == "redo":
-        raise FixError(f"fix {rec['id']} does not fit your thimble any more; r asks Claude to redo it")
+        raise FixError(f"fix {rec['id']} does not fit your thimble any more; /thimble-fix {rec['id']} redo it, in Claude "
+                       "Code, has Claude make it fit")
     if rec.get("state") == "pending":
         raise FixError(f"thimble update set fix {rec['id']} aside at {release_name()}, so that nothing is fixed twice: "
                        "thimble reapply in a shell has Claude check it against the release and bring it back")
@@ -1063,7 +1084,8 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
             r = get(rec["id"])
             r.update(state="redo", error="it does not fit the fixes you have on")
             put(r)
-            raise FixError(f"fix {rec['id']} does not fit the fixes you have on; r asks Claude to redo it")
+            raise FixError(f"fix {rec['id']} does not fit the fixes you have on; /thimble-fix {rec['id']} redo it, in Claude "
+                           "Code, has Claude make it fit")
         new_commit = git("rev-parse", "HEAD", cwd=live)
         git("update-ref", f"refs/thimble/fixes/{rec['id']}", new_commit, cwd=live)
         _repoint()
@@ -1098,7 +1120,8 @@ def _swap(fid: int) -> dict[str, Any]:
     if fid in failed:
         git("update-ref", f"refs/thimble/fixes/{fid}", old, cwd=live)
         _rebuild([i for i in order if p.get("state") == "on" or i != fid])
-        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; r asks Claude to redo it")
+        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; /thimble-fix {fid} redo it, in "
+                       "Claude Code, has Claude make it fit")
     for i in failed:
         x = get(i)
         x.update(state="redo", error=f"it did not fit once fix {fid} changed")
@@ -1344,11 +1367,16 @@ def not_now(fid: int | str) -> dict[str, Any]:
 
 
 def redo(fid: int | str, words: str = "", session: str | None = None) -> dict[str, Any]:
-    """r: a new copy, cut from mine as it is now, for the same fix: the fixer gets the person's words again, and the
-    earlier change (tmp/<id>/earlier.patch) to start from."""
+    """y on a failed fix's line (try again): a new copy, cut from mine as it is now, for the same fix: the fixer gets
+    the person's words again, and the earlier change (tmp/<id>/earlier.patch) to start from. A fix whose fixer could
+    not do without the files no fix may change (blocked) tries again only with new words."""
     rec = get(fid)
     if rec.get("state") not in ("redo", "pending", "failed", "off", "ready", "request"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}")
+    if rec.get("blocked") and not (words or "").strip():
+        raise FixError(f"fix {rec['id']} needs a change to {_and(rec['blocked'])}, which no fix may make, so another try "
+                       f"would fail the same way; thimble file issue {rec['id']}, in a shell, sends it to thimble's "
+                       "maintainers")
     with Lock():
         ensure_live()
         if rec.get("prev"):
@@ -1369,6 +1397,7 @@ def redo(fid: int | str, words: str = "", session: str | None = None) -> dict[st
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         if earlier.strip():
             (tmp_dir(rec["id"]) / "earlier.patch").write_text(earlier)
+        rec = _fresh(rec)
         rec.update(state="working", work=str(wt), base=base, error=None, tests=None, rounds=int(rec.get("rounds") or 1) + 1,
                    session=session or None,
                    words=[*rec.get("words", []), *([words.strip()] if words.strip() else [])])

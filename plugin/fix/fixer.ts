@@ -3,8 +3,9 @@
 // ("this" means something in it); prompts/fixer.md opens its first message.
 //
 //   startFixer($, fix, words)   forks the session into the copy, with the words and a text copy of what thimble shows
-//                               now (screen.ts); the bar shows `fixing <name>` with its time (`changing <name>` for a
-//                               round of a fix the person has); the subagent is named after the fix (fix-<slug>)
+//                               now (screen.ts); the bar shows `fixing <name>` with its time since the round started
+//                               (`changing <name>` for a round of a fix the person has, `· try 2` for another try of
+//                               it); the subagent is named after the fix (fix-<slug>)
 //   fixerCall($, e, id)         each of its tool calls: Bash runs in the sandbox runtime (the kernel's `fix sandbox`
 //                               gives the command's start: reads only the system, its tools and the copy, writes only
 //                               the copy and its temp folder, reaches only the package registries, by the release's
@@ -18,9 +19,9 @@
 //                               then the line above the bar asks whether to use it (y; the person's key applies it), and
 //                               Claude Code sends a notification. When Claude started the fix, Claude is told, so that it
 //                               can tell the person. When the check does not use the change (a file no fix may change,
-//                               a binary file, failing tests), a new fixer gets another round in the same copy at once
-//                               (`thimble fix again`), told why; the person sees a failure only when a fixer ends with
-//                               `Cannot: <why>`.
+//                               a binary file, failing tests), a new fixer gets another try in the same copy at once
+//                               (`thimble fix again`), told why, and a toast says so; the person sees a failure only
+//                               when a fixer ends with `Cannot: <why>`.
 //
 //   state: fixers (agentId → the fix's id), fixBy (the fixes Claude started, by their id), fixerBox (the sandbox
 //          command's start, by the fix's id)
@@ -85,9 +86,10 @@ export function changingText(f: Fix): string {
   return `These words change the fix the person already ${had}, "${f.prev?.title || f.title}"${f.prev?.summary || f.summary ? ` (${f.prev?.summary || f.summary})` : ''}; its change is in your copy, and your change becomes part of it.`
 }
 
-/** For the next fixer after the check did not use a change (another round in the same copy, or r in a new one): what
+/** For the next fixer after the check did not use a change (another try in the same copy, or y in a new one): what
  *  was refused and why, so that it puts the change elsewhere or fixes the tests, or says why it cannot. The prompt does
- *  not list the files no fix may change; this names only the ones the change touched. `earlier`: r, whose copy is new. */
+ *  not list the files no fix may change; this names only the ones the change touched. `earlier`: another try in a new
+ *  copy (y on the failed line). */
 export function refusedText(r: Refusal, earlier: boolean): string {
   const where = earlier ? 'The earlier change is not in your copy' : 'Your last change is in your copy'
   const fix = r.files?.length
@@ -159,24 +161,26 @@ async function start($: Engine, fix: Fix, earlier: boolean, screen: string): Pro
   const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier ? `${fixesDir(await thimbleHome($))}/tmp/${fix.id}/earlier.patch` : null, task, await askerOf($, fix.id), screen), description: fixingWord(fix), cwd: fix.work || undefined, name: fixSlug(fix) })
   if (r.deny !== undefined || !r.agentId) return `The fixer did not start (${cut(String(r.deny || 'no agent started'), 200)}).`
   await $.state.set(FIXERS, { ...(await fixers($)), [r.agentId]: fix.id } as never)
-  busyFixer($, fix, async () => fixOf($, fix.id))
+  busyFixer($, fix)
   watch($, fix.id)
   return null
 }
 
 /** The bar's step while a fix's fixer works (`fixing <name>`, or `changing <name>` for a round of a fix the person
- *  has), until it ends. `now`: the fix's record now. */
-export function busyFixer($: Engine, fix: Fix, now: () => Promise<Fix | null | undefined>): void {
+ *  has), until it ends, with its time since the round started (the kernel's `started`), so that a reload of the plugin
+ *  (a setting changed) or another try of the same request does not set it back to 0. It reads the fix from the list
+ *  this session keeps, which the fixer's end and watch's looks bring up to date. */
+export function busyFixer($: Engine, fix: Fix): void {
   void busyWhile($, fixingWord(fix), async () => {
     if (ending.has(fix.id)) return false
-    const f = await now()
+    const f = await fixOf($, fix.id)
     return f?.state === 'working' ? fixingWord(f) : false
-  })
+  }, fix.started ? fix.started * 1000 : undefined)
 }
 
 /** While a fix works, a look every few seconds: a fixer that ended without its end reaching this plugin (a reload
  *  between) is taken as it stands. */
-function watch($: Engine, id: number): void {
+export function watch($: Engine, id: number): void {
   let t: { cancel?: () => void } | null = null
   const look = async () => {
     const f = await fixOf($, id)
@@ -334,12 +338,16 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
     return null
   }
   const done = jsonOf<Fix>(r.out)
-  // the check did not use the change (a file no fix may change, a binary file, failing tests): another round in the same copy
+  // the check did not use the change (a file no fix may change, a binary file, failing tests): another try in the same
+  // copy, under the same name and time, which the bar counts (fixingWord) and a toast tells
   if (!end.cannot && done?.state === 'failed' && done.refused && done.work) {
     const a = await kernelFix($, ['again', String(id)], { timeoutMs: 60000 })
     const next = a.ok ? jsonOf<Fix>(a.out) : null
     await refreshFixes($)
-    if (next?.state === 'working') return next
+    if (next?.state === 'working') {
+      $.ui.toast(`thimble did not use the last try at “${fixName(next)}” (${cut(done.refused.why, 120)}), so another one runs.`)
+      return next
+    }
   }
   // a round of a fix the person has that changed no code: the fix stays as it was
   const kind = done?.unchanged ? 'request' : done?.state === 'ready' ? 'ready' : done?.state === 'request' ? 'request' : 'failed'

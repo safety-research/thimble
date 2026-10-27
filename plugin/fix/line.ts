@@ -17,17 +17,21 @@
 //               If thimble stops loading: sh …/off.sh       loads thimble with --plugin-dir, the restart that loads it)
 //   off       ○ <title> is off · thimble reloaded           (until the next prompt)
 //             ↺ <title> is back to its version before · thimble reloaded   (u after y on a changed fix)
-//   failed    × <title> did not pass · <why>                d what changed · r redo · n later
+//   failed    × <title> did not pass · <why>                y try again · d what it tried · n dismiss   (until the
+//             next prompt; the fix stays failed in thimble fixes)
 //             (× The change to <title> did not pass, for a round of a fix the person has: n leaves the fix as it was;
-//             a <why> too long for the row, such as a refusal that names files, gets a row of its own)
-//   request   ◇ Saved as a request with no code: <title>    n ok · thimble fix list, in a shell, lists it
-//             ◇ Claude changed no code: <title> stays as it was   (a round of a fix the person has)
+//             a <why> too long for the row, such as a refusal that names files, gets a row of its own; a fix whose
+//             fixer could not do without the files no fix may change (blocked) offers no new try: d what it tried ·
+//             n dismiss · thimble file issue N, in a shell, sends it to thimble's maintainers)
+//   request   ◇ Saved as a request with no code: <title>    n ok · thimble fix list, in a shell, lists it   (until the
+//             ◇ Claude changed no code: <title> stays as it was   (a round of a fix the person has)    next prompt)
 //   update    ↑ thimble 0.10.3 · 3 fixes carried · 1 needs redo   (until the next prompt)
 //   release   ↑ thimble 0.10.3 is out (you have 0.10.2) · thimble update in a shell   (at session start)
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
 //
 // y applies: from then on the fix's code runs as thimble, so only the person's key does it (fixes.ts). n leaves a ready
-// fix ready in the person's list (thimble fix list, in a shell), where thimble fix apply N turns it on later.
+// fix ready in the person's list (thimble fix list, in a shell), where thimble fix apply N turns it on later. The keys
+// say what they do; r stays the bar's (coverage), so a failed fix tries again with y.
 import type { EngineInterface } from 'claude-code'
 
 import { thimbleHome } from '../core/home'
@@ -42,28 +46,33 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** The keys the line takes now, by its kind. */
-const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['d', 'r', 'n'], request: ['n'] }
+/** The keys the line takes now, by its kind. A failed fix's y tries again, except for a blocked one (keysOf). */
+const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['y', 'd', 'n'], request: ['n'] }
+
+/** The keys the line takes for this fix: a failed fix whose fixer could not do without the files no fix may change
+ *  (blocked) offers no new try, which would fail the same way. */
+const keysOf = (kind: string, f: Pick<Fix, 'blocked'> | null): string[] =>
+  (KEYS[kind] ?? []).filter(k => !(kind === 'failed' && k === 'y' && f?.blocked?.length))
 
 /** What a key on the line does, once the word window closed (it cannot be undone). */
 export async function fixKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
   // a key no line takes reads nothing: a key's hook has a few milliseconds of its own time
   if (!Object.values(KEYS).some(ks => ks.includes(k))) return null
   const l = await fixLineNow($)
-  if (!l || !(KEYS[l.kind] ?? []).includes(k)) return null
+  if (!l || !keysOf(l.kind, l.kind === 'failed' ? await fixOf($, l.id) : null).includes(k)) return null
   return { later: () => pressLine($, l.id, l.kind, k) }
 }
 
 async function pressLine($: Engine, id: number, kind: string, k: string): Promise<void> {
   let said: string | null = null
-  if (k === 'y') said = await applyFix($, id)
+  if (k === 'y' && kind === 'failed') said = await redoFix($, id)
+  else if (k === 'y') said = await applyFix($, id)
   else if (k === 'u') said = await undoFix($, id)
   else if (k === 'd') {
     // what changed, in the line's place, or the line again
     const l = await fixLineNow($)
     if (l?.id === id) await setFixLine($, { ...l, open: !l.open })
-  } else if (k === 'r') said = await redoFix($, id)
-  else if (k === 'n') {
+  } else if (k === 'n') {
     // a ready fix stays ready in the person's list (thimble fix list), where thimble fix apply turns it on later; a failed
     // one stays failed there
     await setFixLine($, null)
@@ -75,10 +84,11 @@ async function pressLine($: Engine, id: number, kind: string, k: string): Promis
   if (said) await setFixLine($, { id, kind: 'problem', said })
 }
 
-/** The person's next prompt: a line that only told something goes. A fix that waits for y stays. */
+/** The person's next prompt: a line that only told something goes, a failed fix's and a request's too (thimble fixes
+ *  keeps them, and /thimble-fix N tries again). A fix that waits for y stays. */
 export async function lineSeen($: Engine): Promise<void> {
   const l = await fixLineNow($)
-  if (l && (l.kind === 'off' || l.kind === 'problem' || l.kind === 'update' || l.kind === 'release' || (l.kind === 'applied' && !l.reload))) await setFixLine($, null)
+  if (l && (['off', 'problem', 'update', 'release', 'failed', 'request'].includes(l.kind) || (l.kind === 'applied' && !l.reload))) await setFixLine($, null)
 }
 
 /** A key and its words, a click that does what the key does (`press`). */
@@ -117,6 +127,14 @@ function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
   ]
 }
 
+/** A failed fix's keys: another try, unless its fixer could not do without the files no fix may change (blocked); then
+ *  what sends it to thimble's maintainers. `open`: the keys under what it tried. */
+function failedKeys(els: Any, f: Fix | null, id: number, open: boolean, press: (k: string) => unknown): Any[] {
+  const blocked = !!f?.blocked?.length
+  const keys: [string, string][] = [...(blocked ? [] : [['y', 'try again'] as [string, string]]), ...(open ? [] : [['d', 'what it tried'] as [string, string]]), ['n', 'dismiss']]
+  return [...keysRow(els, keys, press), ...(blocked ? [els.Text({ key: 'm', dimColor: true, children: ` · thimble file issue ${id}, in a shell, sends it to thimble's maintainers` })] : [])]
+}
+
 /** The line's rows, `width` cells wide, or none. */
 export async function fixLineRows($: Engine, els: Any, width: number): Promise<Any[]> {
   const l = await fixLineNow($)
@@ -132,7 +150,7 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     return [...whatChanged(els, f, width, `${filesWord(f)} · ${testsWord(f)}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: keysRow(els, [['y', 'use it now'], ['n', 'later']], press) })]
   }
   if (l.kind === 'failed' && f && l.open) {
-    return [...whatChanged(els, f, width, `${filesWord(f)} · ${f.error || 'its tests failed'}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: keysRow(els, [['r', 'redo'], ['n', 'later']], press) })]
+    return [...whatChanged(els, f, width, `${filesWord(f)} · ${f.error || 'its tests failed'}`), Box({ key: 'fix-line-2', flexDirection: 'row', flexWrap: 'wrap', width, children: failedKeys(els, f, l.id, true, press) })]
   }
   let first: Any[] = []
   let second: Any[] = []
@@ -164,7 +182,7 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     first = [Text({ key: 'g', color: 'error', children: '× ' }), Text({ key: 'h', children: lead }), Text({ key: 't', children: title }), Text({ key: 'p', children: ' did not pass' }),
       ...(fits ? [dim('m', ` · ${reason}`)] : [])]
     if (!fits) why = [Text({ key: 'w', dimColor: true, wrap: 'wrap', children: `  ${reason}` })]
-    second = keysRow(els, [['d', 'what changed'], ['r', 'redo'], ['n', 'later']], press)
+    second = failedKeys(els, f, l.id, false, press)
   } else if (l.kind === 'request') {
     first = l.kept
       ? [Text({ key: 'g', color: accent(), children: '◇ ' }), Text({ key: 'h', children: 'Claude changed no code: ' }), Text({ key: 't', children: title }), Text({ key: 'm', children: ' stays as it was' })]

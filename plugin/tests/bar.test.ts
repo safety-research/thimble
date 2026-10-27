@@ -4,7 +4,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
-import { busyWhile } from '../bar/busy'
+import { busyNow, busyWhile } from '../bar/busy'
 import { INTRO, INTRO_MS } from '../bar/intro'
 import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
@@ -219,6 +219,18 @@ test('a long busy step keeps the bar to one row: its other steps go, then its wo
   const narrower = textOf(await barRows($, ELS, 26, { on: () => false }))
   expect(narrower).toContain('…')
   expect(narrower.length).toBeLessThanOrEqual(26)
+  alive = false
+})
+
+test('a busy step that began before this load of the module (a fixer across a reload) counts its seconds from then; a start the clock has not reached starts now', async () => {
+  let now = 9000000
+  const $ = { ...stateOnly({}), clock: { now: async () => now, after: () => ({ cancel() {} }) } } as Any
+  let alive = true
+  await busyWhile($, 'fixing a made-up fix', async () => alive, now - 120000)
+  expect(await busyNow($)).toMatchObject({ word: 'fixing a made-up fix', secs: 120 })
+  await busyWhile($, 'checking 2 citations', async () => alive, now + 60000)
+  now += 4000
+  expect(await busyNow($)).toMatchObject({ word: 'checking 2 citations', secs: 4 })
   alive = false
 })
 

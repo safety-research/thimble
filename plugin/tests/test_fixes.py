@@ -201,8 +201,9 @@ def test_a_fix_may_not_change_the_way_back_and_its_record_names_the_safety_files
     (Path(r["work"]) / "plugin" / "engine" / "kernel").mkdir(parents=True)
     (Path(r["work"]) / "plugin" / "engine" / "kernel" / "privacy.py").write_text("def scan(*a): return [], []\n")
     r = FX.done(r["id"], "Skip the scan", "")
-    # the refusal names each file with what it is, and why
+    # the refusal names each file with what it is, and why; the refused try's title does not rename the fix
     assert r["state"] == "failed" and r["error"] == f"it changes plugin/engine/kernel/privacy.py (the privacy scan); {WAY_BACK}"
+    assert r["title"] == "let fixes skip the scan"
     with pytest.raises(FX.FixError):
         FX.apply(r["id"], press(r["id"]))
     b = FX.new("an image")
@@ -326,13 +327,16 @@ def test_a_refused_change_goes_back_to_the_fixer_in_the_same_copy_and_the_next_r
     wt = Path(r["work"])
     (wt / "plugin" / "fix").mkdir(parents=True)
     (wt / "plugin" / "fix" / "line.ts").write_text("const KEY_COLOR = 'blue'\n")
+    started = r["started"]
     r = FX.done(r["id"], "Blue fix line", "")
-    assert r["state"] == "failed" and r["work"] == str(wt)
+    assert r["state"] == "failed" and r["work"] == str(wt) and r["title"] == "make the fix line blue"
     assert r["refused"] == {"why": r["error"], "files": ["plugin/fix/line.ts"]}
-    # again: another round in the same copy, no new words, the refusal still there for the fixer
+    # again: another try in the same copy, no new words, the refusal still there for the fixer; its name and its time
+    # go on, and it counts the tries
     r = FX.again(r["id"], session="s-made-up")
     assert r["state"] == "working" and r["rounds"] == 2 and r["words"] == ["make the fix line blue"]
     assert r["refused"]["files"] == ["plugin/fix/line.ts"] and r["work"] == str(wt) and r["session"] == "s-made-up"
+    assert r["tries"] == 2 and r["started"] == started and r["title"] == "make the fix line blue"
     # round 2 puts the change elsewhere: it passes, and the refusal is gone
     (wt / "plugin" / "fix" / "line.ts").unlink()
     (wt / "plugin" / "fix").rmdir()
@@ -340,6 +344,7 @@ def test_a_refused_change_goes_back_to_the_fixer_in_the_same_copy_and_the_next_r
     p.write_text(p.read_text() + "const accent = 'blue'\n")
     r = FX.done(r["id"], "Blue accent", "thimble's color is blue.")
     assert r["state"] == "ready" and "refused" not in r and [f["path"] for f in r["files"]] == ["plugin/bar/bar.tsx"]
+    assert r["title"] == "Blue accent"  # the try thimble used names the fix
     with pytest.raises(FX.FixError, match="no refusal"):
         FX.again(r["id"])
     # failing tests: the refusal carries the end of their output
@@ -347,11 +352,23 @@ def test_a_refused_change_goes_back_to_the_fixer_in_the_same_copy_and_the_next_r
     t = made(world)
     t = FX.done(t["id"], "Bar says read", "")
     assert t["state"] == "failed" and t["refused"]["files"] == [] and "made-up-failure" in t["refused"]["tests"]
-    # the fixer ends saying why it cannot be done: that is the failure the person reads, the copy kept for r
+    # the fixer ends saying why it cannot be done: that is the failure the person reads, the copy kept for another try
     t = FX.again(t["id"])
     t = FX.done(t["id"], cannot="The color of the fix line is drawn by thimble's own fix flow, which a fix may not change.")
     assert t["state"] == "failed" and t["error"].startswith("The color of the fix line") and "refused" not in t
-    assert Path(t["work"]).is_dir()
+    assert Path(t["work"]).is_dir() and "blocked" not in t
+    # a fixer that cannot do without the files no fix may change: the fix is blocked, and another try needs new words
+    b = FX.new("make the fix line blue")
+    (Path(b["work"]) / "plugin" / "fix").mkdir(parents=True)
+    (Path(b["work"]) / "plugin" / "fix" / "line.ts").write_text("const KEY_COLOR = 'blue'\n")
+    FX.done(b["id"], "Blue fix line", "")
+    FX.again(b["id"])
+    b = FX.done(b["id"], cannot="Only thimble's maintainers can change the fix line.")
+    assert b["blocked"] == ["plugin/fix/line.ts"] and "refused" not in b
+    with pytest.raises(FX.FixError, match=f"thimble file issue {b['id']}"):
+        FX.redo(b["id"])
+    b = FX.redo(b["id"], "make the bar blue instead")
+    assert b["state"] == "working" and "blocked" not in b and "tries" not in b and b["words"][-1] == "make the bar blue instead"
 
 
 def test_a_follow_up_made_a_fix_of_its_own_merges_into_the_fix_it_repairs(world):
@@ -1305,7 +1322,7 @@ def test_two_sessions_check_only_their_own_fixes_and_a_copy_that_is_no_checkout_
     assert three["session"] == "s-made-up-a" and Path(three["work"]).is_dir()
     (Path(three["work"]) / ".git").unlink()
     out = FX.done(three["id"], session="s-made-up-a")
-    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "r starts it again" in out["error"]
+    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "y on its line starts it again" in out["error"]
     assert out["work"] is None and not Path(three["work"]).exists()
     again = FX.redo(three["id"], session="s-made-up-a")
     p = Path(again["work"]) / "plugin" / "bar" / "bar.tsx"

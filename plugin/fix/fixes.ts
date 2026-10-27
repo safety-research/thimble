@@ -49,10 +49,16 @@ export type Fix = {
   /** the Claude Code session whose fixer works on it (new, round, redo): only that session ends it */
   session?: string | null
   /** the last check did not use the change, and why; kept until the next check, so that the next fixer in the copy
-   *  (another round, at once, or r) is told */
+   *  (another round, at once, or y on its failed line) is told */
   refused?: Refusal | null
+  /** the files no fix may change that its fixer could not do without, when it ended with `Cannot:`: another try fails
+   *  the same way, so its failed line offers none */
+  blocked?: string[]
   /** the kinds of files it changes that the person is told of before they use it, by kind (the sandbox, dependencies…) */
   notice?: Record<string, string[]>
+  /** which try of the same request this is, after the check refused the tries before (again); when this round of work
+   *  started, in seconds, which a refused try and a reload keep */
+  tries?: number; started?: number
 }
 /** A fix as the person and Claude read it in a session: its name (its title), cut to `n` cells. The number is the
  *  shell's handle (thimble fix off 2), never the name. */
@@ -61,8 +67,9 @@ export const fixName = (f: Pick<Fix, 'id' | 'title'>, n = 60): string => cut(f.t
 /** Whether a fix had a version before this round: a change to a fix the person has, not a new fix. */
 export const isChange = (f: Pick<Fix, 'prev'>): boolean => !!f.prev
 
-/** The bar's step while a fixer works: `fixing <name>` for a new fix, `changing <name>` for a fix the person has. */
-export const fixingWord = (f: Fix): string => `${isChange(f) ? 'changing' : 'fixing'} ${fixName(f, 28)}`
+/** The bar's step while a fixer works: `fixing <name>` for a new fix, `changing <name>` for a fix the person has, with
+ *  ` · try 2` once the check refused a try of it. */
+export const fixingWord = (f: Fix): string => `${isChange(f) ? 'changing' : 'fixing'} ${fixName(f, 28)}${(f.tries ?? 1) > 1 ? ` · try ${f.tries}` : ''}`
 
 /** The sentence that tells the person what such files a fix changes before they use it: `This fix changes the sandbox
  *  (plugin/cards/argv.mjs).`, or '' (engine/kernel/fixes.py notice_said says the same). */
@@ -91,7 +98,7 @@ export function fixSlug(f: Pick<Fix, 'id' | 'title'>): string {
 export type Refusal = { why: string; files: string[]; tests?: string }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
- *  u), failed (d what changed · r redo · n later), request (no code), a new release with the fixes replayed on it
+ *  u), failed (y try again · d what it tried · n dismiss), request (no code), a new release with the fixes replayed on it
  *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
  *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
 export type FixLine = {

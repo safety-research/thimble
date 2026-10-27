@@ -26,8 +26,9 @@
 //                          fixes' copies, are refused
 //   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it now · d what
 //                          changed · n later, and Claude Code sends a notification
-//   the person's prompt    a line that only told something goes (line.ts)
-//   session start          a newer release is out: one line says so (thimble update, in a shell, moves to it)
+//   the person's prompt    a line that only told something goes, a failed fix's too (line.ts)
+//   session start          a newer release is out: one line says so (thimble update, in a shell, moves to it); a
+//                          fixer that works on across a reload keeps its step on the bar, and its time
 //
 // A newer release comes with `thimble update` in a shell, never inside Claude Code.
 //
@@ -38,7 +39,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
-import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes, recoverFixers } from './fixer'
+import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes, recoverFixers, watch } from './fixer'
 import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { fixesContext, request } from './request'
@@ -174,8 +175,13 @@ export const registerFix: Register = on => {
       else await reloaded($)
       // a follow-up from before rounds changed a fix in place, folded in by the kernel: once, its fix's line
       await strayLine($, list?.fixes ?? [])
+      // a fixer that works on across the reload: its step on the bar again, with its time, and the look that takes its
+      // end should the end not reach this load
       const working = await ownFixes($, (list?.fixes ?? []).filter(f => f.state === 'working'))
-      for (const f of working) busyFixer($, f, async () => (await refreshFixes($))?.fixes.find(x => x.id === f.id))
+      for (const f of working) {
+        busyFixer($, f)
+        watch($, f.id)
+      }
       await recoverFixers($, working)
       // a newer release: one line says so, once per session (a reload starts the module again)
       if (list?.pointed && !(await $.state.get(UPDATED)).value) {
