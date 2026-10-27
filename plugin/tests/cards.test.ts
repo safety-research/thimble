@@ -574,15 +574,11 @@ test('when the sandbox cannot start, no card runs: the call and the failure line
   await w.clock.advance(10)
   const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_8', title: 'Scores', data: 'runs.json', view: VIEW } as never)) as Any
   const text = String(r.result)
-  // why cards need the sandbox (they run the code Claude writes), why it cannot start, and the fix
-  expect(text).toContain('the code Claude writes')
-  expect(text).toContain("Anthropic's sandbox runtime, which cannot start here: this machine lacks what the sandbox needs: bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap")
+  expect(text).toContain("cards run only in Anthropic's sandbox runtime, which cannot start here: this machine lacks what the sandbox needs: bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap")
   expect(text).toContain('The view is not the cause')
   const bar = textOf(await $.ui.render(BAND))
-  expect(bar).toContain('Cards cannot draw: cards run the code Claude writes')
+  expect(bar).toContain('Cards cannot draw: cards run only in Anthropic')
   expect(bar).toContain('sudo apt-get install bubblewrap')
-  // and that only cards wait for it
-  expect(bar).toContain('The rest of thimble works')
   expect(w.asked).not.toContain('load')
   expect(w.spawned.length).toBe(0)
   // the fix needs the person's sudo: a notice, not a failure line

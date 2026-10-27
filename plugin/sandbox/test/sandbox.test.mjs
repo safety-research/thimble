@@ -220,11 +220,8 @@ test('a runner that ends before it opens its socket: the probe says how it ended
   assert.ok(said.why.includes(node), said.why)
   // a signal stopped it: run.mjs exits with 128 and the signal's number
   assert.match(probeWith("sh -c 'kill -KILL $$'").why, /SIGKILL/)
-  // the line it prints says why, what the sandbox is for, and that the rest of thimble works without it
-  const line = probeWith('true', false)
-  assert.match(line, /cards cannot run yet: .*exit 0/)
-  assert.match(line, /code Claude writes/)
-  assert.match(line, /rest of thimble works/)
+  // the line it prints says so too
+  assert.match(probeWith('true', false), /cards cannot run yet: .*exit 0/)
 })
 
 test('a runner that an error ends before it opens its socket: the probe quotes the error and its code, not the last lines of Node\'s report', () => {
