@@ -337,8 +337,8 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
     ? ['done', String(id), '--cannot', '-']
     : ['done', String(id), '--summary', '-', ...(end.title ? ['--title', end.title] : []), ...(end.request ? ['--request'] : [])]
   // the tests of one fix at a time, each run once more when it fails (engine/kernel/fixes.py run_tests): the wait for
-  // another fix's tests counts too
-  const r = await kernelFix($, args, { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 2400000, doing: `testing ${fix ? fixName(fix, 28) : `fix ${id}`}` })
+  // another fix's tests counts too; 10 minutes, the most Claude Code gives a process call (core/test/limits.test.mjs)
+  const r = await kernelFix($, args, { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 600000, doing: `testing ${fix ? fixName(fix, 28) : `fix ${id}`}` })
   await refreshFixes($)
   if (!r.ok) {
     await setFixLine($, { id, kind: 'problem', said: `“${name}” could not be checked: ${cut(r.err || 'thimble fix done gave nothing', 200)}` })
