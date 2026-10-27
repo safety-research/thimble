@@ -15,7 +15,7 @@ import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
-import { readText, rewritesIn, withAsked } from '../marks/message.js'
+import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
 import { noteRow, startCheck } from '../marks/checker'
 import { citeBar, citeKey, citeWords, placeOf } from '../marks/cite'
@@ -467,6 +467,37 @@ test('with Citations manual, c makes the selected words a citation of their answ
     setOptions({ citations: 'off' })
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
+  } finally {
+    setOptions({})
+  }
+})
+
+test("c finds words on a card's link as they draw, the card's title, and the citation takes in the whole link, which still draws as the title", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const text = 'Edits peak on Mondays, as [Edits by day](card:c1a2b3c4d5) shows above.'
+    const read = 'Edits peak on Mondays, as Edits by day shows above.'
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const drawn = async (row: string) => {
+      const a = withAsked(text, (await rowMarks(s.$, row))!.items)
+      const runs = inline(a.text, 0, a.text.length, marksIn(a.text))
+      return { text: a.text, read: runsText(runs), cited: runs.filter(r => r.mark === 0).map(r => r.s).join('') }
+    }
+    // words of the title: a citation of the whole link, drawn on the title
+    await answered(s, { id: 't1', prompt: 'When are edits made?', text })
+    expect(await citeWords(s.$, 't1-row', 'Edits by day')).toBeUndefined()
+    expect((await rowMarks(s.$, 't1-row'))!.items.map(m => m.words)).toEqual(['Edits by day'])
+    expect(await drawn('t1-row')).toEqual({ text: 'Edits peak on Mondays, as [[Edits by day](card:c1a2b3c4d5)](#) shows above.', read, cited: 'Edits by day' })
+    // words that run across the link, as they draw
+    await answered(s, { id: 't2', prompt: 'And again?', text })
+    expect(await citeWords(s.$, 't2-row', 'as Edits by day shows')).toBeUndefined()
+    expect((await rowMarks(s.$, 't2-row'))!.items.map(m => m.words)).toEqual(['as Edits by day shows'])
+    expect(await drawn('t2-row')).toEqual({ text: 'Edits peak on Mondays, [as [Edits by day](card:c1a2b3c4d5) shows](#) above.', read, cited: 'as Edits by day shows' })
+    expect(readText(text, (await rowMarks(s.$, 't2-row'))!.items)).toBe(text)
+    // a citation stored on part of a link is left out, so the link still draws
+    const part = { n: 9, row: 't3-row', words: 'Edits by day', start: text.indexOf('Edits by'), end: text.indexOf('](card'), status: 'deferred', shown: 'Edits by day', asked: true }
+    expect(withAsked(text, [part]).text).toBe(text)
   } finally {
     setOptions({})
   }

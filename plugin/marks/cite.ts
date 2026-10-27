@@ -5,7 +5,8 @@
 // its check (checker.ts checkOpened): a second Claude finds where they come from in the files or in what code printed,
 // and the tray shows the evidence, verified, corrected or failed, as for any citation. The words are found in the answer
 // as it draws: words inside or across a citation (Claude's, or one asked before) open that one, and so do words of a
-// sentence a check rewrote, which is the check's.
+// sentence a check rewrote, which is the check's; a card's link reads as its title, and a new citation on any of its
+// words takes in the whole link, which still draws as the title.
 //
 // c is also the Claims pane's key: c cites only while words are selected that it has not cited yet, which the bar shows
 // as `c cite` (beside `e explain`, the claims' item set aside meanwhile); else c opens the claims (core/answerview.ts
@@ -29,7 +30,7 @@ import { claudeCites, featureOn } from '../settings/features.mjs'
 import { squeezeView } from '../squeeze/seam'
 import { openTray, trayFocus } from '../tray/seam'
 import { awaitsCheck } from './checker'
-import { askedWords, carrier, codeRanges, marksIn, rewritesIn, sentenceOf, sentenceSpan, withAsked, withCorrections } from './message.js'
+import { askedWords, cardLinksIn, carrier, codeRanges, marksIn, rewritesIn, sentenceOf, sentenceSpan, withAsked, withCorrections, withoutCardLinks } from './message.js'
 import { editReply, newReply, replyKeyOf, replyOf, type MarkItem } from './store'
 
 type Engine = EngineInterface
@@ -39,24 +40,35 @@ type Engine = EngineInterface
 const SIGN = new RegExp(`(^| )[×${SPIN}]`, 'g')
 
 /** Where `words`, as the analyst read them, stand in an answer's text, on one line: each citation (`[words](#)`) reads
- *  as its words, and a place on them takes in the whole citation; the spaces and markdown emphasis between words may
- *  differ (`**`, `*`, `` ` ``), and the place found starts and ends on the words themselves. Words not found as
- *  selected are looked for without the signs drawn after citations. */
+ *  as its words and each link to a card as its title, as they draw, and a place on them takes in the whole citation or
+ *  link; the spaces and markdown emphasis between words may differ (`**`, `*`, `` ` ``), and the place found starts and
+ *  ends on the words themselves. Words not found as selected are looked for without the signs drawn after citations. */
 export function placeOf(text: string, words: string): { start: number; end: number } | null {
   const marks = marksIn(text)
-  // the text with each citation as its words, and where each of its characters stands in `text`
+  const links = cardLinksIn(text)
+  // the text with each citation as its words and each card's link as its title, and where each of its characters
+  // stands in `text`
+  const brackets = new Set<number>()
+  for (const m of marks) {
+    brackets.add(m.start)
+    for (let k = m.start + 1 + m.words.length; k < m.end; k++) brackets.add(k)
+  }
   let read = ''
   const at: number[] = []
-  let i = 0
-  for (const m of [...marks, { start: text.length, end: text.length, words: '' }]) {
-    for (; i < m.start; i++) { read += text[i]; at.push(i) }
-    for (let k = 0; k < m.words.length; k++) { read += m.words[k]; at.push(m.start + 1 + k) }
-    i = m.end
+  for (let i = 0; i < text.length;) {
+    const l = links.find(x => x.start === i)
+    if (l) {
+      for (let k = 0; k < l.words.length; k++) { read += l.words[k]; at.push(l.start + 1 + k) }
+      i = l.end
+      continue
+    }
+    if (!brackets.has(i)) { read += text[i]; at.push(i) }
+    i++
   }
   const p = wordsIn(read, words) ?? wordsIn(read, words.replace(SIGN, ''))
   if (!p) return null
   let [start, end] = [at[p.start]!, at[p.end - 1]! + 1]
-  for (const m of marks) if (start < m.end && end > m.start) [start, end] = [Math.min(start, m.start), Math.max(end, m.end)]
+  for (const m of [...links, ...marks]) if (start < m.end && end > m.start) [start, end] = [Math.min(start, m.start), Math.max(end, m.end)]
   return { start, end }
 }
 
@@ -145,12 +157,14 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
   if (codeRanges(raw).some(([a, b]) => place.start < b && place.end > a)) return 'those words are code, which has no source; select words of the answer\'s text.'
   // while Claude cites, the end of the answer's turn stores its citations as a new reply, in place of one stored now
   if (!reply && claudeCites() && (await awaitsCheck($, row))) return 'Claude is still answering; select the words again once the answer is done.'
-  const text = askedWords(raw.slice(place.start, place.end))
+  // the citation is written on the words with their card links kept (withAsked); its words are as they draw
+  const written = askedWords(raw.slice(place.start, place.end))
+  const text = withoutCardLinks(written)
   const next = Math.max(0, ...(reply?.items ?? []).map(m => m.n)) + 1
-  const marked = raw.slice(0, place.start) + `[${text}](#)` + raw.slice(place.end)
+  const marked = raw.slice(0, place.start) + `[${written}](#)` + raw.slice(place.end)
   const item: MarkItem = {
     n: next, row, words: text, start: place.start, end: place.end, status: 'deferred', shown: text, asked: true,
-    sentence: sentenceOf(marked, { start: place.start, end: place.start + text.length + 5 }),
+    sentence: sentenceOf(marked, { start: place.start, end: place.start + written.length + 5 }),
   }
   if (reply) await editReply($, key, r => ({ ...r, items: [...r.items, item] }))
   else {
