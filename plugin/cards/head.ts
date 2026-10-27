@@ -274,9 +274,12 @@ export const registerCardHead: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
+  // a fork's end, found by the card's record that names its agent: at a reload the fork registry (core/forks.ts) knows
+  // the fork again only after this module's session start, and the end may come before that
   on('turn.complete', { agentId: /\S/ }, async ($, e, next) => {
     const r = await next(e)
-    if (forkOf(e.agentId)?.kind !== 'artifact') return r
+    const kind = forkOf(e.agentId)?.kind
+    if (kind && kind !== 'artifact') return r
     const m = await owning($, e.agentId)
     if (m) {
       try {

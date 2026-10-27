@@ -6,7 +6,7 @@
 // prompt. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
-import { busySteps } from '../bar/busy'
+import { busySteps, busyWhile } from '../bar/busy'
 import { artifactLine, artifactMaking, launch, registerCardHead } from '../cards/head'
 import { registerForks } from '../core/forks'
 
@@ -20,8 +20,8 @@ function setup() {
     hooks[event].push(typeof a === 'function' ? a : b)
     return { catch: () => undefined }
   }
-  // the fork registry first, as hooks/register.ts has it: at a session start it knows the forks again before this module
-  // looks for the cards they publish
+  // the fork registry first, as hooks/register.ts has it: it wraps this module, so at a session start this module's
+  // work after `next` runs before the registry knows the forks again (start)
   registerForks(on, {} as never)
   registerCardHead(on, {} as never)
   const state = new Map<string, unknown>()
@@ -50,12 +50,27 @@ function setup() {
   const ended = async (agentId: string, answer: string, reason = 'answer') => {
     for (const h of hooks['turn.complete']) await h($, { agentId, reason, answer }, async () => ({}))
   }
-  // what an earlier load of the plugin kept in $.state; a session start (the reload), or only its first `n` hooks
+  // what an earlier load of the plugin kept in $.state
   const kept = (ref: Any, value: unknown) => { state.set(JSON.stringify(ref), value) }
-  const start = async (n = Infinity) => { for (const h of hooks['session.start'].slice(0, n)) await h($, { cwd: '/made-up/data' }, async () => ({})) }
+  // a session start (the reload) as the engine runs it: the registry's hook calls this module's as its `next`, so this
+  // module's work ends before the registry's begins; `between` comes in that gap
+  const start = async (between?: () => Promise<unknown>) => {
+    const [forks, head] = hooks['session.start']
+    await forks($, { cwd: '/made-up/data' }, async (e: Any) => {
+      const r = await head($, e, async () => ({}))
+      await between?.()
+      return r
+    })
+  }
+  // the bar's next tick, which takes out each job that ended, earlier tests' too: a job begun for it asks for the tick,
+  // and the clock stays, so the tick shows nothing and stops
+  const barTick = async () => {
+    await busyWhile($, 'a tick', () => false)
+    await clock.tick()
+  }
   // what main reads with the person's next prompt (core/tell.ts)
   const told = () => Object.values((state.get(JSON.stringify({ plugin: 'thimble', key: 'tell' })) ?? {}) as Record<string, string>).join('\n')
-  return { $, E, ended, spawns, clock, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } }, agents, kept, start, told }
+  return { $, E, ended, spawns, clock, barTick, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } }, agents, kept, start, told }
 }
 
 /** A publish an earlier load of the plugin started: its fork, and the card's record. */
@@ -66,6 +81,8 @@ function earlier(s: ReturnType<typeof setup>, card: string, agentId: string) {
 }
 
 const settle = () => new Promise(r => setTimeout(r, 0))
+/** The bar's steps of a publish, earlier tests' too. */
+const steps = () => busySteps().filter(w => w === 'publishing an artifact').length
 
 // the words as Claude Code draws them: a Link with words of its own (children, a label) draws them, then its address
 const words = (n: Any): string => {
@@ -184,7 +201,6 @@ test('a reload of the plugin while a fork publishes the card: the publish shows 
   const s = setup()
   earlier(s, 'c-made-up-7', 'agent-earlier-7')
   s.agents.push({ id: 'agent-earlier-7', status: 'running' })
-  const steps = () => busySteps().filter(w => w === 'publishing an artifact').length
   const before = steps()
   await s.start()
   expect(await artifactMaking(s.$, 'c-made-up-7')).toBe(true)
@@ -194,14 +210,25 @@ test('a reload of the plugin while a fork publishes the card: the publish shows 
   expect(words(await artifactLine(s.$, s.E, 'c-made-up-7'))).toContain('https://claude.ai/artifact/made-up-7')
 })
 
-test('a fork whose end comes before this module looked at the reload still shows its link', async () => {
+test('a fork whose end comes at a reload before the fork registry knows it again still shows its link, and its busy step goes', async () => {
+  // the end comes after this module's session start work, before the registry's
   const s = setup()
+  await s.barTick()
+  const before = steps()
   earlier(s, 'c-made-up-8', 'agent-earlier-8')
   s.agents.push({ id: 'agent-earlier-8', status: 'running' })
-  // only the fork registry knows its forks again
-  await s.start(1)
-  await s.ended('agent-earlier-8', 'https://claude.ai/artifact/made-up-8')
+  await s.start(() => s.ended('agent-earlier-8', 'https://claude.ai/artifact/made-up-8'))
   expect(words(await artifactLine(s.$, s.E, 'c-made-up-8'))).toContain('https://claude.ai/artifact/made-up-8')
+  await s.barTick()
+  expect(steps()).toBe(before)
+  // the end comes before the session start: the start neither shows the publish again nor says thimble lost the copy
+  const r = setup()
+  earlier(r, 'c-made-up-12', 'agent-earlier-12')
+  r.agents.push({ id: 'agent-earlier-12', status: 'completed' })
+  await r.ended('agent-earlier-12', 'https://claude.ai/artifact/made-up-12')
+  await r.start()
+  expect(words(await artifactLine(r.$, r.E, 'c-made-up-12'))).toContain('https://claude.ai/artifact/made-up-12')
+  expect(steps()).toBe(before)
 })
 
 test('at a reload, a publish whose fork Claude Code no longer runs ends as failed, and says so under the card', async () => {
