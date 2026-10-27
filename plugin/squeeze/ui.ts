@@ -424,11 +424,11 @@ async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
  *  them while the answer above draws again. */
 async function chipsEl($: Engine, els: Any, id: string, cols: number): Promise<Any | null> {
   const open = await openNow($)
-  // the chips' words, which a double click on one selects: no answer's words (core/selection.ts)
-  if (!open) controlWords('chips', [])
   if (!open || open.id !== id) return null
   const w = Math.max(30, cols - 2)
   const props = await chipsProps($, id, w)
+  // the chips' words, which a double click on one selects, then and once they closed: no answer's words
+  // (core/selection.ts)
   controlWords('chips', ['s close', 'close', ...((props as Any)?.items ?? []).flatMap((c: Any) => [c.name, c.word, ...(c.levels ?? []), ...(c.ends ?? [])].filter((x: unknown) => typeof x === 'string'))])
   return els.Box({ key: `sq-${id}`, marginLeft: 2, marginTop: 1, children: [els.Client({ key: `sqchips-${id}`, module: './chips.tsx', width: w, props })] })
 }

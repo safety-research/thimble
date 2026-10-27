@@ -27,8 +27,8 @@
 //                        for it until words are selected anew
 //   shownWords(row, raw, text)   the words a row of Claude's draws now in place of the ones it holds (`raw`;
 //                        marks/register.ts), kept in memory
-//   controlWords(at, words) the words of thimble's own controls drawn now `at` the bar, a card's header, the chips or
-//                        the tray, kept in memory until that place draws again
+//   controlWords(at, words) the words of thimble's own controls drawn last `at` the bar, a card's header, the chips
+//                        or the tray (a word double clicked there stays selected once they close), kept in memory
 //
 // state: selectionDone, the selection dropped and the ones e and c took, by row and words: kept across the plugin's
 // loads, since a change in the settings loads it again while the same selection stands
@@ -74,8 +74,8 @@ export function shownWords(row: string, raw: string, text: string): void {
   shown.set(row, { raw, text })
 }
 
-/** The words of thimble's own controls drawn now at one place (`at`: the bar, a card's header, the chips, the tray):
- *  each item's words, and its key with them. They replace what that place drew before. */
+/** The words of thimble's own controls drawn at one place (`at`: the bar, a card's header, the chips, the tray): each
+ *  item's words, and its key with them. They replace what that place drew before, and stay once it is gone. */
 export function controlWords(at: string, words: string[]): void {
   controls.set(at, new Set(words.map(asWhole).filter(Boolean)))
 }

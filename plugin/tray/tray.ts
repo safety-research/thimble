@@ -791,7 +791,7 @@ function scrollTray($: Engine, by: number): boolean {
 export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
-  if (!tray || !f) { windowed = null; controlWords('tray', []); return [] }
+  if (!tray || !f) { windowed = null; return [] }
   const { Box, Text } = els
   const w = Math.max(40, Math.min(104, width - 3))
   const inner = w - 4
@@ -834,7 +834,8 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const tone = TONES[f.kind]
   // its keys at the right, after a citation's status, each drawn as the bar draws a key and a click that presses it
   const keys = await trayKeys($, tray, f)
-  // its keys' words, which a double click on one selects: no answer's words (core/selection.ts)
+  // its keys' words, which a double click on one selects, then and once it closed: no answer's words
+  // (core/selection.ts)
   controlWords('tray', keys.flatMap(k => [k.words, `${k.key} ${k.words}`]))
   const keysLen = keys.reduce((n, k) => n + (n ? 3 : 0) + `${k.key} ${k.words}`.length, 0)
   const rightLen = (status ? status.word.length + 2 : 0) + keysLen
