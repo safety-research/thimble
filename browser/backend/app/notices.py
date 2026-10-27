@@ -87,6 +87,7 @@ REMEMBERED = ("manual-mode", "no-box:")
 OPEN_MAX = 50  # open notices kept; the oldest go first
 TEXT_CHARS = 480  # a notice's text at most, cut at a word (long enough for a fix in the terminal and its words)
 REASON_CHARS = 280  # a failure's own words inside a notice at most
+SENTENCE_END = re.compile(r"[.!?][)\]\"'’”]*$")  # the end of a whole sentence, which a text cut short lacks
 SETTINGS = {"label": "Open Settings", "do": "settings"}
 
 
@@ -103,14 +104,15 @@ def _short(text: Any, limit: int) -> str:
     return (cut or t[: limit - 1]) + "…"
 
 
-def _gist(text: Any, limit: int) -> str:
+def gist(text: Any, limit: int) -> str:
     """`text` on one line in at most `limit` characters: whole when it fits, else its first sentence and its last (where
-    a fix usually is), else its first sentence cut at a word."""
+    a fix usually is) when that one ends as a sentence does, which the end of a text cut short does not, else its first
+    sentence cut at a word."""
     t = " ".join(str(text or "").split())
     if len(t) <= limit:
         return t
     parts = re.split(r"(?<=[.!?])\s+(?=[A-Z`(])", t)
-    if len(parts) > 1 and len(parts[0]) + len(parts[-1]) + 3 <= limit:
+    if len(parts) > 1 and SENTENCE_END.search(parts[-1]) and len(parts[0]) + len(parts[-1]) + 3 <= limit:
         return f"{parts[0]} … {parts[-1]}"
     return _short(parts[0], limit)
 
@@ -415,7 +417,7 @@ def reason(text: Any, *, server: bool = False, cls: str | None = None, main_mode
     shortened."""
     cls = cls if cls in API_WORDS else failure_class(text)
     if cls is None:
-        return _gist(text, REASON_CHARS).rstrip(".") or "no reason was given", None
+        return gist(text, REASON_CHARS).rstrip(".") or "no reason was given", None
     words, fix, where = SERVER_AUTH if server and cls == "auth" else API_WORDS[cls]
     if cls == "not_found" and main_model:
         fix, where = MAIN_MODEL_FIX, TERMINAL

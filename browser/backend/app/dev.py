@@ -3377,7 +3377,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     - still not built: a change to a built view leaves the view as it was, a proposal the analyst did not ask for gets
       up to VIEW_REPAIRS new builders started with what failed, and then fails with Retry (_repairs_failed), and a view
       the analyst asked for fails with Retry."""
-    from . import subagents, view_review, view_tools, views  # noqa: PLC0415
+    from . import notices, subagents, view_review, view_tools, views  # noqa: PLC0415
 
     prop = views.read_proposal(c, slug)
     if prop is None or prop.get("agent_id") != run.agent_id:
@@ -3422,9 +3422,11 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         return
     failure = (str(finish.get("report") or prop.get("last_report") or "")
                or (UNCHANGED_LINE if prop.get("revision") and views.unchanged_since_built(c, slug) else "")
-               or " ".join(str(report or "").split())[:ERROR_CHARS] or "the checks did not pass")
+               or " ".join(str(report or "").split()) or "the checks did not pass")
     first = next((ln for ln in failure.splitlines() if ln.startswith(("problem: ", "bad ", "page: "))), "")
-    shown = (first or failure)[:ERROR_CHARS]
+    # a builder's long report shows on the chip and in the notice as its first sentence and its last, where it says
+    # what to do (notices.gist), never as a head cut mid-word
+    shown =first[:ERROR_CHARS] or notices.gist(failure, notices.REASON_CHARS)
     log.warning("the view %s/%s was not built: %s", c, slug, shown)
     if prop.get("revision"):
         views.end_revision(c, slug, shown, failed_change=str(prop.get("change") or ""))
