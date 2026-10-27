@@ -11,7 +11,8 @@
 // from its copy on disk (draw.ts).
 //
 //   sandbox($)         the sandbox, from sandbox/setup.mjs, which installs srt the first time (it runs at each session
-//                      start, register.ts): {ok, node, srt, platform, why, fix}; kept once it works, asked again until
+//                      start, register.ts): {ok, node, nodeVersion, grants, srt, platform, why, fix}, where `grants`
+//                      says which of the runner's grants its Node takes; kept once it works, asked again until
 //                      then. Each hook that asks runs setup.mjs itself: a hook's own time is bounded (10 s) while a `$`
 //                      call it makes is not, so a card called while the session start installs srt waits in its own
 //                      setup.mjs, which waits for that install, and not on the session start's promise
@@ -42,7 +43,7 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Sandbox = { ok: boolean; node: string; nodeVersion?: string; srt: string; platform: string; why: string; fix: string }
+export type Sandbox = { ok: boolean; node: string; nodeVersion?: string; grants?: Record<string, boolean>; srt: string; platform: string; why: string; fix: string }
 /** Why the runner cannot start; `machine` when the fix is the machine's (a package, a setting), not thimble's. */
 type Down = { why: string; machine?: boolean }
 const downOf = (s: Sandbox): Down => ({ why: sandboxWhy(s), machine: !!s.fix })
@@ -153,7 +154,7 @@ async function start($: Engine, sock: string): Promise<Down | null> {
   if (runner.sock && runner.sock !== sock) await removeFolder($, runner.sock)
   runner.sock = sock
   const argv = runnerArgv({
-    plugin: $.plugin.root, node: s.node, nodeVersion: s.nodeVersion, srt: s.srt, platform: s.platform, cards, run: folderOf(sock), sock,
+    plugin: $.plugin.root, node: s.node, grants: s.grants, srt: s.srt, platform: s.platform, cards, run: folderOf(sock), sock,
     home: String((await $.env.get('HOME')) || ''), thimbleHome: await thimbleHome($), path: String((await $.env.get('PATH')) || '/usr/bin:/bin'),
   })
   const mine = {}

@@ -1,7 +1,8 @@
 // The sandbox the card runner runs in (Anthropic's sandbox runtime, srt): its rules (cards/argv.mjs) on any machine,
 // then, on this machine, a process under those rules: it reads no file but the ones the rules name, writes only its own
-// folder, has no network and no variable of the session's. setup.mjs installs srt in the test's THIMBLE_HOME, and names
-// the system packages srt lacks with the one command that installs them. All paths and names are made up.
+// folder, has no network and no variable of the session's. setup.mjs installs srt in the test's THIMBLE_HOME, says
+// which of the runner's grants its Node takes, and names the system packages srt lacks with the one command that
+// installs them. All paths and names are made up.
 //   node --test plugin/sandbox/test/sandbox.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -12,7 +13,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { runnerArgv, runnerRules } from '../../cards/argv.mjs'
+import { GRANTS, runnerArgv, runnerRules } from '../../cards/argv.mjs'
 import { sandbox } from '../../cards/test/start.mjs'
 
 const PLUGIN = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '')
@@ -51,13 +52,18 @@ test('the runner starts with an empty environment, in srt, under Node\'s permiss
   assert.deepEqual(argv.slice(-2), [`${MADE_UP.plugin}/cards/runner.mjs`, `${MADE_UP.run}/cards.sock`])
 })
 
-test('Node 25 and later let the runner make its socket (--allow-net); older Node, which refuses the flag, gets none', () => {
-  const after = nodeVersion => {
-    const argv = runnerArgv({ platform: 'linux', ...MADE_UP, nodeVersion, sock: `${MADE_UP.run}/cards.sock` })
-    return argv[argv.lastIndexOf('--permission') + 1]
+test('the runner gets each of its grants that its Node takes, and no other: --allow-net where Node covers its socket', () => {
+  // the flags between --permission and the runner's files
+  const given = grants => {
+    const argv = runnerArgv({ platform: 'linux', ...MADE_UP, grants, sock: `${MADE_UP.run}/cards.sock` })
+    return argv.slice(argv.lastIndexOf('--permission') + 1, argv.indexOf(`--allow-fs-read=${MADE_UP.plugin}/cards`))
   }
-  for (const v of ['22.20.0', '24.9.0', '', undefined]) assert.equal(after(v), `--allow-fs-read=${MADE_UP.plugin}/cards`, `Node ${v}`)
-  for (const v of ['25.0.0', '26.11.1']) assert.equal(after(v), '--allow-net', `Node ${v}`)
+  assert.deepEqual(GRANTS, ['--allow-net'])
+  assert.deepEqual(given({ '--allow-net': true }), ['--allow-net'])
+  // a Node that refuses the flag (Node 24 and earlier), and a setup that said nothing of it
+  for (const g of [{ '--allow-net': false }, {}, undefined, null]) assert.deepEqual(given(g), [], JSON.stringify(g))
+  // a grant the runner does not need is never given, whatever the answer named
+  assert.deepEqual(given({ '--allow-net': true, '--allow-child-process': true, '--allow-fs-read=/': true }), ['--allow-net'])
 })
 
 // ---------------------------------------------------------------- in the sandbox, on this machine
@@ -97,6 +103,14 @@ function inSandbox(code, path = process.env.PATH) {
 test('setup.mjs installs srt in thimble\'s home, and the sandbox works here', () => {
   assert.equal(s.ok, true, `${s.why}. ${s.fix}`)
   assert.equal(s.srt, join(process.env.THIMBLE_HOME, 'srt', JSON.parse(readFileSync(join(PLUGIN, 'sandbox', 'package.json'), 'utf8')).dependencies['@anthropic-ai/sandbox-runtime']))
+})
+
+test('setup.mjs says which of the runner\'s grants its Node takes, as that Node\'s own command line takes them', () => {
+  assert.equal(s.nodeVersion, process.versions.node)
+  for (const g of GRANTS) {
+    const r = spawnSync(s.node, ['--permission', g, '-e', '0'], { encoding: 'utf8' })
+    assert.equal(s.grants[g], r.status === 0, `Node ${s.nodeVersion}, ${g}: ${r.stderr}`)
+  }
 })
 
 test('in the sandbox: the card copies read, nothing else of the files; writes only in its own folder', () => {

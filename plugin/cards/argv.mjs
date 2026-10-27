@@ -1,10 +1,9 @@
 // argv.mjs: the command that starts the card runner (runner.mjs) in Anthropic's sandbox runtime (srt), for the hooks
 // (ask.ts), sandbox/setup.mjs's check and the tests alike. Pure: no `$`, no file system.
 //
-//   runnerCommand({plugin, node, nodeVersion, cards, run, sock})   the runner itself: Node's permission model (it reads
-//       the plugin's cards/ code, core/text.js and the session's card copies, writes only its own folder `run`, and on
-//       Node 25 and later, whose model covers the network too, may make its socket), no code made from strings, at most
-//       1 GB of memory. The browser workbench starts the same command (cardrunner.py).
+//   runnerCommand({plugin, node, grants, cards, run, sock})   the runner itself: Node's permission model (it reads the
+//       plugin's cards/ code, core/text.js and the session's card copies, writes only its own folder `run`, and has
+//       each of GRANTS that its Node takes), no code made from strings, at most 1 GB of memory
 //   runnerRules({platform, plugin, node, srt, cards, run, home, thimbleHome})   srt's rules for it: no network (no
 //       domain is allowed; only the runner's own Unix socket), writes only `run`, and reads only the runner's code, the
 //       card copies, `run`, and the Node it runs on with what Node needs of the system (Linux: everything else is
@@ -12,13 +11,19 @@
 //   runnerArgv({..., path})   the whole command: run.mjs, with an environment that holds only PATH and the runner's
 //       own folder, wraps an empty environment (`env -i`) and runnerCommand in srt with runnerRules
 //
-// `node` is the absolute path of the Node binary (process.execPath), `nodeVersion` its version (as setup.mjs says it),
-// `srt` the folder srt is installed in (setup.mjs), `run` the runner's own folder (mode 700), which holds its socket
-// `sock` (a path of at most SOCKET_MAX characters) and is its TMPDIR. srt itself makes no socket for the runner: it
-// starts no proxy, since no domain is allowed.
+// `node` is the absolute path of the Node binary (process.execPath), `grants` whether it takes each of GRANTS (as
+// setup.mjs says it, {'--allow-net': true}), `srt` the folder srt is installed in (setup.mjs), `run` the runner's own
+// folder (mode 700), which holds its socket `sock` (a path of at most SOCKET_MAX characters) and is its TMPDIR. srt
+// itself makes no socket for the runner: it starts no proxy, since no domain is allowed.
 
 // the longest path of the runner's socket: a Unix socket's path holds at most 108 bytes on Linux, 104 on macOS
 export const SOCKET_MAX = 100
+
+// the grants the runner needs beyond its files, where its Node's permission model covers what it does: Node 25 and
+// later refuse its listen() on its socket without --allow-net. A Node whose model does not cover it refuses the flag,
+// so the runner gets each grant only where its Node takes it; srt's rules keep the network away from it all the same.
+// A grant that a new Node comes to require for the runner goes here
+export const GRANTS = ['--allow-net']
 
 // Linux: what is shown of the system, for Node and the shell srt starts it from
 export const LINUX_SYSTEM = ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/lib32', '/etc/ld.so.cache']
@@ -31,13 +36,10 @@ const trim = p => String(p).replace(/\/+$/, '') || '/'
 const parent = p => trim(p).replace(/\/[^/]*$/, '') || '/'
 const literal = path => ({ path, literal: true })
 
-export function runnerCommand({ plugin, node = 'node', nodeVersion = '', cards, run, sock }) {
+export function runnerCommand({ plugin, node = 'node', grants = {}, cards, run, sock }) {
   const here = trim(plugin)
-  // Node 25 and later refuse the runner's listen() without --allow-net (older Node refuses the flag); srt's rules keep
-  // the network away from it
-  const net = Number(String(nodeVersion).split('.')[0]) >= 25 ? ['--allow-net'] : []
   return [
-    node, '--permission', ...net, `--allow-fs-read=${here}/cards`, `--allow-fs-read=${here}/core/text.js`, `--allow-fs-read=${cards}`,
+    node, '--permission', ...GRANTS.filter(g => grants?.[g] === true), `--allow-fs-read=${here}/cards`, `--allow-fs-read=${here}/core/text.js`, `--allow-fs-read=${cards}`,
     `--allow-fs-write=${run}`, '--disallow-code-generation-from-strings', '--max-old-space-size=1024',
     `${here}/cards/runner.mjs`, sock,
   ]
@@ -73,12 +75,12 @@ export function runnerRules({ platform, plugin, node, srt, cards, run, home, thi
   }
 }
 
-export function runnerArgv({ plugin, node, nodeVersion, srt, cards, run, sock, platform, home, thimbleHome, path = '/usr/bin:/bin' }) {
+export function runnerArgv({ plugin, node, grants, srt, cards, run, sock, platform, home, thimbleHome, path = '/usr/bin:/bin' }) {
   const here = trim(plugin)
   const rules = runnerRules({ platform, plugin, node, srt, cards, run, home, thimbleHome })
   return [
     'env', '-i', `PATH=${path}`, `HOME=${run}`, `TMPDIR=${run}`, `CLAUDE_CODE_TMPDIR=${run}`, 'LANG=C.UTF-8',
     node, `${here}/sandbox/run.mjs`, '--srt', trim(srt), JSON.stringify(rules), '--',
-    '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', ...runnerCommand({ plugin, node, nodeVersion, cards, run, sock }),
+    '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', ...runnerCommand({ plugin, node, grants, cards, run, sock }),
   ]
 }

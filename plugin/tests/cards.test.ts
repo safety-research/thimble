@@ -580,10 +580,11 @@ test('when the sandbox cannot start, no card runs: the call and the failure line
   expect(result).toContain('bubblewrap (bwrap) not installed. Install it: sudo apt-get install bubblewrap · Claude got the error')
 })
 
-// the hooks run in Claude Code's engine, whose own version is not the runner's: only setup.mjs's answer says it
-for (const [nodeVersion, net] of [['26.11.1', true], ['25.0.0', true], ['22.22.0', false]] as const) {
-  test(`the hooks start the runner on the Node setup.mjs names: Node ${nodeVersion} ${net ? 'gets' : 'does not get'} --allow-net`, async ($, on) => {
-    const w = world(on, { sandbox: { nodeVersion }, noRunner: true })
+// the hooks run in Claude Code's engine, whose own Node is not the runner's: only setup.mjs's answer says which grants
+// the runner's Node takes, whatever its version (a Node 24 that took the flag would get it too)
+for (const [nodeVersion, net] of [['26.11.1', true], ['24.30.0', true], ['22.22.0', false]] as const) {
+  test(`the hooks start the runner with the grants setup.mjs says its Node takes: Node ${nodeVersion} that ${net ? 'takes --allow-net gets it' : 'refuses --allow-net does not get it'}`, async ($, on) => {
+    const w = world(on, { sandbox: { nodeVersion, grants: { '--allow-net': net } }, noRunner: true })
     await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
     await w.clock.advance(10)
     // the runner starts on the clock's next turn, and the hooks wait on the clock for its answer
