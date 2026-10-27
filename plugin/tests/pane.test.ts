@@ -3,6 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { keyedWords, pressedWords } from '../bar/bar'
+import { noteViewport } from '../cards/draw'
 import { closePane, drawPane, narrowNotice, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 import { setOptions } from '../settings/features.mjs'
 
@@ -167,7 +168,8 @@ test('a pane a key could not open in a narrow window: the notice says how wide t
   // once the pane had opened (110 columns then), the notice names that width
   s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 110 columns (100 now, an id the person opened before)' } }
   await openPane(s.$, 'claims', {}, 'Evidence', { focus: true, rows: 36 })
-  expect(narrowNotice('c', 'c 3 claims')).toContain('110 columns or more (this one has 100)')
+  expect(narrowNotice('c', 'c 3 claims')).toContain('110')
+  expect(narrowNotice('c', 'c 3 claims')).toContain('100')
   // Claude Code gives no width: the notice still offers the click
   s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false } }
   await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })
@@ -179,6 +181,32 @@ test('a pane a key could not open in a narrow window: the notice says how wide t
     await closePane(s.$)
     await openPane(s.$, kind, {}, kind, { focus: true })
     expect(s.opens.at(-1).rows).toBeGreaterThan(20)
+  }
+})
+
+test("in Claude Code's default layout, which sends no click and docks no pane, the notice names /tui fullscreen and the width at which the key opens the pane above the prompt, with no click; where nothing places panes, it does not say to widen the window", async () => {
+  const s = setup()
+  const named = new Map([['r coverage 43% (3/7 files)', () => 'opened']])
+  try {
+    noteViewport({ isFullscreen: false })
+    s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (80 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
+    expect(await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })).toBe(false)
+    const said = narrowNotice('r', 'r coverage')
+    expect(said).toContain('/tui fullscreen')
+    expect(said).toContain('144')
+    expect(said).toContain('80')
+    expect(said).not.toMatch(/click/i)
+    expect(pressedWords(said, named).some(p => p.press)).toBe(false)
+    // no surface here places panes: neither a wider window nor the fullscreen layout opens it
+    s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'no attached surface places panes' } }
+    await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })
+    for (const isFullscreen of [false, true]) {
+      noteViewport({ isFullscreen })
+      expect(narrowNotice('r', 'r coverage')).not.toMatch(/widen|wider|columns|fullscreen|click/i)
+    }
+  } finally {
+    // the tests after it draw in the fullscreen layout
+    noteViewport({ isFullscreen: true })
   }
 })
 

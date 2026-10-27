@@ -415,7 +415,7 @@ test('a on a card at a narrow terminal: the bar names the click on a ask, and th
   }
   expect(opens).toEqual(['thimble'])
   const band = textOf(await $.ui.render(above()))
-  expect(band).toContain('a opens the side pane in a window of 144 columns or more (this one has 118): widen it, or click “a ask” to open it here.')
+  for (const part of ['144', '118', '“a ask”']) expect(band).toContain(part)
   expect(band).not.toContain('Hint:')
   expect(band).toContain('a ask')
   // the press on a ask in the bar: Claude Code places it

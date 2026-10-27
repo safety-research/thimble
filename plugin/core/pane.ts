@@ -31,6 +31,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { failCleared, failLineNow } from '../bar/notice'
+import { fullscreenNow } from '../cards/draw'
 import { drawClaimsPane } from '../claims/seam'
 import { drawLabels } from '../labels/pane'
 import { drawEvidence } from '../marks/evidence'
@@ -60,18 +61,21 @@ export type PaneNow = { kind: string; args: unknown; title?: string; escape?: bo
  *  Docked beside the conversation, a pane takes the window's height whatever it asks. */
 const ROWS: Record<string, number> = { settings: 40, coverage: 28, evidence: 28 }
 
-/** How wide the window must be for a key to open the pane, and how wide it is, as Claude Code said when it did not
- *  place the last open (`unasked below 144 columns (118 now)`); null when it gave no width. */
-let narrow: { needs: number; has: number } | null = null
+/** Why Claude Code did not place the last open, as it said: how wide the window must be for a key to open the pane, and
+ *  how wide it is (`unasked below 144 columns (118 now)`), or `nowhere` when the width is not why (no surface here
+ *  places panes). */
+let unplaced: { needs?: number; has?: number; nowhere?: boolean } = {}
 
 /** What the failure line says when a key at the prompt (`key`) could not open the side pane: the width the pane needs,
  *  when Claude Code said it, and the bar's item a click on which opens the pane here at any width (its `words`, and
- *  `where` they stand when not on the bar). */
+ *  `where` they stand when not on the bar). Claude Code's default layout sends no click and draws a pane only above the
+ *  prompt (cards/draw.ts fullscreenNow): there it names the command that turns on the fullscreen layout, and the width
+ *  at which the key opens the pane above the prompt. Where no surface here places panes, only that it did not open. */
 export function narrowNotice(key: string, words: string, where = ''): string {
-  const click = `click “${words}”${where ? ` ${where}` : ''} to open it here`
-  return narrow
-    ? `${key} opens the side pane in a window of ${narrow.needs} columns or more (this one has ${narrow.has}): widen it, or ${click}.`
-    : `${key} opens the side pane in a wider window: widen it, or ${click}.`
+  if (unplaced.nowhere) return 'Claude Code did not open the side pane here.'
+  const width = unplaced.needs ? `a window of ${unplaced.needs} columns or more (this one has ${unplaced.has})` : 'a wider window'
+  if (fullscreenNow() === false) return `${key} opens the side pane in Claude Code's fullscreen layout: type /tui fullscreen. In this layout it opens above the prompt in ${width}.`
+  return `${key} opens the side pane in ${width}: widen it, or click “${words}”${where ? ` ${where}` : ''} to open it here.`
 }
 
 /** `focus`: the person opened it (a key, a click, a command), so it takes the keyboard and Esc closes it. Answers
@@ -94,8 +98,9 @@ export async function openPane($: Engine, kind: string, args: unknown, title: st
   if (o.under && !(last?.kind === o.under.kind && JSON.stringify(last.args ?? null) === JSON.stringify(o.under.args ?? null))) trail.push(o.under)
   await $.state.set(NOW, { kind, args, title, ...(escape ? { escape } : {}), ...(rows ? { rows } : {}), ...(trail.length ? { trail } : {}) })
   const r = await $.ui.open({ id: PANE_ID, title, ...(o.focus ? { focus: true } : {}), ...(escape ? { closeOnEscape: true } : {}), ...(rows ? { rows } : {}) })
-  const why = /below (\d+) columns \((\d+) now/.exec(String((r as { reason?: string }).reason ?? ''))
-  narrow = r.isPlaced || !why ? null : { needs: Number(why[1]), has: Number(why[2]) }
+  const why = String((r as { reason?: string }).reason ?? '')
+  const cols = /below (\d+) columns \((\d+) now/.exec(why)
+  unplaced = cols ? { needs: Number(cols[1]), has: Number(cols[2]) } : { nowhere: !!why && !/columns/.test(why) }
   if (r.isPlaced) {
     // the line that said the side pane could not open (a narrow terminal: `pane:<kind>`) goes once it is open, on
     // whatever it shows
