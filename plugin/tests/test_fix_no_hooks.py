@@ -1,7 +1,8 @@
 """thimble fix (engine/kernel/fixes.py) in a clone whose post-checkout hook fails, as git-lfs's does when git-lfs is not on
 the kernel's PATH: thimble's own git calls that make or move a fix's copy, and the checkouts of live that put a fix on or
-take it out, run no hook of the clone's, so the person can make, apply and undo a fix, change it in place, redo it and
-merge fixes, and off.sh shows the release. A home an older thimble made gets the off.sh this kernel writes. The world is
+take it out, or that follow the clone before the first fix goes on, run no hook of the clone's, so the person can make,
+apply and undo a fix, change it in place, redo it and merge fixes, a request or a y after the clone moved on follows it,
+and off.sh shows the release. A home an older thimble made gets the off.sh this kernel writes. The world is
 test_fixes.py's made-up thimble 0.10.2. All data here is made up."""
 from __future__ import annotations
 
@@ -14,7 +15,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, live_file, made, on_fix, press, sh, world  # noqa: E402, F401  (world is the fixture)
+from test_fixes import FX, live_file, made, on_fix, press, release_with, sh, world  # noqa: E402, F401  (world is the fixture)
 
 
 @pytest.fixture(autouse=True)
@@ -132,6 +133,44 @@ def test_a_round_that_no_longer_fits_its_fix_fails_with_its_words_in_a_clone_wit
     assert (got["state"], got["error"]) == ("failed", f"its change does not fit fix {a['id']} as it is now")
     assert sh("git", "rev-parse", "HEAD", cwd=Path(r["work"])) == got["commit"]
     in_no_copy(ran)
+
+
+def moved_on(w, tmp_path: Path, off: bool) -> tuple[dict, str]:
+    """A clone whose post-checkout hook fails, with fix 1 made and checked but never used (and, when `off`, live showing
+    the release, as after sh off.sh); then the person's clone moves on, and scripts/install.sh --local installs it
+    (installed_plugins.json names the new commit). Fix 1's record, and the new commit."""
+    failing_hook(w, tmp_path)
+    a = made(w)
+    assert FX.done(a["id"], "Bar says read", "")["state"] == "ready"
+    if off:
+        subprocess.run(["sh", str(FX.home() / "off.sh")], capture_output=True, check=True)
+    return a, release_with(w, {"plugin/notes.md": "made-up note\n"})
+
+
+LIVE_ON_OR_OFF = pytest.mark.parametrize("off", [False, True], ids=["live-on-mine", "live-off-after-off-sh"])
+
+
+@LIVE_ON_OR_OFF
+def test_a_request_after_the_clone_moved_on_follows_it_in_a_clone_with_a_failing_post_checkout_hook(world, tmp_path,
+                                                                                                    off):
+    _, new = moved_on(world, tmp_path, off)
+    b = FX.new("a note")
+    live = FX.live_dir()
+    assert b["state"] == "working" and b["base"] == new
+    assert FX.release()["base"] == new and sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == new
+    assert sh("git", "rev-parse", "mine", cwd=live) == new and sh("git", "rev-parse", "HEAD", cwd=live) == new
+    assert sh("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=live) == ("HEAD" if off else "mine")
+
+
+@LIVE_ON_OR_OFF
+def test_the_first_y_after_the_clone_moved_on_puts_the_fix_onto_it_in_a_clone_with_a_failing_post_checkout_hook(
+        world, tmp_path, off):
+    a, new = moved_on(world, tmp_path, off)
+    FX.apply(a["id"], press(a["id"]))
+    live = FX.live_dir()
+    assert FX.get(a["id"])["state"] == "on" and sh("git", "rev-parse", "mine^", cwd=live) == new
+    assert FX.release()["base"] == new and sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == new
+    assert "read ${n}" in live_file("plugin/bar/bar.tsx") and live_file("plugin/notes.md") == "made-up note\n"
 
 
 def test_off_sh_shows_the_release_in_a_clone_with_a_failing_post_checkout_hook(world, tmp_path):

@@ -196,8 +196,8 @@ def as_thimble() -> dict[str, str]:
 
 def git(*args: str, cwd: str | Path, env: dict[str, str] | None = None, check: bool = True, hooks: bool = True) -> str:
     """git ARGS; with hooks False, with no hook of the repository's (NO_HOOKS): thimble's own calls that make or move a
-    fix's copy, or move live for a fix, which a hook of the person's clone (git-lfs's, with no git-lfs on the PATH)
-    would fail."""
+    fix's copy, or move live (for a fix, or to follow the release before the first fix goes on), which a hook of the
+    person's clone (git-lfs's, with no git-lfs on the PATH) would fail."""
     return run(["git", *([] if hooks else NO_HOOKS), *args], cwd=cwd, env=env, check=check,
                said=["git", *args]).stdout.strip()
 
@@ -526,10 +526,10 @@ def _follow(rel: dict[str, Any]) -> dict[str, Any]:
     if git("rev-parse", "mine", cwd=live) == base:
         _unstamp()
         if git("symbolic-ref", "-q", "HEAD", cwd=live, check=False) == "refs/heads/mine":
-            git("checkout", "-q", "-B", "mine", new, cwd=live)
+            git("checkout", "-q", "-B", "mine", new, cwd=live, hooks=False)
         else:
             git("branch", "-f", "mine", new, cwd=live)
-            git("checkout", "-q", "--detach", new, cwd=live)
+            git("checkout", "-q", "--detach", new, cwd=live, hooks=False)
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
     return rel
