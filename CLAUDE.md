@@ -66,14 +66,18 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
      `v` visualize, `s` rewrite, `c` evidence, `r` coverage. A click on `thimble` in that line, or
      `/thimble-settings`, opens the settings; `/plugin` turns thimble off.
    - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints.
-6. When the plugin works, offer to show it in this session, in one short line: "Type /reload-plugins, then try it."
-   (You cannot type `/reload-plugins` for them; it loads thimble here.) A session keeps the PATH and the Claude Code it
-   started with, so when the plugin needs a Node or a Claude Code that this session does not have, offer a new
-   `claude` in a new terminal instead. When they answer after the reload, look at the checkout's
-   `examples/sample/runs.csv` yourself (40 made-up nightly test runs) and answer: did the failures start after the
-   config change? Answer it as thimble's guidance says: one card, and checked citations. Never ask the user to type
-   the question or a path. If the line above the prompt does not show `thimble` after the reload, say that a new
-   `claude` session in a folder of their own files will have it.
+6. When the plugin works, offer to show it on the checkout's `examples/sample/runs.csv` (40 made-up nightly test
+   runs), in one short line, and never ask the user to type the question or a path. A citation can name only files in
+   the folder its session works in, and a session keeps the PATH and the Claude Code it started with. So when the
+   checkout lies outside this session's folder, or the plugin needs a Node or a Claude Code that this session does not
+   have, the line gives a command to run in a new terminal, which starts `claude` in the sample's folder with the
+   question, such as:
+   `cd ~/thimble/examples/sample && claude "Did the failures start after the config change? Show it as a card."`
+   Otherwise the line is "Type /reload-plugins, then try it." (You cannot type `/reload-plugins` for them; it loads
+   thimble here.) When they answer after the reload, look at the sample yourself and answer: did the failures start
+   after the config change? Answer it as thimble's guidance says: one card, and checked citations. If the line above
+   the prompt does not show `thimble` after the reload, say that a new `claude` session in a folder of their own files
+   will have it.
 
 ## Working on thimble
 
