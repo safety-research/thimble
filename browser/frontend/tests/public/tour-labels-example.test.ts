@@ -3,7 +3,7 @@
 // agrees with itself: the ruler the step draws beside the transcript is drawn from the records it shows, a mark in a
 // lane per label over each run of records lit in one colour, at their place in the file, in their cells' colour; and
 // the Labels sidebar's legend names those colours and counts those records. The example shows one label, with few
-// values.
+// values, and the step says what the colored bars beside the records and the minimap beside the transcript mean.
 import { expect, test } from 'vitest'
 import { rulerWidth } from '../../src/files/Ruler.tsx'
 import { createTour, type Api, type Snaps } from '../../src/tour/engine.ts'
@@ -87,4 +87,10 @@ test('the example shows one label, with few values: one lane beside the records 
   expect(reader.querySelector<HTMLElement>('.reader-body')!.style.getPropertyValue('--lanes')).toBe('1')
   // the ruler as wide as thimble draws it for one lane
   expect(reader.querySelector<HTMLElement>('.reader-ruler-bar')!.style.width).toBe(`${rulerWidth(1)}px`)
+})
+
+test('the Labels step says what the colored bars and the minimap mean', () => {
+  const body = tourSteps('⌘').find((s) => s.title === 'Labels')!.body as string
+  expect(body).toMatch(/colored bar beside a record shows its value/)
+  expect(body).toMatch(/minimap at the right shows where those values fall in the whole file/)
 })

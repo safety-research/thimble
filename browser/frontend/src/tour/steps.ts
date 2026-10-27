@@ -589,7 +589,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
       scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
       title: 'Labels',
-      body: 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.',
+      body: 'A label sorts records into values, by a rule or by Claude’s reading. The colored bar beside a record shows its value, and the minimap at the right shows where those values fall in the whole file. Labels, at the top, lists the labels. Open one to see its records and correct them.',
     },
     {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
