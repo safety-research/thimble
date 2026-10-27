@@ -17,8 +17,8 @@
 #   page       the page's type check, unit tests and build (browser/frontend), after npm ci when its packages are missing
 #
 # Each test has a time limit, so a test that hangs fails with its name: 120 s for node --test and pytest (the browser's
-# in browser/backend/pyproject.toml; the plugin's when pytest-timeout is installed), the kit's 5 s for a hooks test and
-# 60 s for one that loads the plugin (plugin/tests/kit.ts), and vitest's testTimeout (10 s) for the page.
+# in browser/backend/pyproject.toml; the plugin's when pytest-timeout is installed) and for a hooks test that loads the
+# plugin (plugin/tests/kit.ts; the kit's 5 s for one that does not), and vitest's testTimeout (10 s) for the page.
 #
 # The plugin's steps need claude (Claude Code 2.1.307 or later), node 22.18 or later, and Python 3.10 or later with pytest:
 # THIMBLE_PYTHON, else python3. The browser's steps need uv and node 22.12 or later. Each step runs with a Claude Code
