@@ -79,8 +79,8 @@ The simplest way is to ask Claude Code:
 claude "install thimble from https://github.com/safety-research/thimble"
 ```
 
-Claude asks whether you want the browser workbench too, runs the script below, helps you fix what is missing, and
-says how to use what it installed. To do it yourself:
+Claude asks whether you want both products (the default) or the terminal plugin alone, runs the script below, helps
+you fix what is missing, and says how to use what it installed. To do it yourself:
 
 ```
 git clone https://github.com/safety-research/thimble

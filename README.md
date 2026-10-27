@@ -28,7 +28,7 @@ https://github.com/user-attachments/assets/4b436c41-40b0-4bf2-bab8-e5dcc3ecee94
 claude "install thimble from https://github.com/safety-research/thimble"
 ```
 
-Claude asks whether you want the terminal plugin, the browser workbench, or both, and helps with anything missing. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
+Claude asks whether you want both the terminal plugin and the browser workbench (the default) or the plugin alone, and helps with anything missing. Agents installing thimble: follow [CLAUDE.md](CLAUDE.md).
 
 ### Manual installation
 

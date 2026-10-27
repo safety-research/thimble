@@ -8,11 +8,12 @@ This repository holds two products: the terminal plugin for Claude Code (`plugin
 When the user asks you to install thimble (for example "install thimble from
 https://github.com/safety-research/thimble"), do this. [INSTALL.md](INSTALL.md) has the details and the fixes.
 
-1. Ask first, with your question tool (AskUserQuestion) when you have it, which they want:
-   - **The terminal plugin alone**: in their Claude Code sessions, Claude cites its claims, a second Claude checks
-     them, and Claude draws cards of the data. It needs Node.js and Python, and no other access.
-   - **The browser workbench too**: the same work in a web page on this machine. It takes about 1 GB of disk and needs
+1. Ask first, with your question tool (AskUserQuestion) when you have it, which they want, in this order:
+   - **The terminal plugin and the browser workbench** (the default; mark it recommended): in their Claude Code
+     sessions, Claude cites its claims, a second Claude checks them, and Claude draws cards of the data; the browser
+     workbench does the same work in a web page on this machine. The workbench takes about 1 GB of disk and needs
      access to the Claude API: an API key, Workload Identity Federation, or their Claude Code sign-in.
+   - **The terminal plugin alone**: only the Claude Code part. It needs Node.js and Python, and no other access.
 2. thimble 0.9 is here when `~/.local/bin/thimble` or `~/.thimble/app` exists, or when `scripts/install.sh` (step 3)
    stops with what it found and the commands that remove it. 0.10 does not load while 0.9's plugin is installed.
    Before you remove anything, tell the user plainly that removing 0.9 deletes its workspaces (cards, notebooks,
