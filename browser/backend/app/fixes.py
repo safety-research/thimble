@@ -563,14 +563,51 @@ def end_of(answer: str) -> dict[str, Any]:
 
 
 def changed(work: Path, base: str) -> list[str]:
-    """The paths the copy changed since `base`, new files among them."""
+    """The paths the copy changed since `base`, new files among them; none for a copy git may not run in (_own_git),
+    which the kernel's check then fails."""
+    g = _own_git(work)
+    if g is None:
+        return []
+    env = {**os.environ, **g}
     p = subprocess.run(["git", "-c", "core.quotePath=false", "status", "--porcelain", "--untracked-files=all"],
-                       cwd=work, capture_output=True, text=True)
+                       cwd=work, capture_output=True, text=True, env=env)
     q = subprocess.run(["git", "-c", "core.quotePath=false", "diff", "--name-only", base], cwd=work, capture_output=True,
-                       text=True)
+                       text=True, env=env)
     out = {ln[3:].split(" -> ")[-1] for ln in p.stdout.splitlines() if len(ln) > 3}
     out |= {ln for ln in q.stdout.splitlines() if ln}
     return sorted(out)
+
+
+def _own_git(work: Path) -> dict[str, str] | None:
+    """git's environment for a fix's copy (GIT_DIR, GIT_WORK_TREE): the copy's own worktree entry in live's repository,
+    as live's records have it, never the copy's .git, which the fixer's sandbox writes and could point at another
+    repository, or at a git folder whose settings run commands outside the sandbox (the kernel's _own_git does the
+    same). None when the copy's .git is not a file that names that entry, or the entry does not name the copy back."""
+    import stat  # noqa: PLC0415
+
+    live = fixes_home() / "live"
+    try:
+        fd = os.open(work / ".git", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return None
+    try:
+        link = os.read(fd, 4096).decode(errors="replace").strip() if stat.S_ISREG(os.fstat(fd).st_mode) else ""
+    finally:
+        os.close(fd)
+    common = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=live, capture_output=True, text=True,
+                            check=False).stdout.strip() if live.is_dir() else ""
+    if not link.startswith("gitdir:") or not common:
+        return None
+    entry = Path(os.path.realpath(os.path.join(work, link[len("gitdir:"):].strip())))
+    if entry.parent != (live / common).resolve() / "worktrees":
+        return None
+    try:
+        back = (entry / "gitdir").read_text().strip()
+    except OSError:
+        return None
+    if not back or os.path.realpath(os.path.join(entry, back)) != os.path.realpath(work / ".git"):
+        return None
+    return {"GIT_DIR": str(entry), "GIT_WORK_TREE": str(work)}
 
 
 def tests_for(paths: list[str]) -> str:

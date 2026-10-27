@@ -626,3 +626,26 @@ def test_a_release_checkout_as_the_release_has_it_is_left_alone_and_one_that_is_
     t.join()
     assert (checkout / "bar.txt").read_text() == "as released\n" and not ran.exists()
     assert _git("status", "--porcelain", "--ignored", cwd=checkout) == ""
+
+
+def test_the_files_a_copy_changed_are_read_by_git_on_its_own_entry_never_through_its_git_link(tmp_path, monkeypatch):
+    monkeypatch.setenv(fixes.PLUGIN_HOME_ENV, str(tmp_path / "home"))
+    live = tmp_path / "home" / "fixes" / "live"
+    live.mkdir(parents=True)
+    (live / "bar.txt").write_text("as released\n")
+    _git("init", "-q", cwd=live)
+    _git("add", "-A", cwd=live)
+    _git("commit", "-q", "-m", "made-up release", cwd=live)
+    work = tmp_path / "home" / "fixes" / "work" / "1"
+    _git("worktree", "add", "-q", "--detach", str(work), "HEAD", cwd=live)
+    (work / "notes.md").write_text("a made-up note\n")
+    assert fixes.changed(work, "HEAD") == ["notes.md"]
+    # the fixer's sandbox writes the copy: a git folder of its own there, whose settings would run its command here
+    ran = tmp_path / "ran-outside"
+    (work / "made-up-monitor").write_text(f"#!/bin/sh\ntouch '{ran}'\nexit 1\n")
+    (work / "made-up-monitor").chmod(0o755)
+    (work / ".git").unlink()
+    _git("init", "-q", str(work), cwd=tmp_path)
+    _git("config", "core.fsmonitor", str(work / "made-up-monitor"), cwd=work)
+    assert fixes.changed(work, "HEAD") == []
+    assert not ran.exists()
