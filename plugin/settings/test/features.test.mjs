@@ -49,16 +49,16 @@ test("the manifest's userConfig is the features, each on by default and turned o
     assert.equal(featureOn('cards'), true)
     setOptions({})
   }
-  // Citations: auto cite + verify by default; Claude cites in the two auto modes, c on selected words in manual; a value
-  // outside them is the default
+  // Citations: auto cite + verify by default; Claude cites in the two auto modes, c cites selected words in every mode
+  // but off; a value outside them is the default
   {
     setOptions({})
     assert.equal(choiceOf('citations'), 'auto cite + verify')
     assert.equal(claudeCites(), true)
-    assert.equal(featureOn('cite'), false)
+    assert.equal(featureOn('cite'), true)
     setOptions({ citations: 'auto cite' })
     assert.equal(claudeCites(), true)
-    assert.equal(featureOn('cite'), false)
+    assert.equal(featureOn('cite'), true)
     setOptions({ citations: 'auto cite + verify' })
     assert.equal(claudeCites(), true)
     setOptions({ citations: 'manual' })
@@ -69,6 +69,8 @@ test("the manifest's userConfig is the features, each on by default and turned o
     setOptions({ citations: 'off' })
     assert.equal(claudeCites(), false)
     assert.equal(featureOn('citations'), false)
+    assert.equal(featureOn('cite'), false)
+    assert.equal(switchesFrom({ citations: 'off' })('cite'), false)
     setOptions({ citations: 'sometimes' })
     assert.equal(choiceOf('citations'), 'auto cite + verify')
     setOptions({})

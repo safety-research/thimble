@@ -83,8 +83,9 @@ export function askedWords(raw) {
  * the text's marks then stand, so the k-th mark of the text is the k-th of `items`, as for Claude's own marks
  * (rewritesIn, withCorrections, the looks). An asked mark (store.ts MarkItem `asked`) gives its words' place in the text
  * as Claude wrote it (`start`, `end`), and its words as the analyst read them there (askedWords: without emphasis),
- * which the mark is written with; one whose words no longer stand there, that lies in code or across a mark, or whose
- * words hold a bracket, is left out of the text and of the order.
+ * which the mark is written with; one whose words no longer stand there, that lies in code, across a mark or in a
+ * sentence the check of one of Claude's marks rewrote (rewritesIn: the new sentence holds only the marks it was written
+ * with), or whose words hold a bracket, is left out of the text and of the order.
  */
 export function withAsked(text, items) {
   const s = String(text ?? '')
@@ -94,12 +95,13 @@ export function withAsked(text, items) {
   const own = all.filter(it => !it?.asked)
   const marks = marksIn(s)
   const code = codeRanges(s)
+  const rewritten = [...rewritesIn(s, own).placed].map(k => sentenceSpan(s, marks[k]))
   const over = (a, b, x, y) => a < y && b > x
   const placed = []
   for (const it of [...asked].sort((x, y) => x.start - y.start)) {
     const [a, b] = [it.start, it.end]
     if (!(b > a) || askedWords(s.slice(a, b)) !== it.words || /[[\]\n]/.test(it.words)) continue
-    if (code.some(([x, y]) => over(a, b, x, y)) || marks.some(m => over(a, b, m.start, m.end)) || placed.some(p => over(a, b, p.start, p.end))) continue
+    if ([...code, ...rewritten].some(([x, y]) => over(a, b, x, y)) || marks.some(m => over(a, b, m.start, m.end)) || placed.some(p => over(a, b, p.start, p.end))) continue
     placed.push(it)
   }
   let out = s

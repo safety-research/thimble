@@ -32,7 +32,7 @@ import { introKey } from '../bar/intro'
 import { BAR_KEYS, barKey } from '../bar/register'
 import { cardTake } from '../cards/draw'
 import { HEAD_KEYS, headKey } from '../cards/head'
-import { restoredKey, restoredKeys } from '../core/answerview'
+import { keysReady, restoredKey, restoredKeys } from '../core/answerview'
 import { vKey } from '../designer/v'
 import { fixKey } from '../fix/line'
 import { promptHasKeys } from '../squeeze/ui'
@@ -160,6 +160,14 @@ async function burst($: Engine, keys: string[], now: number, live: () => boolean
 }
 
 export const registerKeys: Register = on => {
+  // what the keys read of the state, read as the plugin loads, so the first key after a load reads it no more than the
+  // next ones do
+  on('session.start', { isInteractive: true }, async ($, e, next) => {
+    const r = await next(e)
+    await keysReady($).catch(() => undefined)
+    return r
+  }).catch(($, e, next) => next(e))
+
   on('prompt.edit', { origin: { kind: 'composer' } }, async ($, e, next) => {
     // the prompt has the keys: words begun after + in the squeeze chips are let go (esc gave the keys back)
     await promptHasKeys($).catch(() => undefined)

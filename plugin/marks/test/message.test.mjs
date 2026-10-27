@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { carrier, inline, marksIn, rewritesIn, runsText, sentenceOf, withCorrections, withRewrites } from '../message.js'
+import { carrier, inline, marksIn, rewritesIn, runsText, sentenceOf, withAsked, withCorrections, withRewrites } from '../message.js'
 
 const words = text => marksIn(text).map(m => m.words)
 
@@ -78,6 +78,25 @@ test("a rewrite in a sentence with a link stands whole: the link keeps its targe
   const one = rewritesIn(two, [{ status: 'corrected', rewrite: 'A [1] [x] here.' }, { status: 'corrected', rewrite: 'B [two] there.' }])
   assert.equal(one.text, 'A [1](#) here. B [two](#) there.')
   assert.deepEqual([...one.placed], [1])
+})
+
+test('words asked about in a sentence that the check of one of Claude\'s marks rewrote are left out, so the rewrite stands: it holds only the marks it was written with', () => {
+  const text = 'Uploads fail when the budget runs out: [41 of the 44](#) failures came after a drop. The client gives up.'
+  const place = w => ({ start: text.indexOf(w), end: text.indexOf(w) + w.length })
+  const claude = { n: 1, status: 'deferred', words: '41 of the 44', shown: '41 of the 44', ...place('[41 of the 44](#)') }
+  const asked = [
+    { n: 2, status: 'deferred', words: 'Uploads fail', shown: 'Uploads fail', asked: true, ...place('Uploads fail') },
+    { n: 3, status: 'deferred', words: 'gives up', shown: 'gives up', asked: true, ...place('gives up') },
+  ]
+  assert.equal(withAsked(text, [claude, ...asked]).text, '[Uploads fail](#) when the budget runs out: [41 of the 44](#) failures came after a drop. The client [gives up](#).')
+  // the check rewrote the sentence (before or after the analyst asked): words asked about in it are no mark, those of
+  // another sentence still are
+  const fixed = { ...claude, status: 'corrected', shown: '43 of the 44', rewrite: 'Uploads fail when the budget runs out: [43 of the 44] failures came within a minute of a drop.' }
+  const a = withAsked(text, [fixed, ...asked])
+  assert.deepEqual(a.items.map(it => it.n), [1, 3])
+  const r = rewritesIn(a.text, a.items)
+  assert.deepEqual([...r.placed], [0])
+  assert.equal(r.text, 'Uploads fail when the budget runs out: [43 of the 44](#) failures came within a minute of a drop. The client [gives up](#).')
 })
 
 test('a correction\'s words stand in place of its mark\'s words, so features place their words on what is shown; a narrowing or a rewrite does not', () => {

@@ -549,6 +549,66 @@ test("an explainer's or a heads-up's links to a file's lines draw as the answer'
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
+test('c cites the selected words in auto cite + verify too: while they wait the bar says c cite in place of the claims, and c opens their citation in the tray; with none selected, c opens Evidence', CITES, async ($, on) => {
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
+  let selected: Any = { text: 'failed on the p95 check', requestId: 'row-t1' }
+  on('ui.selection', () => ({ value: selected }))
+  let gets = 0
+  on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
+  const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-cite')
+  let band = textOf(await $.ui.render(above()))
+  expect(band).toContain('c cite')
+  expect(band).not.toContain('c evidence')
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  // the words are a citation of their own, open in the tray, and its check started; the selection no longer waits, so
+  // the bar names the claims again
+  band = textOf(await $.ui.render(above(40)))
+  expect(band).toContain('failed on the p95 check')
+  expect(band).toContain('a ask · 0 close')
+  expect(spawns.length).toBe(1)
+  expect(band).not.toContain('c cite')
+  expect(band).toContain('c evidence')
+  // with nothing selected, c opens Evidence; the open tray's citation, which c does not act on, is not read for the key
+  selected = undefined
+  gets = 0
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  expect(gets).toBe(0)
+  await clock.advance(1000)
+  expect(opens).toEqual(['Evidence'])
+})
+
+test('with Evidence off, c cites the selected words, and with none selected c is a letter of the prompt, since nothing on the bar names it', { options: { citations: 'auto cite + verify', claimsMode: 'off' } }, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
+  let selected: Any = { text: 'failed on the p95 check', requestId: 'row-t1' }
+  on('ui.selection', () => ({ value: selected }))
+  const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-cite-off')
+  expect(textOf(await $.ui.render(above()))).toContain('c cite')
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  // the words are a citation of their own, open in the tray, and its check started
+  expect(textOf(await $.ui.render(above(40)))).toContain('failed on the p95 check')
+  expect(spawns.length).toBe(1)
+  // nothing selected: c is typed, and opens nothing
+  selected = undefined
+  expect(textOf(await $.ui.render(above(40)))).not.toContain('c cite')
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: 'c', cursor: 1 })
+  await clock.advance(1000)
+  expect(opens).toEqual([])
+})
+
+test('a sentence the check rewrote draws as rewritten, its citation corrected, though the analyst asked about other words of it: those step aside', CITES, async ($, on) => {
+  const fixed = { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40', rewrite: 'Of the runs, [11 of 40] failed on the p99 check.' }
+  const asked = { n: 2, row: 'row-t1', words: 'failed on the p95 check', start: 27, end: 50, sentence: 'Of the runs, [12 of 40] [failed on the p95 check].', status: 'deferred', shown: 'failed on the p95 check', asked: true }
+  await resumed($, on, [fixed, asked], 's-tray-rewritten')
+  const drawn = textOf(await $.ui.render(answer('row-t1', TEXT)))
+  expect(drawn).toContain('Of the runs, 11 of 40 failed on the p99 check.')
+  expect(drawn).not.toContain('×')
+})
+
 test("with Citations manual, ] passes the citations Claude wrote (they draw as plain words); a click on their words still opens one", { options: { citations: 'manual' } }, async ($, on) => {
   // the answer's only citation is Claude's: nothing for ] to open, so ] is the prompt's and types
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))

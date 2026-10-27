@@ -45,7 +45,7 @@ test('/thimble-settings opens the settings under their headings; a press on a ch
   await pane.unmount()
 })
 
-test('Citations has four modes: a press on one sets it, the line under the row says what it gives, and manual puts c cite on the bar', async ($, on) => {
+test('Citations has four modes: a press on one sets it, the line under the row says what it gives, and the preview of the bar has c cite in every mode but off', async ($, on) => {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp' })
   mock.clock(on, { now: 0 })
   const rows: Record<string, boolean | string> = { citations: 'auto cite', explain: true }
@@ -64,21 +64,23 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   expect((await pane.find({ key: 'switch-citations' }))?.text).toContain('Citations')
   for (const mode of ['auto cite + verify', 'auto cite', 'manual', 'off']) expect(await pane.find({ key: `mode-citations-${mode}` })).toBeDefined()
   expect((await pane.find({ key: 'says-citations' }))?.text).toContain('verified when you open it')
-  expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeUndefined()
+  // the bar's preview shows every item the switches leave on: c cite, as with words selected, beside c evidence
+  expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^ evidence$/ })).toBeDefined()
   await pane.press({ key: 'mode-citations-manual' })
   expect(set.filter(e => !String(e.key).endsWith('.defaultsAt'))).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
-  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('Select words and press c to cite them.')
-  // the bar's preview, as with words selected: c cite beside e explain, and the claims' item set aside, so c names one
-  // thing
+  expect((await pane.find({ key: 'says-citations' }))?.text).toContain('press c to cite')
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: /^ ?evidence$/ })).toBeUndefined()
+  // off: no c cite, and the claims keep c
+  await pane.press({ key: 'mode-citations-off' })
+  expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: /^ evidence$/ })).toBeDefined()
   // the row picked is the first, Minimal, tinted with no mark; a click on a name picks its row, changing nothing (↑ ↓:
   // tests/pane.test.ts)
   expect((await pane.find({ key: 'sw-minimal' }))?.text).not.toContain('›')
   await pane.press({ key: 'switch-claimsMode' })
   expect((await pane.find({ key: 'sw-claimsMode' }))?.text).not.toContain('›')
-  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(1)
+  expect(set.filter(e => !String(e.key).endsWith('.defaultsAt')).length).toBe(2)
   await pane.unmount()
 })
 

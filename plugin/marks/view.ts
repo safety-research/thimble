@@ -23,7 +23,7 @@
 //                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
 //                look whatever the cause
 //   deferred     as pending: a citation whose check waits until the person opens it (the setting Citations: auto
-//                cite, or words the person asked about in manual)
+//                cite, or words the person asked about with c)
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //

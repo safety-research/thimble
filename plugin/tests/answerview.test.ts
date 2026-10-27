@@ -87,12 +87,45 @@ test('a key at an empty prompt reads no state once the plugin has read it: its h
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text}${e.inputText}`, cursor: e.text.length + e.inputText.length }))
   let gets = 0
   on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
+  // words stand selected, which c cites in every mode of Citations but off
+  let selections = 0
+  on('ui.selection', () => { selections++; return { value: { text: 'two runs failed', requestId: 'row-t1' } } })
   const press = (key: string) => $.prompt.edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never)
-  // the first key reads what the keys need; a letter no one takes then reads nothing, nor does c (its pane opens later)
+  // the first key reads what the keys need; a letter no one takes then reads nothing, nor does c, which reads the
+  // selection only once its word window closed, to cite the words or open the claims
   expect(await press('h')).toEqual({ text: 'h', cursor: 1 })
   expect(gets).toBeGreaterThan(0)
   gets = 0
   expect(await press('q')).toEqual({ text: 'q', cursor: 1 })
+  expect(gets).toBe(0)
+  expect(await press('c')).toEqual({ text: '', cursor: 0 })
+  expect(gets).toBe(0)
+  expect(selections).toBe(0)
+})
+
+test('the keys read what they need as the plugin loads, so even the first key after a load reads no state', async ($, on) => {
+  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin' })
+  mock.clock(on, { now: 0 })
+  on('session.id', () => ({ value: 's-keys-load' }))
+  on('session.cwd', () => ({ value: '/made-up/data' }))
+  on('session.root', () => ({ value: '/made-up/data' }))
+  on('session.messages', () => ({ value: [] }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: promptStub(e.path) ?? '' }))
+  on('fs.write', () => ({ value: undefined }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', () => ({ value: false }))
+  on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
+  on('env.set', () => ({ value: {} }))
+  on('tool.register', () => ({ value: undefined }))
+  on('command.register', () => ({ value: { command: 'x' } }))
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('session.start', (_$: unknown, e: { cwd: string }) => ({ cwd: e.cwd }) as never)
+  let gets = 0
+  on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  gets = 0
+  // the first key, c: taken, and nothing read
+  expect(await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'c' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'c' } as never)).toEqual({ text: '', cursor: 0 })
   expect(gets).toBe(0)
 })
 
