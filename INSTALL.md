@@ -202,11 +202,11 @@ The install:
   install names the command for yours. On a machine that an organization manages, whoever manages it updates Claude
   Code. Then start a new `claude` session: one that was open keeps its version.
 - **Claude Code's own sandbox is on** (`"sandbox": {"enabled": true}` in its settings, so Claude's commands run in
-  it). When Claude installs thimble, the install writes outside the folder (`~/.claude/plugins`, `~/.thimble`,
-  `~/.local/bin`) and downloads packages, which that sandbox may refuse; Claude then asks to run those commands
-  outside it, or you run `scripts/install.sh` in your own terminal. The install's check of the card sandbox may fail
-  inside Claude Code's sandbox for that reason alone. The check that counts is a card drawn in a new `claude` session:
-  a card that cannot draw says why in the line above the prompt.
+  it). When Claude installs thimble, the install writes outside the folder (the checkout, such as `~/thimble`, and
+  `~/.claude/plugins`, `~/.thimble`, `~/.thimble-browser`, `~/.local/bin`) and downloads packages, which that sandbox
+  may refuse; Claude then asks to run those commands outside it, or you run `scripts/install.sh` in your own terminal.
+  The install's check of the card sandbox may fail inside Claude Code's sandbox for that reason alone. The check that
+  counts is a card drawn in a new `claude` session: a card that cannot draw says why in the line above the prompt.
 
 The terminal plugin:
 
