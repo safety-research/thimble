@@ -1,7 +1,8 @@
 // The pointer box: the overlay beside the highlight, never over it, holding only the input ("Ask about this…"); its
 // accessible label names what was picked. A span of text or a tab takes the box under its last line (or over it); a
 // region takes it to its right, or its left when that stays inside the region's pane, else under; a region inside a
-// cell takes it beside the cell. ↵ sends, esc closes; the caller releases the highlight on close.
+// cell takes it beside the cell. ↵ sends, esc closes, a hidden box too unless a popover is open, whose Escape that is;
+// the caller releases the highlight on close.
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { TextArea } from '../components/Field'
@@ -77,6 +78,11 @@ export interface PointerBoxProps {
   /** the highlight the box sits beside: a region's box, or a span's last line */
   rect: Box
   place: Place
+  /** counts the times its field takes the focus: it takes it when the box is drawn first and at each new count, never
+   * when the box only moves with what it is about or comes back (`hidden`) */
+  focus?: number
+  /** what the box is about is off screen: the box is not drawn, and keeps its text, its focus count and its Escape */
+  hidden?: boolean
   /** the accessible name of the box and its text area */
   label: string
   draft: string
@@ -91,22 +97,22 @@ export interface PointerBoxProps {
   attrs?: Record<string, string | number | undefined>
 }
 
-export function PointerBox({ rect, place, label, draft, onDraft, busy = false, onSubmit, onClose, className, ref, attrs }: PointerBoxProps) {
+export function PointerBox({ rect, place, focus, hidden = false, label, draft, onDraft, busy = false, onSubmit, onClose, className, ref, attrs }: PointerBoxProps) {
   const own = useRef<HTMLElement>(null)
   const boxEl = ref ?? own
   const taRef = useRef<HTMLTextAreaElement>(null)
 
-  // Escape closes the box from anywhere
+  // Escape closes the box from anywhere, while it is hidden too, unless a popover is open: that Escape is the popover's
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !(hidden && document.querySelector('.popover'))) {
         e.preventDefault()
         onClose()
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [onClose, hidden])
 
   // beside the rect, never on it (boxPlace)
   useLayoutEffect(() => {
@@ -119,9 +125,10 @@ export function PointerBox({ rect, place, label, draft, onDraft, busy = false, o
     const { left, top } = boxPlace(rect, w, el.offsetHeight, vw, vh, place)
     el.style.left = `${left}px`
     el.style.top = `${top}px`
-    taRef.current?.focus()
-  }, [rect, place, boxEl])
+  }, [rect, place, boxEl, hidden])
+  useLayoutEffect(() => taRef.current?.focus(), [focus])
 
+  if (hidden) return null
   return createPortal(
     <div
       ref={boxEl as RefObject<HTMLDivElement>}

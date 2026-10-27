@@ -8,12 +8,15 @@
 // so the pointer shows once ⌘ has been held alone for HOLD_MS, and a key pressed with ⌘ (⌘C, ⌘V, ⌘Z) lets go of it
 // until ⌘ is released; a ⌘-press points at once. Off a Mac, Ctrl does what ⌘ does (lib/platform), at once, and lets go
 // at a key pressed with it. A ⌘ pressed while a frame has the focus reaches the page as no key event: the first move
-// with ⌘ held starts the pointer as the key-down would have. The send lets
-// go of the highlight and opens the thread in the chat column. The box shows only while the element it is about is on
-// screen: a switch to another tab or a collapsed frame hides it, its text kept, and it comes back beside the element
-// when the element is back (onScreen); a send under way goes on. ⌘ here stands for the ask key Settings picks
-// (lib/platform pointKeyHeld): ⌘ by default, or ⌥, which then holds alone for HOLD_MS on a Mac as ⌘ does, and lets go
-// at a key pressed with it (⌥ types a letter's accent there); off a Mac, Ctrl or Alt, at once.
+// with ⌘ held starts the pointer as the key-down would have. The send lets go of the highlight and opens the thread in
+// the chat column. The box moves with the element it is about, and shows only while the element is on screen: a switch
+// to another tab, a collapsed frame, a pan or a scroll that takes it out of its pane, or a popover over the page hides
+// it, its text kept, and it comes back beside the element when the element is back (onScreen). Its field takes the
+// focus when the box opens; coming back, only when it had the focus as it went and the focus has gone nowhere since, so
+// it never takes the focus from a field the analyst went on in. Escape closes a hidden box too, but for one a popover
+// hides, whose Escape that is; a send under way goes on. ⌘ here stands for the ask key Settings picks (lib/platform
+// pointKeyHeld): ⌘ by default, or ⌥, which then holds alone for HOLD_MS on a Mac as ⌘ does, and lets go at a key pressed
+// with it (⌥ types a letter's accent there); off a Mac, Ctrl or Alt, at once.
 import { useEffect, useRef, useState } from 'react'
 import { agentTinted } from '../lib/agentKey'
 import { api } from '../lib/api'
@@ -21,7 +24,7 @@ import { bus } from '../lib/bus'
 import { getAskKey, isMacPlatform, isPointKey, pointKeyHeld } from '../lib/platform'
 import { track } from '../lib/telemetry'
 import { token } from '../lib/vizTheme'
-import { anchorsInSelection, cellOf, chunkAt, isDrag, isShown, joinAnchors, lastLine, nearestAnchor, pressRoot, rangeContext, selectionTextWithin, textHitAt, toBox, type Anchor, type Box } from './anchors'
+import { anchorsInSelection, cellOf, chunkAt, isDrag, isShown, joinAnchors, lastLine, nearestAnchor, pressRoot, rangeContext, selectionTextWithin, textHitAt, toBox, visibleBox, type Anchor, type Box } from './anchors'
 import { capturePng, commonElement, describeElement, type ElementInfo } from './capture'
 import { cmdCursors } from './cursor'
 import { carried, highlight } from './highlight'
@@ -55,10 +58,13 @@ interface Ask {
   range?: Range
   /** where the element, a view's frame, is found again once it is drawn anew (homeOf); null for any other element */
   home: Home | null
+  /** counts the times the box's field takes the focus (PointerBox focus): each opening, and a way back with the focus it
+   * had as it went; never the box moving with its element */
+  focus: number
 }
 
 /** What an opened box is given: everything but where its element was when it opened, which openBox takes. */
-type Opened = Omit<Ask, 'from' | 'home'>
+type Opened = Omit<Ask, 'from' | 'home' | 'focus'>
 
 /** Where a view's frame, which has no `data-anchor` of its own, is found again once it is drawn anew: in the nearest
  * anchored element around it (a card), else in the surface it is in (a view's pane), by its title. */
@@ -79,16 +85,34 @@ export function homeOf(el: Element): Home | null {
 }
 
 const escAttr = (v: string): string => (typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(v) : v.replace(/["\\]/g, '\\$&'))
-const shownAll = (root: ParentNode, sel: string): Element[] => Array.from(root.querySelectorAll(sel)).filter(isShown)
+
+/** Whether some of an element shows: it is laid out (a hidden tab's elements are not), and its box meets the part of
+ * the window the boxes that clip it show (anchors.ts visibleBox), which a card panned off the board, or a line scrolled
+ * out of its pane, does not. */
+export function inSight(el: Element): boolean {
+  if (!isShown(el)) return false
+  const r = el.getBoundingClientRect()
+  const clip = visibleBox(el.parentElement)
+  const left = Math.max(0, clip?.left ?? 0)
+  const top = Math.max(0, clip?.top ?? 0)
+  const right = Math.min(window.innerWidth, clip?.right ?? Infinity)
+  const bottom = Math.min(window.innerHeight, clip?.bottom ?? Infinity)
+  return r.right > left && r.left < right && r.bottom > top && r.top < bottom
+}
+const shownAll = (root: ParentNode, sel: string): Element[] => Array.from(root.querySelectorAll(sel)).filter(inSight)
+
+/** Whether a popover that does not hold the element is open (Settings, a menu): the box steps aside while it is, since
+ * it would draw over it. */
+const covered = (el: Element): boolean => Array.from(document.querySelectorAll('.popover')).some((p) => !p.contains(el) && isShown(p))
 
 /**
- * The element a box is about as it is on screen now: the element itself while it is laid out (a hidden tab's elements
- * are not); once it has left the page, the element drawn anew in its place, with its `data-anchor`, in the panel it was
- * in (a card a collapsed frame no longer drew, once the frame opens again), or, for a view's frame, the frame drawn anew
- * at its `home` (in its card, or in its view's pane); else null.
+ * The element a box is about as it is on screen now: the element itself while some of it shows (inSight); once it has
+ * left the page, the element drawn anew in its place, with its `data-anchor`, in the panel it was in (a card a collapsed
+ * frame no longer drew, once the frame opens again), or, for a view's frame, the frame drawn anew at its `home` (in its
+ * card, or in its view's pane); else null.
  */
 export function onScreen(el: Element, panel: Element | null, home: Home | null = null): Element | null {
-  if (el.isConnected) return isShown(el) ? el : null
+  if (el.isConnected) return inSight(el) ? el : null
   const root: ParentNode = panel?.isConnected ? panel : document
   const anchor = el.getAttribute('data-anchor')
   if (anchor) return shownAll(root, `[data-anchor="${escAttr(anchor)}"]`)[0] ?? null
@@ -147,6 +171,7 @@ export function CmdPointer({ ws }: { ws: string }) {
   const press = useRef<{ x: number; y: number; root: ParentNode; dragged: boolean } | null>(null)
   // the click that follows a drag's release is not a ⌘-click
   const swallowClick = useRef(false)
+  const focuses = useRef(0)
 
   useEffect(() => {
     const mac = isMacPlatform()
@@ -170,7 +195,7 @@ export function CmdPointer({ ws }: { ws: string }) {
       setDraft('')
       setHidden(false)
       panel.current = b.el.closest('[data-panel]')
-      setBox({ ...b, from: toBox(b.el.getBoundingClientRect()), home: homeOf(b.el) })
+      setBox({ ...b, from: toBox(b.el.getBoundingClientRect()), home: homeOf(b.el), focus: ++focuses.current })
     }
     const inBox = (t: EventTarget | null) => !!boxEl.current?.contains(t as Node)
     // what the pointer is on: the report block it is in, else the part of a card under it, else a word of an anchored
@@ -395,37 +420,50 @@ export function CmdPointer({ ws }: { ws: string }) {
     }
   }, [])
 
-  // the box shows while its element is on screen (onScreen). A switch to another tab or a collapsed frame takes the
-  // element away: the box is not drawn, keeps its text, and leaves the ⌘ pointer free for what is on screen. Once the
-  // element, or the element drawn anew in its place, is back, the box comes back beside it with the highlight on it. A
-  // send under way goes on, and closes the box when it is done.
+  // the box shows while its element is on screen (onScreen). A switch to another tab, a collapsed frame, or a pan or a
+  // scroll that takes it out of its pane takes the element away, and a popover opened over the page (Settings) covers
+  // it: the box is not drawn, keeps its text, and leaves the ⌘ pointer free for what is on screen. Once the element, or
+  // the element drawn anew in its place, is back, the box comes back beside it with the highlight on it, and takes the
+  // focus again only when it had it as it went and the focus has gone nowhere since. While it shows, the box moves with
+  // its element, as the highlight does (a pan, a zoom, the card laid out again). A send under way goes on, and closes
+  // the box when it is done.
   useEffect(() => {
     if (!box) return
     let id = 0
     let gone = false
+    // the box's field had the focus as the box went
+    let had = false
     // each frame while the box shows; while it is hidden, every GONE_MS
     let later = 0
     const tick = () => {
       const now = onScreen(box.el, panel.current, box.home)
-      if (!now) {
+      // where it is now, unless a popover covers it
+      const at = now && !covered(now) ? toBox(now.getBoundingClientRect()) : null
+      if (!now || !at) {
         if (!gone) {
           gone = true
+          had = !!boxEl.current?.contains(document.activeElement)
           highlight.release()
           setHidden(true)
         }
-      } else if (gone || now !== box.el) {
-        const at = toBox(now.getBoundingClientRect())
+      } else if (gone || now !== box.el || !near(at, box.from)) {
         const moved = carried(box.rect, box.from, at) ?? at
         const rect = near(moved, box.rect) ? box.rect : moved
-        highlight.retarget()
-        if (box.range && now === box.el) highlight.text(box.range)
-        else if (box.mark === 'box') highlight.box(new DOMRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top), now)
-        else highlight.region(now)
-        highlight.hold()
+        // the element only moved: the held highlight follows it by itself
+        if (gone || now !== box.el) {
+          highlight.retarget()
+          if (box.range && now === box.el) highlight.text(box.range)
+          else if (box.mark === 'box') highlight.box(new DOMRect(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top), now)
+          else highlight.region(now)
+          highlight.hold()
+        }
         setHidden(false)
         // a view's frame keeps the place it had: its box went beside the frame's element, which only the frame knows
-        const place = gone && !box.span && !box.home ? placeAgain(box.place, now) : box.place
-        setBox((b) => (b === box ? { ...box, el: now, from: at, rect, place } : b))
+        const place = (gone || now === box.el) && !box.span && !box.home ? placeAgain(box.place, now) : box.place
+        // the focus it had as it went comes back with it, unless the analyst has put the focus somewhere since
+        const elsewhere = document.activeElement && document.activeElement !== document.body
+        const focus = gone && had && !elsewhere ? ++focuses.current : box.focus
+        setBox((b) => (b === box ? { ...box, el: now, from: at, rect, place, focus } : b))
         return
       }
       if (gone) later = window.setTimeout(tick, GONE_MS)
@@ -462,11 +500,13 @@ export function CmdPointer({ ws }: { ws: string }) {
   }
   return (
     <>
-      {box && !hidden && (
+      {box && (
         <PointerBox
           ref={boxEl}
+          hidden={hidden}
           rect={box.rect}
           place={box.span ? UNDER : (box.place ?? BESIDE)}
+          focus={box.focus}
           className={box.anchors.length > 1 ? 'pointer-box-range' : undefined}
           label={box.anchors.length > 1 ? `Ask about these ${box.anchors.length}` : 'Ask about this'}
           draft={draft}
