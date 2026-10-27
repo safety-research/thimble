@@ -61,7 +61,9 @@ ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main'
 nothing.
 
 Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode, Bypass
-included, and ask as main does, in the analyst's terminal. thimble's own questions about its code stay on the ticket's card, in
+included, and ask as main does, in the analyst's terminal. Where the server runs its agents itself (runtime.py), no
+agent is asked anything: a view builder and its reviewer write the view's folder and their own folder (view_work_dir)
+alone, on either engine (runtime.agent_writes). thimble's own questions about its code stay on the ticket's card, in
 every mode, Bypass included (CODE_TOOL): its chat hosts the ticket's key (agent_session.host) for them alone, and a
 question nobody answers within the card's wait (userconf.card_wait_s) is a no.
 
