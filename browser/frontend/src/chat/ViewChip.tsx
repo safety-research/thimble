@@ -1,8 +1,8 @@
 // A view proposal's chip, the same wherever a proposal shows: the view's option as the views bar draws it (ViewTab),
-// keyed by slug, followed by its build state. Each build is a view builder, a subagent of the analyst's Claude Code
-// session (`thimble:view-builder`). Queued: at most VIEW_POOL build at once, so the chip says how many build ahead of it.
-// Building: a spinner, a click opens the build's thread (each gate shows there as a step), its tooltip says where the
-// terminal shows it, and a repair (a fresh builder after a build that failed for good) says which of VIEW_REPAIRS it is.
+// keyed by slug, followed by its build state. Each build is a view builder, one of the agents thimble's server runs.
+// Queued: at most VIEW_POOL build at once, so the chip says how many build ahead of it.
+// Building: a spinner, a click opens the build's thread (each gate shows there as a step), as its tooltip says, and a
+// repair (a fresh builder after a build that failed for good) says which of VIEW_REPAIRS it is.
 // Built: a click opens the view (with Open after it while the analyst has not opened it yet, files/viewReady.ts).
 // Failed (a view the analyst asked for, or one nobody asked for after its repairs), or stopped when the analyst's
 // Claude Code session ended: ✕ with why in its tooltip, Retry, and Report a problem (shell/ProblemReport); Retry is a
@@ -67,8 +67,8 @@ export function buildingText(p: Pick<Proposal, 'repairs'> | null | undefined): s
   return p?.repairs ? `repair ${p.repairs} of ${VIEW_REPAIRS}` : 'building'
 }
 
-/** The tooltip of a building chip: where the terminal shows its builder. */
-export const BUILD_TERMINAL_TIP = 'In your terminal: ↓ to thimble:view-builder in the agent tray'
+/** The tooltip of a building chip: where its builder's work shows. */
+export const BUILD_TIP = 'A click on its name opens the build’s thread'
 
 /** The words a build stopped by the analyst's quit shows. */
 export const BUILD_QUIT_LINE = 'Stopped when your Claude Code session ended.'
@@ -194,7 +194,7 @@ export function ViewChip({ ws, slug, name, className }: Props) {
     >
       <ViewTab name={name} className="view-chip-chip" onClick={clickable ? (e) => (e.stopPropagation(), open()) : undefined} />
       {pending && (
-        <Tipped text={status === 'building' ? BUILD_TERMINAL_TIP : `At most ${VIEW_POOL} views build at once`} className="view-chip-state">
+        <Tipped text={status === 'building' ? BUILD_TIP : `At most ${VIEW_POOL} views build at once`} className="view-chip-state">
           <Spinner size={10} label={status === 'queued' ? 'Queued' : 'Building'} />
           <span className="view-chip-word">{status === 'queued' ? queuedText(proposals ?? []) : buildingText(p)}</span>
         </Tipped>
