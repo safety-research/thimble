@@ -6,10 +6,11 @@ Both engines honor the switch: the Messages API's tools (runtime_tools.Box, its 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from app import config, ledger, runtime, runtime_api, runtime_cc, runtime_tools
+from app import config, kernel_wrap, ledger, runtime, runtime_api, runtime_cc, runtime_tools, view_tools, views
 
 CORPUS = "mini"
 SWITCH = "Claude can edit files in this folder"
@@ -135,3 +136,35 @@ def test_the_checker_s_fork_never_writes_the_corpus(space, monkeypatch):
     with pytest.raises(Stop):
         asyncio.run(runtime_api.fork_stream(CORPUS, "check", model="claude-opus-5-5", effort=None))
     assert space.corpus not in seen["write_roots"] and seen["write_roots"]
+
+
+async def test_the_view_builder_writes_its_view_folder_and_nothing_else_of_the_local_extension(space):
+    """The builder's write root extension/views lies inside the read-only local extension (kernel_wrap.LOCAL_DIR). A
+    denied folder wins over an allowed one inside it (srt's Seatbelt profile on macOS, issue #46), so no denied path may
+    hold an allowed one: the local extension's other entries are denied in its place, and the other protected paths
+    stay denied whole."""
+    ext = views.ensure_local(space.ws)
+    spec = space.spec_of(runtime.Conv(space, "b1", "agent", agent_id="b1", role=view_tools.BUILDER))
+    folder = ext / views.VIEWS_SUBDIR
+    assert folder in spec.write_roots
+    others = [space.ws / n for n in (*kernel_wrap.HIDDEN_FILES, *kernel_wrap.LOCK_FILES, *kernel_wrap.READ_ONLY_FILES,
+                                     *kernel_wrap.READ_ONLY_DIRS) if n != kernel_wrap.LOCAL_DIR]
+
+    def holds(deny: list[str], allow: list[str]) -> list[tuple[str, str]]:
+        return [(d, a) for d in deny for a in allow if kernel_wrap._under(Path(a), Path(d))]
+
+    got = runtime_cc.settings(spec, True, spec.home)
+    fs, perms = got["sandbox"]["filesystem"], got["permissions"]
+    assert not holds(fs["denyWrite"], fs["allowWrite"]) and str(folder) in fs["allowWrite"]
+    assert {*map(str, others), str(ext / views.LOCAL_MANIFEST)} <= set(fs["denyWrite"])
+    assert f"Edit(/{folder}/**)" in perms["allow"] and f"Edit(/{ext}/**)" not in perms["deny"]
+    assert f"Edit(/{ext / views.LOCAL_MANIFEST})" in perms["deny"]
+    rules = runtime_tools._rules(box(spec))["filesystem"]
+    assert not holds(rules["denyWrite"], rules["allowWrite"]) and str(ext / views.LOCAL_MANIFEST) in rules["denyWrite"]
+
+    # the Messages API's tools write the view's folder, and neither the extension's manifest nor a new file beside it
+    got = await runtime_tools.call(box(spec), "Write", {"file_path": str(folder / "v1" / "view.json"), "content": "{}"})
+    assert not got.is_error and (folder / "v1" / "view.json").read_text() == "{}", got.text
+    for p in (ext / views.LOCAL_MANIFEST, ext / "new.txt", space.ws / kernel_wrap.TRUSTED_DIR / "x"):
+        got = await runtime_tools.call(box(spec), "Write", {"file_path": str(p), "content": "x"})
+        assert got.is_error and (not p.exists() or p.read_text() != "x"), p

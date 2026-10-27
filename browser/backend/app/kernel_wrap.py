@@ -202,6 +202,28 @@ def _under(p: Path, root: Path) -> bool:
     return p == root or root in p.parents
 
 
+def deny_around(deny: Sequence[str | Path], allow: Sequence[str | Path]) -> list[Path]:
+    """`deny` with each folder that holds a folder of `allow` replaced by its other entries, so that no denied folder
+    holds an allowed one: srt's Seatbelt profile (macOS) lets a denyWrite folder win over an allowWrite folder inside
+    it, as Claude Code's deny rules win over its allow rules, so the view builder could not write its folder
+    extension/views (subagents.WORK_DIRS) inside the read-only LOCAL_DIR. A file made in the folder later stays
+    unwritten, since nothing in `allow` holds it. A folder that `allow` holds too, or that cannot be listed, stays
+    denied whole."""
+    allow = [Path(a) for a in allow]
+    out: list[Path] = []
+    todo = [Path(d) for d in deny]
+    while todo:
+        d = todo.pop(0)
+        if any(_under(d, a) for a in allow) or not any(_under(a, d) for a in allow):
+            out.append(d)
+            continue
+        try:
+            todo += [e for e in sorted(d.iterdir()) if e not in allow]
+        except OSError:
+            out.append(d)
+    return out
+
+
 def kernel_wrap_argv(argv: Sequence[str], *, corpus_dir: str | Path, workspace_dir: str | Path,
                      connection_dir: str | Path, venv: str | Path | None, python: str | Path,
                      read: Sequence[str | Path] = (), bwrap: str = "bwrap") -> list[str]:

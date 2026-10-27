@@ -444,17 +444,19 @@ class Space:
         return Spec(system=system, builtins=runtime_tools.available(builtins) if engine() == "api" else builtins,
                     thimble=names, model=model, effort=effort, cwd=cwd, workspace=self.ws,
                     read_roots=reads, write_roots=writes, private=self.private(), home=tmp, fast=fast,
-                    corpus_edits=edits, no_write=protected(self.ws))
+                    corpus_edits=edits, no_write=protected(self.ws, writes))
 
 
-def protected(ws: Path) -> list[Path]:
+def protected(ws: Path, writes: list[Path]) -> list[Path]:
     """The workspace's files no agent writes, as the kernels' sandbox keeps them (kernel_wrap.srt_rules): its hidden
     files and lock, and its read-only files and folders. They matter where a write root holds the workspace, as a
-    corpus folder that holds thimble's home would."""
+    corpus folder that holds thimble's home would. A read-only folder that holds one of `writes` (the local extension
+    holds extension/views) is given as its other entries (kernel_wrap.deny_around)."""
     from . import kernel_wrap  # noqa: PLC0415
 
-    return [ws / n for n in (*kernel_wrap.HIDDEN_FILES, *kernel_wrap.LOCK_FILES, *kernel_wrap.READ_ONLY_FILES,
-                             *kernel_wrap.READ_ONLY_DIRS)]
+    paths = [ws / n for n in (*kernel_wrap.HIDDEN_FILES, *kernel_wrap.LOCK_FILES, *kernel_wrap.READ_ONLY_FILES,
+                              *kernel_wrap.READ_ONLY_DIRS)]
+    return kernel_wrap.deny_around(paths, writes)
 
 
 def _read_json(p: Path) -> dict[str, Any]:

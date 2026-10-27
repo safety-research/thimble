@@ -324,7 +324,8 @@ def _rules(box: Box) -> dict[str, Any]:
                                   hide=[str(p) for p in box.private], home=Path.home(), platform=sys.platform)
     fs = rules["filesystem"]
     fs["allowWrite"] = [str(p) for p in box.write_roots]
-    fs["denyWrite"] = list(dict.fromkeys([*fs.get("denyWrite", []), *map(str, box.private), *map(str, box.no_write)]))
+    fs["denyWrite"] = list(dict.fromkeys(map(str, kernel_wrap.deny_around(
+        [*fs.get("denyWrite", []), *box.private, *box.no_write], box.write_roots))))
     return rules
 
 

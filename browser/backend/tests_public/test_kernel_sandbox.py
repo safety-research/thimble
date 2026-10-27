@@ -105,6 +105,20 @@ def test_on_linux_srt_hides_a_folder_inside_a_hidden_one_by_the_outer_rule_unles
     assert {"/home/u", "/home/u/.thimble", *config_files} <= deny("/home/u")
 
 
+def test_a_denied_folder_that_holds_an_allowed_one_is_denied_as_its_other_entries(tmp_path):
+    """kernel_wrap.deny_around: the entries off the way to the allowed folder, at each level; a folder an allowed one
+    also holds, or one that cannot be listed, stays denied whole."""
+    for p in ("ext/views/v1", "ext/a/b", "ext/a/c", "trusted"):
+        (tmp_path / p).mkdir(parents=True)
+    (tmp_path / "ext" / "extension.json").write_text("{}")
+    ext, inner = tmp_path / "ext", tmp_path / "ext" / "a" / "b"
+    got = kernel_wrap.deny_around([ext, tmp_path / "trusted"], [ext / "views", inner])
+    assert got == [tmp_path / "trusted", ext / "extension.json", ext / "a" / "c"]
+    assert kernel_wrap.deny_around([ext], [tmp_path, ext / "views"]) == [ext]
+    assert kernel_wrap.deny_around([ext], [ext]) == [ext]
+    assert kernel_wrap.deny_around([tmp_path / "gone"], [tmp_path / "gone" / "views"]) == [tmp_path / "gone"]
+
+
 def _wrap_works(wrap: str) -> bool:
     if wrap == "srt":
         return kernel_wrap.srt_works(NODE, SRT)
