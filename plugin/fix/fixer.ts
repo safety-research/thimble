@@ -9,7 +9,8 @@
 //   fixerCall($, e, id)         each of its tool calls: Bash runs in the sandbox runtime (the kernel's `fix sandbox`
 //                               gives the command's start: reads only the system, its tools and the copy, writes only
 //                               the copy and its temp folder, reaches only the package registries, by the release's
-//                               sandbox code), in the foreground, for at most 5 minutes;
+//                               sandbox code), in the foreground, for at most 5 minutes, and never publishes to the
+//                               registries or signs in to them (npm publish, npm login);
 //                               Write and Edit only in the copy; its other calls as they are
 //   fixerCheck($, e)            a Bash call thimble put in the sandbox needs no dialog, as Claude Code's own sandboxed
 //                               commands need none, unless the person's rules deny the command; its other calls go
@@ -224,7 +225,13 @@ function writable(argv: string[]): string[] {
  *  it, for their check. */
 const wrapped = new Map<string, { run: string; asked: string }>()
 
-/** One tool call of a fixer: its shell command put in the sandbox, a write outside its copy refused, else as it is. */
+/** A command of npm's (or pnpm's, or yarn's) that writes to the registry or signs in to it (npm publish, npm login, npm
+ *  token…). The fixer's shell reaches the registry to add a package to its copy, and the registry takes writes too,
+ *  which could carry the conversation's data off as a package. */
+const REGISTRY_WRITE = /\b(?:npm|pnpm|yarn)\b[^;&|\n]*?\s(?:publish|unpublish|adduser|add-user|login|logout|token|owner|access|deprecate|dist-tag|team|org|hook|profile|star|unstar)(?=[\s;&|)]|$)/
+
+/** One tool call of a fixer: its shell command put in the sandbox, a write outside its copy or to a package registry
+ *  refused, else as it is. */
 export async function fixerCall($: Engine, e: Any, id: number): Promise<{ call?: Any; deny?: string } | null> {
   const isWrite = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(e.tool)
   if (e.tool !== 'Bash' && !isWrite) return null
@@ -236,6 +243,7 @@ export async function fixerCall($: Engine, e: Any, id: number): Promise<{ call?:
     return ok ? null : { deny: `The fixer changes only its copy of thimble (${writable(argv)[0] ?? 'the copy'}); ${p || 'that file'} is outside it.` }
   }
   const asked = String(e.command ?? '')
+  if (REGISTRY_WRITE.test(asked)) return { deny: "The fixer's shell reaches the npm and PyPI registries to add a package to its copy, never to publish one or sign in to them." }
   const run = [...argv, asked].map(quote).join(' ')
   if (e.tool_use_id) wrapped.set(String(e.tool_use_id), { run, asked })
   const timeout = Math.min(Number(e.timeout) > 0 ? Number(e.timeout) : FIXER_BASH_MS, FIXER_BASH_MS)
@@ -255,7 +263,7 @@ export async function fixerCheck($: Engine, e: Any): Promise<{ decision: 'allow'
   if (!w || w.run !== String((e.input as Any)?.command ?? '')) return null
   const own = await $.tool.check({ tool: 'Bash', input: { command: w.asked } } as never).catch(() => null)
   if ((own as Any)?.decision === 'deny') return { decision: 'deny', reason: String((own as Any).reason || 'the person\'s settings deny this command') }
-  return { decision: 'allow', reason: "thimble's fixer: in the sandbox runtime, which reads and writes only its copy of thimble" }
+  return { decision: 'allow', reason: "thimble's fixer: in the sandbox runtime, which writes only its copy of thimble and reaches only the package registries" }
 }
 
 /** A fix whose fixer still works, and its agent, or null: more words for that fix go to it. A fixer that ended (its

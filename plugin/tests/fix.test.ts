@@ -5,8 +5,8 @@
 // what changed; y applies it with a secret only that press holds and reloads the plugins (at the turn's end when Claude
 // is mid-reply; a --plugin-dir session is told to restart); u undoes it; n leaves it ready in the list; /thimble-fix
 // alone goes to Claude, for the fix it offered; a failed fix's line says what its keys do and goes at the next prompt.
-// The fixer's shell runs in the sandbox the kernel describes, with a time limit, and its writes stay in its copy. All
-// data is made up. `claude plugin test plugin`.
+// The fixer's shell runs in the sandbox the kernel describes, with a time limit, its writes stay in its copy, and it
+// publishes nothing to the package registries it reaches. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { busyNow, busySteps } from '../bar/busy'
@@ -267,6 +267,10 @@ test("a request forks the session into its copy with a text copy of the screen; 
   })
   expect(seen.at(-1).verdict).toBe('deny')
   expect((await check('tu-9', 'find / -name x')).decision).toBe('ask')
+  // the shell reaches the package registries to add a package, never to publish one or sign in: refused before it runs
+  for (const command of ['npm publish', 'cd pkg && npm --registry=https://registry.npmjs.org/ publish --access public', 'npm login', 'yarn npm publish'])
+    expect(String((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-1e', agentId: 'agent-fixer-1', command }, ran)).deny)).toContain('never to publish one')
+  expect((await s.call('tool.call', { tool: 'Bash', tool_use_id: 'tu-1f', agentId: 'agent-fixer-1', command: 'npm install left-pad' }, ran)).result.ran).toBe(boxed('npm install left-pad'))
   // its writes stay in its copy
   expect((await s.call('tool.call', { tool: 'Write', tool_use_id: 'tu-2', agentId: 'agent-fixer-1', file_path: `${WORK}/plugin/bar/bar.tsx` }, ran)).result.ran).toBe(`${WORK}/plugin/bar/bar.tsx`)
   for (const file_path of ['/made-up/home/notes.txt', `${WORK}/../2/plugin/bar/bar.tsx`, `${HOME}/fixes/work/12/x.ts`]) {
