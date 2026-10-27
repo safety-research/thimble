@@ -23,7 +23,9 @@
 //   ● Links peaked that day: 2,994 of …       the answer after ●
 //
 //     [a card it drew]
-//                                             a question at work: the bar says `⠋ answering: <thread>` (bar/busy.ts)
+//
+//     ⎿ answering…                            a question at work, under what its fork did so far; the bar says
+//                                             `⠋ answering: <thread>` with its seconds (bar/busy.ts)
 //   e: show the card · m: add this answer…    the keys' row, as other panes draw keys: e the card whole or not (a
 //                                             card's thread), m (or a click) adds the answer to the main conversation
 //                                             once it answered, and says so after
@@ -116,9 +118,10 @@ function subjectBlock(els: Any, key: string, title: string, line = '', more: Any
   const { Box, Text } = els
   const rows = [Text({ key: `${key}-t`, wrap: 'truncate-end', children: [Text({ dimColor: true, children: '▎ ' }), Text({ bold: true, children: title })] })]
   if (line) rows.push(Text({ key: `${key}-l`, wrap: 'truncate-end', dimColor: true, children: `▎ ${line}` }))
-  // a part that wraps keeps its rows after the gutter, the `▎` a column of its own, as a quote's rows are drawn
+  // a part that wraps keeps its rows after the gutter, the `▎` a column of its own, as a quote's rows are drawn; the
+  // gutter's width is its own, so the pane counts the part's rows at the width they wrap at (core/trail.mjs treeRows)
   more.forEach((m, i) => rows.push(moreWrap === 'wrap'
-    ? Box({ key: `${key}-m${i}`, flexDirection: 'row', children: [Text({ dimColor: true, children: '▎ ' }), Box({ flexShrink: 1, children: [Text({ wrap: 'wrap', children: [m] })] })] })
+    ? Box({ key: `${key}-m${i}`, flexDirection: 'row', children: [Box({ width: 2, flexShrink: 0, children: [Text({ dimColor: true, children: '▎ ' })] }), Box({ flexShrink: 1, children: [Text({ wrap: 'wrap', children: [m] })] })] })
     : Text({ key: `${key}-m${i}`, wrap: moreWrap, children: [Text({ dimColor: true, children: '▎ ' }), m] })))
   rows.push(Text({ key: `${key}-gap`, children: ' ' }))
   return Box({ key, flexDirection: 'column', children: rows })
@@ -136,13 +139,15 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
   const out: Any[] = []
   const head = ` ${cut(nameOf(t), w - 8)} `
   out.push(Text({ key: 'conv-head', dimColor: true, wrap: 'truncate-end', children: `──${head}${'─'.repeat(Math.max(2, w - textWidth(head) - 2))}` }))
-  // the newest turns that fit: an answer with the question before it
+  // the newest turns that fit, and always the newest answer with the question before it (the pane scrolls)
+  const last = turns.length - 1
+  const always = turns[last]!.role !== 'person' && turns[last - 1]?.role === 'person' ? last - 1 : last
   let used = 0
   let from = turns.length
   while (from > 0) {
     const x = turns[from - 1]!
     const h = rowsAt(x.text, w - 2) + 1 + (x.calls?.length ? 2 : 0) + (x.cards?.length ? 8 : 0)
-    if (used + h > room && from < turns.length) break
+    if (used + h > room && from <= always) break
     used += h
     from--
   }
@@ -173,6 +178,12 @@ async function conversation($: Engine, e: Any, els: Any, t: Thread, w: number, r
       else if (meta.anchorRow !== `thread:${t.key}`) out.push(Text({ key: `${k}-c-${meta.id}`, dimColor: true, wrap: 'truncate-end', children: `  ⎿ drew a new version of “${cut(meta.title, 40)}” in the conversation` }))
       else out.push(Box({ key: `${k}-c-${meta.id}`, marginTop: 1, children: [await frame($, { ...e, viewport: { ...(e?.viewport ?? {}), columns: w + 2 } }, meta)] }))
     }
+  }
+  // a question at work: one row says so under what the thread did so far, until its answer comes (the bar's busy line
+  // turns and counts the seconds)
+  if (t.status === 'running') {
+    out.push(Text({ key: 'conv-run-gap', children: ' ' }))
+    out.push(Text({ key: 'conv-run', dimColor: true, wrap: 'truncate-end', children: '  ⎿ answering…' }))
   }
   if (t.status === 'failed') {
     out.push(Text({ key: 'conv-fail-gap', children: ' ' }))
@@ -433,7 +444,7 @@ async function subjectOfPane($: Engine, e: Any, els: Any, t: Thread, W: number):
   if (s.passage) {
     const runs = passageRuns(String(s.passage.text))
     const words = runs.map(r => r.s).join('')
-    return { el: subjectBlock(els, 'subject', 'A passage of Claude\'s reply', '', [passageEl(els, runs)]), rows: 2 + rowsAt(words, W) }
+    return { el: subjectBlock(els, 'subject', 'A passage of Claude\'s reply', '', [passageEl(els, runs)]), rows: 2 + rowsAt(words, W - 2) }
   }
   if (s.mark) {
     const it = (await rowMarks($, s.mark.row).catch(() => null))?.items.find(x => x.n === (s.mark as Any).n)
