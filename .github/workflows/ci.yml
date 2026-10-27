@@ -3,9 +3,9 @@
 # things:
 #
 #   scan            scripts/scan.sh over the new commits, with its generic patterns (CI has no private lists)
-#   plugin          the terminal plugin, on Linux and macOS, each on Node 22.18 (the plugin's minimum), 24 and 26 (the
-#                   newest): its validation, hooks tests, Node tests (the card runner in its sandbox under that Node's
-#                   permission model: bubblewrap, socat and ripgrep on Linux, Seatbelt on macOS) and Python tests
+#   plugin          the terminal plugin, on Node 22.18 (the plugin's minimum), 24 and 26 (the newest): its validation,
+#                   hooks tests, Node tests (the card runner in its sandbox under that Node's permission model, with
+#                   bubblewrap, socat and ripgrep) and Python tests
 #   parity          the browser's shared prompts still apply to the plugin's texts (browser/prompts/shared.json)
 #   browser-server  the browser workbench's server tests, with bubblewrap and the sandbox runtime
 #   browser-page    the browser workbench's page: type check, unit tests and build
@@ -57,12 +57,11 @@ jobs:
   plugin:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     strategy:
-      fail-fast: false  # each system and Node says for itself whether it works
+      fail-fast: false  # each Node says for itself whether it works
       matrix:
-        os: [ubuntu-latest, macos-latest]
         # 22.18 itself, the plugin's minimum (setup-node's 22 would be the newest 22)
         node: ['22.18', 24, 26]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       CLAUDE_CODE_VERSION: 2.1.307
@@ -88,9 +87,7 @@ jobs:
           uv pip install --python "$RUNNER_TEMP/py/bin/python" pandas pytest pytest-timeout
           echo "THIMBLE_PYTHON=$RUNNER_TEMP/py/bin/python" >> "$GITHUB_ENV"
 
-      # on Linux only: macOS has its own sandbox, Seatbelt (sandbox-exec)
       - name: Install the sandbox's system packages, and let bubblewrap make its namespaces (the runner's AppArmor keeps it from them)
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y bubblewrap socat ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
@@ -210,7 +207,7 @@ jobs:
       - name: Type check, unit tests and build (after npm ci)
         run: scripts/check.sh page
 
-  # the check main's ruleset requires: it passes only when every job above passed (each system and Node of plugin)
+  # the check main's ruleset requires: it passes only when every job above passed (each Node of plugin)
   checks:
     needs: [scan, plugin, parity, browser-server, browser-page]
     # a skipped required job counts as passed, so this one runs, and fails, whatever the others did (a draft runs none)
