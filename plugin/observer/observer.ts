@@ -16,7 +16,9 @@
 // where a person is (S.person): never in a `-p` run, and in a session Claude Code's background service runs only once
 // the person's first prompt came; never at a fork's or a subagent's messages.
 // The messages queued or being looked at are kept in $.state too: a reload of the plugin (each settings change is one)
-// stops the looks of the load before it, and the next load's session.start hook queues those messages again.
+// stops the looks of the load before it (Claude Code cuts their forks, which answer `aborted`, and drops their timers),
+// and the next load's session.start hook queues those messages again. Any other look takes its messages out when it
+// ends, whatever came of it.
 //
 // One look, in order:
 // 1. What the conversation does not show of the work: the cards main drew in the looked-at turns (title and text copy,
@@ -345,6 +347,8 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
   const on = () => (only ? (LENSES as Lens[]).some(l => only.includes(l.name) && featureOn(l.option)) : observerOn())
   // whether the look reads the claims: one on demand (f said so already), or one after a reply the claims lens joins
   let finds = !!only?.includes('claims')
+  // whether Claude Code cut the look's fork (`aborted`), as it does when the plugin reloads
+  let stopped = false
   try {
     if (!on()) { row.dropped = 'turned off'; return }
     const parts = await lensParts($, only)
@@ -371,6 +375,7 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
       p = await pass($, { frame, parts, msgs: batch, vals, st })
     }
     row.fork = p.fork
+    stopped = p.f?.reason === 'aborted'
     if (gen !== S.gen) { row.dropped = 'the conversation changed'; return }
     const moved = !!S.running && S.running !== newest.turnId
     const lookOf = (out: Look['out']): Look => ({ msgs: batch, out, moved, log: (k, v) => { row[k] = v } })
@@ -397,9 +402,9 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
     // a look that read the claims ended, whatever came of it: the pane stops saying they are being found, unless a look
     // that waits reads them too
     if (finds && !S.queue.some(readsClaims)) await claimsFindEnd($).catch(() => undefined)
-    // the messages of a look that ended are kept no more; those of one an error stopped (a reload of the plugin under
-    // it) wait for the next load
-    if (!row.error) await keepLooks($, ms => ms.filter(x => !batch.some(m => queuedKey(m) === queuedKey(x))))
+    // the messages of a look that ended are kept no more, whatever came of it (an error of its own would come again at
+    // each later load), but those of a look whose fork a reload of the plugin cut: the next load looks at them again
+    if (!stopped) await keepLooks($, ms => ms.filter(x => !batch.some(m => queuedKey(m) === queuedKey(x))))
     row.ms = Date.now() - started
     if (gen === S.gen) {
       S.log = [...S.log, { at: new Date(Number(await $.clock.now())).toISOString(), ...row }].slice(-400)

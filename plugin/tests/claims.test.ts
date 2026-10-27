@@ -9,9 +9,10 @@ import { registerTurn } from '../core/turn'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
-import { claimsStore, openClaims } from '../claims/term'
+import { claimsStore, claimsToFind, openClaims } from '../claims/term'
 import { pressedWords } from '../bar/bar'
 import { failLineNow } from '../bar/notice'
+import { resetPrompts } from '../prompts/prompts'
 import { promptStub, tempRun } from './stubs'
 import { treeRows } from '../core/trail.mjs'
 
@@ -92,6 +93,15 @@ async function answered(s: ReturnType<typeof setup>, o: { id: string; prompt: st
     await s.call('session.append', { door: 'response', message: { type: 'assistant', content: [{ type: 'text', text }] } }, async () => ({ uuid: `${o.id}-row-${k}` }))
   }
   await s.call('turn.complete', { turnId: o.id, reason: 'answer', answer: o.rows.at(-1) }, async () => ({ text: '' }))
+  await settle()
+  await drainNow(s.$)
+  await settle()
+}
+
+/** A reload of the plugin: the module's memory starts again, the session's state stays, session.start runs again. */
+async function reloaded(s: ReturnType<typeof setup>) {
+  resetObserver()
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
   await settle()
   await drainNow(s.$)
   await settle()
@@ -504,23 +514,78 @@ test('a reload of the plugin while one look runs and another waits loses neither
   await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed.'] })
   await answered(s, { id: 't2', prompt: 'And run 9?', rows: ['Run 9 passed.'] })
   expect(s.forks.length).toBe(1)
-  // the reload: the module's memory starts again, the session's state stays, and session.start runs again
-  const reload = async () => {
-    resetObserver()
-    await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
-    await settle()
-    await drainNow(s.$)
-    await settle()
-  }
-  await reload()
+  await reloaded(s)
   for (let i = 0; i < 100 && (await claimsStore(s.$)).claims.length < 2; i++) await settle()
   expect(s.forks.length).toBe(2)
   expect(s.forks[1]).toContain('Run 4 failed.')
   expect(s.forks[1]).toContain('Run 9 passed.')
   expect((await claimsStore(s.$)).claims.map((c: Any) => c.text)).toEqual(['Run 4 failed.', 'Run 9 passed.'])
   // the looks that landed are not kept for a later load
-  await reload()
+  await reloaded(s)
   expect(s.forks.length).toBe(2)
+  setOptions({})
+})
+
+test('a reload that cuts the forks of the load before keeps the messages of its looks, though they end: the next load looks at them once, and their claims come in', async () => {
+  setOptions({ claimsMode: 'auto' })
+  const usage = { input_tokens: 0, output_tokens: 0 }
+  const aborted = { isAnswered: false, reason: 'aborted', usage }
+  let cut: (r: unknown) => void = () => undefined
+  // the first look's first try fails on the API, and its second runs when the plugin reloads; the second answer waits
+  const replies: Any[] = [{ isAnswered: false, reason: 'api-error', status: 529, error: 'overloaded', usage }, new Promise(r => { cut = r })]
+  const s = setup(replies)
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed.'] })
+  await answered(s, { id: 't2', prompt: 'And run 9?', rows: ['Run 9 passed.'] })
+  for (let i = 0; i < 100 && s.forks.length < 2; i++) await settle()
+  expect(s.forks.length).toBe(2)
+  // the reload cuts each fork of the load before, which Claude Code answers `aborted`: the one that runs, and both
+  // tries of the look the load starts next. Both looks end, and the pane stops saying the claims are being found
+  replies.push(aborted, aborted)
+  cut(aborted)
+  for (let i = 0; i < 100 && (await claimsToFind(s.$)).finding; i++) await settle()
+  await settle()
+  expect(s.forks.length).toBe(4)
+  replies.push(reply([
+    { claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' },
+    { claim: 'Run 9 passed.', quote: 'Run 9 passed', cluster: 'passes' },
+  ]))
+  await reloaded(s)
+  for (let i = 0; i < 100 && (await claimsStore(s.$)).claims.length < 2; i++) await settle()
+  expect(s.forks.length).toBe(5)
+  expect(s.forks[4]).toContain('Run 4 failed.')
+  expect(s.forks[4]).toContain('Run 9 passed.')
+  expect((await claimsStore(s.$)).claims.map((c: Any) => c.text)).toEqual(['Run 4 failed.', 'Run 9 passed.'])
+  // the pane no longer says that the turns the cut looks could not read were not read
+  expect((await claimsStore(s.$)).gaps).toEqual([])
+  // the look that landed is not kept for a later load
+  await reloaded(s)
+  expect(s.forks.length).toBe(5)
+  setOptions({})
+})
+
+test('a look that fails on an error of its own leaves nothing for a later load: after a reload, only the next answer is looked at', async () => {
+  setOptions({ claimsMode: 'auto' })
+  const s = setup([reply([{ claim: 'Run 9 passed.', quote: 'Run 9 passed', cluster: 'passes' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  // the look cannot read the text of its claims lens, this once
+  resetPrompts()
+  const read = s.$.fs.read
+  let unreadable = true
+  s.$.fs.read = async (p: string) => {
+    if (unreadable && p.endsWith('/prompts/lens-claims.md')) { unreadable = false; throw new Error('made-up: the file cannot be read') }
+    return read(p)
+  }
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed.'] })
+  expect(unreadable).toBe(false)
+  expect(s.forks.length).toBe(0)
+  // a reload does not look at that answer again, long after it came
+  await reloaded(s)
+  expect(s.forks.length).toBe(0)
+  await answered(s, { id: 't2', prompt: 'And run 9?', rows: ['Run 9 passed.'] })
+  expect(s.forks.length).toBe(1)
+  expect(s.forks[0]).toContain('Run 9 passed.')
+  expect(s.forks[0]).not.toContain('Run 4 failed.')
   setOptions({})
 })
 
