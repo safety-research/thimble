@@ -168,9 +168,11 @@ The browser workbench:
 
 ## Settings
 
-- **The plugin's features.** Citations, Cards (with `v`), Squeeze, Catch-up, Labels and Coverage can each be turned on or
-  off: click `thimble` at the left of the bar or run `/thimble-settings`. Claude Code keeps the values in its settings
-  (`pluginConfigs`). With Citations off, the checker makes no model call.
+- **The plugin's features.** Citations, Cards (`v`), Rewrite (`s`), Catch-up (`b`), Explainers, Heads-ups, Evidence
+  (`c`), Labels (`l`) and Coverage (`r`) can each be turned off, and Citations, Explainers, Heads-ups and Evidence can
+  work after each answer or only when you ask; Minimal sets those four to when you ask. Click `thimble` at the left of
+  the bar or run `/thimble-settings`. Claude Code keeps the values in its settings (`pluginConfigs`). With Citations
+  off, the checker makes no model call.
 - **Permissions.** Claude runs `thimble` through its Bash tool, so your permission mode applies to it as to any other
   command. To let it run without asking, add `"Bash(thimble:*)"` to `permissions.allow` in your Claude Code settings.
 - **`THIMBLE_HOME`** sets where the plugin keeps its per-session files (default `~/.thimble`).
