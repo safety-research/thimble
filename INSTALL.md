@@ -70,9 +70,8 @@ runs the steps only after you answer y.
 
 Restart the `claude` sessions that were open, or run `/reload-plugins` in them: until then they report "Plugin
 directory does not exist" after each tool call. 0.9 also left a headless Chromium in `~/.cache/ms-playwright` (about
-650 MB): delete it if nothing else uses it. In 0.10, `thimble-browser` replaces `/thimble browser`, and
-`scripts/install.sh` or `claude plugin update thimble@thimble` replaces `thimble update`; 0.10 has no `thimble`
-command in your shell.
+650 MB): delete it if nothing else uses it. In 0.10, `thimble-browser` replaces `/thimble browser`, and 0.10's own
+`thimble update`, in a shell, updates both products (see "Update and uninstall").
 
 ## Install
 
@@ -182,18 +181,21 @@ The browser workbench:
 
 ## Update and uninstall
 
-To update both, pull the checkout and run `scripts/install.sh` again. The plugin alone:
+To update both products, run `thimble update` in a shell (not inside Claude Code). It moves the plugin and the browser
+workbench to the newest release, keeps your fixes, and says what to do next; with `--local`, it moves them to the commit
+your checkout has, so pull it first. A plugin installed without a clone updates with `claude plugin update
+thimble@thimble`. To uninstall the plugin:
 
 ```
-claude plugin update thimble@thimble
 claude plugin uninstall thimble@thimble
 ```
 
 To remove the browser workbench, delete `~/.local/bin/thimble-browser` and the checkout. Uninstalling leaves your data
 alone. To remove what thimble wrote, delete `~/.thimble` and `~/.thimble-browser` (and a `thimble/` folder that a build
 before 0.10.0 made in a data folder). With `--local`, your fixes also live in the checkout, as the branch `mine` and
-the refs under `refs/thimble/`, and a new install sets them aside by itself, under `refs/thimble-old/`, when `mine` is
-one that thimble made. To remove them, after you delete `~/.thimble`, run `git worktree prune`, `git branch -D mine`
+the refs under `refs/thimble/`. After a new install, the first fix or `thimble update` sets them aside by itself, under
+`refs/thimble-old/`, when thimble made or recorded every commit that only `mine` has; otherwise it asks you to rename
+`mine`. To remove them, after you delete `~/.thimble`, run `git worktree prune`, `git branch -D mine`
 and `git for-each-ref --format='delete %(refname)' refs/thimble refs/thimble-old | git update-ref --stdin` in the
 checkout.
 
