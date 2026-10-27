@@ -518,3 +518,29 @@ def test_the_kernel_runs_from_the_release_checkout_once_there_is_one(tmp_path, m
     release.parent.mkdir(parents=True)
     release.write_text("print('made-up kernel')\n")
     assert fixes.kernel_script() == release
+
+
+def test_the_kernel_runs_only_the_releases_code_whatever_was_added_to_its_checkout(tmp_path, monkeypatch):
+    """A file changed in the release checkout is restored and a file added to it (a module that would shadow one of
+    Python's) removed before the kernel runs from it."""
+    import subprocess  # noqa: PLC0415
+
+    monkeypatch.setenv(fixes.PLUGIN_HOME_ENV, str(tmp_path / "home"))
+    checkout = tmp_path / "home" / "fixes" / "release"
+    engine = checkout / "plugin" / "engine"
+    engine.mkdir(parents=True)
+    # as the real kernel's command, it puts its own folder first on Python's path
+    head = "import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).resolve().parent))\nimport getpass\n"
+    (engine / "thimble.py").write_text(head + "print('made-up kernel', getattr(getpass, 'WHO', 'python'))\n")
+    ident = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
+             "GIT_COMMITTER_EMAIL": "t@example.com"}
+    for cmd in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "made-up release"]):
+        subprocess.run(["git", *cmd], cwd=checkout, check=True, capture_output=True, env=ident)
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=checkout, check=True, capture_output=True, text=True).stdout.strip()
+    (checkout.parent / "release.json").write_text(json.dumps({"base": base}))
+    (engine / "getpass.py").write_text("WHO = 'planted'\n")
+    (engine / "thimble.py").write_text(head + "print('changed by hand', getattr(getpass, 'WHO', 'python'))\n")
+    assert fixes.kernel(["list"]).out.strip() == "made-up kernel python"
+    assert not (engine / "getpass.py").exists()
+    assert subprocess.run(["git", "status", "--porcelain", "--ignored"], cwd=checkout, capture_output=True,
+                          text=True).stdout == ""

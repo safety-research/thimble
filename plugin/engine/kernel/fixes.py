@@ -7,8 +7,9 @@ Under $THIMBLE_HOME/fixes:
                      a clone of Claude Code's own clone of the marketplace, at the installed commit (no download); a
                      clone install's (scripts/install.sh --local) is a worktree of that clone, so `mine` shows there.
     release/         the release commit (base) as it is, never changed by a fix: a detached worktree of live's
-                     repository, made with live, moved when base moves, made again when it is missing. The way back runs
-                     from it (place_release), never from live
+                     repository, made with live, moved when base moves, made again when it is missing, and put back as
+                     the release commit has it before the way back runs from it (place_release, the launcher), never
+                     from live
     work/<id>/       a fix's scratch worktree, cut from mine. The fixer edits only here, and its shell runs in the
                      sandbox runtime, which may write only here and in tmp/<id>/, and reach only the package registries
                      (REGISTRIES). Removed after apply or "not now".
@@ -387,12 +388,14 @@ def ensure_live() -> dict[str, Any]:
 
 
 def place_release(base: str) -> None:
-    """The release checkout at `base`: made when it is missing (or no longer a checkout), moved when base moved. Nothing
-    in it is ever changed: a fix changes its copy and live, never this."""
+    """The release checkout at `base`: made when it is missing (or no longer a checkout), and each time put back as
+    the release commit has it, with any file changed in it restored and any file added to it (also an ignored one, such
+    as a module that would shadow one of Python's) removed. A fix changes its copy and live, never this. The launcher
+    (plugin/bin/thimble) does the same before it runs the way back from here."""
     d = release_dir()
     if _is_checkout(str(d)):
-        if git("rev-parse", "HEAD", cwd=d, check=False) != base:
-            git("checkout", "-q", "-f", "--detach", base, cwd=d)
+        git("checkout", "-q", "-f", "--detach", base, cwd=d)
+        git("clean", "-q", "-ffdx", cwd=d)
         return
     if d.exists():
         shutil.rmtree(d)

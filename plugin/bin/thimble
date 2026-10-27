@@ -17,7 +17,16 @@ release=$(cd "$fixes/release/plugin" 2>/dev/null && pwd -P)
 if [ -n "$release" ] && [ -x "$release/bin/thimble" ]; then
   me=$(cd "$here" && pwd -P)
   case "$1" in
-    fix|fixes|file|update|reapply) [ "$me" = "$release" ] || exec "$release/bin/thimble" "$@" ;;
+    fix|fixes|file|update|reapply)
+      [ "$me" = "$release" ] || exec "$release/bin/thimble" "$@"
+      # the checkout as the release commit (release.json's base) has it, before any of its code runs: a file changed in
+      # it is restored and a file added to it removed (fixes.py place_release does the same)
+      top=${release%/plugin}
+      if [ "$(git -C "$top" rev-parse --show-toplevel 2>/dev/null)" = "$top" ]; then
+        base=$(sed -n 's/^ *"base": *"\([0-9a-f]*\)".*/\1/p' "$fixes/release.json" 2>/dev/null | head -n 1)
+        git -C "$top" checkout -q -f --detach "${base:-HEAD}" 2>/dev/null
+        git -C "$top" clean -q -ffdx 2>/dev/null
+      fi ;;
     *) if [ "$me" = "$release" ] && [ -x "$fixes/live/plugin/bin/thimble" ]; then exec "$fixes/live/plugin/bin/thimble" "$@"; fi ;;
   esac
 fi

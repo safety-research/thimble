@@ -98,3 +98,41 @@ def test_a_y_on_a_new_version_whose_first_pointing_at_live_fails_changes_nothing
     assert out["changed"] is True and FX.get(r["id"])["state"] == "on"
     assert "read ${n ?? 0}" in live_file("plugin/bar/bar.tsx")
     assert sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines() == ["Bar says read", "thimble 0.10.2"]
+
+
+def test_the_release_checkout_is_put_back_as_the_release_has_it(world):
+    made(world)
+    rel = FX.release_dir()
+    (rel / "plugin" / "bar" / "bar.tsx").write_text("const words = 'changed by hand'\n")
+    (rel / "plugin" / "engine").mkdir(parents=True, exist_ok=True)
+    (rel / "plugin" / "engine" / "getpass.py").write_text("WHO = 'planted'\n")
+    (rel / "plugin" / "engine" / "__pycache__").mkdir()
+    (rel / "plugin" / "engine" / "__pycache__" / "getpass.cpython-312.pyc").write_bytes(b"made-up")
+    FX.place_release(world["base"])
+    assert sh("git", "rev-parse", "HEAD", cwd=rel) == world["base"]
+    assert (rel / "plugin" / "bar" / "bar.tsx").read_text() == "const words = `coverage ${n}`\n"
+    assert not (rel / "plugin" / "engine").exists()
+    assert sh("git", "status", "--porcelain", "--ignored", cwd=rel) == ""
+
+
+def test_the_way_back_runs_only_the_releases_code_whatever_was_added_to_its_checkout(world, tmp_path):
+    real = PLUGIN / "bin" / "thimble"
+    release_with(world, {"plugin/bin/thimble": real.read_text(),
+                         "plugin/engine/thimble.py": "import getpass\nimport sys\n"
+                                                     "print('made-up kernel', getattr(getpass, 'WHO', 'python'), *sys.argv[1:])\n"})
+    made(world)
+    rel = FX.release_dir()
+
+    def ran(launcher: Path, *args: str) -> str:
+        p = subprocess.run([str(launcher), *args], capture_output=True, text=True, cwd=tmp_path,
+                           env={**os.environ, "THIMBLE_PYTHON": sys.executable})
+        return p.stdout.strip() or f"exit {p.returncode}: {p.stderr.strip()}"
+
+    # the plugin and the shell's link run the release's launcher; live's hands the way back to it
+    for launcher in (rel / "plugin" / "bin" / "thimble", FX.live_dir() / "plugin" / "bin" / "thimble"):
+        (rel / "plugin" / "engine" / "getpass.py").write_text("WHO = 'planted'\n")
+        (rel / "plugin" / "bar" / "bar.tsx").write_text("const words = 'changed by hand'\n")
+        assert ran(launcher, "fix", "list") == "made-up kernel python fix list", launcher
+        assert not (rel / "plugin" / "engine" / "getpass.py").exists()
+        assert (rel / "plugin" / "bar" / "bar.tsx").read_text() == "const words = `coverage ${n}`\n"
+        assert sh("git", "rev-parse", "HEAD", cwd=rel) == world["base"]
