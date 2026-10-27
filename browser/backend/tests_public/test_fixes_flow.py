@@ -509,14 +509,24 @@ def test_the_tests_read_the_real_packages_also_when_the_server_runs_from_live(tm
     assert os.readlink(copy / "frontend" / "node_modules" / "vite") == str((real / "frontend" / "node_modules" / "vite").resolve())
 
 
+# a release launcher that hands the way back off itself, as the plugin's launcher checks (plugin/bin/thimble)
+HANDS_OFF = "#!/bin/sh\n# the way back runs from $THIMBLE_HOME/fixes/release/plugin (made up)\n"
+
+
 def test_the_kernel_runs_from_the_release_checkout_once_there_is_one(tmp_path, monkeypatch):
     """The way back runs from the release, which no fix changes (plugin/engine/kernel/fixes.py): a fix to live's kernel
-    cannot break the clicks that undo it."""
+    cannot break the clicks that undo it. A release checkout from before the hand-off (its launcher names no
+    fixes/release/plugin) runs an older kernel: this tree's runs instead, as the plugin's launcher does."""
     monkeypatch.setenv(fixes.PLUGIN_HOME_ENV, str(tmp_path / "home"))
     assert fixes.kernel_script() == fixes.plugin_dir() / "engine" / "thimble.py"
     release = tmp_path / "home" / "fixes" / "release" / "plugin" / "engine" / "thimble.py"
     release.parent.mkdir(parents=True)
     release.write_text("print('made-up kernel')\n")
+    launcher = release.parents[1] / "bin" / "thimble"
+    launcher.parent.mkdir()
+    launcher.write_text("#!/bin/sh\n# a made-up launcher from before the hand-off\n")
+    assert fixes.kernel_script() == fixes.plugin_dir() / "engine" / "thimble.py"
+    launcher.write_text(HANDS_OFF)
     assert fixes.kernel_script() == release
 
 
@@ -532,6 +542,8 @@ def test_the_kernel_runs_only_the_releases_code_whatever_was_added_to_its_checko
     # as the real kernel's command, it puts its own folder first on Python's path
     head = "import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).resolve().parent))\nimport getpass\n"
     (engine / "thimble.py").write_text(head + "print('made-up kernel', getattr(getpass, 'WHO', 'python'))\n")
+    (checkout / "plugin" / "bin").mkdir()
+    (checkout / "plugin" / "bin" / "thimble").write_text(HANDS_OFF)
     ident = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
              "GIT_COMMITTER_EMAIL": "t@example.com"}
     for cmd in (["init", "-q"], ["add", "-A"], ["commit", "-q", "-m", "made-up release"]):
@@ -544,3 +556,73 @@ def test_the_kernel_runs_only_the_releases_code_whatever_was_added_to_its_checko
     assert not (engine / "getpass.py").exists()
     assert subprocess.run(["git", "status", "--porcelain", "--ignored"], cwd=checkout, capture_output=True,
                           text=True).stdout == ""
+
+
+IDENT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com", "GIT_COMMITTER_NAME": "t",
+         "GIT_COMMITTER_EMAIL": "t@example.com"}
+
+
+def _git(*args: str, cwd: Path) -> str:
+    import subprocess  # noqa: PLC0415
+
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True,
+                          env={**os.environ, **IDENT}).stdout.strip()
+
+
+def _release(tmp_path: Path, monkeypatch) -> Path:
+    """A made-up release checkout whose kernel imports a module of its own, at its release commit (release.json)."""
+    monkeypatch.setenv(fixes.PLUGIN_HOME_ENV, str(tmp_path / "home"))
+    checkout = tmp_path / "home" / "fixes" / "release"
+    (checkout / "plugin" / "engine" / "kernel").mkdir(parents=True)
+    (checkout / "plugin" / "bin").mkdir()
+    (checkout / "plugin" / "bin" / "thimble").write_text(HANDS_OFF)
+    (checkout / "plugin" / "engine" / "kernel" / "__init__.py").write_text("")
+    (checkout / "plugin" / "engine" / "kernel" / "words.py").write_text("WORDS = 'made-up kernel'\n")
+    (checkout / "plugin" / "engine" / "thimble.py").write_text(
+        "import sys\nfrom pathlib import Path\nsys.path.insert(0, str(Path(__file__).resolve().parent))\n"
+        "from kernel import words\nprint(words.WORDS, *sys.argv[1:])\n")
+    (checkout / "bar.txt").write_text("as released\n")
+    _git("init", "-q", cwd=checkout)
+    _git("add", "-A", cwd=checkout)
+    _git("commit", "-q", "-m", "made-up release", cwd=checkout)
+    (checkout.parent / "release.json").write_text(json.dumps({"base": _git("rev-parse", "HEAD", cwd=checkout)}))
+    return checkout
+
+
+def _recording_hook(checkout: Path, tmp_path: Path) -> Path:
+    """A post-checkout hook in the release checkout's repository (in a clone install, the person's own clone's)."""
+    ran = tmp_path / "hook-ran"
+    hooks = tmp_path / "made-up-hooks"
+    hooks.mkdir()
+    (hooks / "post-checkout").write_text(f"#!/bin/sh\necho ran >> '{ran}'\nexit 2\n")
+    (hooks / "post-checkout").chmod(0o755)
+    _git("config", "core.hooksPath", str(hooks), cwd=checkout)
+    return ran
+
+
+def test_the_releases_kernel_writes_no_bytecode_into_its_checkout(tmp_path, monkeypatch):
+    checkout = _release(tmp_path, monkeypatch)
+    assert fixes.kernel(["list"]).out.strip() == "made-up kernel fix list"
+    assert _git("status", "--porcelain", "--ignored", cwd=checkout) == ""
+
+
+def test_a_release_checkout_as_the_release_has_it_is_left_alone_and_one_that_is_not_waits_for_anothers_lock(
+        tmp_path, monkeypatch):
+    import threading  # noqa: PLC0415
+
+    checkout = _release(tmp_path, monkeypatch)
+    ran = _recording_hook(checkout, tmp_path)
+    # as the release commit has it: no git changes it (the hook would say so), so the processes that run from it at once
+    # never meet it half put back
+    assert fixes.kernel(["list"]).out.strip() == "made-up kernel fix list"
+    assert not ran.exists()
+    # changed by hand while another git holds its index: put back once that git lets go, with no hook of the repository's
+    (checkout / "bar.txt").write_text("changed by hand\n")
+    lock = checkout / ".git" / "index.lock"
+    lock.write_text("")
+    t = threading.Timer(0.5, lambda: lock.unlink(missing_ok=True))
+    t.start()
+    assert fixes.kernel(["list"]).out.strip() == "made-up kernel fix list"
+    t.join()
+    assert (checkout / "bar.txt").read_text() == "as released\n" and not ran.exists()
+    assert _git("status", "--porcelain", "--ignored", cwd=checkout) == ""

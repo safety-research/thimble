@@ -134,17 +134,21 @@ export async function kernelFix($: Engine, args: string[], o: { stdin?: string; 
   }
   const root = (await rootHere($)) || (await startDir($))
   const bin = await releaseLauncher($)
-  const call = () => runThimble($, root, ['fix', ...args], { timeoutMs: o.timeoutMs ?? 120000, ...(bin ? { bin } : {}), ...(o.stdin != null ? { stdin: o.stdin } : {}) })
+  // the release's kernel writes no bytecode, which would change the release checkout, also under a launcher of the
+  // release that does not say so itself (-B)
+  const call = () => runThimble($, root, ['fix', ...args], { timeoutMs: o.timeoutMs ?? 120000, ...(bin ? { bin, env: { PYTHONDONTWRITEBYTECODE: '1' } } : {}), ...(o.stdin != null ? { stdin: o.stdin } : {}) })
   const r = o.doing ? await busy($, o.doing, call) : await call()
   return { ok: r.code === 0, out: r.stdout, err: r.stderr.trim().replace(/^thimble fix \w+: /, '') }
 }
 
 /** The launcher of the release checkout, which the kernel keeps at the release commit (engine/kernel/fixes.py
- *  place_release), when there is one; else undefined, and the loaded plugin's runs, which is the release before the
- *  first fix. */
+ *  place_release), when there is one that hands the way back off itself, as the launcher's own guard asks (bin/thimble:
+ *  it names fixes/release/plugin); else undefined, and the loaded plugin's runs, which is the release before the first
+ *  fix, and whose kernel moves a release checkout from before the hand-off forward. */
 async function releaseLauncher($: Engine): Promise<string | undefined> {
   const bin = `${fixesDir(await thimbleHome($))}/release/plugin/bin/thimble`
-  return (await $.fs.exists(bin).catch(() => false)) ? bin : undefined
+  const text = await $.fs.read(bin).then(String, () => '')
+  return text.includes('fixes/release/plugin') ? bin : undefined
 }
 
 /** The kernel's JSON answer, or null. */

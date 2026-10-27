@@ -158,18 +158,27 @@ def fixing_word(rec: dict[str, Any]) -> str:
 def kernel_script() -> Path:
     """The kernel `thimble fix` runs: the release checkout's (fixes/release, which the kernel keeps at the release
     commit), so that a fix to the kernel's own modules cannot break its undo; this tree's before there is one. The
-    checkout is first put back as the release commit has it (_pristine)."""
+    checkout is first put back as the release commit has it (_pristine), and runs only when its launcher hands the way
+    back off itself, as the plugin's launcher asks (bin/thimble: it names fixes/release/plugin): a release checkout
+    from before the hand-off runs an older kernel, and this tree's kernel moves it forward."""
     release = fixes_home() / "release" / "plugin" / "engine" / "thimble.py"
     if release.is_file():
         _pristine(fixes_home() / "release")
-    return release if release.is_file() else plugin_dir() / "engine" / "thimble.py"
+    try:
+        hands_off = "fixes/release/plugin" in (release.parents[1] / "bin" / "thimble").read_text(errors="replace")
+    except OSError:
+        hands_off = False
+    return release if hands_off and release.is_file() else plugin_dir() / "engine" / "thimble.py"
 
 
 def _pristine(checkout: Path) -> None:
     """The release checkout as the release commit (release.json's base) has it, before any of its code runs: a file
     changed in it is restored and a file added to it removed, as the plugin's launcher and the kernel's place_release
-    do. Nothing when it is not a git checkout of its own."""
-    git = ["git", "-C", str(checkout)]
+    do. Nothing when it is not a git checkout of its own, or is so already: one git call, which takes no lock, says so,
+    and the checkout is left alone, so that thimble's other processes that run from it never meet it half put back.
+    git runs no hook of the repository's (in a clone install, the person's own clone's), and tries again for up to 5 s
+    while another git holds the checkout's index (index.lock)."""
+    git = ["git", "-c", "core.hooksPath=/dev/null", "-C", str(checkout)]
     top = subprocess.run([*git, "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False).stdout
     if not top.strip() or Path(top.strip()).resolve() != checkout.resolve():
         return
@@ -178,8 +187,19 @@ def _pristine(checkout: Path) -> None:
     except (OSError, ValueError, AttributeError):
         base = ""
     base = base if re.fullmatch(r"[0-9a-f]{7,64}", base) else "HEAD"
-    subprocess.run([*git, "checkout", "-q", "-f", "--detach", base], capture_output=True, check=False)
-    subprocess.run([*git, "clean", "-q", "-ffdx"], capture_output=True, check=False)
+    st = subprocess.run([*git, "--no-optional-locks", "status", "--porcelain=v2", "--branch", "--ignored",
+                         "--untracked-files=normal"], capture_output=True, text=True, check=False)
+    lines = st.stdout.splitlines()
+    oid = next((x[len("# branch.oid "):] for x in lines if x.startswith("# branch.oid ")), "")
+    if (st.returncode == 0 and oid and (base == "HEAD" or oid == base) and "# branch.head (detached)" in lines
+            and all(x.startswith("# ") for x in lines)):
+        return
+    for args in (["checkout", "-q", "-f", "--detach", base], ["clean", "-q", "-ffdx"]):
+        for _ in range(50):
+            p = subprocess.run([*git, *args], capture_output=True, text=True, check=False)
+            if p.returncode == 0 or "index.lock" not in p.stderr:
+                break
+            time.sleep(0.1)
 
 
 def kernel(args: list[str], *, stdin: str | None = None, timeout: float = 120, env: dict[str, str] | None = None) -> Ran:
@@ -191,7 +211,8 @@ def kernel(args: list[str], *, stdin: str | None = None, timeout: float = 120, e
         full["THIMBLE_CLAUDE"] = config.CLI_PATH
     full.pop("THIMBLE_ROOT", None)
     try:
-        p = subprocess.run([sys.executable, "-I", str(script), "fix", *args], input=stdin or "", capture_output=True,
+        # -B: -I ignores PYTHONDONTWRITEBYTECODE, and the release's kernel would write its bytecode into the checkout
+        p = subprocess.run([sys.executable, "-I", "-B", str(script), "fix", *args], input=stdin or "", capture_output=True,
                            text=True, timeout=timeout, env=full, cwd=str(Path.home()))
     except subprocess.TimeoutExpired:
         return Ran(False, "", f"thimble fix {args[0] if args else ''} took longer than {int(timeout)} s")

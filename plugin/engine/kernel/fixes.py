@@ -352,6 +352,13 @@ def find_source() -> dict[str, Any]:
 OFF_SH = """#!/bin/sh
 # Back to the plain thimble release, also when thimble does not load: sh {off}
 # It shows the release commit in {live} and has Claude Code copy it. Your fixes stay: `thimble fix on` brings them back.
+# First the release checkout, which `thimble fix` runs from, goes back to the release commit as it has it, also when a
+# file in it (its launcher) was changed, with no hook of the repository's.
+release=$(cd {release_q} 2>/dev/null && pwd -P)
+if [ -n "$release" ] && [ "$(git -C "$release" rev-parse --show-toplevel 2>/dev/null)" = "$release" ]; then
+  git -c core.hooksPath=/dev/null -C "$release" checkout -q -f --detach {base} 2>/dev/null
+  git -c core.hooksPath=/dev/null -C "$release" clean -q -ffdx 2>/dev/null
+fi
 live={live_q}
 git -C "$live" checkout -q -- {plugin_json} 2>/dev/null
 git -C "$live" checkout -q --detach {base} || {{ echo "thimble: could not show the release in $live"; exit 1; }}
@@ -365,7 +372,7 @@ def _write_off_sh(rel: dict[str, Any]) -> None:
     off = home() / "off.sh"
     off.write_text(OFF_SH.format(off=off, live=live_dir(), live_q=shlex.quote(str(live_dir())), plugin_json=PLUGIN_JSON,
                                  base=shlex.quote(rel["base"]), state_q=shlex.quote(str(home() / "state.json")),
-                                 claude=shlex.quote(claude())))
+                                 claude=shlex.quote(claude()), release_q=shlex.quote(str(release_dir()))))
     off.chmod(0o755)
 
 
@@ -520,16 +527,49 @@ def place_release(base: str) -> None:
     """The release checkout at `base`: made when it is missing (or no longer a checkout), and each time put back as
     the release commit has it, with any file changed in it restored and any file added to it (also an ignored one, such
     as a module that would shadow one of Python's) removed. A fix changes its copy and live, never this. The launcher
-    (plugin/bin/thimble) does the same before it runs the way back from here."""
+    (plugin/bin/thimble) does the same before it runs the way back from here. A checkout that is as the release commit
+    has it already is left alone (_pristine), so that thimble's other processes that run from it at the same time (the
+    plugin's list, another session, the browser) never meet it half put back."""
     d = release_dir()
     if _is_checkout(str(d)):
-        git("checkout", "-q", "-f", "--detach", base, cwd=d)
-        git("clean", "-q", "-ffdx", cwd=d)
+        if not _pristine(d, base):
+            _release_git(d, "checkout", "-q", "-f", "--detach", base)
+            _release_git(d, "clean", "-q", "-ffdx")
         return
     if d.exists():
         shutil.rmtree(d)
     run(["git", "worktree", "prune"], cwd=live_dir(), check=False)
-    git("worktree", "add", "-q", "--detach", str(d), base, cwd=live_dir())
+    _release_git(live_dir(), "worktree", "add", "-q", "--detach", str(d), base)
+
+
+def _pristine(d: Path, base: str) -> bool:
+    """Whether the checkout `d` is as commit `base` has it: HEAD detached at base, and no file changed, untracked or
+    ignored. One git call, which takes no lock, so that it never stops another process's git in the checkout."""
+    p = run(["git", "--no-optional-locks", "status", "--porcelain=v2", "--branch", "--ignored", "--untracked-files=normal"],
+            cwd=d, check=False)
+    lines = p.stdout.splitlines()
+    return (p.returncode == 0 and f"# branch.oid {base}" in lines and "# branch.head (detached)" in lines
+            and all(x.startswith("# ") for x in lines))
+
+
+# git with no hook of the repository's: in a clone install, the person's own clone's (git-lfs's post-checkout, which
+# fails when git-lfs is not on the kernel's PATH)
+NO_HOOKS = ["-c", "core.hooksPath=/dev/null"]
+
+
+def _release_git(d: Path, *args: str) -> None:
+    """git ARGS in `d` for the release checkout, with no hook (NO_HOOKS), tried again for up to 5 s while another git
+    holds the checkout's index (index.lock): the launcher and the browser put the checkout back too, with no lock of
+    thimble's."""
+    for n in range(50):
+        p = run(["git", *NO_HOOKS, *args], cwd=d, check=False)
+        if p.returncode == 0:
+            return
+        if "index.lock" not in p.stderr:
+            break
+        time.sleep(0.1)
+    err = (p.stderr or p.stdout).strip().splitlines()
+    raise FixError(f"{' '.join(['git', *args][:3])} failed: {err[-1] if err else 'no message'}")
 
 
 def is_on() -> bool:
@@ -817,7 +857,7 @@ TESTS_FAILED = "its tests failed in the sandbox"
 # the log's last lines of a fix whose runner ended before it wrote what came of the tests
 TESTS_STOPPED = "the tests stopped before they finished"
 # the runner: this kernel's Python, isolated (no PYTHON* settings, no folder of the caller's on its path), with its job
-# on stdin
+# on stdin; it writes no bytecode (-B), since a kernel that runs from the release checkout would write it there
 RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from kernel import fixes; fixes.tests_runner()"
 
 
@@ -854,7 +894,7 @@ def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str], deadli
         job = {"id": fid, "argv": argv, "title": named, "testing": rec["testing"]}
         log = _new_log(tmp_dir(fid) / "runner.log")
         try:
-            p = subprocess.Popen([sys.executable or "python3", "-I", "-c", RUNNER, str(Path(__file__).resolve().parents[1])],
+            p = subprocess.Popen([sys.executable or "python3", "-I", "-B", "-c", RUNNER, str(Path(__file__).resolve().parents[1])],
                                  stdin=subprocess.PIPE, stdout=log, stderr=log, cwd=home(), start_new_session=True,
                                  pass_fds=(held,))
             with p.stdin:
