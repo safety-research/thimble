@@ -27,6 +27,18 @@
       ],
       "default": "auto cite + verify"
     },
+    "checkerModel": {
+      "type": "string",
+      "title": "Checker",
+      "description": "The model of the second Claude that checks citations. same as Claude: the model of the conversation. haiku, sonnet or opus: that model, which reads the conversation without the cache of the conversation's model.",
+      "options": [
+        "same as Claude",
+        "haiku",
+        "sonnet",
+        "opus"
+      ],
+      "default": "same as Claude"
+    },
     "cards": {
       "type": "boolean",
       "title": "Cards",

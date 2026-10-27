@@ -8,6 +8,8 @@
 // with the new value. register(on, options) hands the values in (setOptions); every module asks featureOn(key), or
 // choiceOf(key) for a mode, when it acts.
 
+import { modelOf } from '../core/models.js'
+
 /** What Minimal does, as the settings pane says it under its row. */
 const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers, citations, heads-up, and claims only appear when you request them.'
 
@@ -33,6 +35,16 @@ export const SWITCHES = [
       'auto cite': 'Claude cites what each answer rests on; a citation is verified when you open it.',
       'manual': 'Select words and press c to cite them.',
       'off': 'No citations.',
+    },
+  },
+  {
+    key: 'checkerModel', title: 'Checker', group: 'Answers', default: 'same as Claude', choices: ['same as Claude', 'haiku', 'sonnet', 'opus'],
+    does: 'The model of the second Claude that checks citations. same as Claude: the model of the conversation. haiku, sonnet or opus: that model, which reads the conversation without the cache of the conversation\'s model.',
+    says: {
+      'same as Claude': 'The second Claude checks citations on the model of the conversation.',
+      'haiku': 'The second Claude checks citations on Haiku.',
+      'sonnet': 'The second Claude checks citations on Sonnet.',
+      'opus': 'The second Claude checks citations on Opus.',
     },
   },
   {
@@ -267,3 +279,10 @@ export const claudeCites = () => ['auto cite + verify', 'auto cite'].includes(ch
 
 /** A feature by its key, or null. */
 export const switchOf = key => BY_KEY.get(key) ?? null
+
+/** The model the checker of the citations runs on (the setting Checker), by the id a request names it by (core/models.js: a
+ *  request takes no alias), or null for the model of the conversation, which a fork keeps. */
+export function checkerModel() {
+  const m = choiceOf('checkerModel')
+  return m === 'same as Claude' ? null : modelOf(m)?.id ?? null
+}

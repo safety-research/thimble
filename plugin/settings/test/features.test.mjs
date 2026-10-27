@@ -13,7 +13,7 @@ test("the manifest's userConfig is the features, each on by default and turned o
     const manifest = JSON.parse(readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
     // the fields Citations replaced stay last, so a value saved under them still reaches the plugin
     assert.deepEqual(Object.keys(manifest.userConfig), [...SWITCHES.map(s => s.key), ...Object.keys(RETIRED), ...Object.keys(DEFAULTS_FIELD)])
-    assert.deepEqual(SWITCHES.map(s => s.key), ['minimal', 'citations', 'cards', 'squeezeAnswers', 'catchUp', 'explain', 'details', 'claimsMode', 'labels', 'coverage'])
+    assert.deepEqual(SWITCHES.map(s => s.key), ['minimal', 'citations', 'checkerModel', 'cards', 'squeezeAnswers', 'catchUp', 'explain', 'details', 'claimsMode', 'labels', 'coverage'])
     for (const s of SWITCHES) {
       const kind = s.choices ? { type: 'string', options: s.choices } : { type: 'boolean' }
       assert.deepEqual(manifest.userConfig[s.key], { ...kind, title: s.title, description: s.does, default: s.default })

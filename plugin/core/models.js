@@ -1,15 +1,17 @@
 // models.js: the Claude models thimble's own calls name ($.model.complete takes Claude Code's aliases), each with its
-// full name and its list price in dollars per million tokens, input and output (Anthropic's first-party API rates).
-// The one place to change when an alias moves to a new model or a price changes. Pure: no `$`.
+// full name, the id Anthropic's first-party API knows it by (a request a turn.step hook names takes an id, not an
+// alias: marks/register.ts, the setting Checker) and its list price in dollars per million tokens, input and
+// output (Anthropic's first-party API rates). The one place to change when an alias moves to a new model or a price
+// changes. Pure: no `$`.
 //
-//   modelOf(alias)                 -> {name, input, output}, or null for an alias not listed
+//   modelOf(alias)                 -> {name, id, input, output}, or null for an alias not listed
 //   dollars(alias, input, output)  -> the list price of `input` and `output` tokens, or null
 //   aboutDollars(x)                -> a rough price in words: 'about $4', 'about $0.30', 'under $0.01'
 
 const MODELS = {
-  opus: { name: 'Claude Opus 5.5', input: 4, output: 20 },
-  sonnet: { name: 'Claude Sonnet 5.5', input: 2, output: 10 },
-  haiku: { name: 'Claude Haiku 5.5', input: 0.1, output: 0.5 },
+  opus: { name: 'Claude Opus 5.5', id: 'claude-opus-5-5', input: 4, output: 20 },
+  sonnet: { name: 'Claude Sonnet 5.5', id: 'claude-sonnet-5-5', input: 2, output: 10 },
+  haiku: { name: 'Claude Haiku 5.5', id: 'claude-haiku-5-5', input: 0.1, output: 0.5 },
 }
 
 export function modelOf(alias) {
