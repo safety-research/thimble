@@ -1,8 +1,9 @@
 """thimble fix done (engine/kernel/fixes.py) at the edges of the runner that tests a fixer's change: a done that only
 waits works from any session; two checks at once start one run, and the second waits no longer than its limit; a new
-round takes the copy from the tests of the round before; and a fix removed while its tests run keeps no mark of them.
-The world is test_fixes.py's made-up thimble 0.10.2; slow tests are made with THIMBLE_FIX_TESTS. All data here is made
-up."""
+round takes the copy from the tests of the round before; a fix removed while its tests run keeps no mark of them; what
+came of the tests stays marked as not shown until the plugin says it showed it; a round of a fix changed in place that
+git stops fails with git's words. The world is test_fixes.py's made-up thimble 0.10.2; slow tests are made with
+THIMBLE_FIX_TESTS. All data here is made up."""
 from __future__ import annotations
 
 import fcntl
@@ -16,7 +17,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_fixes import FX, made, sh, world  # noqa: E402, F401  (world is the fixture)
+from test_fixes import FX, made, on_fix, sh, world  # noqa: E402, F401  (world is the fixture)
 
 
 def runner_gone(fid: int) -> None:
@@ -124,3 +125,30 @@ def test_a_fix_removed_while_its_tests_run_keeps_no_mark_of_them(world, monkeypa
     assert FX.get(r["id"])["state"] == "removed"
     # only a working record carries the mark
     assert "testing" not in FX.put({**got, "state": "failed", "testing": {"since": 1.0, "lock": "made-up.lock"}})
+
+
+def test_what_came_of_the_tests_stays_marked_as_not_shown_until_the_plugin_says_it_showed_it(world, monkeypatch, capsys):
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "sleep 0.5")
+    r = made(world)
+    assert FX.done(r["id"], "Bar says read", "", within=0)["testing"]
+    # the session that waited is gone; the runner writes what came of the tests all the same
+    runner_gone(r["id"])
+    got = FX.get(r["id"])
+    assert got["state"] == "ready" and got["unshown"] is True
+    capsys.readouterr()
+    assert cli.main(["fix", "shown", str(r["id"])]) == 0
+    assert "unshown" not in FX.get(r["id"]) and FX.get(r["id"])["state"] == "ready"
+
+
+def test_a_round_of_a_fix_changed_in_place_that_git_stops_fails_with_gits_words(world, monkeypatch):
+    a = on_fix(world)
+    r = FX.round_(a["id"], "it breaks when I click")
+    p = Path(r["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("${n}", "${n ?? 0}"))
+    # the tests pass, and leave the copy's git busy, so that git cannot make the fix's new version
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", 'touch "$(git rev-parse --git-dir)/index.lock"')
+    got = FX.done(r["id"], None, "The read item works when clicked.", within=30)
+    assert got["state"] == "failed" and got["error"].startswith("git checkout") and got["tests"] == "passed"
+    assert "refused" not in got

@@ -617,7 +617,7 @@ def main(argv: list[str] | None = None) -> int:
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     # the verbs after `export` are the plugin's own: a request, the fixer's end, and the person's keys
     p.add_argument("verb", nargs="?", default="list",
-                   choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "again", "done", "apply", "merge", "notnow",
+                   choices=("list", "show", "diff", "export", "off", "on", "update", "new", "round", "again", "done", "shown", "apply", "merge", "notnow",
                             "redo", "undo", "remove", "sandbox", "draft", "keep", "send"), metavar="VERB")
     p.add_argument("id", nargs="?")
     p.add_argument("hit", nargs="?", help=argparse.SUPPRESS)

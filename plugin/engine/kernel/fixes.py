@@ -801,22 +801,39 @@ def _new_log(p: Path) -> int:
 
 def tests_runner() -> None:
     """The runner (_start_tests), with its job on stdin: the tests as run_tests runs them, then what came of them on the
-    fix's record, as done writes it. A record that went on without them (the fix was removed) stays as it is."""
+    fix's record, as done writes it, marked as not shown yet (`unshown`) until the plugin's line shows it (shown): no
+    session may wait for it any more. A record that went on without them (the fix was removed, a new round took the
+    copy) stays as it is."""
     job = json.loads(sys.stdin.read())
     ok, tail = _run_tests(job["argv"], job["id"])
     rec = get(job["id"])
     if rec.get("state") != "working" or rec.get("testing") != job["testing"]:
         return
     rec.pop("testing")
-    rec = _tested(rec, ok, tail, job["title"])
+    rec = _tested({**rec, "unshown": True}, ok, tail, job["title"])
     if rec.get("prev") and rec["state"] == "ready":
         try:
             settle(rec)
-        except Exception:
-            put(rec)  # the round stays ready with its own change, as done left it when settle failed
-            raise
+        except Exception as e:
+            # git stopped the round's new version: the round fails with git's words, never ready with the round's own
+            # change alone, and with no refusal, which no next fixer could answer
+            rec.pop("refused", None)
+            put({**rec, "state": "failed", "error": str(e)})
+            if not isinstance(e, FixError):
+                raise
         return
     put(rec)
+
+
+def shown(fid: int | str) -> dict[str, Any]:
+    """The plugin's line showed what came of the fix's tests (tests_runner): it is no longer one to show at a session's
+    start."""
+    with Lock():
+        rec = get(fid)
+        if "unshown" not in rec:
+            return rec
+        rec.pop("unshown")
+        return put(rec)
 
 
 def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None) -> dict[str, Any]:
@@ -3162,6 +3179,8 @@ def cmd(a) -> int:
             else:
                 summary = stdin_text() if a.summary == "-" else (a.summary or "")
                 out_json(done(a.id, a.title, summary, a.request, not a.no_tests, session=a.session, within=a.within))
+        elif verb == "shown":
+            out_json(shown(a.id))
         elif verb == "apply":
             if a.ask == "-":
                 out_json(apply(a.id, stdin_text()))

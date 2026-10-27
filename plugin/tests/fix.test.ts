@@ -524,6 +524,40 @@ test('a fix whose tests ran for minutes before a reload: the bar counts testing 
   expect(calls[0]?.bar?.secs).toBeGreaterThanOrEqual(200)
 })
 
+test("what came of a check that no session waited for gets its line at this session's start, with the notification, Claude told, and the kernel told it was shown; a refused change gets another round", async () => {
+  const s = setup()
+  s.made()
+  // the session ended while the tests ran, and the kernel's runner wrote what came of them, not shown yet
+  Object.assign(s.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', session: 's-fix', unshown: true })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixBy' }, { 1: 'claude' })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await s.tick()
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
+  expect(s.verbs()).toContain('shown 1')
+  const told = ((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['fix-1']).toBe('The thimble fix you started, "Bar says read", is ready and tests pass; the person turns it on with y. Tell the person in one short line.')
+  // another session's outcome is that session's to show
+  const o = setup()
+  o.made()
+  Object.assign(o.fix, { state: 'ready', tests: 'passed', session: 's-other', unshown: true })
+  await o.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  expect(await fixLineRows(o.$, ELS, 110)).toEqual([])
+  expect(o.verbs().some(v => v.startsWith('shown'))).toBe(false)
+  // tests that failed: a new fixer in the same copy, told why, as at the fixer's end
+  const t = setup()
+  t.made()
+  Object.assign(t.fix, { state: 'failed', tests: 'failed', session: 's-fix', unshown: true, error: 'its tests failed in the sandbox', refused: { why: 'its tests failed in the sandbox', files: [], tests: 'FAIL made-up test' } })
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await t.tick()
+  expect(t.verbs()).toContain('again 1')
+  expect(t.spawns.length).toBe(1)
+  expect(String(t.spawns[0].prompt)).toContain('FAIL made-up test')
+})
+
 test('n leaves the fix ready in the list, where thimble fix apply in a shell turns it on; a fixer that changed nothing leaves a request', async () => {
   const s = setup()
   await requested(s)
