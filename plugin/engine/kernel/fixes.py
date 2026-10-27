@@ -2003,9 +2003,10 @@ def _vtuple(tag: str) -> tuple[int, ...]:
     return tuple(int(x) for x in m.groups()) if m else ()
 
 
-def latest_release() -> dict[str, str]:
-    """The newest release, {tag, version, commit, url}: the highest vX.Y.Z tag of thimble's repository. A tag with more
-    after the numbers (v0.11.0-rc1) is not a release."""
+def latest_release() -> dict[str, Any]:
+    """The newest release, {tag, version, commit, url, tags}: the highest vX.Y.Z tag of thimble's repository, and each
+    release tag's commit (tags), which names a release that a clone without tags has. A tag with more after the numbers
+    (v0.11.0-rc1) is not a release."""
     url = update_url()
     p = run(["git", "ls-remote", "--tags", url, "refs/tags/v*"], check=False, timeout=120)
     if p.returncode != 0:
@@ -2023,7 +2024,7 @@ def latest_release() -> dict[str, str]:
     if not tags:
         raise FixError(f"{url} has no release (no tag such as v0.10.3)")
     tag = max(tags, key=_vtuple)
-    return {"tag": tag, "version": tag[1:], "commit": tags[tag], "url": url}
+    return {"tag": tag, "version": tag[1:], "commit": tags[tag], "url": url, "tags": tags}
 
 
 def release_name(rel: dict[str, Any] | None = None) -> str:
@@ -2277,8 +2278,10 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         # Claude Code's clone of the marketplace is at the release already (Claude Code refreshed it), while Claude Code
         # still runs the plugin it had: it copies the release from its clone
         run([claude(), "plugin", "update", "thimble@thimble"])
-        out.update({"from": _described(repo, installed) or installed[:7], "newer": True, "aside": [], "reload": True,
-                    "said": f"thimble {latest['version']}"})
+        # the release it had, by the tags read above: Claude Code's clone, one commit deep, has none
+        had = max((t for t, c in latest["tags"].items() if c == installed), key=_vtuple, default="")
+        out.update({"from": had[1:] or _described(repo, installed) or installed[:7], "newer": True, "aside": [],
+                    "reload": True, "said": f"thimble {latest['version']}"})
         out["lines"] = _summary(out)
         return out
     if check or not out["newer"]:

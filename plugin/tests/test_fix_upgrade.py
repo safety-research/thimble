@@ -192,7 +192,8 @@ def test_update_brings_claude_codes_plugin_to_the_release_its_clone_has(world, u
     out = FX.update()
     assert calls(world)[before:] == ["plugin update thimble@thimble"]
     assert (out["newer"], out["to"], out["aside"], out["reload"]) == (True, "0.10.3", [], True)
-    assert out["lines"] == [f"Updated thimble {world['base'][:7]} → 0.10.3 (terminal plugin)", "",
+    # the release Claude Code ran is named by the release's tags, which its clone, one commit deep, does not have
+    assert out["lines"] == ["Updated thimble 0.10.2 → 0.10.3 (terminal plugin)", "",
                             "Then  Terminal: /reload-plugins in Claude Code"]
     assert not FX.live_dir().exists()
     # once Claude Code runs the release, it is the newest
