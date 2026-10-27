@@ -15,9 +15,9 @@
 //   {ok, node, nodeVersion, grants, platform, version, srt, why, fix, ms}
 // `node` is this Node's binary (the runner's), `nodeVersion` its version, `grants` whether it takes each grant of
 // Node's permission model that the runner needs beyond its files (argv.mjs's GRANTS, such as {'--allow-net': true}),
-// as its own list of the flags it takes says (process.allowedNodeEnvironmentFlags), `srt` the folder srt is in, `why`
-// what is wrong and `fix` the one command or step that fixes it, `ms` how long the probe's runner took to answer.
-// Exits 0 when the sandbox works, else 1.
+// as its list of the flags it allows in NODE_OPTIONS says (process.allowedNodeEnvironmentFlags, which holds each
+// --allow-* flag it takes), `srt` the folder srt is in, `why` what is wrong and `fix` the one command or step that
+// fixes it, `ms` how long the probe's runner took to answer. Exits 0 when the sandbox works, else 1.
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'

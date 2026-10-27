@@ -31,7 +31,10 @@ export const SAID_MAX = 8000
 // the grants the runner needs beyond its files, where its Node's permission model covers what it does: Node 25 and
 // later refuse its listen() on its socket without --allow-net. A Node whose model does not cover it refuses the flag,
 // so the runner gets each grant only where its Node takes it; srt's rules keep the network away from it all the same.
-// A grant that a new Node comes to require for the runner goes here
+// A grant that a new Node comes to require for the runner goes here. setup.mjs reads whether a Node takes it from the
+// flags that Node allows in NODE_OPTIONS (process.allowedNodeEnvironmentFlags), which hold every --allow-* flag so far;
+// a grant kept out of NODE_OPTIONS would read as refused on every Node, and setup.mjs would have to try it instead
+// (`node --permission <grant> -e 0`)
 export const GRANTS = ['--allow-net']
 
 // Linux: what is shown of the system, for Node and the shell srt starts it from

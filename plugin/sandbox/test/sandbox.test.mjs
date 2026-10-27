@@ -145,6 +145,7 @@ test('setup.mjs installs srt in thimble\'s home, and the sandbox works here', ()
 })
 
 test('setup.mjs says which of the runner\'s grants its Node takes, as that Node\'s own command line takes them', () => {
+  // setup.mjs reads the flags Node allows in NODE_OPTIONS: a grant kept out of them fails here, on a Node that takes it
   assert.equal(s.nodeVersion, process.versions.node)
   for (const g of GRANTS) {
     const r = spawnSync(s.node, ['--permission', g, '-e', '0'], { encoding: 'utf8' })
