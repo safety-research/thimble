@@ -3,8 +3,9 @@
 // DOM: pane.tsx draws what this returns with Claude Code's own elements, and the tests read it as text.
 //
 //   the head        at rest: Evidence and how many (`no claims yet` before the first); `+N new`
-//                   bold for a moment after claims came in. Once a cluster or a claim is chosen it goes (the pane's
-//                   top row says where back goes)
+//                   bold for a moment after claims came in; under it, unless the pane is narrow, a dim line that says
+//                   what the pane holds. Once a cluster or a claim is chosen it goes (the pane's top row says where
+//                   back goes)
 //   the overview    at rest and with a cluster chosen, on top: the map, every cluster a loose group of solid dots in
 //                   its own color in a cell, its name under them (two lines at most, then …). Every dot is the same ●:
 //                   a new claim (came in while the person browsed) is bold, the cluster's current claim inverse in its
@@ -1239,6 +1240,8 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false, passag
   // with a cluster or claim chosen only while it says new claims came
   const added = bright ? fresh.size || claims.filter(c => c.turn != null && c.turn === data.last).length : 0
   const head = !chosen || added ? [headRuns(raw, { narrow, fresh: added })] : []
+  // at rest, what the pane holds, for a person who opened it without knowing
+  if (!chosen && !narrow) for (const l of wrap(ABOUT, W)) head.push([{ s: l, tone: 'dim' }])
   for (const g of data.gaps || []) head.push([{ s: `Turn ${g.turn} was not read: `, tone: 'bad' }, { s: cut(g.why || 'the look at the answer failed', W - 24), tone: 'dim' }])
   const base = { claim, group, chosen, cites: 0, shown: null, cut: false, fixes: 0, compact: false, rowsView: crowded, narrow, cellRows: 0, data }
   if (!claims.length) return { head, graph: [], panel: [], scroll: { top: 0, max: 0, room: 0 }, ...base, order: [] }
@@ -1286,6 +1289,9 @@ export function graphView(raw, st = {}, { w = 90, h = 40, bright = false, passag
   const room = roomAt(ch)
   return { head, graph, ...base, ...(panel ? scrolled(panel, room) : { panel: [], scroll: { top: 0, max: 0, room } }), cellRows: ch, order: drawn.map(nm => (nm.id === '' ? '-' : nm.id)) }
 }
+
+/** What the pane holds, under the head at rest. */
+const ABOUT = 'The claims made in this conversation, with their evidence.'
 
 /** The head: Evidence and how many (`no claims yet` before the first), and `+N new` for a moment
  *  after claims came in. */

@@ -235,17 +235,17 @@ export async function findEnd($: Engine): Promise<void> {
 
 // ------------------------------------------------------------------------------------------------ the bar and c
 
-/** c on the bar: `c 11 claims`, in the lit color when a claim of the answer the keys act on was corrected. */
 /** Whether the bar's count is bold now: for a moment after the count went up. */
 export async function claimsBright($: Engine): Promise<boolean> {
   const at = (await $.state.get(BRIGHT)).value
   return typeof at === 'number' && Number(await $.clock.now()) - at < BRIGHT_MS
 }
 
+/** c's words on the bar: `evidence 11`, the pane's name as its head and the settings say it, and how many claims it
+ *  holds. */
 export async function claimsBarWords($: Engine): Promise<string> {
   const n = await claimCount($)
-  const words = n === 1 ? '1 claim' : n > 1 ? `${n.toLocaleString('en-US')} claims` : 'claims'
-  return words
+  return n ? `evidence ${n.toLocaleString('en-US')}` : 'evidence'
 }
 
 /** Whether the bar's count is lit: a claim of the answer the keys act on was corrected. */
@@ -263,8 +263,8 @@ export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false
   await $.state.set(FIRST, { lit: false, opened: true }).catch(() => undefined)
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
-  const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
-  if (byKey) failNotice($, `c needs a wider terminal: widen the window to show the side pane, or click “${words}”.`, 'pane:claims')
+  // the bar's item by the words it starts with, whatever its count (bar.tsx pressedWords finds it by them)
+  if (byKey) failNotice($, 'c needs a wider terminal: widen the window to show the side pane, or click “c evidence”.', 'pane:claims')
   else failNotice($, 'Claude Code did not open the Evidence pane here.', 'pane:claims')
 }
 
