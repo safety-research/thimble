@@ -113,7 +113,8 @@ PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
 # them safe, and the packages thimble installs. A file counts as the first kind it matches.
 NOTICE_KINDS = {
     "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "plugin/cards/ask.ts", "plugin/cards/runner.mjs",
-                    "browser/backend/app/kernel_wrap.py"),
+                    "browser/backend/app/kernel_wrap.py", "browser/backend/app/kernel_srt.mjs",
+                    "browser/backend/app/srt.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),
     "a command hook": ("plugin/hooks/temp-allow.sh", "plugin/hooks/temp_allow.py"),
     "the launcher": ("plugin/bin/*",),
@@ -777,9 +778,22 @@ def _has_pytest(py: str) -> bool:
 
 QUICK_TESTS = "claude plugin test plugin"
 # the copy's own launcher and the kernel's command start (thimble --help reads cli.py and the modules it needs) and say
-# no traceback; on a failure the log ends with what they said and their exit code
-LAUNCHER_SMOKE = ('(o=$(plugin/bin/thimble --help 2>&1); s=$?; case "$s:$o" in [1-9]*|0:*Traceback*) '
-                  'printf "%s\\nplugin/bin/thimble --help: exit %s\\n" "$o" "$s"; false;; esac)')
+# no traceback: the launcher, and the kernel run directly, since a launcher that answers --help itself would hide a dead
+# kernel. Each has SMOKE_LIMIT seconds, and then its processes are stopped (exit 124), so that one that hangs does not
+# hold tests.lock for the whole run. On a failure the log ends with what they said and their exit code
+SMOKE_LIMIT = 60
+LAUNCHER_SMOKE = ("(lim() { \"$THIMBLE_PYTHON\" -c 'import os,signal,subprocess as s,sys\n"
+                  "try:p=s.Popen(sys.argv[2:],start_new_session=True)\n"
+                  "except OSError as e:print(e);sys.exit(127)\n"
+                  "try:c=p.wait(int(sys.argv[1]))\n"
+                  "except s.TimeoutExpired:c=124\n"
+                  "try:os.killpg(p.pid,signal.SIGKILL)\n"
+                  "except OSError:pass\n"
+                  "sys.exit(c)' " + str(SMOKE_LIMIT) + " \"$@\"; }\n"
+                  "chk() { n=$1; shift; o=$(lim \"$@\" --help 2>&1); s=$?; case \"$s:$o\" in [1-9]*|0:*Traceback*) "
+                  "printf \"%s\\n%s --help: exit %s\\n\" \"$o\" \"$n\" \"$s\"; return 1;; esac; }\n"
+                  "chk plugin/bin/thimble plugin/bin/thimble && "
+                  "chk plugin/engine/thimble.py \"$THIMBLE_PYTHON\" plugin/engine/thimble.py)")
 
 
 def run_tests(fid: int | str) -> tuple[bool, str]:
