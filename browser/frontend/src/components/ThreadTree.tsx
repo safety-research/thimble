@@ -1,12 +1,13 @@
-// The thread tree: every thread in one card at the top of the chat column. Collapsed it is one row: the current
-// thread's full name and, when something happens elsewhere, how many run, how many hold an unread reply, and "waiting"
-// while a prompt waits. Open, it is drawn like the Files tree (files/Tree): rows by depth with guide lines and
-// chevrons that fold their children; a folded row shows the state of the rows it hides. While open the rows keep the
-// order they opened with (inKeptOrder), a new thread going after them. A row's right edge is its
-// state (progress, spinner, waiting dot, unread dot, or a finished agent's result and end time) and ⋯ on hover for
-// Rename and Delete. With many threads a search field at the card's foot filters the rows. Picking a row shows that
-// thread's conversation; picking main also folds the tree.
+// The thread tree: every thread in one card at the top of the chat column. Collapsed it is one row: in any thread but
+// main, a button back to main; the current thread's full name; and, when something happens elsewhere, how many run,
+// how many hold an unread reply, and "waiting" while a prompt waits. Open, it is drawn like the Files tree
+// (files/Tree): rows by depth with guide lines and chevrons that fold their children; a folded row shows the state of
+// the rows it hides. While open the rows keep the order they opened with (inKeptOrder), a new thread going after them.
+// A row's right edge is its state (progress, spinner, waiting dot, unread dot, or a finished agent's result and end
+// time) and ⋯ on hover for Rename and Delete. With many threads a search field at the card's foot filters the rows.
+// Picking a row shows that thread's conversation; picking main also folds the tree.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { Button } from './Button'
 import { Icon } from './Icon'
 import { Mark } from './Marks'
 import { Popover } from './Menu'
@@ -207,6 +208,9 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
   }, [above])
 
   const cur = nodes.find((n) => n.id === current)
+  // main, where the analyst goes back to: the folded card of any other thread has a button to it
+  const home = nodes.find((n) => n.fixed && !n.group)
+  const back = home && home.id !== current ? home : null
   const att = attention(nodes, current, starter)
   const filtering = query.trim() !== ''
   const rows = filtering ? filterRows(nodes, query) : treeRows(nodes, folded)
@@ -356,6 +360,23 @@ export function ThreadTree({ nodes: live, current, onPick, collapsed, onCollapse
     <div className={`tt${collapsed ? ' tt-collapsed' : ''}${className ? ` ${className}` : ''}`} data-panel="threads">
       {collapsed ? (
         <div className="tt-row tt-summary" role="button" tabIndex={0} aria-expanded={false} aria-label="Show threads" onClick={() => onCollapsedChange(false)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onCollapsedChange(false))}>
+          {back && (
+            // goes to main and leaves the tree folded; its keys are its own, not the card's
+            <Button
+              variant="ghost"
+              size="sm"
+              icon="arrow-left"
+              className="tt-back"
+              aria-label={`Back to ${back.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onPick(back.id)
+              }}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              {back.name}
+            </Button>
+          )}
           <span className="tt-caret tt-caret-on" aria-hidden="true">
             <Icon name="chevron-right" size={13} />
           </span>
