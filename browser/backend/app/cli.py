@@ -4512,7 +4512,7 @@ def _failed_up(what: str, e: BaseException) -> int:
 
 BROWSER_LINE = "thimble browser: {what}"
 # `thimble-browser --link` (cmd_link) when no server of this install answers: no page to sign in to
-LINK_NO_SERVER_LINE = "no server is running. Start it with thimble-browser in a folder of files."
+LINK_NO_SERVER_LINE = "no server answers. Start one with thimble-browser in a folder of files."
 
 
 SESSION_NONE_LINE = {"continue": "no earlier session in {cwd} to continue.",
@@ -4689,7 +4689,8 @@ def cmd_link(args: argparse.Namespace) -> int:
     it, for the folder's workspace (known_corpus), or for the start page, which lists the server's workspaces, when the
     server holds none for the folder. It starts no server, opens no session and registers nothing, so the page keeps
     its chat. The new code voids the last one made for that workspace (hook_auth.mint), and only a terminal gets one
-    (to_terminal), as at the start. 1, with LINK_NO_SERVER_LINE, when no server of this install answers."""
+    (to_terminal), as at the start. 1, with LINK_NO_SERVER_LINE, when no server of this install answers (none runs, or
+    one runs but does not answer)."""
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     url = api_url()
     if refuse_foreign(url):

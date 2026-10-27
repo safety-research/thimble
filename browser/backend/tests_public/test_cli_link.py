@@ -1,6 +1,6 @@
 """`thimble-browser --link` (app.cli cmd_link, and the launcher browser/scripts/thimble-browser): a fresh sign-in link
 to the server that runs, for the folder's workspace, with no new session. It starts, registers and moves aside nothing,
-so the page keeps its chat. With no server running it says so, builds no page and starts no server."""
+so the page keeps its chat. With no server answering it says so, builds no page and starts no server."""
 from __future__ import annotations
 
 import json
@@ -84,7 +84,8 @@ def test_the_launcher_s_link_with_no_server_running_says_so_and_builds_and_start
            "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home"), "THIMBLE_SKIP_KEY": "1"}
     p = subprocess.run([str(LAUNCHER), "--link", "--port", str(port), str(folder)], capture_output=True, text=True,
                        env=env, stdin=subprocess.DEVNULL, timeout=60)
-    assert (p.returncode, p.stdout.splitlines()) == (1, [cli.BROWSER_LINE.format(what=cli.LINK_NO_SERVER_LINE)]), p.stderr
+    assert p.returncode == 1, p.stdout + p.stderr
+    assert p.stdout.splitlines() == [cli.BROWSER_LINE.format(what=cli.LINK_NO_SERVER_LINE)], p.stderr
     assert not npm_log.exists(), "no page build"
     with socket.socket() as s:
         assert s.connect_ex(("127.0.0.1", port)) != 0, "no server started"
