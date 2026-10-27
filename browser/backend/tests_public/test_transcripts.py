@@ -632,6 +632,56 @@ def test_a_role_that_first_speaks_past_the_head_still_starts_a_turn(chats, monke
     assert [r["meta"].get("turn", {}).get("speaker") for r in page["records"]] == [None, "User", "Assistant", "User", "Assistant", "System"]
 
 
+# an agent's tool call in a text chat log: its code and its output, each in a fenced block (15 lines)
+TOOL_CALL = ("Assistant: I will check the parser.\nTool call: python\n```python\ntry:\n    import parser\n"
+             "except ImportError as e:\n    print(e)\n```\nTool result:\n```\nTraceback (most recent call last):\n"
+             '  File "<stdin>", line 2, in <module>\nModuleNotFoundError: No module named \'parser\'\nHost: example.com\n```\n')
+
+
+def test_lines_inside_a_tool_call_start_no_turn(chats, monkeypatch):
+    """A tool call's code and output (Python's try: and except:, an error message, a header line) start no turn: not in
+    a fenced block, on a page that starts inside one (read back to the turn it is in, at most about LOOKBACK_MAX
+    lines), in the speakers Color by reads, nor in aider's edits; nor do a line of code and an error message outside a
+    block. A block left open (a message cut in its code) ends at the next turn of a speaker the log has."""
+    log = "User: Why does the parser fail?\n" + TOOL_CALL * 3 + "Assistant: The parser module is missing.\nUser: ok\n"
+    (chats / "logs" / "agent.txt").write_text(log)
+    hint = transcripts.sniff(chats / "logs" / "agent.txt", "logs/agent.txt")
+    assert hint["speakers"] == ["assistant", "tool call", "tool result", "user"]
+
+    def turns(name, **params):
+        page = client.get(f"{CHATS}/source", params={"path": f"logs/{name}", **params}).json()
+        return [(r["line"], r["meta"]["turn"]["speaker"]) for r in page["records"] if r["meta"].get("turn")]
+
+    calls = [(2 + 15 * k + d, who) for k in range(3) for d, who in ((0, "Assistant"), (1, "Tool call"), (8, "Tool result"))]
+    assert turns("agent.txt") == [(1, "User"), *calls, (47, "Assistant"), (48, "User")]
+    assert turns("agent.txt", start=12, count=10) == [(17, "Assistant"), (18, "Tool call")], "a page inside a block"
+    lines = log.split("\n")
+    assert transcripts._lead_texts(chats / "logs" / "agent.txt", hint, 40) == lines[32:39], "from line 33, Tool call"
+    with monkeypatch.context() as m:
+        m.setattr(transcripts, "LOOKBACK_LINES", 1)
+        m.setattr(transcripts, "LOOKBACK_MAX", 2)
+        assert transcripts._lead_texts(chats / "logs" / "agent.txt", hint, 40) == lines[36:39]
+    keys = client.get(f"{CHATS}/source/keys", params={"path": "logs/agent.txt"}).json()["keys"]
+    assert {v["value"] for v in keys[0]["values"]} == {"User", "Assistant", "Tool call", "Tool result"}
+
+    plain = ("User: run the check\nAssistant: Running it.\nTool: python\ntry:\n    check()\nexcept ValueError as e:\n"
+             "    print(e)\nValueError: bad input\n") * 2 + "User: ok\n"
+    (chats / "logs" / "plain.txt").write_text(plain)
+    assert [w for _, w in turns("plain.txt")] == ["User", "Assistant", "Tool"] * 2 + ["User"]
+
+    aider = ("\n# aider chat started at 2026-09-01 10:00:00\n\n#### Fix the off-by-one.\n\nI will edit range.py.\n\n"
+             "range.py\n```python\n<<<<<<< SEARCH\nfor i in range(n + 1):\n=======\nfor i in range(n):\n>>>>>>> REPLACE\n"
+             "```\n\n> Applied edit to range.py\n\n#### Thanks.\n\nYou are welcome.\n")
+    (chats / "logs" / "edit.aider.chat.history.md").write_text(aider)
+    assert turns("edit.aider.chat.history.md") == [(4, "User"), (6, "Assistant"), (17, "Aider"), (19, "User"),
+                                                   (21, "Assistant")]
+
+    cut = "User: show the script\nAssistant: Here it is:\n```python\ntry:\n    run()\n" + "User: thanks\nAssistant: ok\n" * 2
+    (chats / "logs" / "cut.txt").write_text(cut)
+    assert turns("cut.txt") == [(1, "User"), (2, "Assistant"), (6, "User"), (7, "Assistant"), (8, "User"),
+                                (9, "Assistant")]
+
+
 def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():
     """A harness that logs each tool call with its result on its own line, between the agent's spoken turns: the tool
     turns count toward the transcript, so it is strong (Transcript the default), with `tools` set for the view, even
