@@ -56,6 +56,11 @@ def test_link_prints_a_fresh_sign_in_link_for_the_folder_and_starts_nothing(home
     assert cli.main(["link", "--cwd", str(runs)]) == 0
     assert capsys.readouterr().out.splitlines() == ["thimble browser: http://127.0.0.1:8399/?ws=runs"]
     assert posted == [], "no code for a program's output"
+    monkeypatch.setattr(cli, "to_terminal", lambda: True)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {"detail": "Not Found"}))
+    assert cli.main(["link", "--cwd", str(runs)]) == 1, "a server that gives no code gives no fresh link"
+    assert capsys.readouterr().out.splitlines() == ["thimble browser: http://127.0.0.1:8399/?ws=runs",
+                                                    cli.NO_CODE_LINE.format(log=cli.log_path())]
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     assert cli.main(["link", "--cwd", str(runs)]) == 1
     assert capsys.readouterr().out.splitlines() == [cli.BROWSER_LINE.format(what=cli.LINK_NO_SERVER_LINE)]

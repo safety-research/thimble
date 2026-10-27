@@ -4690,7 +4690,7 @@ def cmd_link(args: argparse.Namespace) -> int:
     server holds none for the folder. It starts no server, opens no session and registers nothing, so the page keeps
     its chat. The new code voids the last one made for that workspace (hook_auth.mint), and only a terminal gets one
     (to_terminal), as at the start. 1, with LINK_NO_SERVER_LINE, when no server of this install answers (none runs, or
-    one runs but does not answer)."""
+    one runs but does not answer), and with NO_CODE_LINE when the server gives the terminal no code."""
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     url = api_url()
     if refuse_foreign(url):
@@ -4704,6 +4704,7 @@ def cmd_link(args: argparse.Namespace) -> int:
     print(BROWSER_LINE.format(what=link), flush=True)
     if pair and "#p=" not in link:
         print(NO_CODE_LINE.format(log=log_path()))
+        return 1
     return 0
 
 
