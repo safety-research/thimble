@@ -132,9 +132,14 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   on('tool.check', (_$: unknown, e: Any) => (e.tool === 'Read' && String(e.input?.file_path).endsWith('secret.json') ? { decision: 'deny', reason: 'a made-up deny rule', rule: 'Read(./secret.json)' }
     : o.ask && String(e.input?.file_path).startsWith('/made-up/tmp/mine') ? { decision: 'ask', rule: 'Read(/made-up/tmp/mine/**)' }
       : o.ask && !String(e.input?.file_path).startsWith(DATA) ? { decision: 'ask', setting: 'permissions.blockReadsOutsideWorkingDirectories' } : { decision: 'allow' }) as never)
-  on('ui.render', (_$: unknown, e: Any) => ({ type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] }) as never)
+  // the words of each answer the engine draws itself, as the hooks hand them to it
+  const answers: string[] = []
+  on('ui.render', (_$: unknown, e: Any) => {
+    if (e.component === 'AssistantMessage') answers.push(String(e.props?.text ?? ''))
+    return { type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] } as never
+  })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  return { files, asked, dirs, clock, spawned, runs, look, forks }
+  return { files, asked, dirs, clock, spawned, runs, look, forks, answers }
 }
 
 const callRow = (toolUseId: string, input: Record<string, unknown>) => ({
@@ -268,6 +273,29 @@ test('a line of the reply that holds only a card\'s link draws the card there; i
   // a later call changes it where it stands: its line points up to the answer above
   await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_q3', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] } as never)
   expect(textOf(await $.ui.render(callRow('toolu_made_up_q3', { id, edits: [{ old: 'children: "x"', new: 'children: "y"' }] })))).toBe('● Changed card “Scores” to version 2 (1 edit to its view) · ↑ shown in the answer above')
+})
+
+test('a card\'s link among an answer\'s words reads as the card\'s title, whether Claude Code or thimble draws the words', async ($, on) => {
+  const w = world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_r1', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  const row = (requestId: string, text: string) => ({ component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } }) as never
+  const append = (uuid: string, text: string) => $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid } as never)
+  // nothing of thimble's to draw in the answer: Claude Code draws it, given the link as its words
+  const text = `Ada leads; the scores are in the card above ([Scores](card:${id})).`
+  await append('row-made-up-r1', text)
+  await $.ui.render(row('row-made-up-r1', text))
+  expect(w.answers.at(-1)).toBe('Ada leads; the scores are in the card above (Scores).')
+  // an answer that also places the card on a line of its own: thimble draws it, and its words name the card alone
+  const placed = `Ada leads.\n\n[Scores](card:${id})\n\nThe card above ([Scores](card:${id})) sorts by score.`
+  await append('row-made-up-r2', placed)
+  const reply = await $.ui.render(row('row-made-up-r2', placed))
+  expect(elements(reply).some(n => n.type === 'Client')).toBe(true)
+  const words = elements(reply).filter(n => n.type === 'Markdown').map(n => String(n.props.text)).join('\n')
+  expect(words).toContain('The card above (Scores) sorts by score.')
+  expect(words).not.toContain('card:')
 })
 
 test('a new card waits while the run of calls above it is live and draws once it folds; a card drawn before stays when a later run is live', async ($, on) => {
