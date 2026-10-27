@@ -968,7 +968,9 @@ def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None) -> dict
 def _wait(fid: int, deadline: float | None) -> dict[str, Any]:
     """The fix's record once the runner of its tests wrote what came of them, or as soon as the record no longer waits
     for that runner (a new round took the copy, the fix was removed: working with no `testing`, or another state), or
-    at `deadline` (time.monotonic) as it is then: still working, with `testing`."""
+    at `deadline` (time.monotonic) as it is then: still working, with `testing`. fixes.jsonl only grows (put), so the
+    record is read again only once it grew."""
+    size = _size(home() / "fixes.jsonl")
     rec = get(fid)
     mark = rec.get("testing")
     if not mark or rec.get("state") != "working":
@@ -977,10 +979,21 @@ def _wait(fid: int, deadline: float | None) -> dict[str, Any]:
         if deadline is not None and time.monotonic() >= deadline:
             return get(fid)
         time.sleep(0.1)
+        if _size(home() / "fixes.jsonl") == size:
+            continue
+        size = _size(home() / "fixes.jsonl")
         rec = get(fid)
         if rec.get("state") != "working" or rec.get("testing") != mark:
             return rec
     return get(fid)
+
+
+def _size(p: Path) -> int:
+    """The file's size, or -1 when it cannot be read."""
+    try:
+        return p.stat().st_size
+    except OSError:
+        return -1
 
 
 def _ended(fid: int, mark: dict[str, Any]) -> bool:
