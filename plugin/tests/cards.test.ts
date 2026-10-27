@@ -555,6 +555,32 @@ test('a card placed in the middle of an answer takes keys while the screen shows
   expect((await edit('o')).text).toBe('o')
 })
 
+test("a card kept from before w was thimble's own still lists w: the bar names only the keys it can get, and w never reaches it", async ($, on) => {
+  const w = world(on)
+  const dir = '/made-up/.thimble/conversations/s-cards/cards/c0123456789ab'
+  // its keys as the card tool kept them before w was thimble's own
+  const meta = { id: 'c0123456789ab', version: 1, title: 'Scores', toolUseId: 'toolu_made_up_3', agentId: 'a-made-up', anchorRow: 'row-made-up', keys: ['o', 'w'], read: '2 rows', columns: ['name', 'score'], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_3: { version: 1 } }, at: 1 }
+  w.files[`${dir}/meta.json`] = JSON.stringify(meta)
+  w.files[`${dir}/v1/view.js`] = VIEW
+  w.dirs['/made-up/.thimble/conversations/s-cards/cards'] = ['c0123456789ab']
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  // the card's Client draws under its answer (Claude Code mounts it), so the card is on screen
+  await $.ui.mount({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: 'row-made-up', viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text: 'An answer.', isFirstOfReply: true } } as never)
+  const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
+  // the bar names o, its one key it can get
+  const bar = textOf(await $.ui.render(BAND))
+  expect(bar).toContain('o card keys')
+  expect(bar).not.toContain('w card keys')
+  // w never reaches it: nothing names w here, so it is typed, and the card is asked nothing
+  const asked = w.asked.filter(x => x === 'key').length
+  expect((await edit('w')).text).toBe('w')
+  expect(w.asked.filter(x => x === 'key').length).toBe(asked)
+  // o does
+  await w.clock.advance(1000)
+  expect(await edit('o')).toEqual({ text: '', cursor: 0 })
+  expect(w.asked.filter(x => x === 'key').length).toBe(asked + 1)
+})
+
 test("a card call the person's permission rules refuse draws nothing, and says why", async ($, on) => {
   const w = world(on)
   w.files[`${DATA}/secret.json`] = '[]'
