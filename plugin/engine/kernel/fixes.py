@@ -442,7 +442,8 @@ def _repoint() -> None:
     """Point Claude Code's thimble marketplace at live, once, at the first fix. Claude Code also keeps the source in
     its user settings (extraKnownMarketplaces) and refuses another source for the name until that entry changes, so
     the entry changes first, and nothing else in the file; then Claude Code adds the marketplace from live. Removing
-    the marketplace instead would uninstall thimble and lose its options."""
+    the marketplace instead would uninstall thimble and lose its options. When Claude Code does not add it, the
+    settings are put back as they were, so that the y that called this changes nothing (apply, _swap)."""
     rel = release()
     if rel.get("pointed"):
         # a shell link made before the release checkout was (to live's launcher) moves to the checkout's
@@ -454,19 +455,30 @@ def _repoint() -> None:
     entry = {"source": "directory", "path": str(live_dir())}
     p = config_dir() / "settings.json"
     try:
-        settings = json.loads(p.read_text())
+        text = p.read_text()
+        settings = json.loads(text)
     except FileNotFoundError:
-        settings = None
+        text, settings = None, None
     except (OSError, ValueError):
         raise FixError(f"thimble cannot read Claude Code's settings ({p}) to load thimble from your fixes")
-    known = (settings or {}).get("extraKnownMarketplaces")
-    if isinstance(known, dict) and isinstance(known.get("thimble"), dict):
-        known["thimble"]["source"] = entry
+
+    def write(t: str) -> None:
         tmp = p.with_suffix(".json.thimble-tmp")
-        tmp.write_text(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+        tmp.write_text(t)
         os.chmod(tmp, p.stat().st_mode & 0o777)
         tmp.replace(p)
-    run([claude(), "plugin", "marketplace", "add", str(live_dir())])
+
+    known = (settings or {}).get("extraKnownMarketplaces")
+    changed = isinstance(known, dict) and isinstance(known.get("thimble"), dict)
+    if changed:
+        known["thimble"]["source"] = entry
+        write(json.dumps(settings, indent=2, ensure_ascii=False) + "\n")
+    try:
+        run([claude(), "plugin", "marketplace", "add", str(live_dir())])
+    except FixError:
+        if changed and text is not None:
+            write(text)
+        raise
     _relink_cli()
     rel["pointed"] = True
     write_json(home() / "release.json", rel)
@@ -1099,8 +1111,9 @@ def _move(change) -> dict[str, Any]:
 
 
 def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
-    """y: the fix goes on. thimble cherry-picks its commit onto mine, points the marketplace at live the first time,
-    and has Claude Code copy live; the plugin then runs /reload-plugins."""
+    """y: the fix goes on. thimble points the marketplace at live the first time (before anything else, so that a y
+    whose pointing fails changes nothing), cherry-picks the fix's commit onto mine unless mine holds it already, and has
+    Claude Code copy live; the plugin then runs /reload-plugins."""
     rec = get(fid)
     check_ask(rec["id"], secret)
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
@@ -1116,21 +1129,27 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
 
     def change():
         live = live_dir()
+        # Claude Code's marketplace on live first: when that fails, mine, the fix's ref and its record stay as they were
+        _repoint()
         _unstamp()
         # a fix the person turns on while all are off: the others come back with it
         git("checkout", "-q", "mine", cwd=live)
         write_json(home() / "state.json", {"on": True})
-        p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", f"refs/thimble/fixes/{rec['id']}"], cwd=live,
-                check=False, env=as_thimble())
-        if p.returncode != 0:
-            run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
-            r = get(rec["id"])
-            r.update(state="redo", error="it does not fit the fixes you have on")
-            put(r)
-            raise FixError(f"fix {rec['id']} does not fit the fixes you have on; r asks Claude to redo it")
-        new_commit = git("rev-parse", "HEAD", cwd=live)
-        git("update-ref", f"refs/thimble/fixes/{rec['id']}", new_commit, cwd=live)
-        _repoint()
+        ref = f"refs/thimble/fixes/{rec['id']}"
+        if run(["git", "merge-base", "--is-ancestor", ref, "mine"], cwd=live, check=False).returncode == 0:
+            # mine holds the fix's commit already: it goes on as it is, with no empty commit after it
+            new_commit = git("rev-parse", ref, cwd=live)
+        else:
+            p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", ref], cwd=live, check=False,
+                    env=as_thimble())
+            if p.returncode != 0:
+                run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
+                r = get(rec["id"])
+                r.update(state="redo", error="it does not fit the fixes you have on")
+                put(r)
+                raise FixError(f"fix {rec['id']} does not fit the fixes you have on; r asks Claude to redo it")
+            new_commit = git("rev-parse", "HEAD", cwd=live)
+            git("update-ref", ref, new_commit, cwd=live)
         r = get(rec["id"])
         r.update(state="on", on_at=time.time(), commit=new_commit, error=None)
         _drop_work(r)
@@ -1147,6 +1166,8 @@ def _swap(fid: int) -> dict[str, Any]:
     rec = get(fid)
     p = rec.get("prev") or {}
     old = git("rev-parse", "-q", "--verify", f"refs/thimble/fixes/{fid}", cwd=live, check=False) or str(p.get("commit") or "")
+    # Claude Code's marketplace on live first: when that fails, mine, the fix's refs and its record stay as they were
+    _repoint()
     _unstamp()
     git("checkout", "-q", "mine", cwd=live)
     write_json(home() / "state.json", {"on": True})
@@ -1170,7 +1191,6 @@ def _swap(fid: int) -> dict[str, Any]:
     if old:
         git("update-ref", f"refs/thimble/prev/{fid}", old, cwd=live)
     git("update-ref", "-d", f"refs/thimble/next/{fid}", cwd=live)
-    _repoint()
     r = get(fid)
     new_commit = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
     r.pop("round_commit", None)
