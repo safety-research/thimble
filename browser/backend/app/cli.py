@@ -4522,21 +4522,6 @@ NEW_SESSION = {"archive": None, "chat": "new"}  # pick_session's answer for a ne
 SET_ASIDE_FAILED_LINE = ("the last session was not moved aside ({why}), so the page opens it with a new chat; "
                          "see {log}")
 BACK_FAILED_LINE = "the session was not brought back ({why}); see {log}"
-# under a link that signs in (link_lines): its code signs in one browser, once, within hook_auth.PAIR_TTL_S, and
-# thimble-browser --link prints a new one, in another terminal (HELD_WHERE) when thimble-browser goes on to hold this
-# one until Ctrl-C (hold_until_quit), which stops the server
-LINK_ONCE_LINE = ("this link signs in one browser, once, within {minutes} minutes: open it in the browser you will "
-                  "use. thimble-browser --link{where} prints a new one.")
-HELD_WHERE = " in another terminal"
-# VS Code's terminal opens a localhost link clicked there in its own small browser, at times in two tabs at once, and
-# the tab that comes second finds the code spent
-VSCODE_LINK_LINE = "VS Code opens a link you click here in its own small browser: copy the link into your web browser."
-NO_TERMINAL_LINK_LINE = ("a link that signs in is printed only to a terminal, which no program reads: run "
-                         "thimble-browser --link in yours.")
-# --link once the server stopped (a Ctrl-C where it was held): --continue starts it with the folder's latest session
-# (pick_session), the one the page had open when that holds anything, which a plain start moves aside (open_session)
-NO_SERVER_LINK_LINE = ("no server runs here to sign in to: thimble-browser --continue starts one with this folder's "
-                       "latest session and prints its link (thimble-browser alone starts a new session).")
 
 
 def _ago(at: float, now: float | None = None) -> str:
@@ -4642,59 +4627,18 @@ def open_session(url: str, name: str, cwd: Path, chosen: dict[str, Any]) -> bool
     return True
 
 
-def link_lines(name: str | None, held: bool = False) -> list[str]:
-    """The page's link for workspace `name` (ui_url) and what thimble-browser says under it. Only a terminal gets a link
-    with a code (to_terminal), which signs in one browser, once, within hook_auth.PAIR_TTL_S: the lines say so and how
-    to get a new one (in another terminal when thimble-browser goes on to hold this one: `held`), and in VS Code's
-    terminal to copy it into a browser. A link printed for a program has no code, and the line says where to get one."""
-    from . import hook_auth  # noqa: PLC0415
-
-    pair = to_terminal()
-    link = ui_url(name, pair=pair)
-    if not pair:
-        return [link, NO_TERMINAL_LINK_LINE]
-    if "#p=" not in link:  # the server gave no code, which pair_code logged
-        return [link]
-    notes = [LINK_ONCE_LINE.format(minutes=hook_auth.PAIR_TTL_S // 60, where=HELD_WHERE if held else "")]
-    if os.environ.get("TERM_PROGRAM") == "vscode":
-        notes.append(VSCODE_LINK_LINE)
-    return [link, *notes]
-
-
-def print_link(cwd: Path) -> int:
-    """`thimble-browser --link`: a new sign-in link (link_lines) from the server that runs, for the folder's workspace,
-    or for the start page where the folder has none, so another browser signs in, or this one after its link was used
-    or expired. Nothing else changes: the session open in the page stays, and the terminal that holds the server keeps
-    it. 1 when no server of this install runs, with the start that keeps the folder's latest session
-    (NO_SERVER_LINK_LINE)."""
-    ensure_home()
-    url = api_url()
-    if refuse_foreign(url):
-        return 1
-    if not serves(url):
-        print(BROWSER_LINE.format(what=NO_SERVER_LINK_LINE))
-        return 1
-    name = workspace_for(cwd.resolve(), Path(resolve_env()["data_dir"]), None)
-    for line in link_lines(name):
-        print(BROWSER_LINE.format(what=line), flush=True)
-    return 0
-
-
 def cmd_browser(args: argparse.Namespace) -> int:
     """`thimble-browser [FOLDER]` (browser/scripts/thimble-browser): start the server if needed, open the folder as a
-    workspace, print the page's sign-in link (link_lines) and how thimble reaches Claude (claude_access.py), then hold
-    the terminal until Ctrl-C, which stops the server. No Claude Code session starts here: the server runs main and
-    every agent itself (runtime.py). `--session` says which session of the folder the page opens (pick_session,
-    open_session): a new one, as each `claude` starts a new session, as empty as the folder's first; the latest
-    (`--continue`); one picked from a list (`--resume`); or the one that holds a chat of main by id. With `--detach` it
-    returns once the link is printed and the server keeps running. With `--link` it only prints a new link
-    (print_link)."""
+    workspace, print the page's sign-in link and how thimble reaches Claude (claude_access.py), then hold the terminal
+    until Ctrl-C, which stops the server. No Claude Code session starts here: the server runs main and every agent
+    itself (runtime.py). `--session` says which session of the folder the page opens (pick_session, open_session): a
+    new one, as each `claude` starts a new session, as empty as the folder's first; the latest (`--continue`); one
+    picked from a list (`--resume`); or the one that holds a chat of main by id. With `--detach` it returns once the
+    link is printed and the server keeps running."""
     from . import claude_access, llm  # noqa: PLC0415
 
     llm.scrub_env()
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
-    if getattr(args, "link", False):
-        return print_link(cwd)
     if refused(cwd):
         print(BROWSER_LINE.format(what=f"{cwd} is not a folder to open as a workspace; start thimble-browser in the "
                                        "folder that holds your files."))
@@ -4726,8 +4670,7 @@ def cmd_browser(args: argparse.Namespace) -> int:
         with server_dirs():
             if not open_session(url, name, cwd, chosen):
                 return 1
-    for line in link_lines(name, held=not getattr(args, "detach", False)):
-        print(BROWSER_LINE.format(what=line), flush=True)
+    print(BROWSER_LINE.format(what=ui_url(name, pair=to_terminal())), flush=True)
     p = claude_access.problem_line()
     print(BROWSER_LINE.format(what=f"Claude access: {claude_access.describe()}" + (f". {p}" if p else "")), flush=True)
     if not env["dev"] and not has_ui_build():
@@ -4847,7 +4790,6 @@ def build_parser() -> argparse.ArgumentParser:
     b = sub.add_parser("browser", help="thimble-browser: start the server, open this folder, print the sign-in link")
     b.add_argument("--cwd")
     b.add_argument("--detach", action="store_true")
-    b.add_argument("--link", action="store_true", help="only print a new sign-in link from the server that runs")
     b.add_argument("--session", default="new",
                    help="new | continue | pick | a chat's id: the session of the folder to open (pick_session)")
     b.set_defaults(fn=cmd_browser)

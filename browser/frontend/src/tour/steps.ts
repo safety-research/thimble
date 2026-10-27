@@ -549,13 +549,13 @@ export function tourSteps(key: string, chat = true): Step[] {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
       interact: (api) => api.els.frame ?? null,
       title: 'Views',
-      body: 'A view is a page for browsing this folder’s records, linked to its files, like this Timeline of every event. Views open here in Files; thimble proposes new ones as you work.',
+      body: 'thimble also proposes views, custom-generated just for your corpus, like this Timeline of every event.',
     },
     {
       tab: 'canvas', example: cardExample, clip: canvasPanel, place: 'right', align: 'center', pad: 6,
       anchor: (api) => api.els.card,
       title: 'Cards on the Canvas',
-      body: 'A card answers one question from the files with a table or a chart; the Canvas keeps your cards. Hover over an underlined value to see its source.',
+      body: 'Cards help make agents’ work visible. Hover over an underlined value to see its source.',
       // the analyst's own hover on a value shows its source, as the demo does
       chips: (api, chip) => {
         api.stopDemo()

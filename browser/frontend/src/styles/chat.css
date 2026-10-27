@@ -1414,8 +1414,8 @@ button.model-line-part[aria-expanded='true'] {
 
 /* -------- a view proposal (ProposalCard): one card above the composer in the accent, on the view chip's tint mixed
    into the card's own surface (the foot floats over the rows) with the accent's edge: the head with its
-   sparkle, the view's name in bold and what it shows, the task, a muted line on what Accept starts, then Accept, Reject
-   and a quiet Don't ask again; an Accept that could not start the build says why under them -------- */
+   sparkle, the view's name in bold and what it shows, the task, then Accept, Reject and a quiet Don't ask again; an
+   Accept that could not start the build says why under them -------- */
 .chat-offer {
   display: flex;
   flex: none;
@@ -1448,8 +1448,7 @@ button.model-line-part[aria-expanded='true'] {
   color: var(--text-accent);
 }
 .chat-offer-text,
-.chat-offer-files,
-.chat-offer-what {
+.chat-offer-files {
   margin: 0;
   overflow-wrap: anywhere;
 }
@@ -1462,9 +1461,6 @@ button.model-line-part[aria-expanded='true'] {
 }
 .chat-offer-files {
   color: var(--text-secondary);
-}
-.chat-offer-what {
-  color: var(--text-tertiary);
 }
 .chat-offer-acts {
   display: flex;

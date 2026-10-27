@@ -1,12 +1,12 @@
 // A view proposal (backend views.offer: after a turn, a side thread's answer or the orientation's end, or a viewer for
 // the type of a file opened in Files), as one card above the chat's composer in the accent: "View proposal", the
-// view's name in bold and what it shows (for a file-type viewer, then the files it reads), a muted line that says what
-// Accept starts, then Accept, which builds it as a view the analyst asked for, Reject, and a quiet Don't ask again,
-// which turns view proposals off (Settings turns them on again). The oldest open proposal shows (openOffer); a
-// `suggested` row without `offered` is from an older version and never shows, and nothing shows while view proposals
-// are off. A new proposal ignores clicks for ARM_MS, so a double click never answers it unread. An Accept that cannot
-// start a build now keeps the proposal and says why, and what to do, under its buttons. The card never takes the focus,
-// and a request that fails says so in a toast.
+// view's name in bold and what it shows (for a file-type viewer, then the files it reads), then Accept, which builds
+// it as a view the analyst asked for, Reject, and a quiet Don't ask again, which turns view proposals off (Settings
+// turns them on again). The oldest open proposal shows (openOffer); a `suggested` row without
+// `offered` is from an older version and never shows, and nothing shows while view proposals are off. A new proposal
+// ignores clicks for ARM_MS, so a double click never answers it unread. An Accept that cannot start a build now keeps
+// the proposal and says why, and what to do, under its buttons. The card never takes the focus, and a request that
+// fails says so in a toast.
 import { useEffect, useState } from 'react'
 import { Button } from '../components/Button'
 import { Icon } from '../components/Icon'
@@ -20,9 +20,6 @@ import { ARM_MS } from './PermissionCard'
 
 /** The card's head. */
 export const PROPOSAL_HEAD = 'View proposal'
-/** What Accept starts, under what the view shows: a builder runs in the background, in a thread of its own, and the
- * view waits in Files once it is built (files/viewReady). No time is promised: a build takes minutes, often many. */
-export const ACCEPT_LINE = 'Accept builds it in the background. Its thread shows the build; once it is built, the view is ready in Files.'
 /** The toast after Don't ask again (and a notice's Turn off view proposals). */
 export const PROPOSALS_OFF_LINE = 'View proposals are off. Settings turns them on again.'
 
@@ -147,7 +144,6 @@ export function ProposalCard({ ws }: { ws: string }) {
         {p.description && <span className="chat-offer-desc">{` ${p.description}`}</span>}
       </p>
       {line && <p className="chat-offer-files">{line}</p>}
-      <p className="chat-offer-what">{ACCEPT_LINE}</p>
       <div className="chat-offer-acts">
         <Button variant="primary" size="sm" className="chat-offer-accept" busy={busy === 'accept'} {...gate} onClick={accept}>
           Accept
