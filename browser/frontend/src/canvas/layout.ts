@@ -648,16 +648,24 @@ export interface WheelLike {
   metaKey?: boolean
 }
 
-/** zoom per wheel pixel */
-export const WHEEL_ZOOM = 0.002
+/** zoom per wheel pixel with ctrl, about 1%: a trackpad's pinch arrives as ctrl, a few pixels an event */
+export const WHEEL_ZOOM = 0.01
+/** zoom per wheel pixel with ⌘ alone, a fifth of a pinch's: ⌘ is also the pointer's key, and a ⌘ scroll on a trackpad
+ * comes as a run of small events, which would fly the board to its bounds at a pinch's rate */
+export const CMD_WHEEL_ZOOM = 0.002
+/** the most one wheel event zooms by: a mouse's notch elsewhere (100 pixels, or 3 lines) or a fast turn is one step */
+export const WHEEL_ZOOM_MAX = 1.25
 
-/** A wheel gesture: ⌘ or ctrl (a pinch arrives as ctrl) zooms about the pointer at (px, py); anything else pans. */
+/** A wheel gesture: ctrl (a pinch, or Ctrl and a mouse's wheel off a Mac) or ⌘ zooms about the pointer at (px, py), ⌘
+ * alone more slowly, each event by at most WHEEL_ZOOM_MAX; anything else pans. */
 export function wheelView(view: View, e: WheelLike, px: number, py: number): View {
   const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1
   const dx = e.deltaX * unit
   const dy = e.deltaY * unit
-  if (e.ctrlKey || e.metaKey) return zoomTo(view, view.scale * Math.exp(-dy * WHEEL_ZOOM), px, py)
-  return panBy(view, -dx, -dy)
+  if (!e.ctrlKey && !e.metaKey) return panBy(view, -dx, -dy)
+  const most = Math.log(WHEEL_ZOOM_MAX)
+  const by = -dy * (e.ctrlKey ? WHEEL_ZOOM : CMD_WHEEL_ZOOM)
+  return zoomTo(view, view.scale * Math.exp(Math.max(-most, Math.min(most, by))), px, py)
 }
 
 /** The view that shows `content` whole in the viewport (vw × vh, less `right` for the controls), centred, at most 100%
