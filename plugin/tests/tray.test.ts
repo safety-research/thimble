@@ -579,6 +579,15 @@ test('c cites the selected words in auto cite + verify too: while they wait the 
   expect(opens).toEqual(['Evidence'])
 })
 
+test('a sentence the check rewrote draws as rewritten, its citation corrected, though the analyst asked about other words of it: those step aside', CITES, async ($, on) => {
+  const fixed = { ...QUOTED, status: 'corrected', shown: '11 of 40', was: '12 of 40', rewrite: 'Of the runs, [11 of 40] failed on the p99 check.' }
+  const asked = { n: 2, row: 'row-t1', words: 'failed on the p95 check', start: 27, end: 50, sentence: 'Of the runs, [12 of 40] [failed on the p95 check].', status: 'deferred', shown: 'failed on the p95 check', asked: true }
+  await resumed($, on, [fixed, asked], 's-tray-rewritten')
+  const drawn = textOf(await $.ui.render(answer('row-t1', TEXT)))
+  expect(drawn).toContain('Of the runs, 11 of 40 failed on the p99 check.')
+  expect(drawn).not.toContain('×')
+})
+
 test("with Citations manual, ] passes the citations Claude wrote (they draw as plain words); a click on their words still opens one", { options: { citations: 'manual' } }, async ($, on) => {
   // the answer's only citation is Claude's: nothing for ] to open, so ] is the prompt's and types
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))

@@ -4,7 +4,8 @@
 // would be (store.ts MarkItem `asked`, drawn as a mark by message.js withAsked), and the tray opens on it, which starts
 // its check (checker.ts checkOpened): a second Claude finds where they come from in the files or in what code printed,
 // and the tray shows the evidence, verified, corrected or failed, as for any citation. The words are found in the answer
-// as it draws: words inside or across a citation (Claude's, or one asked before) open that one.
+// as it draws: words inside or across a citation (Claude's, or one asked before) open that one, and so do words of a
+// sentence a check rewrote, which is the check's.
 //
 // c is also the Claims pane's key: c cites only while words are selected that it has not cited yet, which the bar shows
 // as `c cite` (beside `e explain`, the claims' item set aside meanwhile); else c opens the claims (core/answerview.ts
@@ -12,8 +13,8 @@
 //
 //   citeKey($, key), citeBar, citeShown   c at an empty prompt while words wait, `c cite` on the bar
 //   citeWords($, row, words)              the citation of these words on that answer: an existing one (Claude's, or
-//                                         one asked before) when the words stand inside or across it, else a new
-//                                         one; opened
+//                                         one asked before) when the words stand inside or across it, or in a
+//                                         sentence its check rewrote, else a new one; opened
 import type { EngineInterface } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
@@ -28,7 +29,7 @@ import { claudeCites, featureOn } from '../settings/features.mjs'
 import { squeezeView } from '../squeeze/seam'
 import { openTray, trayFocus } from '../tray/seam'
 import { awaitsCheck } from './checker'
-import { askedWords, carrier, codeRanges, marksIn, rewritesIn, sentenceOf, withAsked, withCorrections } from './message.js'
+import { askedWords, carrier, codeRanges, marksIn, rewritesIn, sentenceOf, sentenceSpan, withAsked, withCorrections } from './message.js'
 import { editReply, newReply, replyKeyOf, replyOf, type MarkItem } from './store'
 
 type Engine = EngineInterface
@@ -107,7 +108,8 @@ async function showCitation($: Engine, row: string, n: number): Promise<void> {
 }
 
 /** The citation of `words` on the answer `row`, opened in the tray: Claude's own or an asked one when the words stand
- *  inside or across it, else a new one, whose check opening it starts. A sentence says why there is none. */
+ *  inside or across it, the one whose check rewrote their sentence when they stand in that sentence, else a new one,
+ *  whose check opening it starts. A sentence says why there is none. */
 export async function citeWords($: Engine, row: string, words: string): Promise<string | void> {
   const raw = (await messageOf($, row))?.text ?? ''
   const v = await squeezeView($, row, raw).catch(() => null)
@@ -127,10 +129,15 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
   const marks = marksIn(shown)
   const hit = marks.findIndex(m => at.start < m.end && at.end > m.start)
   if (hit >= 0 && !asked.items[hit]) return 'those words are in a citation still being checked; try again in a moment.'
-  // so do words asked about before that it does not draw
+  // so do words asked about before that it does not draw; and words of a sentence a check rewrote open the citation it
+  // was rewritten for, since the sentence is the check's and holds no citation asked about (message.js withAsked)
   const place = writtenPlace(shown, asked, at)
   const before = place && items.find(m => m.asked && place.start < m.end && place.end > m.start)
-  const n = hit >= 0 ? asked.items[hit].n : before ? before.n : null
+  const fixed = marks.findIndex((m, k) => {
+    const [a, b] = sentenceSpan(shown, m)
+    return rewrote.placed.has(k) && at.start < b && at.end > a
+  })
+  const n = hit >= 0 ? asked.items[hit].n : before ? before.n : fixed >= 0 ? asked.items[fixed].n : null
   if (n != null) { await showCitation($, row, n); return }
   if (!place) return missing
   if (codeRanges(raw).some(([a, b]) => place.start < b && place.end > a)) return 'those words are code, which has no source; select words of the answer\'s text.'

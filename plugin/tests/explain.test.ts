@@ -15,7 +15,7 @@ import { failLineNow } from '../bar/notice'
 import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
-import { readText, withAsked } from '../marks/message.js'
+import { readText, rewritesIn, withAsked } from '../marks/message.js'
 import { editReply, replyKeyOf, rowMarks } from '../marks/store'
 import { noteRow, startCheck } from '../marks/checker'
 import { citeBar, citeKey, citeWords, placeOf } from '../marks/cite'
@@ -540,6 +540,43 @@ test('c finds the selected words in the answer as it draws: words that run into 
     const items = (await rowMarks(s.$, 't1-row'))!.items
     expect(items.filter(m => m.asked).map(m => ANSWER.slice(m.start, m.end))).toEqual(['came 30 seconds', 'after a drop'])
     expect(withAsked(ANSWER, items).text).toContain('[41 of the 44](#) failures [came 30 seconds](#) [after a drop](#).')
+  } finally {
+    setOptions({})
+  }
+})
+
+test('words of a sentence a check rewrote: those asked about before step aside so the rewrite stands, and open their citation again; its other words open the citation it was rewritten for; words of another sentence become a citation beside it', async () => {
+  setOptions({ citations: 'auto cite' })
+  try {
+    const text = `${ANSWER} The client gives up after five tries.`
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text })
+    await noteRow(s.$, 't1-row', text)
+    await startCheck(s.$, { turnId: 't1', reason: 'answer' })
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const items = async () => (await rowMarks(s.$, 't1-row'))!.items
+    const opened = async () => (await trayNow(s.$))!.stack[0]
+    // words of the citation's sentence, asked about while the citation waits to be opened; then its check rewrites the
+    // sentence
+    expect(await citeWords(s.$, 't1-row', 'Uploads fail')).toBeUndefined()
+    const rewrite = 'Uploads fail after the retry budget runs out: [43 of the 44] failures came within a minute of a drop.'
+    await editReply(s.$, (await replyKeyOf(s.$, 't1-row'))!, r => ({ ...r, items: r.items.map(m => (m.n === 1 ? { ...m, status: 'corrected', shown: '43 of the 44', was: m.words, rewrite } : m)) }))
+    // the rewrite stands, and the words asked about in it are no citation there
+    expect(withAsked(text, await items()).items.map(m => m.n)).toEqual([1])
+    expect(readText(text, await items())).toBe(`${rewrite.replace('[43 of the 44]', '[43 of the 44](#)')} The client gives up after five tries.`)
+    // those words again open their citation; other words of the sentence, Claude's or the check's, the rewritten one
+    expect(await citeWords(s.$, 't1-row', 'Uploads fail')).toBeUndefined()
+    expect(await opened()).toMatchObject({ n: 2 })
+    for (const words of ['retry budget runs out', 'within a minute']) {
+      expect(await citeWords(s.$, 't1-row', words)).toBeUndefined()
+      expect(await opened()).toMatchObject({ n: 1 })
+    }
+    expect((await items()).length).toBe(2)
+    // words of another sentence: a citation of their own, and the rewrite still stands beside it
+    expect(await citeWords(s.$, 't1-row', 'gives up after five tries')).toBeUndefined()
+    expect(await opened()).toMatchObject({ n: 3 })
+    const drawn = withAsked(text, await items())
+    expect(rewritesIn(drawn.text, drawn.items).text).toBe(`${rewrite.replace('[43 of the 44]', '[43 of the 44](#)')} The client [gives up after five tries](#).`)
   } finally {
     setOptions({})
   }
