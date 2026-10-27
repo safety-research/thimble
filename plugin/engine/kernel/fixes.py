@@ -545,9 +545,10 @@ def place_release(base: str) -> None:
 
 def _pristine(d: Path, base: str) -> bool:
     """Whether the checkout `d` is as commit `base` has it: HEAD detached at base, and no file changed, untracked or
-    ignored. One git call, which takes no lock, so that it never stops another process's git in the checkout."""
-    p = run(["git", "--no-optional-locks", "status", "--porcelain=v2", "--branch", "--ignored", "--untracked-files=normal"],
-            cwd=d, check=False)
+    ignored. One git call. It writes the checkout's index only when the files' times there are stale (a checkout made or
+    put back within the same second), so that the next looks, the launcher's and the browser's too, are quick, and it
+    never waits for the index's lock: when another process's git holds it, it writes nothing."""
+    p = run(["git", "status", "--porcelain=v2", "--branch", "--ignored", "--untracked-files=normal"], cwd=d, check=False)
     lines = p.stdout.splitlines()
     return (p.returncode == 0 and f"# branch.oid {base}" in lines and "# branch.head (detached)" in lines
             and all(x.startswith("# ") for x in lines))
