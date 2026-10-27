@@ -107,7 +107,8 @@ until you fix it and run it again. Then it:
    `~/.thimble-browser` readable by you alone), 2 your Claude Code sign-in (it shows that this launches headless Claude
    Code sessions in the background and asks you to confirm), or 3 Workload Identity Federation (the path of its config
    file). It checks the choice with one small call.
-5. says how much disk space the browser workbench takes, and whether the sandbox works on this machine.
+5. says how much disk space the browser workbench takes, and, last, what does not work yet or is left to do, such as a
+   card sandbox that cannot start here, with its fix.
 
 Options:
 

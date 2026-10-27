@@ -91,3 +91,41 @@ def test_an_old_claude_code_is_updated_by_what_installed_it(tmp_path):
     line = needs(tmp_path / "own", tmp_path / "own" / "home" / ".local" / "share" / "claude" / "versions" / "2.1.283")
     assert "or later: claude update" in line
     assert "whoever manages this machine" in line
+
+
+def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
+    """A whole install, with made-up commands, whose card sandbox does not work yet: its line, and the why and fix in
+    it, come again at the end, after the browser workbench's start lines, so what is left to do is said last."""
+    market = tmp_path / "market"
+    (market / ".claude-plugin").mkdir(parents=True)
+    (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
+    (market / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (market / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"userConfig": {}}))
+    stub(market / "plugin" / "sandbox" / "setup.mjs", "")
+    stub(market / "plugin" / "bin" / "thimble", "")
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"installLocation": str(market)}}))
+    bin_ = tmp_path / "stubs"
+    # node's version, and setup.mjs --probe, which says why the sandbox does not work and its fix
+    stub(bin_ / "node", 'case "$1" in --version) echo v22.20.0 ;;\n'
+         '*) echo "thimble: cards cannot run yet: the made-up runner did not start."; echo "  Run the made-up fix."; exit 1 ;; esac\n')
+    stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
+    stub(bin_ / "uv", '[ "$1" = --version ] && echo "uv 0.9.0"\nexit 0\n')
+    stub(bin_ / "npm", "exit 0\n")
+    stub(bin_ / "bwrap", "exit 0\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home")}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-setup", "--bin-dir", str(tmp_path / "bin")],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, p.stdout + p.stderr
+    lines = [line for line in p.stdout.splitlines() if line.strip()]
+    start = lines.index("To start the browser workbench, run this in a folder of files:")
+    notes = lines[start:]
+    while notes and not notes[0].startswith("Note: "):
+        notes.pop(0)
+    # from the first note on, every line is a note, and one of them is the sandbox's, with its why and its fix
+    assert notes and all(line.startswith("Note: ") for line in notes), lines
+    assert any("the made-up runner did not start. Run the made-up fix." in line for line in notes), notes
