@@ -4,7 +4,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import { keyedWords, pressedWords } from '../bar/bar'
-import { closePane, drawPane, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
+import { noteViewport } from '../cards/draw'
+import { closePane, drawPane, narrowNotice, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 import { setOptions } from '../settings/features.mjs'
 import { resetThreads } from '../threads/thread'
 
@@ -221,6 +222,45 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('labels')
   expect(focused.at(-1)).toBe('mode-labels-off')
   setOptions({})
+})
+
+test('a pane a key could not open in a narrow window: the notice offers the click that opens it here; the panes that lay out by their rows ask for them', async () => {
+  const s = setup()
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (118 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
+  expect(await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })).toBe(false)
+  const said = narrowNotice('r', 'r coverage')
+  expect(pressedWords(said, new Map([['r coverage 43% (3/7 files)', () => 'opened']])).find(p => p.press)?.s).toBe('“r coverage”')
+  // a pane drawn inline gets the rows it asks for: the settings, coverage and a citation's evidence ask for theirs
+  s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: true } }
+  for (const kind of ['settings', 'coverage', 'evidence']) {
+    await closePane(s.$)
+    await openPane(s.$, kind, {}, kind, { focus: true })
+    expect(s.opens.at(-1).rows).toBeGreaterThan(20)
+  }
+})
+
+test("in Claude Code's default layout, which sends no click and docks no pane, the notice names /tui fullscreen, with no click; where nothing places panes, it does not say to widen the window", async () => {
+  const s = setup()
+  const named = new Map([['r coverage 43% (3/7 files)', () => 'opened']])
+  try {
+    noteViewport({ isFullscreen: false })
+    s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (80 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
+    expect(await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })).toBe(false)
+    const said = narrowNotice('r', 'r coverage')
+    expect(said).toContain('/tui fullscreen')
+    expect(said).not.toMatch(/click/i)
+    expect(pressedWords(said, named).some(p => p.press)).toBe(false)
+    // no surface here places panes: neither a wider window nor the fullscreen layout opens it
+    s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'no attached surface places panes' } }
+    await openPane(s.$, 'coverage', {}, 'Coverage', { focus: true })
+    for (const isFullscreen of [false, true]) {
+      noteViewport({ isFullscreen })
+      expect(narrowNotice('r', 'r coverage')).not.toMatch(/widen|wider|columns|fullscreen|click/i)
+    }
+  } finally {
+    // the tests after it draw in the fullscreen layout
+    noteViewport({ isFullscreen: true })
+  }
 })
 
 test('a key a failure line names is a part of its own, so a click presses it; esc and a key with a modifier are not', async () => {

@@ -12,6 +12,9 @@ import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/
 import { claimsStore, claimsToFind, openClaims } from '../claims/term'
 import { failLineNow } from '../bar/notice'
 import { resetPrompts } from '../prompts/prompts'
+import { barRows } from '../bar/bar'
+import { busyWhile } from '../bar/busy'
+import { textWidth } from '../core/text.js'
 import { promptStub, tempRun } from './stubs'
 import { treeRows } from '../core/trail.mjs'
 
@@ -442,6 +445,30 @@ test('c in a narrow terminal before any claims names the bar\'s item by the bar\
   await openClaims(s.$, {}, true)
   expect(String((await failLineNow(s.$))?.text)).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c evidence”.')
   setOptions({})
+})
+
+test('a bar of 80 columns beside a long busy step keeps c and its count, whole: the busy step gives way first', async () => {
+  setOptions({ claimsMode: 'auto' })
+  const said = Array.from({ length: 7 }, (_, i) => `Run ${i + 1} failed`)
+  const s = setup([reply(said.map(quote => ({ claim: `${quote}.`, quote, cluster: 'failures' })))])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: [said.map(x => `${x}.`).join(' ')] })
+  let alive = true
+  // the newest step (the steps of tests before it still run beside it), run long enough to show
+  let now = 1e9
+  s.$.clock = { ...s.$.clock, now: async () => now }
+  try {
+    await busyWhile(s.$, 'fixing new: add a way for the analyst to see it', async () => alive)
+    now += 5000
+    const rows = (await barRows(s.$, els, 80, { on: k => k !== 'cards' })).map(textOf)
+    expect(rows.some(r => r.includes('c 7 claims'))).toBe(true)
+    for (const r of rows) expect(textWidth(r)).toBeLessThanOrEqual(80)
+    expect(rows.join('\n')).toContain('fixing')
+    expect(rows.join('\n')).not.toContain('to see it')
+  } finally {
+    alive = false
+    setOptions({})
+  }
 })
 
 test('claims on demand: no look reads them after a reply; c shows the pane with f, which finds the claims of the answers not read, alone', async () => {

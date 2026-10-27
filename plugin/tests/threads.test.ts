@@ -12,6 +12,7 @@ import { keptDir } from '../core/env'
 import { openThread, threadCardAnchor, threadKnown, threadOnCard, threadPaneParts, threadPassages, threadsBar, threadsKey } from '../threads/seam'
 import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from '../threads/thread'
 import { threadKey } from '../threads/threads.mjs'
+import { treeRows } from '../core/trail.mjs'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -458,6 +459,38 @@ test("a thread's pane drawn right after a reload of the plugin reads the kept th
   expect(textOf(p.body)).not.toContain('no longer in the session')
   expect(await threadKnown(s.$, KEY)).toBe(true)
   expect(await threadKnown(s.$, 'mark-row-made-up-2-citation-1')).toBe(false)
+})
+
+test("a running thread under a tall heads-up shows its question and the steps its fork took; the pane counts the heads-up's rows at the width they wrap at", async () => {
+  const s = setup()
+  let poll: (() => void) | null = null
+  s.$.clock.every = (_ms: number, f: () => void) => { poll = f; return () => undefined }
+  const mark = { row: 'row-made-up-6', kind: 'heads' as const, id: 'h1' }
+  const point = 'A run that was retried has two rows in runs.csv, so the count of failed runs is too high by about a third, and the median time is off as well.'
+  await s.$.state.set({ plugin: 'thimble', key: 'answerMsg', id: mark.row }, { row: mark.row, turnId: 't6', text: 'Retries rose.', at: 1, parts: { explain: { order: ['h1'], items: { h1: {
+    id: 'h1', kind: 'heads', term: 'Retries rose', title: 'Retried runs count twice', bullets: [point, point, point],
+  } } } } })
+  const scope = { about: 'the heads-up "Retried runs count twice"', mark }
+  const asked = askHere(s.$, scope, 'how many were retried?')
+  await settle()
+  s.go()
+  await asked
+  // the fork wrote words, then ran a command, and works on
+  s.$.session.messages = async () => [
+    { role: 'user', content: [{ type: 'text', text: `<fork-boilerplate>b</fork-boilerplate>\nYour directive: ${s.spawns[0].prompt}` }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Let me look at the folder of runs first.' }, { type: 'tool_use', name: 'Bash', input: { command: 'ls runs' } }] },
+  ]
+  poll!()
+  await settle()
+  expect(threadOf(threadKey(scope))!.status).toBe('running')
+  const tree = await drawThreads(s.$, { props: { bodyColumns: 50, scroll: { bodyRows: 20 } } }, 'thread', { key: threadKey(scope) }, els)
+  const shown = textOf(tree)
+  expect(shown).toContain('how many were retried?')
+  expect(shown).not.toContain('earlier turn')
+  expect(shown).toContain('● 2 steps · ls runs')
+  // each point wraps after its gutter, so the pane, which scrolls to the conversation's end, counts it at that width
+  const part = nodes(tree).find(n => n.props?.key === 'subject-m0')
+  expect(treeRows(part, 50)).toBe(treeRows(els.Text({ wrap: 'wrap', children: `· ${point}` }), 48))
 })
 
 // The pane reads a running thread's turns every few seconds. A read that started before the fork ended, and ends after

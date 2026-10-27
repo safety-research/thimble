@@ -8,6 +8,7 @@ import { busyWhile } from '../bar/busy'
 import { INTRO, INTRO_MS } from '../bar/intro'
 import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
+import { textWidth } from '../core/text.js'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub } from './stubs'
 
@@ -181,6 +182,17 @@ test('each switch takes its items off the bar, and v waits while a design runs',
   expect(narrow).not.toContain('labels')
 })
 
+test('the settings\' preview in a narrow pane lays out whole items: none is split across rows, no row starts or ends with ·, and none is wider than the pane', async () => {
+  const state: Record<string, unknown> = { counts: { coverage: '0.01% (1/7,008 files)', labels: 2, gen: 1, error: null } }
+  const lines = (await barRows(stateOnly(state), ELS, 40, { on: () => true, preview: true })).map(textOf)
+  expect(lines.length).toBeGreaterThan(1)
+  for (const l of lines) {
+    expect(textWidth(l)).toBeLessThanOrEqual(40)
+    expect(l.trim()).not.toMatch(/^·|·$/)
+  }
+  for (const item of ['v visualize', 'e explain', 'r coverage 0.01% (1/7,008 files)', 'l 2 labels']) expect(lines.filter(l => l.includes(item)).length).toBe(1)
+})
+
 test('a failure is a line above the bar in red, a notice one not in red; the next prompt takes either away', async () => {
   const state: Record<string, unknown> = {}
   const $ = stateOnly(state)
@@ -222,22 +234,46 @@ test('a long busy step keeps the bar to one row: its other steps go, then its wo
   alive = false
 })
 
-test('while a busy step shows, a long hint and the busy step give way before the right loses its words', async () => {
+test('a narrow bar gives way in order: the busy step to its glyph and seconds, then the counts; a hint stays whole, and the keys stay, whole, on a second row when they must', async () => {
   let now = 0
-  const state: Record<string, unknown> = { counts: { coverage: '43% (3/7 files)', labels: 0, gen: 1, error: null } }
+  const state: Record<string, unknown> = { answerRow: 'row-made-up', counts: { coverage: '43% (3/7 files)', labels: 2, gen: 1, error: null }, designNow: 'd1', 'designs:d1': { status: 'done' } }
   const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined }, clock: { now: async () => now, after: () => ({ cancel() {} }) } }
   let alive = true
-  await busyWhile($, 'adding explainers', async () => alive)
-  now = 5000
+  // the newest step (the steps of tests before it still run beside it)
+  now = 1000
+  await busyWhile($, 'fixing new: add a way for the analyst to see it', async () => alive)
+  now = 6000
+  // the bar's rows at `width`, none wider than it
+  const bar = async (width: number) => {
+    const rows = (await barRows($, ELS, width, { on: () => true })).map(textOf)
+    for (const r of rows) expect(textWidth(r)).toBeLessThanOrEqual(width)
+    return rows
+  }
+  // the busy step's words go first, a whole word at a time, while the counts keep theirs
+  const cut = (await bar(80)).join('\n')
+  expect(cut).toContain('fixing')
+  expect(cut).not.toContain('to see it')
+  for (const item of ['5s', 'v visualize', 'r coverage 43% (3/7 files)', 'l 2 labels']) expect(cut).toContain(item)
+  // then down to its glyph and seconds, before the labels' count goes
+  const least = (await bar(60)).join('\n')
+  expect(least).not.toContain('fixing')
+  for (const item of ['5s', 'v visualize', 'r coverage 43% (3/7 files)']) expect(least).toContain(item)
+  expect(least).not.toContain('labels')
+  // a hint stays whole, and the counts give way to it; the busy step takes back the room they leave
   hintLine($, 'select words in an answer and press e to explain them.', 'explain')
   await new Promise(r => setTimeout(r, 5))
-  const rows = await barRows($, ELS, 90, { on: () => true })
-  expect(rows.length).toBe(1)
-  const band = textOf(rows)
-  expect(band).toContain('Hint: select')
-  expect(band).toContain('…')
-  expect(band).toContain('r coverage 43% (3/7 files)')
-  expect(band.length).toBeLessThanOrEqual(90)
+  const hinted = await bar(90)
+  expect(hinted.length).toBe(1)
+  expect(hinted[0]).toContain('select words in an answer and press e to explain them.')
+  expect(hinted[0]).toContain('fixing')
+  expect(hinted[0]).not.toContain('coverage')
+  expect(hinted[0]).not.toContain('labels')
+  await hintsGone($)
+  // narrower than its keys: they go on a second row, each whole
+  const two = await bar(25)
+  expect(two.length).toBe(2)
+  expect(two[0]).toContain('5s')
+  expect(two[1]).toContain('v visualize')
   alive = false
 })
 
@@ -300,7 +336,7 @@ test('a hint above the bar goes by itself after a few seconds, or at the next ke
   expect(await shown()).toContain('The card did not draw.')
 })
 
-test('a hint stands in the bar in place of its left keys, after `thimble`; the right stays, and a long hint is cut to the one row', async () => {
+test('a hint stands in the bar in place of its left keys, after `thimble`; the right stays, and a hint too long for the row stands whole above the bar, which keeps its keys', async () => {
   const state: Record<string, unknown> = { answerRow: 'row-made-up', counts: { coverage: '43% (3/7 files)', labels: 2, gen: 1, error: null }, designNow: 'd1', 'designs:d1': { status: 'done' } }
   const $: Any = { ...stateOnly(state), ui: { invalidate: () => undefined } }
   const bar = async (width: number) => barRows($, ELS, width, { on: () => true })
@@ -313,16 +349,16 @@ test('a hint stands in the bar in place of its left keys, after `thimble`; the r
   expect(band).toContain('thimble  Hint: press s to rewrite the last answer shorter or longer.')
   expect(band).not.toContain('v visualize')
   expect(band).toContain('r coverage 43% (3/7 files) · l 2 labels')
-  // a hint too long for the row is cut, and the bar keeps to one row
-  hintLine($, `select words in an answer and press e to explain them, ${'and then some more words '.repeat(8)}`, 'explain')
+  // a hint too long for the row stands above the bar, whole, and the bar names its keys again
+  const long = `select words in an answer and press e to explain them, ${'and then some more words '.repeat(8)}`.trim()
+  hintLine($, long, 'explain')
   await new Promise(r => setTimeout(r, 5))
   const narrow = await bar(80)
-  expect(narrow.length).toBe(1)
-  const cutBar = textOf(narrow)
-  expect(cutBar).toContain('Hint: select words')
-  expect(cutBar).toContain('…')
-  expect(cutBar).toContain('r coverage')
-  expect(cutBar.length).toBeLessThanOrEqual(80)
+  expect(narrow.length).toBe(2)
+  expect(textOf(narrow[0])).toBe(`Hint: ${long}`)
+  expect(textOf(narrow[1])).toContain('v visualize')
+  expect(textOf(narrow[1])).toContain('r coverage')
+  expect(textOf(narrow)).not.toContain('…')
 })
 
 test('the first session\'s hint says where the settings are, in the bar in place of its keys', async ($, on) => {

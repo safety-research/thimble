@@ -21,7 +21,7 @@ import { failCleared, failNotice } from '../bar/notice'
 import { actingRow, messageOf, partOf, setPart, turnOf, turnsNow, type TurnRec } from '../core/answers'
 import { isPersonPrompt } from '../core/answers.mjs'
 import { readKept, writeKept } from '../core/env'
-import { openPane } from '../core/pane'
+import { narrowNotice, openPane } from '../core/pane'
 import { sessionKey } from '../hooks/conversation'
 import type { Look } from '../observer/observer'
 import { readText } from '../marks/message.js'
@@ -264,7 +264,7 @@ export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
   const words = `c ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
-  if (byKey) failNotice($, `c needs a wider terminal: widen the window to show the side pane, or click “${words}”.`, 'pane:claims')
+  if (byKey) failNotice($, narrowNotice('c', words), 'pane:claims')
   else failNotice($, 'Claude Code did not open the Evidence pane here.', 'pane:claims')
 }
 
