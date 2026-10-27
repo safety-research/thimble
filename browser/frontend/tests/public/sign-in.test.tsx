@@ -6,13 +6,15 @@
 // that says it isn't signed in and names the way in, and the app never mounts, so nothing polls. A code the server
 // refused with 410 says so first. A read refused for
 // want of sign-in, or a stream closed while the browser is no longer signed in, brings the line back; a new link opened
-// in the tab, or the tab shown again, checks once more.
+// in the tab, the tab shown again, or a sign-in in another tab of the browser checks once more.
 import { act, createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import type { Notice } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
-const LINE = "This browser isn't signed in. Open the link thimble-browser printed in your terminal, or run thimble-browser again."
-const GONE = "This link was used or has expired, so this browser isn't signed in. Open the link thimble-browser printed in your terminal, or run thimble-browser again."
+const LINE = "This browser isn't signed in. Open the link thimble-browser printed in your terminal, or run thimble-browser --link there for a new one."
+const GONE = "This link was used or has expired, so this browser isn't signed in. Each link signs in one browser, once: run thimble-browser --link in your terminal for a new one."
 
 let paired: boolean | 'down' = false
 // the server answers reads without the sign-in, as it does for the screenshot tool's credential
@@ -54,6 +56,17 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** The notices this page made, as a strip reads them (lib/notices usePageNotices). */
+function pageNotices(notices: typeof import('../../src/lib/notices.ts')): Notice[] {
+  const got: Notice[] = []
+  function Read() {
+    got.push(...notices.usePageNotices())
+    return null
+  }
+  renderToStaticMarkup(createElement(Read))
+  return got
+}
+
 /** The gate over a stand-in app, from modules loaded fresh for the test (claimKey keeps its claim per page). */
 async function gate() {
   const api = await import('../../src/lib/api.ts')
@@ -68,8 +81,8 @@ async function gate() {
 describe('the sign-in gate', () => {
   test('the lines are the contract the server and the release test share, and each starts by saying the browser is not signed in', async () => {
     const { SIGN_IN_LINE, CODE_GONE_LINE } = await gate()
-    expect(SIGN_IN_LINE).toBe("This browser isn't signed in. Open the link `thimble-browser` printed in your terminal, or run `thimble-browser` again.")
-    expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Open the link `thimble-browser` printed in your terminal, or run `thimble-browser` again.")
+    expect(SIGN_IN_LINE).toBe("This browser isn't signed in. Open the link `thimble-browser` printed in your terminal, or run `thimble-browser --link` there for a new one.")
+    expect(CODE_GONE_LINE).toBe("This link was used or has expired, so this browser isn't signed in. Each link signs in one browser, once: run `thimble-browser --link` in your terminal for a new one.")
   })
 
   test('a browser that is not signed in sees only the line, and the app never mounts or reads', async () => {
@@ -94,8 +107,31 @@ describe('the sign-in gate', () => {
     const { el } = await gate()
     expect(posts).toEqual(['{"code":"old","ws":"logs"}'])
     expect(el.textContent).toBe(GONE)
-    expect(el.querySelector('code')?.textContent).toBe('thimble-browser')
+    expect(el.querySelector('code')?.textContent).toBe('thimble-browser --link')
     expect(el.querySelector('.stand-in-app')).toBeNull()
+  })
+
+  test('a tab whose link lost its code to another tab of the browser signs in once that tab keeps its key', async () => {
+    window.history.replaceState(null, '', '/?ws=logs#p=twice')
+    keyStatus = 410
+    const { el } = await gate()
+    const notices = await import('../../src/lib/notices.ts')
+    expect(el.textContent).toBe(GONE)
+    expect(pageNotices(notices).map((n) => n.text)).toEqual([notices.CODE_GONE_TEXT])
+    // the other tab signed the browser in; something else kept in storage asks nothing
+    paired = true
+    const before = requests.length
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'another-item', newValue: 'x' }))
+    })
+    await settle()
+    expect(requests.slice(before)).toEqual([])
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', { key: 'thimble-browser-key', newValue: 'k'.repeat(32) }))
+    })
+    await settle()
+    expect(el.querySelector('.stand-in-app')?.textContent).toBe('the app')
+    expect(pageNotices(notices)).toEqual([])
   })
 
   test('a signed-in browser sees the app; a read refused for want of sign-in brings the line, with no start', async () => {

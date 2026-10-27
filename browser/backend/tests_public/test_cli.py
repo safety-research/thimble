@@ -179,6 +179,54 @@ def test_up_prints_the_url_and_opens_a_sessions_folder(home, data, monkeypatch, 
     assert cli.build_parser().parse_args(["up"]).cmd == "up" and cli.build_parser().parse_args(["ensure"]).cmd == "ensure"
 
 
+def test_the_link_says_it_signs_in_one_browser_once_and_link_prints_a_new_one_with_nothing_else(home, data, monkeypatch,
+                                                                                                capsys, tmp_path):
+    """thimble-browser's link: under a link with a sign-in code, that it signs in one browser, once, within the code's
+    minutes, and how to get a new one; in VS Code's terminal, which opens a link clicked there in its own browser, to
+    copy it into a browser. `thimble-browser --link` prints a new link for the folder's workspace (the start page's for
+    a folder with none) from the server that runs, and does nothing else: no new session, no start, no hold of the
+    terminal. Output a program reads holds no code, and says where to get one."""
+    _healthy_no_process(monkeypatch)
+    monkeypatch.setattr(cli, "serves", lambda url=None: True)
+    minted = []
+
+    def request(m, u, b=None, timeout=5.0):
+        assert u == "http://127.0.0.1:8300/api/ui/pair", f"--link asked {m} {u}"
+        minted.append(b)
+        return 200, {"code": f"c{len(minted)}"}
+
+    def nothing_else(*_a, **_k):
+        raise AssertionError("--link only prints a link")
+
+    monkeypatch.setattr(cli, "_request", request)
+    for name in ("pick_session", "open_session", "ensure_running", "hold_until_quit", "archive_workspace"):
+        monkeypatch.setattr(cli, name, nothing_else)
+    monkeypatch.setattr(cli, "to_terminal", lambda: True)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    folder = str(data / "mini" / "agents")
+    once = cli.LINK_ONCE_LINE.format(minutes=5)
+    assert cli.main(["browser", "--cwd", folder, "--link"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["thimble browser: http://127.0.0.1:5300/?ws=mini#p=c1",
+                                                    f"thimble browser: {once}"]
+    assert minted == [{"ws": "mini"}] and "thimble-browser --link" in once
+    monkeypatch.setenv("TERM_PROGRAM", "vscode")
+    assert cli.main(["browser", "--cwd", folder, "--link"]) == 0
+    assert capsys.readouterr().out.splitlines()[1:] == [f"thimble browser: {once}",
+                                                        f"thimble browser: {cli.VSCODE_LINK_LINE}"]
+    (tmp_path / "elsewhere").mkdir()
+    assert cli.main(["browser", "--cwd", str(tmp_path / "elsewhere"), "--link"]) == 0
+    assert capsys.readouterr().out.splitlines()[0] == "thimble browser: http://127.0.0.1:5300/#p=c3"
+    assert minted[-1] == {}, "the start page's code signs the browser in all the same"
+    monkeypatch.setattr(cli, "to_terminal", lambda: False)
+    assert cli.main(["browser", "--cwd", folder, "--link"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["thimble browser: http://127.0.0.1:5300/?ws=mini",
+                                                    f"thimble browser: {cli.NO_TERMINAL_LINK_LINE}"]
+    assert len(minted) == 3, "no code for a program"
+    monkeypatch.setattr(cli, "serves", lambda url=None: False)
+    assert cli.main(["browser", "--cwd", folder, "--link"]) == 1
+    assert capsys.readouterr().out.splitlines() == [f"thimble browser: {cli.NO_SERVER_LINK_LINE}"]
+
+
 def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monkeypatch, capsys):
     """`thimble unpair` asks the server to forget every browser (POST /api/ui/unpair) and removes paired.json, so a
     server that starts later knows none either. When the server does not do it, the line says so and how to fix it."""

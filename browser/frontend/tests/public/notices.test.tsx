@@ -360,7 +360,7 @@ describe('the strip above the composer, and the rows', () => {
     const el = await strip('nt-code-gone')
     await act(async () => showCodeGone())
     expect(lines(el)).toEqual([CODE_GONE_TEXT.replace(/`/g, ''), BLOCKED])
-    expect([...el.querySelectorAll('.chat-notice-text code')].map((c) => c.textContent)).toEqual(['thimble-browser'])
+    expect([...el.querySelectorAll('.chat-notice-text code')].map((c) => c.textContent)).toEqual(['thimble-browser --link'])
     await click(el.querySelector('.chat-notice-x'))
     await settle()
     expect(lines(el)).toEqual([BLOCKED])

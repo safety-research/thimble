@@ -30,10 +30,13 @@ cd path/to/folder
 thimble-browser
 thimble-browser path/to/folder --port 8400
 thimble-browser --continue    # or -r / --resume to pick an earlier session
+thimble-browser --link        # a new sign-in link, while the server runs
 ```
 
 `thimble-browser` opens the folder you are in, or the folder you name. It starts the server on 127.0.0.1, port 8300 or
-the next free one (`--port N` takes N alone), and prints the page's sign-in link and how it reaches Claude. Ctrl-C
+the next free one (`--port N` takes N alone), and prints the page's sign-in link and how it reaches Claude. The link
+signs in one browser, once, within 5 minutes, so open it in the browser you will use; `thimble-browser --link` prints a
+new one for another browser, and leaves the server and its session as they are. Ctrl-C
 stops the server. Each start is a new session, as with `claude`: an empty chat, canvas, report and labels, as at the
 folder's first start. `--continue` (`-c`) brings back the latest session with its chat, canvas, report and labels;
 `--resume` (`-r`) lists the earlier sessions (when, the first message, turns and cards) and brings back the one you

@@ -182,7 +182,14 @@ export async function signedIn(again = false): Promise<boolean | null> {
   await claimKey()
   const got = again ? await learnBrowser() : await afterClaim
   if (!got) return null
-  if (got.paired === true) return true
+  if (got.paired === true) {
+    // signed in after all (another tab of this browser signed in with the code): a refused code no longer matters
+    if (codeGone) {
+      codeGone = false
+      clearCodeGone()
+    }
+    return true
+  }
   try {
     return (await fetch(`${apiBase()}/tour`)).status !== 401
   } catch {

@@ -159,8 +159,9 @@ The browser workbench:
    Federation, or your Claude Code sign-in); when it did not, the page asks at its first start.
    Each start is a new session, as empty as the first: no chat, cards, report or labels. `thimble-browser
    --continue` (`-c`) brings back the latest session whole, and `--resume` (`-r`) lists the earlier ones to pick.
-2. Open the link, and ask in the page's chat: "How many runs failed, and why?" Claude answers with a card whose claims
-   cite the files.
+2. Open the link in the browser you will use (it signs in one browser, once; `thimble-browser --link` prints a new
+   one), and ask in the page's chat: "How many runs failed, and why?" Claude answers with a card whose claims cite the
+   files.
 
 ## Settings
 

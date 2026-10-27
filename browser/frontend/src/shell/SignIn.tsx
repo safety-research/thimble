@@ -4,18 +4,22 @@
 // credential of its own). Every read of the server's data needs one of them (backend hook_auth), so a browser that is
 // not signed in sees one line that says so and names the way in, and neither the start page nor the shell mounts, so nothing polls. A read refused later for want of sign-in
 // (`thimble unpair`, a sign-in notice's Sign it out: bus `signedOut`) brings the line back. A link opened in this tab
-// (bus `newLink`), or the tab shown again while it shows the line, checks once more. Nothing shows while the first check
-// is under way; when the server does not answer it, the app mounts and says so itself.
+// (bus `newLink`), or the tab shown again while it shows the line, checks once more, as does a sign-in in another tab
+// of this browser (the key it keeps, which every tab reads: lib/browserKey), so a tab whose link lost its code to
+// another tab signs in too. Nothing shows while the first check is under way; when the server does not answer it, the
+// app mounts and says so itself.
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { claimRefused, signedIn } from '../lib/api'
+import { KEY_ITEM } from '../lib/browserKey'
 import { bus } from '../lib/bus'
 
-/** The way in, which ends the line; a span in backticks is drawn as code. */
-export const WAY_IN = 'Open the link `thimble-browser` printed in your terminal, or run `thimble-browser` again.'
+/** The way in, which ends the line; a span in backticks is drawn as code. A link's code signs in one browser, once, so
+ * the printed link may be spent, and `thimble-browser --link` prints a new one without a new session. */
+export const WAY_IN = 'Open the link `thimble-browser` printed in your terminal, or run `thimble-browser --link` there for a new one.'
 /** The line a browser that is not signed in sees. */
 export const SIGN_IN_LINE = `This browser isn't signed in. ${WAY_IN}`
 /** The line when the server refused the link's code with 410 (used, replaced by a newer one, or expired). */
-export const CODE_GONE_LINE = `This link was used or has expired, so this browser isn't signed in. ${WAY_IN}`
+export const CODE_GONE_LINE = "This link was used or has expired, so this browser isn't signed in. Each link signs in one browser, once: run `thimble-browser --link` in your terminal for a new one."
 
 type State = 'wait' | 'in' | 'out'
 
@@ -48,12 +52,18 @@ export function SignInGate({ children }: { children: ReactNode }) {
       setState('out')
     })
     const offLink = bus.on('newLink', () => void check())
+    // also while the first check is under way: the other tab may keep its key after this tab asked
+    const keyed = (e: StorageEvent) => {
+      if (e.key === KEY_ITEM && shown.current !== 'in') void check(true)
+    }
     document.addEventListener('visibilitychange', visible)
+    window.addEventListener('storage', keyed)
     return () => {
       alive = false
       offOut()
       offLink()
       document.removeEventListener('visibilitychange', visible)
+      window.removeEventListener('storage', keyed)
     }
   }, [])
   if (state === 'wait') return null
