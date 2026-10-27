@@ -22,7 +22,8 @@
 //                               can tell the person. When the check does not use the change (a file no fix may change,
 //                               a binary file, failing tests), a new fixer gets another round in the same copy at once
 //                               (`thimble fix again`), told why; the person sees a failure only when a fixer ends with
-//                               `Cannot: <why>`.
+//                               `Cannot: <why>`. What came of a check that no session waited for is shown the same way
+//                               at the session's start (`checked`), and the kernel told it was shown (`thimble fix shown`).
 //
 //   state: fixers (agentId → the fix's id), fixBy (the fixes Claude started, by their id), fixerBox (the sandbox
 //          command's start, by the fix's id)
@@ -302,12 +303,14 @@ const ending = new Set<number>()
  *  minutes Claude Code gives a process call. */
 const DONE_WAIT_S = 540
 
-export async function fixerEnded($: Engine, e: Any, id: number): Promise<void> {
+/** `checked`: what came of a check that no session waited for (the kernel's runner wrote it while the session was gone
+ *  or the plugin reloaded), shown now as at the fixer's end. */
+export async function fixerEnded($: Engine, e: Any, id: number, checked?: Fix): Promise<void> {
   if (ending.has(id)) return
   ending.add(id)
   let again: Fix | null = null
   try {
-    again = await ended($, e, id)
+    again = checked ? await afterCheck($, id, checked, checked, false) : await ended($, e, id)
   } catch (err) {
     const f = await fixOf($, id).catch(() => null)
     await setFixLine($, { id, kind: 'problem', said: `${f ? `“${fixName(f)}”` : `Fix ${id}`} could not be checked: ${cut(String((err as Error)?.message || err), 200)}. thimble fix list, in a shell, lists it.` }).catch(() => undefined)
@@ -344,22 +347,36 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   // (engine/kernel/fixes.py done), which may take longer than Claude Code gives a process call (10 minutes,
   // core/test/limits.test.mjs): each call waits for them at most DONE_WAIT_S, and while the fix it gives says that they
   // still run, the next call waits on. A fix whose tests already run (its end taken again after a reload) is waited for
-  // the same way: the kernel starts nothing new for it
+  // the same way: the kernel starts nothing new for it, and the bar counts their time from their start
   const check = () => kernelFix($, [...args, '--within', String(DONE_WAIT_S)], { stdin: end.cannot ?? (end.summary || ' '), timeoutMs: 600000 })
+  let had = false
   const r = await busy($, `testing ${fix ? fixName(fix, 28) : `fix ${id}`}`, async () => {
     let got = await check()
-    while (got.ok && jsonOf<Fix>(got.out)?.testing) got = await check()
+    for (let f = jsonOf<Fix>(got.out); got.ok && f?.state === 'working' && f.testing; f = jsonOf<Fix>(got.out)) {
+      had = true
+      got = await check()
+    }
     return got
-  })
+  }, now.testing?.since ? now.testing.since * 1000 : undefined)
   await refreshFixes($)
   if (!r.ok) {
     await setFixLine($, { id, kind: 'problem', said: `“${name}” could not be checked: ${cut(r.err || 'thimble fix done gave nothing', 200)}` })
     return null
   }
   const done = jsonOf<Fix>(r.out)
+  // the tests it waited for no longer count: a new round took over the copy (more words for the fix), and its own end
+  // says what came of it
+  if (had && done?.state === 'working' && !done.testing) return null
+  return afterCheck($, id, done, fix, !!end.cannot)
+}
+
+/** What came of a fix's check, shown: the line, Claude Code's notification, and Claude told when Claude asked for the
+ *  fix; or the fix again when the check did not use its change and a new round should answer it. An outcome that the
+ *  kernel's runner marked as not shown yet is no longer so once the line shows it. */
+async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | null, cannot: boolean): Promise<Fix | null> {
   // the check did not use the change (a file no fix may change, a binary file, failing tests): another round in the
   // same copy, under the same name and time
-  if (!end.cannot && done?.state === 'failed' && done.refused && done.work) {
+  if (!cannot && done?.state === 'failed' && done.refused && done.work) {
     const a = await kernelFix($, ['again', String(id)], { timeoutMs: 60000 })
     const next = a.ok ? jsonOf<Fix>(a.out) : null
     await refreshFixes($)
@@ -368,6 +385,7 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   // a round of a fix the person has that changed no code: the fix stays as it was
   const kind = done?.unchanged ? 'request' : done?.state === 'ready' ? 'ready' : done?.state === 'request' ? 'request' : 'failed'
   await setFixLine($, { id, kind, ...(done?.unchanged ? { kept: true } : {}) })
+  if (done?.unshown) await kernelFix($, ['shown', String(id)], { timeoutMs: 60000 })
   const title = done?.title || fix?.title || `fix ${id}`
   const changed = !!(done?.prev || (fix && fix.prev))
   if (kind === 'ready') {

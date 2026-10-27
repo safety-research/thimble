@@ -61,6 +61,8 @@ export type Fix = {
   /** while the fixer's change is tested in a process of the kernel's own (the runner): when the tests started, and the
    *  lock file the runner holds while it lives */
   testing?: { since: number; lock: string } | null
+  /** what came of the tests, written by the kernel's runner, which no line has shown yet (thimble fix shown clears it) */
+  unshown?: boolean
   /** the person's own words of each round, beside `words` (Claude's, for the fixer), when they typed /thimble-fix
    *  <words>; null for a round without them */
   asked?: (string | null)[]

@@ -472,6 +472,92 @@ test("a fix whose tests run when the plugins reload is waited for: its fixer's e
   expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: make the bar say read · tests pass')
 })
 
+/** The kernel's answers to done, one a call (the fix with these fields), then the fake kernel's own. Each done call,
+ *  with what the bar showed while it ran. */
+function doneSays(s: ReturnType<typeof setup>, answers: Any[]): { argv: string[]; bar: Any }[] {
+  const calls: { argv: string[]; bar: Any }[] = []
+  const run = s.$.process.run
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('done')) {
+      calls.push({ argv, bar: await busyNow(s.$) })
+      const a = answers.shift()
+      if (a) return { exitCode: 0, stdout: JSON.stringify({ ...s.fix, ...a }), stderr: '' }
+    }
+    return run(argv, o)
+  }
+  return calls
+}
+
+const TESTING = { since: 1761200000, lock: `${HOME}/fixes/tests/1.lock` }
+
+test('a new round that took the copy while the tests ran: the check of the round before shows no line', async () => {
+  const s = setup()
+  // more words for the fix while its tests ran: the kernel's next answer is the new round, working, with no tests
+  const calls = doneSays(s, [{ state: 'working', testing: TESTING }, { state: 'working', testing: null }])
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(2)
+  expect(await fixLineRows(s.$, ELS, 110)).toEqual([])
+  expect(s.notes).toEqual([])
+  expect(s.verbs().some(v => v.startsWith('again'))).toBe(false)
+})
+
+test('the check asks again only while the fix works and its tests run: a fix removed meanwhile ends the asking', async () => {
+  const s = setup()
+  // a record of a fix removed while its tests ran, written with the mark of them
+  const calls = doneSays(s, Array.from({ length: 5 }, () => ({ state: 'removed', testing: TESTING })))
+  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
+  expect(calls.length).toBe(1)
+})
+
+test('a fix whose tests ran for minutes before a reload: the bar counts testing <name> from their start', async () => {
+  const s = setup()
+  now = 3 * 10 ** 13
+  s.made()
+  Object.assign(s.fix, { started: (now - 300000) / 1000, testing: { since: (now - 200000) / 1000, lock: `${HOME}/fixes/tests/1.lock` } })
+  s.agents.push({ id: 'agent-fixer-1', status: 'idle' })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  const calls = doneSays(s, [{ state: 'ready', tests: 'passed', testing: null }])
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await s.tick()
+  expect(calls[0]?.bar?.word).toBe('testing make the bar say read')
+  expect(calls[0]?.bar?.secs).toBeGreaterThanOrEqual(200)
+})
+
+test("what came of a check that no session waited for gets its line at this session's start, with the notification, Claude told, and the kernel told it was shown; a refused change gets another round", async () => {
+  const s = setup()
+  s.made()
+  // the session ended while the tests ran, and the kernel's runner wrote what came of them, not shown yet
+  Object.assign(s.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', session: 's-fix', unshown: true })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixBy' }, { 1: 'claude' })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await s.tick()
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
+  expect(s.verbs()).toContain('shown 1')
+  const told = ((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>
+  expect(told['fix-1']).toBe('The thimble fix you started, "Bar says read", is ready and tests pass; the person turns it on with y. Tell the person in one short line.')
+  // another session's outcome is that session's to show
+  const o = setup()
+  o.made()
+  Object.assign(o.fix, { state: 'ready', tests: 'passed', session: 's-other', unshown: true })
+  await o.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  expect(await fixLineRows(o.$, ELS, 110)).toEqual([])
+  expect(o.verbs().some(v => v.startsWith('shown'))).toBe(false)
+  // tests that failed: a new fixer in the same copy, told why, as at the fixer's end
+  const t = setup()
+  t.made()
+  Object.assign(t.fix, { state: 'failed', tests: 'failed', session: 's-fix', unshown: true, error: 'its tests failed in the sandbox', refused: { why: 'its tests failed in the sandbox', files: [], tests: 'FAIL made-up test' } })
+  await t.call('session.start', { cwd: '/made-up/data' })
+  await new Promise(r => setTimeout(r, 20))
+  await t.tick()
+  expect(t.verbs()).toContain('again 1')
+  expect(t.spawns.length).toBe(1)
+  expect(String(t.spawns[0].prompt)).toContain('FAIL made-up test')
+})
+
 test('n leaves the fix ready in the list, where thimble fix apply in a shell turns it on; a fixer that changed nothing leaves a request', async () => {
   const s = setup()
   await requested(s)

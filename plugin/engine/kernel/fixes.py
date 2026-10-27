@@ -250,9 +250,12 @@ def get(fid: int | str) -> dict[str, Any]:
 
 def put(rec: dict[str, Any]) -> dict[str, Any]:
     """The record's new state, as one line appended in one write, with the kinds of files it changes that the person is
-    told of (notice), from its files as they are now."""
+    told of (notice), from its files as they are now. Only a working fix's tests run (`testing`): a fix that went on
+    without them (removed while they ran) has no such mark."""
     rec = {**rec, "updated": time.time()}
     rec.pop("notice", None)
+    if rec.get("state") != "working":
+        rec.pop("testing", None)
     notice = notice_of([str(f.get("path") or "") for f in rec.get("files") or []])
     if notice:
         rec["notice"] = notice
@@ -707,8 +710,28 @@ def _tests_once(argv: list[str], fid: int | str) -> tuple[bool, str]:
         return False, "the tests ran longer than 9 minutes"
     log = (p.stdout + p.stderr).strip()
     (home() / "tmp" / str(fid)).mkdir(parents=True, exist_ok=True)
-    (home() / "tmp" / str(fid) / "tests.log").write_text(log + "\n")
+    try:
+        _write_new(home() / "tmp" / str(fid) / "tests.log", log + "\n")
+    except OSError:
+        pass  # the log's last lines go on the record either way
     return p.returncode == 0, "\n".join(log.splitlines()[-12:])
+
+
+def _write_new(p: Path, text: str) -> None:
+    """A file thimble writes in a folder that the fixer's sandbox, or its tests', writes too (tmp/<id>/): what is there
+    under the name (a link, a pipe) goes first, and the file is made new (O_EXCL), so that the write never follows a
+    link to a file elsewhere. OSError when it cannot be made (a folder under the name, or a link made again in between)."""
+    p.unlink(missing_ok=True)
+    fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+
+
+def _no_link(p: Path) -> None:
+    """A link under a name in a folder the fixer's sandbox writes (tmp/<id>/) goes, before thimble's git makes or
+    removes a folder there."""
+    if p.is_symlink():
+        p.unlink()
 
 
 TESTS_FAILED = "its tests failed in the sandbox"
@@ -719,11 +742,15 @@ TESTS_STOPPED = "the tests stopped before they finished"
 RUNNER = "import sys; sys.path.insert(0, sys.argv[1]); from kernel import fixes; fixes.tests_runner()"
 
 
-def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str]) -> dict[str, Any]:
+def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str], deadline: float | None = None,
+                 read: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """The quick tests of a fixer's change in a process of their own (the runner), in a session of its own, apart from
     the call that checks the change: the tests wait for other fixes' tests and run twice when they fail, which may take
     longer than Claude Code lets a call run. The record stays working, with `testing` (when they started, and the lock
-    file the runner holds while it lives), until the runner writes what came of them (tests_runner)."""
+    file the runner holds while it lives), until the runner writes what came of them (tests_runner).
+    Another check of the same fix may hold the fix's lock (it started the tests first): this one tries for it until
+    `deadline` (time.monotonic), and once it holds it, starts nothing when the record says that the tests run or is no
+    longer the one it read (`read`). None: it wrote nothing, and its caller waits for the tests (_wait)."""
     import fcntl  # noqa: PLC0415
 
     fid = rec["id"]
@@ -733,7 +760,17 @@ def _start_tests(rec: dict[str, Any], named: str | None, argv: list[str]) -> dic
     try:
         # held from before the record says that the tests run, then by the runner, so no wait takes the lock for a
         # runner that ended (_ended)
-        fcntl.flock(held, fcntl.LOCK_EX)
+        while True:
+            try:
+                fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if deadline is not None and time.monotonic() >= deadline:
+                    return None
+                time.sleep(0.1)
+        now = get(fid)
+        if now.get("testing") or (read is not None and now != read):
+            return None
         rec = put({**rec, "testing": {"since": time.time(), "lock": str(lock)}})
         job = {"id": fid, "argv": argv, "title": named, "testing": rec["testing"]}
         log = _new_log(tmp_dir(fid) / "runner.log")
@@ -764,22 +801,39 @@ def _new_log(p: Path) -> int:
 
 def tests_runner() -> None:
     """The runner (_start_tests), with its job on stdin: the tests as run_tests runs them, then what came of them on the
-    fix's record, as done writes it. A record that went on without them (the fix was removed) stays as it is."""
+    fix's record, as done writes it, marked as not shown yet (`unshown`) until the plugin's line shows it (shown): no
+    session may wait for it any more. A record that went on without them (the fix was removed, a new round took the
+    copy) stays as it is."""
     job = json.loads(sys.stdin.read())
     ok, tail = _run_tests(job["argv"], job["id"])
     rec = get(job["id"])
     if rec.get("state") != "working" or rec.get("testing") != job["testing"]:
         return
     rec.pop("testing")
-    rec = _tested(rec, ok, tail, job["title"])
+    rec = _tested({**rec, "unshown": True}, ok, tail, job["title"])
     if rec.get("prev") and rec["state"] == "ready":
         try:
             settle(rec)
-        except Exception:
-            put(rec)  # the round stays ready with its own change, as done left it when settle failed
-            raise
+        except Exception as e:
+            # git stopped the round's new version: the round fails with git's words, never ready with the round's own
+            # change alone, and with no refusal, which no next fixer could answer
+            rec.pop("refused", None)
+            put({**rec, "state": "failed", "error": str(e)})
+            if not isinstance(e, FixError):
+                raise
         return
     put(rec)
+
+
+def shown(fid: int | str) -> dict[str, Any]:
+    """The plugin's line showed what came of the fix's tests (tests_runner): it is no longer one to show at a session's
+    start."""
+    with Lock():
+        rec = get(fid)
+        if "unshown" not in rec:
+            return rec
+        rec.pop("unshown")
+        return put(rec)
 
 
 def _tested(rec: dict[str, Any], ok: bool, tail: str, named: str | None) -> dict[str, Any]:
@@ -939,8 +993,10 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
     rec = get(fid)
     words = (words or "").strip()
     if _is_checkout(rec.get("work")):
-        # words for a fixer that still works go on in its time; any other round starts its own
+        # words for a fixer that still works go on in its time; any other round starts its own. The tests of the round
+        # before, should they run, are no longer this fix's: their runner writes nothing (tests_runner)
         rec = rec if rec.get("state") == "working" else _fresh(rec)
+        rec.pop("testing", None)
         rec.update(rounds=int(rec.get("rounds") or 1) + 1, state="working", error=None,
                    **({"session": session} if session else {}))
         return put(_named_patches(_with_words(rec, [words], asked), words))
@@ -983,7 +1039,7 @@ def _named_patches(rec: dict[str, Any], words: str) -> dict[str, Any]:
             continue
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         path = tmp_dir(rec["id"]) / f"fix-{m}.patch"
-        path.write_text(patch)
+        _write_new(path, patch)
         out.append({"id": m, "title": other.get("title") or "", "path": str(path)})
     return {**rec, "patches": out} if out else rec
 
@@ -1088,13 +1144,14 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     The tests run in a process of their own (_start_tests), and done waits for what came of them; with `within`, at
     most that many seconds, and then it gives the fix as it is: still working, with `testing`. A done of a fix whose
     tests run starts nothing: it waits for them in the same way, and one with `within` that comes after they ended gives
-    what came of them."""
+    what came of them; such a done may come from any session (/clear and /resume give the session a new id while it
+    waits)."""
     deadline = None if within is None else time.monotonic() + max(within, 0.0)
     rec = get(fid)
+    if (rec.get("state") == "working" and rec.get("testing")) or (within is not None and rec.get("state") != "working"):
+        return _wait(rec["id"], deadline)
     if session and rec.get("session") and rec["session"] != session:
         raise FixError(f"fix {rec['id']} is being made in another Claude Code session, which checks it when its fixer ends")
-    if rec.get("testing") or (within is not None and rec.get("state") != "working"):
-        return _wait(rec["id"], deadline)
     if rec.get("state") != "working":
         raise FixError(f"fix {rec['id']} was checked already ({state_word(rec)}), so there is nothing to check")
     if cannot is not None and cannot.strip():
@@ -1103,9 +1160,11 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
         rec.update(state="failed", tests=None, error=short(" ".join(cannot.split()), 300),
                    **({"blocked": blocked} if blocked else {}))
         return put(rec)
-    rec = _done(fid, title, summary, request, tests)
-    if rec.get("testing"):
+    checked = _done(fid, title, summary, request, tests, deadline)
+    # None: another check of the fix started its tests first, or the record went on while this one made its commit
+    if checked is None or checked.get("testing"):
         return _wait(rec["id"], deadline)
+    rec = checked
     if rec.get("prev") and rec.get("state") == "request":
         return {**_restore(rec), "unchanged": True}
     if rec.get("prev") and rec.get("state") == "ready":
@@ -1166,8 +1225,10 @@ def _take_out(fid: int, why: str) -> dict[str, Any]:
     return {"redo": failed}
 
 
-def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool) -> dict[str, Any]:
+def _done(fid: int | str, title: str | None, summary: str, request: bool, tests: bool,
+          deadline: float | None = None) -> dict[str, Any] | None:
     rec = get(fid)
+    read = dict(rec)
     if not _is_checkout(rec.get("work")):
         # the copy is gone, or something in it removed its git link: nothing of it can be checked. r makes a new copy
         _drop_work(rec)
@@ -1215,7 +1276,7 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
         argv = _tests_argv(rec["id"])
     except FixError as e:
         return put(_tested(rec, False, str(e), named))
-    return _start_tests(rec, named, argv)
+    return _start_tests(rec, named, argv, deadline, read)
 
 
 def _drop_work(rec: dict[str, Any]) -> None:
@@ -1433,6 +1494,9 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
     rest = [i for i in mine_order if i not in merged_ids]
     on_named = [i for i in mine_order if i in merged_ids]
     wt = tmp_dir(first) / "merge"
+    # the fixer's sandbox writes tmp/<id>/: a link left under the name goes, so that git never removes or fills the
+    # folder it leads to
+    _no_link(wt)
     run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
     shutil.rmtree(wt, ignore_errors=True)
     git("worktree", "add", "-q", "--detach", str(wt), release()["base"], cwd=live)
@@ -1468,6 +1532,7 @@ def _merged_tree(code: list[dict[str, Any]], merged_ids: set[int], first: int) -
         other = first if stuck != first else next(r["id"] for r in code if r["id"] != stuck)
         raise Conflict(first, stuck if stuck != first else other)
     finally:
+        _no_link(wt)
         run(["git", "worktree", "remove", "--force", str(wt)], cwd=live, check=False)
         run(["git", "worktree", "prune"], cwd=live, check=False)
 
@@ -1656,7 +1721,7 @@ def redo(fid: int | str, words: str = "", session: str | None = None, asked: str
             _give_types(wt)
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         if earlier.strip():
-            (tmp_dir(rec["id"]) / "earlier.patch").write_text(earlier)
+            _write_new(tmp_dir(rec["id"]) / "earlier.patch", earlier)
         rec = _fresh(rec)
         rec.update(state="working", work=str(wt), base=base, error=None, tests=None, rounds=int(rec.get("rounds") or 1) + 1,
                    session=session or None)
@@ -3114,6 +3179,8 @@ def cmd(a) -> int:
             else:
                 summary = stdin_text() if a.summary == "-" else (a.summary or "")
                 out_json(done(a.id, a.title, summary, a.request, not a.no_tests, session=a.session, within=a.within))
+        elif verb == "shown":
+            out_json(shown(a.id))
         elif verb == "apply":
             if a.ask == "-":
                 out_json(apply(a.id, stdin_text()))

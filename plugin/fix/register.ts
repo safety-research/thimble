@@ -29,7 +29,9 @@
 //                          changed · n later, and Claude Code sends a notification
 //   the person's prompt    a line that only told something goes, a failed fix's too (line.ts)
 //   session start          a newer release is out: one line says so (thimble update, in a shell, moves to it); a
-//                          fixer that works on across a reload keeps its step on the bar, and its time
+//                          fixer that works on across a reload keeps its step on the bar, and its time; what came of
+//                          a check that no session waited for (the session ended, or the plugin reloaded, while the
+//                          tests ran) gets its line then, as at the fixer's end
 //
 // A newer release comes with `thimble update` in a shell, never inside Claude Code.
 //
@@ -117,7 +119,7 @@ export async function strayLine($: Engine, fixes: Fix[]): Promise<void> {
 
 /** The kernel's verbs that are thimble's own (the plugin's lifecycle and the person's keys), and `thimble file issue` and
  *  `thimble file pr`, which post the person's fix publicly from their own terminal: never Claude's. */
-const OWN_VERBS = /\bthimble\s+(?:fix\s+(?:new|round|again|done|apply|merge|notnow|redo|undo|remove|sandbox|draft|keep|send)|file\s+(?:issue|pr))\b/
+const OWN_VERBS = /\bthimble\s+(?:fix\s+(?:new|round|again|done|shown|apply|merge|notnow|redo|undo|remove|sandbox|draft|keep|send)|file\s+(?:issue|pr))\b/
 
 /** The fixers this load knows, so a guard that fails can still refuse their calls. */
 /** Whether this session looked for a newer release already (kept across a reload of the module). */
@@ -189,6 +191,8 @@ export const registerFix: Register = on => {
         busyFixer($, f)
         watch($, f.id)
       }
+      // what came of a check that the kernel's runner wrote while no session waited for it: its line now
+      for (const f of await ownFixes($, (list?.fixes ?? []).filter(f => f.unshown && ['ready', 'failed'].includes(f.state)))) await fixerEnded($, {}, f.id, f)
       await recoverFixers($, working)
       // a newer release: one line says so, once per session (a reload starts the module again)
       if (list?.pointed && !(await $.state.get(UPDATED)).value) {
