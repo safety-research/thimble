@@ -18,6 +18,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -1206,16 +1207,36 @@ async def test_the_headless_page_waits_for_a_slow_answer_and_its_run_gets_the_ti
         pytest.skip(why)
     views.write_view(CORPUS, "threads", reader=THREADS_READER, html=THREADS_HTML, **VIEW)
     real = views.reader_call
+    clock = _RunClock()
 
     async def slow(*a, **k):
-        await asyncio.sleep(8)
+        # the answer takes 8 s on the run's clock, past the run's own 1 s, and a moment on the page's, which waits for
+        # it as for any request still unanswered
+        clock.now += 8.0
+        await asyncio.sleep(0.5)
         return await real(*a, **k)
 
+    # the run's clock (views.time) moves only while the answer runs, so the run's own time is the same 0 s however long
+    # a busy machine takes to start the browser and load the page; the run looks at its time each second (_shoot_in)
+    monkeypatch.setattr(views, "time", clock)
     monkeypatch.setattr(views, "reader_call", slow)
-    monkeypatch.setattr(views, "SHOT_TIMEOUT_S", 4.0)
-    monkeypatch.setattr(views, "SHOT_STATE_S", 1.0)
+    monkeypatch.setattr(views, "SHOT_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(views, "SHOT_STATE_S", 0.5)
     (s,) = await views.shoot_states(CORPUS, "threads", [{"open": {}}])
     assert s["ok"] and s["fetches"] == 1, s["errors"]
+
+
+class _RunClock:
+    """views' time module with a monotonic() that stands still until a test moves it (`now`)."""
+
+    def __init__(self) -> None:
+        self.now = time.monotonic()
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
 
 
 UNMARKED_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>

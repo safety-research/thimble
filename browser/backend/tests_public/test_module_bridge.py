@@ -275,9 +275,9 @@ async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_i
 
     def started(name: str, *args: str) -> int:
         running.append(_process(tmp_path, name, *args))
-        for _ in range(200):  # until /proc shows the command line the test gave it
-            if procs.argv(running[-1].pid)[-1:] == list(args[-1:]):
-                break
+        end = time.monotonic() + 30
+        while procs.argv(running[-1].pid)[-1:] != list(args[-1:]):  # until /proc shows the command line the test gave it
+            assert time.monotonic() < end, f"/proc never showed {name} {' '.join(args)}"
             time.sleep(0.01)
         return running[-1].pid
 
@@ -287,12 +287,21 @@ async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_i
 
     try:
         main = started("claude", "--session-id", MAIN, "--", "/thimble")
-        # a long hold, so that a slow runner's "at once" is never read as held
-        monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 5.0)
+        # held, the hello would wait (module_bridge._wait) up to a hold far longer than any slow runner's "at once"
+        monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 60.0)
+        waits: list[float] = []
+        real_wait = module_bridge._wait
+
+        async def wait(c: str, timeout: float) -> None:
+            waits.append(timeout)
+            await real_wait(c, timeout)
+
+        monkeypatch.setattr(module_bridge, "_wait", wait)
         t0 = time.monotonic()
         r = await hello(main)
         assert r.status_code == 200 and r.json() == {"ok": True}
-        assert time.monotonic() - t0 < module_bridge.HELLO_HOLD_S / 2, "accepted at once, inside session.start"
+        assert not waits and time.monotonic() - t0 < module_bridge.HELLO_HOLD_S / 2, "accepted at once, inside session.start"
+        monkeypatch.setattr(module_bridge, "_wait", real_wait)
         monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 0.6)
         assert module_bridge._accepted(CORPUS, MAIN) and "idle" not in _registry()["module"]
         module_bridge._bridges.clear()

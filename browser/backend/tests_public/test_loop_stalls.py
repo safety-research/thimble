@@ -137,6 +137,7 @@ async def test_health_answers_while_every_worker_thread_is_taken():
     """`server up` and the plugin give a health call 1 to 2 s: it is answered on the event loop, not after a worker
     thread frees up behind the requests that compute."""
     import asyncio
+    import threading
     import time
 
     import anyio
@@ -144,17 +145,30 @@ async def test_health_answers_while_every_worker_thread_is_taken():
 
     from app.main import app
 
+    # FastAPI builds its table of routes at an app's first request, a second's work on the event loop and several on a
+    # busy machine; a server has answered requests before the health call this test is about
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+        assert (await client.get("/api/health")).status_code == 200
     limiter = anyio.to_thread.current_default_thread_limiter()
     tokens = limiter.total_tokens
     limiter.total_tokens = 1
     try:
-        hold = asyncio.ensure_future(anyio.to_thread.run_sync(time.sleep, 3))
-        await asyncio.sleep(0.2)
+        started = threading.Event()
+
+        def hold_thread() -> None:
+            started.set()
+            time.sleep(3)
+
+        hold = asyncio.ensure_future(anyio.to_thread.run_sync(hold_thread))
+        while not started.is_set():  # the one worker thread is taken
+            await asyncio.sleep(0.01)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
             t0 = time.monotonic()
             r = await client.get("/api/health")
             took = time.monotonic() - t0
+            held = not hold.done()
         await hold
     finally:
         limiter.total_tokens = tokens
+    assert held, "the worker thread was still taken when health answered"
     assert r.status_code == 200 and r.json()["ok"] and took < 1.0, f"health took {took:.1f} s"
