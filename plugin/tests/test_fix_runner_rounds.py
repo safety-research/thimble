@@ -210,3 +210,26 @@ def test_a_new_round_while_the_runner_settles_a_fix_changed_in_place_stays_as_it
     assert got["words"][-1] == "and when I press it twice"
     for fd in fds:
         os.close(fd)
+
+
+def test_another_round_a_new_round_and_r_drop_the_mark_of_an_outcome_not_shown(world, monkeypatch):
+    # tests that fail: the runner writes what came of them, not shown yet
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    r = made(world)
+    assert FX.done(r["id"], "Bar says read", "", within=30)["unshown"] is True
+    # another round in the same copy, for the refusal
+    assert "unshown" not in FX.again(r["id"]) and "unshown" not in FX.get(r["id"])
+    assert FX.done(r["id"], "Bar says read", "", within=30)["unshown"] is True
+    # r, in a new copy
+    assert "unshown" not in FX.redo(r["id"]) and "unshown" not in FX.get(r["id"])
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    p = Path(FX.get(r["id"])["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text().replace("coverage", "read"))
+    assert FX.done(r["id"], "Bar says read", "", within=30)["unshown"] is True
+    # more words, in the copy
+    assert "unshown" not in FX.round_(r["id"], "and keep the percent") and "unshown" not in FX.get(r["id"])
+    assert FX.done(r["id"], "Bar says read", "", within=30)["unshown"] is True
+    # more words for a fix with no copy (n kept it, off): a round in place
+    FX.not_now(r["id"])
+    assert FX.get(r["id"])["unshown"] is True
+    assert "unshown" not in FX.round_(r["id"], "and say it in the pane too") and "unshown" not in FX.get(r["id"])

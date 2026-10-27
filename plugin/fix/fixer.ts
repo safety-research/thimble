@@ -392,8 +392,10 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
 
 /** What came of a fix's check, shown: the line, Claude Code's notification, and Claude told when Claude asked for the
  *  fix; or the fix again when the check did not use its change and a new round should answer it. An outcome that the
- *  kernel's runner marked as not shown yet is no longer so once the line shows it. */
+ *  kernel's runner marked as not shown yet is no longer so once the line shows it, or a new round answers it. */
 async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | null, cannot: boolean): Promise<Fix | null> {
+  // before the round that may answer it, so that no later start shows a dismissed line again, or tells Claude again
+  if (done?.unshown) await kernelFix($, ['shown', String(id)], { timeoutMs: 60000 })
   // the check did not use the change (a file no fix may change, a binary file, failing tests): another round in the
   // same copy, under the same name and time
   if (!cannot && done?.state === 'failed' && done.refused && done.work) {
@@ -405,7 +407,6 @@ async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | nu
   // a round of a fix the person has that changed no code: the fix stays as it was
   const kind = done?.unchanged ? 'request' : done?.state === 'ready' ? 'ready' : done?.state === 'request' ? 'request' : 'failed'
   await setFixLine($, { id, kind, ...(done?.unchanged ? { kept: true } : {}) })
-  if (done?.unshown) await kernelFix($, ['shown', String(id)], { timeoutMs: 60000 })
   const title = done?.title || fix?.title || `fix ${id}`
   const changed = !!(done?.prev || (fix && fix.prev))
   if (kind === 'ready') {

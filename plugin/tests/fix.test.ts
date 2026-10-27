@@ -616,6 +616,17 @@ test("what the kernel's runner wrote just after this session's start read the li
   expect(s.verbs().some(v => v.startsWith('done'))).toBe(false)
 })
 
+test('an outcome not shown yet whose refusal a new round answers is marked shown before that round, so no later start shows it or tells Claude again', async () => {
+  const s = setup()
+  s.made()
+  Object.assign(s.fix, { state: 'failed', tests: 'failed', session: 's-fix', unshown: true, error: 'its tests failed in the sandbox', refused: { why: 'its tests failed in the sandbox', files: [], tests: 'FAIL made-up test' } })
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await until(() => s.spawns.length > 0)
+  const v = s.verbs()
+  expect(v).toContain('shown 1')
+  expect(v.indexOf('shown 1')).toBeLessThan(v.indexOf('again 1'))
+})
+
 test("a round's fixer that ends while the check of the round before waits: its end is kept, and checked with its own words once that check returns", async () => {
   const s = setup()
   // the first check's done answers only when the test lets it; by then the new round took the copy

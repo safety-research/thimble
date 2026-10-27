@@ -1092,9 +1092,10 @@ def again(fid: int | str, session: str | None = None) -> dict[str, Any]:
         raise FixError(f"fix {rec['id']} is {state_word(rec)}, with no refusal to answer")
     if not _is_checkout(rec.get("work")):
         raise FixError(f"fix {rec['id']} has no copy any more; r starts it again in a new copy")
-    # the same request, tried again: its time and its name go on
+    # the same request, tried again: its time and its name go on; what came of the check before is no outcome to show
     rec.update(state="working", error=None, rounds=int(rec.get("rounds") or 1) + 1,
                **({"session": session} if session else {}))
+    rec.pop("unshown", None)
     return put(rec)
 
 
@@ -1120,6 +1121,7 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
             # round before, should they run, are no longer this fix's: their runner writes nothing (tests_runner)
             rec = rec if rec.get("state") == "working" else _fresh(rec)
             rec.pop("testing", None)
+            rec.pop("unshown", None)
             rec.update(rounds=int(rec.get("rounds") or 1) + 1, state="working", error=None,
                        **({"session": session} if session else {}))
             return put(_named_patches(_with_words(rec, [words], asked), words))
@@ -1136,6 +1138,7 @@ def round_(fid: int | str, words: str, session: str | None = None, asked: str | 
         prev = {k: rec.get(k) for k in ("state", "commit", "files", "summary", "title", "tests", "tests_tail", "on_at",
                                          "base", "note")}
         rec.pop("refused", None)
+        rec.pop("unshown", None)
         rec = _fresh(rec)
         rec.update(state="working", work=str(wt), base=base, prev=prev, error=None, tests=None, note=None,
                    rounds=int(rec.get("rounds") or 1) + 1, session=session or rec.get("session"))
@@ -1864,6 +1867,7 @@ def redo(fid: int | str, words: str = "", session: str | None = None, asked: str
         if earlier.strip():
             _write_new(tmp_dir(rec["id"]) / "earlier.patch", earlier)
         rec = _fresh(rec)
+        rec.pop("unshown", None)
         rec.update(state="working", work=str(wt), base=base, error=None, tests=None, rounds=int(rec.get("rounds") or 1) + 1,
                    session=session or None)
         return put(_with_words(rec, [words.strip()] if words.strip() else [], asked))
