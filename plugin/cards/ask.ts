@@ -16,6 +16,10 @@
 //                      call it makes is not, so a card called while the session start installs srt waits in its own
 //                      setup.mjs, which waits for that install, and not on the session start's promise
 //   stopRunner($)      the session ends: the runner stops and its folder goes
+//   noteCode($)        the times of the runner's code on disk as this load of the module found them (its session
+//                      start): when the runner does not start but setup.mjs's probe, which starts the code on disk,
+//                      does, and that code changed since (its files were patched in place), the session runs the old
+//                      code, and the error says to type /reload-plugins
 //   ask($, op, body)   the runner's answer to one request (runner.mjs lists them), or {ok: false, error}: with `down`
 //                      when the runner cannot start, so no card can draw (the error says why and how to fix it, and
 //                      `machine` says the fix is the machine's, such as a package to install, not thimble's);
@@ -194,8 +198,32 @@ async function start($: Engine, sock: string): Promise<Down | null> {
   // what kept it from starting: setup.mjs starts a runner of its own in the sandbox, and says why that one does not start
   const probed = await setup($, true)
   if (!probed.ok) return downOf(probed)
+  // the probe starts the code on disk, this session's runner the code it loaded: changed since, it needs a reload
+  if (await codeChanged($)) return { why: "thimble's card code changed on disk after this session loaded it, so the session runs the old code: type /reload-plugins" }
   const why = runner.exit.split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 300)
   return { why: `the card runner did not start in its sandbox${why ? ` (${why})` : ''}` }
+}
+
+/** The files of the runner's code this load of the module runs (argv.mjs is part of it), and the plugin's manifest. */
+const CODE = ['cards/argv.mjs', 'cards/runner.mjs', '.claude-plugin/plugin.json']
+let loaded: Record<string, number> | null = null
+
+async function codeTimes($: Engine): Promise<Record<string, number>> {
+  const out: Record<string, number> = {}
+  for (const f of CODE) out[f] = Number((await $.fs.stat(`${$.plugin.root}/${f}`).catch(() => null))?.mtimeMs ?? 0)
+  return out
+}
+
+/** The session starts, or the plugins reload: the runner's code on disk is the code this load runs. */
+export async function noteCode($: Engine): Promise<void> {
+  loaded = await codeTimes($)
+}
+
+/** Whether a file of the runner's code changed on disk since this load noted it. */
+async function codeChanged($: Engine): Promise<boolean> {
+  if (!loaded) return false
+  const now = await codeTimes($)
+  return CODE.some(f => now[f] !== loaded![f])
 }
 
 /** The session ends: the runner stops, and its folder goes. */
