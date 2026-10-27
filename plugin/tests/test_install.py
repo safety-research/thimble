@@ -396,3 +396,21 @@ def test_the_install_recommends_the_workbench_s_claude_code_sign_in_to_a_subscri
     note = next(line for line in whole_install(tmp_path).stdout.splitlines()
                 if line.startswith("Note: Claude access is not set up yet."))
     assert "Their Claude Code sign-in, recommended when they have a Claude subscription, only after they accept" in note
+
+
+def test_the_readme_and_the_install_summary_say_when_to_use_each_product(tmp_path):
+    """The README's usage, the install's last lines when it installed both products, and the reply Claude ends an install
+    with (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one
+    product has no choice to explain."""
+    plugin, web = "Use the terminal plugin when you work in Claude Code", "Use the browser workbench when you want"
+    readme = " ".join((ROOT / "README.md").read_text().replace("**", "").split())
+    usage = readme.split("## Usage", 1)[1].split(" ### ", 1)[0]
+    assert plugin in usage and web in usage, usage
+    out = " ".join(whole_install(tmp_path / "both").stdout.split())
+    summary = out.split("== The browser workbench", 1)[1].split("To start the browser workbench", 1)[0]
+    assert plugin in summary and web in summary, summary
+    alone = whole_install(tmp_path / "plugin", "--no-browser").stdout
+    assert "Use the terminal plugin when" not in alone and "Use the browser workbench when" not in alone
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    reply = text.split(" 5. While something the user chose", 1)[1].split(" 6. ", 1)[0]
+    assert "- The plugin, when they work in Claude Code:" in reply and "- The workbench, when they want" in reply, reply

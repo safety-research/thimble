@@ -42,6 +42,8 @@ The browser workbench builds about 1 GB in the checkout and runs from it, so kee
 
 ## Usage
 
+Use the **terminal plugin** when you work in Claude Code: Claude's answers about your files come with checked citations and cards, in the session you already have. Use the **browser workbench** when you want to work in a web page, with the folder's files and views of them beside the chat, a canvas of cards, labels and a report.
+
 ### Terminal plugin
 
 Run `claude` in a folder with files you'd like to analyze. thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off; `/plugin` turns thimble off.

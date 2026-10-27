@@ -57,12 +57,14 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
    chooses to skip this step.
 5. While something the user chose does not work yet, the install is not done: the script's notes, its sandbox line
    and the checks of steps 3 and 4 say what. Fix it, with the user's yes, or give them the step that only they can
-   take. Once it works, end with a short reply on how to use what was installed:
-   - The plugin: open `claude` in a folder of data files. Claude cites each claim, and a second Claude checks it
-     against the files; a click on the underlined words opens the evidence. The line above the prompt shows the keys:
-     `v` visualize, `s` rewrite, `w` evidence, `r` coverage. A click on `thimble` in that line, or
-     `/thimble-settings`, opens the settings; `/plugin` turns thimble off.
-   - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints.
+   take. Once it works, end with a short reply on how to use what was installed, and when to use each:
+   - The plugin, when they work in Claude Code: open `claude` in a folder of data files. Claude cites each claim, and a
+     second Claude checks it against the files; a click on the underlined words opens the evidence. The line above the
+     prompt shows the keys: `v` visualize, `s` rewrite, `w` evidence, `r` coverage. A click on `thimble` in that line,
+     or `/thimble-settings`, opens the settings; `/plugin` turns thimble off.
+   - The workbench, when they want to work in a web page, with the folder's files and views of them beside the chat, a
+     canvas of cards, labels and a report: run `thimble-browser` in a folder of files and open the sign-in link it
+     prints.
 6. When the plugin works, offer to show it on the checkout's `examples/sample/runs.csv` (40 made-up nightly test
    runs), in one short line, and never ask the user to type the question or a path. A citation can name only files in
    the folder its session works in, and a session keeps the PATH and the Claude Code it started with. So when the
