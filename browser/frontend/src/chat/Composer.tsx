@@ -3,11 +3,13 @@
 // (events.model_route, events.effort_route, events.fast_route). A thread whose message goes to a session thimble starts shows that role's line instead
 // (`chip`, RoleChip). A thread whose run the browser can stop (main's turn, a side thread's fork, the orientation, a
 // writer, a check's run, a dev ticket, a view's build or its review) passes `stop`, and while it runs the send square is
-// its Stop until text is typed (ComposerFrame), as Esc is in Claude Code. Each thread keeps its own draft.
-import { useRef, useState, type ReactNode } from 'react'
+// its Stop until text is typed (ComposerFrame), as Esc is in Claude Code. Each thread keeps its own draft. Text offered
+// from outside the chat (chat/pending offerDraft: a question typed in the tour's ask box) joins its thread's draft.
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ComposerFrame, type ComposerFrameProps } from '../components/Composer'
 import type { MainEffort } from '../lib/types'
 import { MODEL_TIP, ModelLine } from './ModelLine'
+import { onDraftOffered, takeDrafts, type Offer } from './pending'
 
 export interface ComposerProps {
   /** the model main runs (ModelLine.mainModel); nothing while it is unknown */
@@ -48,10 +50,24 @@ export function withDraft(drafts: Readonly<Record<string, string>>, thread: stri
   return next
 }
 
+/** `drafts` with each offered text after its thread's draft, on a line of its own. Pure. */
+export function withOffers(drafts: Readonly<Record<string, string>>, offers: readonly Offer[]): Readonly<Record<string, string>> {
+  return offers.reduce((d, o) => withDraft(d, o.thread, d[o.thread] ? `${d[o.thread]}\n${o.text}` : o.text), drafts)
+}
+
 export function Composer({ model, models, onModel, effort, onEffort, fast = null, onFast, chip: own, onSend, sending, placeholder, label = 'Ask about the data', disabled = false, stop, thread = 'main' }: ComposerProps) {
   const [drafts, setDrafts] = useState<Readonly<Record<string, string>>>({})
   const input = drafts[thread] ?? ''
   const taRef = useRef<HTMLTextAreaElement>(null)
+  // what was offered before the composer was drawn, then each offer as it comes
+  useEffect(() => {
+    const take = () => {
+      const offers = takeDrafts()
+      if (offers.length) setDrafts((d) => withOffers(d, offers))
+    }
+    take()
+    return onDraftOffered(take)
+  }, [])
   const send = () => {
     const text = input.trim()
     if (!text || disabled || sending) return
