@@ -1,5 +1,5 @@
-// argv.mjs: the command that starts the card runner (runner.mjs) in Anthropic's sandbox runtime (srt), for the hooks
-// (ask.ts), sandbox/setup.mjs's check and the tests alike. Pure: no `$`, no file system.
+// argv.mjs: the command that starts the card runner (runner.mjs) in Anthropic's sandbox runtime (srt), and what it said
+// when it ended, for the hooks (ask.ts), sandbox/setup.mjs's check and the tests alike. Pure: no `$`, no file system.
 //
 //   runnerCommand({plugin, node, grants, cards, run, sock})   the runner itself: Node's permission model (it reads the
 //       plugin's cards/ code, core/text.js and the session's card copies, writes only its own folder `run`, and has
@@ -10,6 +10,8 @@
 //       hidden; macOS: the folders that hold people's files, the home folder and thimble's home are hidden)
 //   runnerArgv({..., path})   the whole command: run.mjs, with an environment that holds only PATH and the runner's
 //       own folder, wraps an empty environment (`env -i`) and runnerCommand in srt with runnerRules
+//   saidOf(stderr)   what a process said as it ended, in one line: the error and its code when Node reported one,
+//       else its last two lines
 //
 // `node` is the absolute path of the Node binary (process.execPath), `grants` whether it takes each of GRANTS (as
 // setup.mjs says it, {'--allow-net': true}), `srt` the folder srt is installed in (setup.mjs), `run` the runner's own
@@ -18,6 +20,10 @@
 
 // the longest path of the runner's socket: a Unix socket's path holds at most 108 bytes on Linux, 104 on macOS
 export const SOCKET_MAX = 100
+
+// how much of what the runner writes to stderr the hooks and setup.mjs keep, its end: the whole report Node prints when
+// an error ends a process, a few KB at most
+export const SAID_MAX = 8000
 
 // the grants the runner needs beyond its files, where its Node's permission model covers what it does: Node 25 and
 // later refuse its listen() on its socket without --allow-net. A Node whose model does not cover it refuses the flag,
@@ -83,4 +89,22 @@ export function runnerArgv({ plugin, node, grants, srt, cards, run, sock, platfo
     node, `${here}/sandbox/run.mjs`, '--srt', trim(srt), JSON.stringify(rules), '--',
     '/usr/bin/env', '-i', 'PATH=/usr/bin:/bin', ...runnerCommand({ plugin, node, grants, cards, run, sock }),
   ]
+}
+
+// the report Node prints when an error ends a process: the line of code that threw, the error's own line (`Error: …`,
+// `TypeError [ERR_…]: …`), its stack, its properties (`code: 'ERR_ACCESS_DENIED'`), and last Node's version
+const NODE_ERROR = /^\s*\w*(Error|Exception)( \[\w+\])?: .*/m
+const NODE_CODE = /^\s*code: '([^']+)'/m
+
+/** What a process said on stderr as it ended, in one line of at most 300 characters: the error and its code when Node
+ *  reported one, since a report's last lines (the stack, `}`, Node's version) say nothing of why; else its last two
+ *  lines, but Node's version. '' when it said nothing. */
+export function saidOf(stderr) {
+  const text = String(stderr || '')
+  const error = NODE_ERROR.exec(text)
+  if (!error) return text.split('\n').map(l => l.trim()).filter(l => l && !/^Node\.js v\d/.test(l)).slice(-2).join(' ').slice(0, 300)
+  const line = error[0].trim()
+  const code = NODE_CODE.exec(text.slice(error.index))?.[1]
+  const tail = code && !line.includes(code) ? ` (${code})` : ''
+  return `${line.slice(0, 300 - tail.length)}${tail}`
 }

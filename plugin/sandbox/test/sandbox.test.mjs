@@ -2,7 +2,8 @@
 // then, on this machine, a process under those rules: it reads no file but the ones the rules name, writes only its own
 // folder, has no network and no variable of the session's. setup.mjs installs srt in the test's THIMBLE_HOME, says
 // which of the runner's grants its Node takes, names the system packages srt lacks with the one command that installs
-// them, and says how a runner that did not start ended, and on which Node. All paths and names are made up.
+// them, and says how a runner that did not start ended, on which Node, and the error it said. All paths and names are
+// made up.
 //   node --test plugin/sandbox/test/sandbox.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -13,7 +14,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { GRANTS, runnerArgv, runnerRules } from '../../cards/argv.mjs'
+import { GRANTS, runnerArgv, runnerRules, saidOf } from '../../cards/argv.mjs'
 import { sandbox } from '../../cards/test/start.mjs'
 
 const PLUGIN = fileURLToPath(new URL('../..', import.meta.url)).replace(/\/$/, '')
@@ -64,6 +65,24 @@ test('the runner gets each of its grants that its Node takes, and no other: --al
   for (const g of [{ '--allow-net': false }, {}, undefined, null]) assert.deepEqual(given(g), [], JSON.stringify(g))
   // a grant the runner does not need is never given, whatever the answer named
   assert.deepEqual(given({ '--allow-net': true, '--allow-child-process': true, '--allow-fs-read=/': true }), ['--allow-net'])
+})
+
+test('what the runner said as it ended, in one line: the error and its code from the report Node prints, else its last two lines', () => {
+  // the report as Node prints it: the line of code that threw, the error, its stack, its properties, Node's version
+  const report = (error, code = 'ERR_ACCESS_DENIED') => `file:///made-up/cards/runner.mjs:792\n  const server = http.createServer(serve)\n                      ^\n\n${error}\n${'    at serve (file:///made-up/cards/runner.mjs:792:23)\n'.repeat(10)} {\n  code: '${code}'\n}\n\nNode.js v26.1.0\n`
+  const refused = saidOf(report('Error: made-up: refused'))
+  assert.ok(refused.includes('Error: made-up: refused') && refused.includes('ERR_ACCESS_DENIED'), refused)
+  assert.doesNotMatch(refused, /Node\.js|\bat serve\b|}/)
+  // a code the error's own line names is not said twice
+  const missing = saidOf(report("Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/made-up/x.js'", 'ERR_MODULE_NOT_FOUND'))
+  assert.equal(missing.split('ERR_MODULE_NOT_FOUND').length, 2, missing)
+  // a long error is cut, and keeps its code
+  const long = saidOf(report(`Error: ${'made-up '.repeat(60)}`))
+  assert.ok(long.length <= 300 && long.includes('ERR_ACCESS_DENIED'), long)
+  // what is no report of Node's: its last two lines, but Node's version
+  assert.equal(saidOf('bwrap: setting up uid map: Permission denied\n'), 'bwrap: setting up uid map: Permission denied')
+  assert.equal(saidOf('one\ntwo\n  three\n\nNode.js v26.1.0\n'), 'two three')
+  assert.equal(saidOf(''), '')
 })
 
 test('a Node too old for srt is told the plugin\'s minimum, the one scripts/install.sh and the hooks name; the check stays at srt\'s floor', () => {
@@ -196,6 +215,18 @@ test('a runner that ends before it opens its socket: the probe says how it ended
   assert.match(line, /cards cannot run yet: .*exit 0/)
   assert.match(line, /code Claude writes/)
   assert.match(line, /rest of thimble works/)
+})
+
+test('a runner that an error ends before it opens its socket: the probe quotes the error and its code, not the last lines of Node\'s report', () => {
+  // as a Node whose permission model refuses something the runner does at its start, a few calls deep: the error comes
+  // before its stack in Node's report, more than 600 characters from its end
+  const start = 'startTheMadeUpCardRunnerThatThisNodeRefusesSomethingOf'
+  const runner = `function ${start}(n) { if (n) return ${start}(n - 1); throw Object.assign(new Error("made-up: refused"), { code: "ERR_ACCESS_DENIED" }) } ${start}(20)`
+  const got = probeWith(`'${s.node}' -e '${runner}'`)
+  assert.equal(got.ok, false)
+  assert.match(got.why, /exit 1\b/)
+  assert.ok(got.why.includes('made-up: refused') && got.why.includes('ERR_ACCESS_DENIED'), got.why)
+  assert.doesNotMatch(got.why, /Node\.js v/)
 })
 
 test('the sandbox starts its command with the system\'s bash, also when PATH finds another bash first', () => {

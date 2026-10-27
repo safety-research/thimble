@@ -36,7 +36,7 @@ import { tempDir, thimbleHome } from '../core/home'
 import { runDir, shortHash } from '../core/layout.mjs'
 import { themeNow } from '../core/theme'
 import { sessionKey } from '../hooks/conversation'
-import { SOCKET_MAX, runnerArgv } from './argv.mjs'
+import { SAID_MAX, SOCKET_MAX, runnerArgv, saidOf } from './argv.mjs'
 import { cardsDir } from './store'
 
 type Engine = EngineInterface
@@ -167,13 +167,13 @@ async function start($: Engine, sock: string): Promise<Down | null> {
       try {
         const child = $.process.spawn({ argv })
         runner.stop = () => { void child.return?.(undefined as never) }
-        for await (const piece of child) if (piece.stream === 'stderr') said = `${said}${piece.text}`.slice(-600)
+        for await (const piece of child) if (piece.stream === 'stderr') said = `${said}${piece.text}`.slice(-SAID_MAX)
       } catch (err) {
         said = String((err as Error)?.message || err)
       }
       if (runner.current !== mine) return
       runner.up = false
-      runner.exit = said.trim() || 'it stopped'
+      runner.exit = saidOf(said) || 'it stopped'
       // its folder goes with it; a runner started after it (current) makes the folder again
       await removeFolder($, sock)
     })()
@@ -197,8 +197,7 @@ async function start($: Engine, sock: string): Promise<Down | null> {
   // what kept it from starting: setup.mjs starts a runner of its own in the sandbox, and says why that one does not start
   const probed = await setup($, true)
   if (!probed.ok) return downOf(probed)
-  const why = runner.exit.split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 300)
-  return { why: `the card runner did not start in its sandbox${why ? ` (${why})` : ''}` }
+  return { why: `the card runner did not start in its sandbox${runner.exit ? ` (${runner.exit})` : ''}` }
 }
 
 /** The session ends: the runner stops, and its folder goes. */

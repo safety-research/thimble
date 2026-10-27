@@ -25,7 +25,7 @@ import os from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { GRANTS, SOCKET_MAX, runnerArgv } from '../cards/argv.mjs'
+import { GRANTS, SAID_MAX, SOCKET_MAX, runnerArgv, saidOf } from '../cards/argv.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN = dirname(HERE)
@@ -191,7 +191,7 @@ async function probe() {
   let said = ''
   let ended = null
   const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'ignore', 'pipe'] })
-  child.stderr.on('data', d => { said = `${said}${d}`.slice(-600) })
+  child.stderr.on('data', d => { said = `${said}${d}`.slice(-SAID_MAX) })
   child.on('exit', (code, signal) => { ended = { code, signal } })
   const ping = () => new Promise(resolve => {
     const q = http.request({ socketPath: sock, path: '/ping', method: 'POST' }, res => { res.resume(); res.on('end', () => resolve(res.statusCode === 200)) })
@@ -206,7 +206,7 @@ async function probe() {
     await new Promise(r => setTimeout(r, 50))
     if (!ended) return { error: `the card runner did not answer in ${PROBE_MS / 1000} s`, said }
     // how it ended and on which Node: what says why when it said nothing, as when Node 25 refused its socket
-    const why = said.trim().split('\n').filter(l => l.trim()).slice(-2).join(' ').slice(0, 300)
+    const why = saidOf(said)
     const how = `ended with ${endOf(ended)} on ${thisNode}`
     return { error: why ? `the card runner did not start in the sandbox: it ${how}, and said: ${why}` : `the card runner ${how} before it opened its socket, and said nothing`, said }
   } finally {
