@@ -1,13 +1,13 @@
 // The artifact of a card (cards/head.ts), on a plain engine whose $.agent.spawn runs this module's agent.spawn hook and
 // names the fork it started: while the fork works the card and the bar's busy line say so; its last message's link
-// shows under the card once, with a press that copies it, and a message with no link says why there is none; one press
-// publishes a card once, and a word that starts with p leaves the card's link as it was; a reload of the plugin while
-// a fork publishes loses neither the publish nor its end; main reads the link, or why there is none, with the next
-// prompt. All data is made up. `claude plugin test plugin`.
+// shows under the card once, and a message with no link says why there is none; one press publishes a card once, and a
+// word that starts with p leaves the card's link as it was; a reload of the plugin while a fork publishes loses neither
+// the publish nor its end; main reads the link, or why there is none, with the next prompt. All data is made up.
+// `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps, busyWhile } from '../bar/busy'
-import { artifactLine, artifactMaking, launch, registerCardHead } from '../cards/head'
+import { artifactLine, launch, registerCardHead } from '../cards/head'
 import { registerForks } from '../core/forks'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,8 +35,6 @@ function setup() {
   const timers: (() => unknown)[] = []
   const clock = { now: 1000, wake: () => undefined as unknown, tick: async () => { for (const f of timers.splice(0)) f(); await settle() } }
   const started = async (a: Any) => { spawns.push(a); return { model: 'claude-made-up', agentId: `agent-made-up-${spawns.length}` } }
-  const copies: Any[] = []
-  let copyGoes: Any = { isCopied: true }
   const $: Any = {
     state: {
       // each read gives a copy of its own, as the engine's does; a read of a held key waits until the test lets it go
@@ -50,11 +48,10 @@ function setup() {
     },
     agent: { spawn: async (a: Any) => hooks['agent.spawn'][0]($, a, Object.assign(async () => started(a), { origin: { plugin: 'thimble' } })), list: async () => agents },
     clock: { now: async () => clock.now, sleep: () => new Promise<void>(r => { clock.wake = r }), after: (_ms: number, f: () => unknown) => { timers.push(f); return { cancel() {} } } },
-    // the clipboard: what each copy put there, and how the copy went
-    ui: { invalidate: () => undefined, copy: async (a: Any) => { copies.push(a); return copyGoes } },
+    ui: { invalidate: () => undefined },
   }
   const el = (type: string) => (props: Any) => ({ type, props })
-  const E = { Box: el('Box'), Text: el('Text'), Link: el('Link'), Button: el('Button') }
+  const E = { Box: el('Box'), Text: el('Text'), Link: el('Link') }
   const ended = async (agentId: string, answer: string, reason = 'answer') => {
     for (const h of hooks['turn.complete']) await h($, { agentId, reason, answer }, async () => ({}))
   }
@@ -86,7 +83,7 @@ function setup() {
   }
   // what main reads with the person's next prompt (core/tell.ts)
   const told = () => Object.values((state.get(JSON.stringify({ plugin: 'thimble', key: 'tell' })) ?? {}) as Record<string, string>).join('\n')
-  return { $, E, ended, spawns, clock, barTick, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } }, agents, kept, start, hold, letGo, told }
+  return { $, E, ended, spawns, clock, barTick, agents, kept, start, hold, letGo, told }
 }
 
 /** A publish an earlier load of the plugin started: its fork, and the card's record. */
@@ -97,6 +94,8 @@ function earlier(s: ReturnType<typeof setup>, card: string, agentId: string) {
 }
 
 const settle = () => new Promise(r => setTimeout(r, 0))
+/** The line under a card while its artifact is being made. */
+const MAKING = 'creating artifact…'
 /** The bar's steps of a publish, earlier tests' too. */
 const steps = () => busySteps().filter(w => w === 'publishing an artifact').length
 
@@ -128,34 +127,13 @@ test('a card being made an artifact says so, then shows the link the fork ended 
   const { $, E, ended } = setup()
   await launch($, 'c-made-up-1', 'PROMPT artifact', 0).now()
   await settle()
-  expect(await artifactMaking($, 'c-made-up-1')).toBe(true)
-  const making = words(await artifactLine($, E, 'c-made-up-1'))
-  expect(making).toContain('link')
-  expect(making).not.toContain('×')
+  expect(words(await artifactLine($, E, 'c-made-up-1'))).toBe(MAKING)
   await ended('agent-made-up-1', 'Published.\nhttps://claude.ai/artifact/made-up-123')
-  expect(await artifactMaking($, 'c-made-up-1')).toBe(false)
   const line = await artifactLine($, E, 'c-made-up-1')
   const link = line.props.children.find((c: Any) => c.type === 'Link')
   expect(link.props.href).toBe('https://claude.ai/artifact/made-up-123')
   // the address shows once
   expect(words(line).split('https://claude.ai/artifact/made-up-123').length - 1).toBe(1)
-})
-
-test('a press on `copy` beside the link puts the link on the clipboard of the surface pressed on, and says whether it took', async () => {
-  const { $, E, ended, copies, copyFails } = setup()
-  await launch($, 'c-made-up-6', 'PROMPT artifact', 0).now()
-  await settle()
-  await ended('agent-made-up-1', 'https://claude.ai/artifact/made-up-6')
-  const copy = async () => (await artifactLine($, E, 'c-made-up-6')).props.children.find((c: Any) => c.type === 'Button')
-  expect(words(await copy())).toBe('copy')
-  await (await copy()).props.onPress({ surface: 'terminal' })
-  expect(copies).toEqual([{ text: 'https://claude.ai/artifact/made-up-6', surface: 'terminal' }])
-  expect(words(await copy())).toBe('copied')
-  // a terminal with no clipboard: the press says so, and the link stays to select
-  copyFails('no-clipboard')
-  await (await copy()).props.onPress({ surface: 'terminal' })
-  expect(words(await copy())).toContain('no clipboard')
-  expect(words(await artifactLine($, E, 'c-made-up-6'))).toContain('https://claude.ai/artifact/made-up-6')
 })
 
 test('a fork that publishes nothing says why under the card; a card with no artifact has no line', async () => {
@@ -219,10 +197,9 @@ test('a reload of the plugin while a fork publishes the card: the publish shows 
   s.agents.push({ id: 'agent-earlier-7', status: 'running' })
   const before = steps()
   await s.start()
-  expect(await artifactMaking(s.$, 'c-made-up-7')).toBe(true)
+  expect(words(await artifactLine(s.$, s.E, 'c-made-up-7'))).toBe(MAKING)
   expect(steps()).toBe(before + 1)
   await s.ended('agent-earlier-7', 'https://claude.ai/artifact/made-up-7')
-  expect(await artifactMaking(s.$, 'c-made-up-7')).toBe(false)
   expect(words(await artifactLine(s.$, s.E, 'c-made-up-7'))).toContain('https://claude.ai/artifact/made-up-7')
 })
 
@@ -253,14 +230,14 @@ test("at a reload, the session start and the card's drawing read its record at o
   const before = steps()
   earlier(s, 'c-made-up-13', 'agent-earlier-13')
   s.agents.push({ id: 'agent-earlier-13', status: 'running' })
-  // the session start reads the card's record, and the card draws (is it being made?) before that read answers
+  // the session start reads the card's record, and the card draws (the line under it) before that read answers
   const record = { plugin: 'thimble', key: 'cardArtifacts', id: 'c-made-up-13' }
   s.hold(record)
   const starting = s.start()
   await settle()
-  const drawing = artifactMaking(s.$, 'c-made-up-13')
+  const drawing = artifactLine(s.$, s.E, 'c-made-up-13')
   await s.letGo(record)
-  expect(await drawing).toBe(true)
+  expect(words(await drawing)).toBe(MAKING)
   await starting
   expect(steps()).toBe(before + 1)
   await s.ended('agent-earlier-13', 'https://claude.ai/artifact/made-up-13')
@@ -275,7 +252,6 @@ test('at a reload, a publish whose fork Claude Code no longer runs ends as faile
   // its end came while the plugin loaded
   s.agents.push({ id: 'agent-earlier-9', status: 'completed' })
   await s.start()
-  expect(await artifactMaking(s.$, 'c-made-up-9')).toBe(false)
   expect(words(await artifactLine(s.$, s.E, 'c-made-up-9'))).toContain('× no artifact')
 })
 

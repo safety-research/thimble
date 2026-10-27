@@ -46,7 +46,7 @@ import { cardRef } from '../marks/message.js'
 import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
-import { artifactLine, artifactMaking } from './head'
+import { artifactLine } from './head'
 import { layoutLines } from './layout.js'
 import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, keptFocus, keptMeta, keptSeen, markSeen, metaOf, readState, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
@@ -369,17 +369,13 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   const titled = whole ? E.Button({ key: 'title-ask', plain: true, label: `ask about ${whole.label}`, onPress: whole.press, hover: quiet(`card-title-${meta.id}`), children: [title] }) : title
   // at the title's right, in thimble's color, its header's keys: ask (a side thread about the card, whose question
   // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
-  // alone; every card's words are clicks. While the card's artifact is being made, `publishing…` stands in place of
-  // artifact, right where the press was, and p is no key of it
+  // alone; every card's words are clicks
   const lettered = (await headOwner($))?.id === meta.id
   const word = (key: string, words: string) => [...(lettered ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
-  const publishing = await artifactMaking($, meta.id)
   const askEl = ask ? E.Box({ key: 'head-keys', flexDirection: 'row', children: [
     E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: word('a', 'ask') }),
     E.Text({ key: 'head-sep', dimColor: true, children: ' · ' }),
-    publishing
-      ? E.Text({ key: `card-artifact-${meta.id}`, dimColor: true, children: 'publishing…' })
-      : E.Button({ key: `card-artifact-${meta.id}`, plain: true, label: `make an artifact of ${meta.title}`, onPress: () => undefined, hover: quiet(`card-artifact-${meta.id}`), children: word('p', 'artifact') }),
+    E.Button({ key: `card-artifact-${meta.id}`, plain: true, label: `make an artifact of ${meta.title}`, onPress: () => undefined, hover: quiet(`card-artifact-${meta.id}`), children: word('p', 'artifact') }),
   ] }) : null
   const rows: Any[] = [
     askEl ? E.Box({ key: 'title-row', flexDirection: 'row', justifyContent: 'space-between', children: [E.Box({ key: 'title-l', flexShrink: 1, children: [titled] }), E.Box({ key: 'title-r', flexShrink: 0, marginLeft: 2, children: [askEl] })] }) : titled,
