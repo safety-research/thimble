@@ -223,13 +223,35 @@ def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
 
 async def _end_group(proc: asyncio.subprocess.Process) -> None:
     """SIGTERM to the process group, then SIGKILL after KILL_WAIT_S. srt removes the empty files it puts in the working
-    directory for the box's run only when it gets to exit, so a SIGKILL first would leave them in the worktree."""
+    directory for the box's run only when it gets to exit, so a SIGKILL first would leave them in the worktree. A
+    process of the run in a session of its own, which the group's signals miss, gets SIGKILL once the group has ended:
+    a bwrap that srt started just as the run was stopped could outlive srt before its --die-with-parent took hold."""
+    from . import procs  # noqa: PLC0415
+
+    left: set[tuple[int, str]] = set()  # (pid, start time) of the run's processes outside its group
+
+    def look() -> None:
+        for pid in procs.descendants(proc.pid):
+            st = procs._stat_fields(pid)
+            if st is not None and len(st) > 19 and st[2] != str(proc.pid):
+                left.add((pid, st[19]))
+
+    look()
     _signal_group(proc, signal.SIGTERM)
-    try:
-        await asyncio.wait_for(proc.wait(), KILL_WAIT_S)
-    except asyncio.TimeoutError:
+    end = time.monotonic() + KILL_WAIT_S
+    while proc.returncode is None and time.monotonic() < end:
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(proc.wait(), 0.1)
+        if proc.returncode is None:
+            look()
+    if proc.returncode is None:
         _signal_group(proc, signal.SIGKILL)
         await proc.wait()
+    for pid, started in left:
+        st = procs._stat_fields(pid)
+        if st is not None and len(st) > 19 and st[19] == started:  # that process still, not a new one with its pid
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.kill(pid, signal.SIGKILL)
 
 
 async def run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float,
