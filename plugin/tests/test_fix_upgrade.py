@@ -1,7 +1,8 @@
-"""thimble fix after thimble was updated another way than thimble update (scripts/install.sh, claude plugin update,
-Claude Code's own update): while no fix is on, the release and its checkout follow the code that runs, and a release
-checkout from before the launcher's hand-off runs nothing. The world is test_fixes.py's made-up thimble 0.10.2; `claude`
-is a fake. All data here is made up."""
+"""thimble fix and thimble update after thimble was updated another way than thimble update (scripts/install.sh, claude
+plugin update, Claude Code's own update): while no fix is on, the release and its checkout follow the code that runs,
+and a release checkout from before the launcher's hand-off runs nothing; a record an earlier thimble stored tells of
+the sandbox; the reapply prompt names the old change from the home folder. The world is test_fixes.py's made-up thimble
+0.10.2; `claude` is a fake. All data here is made up."""
 from __future__ import annotations
 
 import json
@@ -109,3 +110,38 @@ def test_a_release_checkout_from_before_the_hand_off_runs_nothing(world, tmp_pat
     FX.new("say read")
     assert sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == world["base"]
     assert ran("fix", "list") == "release fix list"
+
+
+def test_a_record_an_earlier_thimble_stored_tells_of_the_sandbox(world, capsys):
+    from kernel import cli  # noqa: PLC0415
+
+    release_with(world, {"plugin/cards/runner.mjs": "export const run = 1\n", "plugin/cards/ask.ts": "export const ask = 1\n"})
+    r = FX.new("the runner says when it starts")
+    (Path(r["work"]) / "plugin" / "cards" / "runner.mjs").write_text("export const run = 2\n")
+    (Path(r["work"]) / "plugin" / "cards" / "ask.ts").write_text("export const ask = 2\n")
+    r = FX.done(r["id"], "Runner says when it starts", "")
+    # as 0.10.4 stored it: it neither refused nor named the card runner and its ask, so the record has no notice
+    with open(FX.home() / "fixes.jsonl", "a") as f:
+        f.write(json.dumps({k: v for k, v in r.items() if k != "notice"}) + "\n")
+    notice = {"the sandbox": ["plugin/cards/ask.ts", "plugin/cards/runner.mjs"]}
+    said = "This fix changes the sandbox (plugin/cards/ask.ts and plugin/cards/runner.mjs)."
+    assert FX.get(r["id"])["notice"] == notice
+    assert next(x for x in FX.listing()["fixes"] if x["id"] == r["id"])["notice"] == notice
+    assert said in " ".join(" ".join(FX.show_lines(r["id"])).split())
+    # the record the plugin's line reads before the person's y
+    assert cli.main(["fix", "show", str(r["id"]), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["notice"] == notice
+    assert cli.main(["fix", "list", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["fixes"][0]["notice"] == notice
+
+
+def test_the_reapply_prompt_names_the_old_change_from_the_home_folder(world, upstream, monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))  # thimble's home (tmp_path/th) is in the home folder
+    r = made(world)
+    FX.done(r["id"], "Bar says read", "")
+    FX.apply(r["id"], press(r["id"]))
+    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "v0.10.3")
+    assert FX.update()["aside"] == [r["id"]]
+    text = FX.reapply_prompt().read_text()
+    assert f"   Old change: ~/th/fixes/pending/0.10.3/fix-{r['id']}.patch (plugin/bar/bar.tsx)" in text
+    assert str(tmp_path) not in text

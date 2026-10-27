@@ -222,7 +222,8 @@ def short(words: str, n: int = 48) -> str:
 
 
 def records() -> dict[int, dict[str, Any]]:
-    """Each fix's record: the last line of its id in fixes.jsonl."""
+    """Each fix's record: the last line of its id in fixes.jsonl. A record stored before thimble kept a notice (0.10.4
+    and older) gets the one its files have now, as put would give it, so that the person is told before they use it."""
     out: dict[int, dict[str, Any]] = {}
     try:
         lines = (home() / "fixes.jsonl").read_text().splitlines()
@@ -234,6 +235,11 @@ def records() -> dict[int, dict[str, Any]]:
             out[int(r["id"])] = r
         except (ValueError, KeyError, TypeError):
             continue
+    for r in out.values():
+        if "notice" not in r:
+            notice = notice_of([str(f.get("path") or "") for f in r.get("files") or [] if isinstance(f, dict)])
+            if notice:
+                r["notice"] = notice
     return out
 
 
@@ -2053,7 +2059,7 @@ def reapply_prompt() -> Path:
             e.append(f"   It did: {' '.join(str(r['summary']).split())}")
         if p.get("old"):
             files = p.get("files") or []
-            e.append(f"   Old change: {p['old']}" + (f" ({', '.join(files)})" if files else ""))
+            e.append(f"   Old change: {_tilde(str(p['old']))}" + (f" ({', '.join(files)})" if files else ""))
         entries.append("\n".join(e))
     try:
         frame = PROMPT_REAPPLY.read_text()
