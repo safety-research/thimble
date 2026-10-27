@@ -49,7 +49,8 @@ A fix may not change the way back (PROTECTED): the fix flow, which turns fixes o
 a shared fix goes through. Binary files are refused too. It may change the rest (NOTICE), such as the sandbox, the hooks
 file and its command hooks, the launcher, thimble's scripts and lock files (a package added from REGISTRIES): its record
 names the kinds and the files (notice), and the line that asks whether to use it says them in one sentence, as thimble
-fix show does. A file moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
+fix show does; a fix that thimble update --continue turns on again, with no key press, may change only those it changed
+before (continue_). A file moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
 prompt does not list these files. A check that refuses a change (these files, a binary file, failing tests) keeps the
 refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
 to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
@@ -1595,6 +1596,14 @@ def _relink_cli() -> None:
     tmp.replace(link)
 
 
+def _way_back() -> None:
+    """The release checkout at the release commit, and the shell's link on its launcher, before the fixes an update set
+    aside go on again (reapply, continue_): an update that a thimble from before the checkout ran made neither."""
+    place_release(release()["base"])
+    if release().get("pointed"):
+        _relink_cli()
+
+
 # ------------------------------------------------------------------ a new release: thimble update
 
 
@@ -1764,11 +1773,13 @@ def reapply_prompt() -> Path:
 
 
 def reapply_argv() -> dict[str, Any]:
-    """thimble reapply: Claude Code (claude) in live, with the reapply prompt as its first message."""
+    """thimble reapply: Claude Code (claude) in live, with the reapply prompt as its first message, once the way back
+    runs from the release checkout (_way_back)."""
     if not (live_dir() / ".git").exists():
         raise FixError("you have no fixes: there is nothing to bring back")
     with Lock():
         prompt = reapply_prompt()
+        _way_back()
     return {"argv": [claude(), prompt.read_text()], "cwd": str(live_dir()), "prompt": str(prompt)}
 
 
@@ -2097,14 +2108,17 @@ def _summary(d: dict[str, Any], paint: Paint | None = None) -> list[str]:
 def continue_() -> dict[str, Any]:
     """thimble update --continue: in the session thimble reapply opened, Claude brought back the set-aside fixes that the
     release still needs, one commit per fix with the fix's title. Each such commit becomes its fix's new version, and the
-    fix is on. A set-aside fix with no commit is left out: the release does it, or it cannot work there, and it leaves
-    the list. A commit that is no set-aside fix's, or that changes a file no fix may change (PROTECTED), stops it with
-    nothing recorded, so mine holds only recorded fixes."""
+    fix is on, with no key press. A set-aside fix with no commit is left out: the release does it, or it cannot work
+    there, and it leaves the list. A commit that is no set-aside fix's, that changes a file no fix may change
+    (PROTECTED), or that changes a file the person is told of before they use a fix (NOTICE_KINDS) which its fix did not
+    change before they used it, stops it with nothing recorded, so mine holds only recorded fixes, each with nothing
+    the person was not told of."""
     cur = read_json(home() / "pending" / "current.json")
     if not cur:
         raise FixError("no fixes are set aside, so there is nothing to record; thimble update looks for a new release")
     live = live_dir()
     with Lock():
+        _way_back()
         dirty = [x[3:] for x in run(["git", "status", "--porcelain", "--untracked-files=no"], cwd=live).stdout.splitlines()
                  if x[3:] != PLUGIN_JSON]
         if dirty:
@@ -2134,6 +2148,16 @@ def continue_() -> dict[str, Any]:
                                "run thimble update --continue again")
             if any(f["add"] is None for f in files):
                 raise FixError(f"commit {c[:7]} adds or changes a binary file; a fix changes text only")
+            # of the files the person is told of (the sandbox, the hooks file, the launcher and the rest), only those the
+            # fix changed when they used it, which its line named
+            had = {*((recs[fid].get("pending") or {}).get("files") or []), *_set_aside_files(fid)}
+            new = notice_of([f["path"] for f in files if f["path"] not in had])
+            if new:
+                what = _and([f"{k} ({_and(ps)})" for k, ps in new.items()])
+                raise FixError(f"commit {c[:7]} (“{short(subject, 50)}”) changes {what}, which the fix did not change "
+                               "before: such a change goes on only after the person reads of it and presses y. Take "
+                               "that part out, or leave the fix out and tell the person that /thimble-fix makes it "
+                               "again, then run thimble update --continue again")
             found.append((fid, c, files))
         for fid, c, files in found:
             git("update-ref", f"refs/thimble/fixes/{fid}", c, cwd=live)

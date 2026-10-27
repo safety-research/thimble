@@ -738,6 +738,52 @@ def test_continue_records_only_commits_that_are_set_aside_fixes_and_safe(world, 
     assert out["aside"] == [a] and FX.get(a)["pending"]["old"].endswith("0.10.4/fix-1.patch")
 
 
+def test_continue_turns_on_no_change_the_person_was_not_told_of_and_the_way_back_runs_from_the_release(world, upstream, tmp_path):
+    import shutil  # noqa: PLC0415
+
+    # fix 1 changes the bar; fix 2 the card runner's rules, which its line named before the person's y
+    a = on_fix(world)["id"]
+    b = FX.new("cards draw on Node 26")
+    (Path(b["work"]) / "plugin" / "cards").mkdir(parents=True)
+    (Path(b["work"]) / "plugin" / "cards" / "argv.mjs").write_text("export const flags = ['--allow-net']\n")
+    assert FX.done(b["id"], "Cards draw on Node 26", "")["notice"] == {"the sandbox": ["plugin/cards/argv.mjs"]}
+    FX.apply(b["id"], press(b["id"]))
+    b = b["id"]
+    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n", "plugin/bin/thimble": "#!/bin/sh\necho made-up\n"}, "v0.10.3")
+    assert FX.update()["aside"] == [a, b]
+    # as an update by a thimble from before the release checkout leaves it: no checkout, the shell's link on live's command
+    shutil.rmtree(FX.release_dir())
+    link = tmp_path / "home" / ".local" / "bin" / "thimble"
+    link.parent.mkdir(parents=True)
+    link.symlink_to(FX.live_dir() / "plugin" / "bin" / "thimble")
+    (FX.thimble_home() / "cli-link").write_text(f"{link}\n")
+    # thimble reapply makes both before Claude brings any fix back
+    FX.reapply_argv()
+    assert sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == FX.release()["base"]
+    assert os.readlink(link) == str(FX.release_dir() / "plugin" / "bin" / "thimble")
+    # Claude brings back the bar's word with a change to the launcher, which fix 1 never had: nothing is recorded
+    live = FX.live_dir()
+    (live / "plugin" / "bar" / "bar.tsx").write_text("const words = `read ${n}`\n")
+    (live / "plugin" / "bin" / "thimble").write_text("#!/bin/sh\necho loosened\n")
+    sh("git", "commit", "-q", "-am", "Bar says read", cwd=live)
+    with pytest.raises(FX.FixError, match=r"changes the launcher \(plugin/bin/thimble\), which the fix did not change before"):
+        FX.continue_()
+    assert FX.get(a)["state"] == "pending" and FX.get(b)["state"] == "pending"
+    sh("git", "reset", "-q", "--hard", "HEAD~1", cwd=live)
+    # the bar's word alone, and fix 2's own file of the sandbox again: both go on, fix 2 still with its note
+    (live / "plugin" / "bar" / "bar.tsx").write_text("const words = `read ${n}`\n")
+    sh("git", "commit", "-q", "-am", "Bar says read", cwd=live)
+    (live / "plugin" / "cards").mkdir(parents=True)
+    (live / "plugin" / "cards" / "argv.mjs").write_text("export const flags = ['--allow-net', '--made-up']\n")
+    sh("git", "add", "-A", cwd=live)
+    sh("git", "commit", "-q", "-m", "Cards draw on Node 26", cwd=live)
+    shutil.rmtree(FX.release_dir())  # and continue_ makes the checkout again when it is gone
+    done = FX.continue_()
+    assert done["recorded"] == [a, b] and FX.get(b)["state"] == "on"
+    assert FX.get(b)["notice"] == {"the sandbox": ["plugin/cards/argv.mjs"]}
+    assert (FX.release_dir() / "plugin" / "bin" / "thimble").read_text() == "#!/bin/sh\necho made-up\n"
+
+
 def test_update_check_skips_release_candidates_and_never_steps_back(world, upstream, monkeypatch):
     monkeypatch.delenv("CLAUDECODE", raising=False)
     assert FX.update()["lines"] == ["thimble 0.10.2 is the newest release."]
