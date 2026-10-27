@@ -1,12 +1,13 @@
 // The artifact of a card (cards/head.ts), on a plain engine whose $.agent.spawn runs this module's agent.spawn hook and
 // names the fork it started: while the fork works the card and the bar's busy line say so; its last message's link
 // shows under the card once, with a press that copies it, and a message with no link says why there is none; one press
-// publishes a card once, and a word that starts with p leaves the card's link as it was. All data is made up.
-// `claude plugin test plugin`.
+// publishes a card once, and a word that starts with p leaves the card's link as it was; a reload of the plugin while
+// a fork publishes loses neither the publish nor its end. All data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps } from '../bar/busy'
 import { artifactLine, artifactMaking, launch, registerCardHead } from '../cards/head'
+import { registerForks } from '../core/forks'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
@@ -18,8 +19,13 @@ function setup() {
     hooks[event].push(typeof a === 'function' ? a : b)
     return { catch: () => undefined }
   }
+  // the fork registry first, as hooks/register.ts has it: at a session start it knows the forks again before this module
+  // looks for the cards they publish
+  registerForks(on, {} as never)
   registerCardHead(on, {} as never)
   const state = new Map<string, unknown>()
+  // the agents Claude Code runs, as $.agent.list() gives them
+  const agents: Any[] = []
   // the forks Claude Code started: the spawns this module's agent.spawn hook let go
   const spawns: Any[] = []
   // the clock; a sleep (the word window's) lasts until the test wakes it, and the timers wait until it ticks
@@ -33,7 +39,7 @@ function setup() {
       get: async (k: Any) => ({ value: state.get(JSON.stringify(k)) }),
       set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true } },
     },
-    agent: { spawn: async (a: Any) => hooks['agent.spawn'][0]($, a, Object.assign(async () => started(a), { origin: { plugin: 'thimble' } })) },
+    agent: { spawn: async (a: Any) => hooks['agent.spawn'][0]($, a, Object.assign(async () => started(a), { origin: { plugin: 'thimble' } })), list: async () => agents },
     clock: { now: async () => clock.now, sleep: () => new Promise<void>(r => { clock.wake = r }), after: (_ms: number, f: () => unknown) => { timers.push(f); return { cancel() {} } } },
     // the clipboard: what each copy put there, and how the copy went
     ui: { invalidate: () => undefined, copy: async (a: Any) => { copies.push(a); return copyGoes } },
@@ -43,7 +49,17 @@ function setup() {
   const ended = async (agentId: string, answer: string, reason = 'answer') => {
     for (const h of hooks['turn.complete']) await h($, { agentId, reason, answer }, async () => ({}))
   }
-  return { $, E, ended, spawns, clock, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } } }
+  // what an earlier load of the plugin kept in $.state; a session start (the reload), or only its first `n` hooks
+  const kept = (ref: Any, value: unknown) => { state.set(JSON.stringify(ref), value) }
+  const start = async (n = Infinity) => { for (const h of hooks['session.start'].slice(0, n)) await h($, { cwd: '/made-up/data' }, async () => ({})) }
+  return { $, E, ended, spawns, clock, copies, copyFails: (reason: string) => { copyGoes = { isCopied: false, reason } }, agents, kept, start }
+}
+
+/** A publish an earlier load of the plugin started: its fork, and the card's record. */
+function earlier(s: ReturnType<typeof setup>, card: string, agentId: string) {
+  s.kept({ plugin: 'thimble', key: 'forks' }, { [agentId]: 'artifact' })
+  s.kept({ plugin: 'thimble', key: 'cardArtifacts', id: card }, { card, status: 'running', agentId, until: 0 })
+  s.kept({ plugin: 'thimble', key: 'cardArtifactsNow' }, [card])
 }
 
 const settle = () => new Promise(r => setTimeout(r, 0))
@@ -159,4 +175,38 @@ test('a word that starts with p leaves the link under the card as it was, and st
   await settle()
   expect(spawns.length).toBe(2)
   expect(await line()).not.toContain('https://claude.ai/artifact/made-up-4')
+})
+
+test('a reload of the plugin while a fork publishes the card: the publish shows again, with its busy step, and its end shows the link', async () => {
+  const s = setup()
+  earlier(s, 'c-made-up-7', 'agent-earlier-7')
+  s.agents.push({ id: 'agent-earlier-7', status: 'running' })
+  const steps = () => busySteps().filter(w => w === 'publishing an artifact').length
+  const before = steps()
+  await s.start()
+  expect(await artifactMaking(s.$, 'c-made-up-7')).toBe(true)
+  expect(steps()).toBe(before + 1)
+  await s.ended('agent-earlier-7', 'https://claude.ai/artifact/made-up-7')
+  expect(await artifactMaking(s.$, 'c-made-up-7')).toBe(false)
+  expect(words(await artifactLine(s.$, s.E, 'c-made-up-7'))).toContain('https://claude.ai/artifact/made-up-7')
+})
+
+test('a fork whose end comes before this module looked at the reload still shows its link', async () => {
+  const s = setup()
+  earlier(s, 'c-made-up-8', 'agent-earlier-8')
+  s.agents.push({ id: 'agent-earlier-8', status: 'running' })
+  // only the fork registry knows its forks again
+  await s.start(1)
+  await s.ended('agent-earlier-8', 'https://claude.ai/artifact/made-up-8')
+  expect(words(await artifactLine(s.$, s.E, 'c-made-up-8'))).toContain('https://claude.ai/artifact/made-up-8')
+})
+
+test('at a reload, a publish whose fork Claude Code no longer runs ends as failed, and says so under the card', async () => {
+  const s = setup()
+  earlier(s, 'c-made-up-9', 'agent-earlier-9')
+  // its end came while the plugin loaded
+  s.agents.push({ id: 'agent-earlier-9', status: 'completed' })
+  await s.start()
+  expect(await artifactMaking(s.$, 'c-made-up-9')).toBe(false)
+  expect(words(await artifactLine(s.$, s.E, 'c-made-up-9'))).toContain('× no artifact')
 })

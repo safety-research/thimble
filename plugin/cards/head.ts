@@ -15,13 +15,17 @@
 // the publish once the window closed with no letter, so a word that starts with p leaves the card, and its link, as
 // they were. A click has no window, and shows at once.
 //
+// A reload of the plugin (a change of the settings, /reload-plugins) empties this module's memory while a fork may
+// still publish: $.state keeps which cards' artifacts are being made, so the fork's end still finds its card, and at
+// session start one whose fork Claude Code no longer runs ends as failed, and says so.
+//
 //   headKey($, key, until)      what a or p does at an empty prompt now (hooks/keys.ts asks), or null when it types
 //   startArtifact($, id, until) p's work, from the key or a click on `artifact`
 //   artifactMaking($, id)       whether the card's artifact is being made now
 //   artifactLine($, E, id)      the line under a card about its artifact, or null
 //
-//   state: cardArtifacts (each card's artifact, by card id)
-import type { EngineInterface, Register } from 'claude-code'
+//   state: cardArtifacts (each card's artifact, by card id), cardArtifactsNow (the cards whose artifact is being made)
+import { update, type EngineInterface, type Register } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
 import { cardAsk } from '../core/answerview'
@@ -60,6 +64,7 @@ const STEP = 'publishing an artifact'
 /** The most of a card's text copy the fork reads. */
 const COPY_CHARS = 4000
 const MADE = { plugin: 'thimble', key: 'cardArtifacts' } as const
+const NOW = { plugin: 'thimble', key: 'cardArtifactsNow' } as const
 /** A claude.ai artifact's link, as the Artifact tool gives it. */
 const LINK = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/
 
@@ -77,13 +82,19 @@ const working = (m: Made | null | undefined) => m?.status === 'held' || m?.statu
 const making = (card: string) => [...starting].some(m => m.card === card && m.status === 'held') || working(made.get(card))
 
 async function madeOf($: Engine, card: string): Promise<Made | null> {
-  return made.get(card) ?? (((await $.state.get({ ...MADE, id: card })).value ?? null) as Made | null)
+  const known = made.get(card)
+  if (known) return known
+  // a reload of the plugin: the record as the earlier load kept it, known again
+  const kept = ((await $.state.get({ ...MADE, id: card })).value ?? null) as Made | null
+  if (kept) made.set(card, kept)
+  return kept
 }
 
 async function save($: Engine, m: Made): Promise<void> {
   made.set(m.card, m)
   copied.delete(m.card)
   await $.state.set({ ...MADE, id: m.card }, m)
+  await update($, NOW, cur => [...(cur ?? []).filter(c => c !== m.card), ...(working(m) ? [m.card] : [])])
   $.ui.invalidate('ui.render')
 }
 
@@ -202,7 +213,32 @@ async function finish($: Engine, m: Made, e: { reason: string; answer: string })
   return end($, m, 'failed', { error: said || (e.reason === 'error' ? 'the model call failed' : 'the copy gave no link') })
 }
 
-const owning = (agentId: string | undefined) => [...made.values()].find(m => m.agentId === agentId && m.status === 'running') ?? null
+/** The artifact a fork makes: as this load holds it, else as $.state keeps it (the plugin was loaded again while the
+ *  fork ran). */
+async function owning($: Engine, agentId: string | undefined): Promise<Made | null> {
+  const its = (m: Made | null | undefined) => !!m && !!agentId && m.agentId === agentId && m.status === 'running'
+  for (const m of made.values()) if (its(m)) return m
+  for (const card of ((await $.state.get(NOW)).value ?? []) as string[]) {
+    const m = await madeOf($, card)
+    if (its(m)) return m
+  }
+  return null
+}
+
+/** A reload of the plugin: each artifact still being made is known again, with its busy step; one whose fork Claude
+ *  Code no longer runs (its end came while the plugin loaded) ends as failed, and says so under its card. */
+async function resume($: Engine): Promise<void> {
+  const cards = ((await $.state.get(NOW)).value ?? []) as string[]
+  if (!cards.length) return
+  const agents = await $.agent.list()
+  for (const card of cards) {
+    const m = await madeOf($, card)
+    if (!m || !working(m)) continue
+    const a = m.status === 'running' ? agents.find(x => x.id === m.agentId) : undefined
+    if (a && !['completed', 'failed', 'killed'].includes(a.status)) await busyWhile($, STEP, () => m.status === 'running')
+    else await end($, m, 'failed', { error: 'thimble lost the copy that made it; press p to publish the card again' })
+  }
+}
 
 export const registerCardHead: Register = on => {
   // a click on a card's `artifact`: what p does, started in this hook, so the plugin's other hooks serve its fork
@@ -218,10 +254,22 @@ export const registerCardHead: Register = on => {
     return { element: e.element }
   }).catch(($, e, next) => next(e))
 
+  // a reload of the plugin: the artifacts being made are known again
+  on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
+    const r = await next(e)
+    try {
+      await resume($)
+    } catch {
+      // each ends when its fork does
+    }
+    return r
+  }).catch(($, e, next) => next(e))
+
   on('turn.complete', { agentId: /\S/ }, async ($, e, next) => {
     const r = await next(e)
-    const m = owning(e.agentId)
-    if (m && forkOf(e.agentId)?.kind === 'artifact') {
+    if (forkOf(e.agentId)?.kind !== 'artifact') return r
+    const m = await owning($, e.agentId)
+    if (m) {
       try {
         await finish($, m, e)
       } catch (err) {

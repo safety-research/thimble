@@ -35,6 +35,8 @@ declare module 'claude-code' {
       // ---- a card's header (cards/head.ts)
       /** a card's artifact, by card id: { card, status, agentId, until, url?, error? } */
       cardArtifacts: StateFamily<unknown>
+      /** the cards whose artifact is being made, which a reload of the plugin finds again */
+      cardArtifactsNow: string[]
       // ---- v (designer/v.ts)
       /** a design v started, by its key: { key, anchorRow, agentId, status, at, until, error?, cards } */
       designs: StateFamily<unknown>
