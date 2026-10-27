@@ -9,7 +9,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
@@ -258,6 +258,49 @@ test('a runner that an error ends before it opens its socket: the probe quotes t
   assert.match(got.why, /exit 1\b/)
   assert.ok(got.why.includes('made-up: refused') && got.why.includes('ERR_ACCESS_DENIED'), got.why)
   assert.doesNotMatch(got.why, /Node\.js v/)
+})
+
+test('the probe has the runner draw a test card in the sandbox, as a card call does, and its line says so', () => {
+  const r = spawnSync(s.node, [SETUP, '--probe'], { encoding: 'utf8', timeout: 60000, env: { PATH: process.env.PATH, THIMBLE_HOME: process.env.THIMBLE_HOME } })
+  assert.equal(r.status, 0, r.stdout + r.stderr)
+  assert.match(r.stdout, /the runner drew a test card in \d+ ms\./)
+})
+
+test('a runner that answers but does not draw the test card: the probe says the card did not draw, and why', () => {
+  // a made-up sandbox runtime that starts, in place of the card runner, a made-up one on the probe's socket: it answers
+  // ping, and refuses to draw
+  const home = mkdtempSync(join(dir, 'home-'))
+  const pkg = join(home, 'srt', s.version, 'node_modules', '@anthropic-ai', 'sandbox-runtime')
+  mkdirSync(join(pkg, 'dist'), { recursive: true })
+  const runner = join(home, 'made-up-runner.mjs')
+  writeFileSync(runner, `import http from 'node:http'
+http.createServer((q, r) => { q.resume(); q.on('end', () => r.end(JSON.stringify(q.url === '/ping' ? { ok: true } : { ok: false, error: 'made-up: this runner draws nothing' }))) }).listen(process.argv[2])
+`)
+  writeFileSync(join(pkg, 'package.json'), JSON.stringify({ name: '@anthropic-ai/sandbox-runtime', version: s.version, type: 'module', main: 'dist/index.js' }))
+  writeFileSync(join(pkg, 'dist', 'index.js'), `export const SandboxRuntimeConfigSchema = { parse: rules => rules }
+export const SandboxManager = { checkDependencies: () => ({ errors: [], warnings: [] }), updateConfig() {}, cleanupAfterCommand() {}, wrapWithSandbox: async command => ${JSON.stringify(`${s.node} ${runner} `)} + command.match(/[^\\s'"]*cards\\.sock/)[0] }\n`)
+  writeFileSync(join(home, 'srt', s.version, 'node_modules', '.thimble-lock.json'), readFileSync(join(PLUGIN, 'sandbox', 'package-lock.json'), 'utf8'))
+  const r = spawnSync(s.node, [SETUP, '--json', '--probe'], { encoding: 'utf8', timeout: 60000, env: { PATH: process.env.PATH, THIMBLE_HOME: home } })
+  const got = JSON.parse(r.stdout)
+  assert.equal(got.ok, false)
+  assert.match(got.why, /did not draw a test card: made-up: this runner draws nothing/)
+})
+
+test('with --repair, a sandbox runtime that does not load is installed again, and the probe then draws its test card; without it, the fix names --repair', () => {
+  // a copy of this machine's install whose entry file is gone
+  const home = mkdtempSync(join(dir, 'home-'))
+  cpSync(join(process.env.THIMBLE_HOME, 'srt', s.version), join(home, 'srt', s.version), { recursive: true })
+  const entry = join(home, 'srt', s.version, 'node_modules', '@anthropic-ai', 'sandbox-runtime', 'dist', 'index.js')
+  rmSync(entry)
+  const env = { PATH: process.env.PATH, THIMBLE_HOME: home }
+  const broken = JSON.parse(spawnSync(s.node, [SETUP, '--json', '--probe'], { encoding: 'utf8', timeout: 60000, env }).stdout)
+  assert.equal(broken.ok, false)
+  assert.match(broken.why, /does not load/)
+  assert.ok(broken.fix.endsWith(`node ${SETUP} --probe --repair`), broken.fix)
+  const fixed = JSON.parse(spawnSync(s.node, [SETUP, '--json', '--probe', '--repair'], { encoding: 'utf8', timeout: 300000, env }).stdout)
+  assert.equal(fixed.ok, true, `${fixed.why}. ${fixed.fix}`)
+  assert.match(fixed.repaired, /does not load/)
+  assert.ok(existsSync(entry))
 })
 
 test('the sandbox starts its command with the system\'s bash, also when PATH finds another bash first', () => {

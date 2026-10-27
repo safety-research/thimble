@@ -137,6 +137,57 @@ def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     assert sandbox.endswith("Install them: sudo made-up-get install bubblewrap socat"), said
 
 
+def install_with_login_shell(tmp_path, login_path):
+    """scripts/install.sh --no-browser with made-up commands, run from a shell whose node fails the card test (it says
+    the made-up sandbox does not work), for a person whose login shell (SHELL, a made-up one) starts with the PATH
+    `login_path`, where a made-up node passes it. Its output, and the arguments the login shell was started with."""
+    market = tmp_path / "market"
+    (market / ".claude-plugin").mkdir(parents=True)
+    (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
+    (market / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (market / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"userConfig": {}}))
+    stub(market / "plugin" / "sandbox" / "setup.mjs", "")
+    stub(market / "plugin" / "bin" / "thimble", "")
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"installLocation": str(market)}}))
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "node", 'case "$1" in --version) echo v22.20.0 ;;\n'
+         '*) echo "thimble: cards cannot run yet: the made-up node of this shell."; exit 1 ;; esac\n')
+    stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
+    stub(tmp_path / "new-terminal" / "node", 'echo "thimble: cards run in the made-up sandbox; the runner drew a test card in 5 ms ($*)."\n')
+    started = tmp_path / "login.log"
+    login = stub(tmp_path / "login-shell", f'echo "$@" > "{started}"\necho "made-up: welcome"\necho "PATH={login_path}"\n')
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "SHELL": str(login)}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, p.stdout + p.stderr
+    return p.stdout, started.read_text().split()
+
+
+def test_the_card_test_runs_on_the_node_a_new_terminal_finds(tmp_path):
+    """The install draws a test card as a session does: on the node a new terminal finds, from the PATH the person's
+    login shell starts with (a login shell, interactive, as a terminal starts it), and with --repair, which installs
+    the sandbox again when that repairs it. This shell's own node is not the one a session runs on."""
+    out, started = install_with_login_shell(tmp_path, f"{tmp_path / 'new-terminal'}:/usr/bin:/bin")
+    assert started == ["-lic", "env"]
+    market = tmp_path / "market" / "plugin" / "sandbox" / "setup.mjs"
+    assert f"thimble: cards run in the made-up sandbox; the runner drew a test card in 5 ms ({market} --probe --repair)." in out.splitlines()
+    assert "cards cannot run yet" not in out
+
+
+def test_a_new_terminal_that_finds_no_node_is_said(tmp_path):
+    """A new terminal that finds no node cannot start the card runner: a note says so, with the line that puts this
+    shell's node on its PATH, and the card test runs on this shell's node."""
+    out, _ = install_with_login_shell(tmp_path, str(tmp_path / "nothing"))
+    notes = [x for x in out.splitlines() if x.startswith("Note: a new terminal finds no node")]
+    assert notes == [f"Note: a new terminal finds no node, and the plugin's cards run on the node a new terminal finds. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"{tmp_path / 'stubs'}:$PATH\""]
+    assert "the made-up node of this shell" in out
+
+
 def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_rest_installs(tmp_path):
     """Once a fix went on, Claude Code's marketplace thimble is the fixes' live folder, which its settings keep, and it
     refuses another source for the name. The install leaves the plugin to thimble update, says so in one line, and

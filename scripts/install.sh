@@ -12,8 +12,9 @@ Installs thimble's two products. It checks Node, Python and uv first, and says w
 it installs the plugin, it looks for thimble 0.9, and stops while 0.9 is here: it says what it found, how to keep 0.9's
 workspaces (0.10 cannot open them), and the commands that remove 0.9.
   The terminal plugin: adds the marketplace safety-research/thimble to Claude Code and installs thimble@thimble, then
-    the sandbox its cards run in (Anthropic's sandbox runtime, pinned by the plugin, in ~/.thimble/srt); on Linux it
-    says which system packages the sandbox lacks, with the one command that installs them (it never runs sudo).
+    the sandbox its cards run in (Anthropic's sandbox runtime, pinned by the plugin, in ~/.thimble/srt), and draws a
+    test card in it on the node a new terminal finds; a sandbox that does not load or start it installs again. On Linux
+    it says which system packages the sandbox lacks, with the one command that installs them (it never runs sudo).
     Without the claude command, it prints the two commands to run.
     It also links the thimble command into ~/.local/bin, for a shell: thimble update moves both products to the
     newest release, thimble fixes lists your changes to thimble, and thimble --help lists the rest.
@@ -250,6 +251,22 @@ link_cli() {
 }
 # sq TEXT: TEXT in single quotes, for a launcher
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# fresh_path: the PATH a new terminal starts with, where the claude the person starts finds the node the plugin's cards
+# run on: their login shell ($SHELL), started as a terminal starts it (a login shell, interactive, so it reads their
+# startup files) with no input, prints its environment; '' when it cannot say within 20 s
+fresh_path() {
+  local sh="${SHELL:-}" out pid i
+  [ -n "$sh" ] && [ -x "$sh" ] || return 0
+  out="$(mktemp)"
+  env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-${USER:-}}" SHELL="$sh" TERM="${TERM:-xterm-256color}" LANG="${LANG:-C.UTF-8}" \
+    "$sh" -lic env </dev/null >"$out" 2>/dev/null &
+  pid=$!
+  for i in $(seq 1 200); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  sed -n 's/^PATH=//p' "$out" | tail -n 1
+  rm -f "$out"
+}
 
 # ---- the terminal plugin
 
@@ -384,10 +401,19 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
 ' || true)"
     if [ -n "$at" ] && [ -f "$at/sandbox/setup.mjs" ]; then
       say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
+      # the test draws a card as a session does: on the node and PATH of a new terminal (fresh_path), else on this
+      # shell's; a failure it can repair (srt that does not load or start) it repairs (--repair)
+      probe_path="$(fresh_path)"
+      probe_node=""
+      if [ -n "$probe_path" ]; then
+        probe_node="$(PATH="$probe_path"; hash -r; command -v node 2>/dev/null || true)"
+        [ -n "$probe_node" ] || notes+=("a new terminal finds no node, and the plugin's cards run on the node a new terminal finds. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"$(dirname "$(command -v node)"):\$PATH\"")
+      fi
+      [ -n "$probe_node" ] || { probe_node="$(command -v node)"; probe_path="$PATH"; }
       # its line (npm's progress goes to stderr, and shows as it comes); when the sandbox does not work yet, the line's
       # why and fix again in the notes, at the end. The fix, on the line after the why, often ends in a command: it
       # keeps a line of its own, so that no words follow the command
-      if sandbox="$(node "$at/sandbox/setup.mjs" --probe)"; then
+      if sandbox="$(PATH="$probe_path" "$probe_node" "$at/sandbox/setup.mjs" --probe --repair)"; then
         say "$sandbox"
       else
         say "$sandbox"

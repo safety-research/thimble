@@ -4,20 +4,25 @@
 // the plugin keeps it. scripts/install.sh and the try-it script run it after they install the plugin, and the plugin
 // runs it at each session start (a plugin installed with `claude plugin install` alone runs no setup of its own).
 //
-//   node setup.mjs [--home DIR] [--json] [--probe]
+//   node setup.mjs [--home DIR] [--json] [--probe] [--repair]
 //
 // It needs nothing but the Node it runs on, which is the Node that will run the runner (the hooks run it by `node` on
 // the session's PATH). It installs srt when that version is not there (it never runs sudo), then asks srt whether this
 // machine has what it needs (Linux: bubblewrap, socat and ripgrep; macOS: sandbox-exec), and with --probe starts the
-// card runner in the sandbox and waits for its answer. Setups that run at the same time (two sessions start, a card
-// is called while the session start installs) install once: the others wait for that install. It prints one line, or
+// card runner in the sandbox, waits for its answer, and has it draw a test card, as a card call does (its rows in the
+// card copies' folder, a view that writes them); the card's text copy must show the rows. With --repair (the install,
+// scripts/install.sh), a check that fails for a cause that is not the machine's (srt does not load, or the runner does
+// not start or draw) installs srt again, once, and checks again: what a package or a setting of the machine lacks
+// stays for the person to fix, since only they can. Setups that run at the same time (two sessions start, a card is
+// called while the session start installs) install once: the others wait for that install. It prints one line, or
 // with --json one JSON object:
-//   {ok, node, nodeVersion, grants, platform, version, srt, why, fix, ms}
+//   {ok, node, nodeVersion, grants, platform, version, srt, why, fix, ms, repaired}
 // `node` is this Node's binary (the runner's), `nodeVersion` its version, `grants` whether it takes each grant of
 // Node's permission model that the runner needs beyond its files (argv.mjs's GRANTS, such as {'--allow-net': true}),
 // as its list of the flags it allows in NODE_OPTIONS says (process.allowedNodeEnvironmentFlags, which holds each
 // --allow-* flag it takes), `srt` the folder srt is in, `why` what is wrong and `fix` the one command or step that
-// fixes it, `ms` how long the probe's runner took to answer. Exits 0 when the sandbox works, else 1.
+// fixes it, `ms` how long the probe's runner took to start and draw the test card, `repaired` why srt was installed
+// again (--repair), when it was. Exits 0 when the sandbox works, else 1.
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import http from 'node:http'
@@ -72,8 +77,9 @@ const again = `node ${join(HERE, 'setup.mjs')} --probe`
 const UNREACHABLE = /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ECONNRESET|EHOSTUNREACH|ENETUNREACH|FetchError|network|proxy|certificate|\b(E40[37]|E5\d\d)\b/i
 
 /** Install srt into its folder: `npm ci` in a new folder beside it, then moved into place, so a session that starts at
- *  the same time never reads half an install. null when it is installed, else why not and the fix. */
-function install() {
+ *  the same time never reads half an install. null when it is installed, else why not and the fix. `anew`: the install
+ *  there does not work, so the new one takes its place even though it looks installed. */
+function install(anew = false) {
   const npm = which('npm') || [join(dirname(process.execPath), 'npm')].find(p => fs.existsSync(p))
   if (!npm) return { why: 'npm is not installed, and thimble installs the sandbox with it', fix: `Install npm (it comes with Node), then run: ${again}` }
   if (!flag('--json')) console.error(`thimble: installing Anthropic's sandbox runtime ${pin} with npm (a minute at most, unless npm cannot reach its registry)...`)
@@ -94,7 +100,7 @@ function install() {
         : { why, fix: `npm's message says what failed; once it is fixed, run: ${again}` }
     }
     fs.writeFileSync(join(tmp, 'node_modules', '.thimble-lock.json'), lock)
-    if (installed()) return null
+    if (!anew && installed()) return null
     if (fs.existsSync(srt)) fs.renameSync(srt, `${tmp}-old`)
     try {
       fs.renameSync(tmp, srt)
@@ -162,16 +168,39 @@ async function needs() {
 }
 
 /** A new folder (mode 700) for the probe's runner whose socket's path fits a Unix socket (SOCKET_MAX): in the temp
- *  folder, else in /tmp, as a long TMPDIR would keep the runner from listening; null when neither can hold one. */
+ *  folder, else in /tmp, as a long TMPDIR would keep the runner from listening; null when neither can hold one. Its
+ *  real path (macOS's temp folder is behind a link), as the sandbox's rules name the folders they hide and show. */
 function probeDir() {
   for (const root of new Set([os.tmpdir(), '/tmp'])) {
-    if (join(root, 'thimble-probe-XXXXXX', 'run', 'cards.sock').length > SOCKET_MAX) continue
-    try { return fs.mkdtempSync(join(root, 'thimble-probe-')) } catch { /* the next */ }
+    let real
+    try { real = fs.realpathSync(root) } catch { continue }
+    if (join(real, 'thimble-probe-XXXXXX', 'run', 'cards.sock').length > SOCKET_MAX) continue
+    try { return fs.mkdtempSync(join(real, 'thimble-probe-')) } catch { /* the next */ }
   }
   return null
 }
 
-/** Start the card runner in the sandbox, as the hooks do, and wait for its answer: '' and the time it took, or why not. */
+/** The test card the probe has the runner draw, as a card call has it draw one: its rows, and a view that writes them
+ *  with surface.num. Its text copy must show TEST_LINE. */
+const TEST_ROWS = [{ name: 'test card', runs: 2327 }]
+const TEST_VIEW = "function view(props, surface) {\n  const { Box, Text } = surface.elements\n  return Box({ flexDirection: 'column', children: props.rows.map(r => Text({ children: r.name + ': ' + surface.num(r.runs) + ' runs' })) })\n}\n"
+const TEST_LINE = 'test card: 2,327 runs'
+
+/** The test card drawn by the runner `ask` reaches, its rows in the card copies' folder `cards`: '' when its copy shows
+ *  the rows, else what went wrong. */
+async function drawTest(ask, cards) {
+  const dir = join(cards, 'test')
+  fs.mkdirSync(dir, { mode: 0o700 })
+  const rows = join(dir, 'rows.json')
+  fs.writeFileSync(rows, JSON.stringify(TEST_ROWS))
+  const r = await ask('load', { id: 'test', version: 1, title: 'test card', view: TEST_VIEW, rows, state: null, width: 40 })
+  if (!r?.ok) return String(r?.error || 'it gave no answer').slice(0, 300)
+  const lines = Array.isArray(r.lines) ? r.lines.map(String) : []
+  return lines.some(l => l.includes(TEST_LINE)) ? '' : `its text copy showed ${JSON.stringify(lines.slice(0, 3).join(' / ').slice(0, 160))}, not the rows`
+}
+
+/** Start the card runner in the sandbox, as the hooks do, wait for its answer, and have it draw the test card: '' and
+ *  the time it took, or why not. */
 async function probe() {
   const dir = probeDir()
   if (!dir) return { error: `no temp folder has a path short enough for the card runner's socket (tried ${[...new Set([os.tmpdir(), '/tmp'])].join(', ')})` }
@@ -185,14 +214,22 @@ async function probe() {
   const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'ignore', 'pipe'] })
   child.stderr.on('data', d => { said = `${said}${d}`.slice(-SAID_MAX) })
   child.on('exit', (code, signal) => { ended = { code, signal } })
-  const ping = () => new Promise(resolve => {
-    const q = http.request({ socketPath: sock, path: '/ping', method: 'POST' }, res => { res.resume(); res.on('end', () => resolve(res.statusCode === 200)) })
-    q.on('error', () => resolve(false))
-    q.end('{}')
+  const ask = (op, body) => new Promise(resolve => {
+    const q = http.request({ socketPath: sock, path: `/${op}`, method: 'POST' }, res => {
+      let t = ''
+      res.setEncoding('utf8')
+      res.on('data', d => { t += d })
+      res.on('end', () => { try { resolve(JSON.parse(t)) } catch { resolve({ ok: false, error: `it answered ${res.statusCode}, not JSON` }) } })
+    })
+    q.on('error', e => resolve({ ok: false, error: e.message, down: true }))
+    q.end(JSON.stringify(body))
   })
   try {
     while (Date.now() - t0 < PROBE_MS && !ended) {
-      if (await ping()) return { error: '', ms: Date.now() - t0 }
+      if ((await ask('ping', {})).ok === true) {
+        const wrong = await drawTest(ask, cards)
+        return wrong ? { error: `the card runner started in the sandbox, but did not draw a test card: ${wrong}`, said } : { error: '', ms: Date.now() - t0 }
+      }
       await new Promise(r => setTimeout(r, 20))
     }
     await new Promise(r => setTimeout(r, 50))
@@ -211,16 +248,16 @@ function read(path) {
   try { return fs.readFileSync(path, 'utf8').trim() } catch { return '' }
 }
 
-async function main() {
-  const [major, minor] = process.versions.node.split('.').map(Number)
-  if (major < NODE_MIN[0] || (major === NODE_MIN[0] && minor < NODE_MIN[1])) {
-    return { why: `Node ${process.versions.node} is too old for the sandbox runtime`, fix: `Install Node ${PLUGIN_NODE_MIN} or later.` }
+/** Whether the sandbox works as installed: what the machine lacks (with its fix), srt that does not load, and with
+ *  --probe a runner that does not start or draw the test card. `again`: a cause that installing srt again may remove,
+ *  as no package or setting of the machine explains it. */
+async function check() {
+  let lacking
+  try {
+    lacking = await needs()
+  } catch (e) {
+    return { why: `the sandbox runtime in ${srt} does not load (${String(e?.message || e).split('\n')[0].slice(0, 200)})`, fix: `Install it again: ${again} --repair`, again: true }
   }
-  if (!installed()) {
-    const failed = await locked(() => (installed() ? null : install()))
-    if (failed) return failed
-  }
-  const lacking = await needs()
   if (lacking) return lacking
   if (!flag('--probe')) return null
   const p = await probe()
@@ -232,7 +269,26 @@ async function main() {
   const fix = userns && platform === 'linux' && read('/proc/sys/kernel/apparmor_restrict_unprivileged_userns') === '1'
     ? 'AppArmor keeps bubblewrap from making its namespaces. Allow them: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0'
     : ''
-  return { why: p.error, fix }
+  return { why: p.error, fix, again: !fix }
+}
+
+async function main() {
+  const [major, minor] = process.versions.node.split('.').map(Number)
+  if (major < NODE_MIN[0] || (major === NODE_MIN[0] && minor < NODE_MIN[1])) {
+    return { why: `Node ${process.versions.node} is too old for the sandbox runtime`, fix: `Install Node ${PLUGIN_NODE_MIN} or later.` }
+  }
+  if (!installed()) {
+    const failed = await locked(() => (installed() ? null : install()))
+    if (failed) return failed
+  }
+  const first = await check()
+  if (!first?.again || !flag('--repair')) return first && { why: first.why, fix: first.fix }
+  // the install there may be damaged (a file of it gone or changed): a new one takes its place, and the check runs again
+  const failed = await locked(() => install(true))
+  if (failed) return failed
+  out.repaired = first.why
+  const next = await check()
+  return next && { why: next.why, fix: next.fix }
 }
 
 let problem
@@ -246,7 +302,7 @@ else out.ok = true
 if (flag('--json')) {
   console.log(JSON.stringify(out))
 } else if (out.ok) {
-  console.log(`thimble: cards run in Anthropic's sandbox runtime ${pin} (${platform === 'darwin' ? 'Seatbelt' : 'bubblewrap'}), installed in ${srt}${out.ms ? `; the runner started in ${out.ms} ms` : ''}.`)
+  console.log(`thimble: cards run in Anthropic's sandbox runtime ${pin} (${platform === 'darwin' ? 'Seatbelt' : 'bubblewrap'}), installed in ${srt}${out.ms ? `; the runner drew a test card in ${out.ms} ms` : ''}${out.repaired ? ', after srt was installed again' : ''}.`)
 } else {
   console.log(`thimble: cards cannot run yet: ${out.why}.${out.fix ? `\n  ${out.fix}` : ''}`)
 }
