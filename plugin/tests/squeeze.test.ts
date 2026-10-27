@@ -151,11 +151,6 @@ test('with two replies since the last prompt, the bar names b apart from s; b wr
   await t.press('b')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(asked)
-  // s opens the chips on the catch-up, and their line says they rewrite the catch-up, not the replies
-  await t.press('s')
-  const about = (await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).tree.props.children[0]
-  expect(textOf(about)).toContain('catch-up')
-  expect(textOf(about)).not.toContain('whole answer')
 })
 
 test('keys pressed in a row make one rewrite, at the last level, 1 s after the last press; the chips show each level at once', async ($, on) => {
@@ -385,10 +380,6 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   expect(textOf(at0.tree)).toContain('1 Length shorter ○●○○ longer · as written')
   expect(textOf(at0.tree)).toContain('2 Background novice ○○●○ expert')
   expect(textOf(at0.tree)).not.toContain('Interpretation')
-  // a dim line above the chips says what a rewrite changes: the whole answer, not the card the chips stand under
-  const about = at0.tree.props.children[0]
-  expect(about.props.dimColor).toBe(true)
-  expect(textOf(about)).toContain('whole answer')
   // each of the bar's keys is a press: [ and ] each one way, and 1–2 picks the next chip
   const bar = nodes(await $.ui.render(above)).filter(n => n.type === 'Button').map(n => String(n.props.label))
   expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–2 chip', '+ your own']))
@@ -440,14 +431,50 @@ test('a press on a chip\'s end moves it one level toward that end, as [ and ] do
   await ui.unmount()
 })
 
-test('while a click holds the keys in the chips, ↵ keeps them open, ↑ and ↓ move between the chips and ← and → between the levels, and s closes them', async ($, on) => {
+test('on a catch-up the chips\' dim line is its own, not an answer\'s, and a press on Length\'s longer end goes from short past as written (the replies themselves) to longer', async ($, on) => {
+  const t = await setup($, on, ['Both: the build failed, and the retry passed.'])
+  const newest = 'The retry passed on all runs.'
+  await t.turn('t1', 'Earlier answer.')
+  await t.turn('t2', 'The build failed on three runs.', { text: 'why did it fail?', by: 'composer' })
+  await t.turn('t3', newest, { text: '<task-notification>done</task-notification>', by: 'task-notification' })
+  const about = async () => nodes((await chipsDrawn($, 'row-t3', newest)).tree).find(n => n.props?.key === 'about')
+  // on the newest reply, an answer, the chips say in a dim line what a rewrite changes
+  await t.press('s')
+  const onAnswer = await about()
+  expect(onAnswer?.props.dimColor).toBe(true)
+  await t.press('s')
+  // on the catch-up of it and the reply before, the line is dim too, and says something else
+  await t.press('b')
+  await t.clock.advance(5000)
+  await t.press('s')
+  const onCatchUp = await about()
+  expect(onCatchUp?.props.dimColor).toBe(true)
+  expect(textOf(onCatchUp)).not.toBe(textOf(onAnswer))
+  // a catch-up arrives at Length short; as written is the replies themselves, so its longer end goes past it to longer
+  const length = async () => (await chipsDrawn($, 'row-t3', newest)).client.props.props.items.find((c: Any) => c.id === 'length').level
+  expect(await length()).toBe(0)
+  const ui = await $.ui.mount(answer('row-t3', newest))
+  await ui.press({ key: 'step-length-up' })
+  expect(await length()).toBe(2)
+  // and its shorter end goes back past it to short
+  await ui.press({ key: 'step-length-down' })
+  expect(await length()).toBe(0)
+  await ui.unmount()
+})
+
+test('while a click holds the keys in the chips, ↵ keeps them open, ↑ and ↓ (and shift+tab and tab) move between the chips and ← and → between the levels, and s closes them', async ($, on) => {
   const t = await setup($, on, [])
   await t.turn('t1', LONG)
   await t.press('s')
   const chips = async () => (await chipsDrawn($, 'row-t1', LONG)).client?.props.props
   const picked = async () => (await chips()).items.find((c: Any) => c.picked)?.id
   const ui = await $.ui.mount(answer('row-t1', LONG))
-  // a click on the dot where Background stands picks it, and gives the chips the keys
+  // a chip of the person's own, typed after + in the chips: with three chips, the chip before is not the next one
+  await ui.press({ key: 'add' })
+  for (const k of 'plain') await ui.key({ key: k })
+  await ui.key({ key: 'return' })
+  expect((await chips()).items.map((c: Any) => c.id)).toEqual(['length', 'familiarity', 'x-plain'])
+  // a click on the dot where Background stands picks it
   await ui.press({ key: 'lvl-familiarity-2' })
   expect(await picked()).toBe('familiarity')
   // ↵ keeps them open, and the bar names the arrows
@@ -458,8 +485,13 @@ test('while a click holds the keys in the chips, ↵ keeps them open, ↑ and �
   await ui.key({ key: 'up' })
   expect(await picked()).toBe('length')
   await ui.key({ key: 'up' })
-  expect(await picked()).toBe('familiarity')
+  expect(await picked()).toBe('x-plain')
   await ui.key({ key: 'down' })
+  expect(await picked()).toBe('length')
+  // tab the next, shift+tab the chip before, as ↓ and ↑
+  await ui.key({ key: 'tab' })
+  expect(await picked()).toBe('familiarity')
+  await ui.key({ key: 'tab', shift: true })
   expect(await picked()).toBe('length')
   await ui.key({ key: 'right' })
   expect((await chips()).items.find((c: Any) => c.id === 'length').level).toBe(2)
