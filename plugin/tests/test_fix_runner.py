@@ -14,6 +14,8 @@ import threading
 import time
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_fixes import FX, made, world  # noqa: E402, F401  (world is the fixture)
@@ -23,7 +25,8 @@ ENGINE = Path(__file__).resolve().parents[1] / "engine"
 
 def appeared(p: Path) -> str:
     """The text of a file the tests write, once it has some."""
-    for _ in range(400):
+    end = time.monotonic() + 60  # a busy machine starts the runner late, never not at all
+    while time.monotonic() < end:
         if p.exists() and p.read_text().strip():
             return p.read_text().strip()
         time.sleep(0.05)
@@ -41,14 +44,22 @@ def call(tmp_path: Path, *args: str) -> subprocess.Popen:
 
 
 def test_done_within_gives_the_fix_still_working_while_its_tests_run_and_a_later_done_what_came_of_them(world, monkeypatch, tmp_path):
-    monkeypatch.setenv("THIMBLE_FIX_TESTS", "sleep 4")
+    gate = tmp_path / "tests-may-end"  # the tests run until the test makes it, so they outlast the first call however slow
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", f"while [ ! -e '{gate}' ]; do sleep 0.05; done")
     r = made(world)
-    # the call ends at its limit while the tests run on: their runner holds none of its pipes
-    out, err = call(tmp_path, "done", str(r["id"]), "--title", "Bar says read", "--within", "0.3").communicate(timeout=3)
-    got = json.loads(out)
-    # still working, as every list reads it, with the mark that its tests run
-    assert got["state"] == "working" and got["testing"]["lock"] and FX.get(r["id"])["testing"] == got["testing"]
-    out, err = call(tmp_path, "done", str(r["id"]), "--within", "30").communicate(timeout=30)
+    try:
+        # the call ends at its limit while the tests run on: their runner holds none of its pipes, so a call that waited
+        # for them would never end
+        try:
+            out, err = call(tmp_path, "done", str(r["id"]), "--title", "Bar says read", "--within", "0.3").communicate(timeout=90)
+        except subprocess.TimeoutExpired:
+            pytest.fail("the call waited for the tests")
+        got = json.loads(out)
+        # still working, as every list reads it, with the mark that its tests run
+        assert got["state"] == "working" and got["testing"]["lock"] and FX.get(r["id"])["testing"] == got["testing"]
+    finally:
+        gate.touch()
+    out, err = call(tmp_path, "done", str(r["id"]), "--within", "60").communicate(timeout=90)
     got = json.loads(out)
     assert got["state"] == "ready" and got["tests"] == "passed" and got["title"] == "Bar says read"
     assert "testing" not in got and FX.get(r["id"])["state"] == "ready"
@@ -65,9 +76,8 @@ def test_a_check_whose_call_is_stopped_while_its_tests_run_still_gets_what_came_
     # Claude Code stops the call, and all of its process group, as it does at the call's 10 minutes
     os.killpg(p.pid, signal.SIGKILL)
     p.communicate(timeout=10)
-    for _ in range(200):
-        if FX.get(r["id"])["state"] != "working":
-            break
+    end = time.monotonic() + 60  # until the runner wrote what came of the tests
+    while FX.get(r["id"])["state"] == "working" and time.monotonic() < end:
         time.sleep(0.05)
     got = FX.get(r["id"])
     assert got["state"] == "ready" and got["tests"] == "passed" and got["title"] == "Bar says read"
