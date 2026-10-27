@@ -146,6 +146,11 @@ declare module 'claude-code' {
        *  shown, what the version shown did to each (squeeze/cards.ts) */
       squeezeCards: { shown: Record<string, { copy: string; v: number }>; hidden: string[]; did: Record<string, string> }
 
+      // ---- the observer (observer/observer.ts)
+      /** the messages queued for a look or being looked at, and the conversation's key: { session, msgs: [LookMsg] };
+       *  a reload of the plugin queues them again */
+      observerLooks: { session: string; msgs: unknown[] } | null
+
       // ---- claims (claims/term.ts): the conversation's claims, kept in its kept folder too (claims.json)
       /** { v, session, updated, claims, clusters, gaps, read } (claims/store.js) */
       claims: unknown

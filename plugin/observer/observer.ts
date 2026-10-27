@@ -15,6 +15,8 @@
 // one look whose prompt names each of them. Two looks never run at once, and a look never delays a turn. It looks only
 // where a person is (S.person): never in a `-p` run, and in a session Claude Code's background service runs only once
 // the person's first prompt came; never at a fork's or a subagent's messages.
+// The messages queued or being looked at are kept in $.state too: a reload of the plugin (each settings change is one)
+// stops the looks of the load before it, and the next load's session.start hook queues those messages again.
 //
 // One look, in order:
 // 1. What the conversation does not show of the work: the cards main drew in the looked-at turns (title and text copy,
@@ -36,7 +38,7 @@
 // for a look of that lens alone. While Minimal is on no lens joins the look after each reply; h asks for a look of the
 // heads lens alone at one answer (headsUpsNow).
 // It registers no model tool, answers no permission request, starts no `claude` and runs only `thimble coverage`.
-import type { EngineInterface, Register } from 'claude-code'
+import { update, type EngineInterface, type Register } from 'claude-code'
 
 import { failNotice } from '../bar/notice'
 import { cardText } from '../cards/draw'
@@ -79,6 +81,9 @@ const LOOK_DELAY = 50 // ms after a message is queued before the worker takes th
 const RETRY_MS = 2000 // ms before a failed pass is tried again
 const COVERAGE_CHARS = 2400
 const CARD_CHARS = 3000
+
+/** The messages queued or being looked at, this conversation's, as $.state keeps them across a reload of the plugin. */
+const LOOKS = { plugin: 'thimble', key: 'observerLooks' } as const
 
 const S = {
   queue: [] as LookMsg[],
@@ -172,15 +177,47 @@ export function lookWord(lenses: string[]): string {
 /** A message as the queue knows it: its row, and the lenses of a look on demand. */
 const queuedKey = (m: { row: string; only?: string[]; catchUp?: string }) => `${m.row}${m.only ? `#${m.only.join(',')}` : ''}${m.catchUp ? `#cu${m.catchUp.length}` : ''}`
 
+/** The messages kept for the next load of the plugin, changed by `fn`. */
+async function keepLooks($: Engine, fn: (msgs: LookMsg[]) => LookMsg[]): Promise<void> {
+  try {
+    const session = await sessionKey($)
+    await update($, LOOKS, cur => ({ session, msgs: fn(cur?.session === session ? (cur.msgs as LookMsg[]) : []) }))
+  } catch {
+    // this load still looks at them
+  }
+}
+
 async function enqueue($: Engine, m: Omit<LookMsg, 'at' | 't'>): Promise<void> {
   if (S.queued.has(queuedKey(m))) {
     // its words were queued as a reply already: it is the answer now, while it still waits
-    if (m.kind === 'answer') { const w = S.queue.find(x => x.row === m.row); if (w) w.kind = 'answer' }
+    if (m.kind === 'answer') {
+      const w = S.queue.find(x => x.row === m.row)
+      if (w) {
+        w.kind = 'answer'
+        await keepLooks($, ms => ms.map(x => (queuedKey(x) === queuedKey(w) ? { ...x, kind: 'answer' } : x)))
+      }
+    }
     return
   }
   S.queued.add(queuedKey(m))
-  S.queue.push({ ...m, at: Number(await $.clock.now()), t: Date.now() })
+  const msg: LookMsg = { ...m, at: Number(await $.clock.now()), t: Date.now() }
+  // kept before the worker can take it, so a look that ends at once does not leave it kept
+  await keepLooks($, ms => [...ms, msg])
+  S.queue.push(msg)
   $.clock.after(LOOK_DELAY, () => { void drain($) })
+}
+
+/** A load of the plugin: the messages the load before it had queued or was looking at are queued again, since its
+ *  looks stopped with it. */
+async function requeue($: Engine): Promise<void> {
+  const kept = (await $.state.get(LOOKS)).value
+  if (!kept || kept.session !== (await sessionKey($))) return
+  const msgs = (kept.msgs as LookMsg[]).filter(m => !S.queued.has(queuedKey(m)))
+  for (const m of msgs) {
+    S.queued.add(queuedKey(m))
+    S.queue.push(m)
+  }
+  if (msgs.length) $.clock.after(LOOK_DELAY, () => { void drain($) })
 }
 
 async function drain($: Engine): Promise<void> {
@@ -348,6 +385,9 @@ async function look($: Engine, batch: LookMsg[]): Promise<void> {
   } finally {
     // a look for the claims on demand ended, whatever came of it: the pane stops saying they are being found
     if (only?.includes('claims')) await claimsFindEnd($).catch(() => undefined)
+    // the messages of a look that ended are kept no more; those of one an error stopped (a reload of the plugin under
+    // it) wait for the next load
+    if (!row.error) await keepLooks($, ms => ms.filter(x => !batch.some(m => queuedKey(m) === queuedKey(x))))
     row.ms = Date.now() - started
     if (gen === S.gen) {
       S.log = [...S.log, { at: new Date(Number(await $.clock.now())).toISOString(), ...row }].slice(-400)
@@ -365,13 +405,14 @@ export async function turnObserver($: Engine): Promise<void> {
   S.gen += 1
   S.queue = []
   S.queued.clear()
+  await $.state.set(LOOKS, null).catch(() => undefined)
   const kept = await readKept<{ log?: Record<string, unknown>[] }>($, 'observer.json')
   S.log = Array.isArray(kept?.log) ? kept!.log : []
 }
 
 export const registerObserver: Register = on => {
   // who is at this session: a `-p` run never; a session of Claude Code's background service from the person's first
-  // prompt
+  // prompt. A reload of the plugin: the looks the load before it did not finish, queued again
   on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
     const r = await next(e)
     try {
@@ -380,6 +421,7 @@ export const registerObserver: Register = on => {
     } catch {
       // a person is taken to be here
     }
+    try { await requeue($) } catch { /* those looks are lost with the load before */ }
     return r
   }).catch(($, e, next) => next(e))
 

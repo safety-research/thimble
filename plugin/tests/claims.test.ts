@@ -485,3 +485,34 @@ test('claims on demand: no look reads them after a reply; c shows the pane with 
   expect(s.forks[1]).toContain('PROMPT lens-claims')
   setOptions({})
 })
+
+test('a reload of the plugin while one look runs and another waits loses neither: the next load looks at both, and their claims come in', async () => {
+  setOptions({ claimsMode: 'auto' })
+  // the first look's fork never answers: the reload stopped it, as Claude Code stops the looks of the load before
+  const s = setup([new Promise(() => undefined), reply([
+    { claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' },
+    { claim: 'Run 9 passed.', quote: 'Run 9 passed', cluster: 'passes' },
+  ])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['Run 4 failed.'] })
+  await answered(s, { id: 't2', prompt: 'And run 9?', rows: ['Run 9 passed.'] })
+  expect(s.forks.length).toBe(1)
+  // the reload: the module's memory starts again, the session's state stays, and session.start runs again
+  const reload = async () => {
+    resetObserver()
+    await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+    await settle()
+    await drainNow(s.$)
+    await settle()
+  }
+  await reload()
+  for (let i = 0; i < 100 && (await claimsStore(s.$)).claims.length < 2; i++) await settle()
+  expect(s.forks.length).toBe(2)
+  expect(s.forks[1]).toContain('Run 4 failed.')
+  expect(s.forks[1]).toContain('Run 9 passed.')
+  expect((await claimsStore(s.$)).claims.map((c: Any) => c.text)).toEqual(['Run 4 failed.', 'Run 9 passed.'])
+  // the looks that landed are not kept for a later load
+  await reload()
+  expect(s.forks.length).toBe(2)
+  setOptions({})
+})
