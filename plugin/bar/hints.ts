@@ -4,10 +4,12 @@
 // manual) that the session has not used yet, each at most once a session. Both are hints (notice.ts hintLine): the bar
 // shows them in place of its keys, and they go after a few seconds, at the next key, or at a prompt.
 //
-//   state: hintsUsed (the features the session used), hintsReminded (the ones a reminder named)
+//   state: hintsUsed (the features the session used), hintsReminded (the ones a reminder named, and `intro` once its
+//          hint showed)
 import type { EngineInterface } from 'claude-code'
 
 import { choiceOf, featureOn } from '../settings/features.mjs'
+import { introText } from './intro'
 import { failLineNow, hintLine } from './notice'
 
 type Engine = EngineInterface
@@ -44,15 +46,17 @@ export const REMINDERS: { feature: string; on: () => boolean; text: string }[] =
   { feature: 'rewrite', on: () => featureOn('squeezeAnswers') === true, text: 'press s to rewrite the last answer shorter or longer, more novice or more expert.' },
 ]
 
-/** The end of one of main's answers: one reminder, of the first feature waiting to be asked that the session has
- *  neither used nor been reminded of. A line already showing (a failure, a hint) stays. */
+/** The end of one of main's answers: the hint that says where the settings are, at the session's first answer
+ *  (intro.ts); after that, one reminder, of the first feature waiting to be asked that the session has neither used
+ *  nor been reminded of. A line already showing (a failure, a hint) stays. */
 export async function remindAfterAnswer($: Engine): Promise<void> {
   if (await failLineNow($)) return
   const used = await usedNow($)
   const reminded = await remindedNow($)
-  const r = REMINDERS.find(x => x.on() && !used.includes(x.feature) && !reminded.includes(x.feature))
+  const intro = reminded.includes('intro') ? null : await introText($)
+  const r = intro ? { feature: 'intro', text: intro } : REMINDERS.find(x => x.on() && !used.includes(x.feature) && !reminded.includes(x.feature))
   if (!r) return
   await $.state.set(REMINDED, [...reminded, r.feature])
-  hintLine($, r.text, `remind:${r.feature}`)
+  hintLine($, r.text, r.feature === 'intro' ? 'intro' : `remind:${r.feature}`)
   $.ui.invalidate('ui.render')
 }

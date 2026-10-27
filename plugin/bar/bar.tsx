@@ -10,9 +10,8 @@
 //                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c 11 claims`); at its
 //                  right their items (barRight: `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
 //                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
-//                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands
-//                  in place of the left's keys, after the busy step, while it fits there whole; the right stays, so a
-//                  hint can point at it
+//                  While a hint shows (bar/notice.ts hintNow), `Hint: …` stands in place of the left's keys, after the
+//                  busy step, while it fits there whole; the right stays, so a hint can point at it
 //
 // A bar too narrow for its items gives way in this order: the busy step's other steps, then its words (whole words,
 // down to its glyph and seconds), then the labels' count, coverage's file counts and coverage. The keys stay: what
@@ -128,7 +127,7 @@ export async function barKeys($: Engine): Promise<Set<string>> {
 
 /** The bar's rows: the failure line (or a hint the bar has no room for) when there is one, and the bar, `width` cells
  *  wide, on as many rows as its items need. */
-export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string } = {}): Promise<Any[]> {
+export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean } = {}): Promise<Any[]> {
   const { Box, Button, Text } = els
   const on = o.on ?? featureOn
   const preview = !!o.preview
@@ -146,7 +145,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // a hint: in place of the left's keys, after the busy step, while it fits there whole beside what the bar keeps (the
   // busy step's glyph and seconds, the right's keys); an item it names (“a ask”) stays after it, on the right too.
   // Longer, it stands above the bar, and the bar keeps its keys
-  const hint = preview ? null : ((await hintNow($).catch(() => null)) ?? o.intro ?? null)
+  const hint = preview ? null : await hintNow($).catch(() => null)
   const named = (x: Item) => !!hint && !!x.key && hint.includes(`“${x.key} ${x.words}”`)
   const counted = (x: Item) => (x.id === 'coverage' || x.id === 'labels') && !named(x)
   const hinted: Item[] = hint ? [{ id: 'hint', glyph: 'Hint:', words: hint }, ...keys.filter(named)] : []

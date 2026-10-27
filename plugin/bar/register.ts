@@ -2,8 +2,8 @@
 //
 //   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
 //                aboveBar). /thimble-settings and a click on `thimble` open the
-//                settings; the person's next prompt takes the failure line and the line at the first session's start (intro.ts); the counts at each load of the plugin and
-//                after each of main's turns (counts.ts)
+//                settings; the person's next prompt takes the failure line; after each of main's turns, a hint or a
+//                notice (hints.ts) and the counts, which each load of the plugin counts too (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Each pane takes the keys its key row names (coverage's j k ↵ and r, the labels' number keys that
 //                check records), and esc closes it
@@ -14,7 +14,7 @@ import { closePane, narrowNotice, openPane, paneNow, PANE_ID } from '../core/pan
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
-import { introDone, introHint } from './intro'
+import { introDone } from './intro'
 import { remindAfterAnswer } from './hints'
 import { failNotice, promptTyped } from './notice'
 
@@ -51,9 +51,11 @@ async function togglePane($: Engine, kind: 'coverage' | 'labels', byKey = false)
   failNotice($, narrowNotice(key, `${key} ${shown}`), `pane:${kind}`)
 }
 
-/** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). */
+/** The settings: they take the keys (tab walks the switches, ↵ turns one on or off, esc closes). Once open, the hint
+ *  that says where they are is done (intro.ts). */
 export async function openSettings($: Engine): Promise<void> {
-  if (!(await openPane($, 'settings', {}, TITLES.settings, { focus: true }))) failNotice($, 'Claude Code did not open the settings here. Type /thimble-settings to open them.', 'pane:settings')
+  if (await openPane($, 'settings', {}, TITLES.settings, { focus: true })) await introDone($).catch(() => undefined)
+  else failNotice($, 'Claude Code did not open the settings here. Type /thimble-settings to open them.', 'pane:settings')
 }
 
 /** r or l at an empty prompt, while the bar names it: its pane opens or closes once the word window closed. */
@@ -85,7 +87,7 @@ export const registerBar: Register = on => {
     const r = await next(e)
     if (e.agentId === undefined) {
       $.clock.after(0, () => { void recount($).catch(() => undefined) })
-      // one reminder of a feature asked for on demand that the session has not used yet (hints.ts)
+      // a notice, the hint that says where the settings are, or a reminder of a feature asked for on demand (hints.ts)
       $.clock.after(0, () => { void remindAfterAnswer($).catch(() => undefined) })
     }
     return r
@@ -94,7 +96,6 @@ export const registerBar: Register = on => {
   // the person's own prompt: the failure line goes
   on('prompt.submit', { origin: { kind: /^(?:composer|bridge)$/ } }, async ($, e, next) => {
     if (!e.command) await promptTyped($).catch(() => undefined)
-    await introDone($).catch(() => undefined)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -104,9 +105,7 @@ export const registerBar: Register = on => {
       const els = $.ui.resolve(e) as Any
       const presses: BarPresses = { settings: () => openSettings($), pane: kind => togglePane($, kind) }
       const width = Math.max(20, e.props.bodyColumns)
-      // the hint at the first session's start that says where the settings are (intro.ts), in the bar
-      const intro = await introHint($).catch(() => null)
-      const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
+      const rows = await barRows($, els, width, { presses })
       // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
       // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off
       const room = Number(e.props.maxRows) > 0 ? Math.max(4, Number(e.props.maxRows) - rows.length - 2) : 0

@@ -5,7 +5,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
 import { busyWhile } from '../bar/busy'
-import { INTRO, INTRO_MS } from '../bar/intro'
+import { INTRO, introDone, introText } from '../bar/intro'
 import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
 import { textWidth } from '../core/text.js'
@@ -267,33 +267,60 @@ test('a narrow bar gives way in order: the busy step to its glyph and seconds, t
   alive = false
 })
 
-test('the first session starts with one plain line above the bar that says where the settings are and names no key; the first prompt takes it, and no later session or reload shows it again', async ($, on) => {
-  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
-  mock.store(on)
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  const band = textOf(await $.ui.render(BAND))
-  expect(band).toContain(INTRO)
-  // the keys are the bar's alone: the line repeats none of them
-  expect(band).not.toContain('v visualize · e explain')
-  expect(band).not.toContain('c cite')
-  await $.prompt.submit({ text: 'which runs failed?', origin: { kind: 'composer' } } as never)
-  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
-  // a reload or a new session keeps it gone: it is kept for the install, not the session
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
-})
+/** The person's prompt, then main's answer to it, and the hooks' work after it done. The prompt comes once the work
+ *  before it is done (the session's start, whose card sandbox cannot start here and says so), and takes that line. */
+async function answer($: Any, w: ReturnType<typeof world>, n: number): Promise<void> {
+  await w.clock.advance(100)
+  await $.prompt.submit({ text: `question ${n}`, origin: { kind: 'composer' } } as never)
+  const row = `row-answer-${n}`
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: `Answer ${n}.` }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: row } as never)
+  await $.turn.complete({ turnId: `t${n}`, reason: 'answer', answer: `Answer ${n}.`, durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+}
 
-test('the line at the first session goes by itself after a few seconds, and stays gone after a reload', async ($, on) => {
+test('the hint that says where the settings are shows in the bar at the end of a session\'s first answer, not before, and counts its seconds from there; a later answer of the session does not show it', async ($, on) => {
   const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   mock.store(on)
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  expect(textOf(await $.ui.render(BAND))).toContain(INTRO)
-  await w.clock.advance(INTRO_MS - 1000)
+  await w.clock.advance(HINT_MS * 2)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+  await answer($, w, 1)
+  const band = textOf(await $.ui.render(BAND))
+  expect(band).toContain(`thimble  Hint: ${INTRO}`)
+  expect(band.split(INTRO).length).toBe(2)
+  await w.clock.advance(HINT_MS - 1000)
   expect(textOf(await $.ui.render(BAND))).toContain(INTRO)
   await w.clock.advance(1000)
   expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await answer($, w, 2)
   expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test('opening the settings takes the hint about them away at once', async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await answer($, w, 1)
+  expect(textOf(await $.ui.render(BAND))).toContain(INTRO)
+  await $.command.run({ command: 'thimble-settings', args: '' } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test('a session after the settings were opened shows no hint about them', async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on, { settingsOpened: true })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await answer($, w, 1)
+  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test('the settings opened keep the hint away for good, in the store; with no store to keep that, there is no hint', async () => {
+  const kept: Record<string, unknown> = {}
+  const $: Any = { ...stateOnly({}), store: { get: async (k: string) => kept[k], set: async (k: string, v: unknown) => { kept[k] = v } } }
+  expect(await introText($)).toBe(INTRO)
+  await introDone($)
+  expect(await introText($)).toBe(null)
+  expect(await introText(stateOnly({}))).toBe(null)
 })
 
 test('a hint above the bar goes by itself after a few seconds, or at the next key thimble takes; a failure stays', async () => {
@@ -349,22 +376,6 @@ test('a hint stands in the bar in place of its left keys, after `thimble`; the r
   expect(textOf(narrow[1])).toContain('v visualize')
   expect(textOf(narrow[1])).toContain('r coverage')
   expect(textOf(narrow)).not.toContain('…')
-})
-
-test('the first session\'s hint says where the settings are, in the bar in place of its keys', async ($, on) => {
-  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
-  mock.store(on)
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  const band = textOf(await $.ui.render(BAND))
-  expect(band).toContain('thimble  Hint: click thimble for settings.')
-  expect(band.split('click thimble for settings.').length).toBe(2)
-})
-
-test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {
-  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
-  mock.store(on, { introDone: true })
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
 })
 
 test('a how-to hint shows until the session used its feature; then it stays away', async () => {
