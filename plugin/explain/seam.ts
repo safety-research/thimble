@@ -17,7 +17,8 @@
 //                                      for them (a catch-up), where it says their terms as written, each opening on its
 //                                      own message
 //   explainState($)                    what the lenses' digests read: {glossed, headsGiven}
-//   explainMerge($, look)              what one look gave for the explain and heads lenses, placed and kept
+//   explainMerge($, look)              what one look gave for the explain and heads lenses, placed and kept; the
+//                                      session's first marks come with a notice of what they mean (legend)
 //   tellComments($, rows)              Claude hears the explainers and heads-ups shown on these answers with the next
 //                                      prompt: each one's words
 //   sessionGlosses($)                  every explainer of this session: a pane shows the one of words picked there
@@ -40,7 +41,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { howTo, hintUsed } from '../bar/hints'
+import { howTo, hintUsed, noticeOnce } from '../bar/hints'
 import { failCleared, failNotice, hintLine } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
 import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
@@ -187,8 +188,22 @@ export async function explainMerge($: Engine, look: Look): Promise<void> {
   if (r.placed.length || r.heads.length) {
     await writeKept($, FILE, { glossed: m.glossed, headsGiven: m.headsGiven }).catch(() => undefined)
     $.ui.invalidate('ui.render')
+    await noticeOnce($, 'legend', legend()).catch(() => false)
   }
   await tellComments($, Object.keys(r.parts)).catch(() => undefined)
+}
+
+/** What the marks on an answer mean, told once a session when the first ones show (bar/hints.ts noticeOnce): the color
+ *  of each kind its switch shows, how one opens, and e for words of one's own. A click and a selection reach thimble
+ *  only in Claude Code's fullscreen layout (cards/draw.ts fullscreenNow); ] works in either. */
+function legend(): string {
+  const clicks = fullscreenNow() !== false
+  return [
+    ...(featureOn('details') ? ['Orange marks a heads-up, a detail to know before you rely on the answer.'] : []),
+    ...(featureOn('explain') ? ['Teal marks an explainer of a term.'] : []),
+    clicks ? 'Click one, or press ] to step through them.' : 'Press ] to step through them.',
+    ...(clicks && featureOn('explain') ? ['Select any words and press e for an explainer of your own.'] : []),
+  ].join(' ')
 }
 
 /** Claude hears, with the next prompt, the explainers and heads-ups shown on each of these answers (one text per
