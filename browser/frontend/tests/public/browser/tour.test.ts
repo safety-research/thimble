@@ -12,9 +12,10 @@
 //     sits 8 px or more inside its cutout, which lies inside the chat panel; step 3, Files, says what the files browser
 //     shows;
 //   - step 4: the step opens the real Labels sidebar with the top bar's Labels button and lays the example sidebar
-//     exactly over it, beside the transcript; the wheel scrolls the labels' transcript in steps with every record
-//     moving by exactly the scroll, its height, the cutout and the example sidebar still and the ruler's thumb
-//     following, and the wheel over the ruler too;
+//     exactly over it, beside the transcript; the ruler's marks stand at the records' lines in the colours of their
+//     bars; the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
+//     height, the cutout and the example sidebar still and the ruler's thumb following, and the wheel over the ruler
+//     too;
 //   - step 5: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
 //     another or anything of the view, nothing of the tour (a badge, the popover, the views bar) meets it, there is no
 //     label control (the page draws its own), the line under the name starts where the name does, the unreadable line
@@ -653,6 +654,27 @@ async function walk(page: Page, tag: string, send = false) {
   })
   assert.ok(lay.open === 'labels' && lay.same && lay.inside && lay.apart && lay.pressed === 'true', `${tag} 3: the Labels sidebar is open with the example over it, beside the transcript ${JSON.stringify(lay)}`)
   assert.equal(await body(page), 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.', `${tag} 3: what a label is`)
+  // the ruler shows the records' colours where they are: every lit cell of a record on line L has a mark in its lane,
+  // in the colour its bar shows, over (L − 1)/76 to L/76 of the ruler, and no mark has a colour no bar shows
+  const ruler = await page.evaluate(() => {
+    const root = document.querySelector('.tour-ex-reader')!
+    const B = root.querySelector('.reader-ruler-bar')!.getBoundingClientRect()
+    // what the ruler draws, but its lanes' stripes, which run its whole height
+    const ticks = [...root.querySelectorAll('.reader-ruler-bar > .reader-ruler-marks *')]
+      .map((m) => {
+        const r = m.getBoundingClientRect()
+        return { x: r.left - B.left, top: r.top - B.top, bottom: r.bottom - B.top, color: getComputedStyle(m).backgroundColor }
+      })
+      .filter((m) => m.bottom - m.top < B.height - 1)
+    const cells = [...root.querySelectorAll<HTMLElement>('.reader-record[data-line]')].flatMap((rec) =>
+      [...rec.querySelectorAll('.reader-gutter-cell')].flatMap((c, lane) => (c.classList.contains('is-lit') ? [{ lane, line: Number(rec.dataset.line), color: getComputedStyle(c).backgroundColor }] : [])),
+    )
+    const colors = new Set(cells.map((c) => c.color))
+    const at = (line: number) => (line / 76) * B.height
+    const missing = cells.filter((c) => !ticks.some((m) => Math.abs(m.x - (3 + 9 * c.lane)) < 0.5 && m.color === c.color && m.top <= at(c.line - 1) + 0.5 && m.bottom >= at(c.line) - 0.5))
+    return { cells: cells.length, ticks: ticks.length, foreign: ticks.filter((m) => !colors.has(m.color)).map((m) => m.color), missing: missing.slice(0, 3) }
+  })
+  assert.ok(ruler.cells > 0 && ruler.ticks > 0 && !ruler.foreign.length && !ruler.missing.length, `${tag} 3: the ruler's marks stand at the records' lines in their bars' colours ${JSON.stringify(ruler)}`)
   // in wheel steps of 100 px down and back up, every record on screen moves by exactly the scroll, and the transcript's
   // height, the cutout and the Labels pane hold still while the ruler's thumb follows
   const look5 = () =>
