@@ -33,7 +33,7 @@ import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
 import { choiceOf, featureOn } from '../settings/features.mjs'
 import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
-import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutMarks } from './message.js'
+import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
 import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 
@@ -234,9 +234,13 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   // the cards the text places on lines of their own
   const cards = featureOn('cards') ? await framesIn($, e, text) : {}
   const placesCards = Object.keys(cards).length > 0
-  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) {
-    return own ? below() : below({ ...e, props: { ...e.props, text } })
+  // the words as Claude Code draws them, each card's link among them as its words (Claude Code would write its target
+  // after them)
+  const plain = () => {
+    const shown = withoutCardLinks(text)
+    return shown === raw ? below() : below({ ...e, props: { ...e.props, text: shown } })
   }
+  if (!marks.length && !reply?.last && !spans.length && !view.dim && !view.lead && !under.length && !placesCards) return plain()
   // the turning glyph after each mark still checked follows the bar's busy line, which ticks while `checking N citations` runs
   const frame = reply?.checking ? Number(((await $.state.get(BUSY)).value as { frame?: number } | null)?.frame ?? 0) : 0
   const spin = SPIN[frame % SPIN.length]!
@@ -272,7 +276,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
         if (n > 0) await openPane($, 'evidence', { row, n }, `citation ${n}`)
       },
     })
-    : await (own ? below() : below({ ...e, props: { ...e.props, text } }))
+    : await plain()
   const gone = lostSpansEl(els, lost, `ml-${row}`)
   const parts = [body, ...(gone ? [gone] : []), ...under]
   return parts.length === 1 ? body : els.Box({ key: `ans-${row}`, flexDirection: 'column', children: parts })

@@ -4,21 +4,31 @@
 //
 //   a   a side thread about the card, as a click on `ask` starts (core/answerview.ts cardAsk)
 //   p   a private claude.ai artifact of the card: a fork of the conversation (core/forks.ts, kind `artifact`, with
-//       prompts/artifact.md) publishes it with its Artifact tool, and its last message is the link. While it works
-//       the card says `creating artifact…`, then `↗ <link>` under it, or why there is none.
+//       prompts/artifact.md) publishes it with its Artifact tool, and its last message is the link. One publish of a
+//       card at a time: a press while one starts or runs starts nothing. While it works the card says `creating
+//       artifact…`, and the bar's busy line `publishing an artifact`; then `↗ <link>` under it, or why there is none.
+//       Main reads the link, or why there is none, with the person's next prompt (core/tell.ts).
 //
 // p is a letter too (hooks/keys.ts holds the word window): as with v, the fork is spawned inside the key's own hook,
-// and this module's agent.spawn hook holds it until the window closes, refusing it when a letter came.
+// and this module's agent.spawn hook holds it until the window closes, refusing it when a letter came. The card shows
+// the publish once the window closed with no letter, so a word that starts with p leaves the card, and its link, as
+// they were. A click has no window, and shows at once.
+//
+// A reload of the plugin (a change of the settings, /reload-plugins) empties this module's memory while a fork may
+// still publish: $.state keeps which cards' artifacts are being made, so the fork's end still finds its card, and at
+// session start one whose fork Claude Code no longer runs ends as failed, and says so.
 //
 //   headKey($, key, until)      what a or p does at an empty prompt now (hooks/keys.ts asks), or null when it types
 //   startArtifact($, id, until) p's work, from the key or a click on `artifact`
 //   artifactLine($, E, id)      the line under a card about its artifact, or null
 //
-//   state: cardArtifacts (each card's artifact, by card id)
-import type { EngineInterface, Register } from 'claude-code'
+//   state: cardArtifacts (each card's artifact, by card id), cardArtifactsNow (the cards whose artifact is being made)
+import { update, type EngineInterface, type Register } from 'claude-code'
 
+import { busyWhile } from '../bar/busy'
 import { cardAsk } from '../core/answerview'
 import { forkOf, spawnFork } from '../core/forks'
+import { tellAtNextPrompt } from '../core/tell'
 import { cut, fenced } from '../core/text.js'
 import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
@@ -35,7 +45,7 @@ export const HEAD_KEYS = ['a', 'p']
 
 export type Made = {
   card: string
-  /** held: the word window is open; running: the fork works; the rest: it ended */
+  /** held: the fork waits to start; running: the fork works; the rest: it ended */
   status: 'held' | 'running' | 'done' | 'failed' | 'cancelled'
   agentId: string | null
   /** when the word window closes: the spawn waits until then */
@@ -46,26 +56,43 @@ export type Made = {
 
 /** The words the fork shows as in /tasks, and how this module's agent.spawn hook knows the spawn as p's. */
 const DESCRIPTION = 'artifact of a card (p)'
+/** The busy line's step while a fork publishes a card. */
+const STEP = 'publishing an artifact'
 /** The most of a card's text copy the fork reads. */
 const COPY_CHARS = 4000
 const MADE = { plugin: 'thimble', key: 'cardArtifacts' } as const
+const NOW = { plugin: 'thimble', key: 'cardArtifactsNow' } as const
 /** A claude.ai artifact's link, as the Artifact tool gives it. */
 const LINK = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[\w-]+/
 
 /** The artifact each card has, as this load of the module holds it; $.state holds it too. */
 const made = new Map<string, Made>()
+/** The publishes whose fork is starting: held for a key's word window, or spawned and not yet named by Claude Code. */
+const starting = new Set<Made>()
 
 const firstLine = (s: string) => String(s || '').split('\n').map(l => l.trim()).find(Boolean) || ''
 const reason = (err: unknown) => cut(String((err as Error)?.message || err), 200)
 const working = (m: Made | null | undefined) => m?.status === 'held' || m?.status === 'running'
+/** Whether a publish of the card starts or runs now, as this load knows it. */
+const making = (card: string) => [...starting].some(m => m.card === card && m.status === 'held') || working(made.get(card))
 
 async function madeOf($: Engine, card: string): Promise<Made | null> {
-  return made.get(card) ?? (((await $.state.get({ ...MADE, id: card })).value ?? null) as Made | null)
+  const known = made.get(card)
+  if (known) return known
+  // a reload of the plugin: the record as the earlier load kept it, known again
+  const kept = ((await $.state.get({ ...MADE, id: card })).value ?? null) as Made | null
+  // each read of $.state gives a copy of its own: the record another read (the session start's, the card's drawing)
+  // or a save kept meanwhile is the one, so that the fork's end changes the record the busy step watches
+  const meanwhile = made.get(card)
+  if (meanwhile) return meanwhile
+  if (kept) made.set(card, kept)
+  return kept
 }
 
 async function save($: Engine, m: Made): Promise<void> {
   made.set(m.card, m)
   await $.state.set({ ...MADE, id: m.card }, m)
+  await update($, NOW, cur => [...(cur ?? []).filter(c => c !== m.card), ...(working(m) ? [m.card] : [])])
   $.ui.invalidate('ui.render')
 }
 
@@ -84,7 +111,7 @@ async function promptOf($: Engine, card: string): Promise<string | null> {
 }
 
 /** The fork, spawned while the key's or the click's own hook runs (the agent.spawn hook below holds it for the word
- *  window). */
+ *  window). Once Claude Code names it, the card and the bar show that it works. */
 async function spawn($: Engine, m: Made, prompt: string): Promise<void> {
   try {
     const r = await spawnFork($, { kind: 'artifact', prompt, description: DESCRIPTION })
@@ -93,8 +120,11 @@ async function spawn($: Engine, m: Made, prompt: string): Promise<void> {
     m.agentId = r.agentId
     m.status = 'running'
     await save($, m)
+    await busyWhile($, STEP, () => m.status === 'running')
   } catch (err) {
     await end($, m, 'failed', { error: reason(err) })
+  } finally {
+    starting.delete(m)
   }
 }
 
@@ -102,22 +132,25 @@ async function spawn($: Engine, m: Made, prompt: string): Promise<void> {
  *  `until` 0; a key's: when its word window closes). Null when nothing starts: the card has no version, or its
  *  artifact is still being made. */
 export async function startArtifact($: Engine, card: string, until: number): Promise<{ now: () => Promise<unknown>; undo: () => Promise<unknown> } | null> {
-  if (!featureOn('cards') || working(await madeOf($, card))) return null
+  if (!featureOn('cards') || making(card) || working(await madeOf($, card))) return null
   const prompt = await promptOf($, card)
   return prompt ? launch($, card, prompt, until) : null
 }
 
 /** The fork for a card's artifact, with its prompt made: `now` starts it (inside the hook that calls it), `undo`
- *  lets it go while the word window holds it. */
+ *  lets it go while the word window holds it. A press while another of the card's publishes starts or runs (a double
+ *  click, p and a click) starts nothing. A click shows on the card at once; a key's publish shows once its spawn goes. */
 export function launch($: Engine, card: string, prompt: string, until: number): { now: () => Promise<unknown>; undo: () => Promise<unknown> } {
   const m: Made = { card, status: 'held', agentId: null, until }
   return {
     now: async () => {
-      await save($, m)
+      if (making(card)) return
+      starting.add(m)
       void spawn($, m, prompt)
+      if (!until) await save($, m)
     },
     undo: async () => {
-      if (m.status === 'held') await end($, m, 'cancelled')
+      if (m.status === 'held') m.status = 'cancelled'
     },
   }
 }
@@ -140,21 +173,54 @@ export async function artifactLine($: Engine, E: Any, card: string): Promise<Any
   if (!m || m.status === 'cancelled') return null
   const box = (children: Any[]) => E.Box({ key: `artifact-${card}`, marginLeft: 4, children })
   if (working(m)) return box([E.Text({ key: 'w', dimColor: true, children: 'creating artifact…' })])
-  if (m.status === 'done' && m.url) return box([E.Text({ key: 'a', dimColor: true, children: '↗ ' }), E.Link({ key: 'l', href: m.url, label: m.url })])
+  // the link with no label, which Claude Code draws as the address alone (with a label: the label, then the address)
+  if (m.status === 'done' && m.url) return box([E.Text({ key: 'a', dimColor: true, children: '↗ ' }), E.Link({ key: 'l', href: m.url })])
   return box([E.Text({ key: 'x', color: 'error', wrap: 'wrap', children: `× no artifact${m.error ? `: ${m.error}` : ''}` })])
 }
 
-/** The fork ended: the link its last message gives, or why it gave none. */
+/** The fork ended: the link its last message gives, or why it gave none. Main reads either with the person's next
+ *  prompt, since the person may ask about the page, which only the account this session publishes with can open. */
 async function finish($: Engine, m: Made, e: { reason: string; answer: string }): Promise<void> {
   if (e.reason === 'aborted') return end($, m, 'cancelled')
   const url = String(e.answer || '').match(LINK)?.[0]
-  if (url) return end($, m, 'done', { url })
-  if (e.reason === 'refusal') return end($, m, 'failed', { error: "the model's safeguards refused it" })
   const said = cut(firstLine(e.answer), 160)
-  return end($, m, 'failed', { error: said || (e.reason === 'error' ? 'the model call failed' : 'the copy gave no link') })
+  const error = url ? '' : e.reason === 'refusal' ? "the model's safeguards refused it" : said || (e.reason === 'error' ? 'the model call failed' : 'the copy gave no link')
+  if (url) await end($, m, 'done', { url })
+  else await end($, m, 'failed', { error })
+  const title = (await metaOf($, m.card).catch(() => null))?.title
+  const card = `the card “${title || m.card}” (id "${m.card}")`
+  await tellAtNextPrompt($, `p:${m.card}`, url
+    ? `The analyst pressed p on ${card}, and a copy of you published it as a new private claude.ai artifact: ${url}. Its link shows under the card. Only the claude.ai account this session publishes with can open it.`
+    : `The analyst pressed p on ${card} to publish it as a claude.ai artifact, and no artifact was published: ${error.replace(/[.\s]+$/, '')}.`)
+    .catch(() => undefined)
 }
 
-const owning = (agentId: string | undefined) => [...made.values()].find(m => m.agentId === agentId && m.status === 'running') ?? null
+/** The artifact a fork makes: as this load holds it, else as $.state keeps it (the plugin was loaded again while the
+ *  fork ran). */
+async function owning($: Engine, agentId: string | undefined): Promise<Made | null> {
+  const its = (m: Made | null | undefined) => !!m && !!agentId && m.agentId === agentId && m.status === 'running'
+  for (const m of made.values()) if (its(m)) return m
+  for (const card of ((await $.state.get(NOW)).value ?? []) as string[]) {
+    const m = await madeOf($, card)
+    if (its(m)) return m
+  }
+  return null
+}
+
+/** A reload of the plugin: each artifact still being made is known again, with its busy step; one whose fork Claude
+ *  Code no longer runs (its end came while the plugin loaded) ends as failed, and says so under its card. */
+async function resume($: Engine): Promise<void> {
+  const cards = ((await $.state.get(NOW)).value ?? []) as string[]
+  if (!cards.length) return
+  const agents = await $.agent.list()
+  for (const card of cards) {
+    const m = await madeOf($, card)
+    if (!m || !working(m)) continue
+    const a = m.status === 'running' ? agents.find(x => x.id === m.agentId) : undefined
+    if (a && !['completed', 'failed', 'killed'].includes(a.status)) await busyWhile($, STEP, () => m.status === 'running')
+    else await end($, m, 'failed', { error: 'thimble lost the copy that made it; press p to publish the card again' })
+  }
+}
 
 export const registerCardHead: Register = on => {
   // a click on a card's `artifact`: what p does, started in this hook, so the plugin's other hooks serve its fork
@@ -170,10 +236,25 @@ export const registerCardHead: Register = on => {
     return { element: e.element }
   }).catch(($, e, next) => next(e))
 
+  // a reload of the plugin: the artifacts being made are known again
+  on('session.start', { cwd: /^\/?/ }, async ($, e, next) => {
+    const r = await next(e)
+    try {
+      await resume($)
+    } catch {
+      // each ends when its fork does
+    }
+    return r
+  }).catch(($, e, next) => next(e))
+
+  // a fork's end, found by the card's record that names its agent: at a reload the fork registry (core/forks.ts) knows
+  // the fork again only after this module's session start, and the end may come before that
   on('turn.complete', { agentId: /\S/ }, async ($, e, next) => {
     const r = await next(e)
-    const m = owning(e.agentId)
-    if (m && forkOf(e.agentId)?.kind === 'artifact') {
+    const kind = forkOf(e.agentId)?.kind
+    if (kind && kind !== 'artifact') return r
+    const m = await owning($, e.agentId)
+    if (m) {
       try {
         await finish($, m, e)
       } catch (err) {
@@ -195,7 +276,7 @@ export const registerCardHead: Register = on => {
   // p's spawn waits out the word window, and is refused when a letter came in it
   on('agent.spawn', { description: DESCRIPTION }, async ($, e, next) => {
     if (next.origin.plugin !== 'thimble') return next(e)
-    const m = [...made.values()].find(x => x.status === 'held')
+    const m = [...starting].filter(x => x.status === 'held').at(-1)
     if (!m) return next(e)
     const left = m.until - Number(await $.clock.now())
     if (left > 0) await $.clock.sleep(left)

@@ -3,7 +3,7 @@
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { carrier, inline, marksIn, rewritesIn, runsText, sentenceOf, withAsked, withCorrections, withRewrites } from '../message.js'
+import { carrier, inline, marksIn, rewritesIn, runsText, sentenceOf, withAsked, withCorrections, withoutCardLinks, withRewrites } from '../message.js'
 
 const words = text => marksIn(text).map(m => m.words)
 
@@ -160,4 +160,17 @@ test("a feature's span lies on plain words, inside one mark's words or over whol
   const first = '[1,212 accounts](#) shared answers.'
   const from = inline(first, 0, first.length, marksIn(first), [{ start: 0, end: first.indexOf(' answers') }])
   assert.deepEqual(from.filter(r => r.span === 0).map(r => [r.s, r.mark]), [['1,212 accounts', 0], [' shared', undefined]])
+})
+
+test("a card's link among words reads as the card's title, in thimble's drawing and in the words Claude Code draws; in code it stays as written", () => {
+  const text = 'The runs are in the card above ([Runs per day: 18 days](card:c0a1b2c3d4e5f)) if you want them.'
+  const read = 'The runs are in the card above (Runs per day: 18 days) if you want them.'
+  assert.equal(runsText(inline(text, 0, text.length)), read)
+  assert.equal(withoutCardLinks(text), read)
+  const code = 'Write `[Scores](card:c0123456789ab)` on a line of its own.\n\n```\n[Scores](card:c0123456789ab)\n```'
+  assert.equal(withoutCardLinks(code), code)
+  // a link to anything else keeps its target
+  const file = 'See [the log](run.log).'
+  assert.equal(runsText(inline(file, 0, file.length)), 'See the log (run.log).')
+  assert.equal(withoutCardLinks(file), file)
 })

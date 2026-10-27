@@ -164,15 +164,17 @@ async function placeInRow($: EngineInterface, row: string, text: string): Promis
 }
 
 /** The one line a call of the card tool draws in place of its call and result: what it did (drew, changed, moved the
- *  card, or failed), to which card, and where the card stands now. Exported for the tests. */
+ *  card, or failed), to which card, and where the card stands now. Claude Code draws the call's row before its input
+ *  has come, so until the call names a title the line names none. Exported for the tests. */
 export function callLine(input: Any, meta: Any, toolUseId: string, running: boolean): string {
   const call = meta?.calls?.[toolUseId]
-  const title = `“${cut(String(input?.title || call?.title || meta?.title || 'card'), 60)}”`
+  const named = String(input?.title || call?.title || meta?.title || '')
+  const title = named ? `“${cut(named, 60)}”` : ''
   // a call without an id draws a new card
   const first = !input?.id
   const moving = !!input?.id && !['title', 'data', 'view'].some(k => String(input?.[k] ?? '').trim() !== '') && !(Array.isArray(input?.edits) && input.edits.length)
-  if (running || !call) return `● ${first ? 'Drawing card' : moving ? 'Moving card' : 'Changing card'} ${title}…`
-  if (call.error) return `● Card ${title} did not draw: ${call.down ? call.error : cut(call.error, 160)} · Claude got the error`
+  if (running || !call) return `● ${first ? 'Drawing' : moving ? 'Moving' : 'Changing'} ${title ? `card ${title}` : 'a card'}…`
+  if (call.error) return `● ${title ? `Card ${title}` : 'The card'} did not draw: ${call.down ? call.error : cut(call.error, 160)} · Claude got the error`
   const changes: string[] = []
   const edits = Array.isArray(input?.edits) ? input.edits.length : 0
   if (!first && input?.title) changes.push('new title')

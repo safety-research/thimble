@@ -16,6 +16,7 @@
 //   withoutMarks(text)         -> the text with each mark as its words alone (marks switched off)
 //   blocks(text)               -> the markdown's blocks with their offsets
 //   cardRef(line)              -> the card a line of its own places there (`[title](card:<id>)`), or null
+//   withoutCardLinks(text)     -> the text with each link to a card as its words alone, as the person reads it
 //   inline(text, from, to, marks) -> one block's content as runs: words with their style, and each mark as one run
 //   wrapRuns(runs, width)      -> the runs cut into lines at spaces, a mark's words as plain words are
 //   tableOf(text, block, marks) -> a table block's cells as runs
@@ -430,6 +431,15 @@ export function cardRef(line) {
   return m ? m[1] : null
 }
 
+/** The text with each link to a card (`see [Edits by day](card:c1a2b3c4d5) above`) as its words alone, outside code,
+ *  as the person reads it: a card's link among words names the card by its title, and leads nowhere in the terminal
+ *  (a line that is only the link draws the card there, cardRef). */
+export function withoutCardLinks(text) {
+  const s = String(text ?? '')
+  const code = codeRanges(s)
+  return s.replace(/\[([^\]\n]*)\]\(card:[^)\n]*\)/g, (link, words, at) => (inCode(code, at) ? link : words))
+}
+
 /** The marks that lie inside [from, to), each with its index `i` among all marks (a span, too: {start, end}). */
 export const marksWithin = (marks, from, to) => (marks || []).map((m, i) => ({ ...m, i })).filter(m => m.start >= from && m.end <= to)
 
@@ -446,9 +456,9 @@ function linkAt(s) {
  * the mark's index among the text's marks, `span` a span's index among `spans` (words a feature draws as a press of its
  * own: an explainer, a heads-up; core/answerview.ts Span), and `tag` the drawing's own (a glyph after a mark's words).
  * Bold, italic and inline code as Claude Code draws them; a mark's words keep their own bold, `*` italic and code, and
- * draw each `_` as written; a link that is no mark reads as its words then its target, as Claude Code draws one. A span
- * lies on plain words, inside one mark's words, or over whole marks, whose runs then carry both ({start, end}: offsets
- * into the text).
+ * draw each `_` as written; a link that is no mark reads as its words then its target, as Claude Code draws one, and a
+ * link to a card as its words alone (withoutCardLinks). A span lies on plain words, inside one mark's words, or over
+ * whole marks, whose runs then carry both ({start, end}: offsets into the text).
  */
 export function inline(text, from, to, marks = [], spans = []) {
   const s = String(text || '')
@@ -515,7 +525,7 @@ export function inline(text, from, to, marks = [], spans = []) {
         const l = linkAt(s.slice(i, end))
         if (l) {
           push(l[1], { ...extra, link: true })
-          if (!/^(https?|file):/i.test(l[2])) push(` (${l[2]})`, { ...extra, dim: true })
+          if (!/^(https?|file|card):/i.test(l[2])) push(` (${l[2]})`, { ...extra, dim: true })
           i += l[0].length
           continue
         }
