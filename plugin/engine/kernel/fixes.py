@@ -13,6 +13,7 @@ Under $THIMBLE_HOME/fixes:
                      sandbox runtime, which may write only here and in tmp/<id>/, and reach only the package registries
                      (REGISTRIES). Removed after apply or "not now".
     tmp/<id>/        the fixer's home and temp folder in the sandbox, and the log of the tests thimble ran
+    srt/<pin>/       the release's sandbox runtime, once live's pin or lock file is not the release's (_srt)
     tests.lock       the quick tests run for one fix at a time
     fixes.jsonl      every request: one line per change of a fix's record; the last line of an id is its record
     release.json     where the release came from: the install's kind, its source, Claude Code's marketplace entry
@@ -503,25 +504,40 @@ def sandbox_dir() -> Path:
     return d if (d / "run.mjs").is_file() else PLUGIN / "sandbox"
 
 
-def _srt_dir() -> Path:
+def _srt_dir(root: Path | None = None) -> Path:
+    """Where setup.mjs installs the release's pin of srt under `root` (thimble's home, where a session's start does)."""
     try:
         pin = json.loads((sandbox_dir() / "package.json").read_text())["dependencies"]["@anthropic-ai/sandbox-runtime"]
     except (OSError, ValueError, KeyError):
         pin = ""
-    return thimble_home() / "srt" / pin
+    return (root or thimble_home()) / "srt" / pin
+
+
+def _text_of(p: Path) -> str:
+    try:
+        return p.read_text()
+    except OSError:
+        return ""
 
 
 def _srt() -> Path:
-    """The folder of the release's srt. A session's start installs the srt of the thimble it loads, live's, so the
-    release's own setup.mjs installs the release's when a fix changed the pin."""
-    srt = _srt_dir()
+    """The folder of the release's srt: its pin, installed from its lock file (setup.mjs keeps the lock file it installed
+    from in node_modules/.thimble-lock.json). A session's start installs the srt of the thimble it loads, live's, in
+    thimble's home: that is the release's while live's lock file is the release's. Else the release's own setup.mjs
+    installs the release's in fixes/srt, so that a fix that changes the pin or the lock file does not change the srt its
+    own fixer and tests run in."""
+    lock = _text_of(sandbox_dir() / "package-lock.json")
+    own = _srt_dir(home())
+    for srt in (_srt_dir(), own):
+        if (srt / "node_modules").is_dir() and _text_of(srt / "node_modules" / ".thimble-lock.json") == lock:
+            return srt
     node = shutil.which("node")
-    if not (srt / "node_modules").is_dir() and node:
-        run([node, str(sandbox_dir() / "setup.mjs"), "--home", str(thimble_home()), "--json"], check=False, timeout=600)
-    if not (srt / "node_modules").is_dir():
-        raise FixError("the sandbox runtime is not installed (thimble installs it at session start); start a new "
-                       "session, then ask again")
-    return srt
+    if node:
+        run([node, str(sandbox_dir() / "setup.mjs"), "--home", str(home()), "--json"], check=False, timeout=600)
+    if (own / "node_modules").is_dir() and _text_of(own / "node_modules" / ".thimble-lock.json") == lock:
+        return own
+    raise FixError("the sandbox runtime that fixes run in is not installed, and npm could not install it (it needs the npm "
+                   f"registry); node {sandbox_dir() / 'setup.mjs'} --home {home()} says why")
 
 
 def sandbox_argv(fid: int | str, path_extra: list[str] | None = None, net: bool = False) -> list[str]:

@@ -315,6 +315,40 @@ def test_the_way_back_runs_from_a_checkout_of_the_release_that_no_fix_changes(wo
     assert sh("git", "rev-parse", "HEAD", cwd=rel) == world["base"]
 
 
+# a made-up setup.mjs: it installs nothing, and keeps the lock file it was given, as the real one does
+MADE_UP_SETUP = """import fs from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+const here = dirname(fileURLToPath(import.meta.url))
+const home = process.argv[process.argv.indexOf('--home') + 1]
+const to = join(home, 'srt', '0.0.0-made-up', 'node_modules')
+fs.mkdirSync(to, { recursive: true })
+fs.copyFileSync(join(here, 'package-lock.json'), join(to, '.thimble-lock.json'))
+"""
+
+
+def test_the_fixer_and_its_tests_run_in_the_releases_srt_even_after_a_fix_changed_its_lock_file(world):
+    import shutil  # noqa: PLC0415
+
+    if not shutil.which("node"):
+        pytest.skip("no node on this machine")
+    release_with(world, {"plugin/sandbox/run.mjs": "// the release's sandbox code\n", "plugin/sandbox/setup.mjs": MADE_UP_SETUP,
+                         "plugin/sandbox/package.json": json.dumps({"dependencies": {"@anthropic-ai/sandbox-runtime": "0.0.0-made-up"}}),
+                         "plugin/sandbox/package-lock.json": "the release's made-up lock\n"})
+    FX.new("anything")
+    # a session's start installed srt from the release's lock file: that one is the release's
+    shared = FX.thimble_home() / "srt" / "0.0.0-made-up" / "node_modules"
+    shared.mkdir(parents=True)
+    (shared / ".thimble-lock.json").write_text("the release's made-up lock\n")
+    assert FX._srt() == shared.parent
+    # a fix changed the lock file, and the next session's start installed live's in its place: the release's own
+    # setup.mjs installs the release's in fixes/srt, and the fixer and the tests run with that one
+    (shared / ".thimble-lock.json").write_text("a fix's made-up lock\n")
+    own = FX.home() / "srt" / "0.0.0-made-up"
+    assert FX._srt() == own and (own / "node_modules" / ".thimble-lock.json").read_text() == "the release's made-up lock\n"
+    assert (shared / ".thimble-lock.json").read_text() == "a fix's made-up lock\n"
+
+
 def test_the_tests_run_for_one_fix_at_a_time_and_once_more_before_they_fail(world, monkeypatch, tmp_path):
     import threading  # noqa: PLC0415
 

@@ -1,8 +1,9 @@
 // The sandbox the card runner runs in (Anthropic's sandbox runtime, srt): its rules (cards/argv.mjs) on any machine,
 // then, on this machine, a process under those rules: it reads no file but the ones the rules name, writes only its own
 // folder, has no network and no variable of the session's; with rules that allow a site, as thimble fix's fixer has,
-// that site alone. setup.mjs installs srt in the test's THIMBLE_HOME, and names the system packages srt lacks with the
-// one command that installs them. All paths and names are made up.
+// that site alone (when this machine reaches it at all), with nothing of srt's proxies left after. setup.mjs installs
+// srt in the test's THIMBLE_HOME, and names the system packages srt lacks with the one command that installs them. All
+// paths and names are made up.
 //   node --test plugin/sandbox/test/sandbox.test.mjs
 import '../../test-home.mjs'
 import assert from 'node:assert/strict'
@@ -126,13 +127,21 @@ test('in the sandbox, with rules that allow a site (the fixer\'s shell, thimble 
   if (!existsSync('/usr/bin/curl')) return t.skip('no curl on this machine')
   const rules = { ...rulesHere(), network: { ...rulesHere().network, allowedDomains: ['registry.npmjs.org'] } }
   const status = url => `curl -s -m 30 -o /dev/null -w '%{http_code}\\n' ${url}`
+  // the site itself, outside the sandbox: a machine with no network, or behind a proxy of its own, cannot reach it
+  const online = spawnSync('/bin/sh', ['-c', status('https://registry.npmjs.org/')], { encoding: 'utf8', timeout: 60000, env: { PATH: '/usr/bin:/bin' } }).stdout.trim() === '200'
+  // a temp folder short enough for the sockets of srt's bridges on Linux, which must be gone when the command ends
+  const tmp = mkdtempSync(join(existsSync('/tmp') ? '/tmp' : tmpdir(), 'thimble-net-'))
   const r = spawnSync(s.node, [join(PLUGIN, 'sandbox', 'run.mjs'), '--srt', s.srt, JSON.stringify(rules), '--', '/usr/bin/env', '/bin/sh', '-c',
     `echo "$HTTPS_PROXY"; ${status('https://registry.npmjs.org/')}; ${status('https://example.com/')}`],
-  { encoding: 'utf8', timeout: 120000, env: { PATH: '/usr/bin:/bin' } })
+  { encoding: 'utf8', timeout: 120000, env: { PATH: '/usr/bin:/bin', TMPDIR: tmp } })
+  const left = readdirSync(tmp).filter(f => /^claude-(http|socks)-/.test(f))
+  rmSync(tmp, { recursive: true, force: true })
   const [proxy, registry, other] = r.stdout.trim().split('\n')
   assert.match(proxy, /@localhost:\d+$/, r.stderr)
-  assert.equal(registry, '200')
+  if (online) assert.equal(registry, '200')
+  else t.diagnostic('registry.npmjs.org does not answer here, outside the sandbox either')
   assert.notEqual(other, '200')
+  assert.deepEqual(left, [])
 })
 
 test('the probe\'s runner starts with a temp folder too long for a socket in it, and the folder stays empty', () => {
