@@ -362,10 +362,12 @@ def _write_off_sh(rel: dict[str, Any]) -> None:
 
 def ensure_live() -> dict[str, Any]:
     """live, made at the first request, with the release checkout beside it: nothing the person runs changes until the
-    first fix goes on."""
+    first fix goes on. Until then, the release follows the code that runs (_follow), so that the release checkout is
+    never older than it."""
     rel = release()
     live = live_dir()
     if rel and (live / ".git").exists():
+        rel = _follow(rel)
         place_release(rel["base"])
         return rel
     src = find_source()
@@ -388,7 +390,8 @@ def ensure_live() -> dict[str, Any]:
            **({"tag": tag} if RELEASE_TAG.match(tag) else {})}
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
-    place_release(commit)
+    rel = _follow(rel)
+    place_release(rel["base"])
     return rel
 
 
@@ -448,6 +451,60 @@ def _other_live(repo: Path) -> bool:
     wts = git("worktree", "list", "--porcelain", cwd=repo).splitlines()
     paths = [Path(x.partition(" ")[2]) for x in wts if x.startswith("worktree ")]
     return any(p.name == "live" and (p.parent / "release.json").exists() for p in paths)
+
+
+def _follow(rel: dict[str, Any]) -> dict[str, Any]:
+    """Before the first fix goes on (Claude Code's marketplace not on live yet), the release follows the code that runs:
+    when Claude Code's installed plugin (installed_plugins.json), or this kernel's own checkout when it is the clone
+    live came from, is a commit after the release commit (base), as after scripts/install.sh, `claude plugin update`
+    or Claude Code's own update, base moves to it (fetched into live from that clone when live lacks it), and mine with
+    it while mine holds no fix. The release as it is then."""
+    if rel.get("pointed"):
+        return rel
+    live, base = live_dir(), str(rel["base"])
+    src = Path(rel["repo"]) if rel.get("repo") and Path(rel["repo"]).is_dir() else None
+    own = git("rev-parse", "HEAD", cwd=src, check=False) if src and PLUGIN.parent.resolve() == src.resolve() else ""
+    new = base
+    for c in dict.fromkeys(x for x in (_installed_sha(), own) if x and x != base):
+        if not _has(live, c) and src:
+            # a shallow live (a clone of Claude Code's shallow clone) takes it as a shallow commit; a whole live takes it
+            # only with its history (a commit whose parents it lacks is no candidate)
+            shallow = git("rev-parse", "--is-shallow-repository", cwd=live, check=False) == "true"
+            run(["git", "fetch", "-q", "--no-tags", *(["--update-shallow"] if shallow else []), str(src), c], cwd=live,
+                check=False, timeout=600)
+        if run(["git", "rev-list", "-n", "2", c], cwd=live, check=False).returncode == 0 and _later(live, new, c):
+            new = c
+    if new == base:
+        return rel
+    rel = {**rel, "base": new, "version": _version_at(live, new), "updated": time.time()}
+    rel.pop("checkout", None)
+    tag = next((t for t in (git("describe", "--tags", "--exact-match", "--match", "v*", new, cwd=r, check=False)
+                            for r in (live, src) if r) if RELEASE_TAG.match(t)), "")
+    if tag:
+        rel["tag"] = tag
+    else:
+        rel.pop("tag", None)
+    if git("rev-parse", "mine", cwd=live) == base:
+        _unstamp()
+        if git("symbolic-ref", "-q", "HEAD", cwd=live, check=False) == "refs/heads/mine":
+            git("checkout", "-q", "-B", "mine", new, cwd=live)
+        else:
+            git("branch", "-f", "mine", new, cwd=live)
+            git("checkout", "-q", "--detach", new, cwd=live)
+    write_json(home() / "release.json", rel)
+    _write_off_sh(rel)
+    return rel
+
+
+def _later(repo: Path, a: str, b: str) -> bool:
+    """Whether commit b comes after commit a: a is in b's history, or, when neither history holds the other (a shallow
+    clone, as Claude Code's is, lacks the commits between), b was committed later."""
+    if a == b or _ancestor(repo, b, a):
+        return False
+    if _ancestor(repo, a, b):
+        return True
+    ta, tb = (git("log", "-1", "--format=%ct", c, cwd=repo, check=False) for c in (a, b))
+    return ta.isdigit() and tb.isdigit() and int(tb) > int(ta)
 
 
 def place_release(base: str) -> None:
