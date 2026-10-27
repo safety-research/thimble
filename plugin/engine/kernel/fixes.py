@@ -1165,7 +1165,10 @@ def _named_patches(rec: dict[str, Any], words: str) -> dict[str, Any]:
             continue
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         path = tmp_dir(rec["id"]) / f"fix-{m}.patch"
-        _write_new(path, patch)
+        try:
+            _write_new(path, patch)
+        except OSError:
+            continue  # the fixer is told of no patch it cannot read
         out.append({"id": m, "title": other.get("title") or "", "path": str(path)})
     return {**rec, "patches": out} if out else rec
 
@@ -1865,7 +1868,10 @@ def redo(fid: int | str, words: str = "", session: str | None = None, asked: str
             _give_types(wt)
         tmp_dir(rec["id"]).mkdir(parents=True, exist_ok=True)
         if earlier.strip():
-            _write_new(tmp_dir(rec["id"]) / "earlier.patch", earlier)
+            try:
+                _write_new(tmp_dir(rec["id"]) / "earlier.patch", earlier)
+            except OSError:
+                pass  # the new copy starts all the same, without the earlier change to start from
         rec = _fresh(rec)
         rec.pop("unshown", None)
         rec.update(state="working", work=str(wt), base=base, error=None, tests=None, rounds=int(rec.get("rounds") or 1) + 1,

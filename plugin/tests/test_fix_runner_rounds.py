@@ -1,8 +1,9 @@
 """thimble fix done (engine/kernel/fixes.py) when a new round, or another check, meets the check of the round before:
 the check that waits returns as soon as the record no longer waits for its tests; each run of the tests has a lock of its
 own, so a new round's tests start while the runner before still runs; two checks at once commit in the copy one at a
-time. The world is test_fixes.py's made-up thimble 0.10.2; slow tests are made with THIMBLE_FIX_TESTS. All data here is
-made up."""
+time; a round or a removal between the runner's look and its write stays as it is; another round, a new round and r drop
+the mark of an outcome not shown; a folder where a round or r writes a patch leaves them to go on. The world is
+test_fixes.py's made-up thimble 0.10.2; slow tests are made with THIMBLE_FIX_TESTS. All data here is made up."""
 from __future__ import annotations
 
 import fcntl
@@ -233,3 +234,23 @@ def test_another_round_a_new_round_and_r_drop_the_mark_of_an_outcome_not_shown(w
     FX.not_now(r["id"])
     assert FX.get(r["id"])["unshown"] is True
     assert "unshown" not in FX.round_(r["id"], "and say it in the pane too") and "unshown" not in FX.get(r["id"])
+
+
+def test_a_folder_where_a_round_writes_the_patch_of_a_fix_its_words_name_leaves_the_round_to_go_on(world):
+    # fix 1 is on; the words of a round of fix 2 name it, and its patch would go where a folder is
+    a = on_fix(world)
+    b = made(world, "the pane title too")
+    FX.tmp_dir(b["id"]).mkdir(parents=True, exist_ok=True)
+    (FX.tmp_dir(b["id"]) / f"fix-{a['id']}.patch").mkdir()
+    got = FX.round_(b["id"], f"fold in fix {a['id']}")
+    assert got["state"] == "working" and got["rounds"] == 2 and not got.get("patches")
+
+
+def test_a_folder_where_r_writes_the_earlier_change_leaves_r_to_go_on(world, monkeypatch):
+    # r on a fix whose tests failed: the earlier change's patch would go where a folder is
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    r = made(world)
+    assert FX.done(r["id"], "Bar says read", "", within=30)["state"] == "failed"
+    (FX.tmp_dir(r["id"]) / "earlier.patch").mkdir()
+    got = FX.redo(r["id"])
+    assert got["state"] == "working" and Path(got["work"]).is_dir()
