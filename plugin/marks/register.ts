@@ -272,13 +272,12 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     })
     : looksByWords(marks, reply?.items ?? [], runs)
   const looks = quietLooks(byStatus, own ? items : reply?.items ?? [], own)
-  // the citations of Claude's own words the check corrected (` *` after them, view.ts): what they were and why, under
-  // the row
-  const fixes: Fix[] = own
-    ? items.flatMap((it, k) => (it.status === 'corrected' && !it.narrowed && (!it.rewrite || rewrote.placed.has(k))
-      ? [{ n: it.n, was: it.rewrite ? plainSentence(it.sentence) : (it.was ?? it.words), ...(it.rewrite ? { rewrite: true } : {}), ...(it.reason ? { reason: it.reason } : {}) }]
-      : []))
-    : []
+  // the citations drawn with * after them (view.ts: the check corrected their words): what Claude wrote and why the
+  // check changed it, in a line under the row for each
+  const starred = new Set(looks.filter(l => l.status === 'corrected' && !l.narrowed && !l.quiet && l.n > 0).map(l => l.n))
+  const fixes: Fix[] = (own ? items : reply?.items ?? []).filter(it => starred.has(it.n)).map(it => ({
+    n: it.n, was: it.rewrite ? plainSentence(it.sentence) : (it.was ?? it.words), ...(it.rewrite ? { rewrite: true } : {}), ...(it.reason ? { reason: it.reason } : {}),
+  }))
   const open = async (n: number) => {
     if (await markPressed($, row, n)) return
     if (n > 0) await openPane($, 'evidence', { row, n }, `citation ${n}`)
