@@ -105,7 +105,8 @@ PROTECTED = tuple(pat for pats in PROTECTED_KINDS.values() for pat in pats)
 # the files a fix may change that the person is told of before they use it, by what each one is: the rest of what keeps
 # them safe, and the packages thimble installs. A file counts as the first kind it matches.
 NOTICE_KINDS = {
-    "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "browser/backend/app/kernel_wrap.py"),
+    "the sandbox": ("plugin/sandbox/*", "plugin/cards/argv.mjs", "plugin/cards/ask.ts", "plugin/cards/runner.mjs",
+                    "browser/backend/app/kernel_wrap.py"),
     "the hooks file": ("plugin/hooks/hooks.json",),
     "a command hook": ("plugin/hooks/temp-allow.sh", "plugin/hooks/temp_allow.py"),
     "the launcher": ("plugin/bin/*",),

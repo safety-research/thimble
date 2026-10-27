@@ -136,3 +136,19 @@ def test_the_way_back_runs_only_the_releases_code_whatever_was_added_to_its_chec
         assert not (rel / "plugin" / "engine" / "getpass.py").exists()
         assert (rel / "plugin" / "bar" / "bar.tsx").read_text() == "const words = `coverage ${n}`\n"
         assert sh("git", "rev-parse", "HEAD", cwd=rel) == world["base"]
+
+
+def test_a_fix_to_the_card_runner_or_its_ask_gets_the_sandbox_notice_also_when_it_moves_them(world):
+    release_with(world, {"plugin/cards/ask.ts": "export const ask = 1\n", "plugin/cards/runner.mjs": "export const run = 1\n"})
+    a = FX.new("cards may ask more")
+    wt = Path(a["work"])
+    (wt / "plugin" / "cards" / "ask.ts").write_text("export const ask = 2\n")
+    (wt / "plugin" / "cards" / "runner.mjs").write_text("export const run = 2\n")
+    a = FX.done(a["id"], "Cards ask more", "")
+    assert a["state"] == "ready" and a["notice"] == {"the sandbox": ["plugin/cards/ask.ts", "plugin/cards/runner.mjs"]}
+    assert FX.notice_said(a) == "This fix changes the sandbox (plugin/cards/ask.ts and plugin/cards/runner.mjs)."
+    b = FX.new("rename the card runner")
+    wt = Path(b["work"])
+    (wt / "plugin" / "cards" / "runner.mjs").rename(wt / "plugin" / "cards" / "run.mjs")
+    b = FX.done(b["id"], "Card runner renamed", "")
+    assert b["state"] == "ready" and b["notice"] == {"the sandbox": ["plugin/cards/runner.mjs"]}
