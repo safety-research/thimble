@@ -5,8 +5,9 @@
 //      call, as plan mode's refusal does. An `ask` that a rule of the person's makes refuses it too, since Claude Code
 //      cannot put its dialog in front of a plugin's own tool; one that comes only from the mode (a tool of a plugin, a
 //      file outside the working folder) lets it go on, since the card reads only a file of the session's folders or
-//      temp folder, and runs its view in the runner's sandbox
-//   1. checks the file is in the session's folder or the temp folder, and copies it into the card's folder
+//      temp folders, and runs its view in the runner's sandbox
+//   1. checks the file is in the session's folder, the temp folder or Claude Code's around it (where a command in its
+//      Bash sandbox writes), and copies it into the card's folder
 //   2. loads the view and the copy into the runner (runner.mjs), which draws the card and makes its text copy
 //   3. keeps the card (store.ts) and draws it where the call stands (draw.ts), or under the answer v was pressed on when
 //      the designer fork called; a new version draws in the card's place
@@ -28,7 +29,7 @@ import type { EngineInterface } from 'claude-code'
 import { failCleared } from '../bar/notice'
 import { startDir } from '../core/env'
 import { forkOf } from '../core/forks'
-import { tempDir } from '../core/home'
+import { claudeTempDir, tempDir } from '../core/home'
 import { paneNow } from '../core/pane'
 import { mainTurn } from '../core/turn'
 import { designAnchor } from '../designer/v'
@@ -96,10 +97,11 @@ async function refused($: Engine, input: Record<string, unknown>, file: string |
   return null
 }
 
-/** The folders a data file may be in, each as its real path: the session's folders and the temp folder. */
+/** The folders a data file may be in, each as its real path: the session's folders, the temp folder, and Claude Code's
+ *  temp folder around it, which a command in Claude Code's Bash sandbox gets as its TMPDIR. */
 async function roots($: Engine): Promise<string[]> {
   const out: string[] = []
-  for (const c of [await $.session.cwd().catch(() => ''), await startDir($).catch(() => ''), await tempDir($)]) {
+  for (const c of [await $.session.cwd().catch(() => ''), await startDir($).catch(() => ''), await tempDir($), await claudeTempDir($)]) {
     if (!c) continue
     const st = await $.fs.stat(c, { resolve: true }).catch(() => null)
     if (st?.kind === 'dir' && st.realPath && !out.includes(st.realPath)) out.push(st.realPath)
@@ -107,14 +109,17 @@ async function roots($: Engine): Promise<string[]> {
   return out
 }
 
-/** The data file's real path, or why it cannot be read. */
+/** The data file's real path, or why it cannot be read. `$TMPDIR/` is the temp folder, a command's TMPDIR, else Claude
+ *  Code's temp folder, the TMPDIR of a command in Claude Code's Bash sandbox. */
 async function dataFile($: Engine, raw: string): Promise<{ path?: string; bad?: string }> {
   const p = String(raw ?? '').trim()
   if (!p) return { bad: '`data` is empty: give the path of the JSON file of rows you wrote' }
   const temp = await tempDir($)
-  const expanded = p.replace(/^\$\{?TMPDIR\}?(?=\/)/, temp)
-  const path = expanded.startsWith('/') ? expanded : `${await $.session.cwd()}/${expanded}`
-  const st = await $.fs.stat(path, { resolve: true }).catch(() => null)
+  const tmp = /^\$\{?TMPDIR\}?(?=\/)/
+  const [first, second] = tmp.test(p) ? [temp, await claudeTempDir($)].filter(Boolean).map(t => p.replace(tmp, t)) : [p]
+  const stat = async (n: string) => $.fs.stat(n.startsWith('/') ? n : `${await $.session.cwd()}/${n}`, { resolve: true }).catch(() => null)
+  let st = await stat(first!)
+  if (st?.kind !== 'file' && second) st = await stat(second)
   if (!st || st.kind !== 'file' || !st.realPath) return { bad: `there is no file at ${p}` }
   const real = st.realPath
   if (!(await roots($)).some(r => real === r || real.startsWith(`${r}/`))) return { bad: `${p} is outside this folder and the temp folder, ${temp}; write the data file in one of them` }

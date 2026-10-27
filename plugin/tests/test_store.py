@@ -14,6 +14,14 @@ sys.path.insert(0, str(ENGINE))
 from kernel import store as STORE  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _no_session_temp_folders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # run from a Claude Code session, the tests' own folders may lie in the session's temp folders (its TMPDIR, its
+    # CLAUDE_CODE_TMPDIR): each test names the temp folders it means
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "no-temp"))
+    monkeypatch.delenv("CLAUDE_CODE_TMPDIR", raising=False)
+
+
 def test_records_stay_in_the_folder_the_session_started_in(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # a session started in data/ whose first command is `cd src`: the labels stay data/'s, not data/src/'s
     data = tmp_path / "data"
@@ -57,20 +65,37 @@ def test_a_command_in_thimbles_temp_folder_keeps_the_start_folders_records(tmp_p
     assert STORE.find_root(temp) == temp.resolve()
 
 
-def test_thimbles_folder_in_claude_codes_temp_folder_is_a_temp_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # thimble/ in Claude Code's temp folder, found by CLAUDE_CODE_TMPDIR; and in a command in Claude Code's Bash
-    # sandbox, whose TMPDIR is Claude Code's temp folder, as thimble/ in TMPDIR. Claude Code's own files beside it are
-    # not thimble's
-    claude = tmp_path / "cc" / f"claude-{os.getuid()}"
+def test_claude_codes_temp_folder_around_thimbles_is_a_temp_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # thimble's folder is thimble/ in Claude Code's temp folder, and a command in Claude Code's Bash sandbox writes in
+    # Claude Code's: `cd $TMPDIR && thimble label …` there keeps the start folder's records
+    data, claude = tmp_path / "data", tmp_path / "cc" / f"claude-{os.getuid()}"
     temp = claude / "thimble"
+    data.mkdir()
     temp.mkdir(parents=True)
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.setenv("THIMBLE_START", str(data))
+    # a command outside the sandbox: TMPDIR is thimble's folder, CLAUDE_CODE_TMPDIR where Claude Code keeps its own
+    monkeypatch.setenv("TMPDIR", str(temp))
     monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(tmp_path / "cc"))
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "elsewhere"))
-    assert STORE.in_temp(temp / "rows.jsonl") and not STORE.in_temp(claude / "cwd-1a2b")
-    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(claude))
+    assert STORE.in_temp(temp / "rows.jsonl") and STORE.in_temp(claude / "rows.jsonl")
+    # a command in the sandbox: Claude Code's folder is its TMPDIR and its CLAUDE_CODE_TMPDIR
     monkeypatch.setenv("TMPDIR", str(claude))
-    assert STORE.in_temp(temp / "rows.jsonl") and not STORE.in_temp(claude / "cwd-1a2b")
+    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(claude))
+    assert STORE.in_temp(temp / "rows.jsonl") and STORE.in_temp(claude / "rows.jsonl")
+    assert STORE.find_root(claude) == data.resolve()
+    # with a CLAUDE_CODE_TMPDIR too long for a socket in it, the sandbox's TMPDIR is claude-<uid>/ in /tmp instead
+    short = tmp_path / "short" / f"claude-{os.getuid()}"
+    short.mkdir(parents=True)
+    monkeypatch.setenv("TMPDIR", str(short))
+    assert STORE.in_temp(temp / "rows.jsonl") and STORE.in_temp(short / "rows.jsonl")
+    assert STORE.find_root(temp) == data.resolve()
+    # a folder named for another user is no temp folder of this one's
+    other = tmp_path / "cc" / f"claude-{os.getuid() + 1}"
+    other.mkdir()
+    monkeypatch.setenv("TMPDIR", str(other))
+    monkeypatch.setenv("CLAUDE_CODE_TMPDIR", str(other))
+    assert not STORE.in_temp(other / "rows.jsonl")
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root may write in any folder")

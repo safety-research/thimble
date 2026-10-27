@@ -5,6 +5,7 @@
 //   tempDir($)       where Claude writes the files it makes for thimble (a card's rows): a folder only this user can
 //                    open, `thimble/` in Claude Code's own temp folder, which its Bash sandbox lets commands write,
 //                    else `thimble/` in the person's TMPDIR, else the home's tmp/
+//   claudeTempDir($) Claude Code's own temp folder around it, the TMPDIR of a command in Claude Code's Bash sandbox
 import type { EngineInterface } from 'claude-code'
 
 import { tmpDir } from './layout.mjs'
@@ -39,6 +40,15 @@ export async function tempDir($: Engine): Promise<string> {
 /** The session's temp folder when a load of the plugin in this session found it already, else ''. */
 export async function keptTempDir($: Engine): Promise<string> {
   return (await $.state.get(TEMP)).value || ''
+}
+
+/** Claude Code's own temp folder, `claude-<uid>/`, as a real path, when the session's temp folder is `thimble/` in it;
+ *  else ''. A command in Claude Code's Bash sandbox gets that folder, not thimble's, as its TMPDIR, so what such a
+ *  command writes for thimble (a card's rows, code a citation names) may land there. */
+export async function claudeTempDir($: Engine): Promise<string> {
+  const temp = await tempDir($)
+  const around = temp.slice(0, temp.lastIndexOf('/'))
+  return temp.endsWith('/thimble') && /\/claude-\d+$/.test(around) ? around : ''
 }
 
 /** This user's id, which Claude Code names its temp folder after (`claude-<uid>`); '' when `id` does not say it. */

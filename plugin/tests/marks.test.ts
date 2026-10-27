@@ -149,6 +149,16 @@ test("the validator gets the fork's calls and main's (it keeps main's whose outp
   expect(JSON.parse(seen.stdin[0]!).calls.map((c: Any) => [c.command, c.by])).toEqual([["python3 - <<'PY'\nprint('12 of 40')\nPY", 'checker'], ['python3 count.py', 'main'], ['ls', 'main']])
 })
 
+test("the check may cite code in Claude Code's temp folder around thimble's, where a command in its Bash sandbox writes", async () => {
+  const { $, seen } = engine(VALIDATED)
+  // thimble's temp folder is thimble/ in Claude Code's, claude-1000/ in CLAUDE_CODE_TMPDIR
+  $.env.get = async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', TMPDIR: '/made-up/tmp', CLAUDE_CODE_TMPDIR: '/made-up/tmp' } as Any)[k]
+  await noteRow($, 'row-1', REPLY)
+  await startCheck($, { turnId: 't-1', reason: 'answer' })
+  await endCheck($, { agentId: FORK, reason: 'answer', answer: '```json\n[]\n```' })
+  expect(JSON.parse(seen.stdin[0]!).tmp).toBe('/made-up/tmp/claude-1000')
+})
+
 test('a refused check leaves the marks failed, says so once, and nothing spins', async () => {
   const { $, seen } = engine(VALIDATED)
   await noteRow($, 'row-1', REPLY)
