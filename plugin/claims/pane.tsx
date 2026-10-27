@@ -15,7 +15,9 @@
 //     a cluster chosen   k j the previous or next claim of its list (the ends hold) · e opens it · p n the previous or
 //                        next cluster
 //     any, overflowing   d u the detail a page down or up
-//     always, last       w closes the pane, as w at the prompt does (as r closes coverage's, panes/coverage.tsx)
+//     always, last       w close, a click alone: no Button takes w, so Claude Code types it into the prompt, where w
+//                        closes the pane once its word window closed (seam.ts claimsKey), and a question that starts
+//                        with w (why …) is typed whole
 //     a claim picked     k j the previous or next claim of its cluster (its evidence shown: citation) · e its
 //                        evidence shown or hidden (the line in the detail that says so) · h its History (a corrected
 //                        claim) · c the current citation's code and output whole · x repair the current citation
@@ -193,12 +195,15 @@ export async function claimsThreadScope($: Engine, args: unknown): Promise<{ abo
   return { about: threadAbout(null), args: {}, ask: 'Ask about all the claims…' }
 }
 
-type Key = { k: string; label: string; onPress: () => unknown; id?: string }
+/** A key of the keys' row; `click`: a click alone, no hotkey, its key drawn here. */
+type Key = { k: string; label: string; onPress: () => unknown; id?: string; click?: true }
 
 /** The keys' rows, ` · ` between them: each a plain Button the key presses (its address `key-<k>`, or its own `id`).
  *  Claude Code draws its key itself (lit, then a colon), so its words are only the label's, dim as the bar's: words
- *  that held the key too drew it twice. The keys are cut into rows of `W` cells here, each key as wide as it is drawn
- *  with its `k: `: Claude Code lays a Button out without that colon, so a row it wrapped itself lost its last key. */
+ *  that held the key too drew it twice. A `click` key's Button has no hotkey, so the row draws its key as Claude Code
+ *  draws the others' (coverage's ↵, panes/coverage.tsx). The keys are cut into rows of `W` cells here, each key as wide
+ *  as it is drawn with its `k: `: Claude Code lays a Button out without that colon, so a row it wrapped itself lost its
+ *  last key. */
 function keysRow(els: Any, keys: Key[], W = Infinity): unknown {
   const { Box, Button, Text } = els
   const lines: Key[][] = [[]]
@@ -209,9 +214,13 @@ function keysRow(els: Any, keys: Key[], W = Infinity): unknown {
     used += (used ? 3 : 0) + w
     lines[lines.length - 1]!.push(x)
   }
+  const words = (x: Key) => Text({ key: 'w', dimColor: true, children: `${x.label}${ARROW[x.k] ?? ''}` })
   const row = (line: Key[], r: number) => Box({ key: `keys-${r}`, flexDirection: 'row', children: line.flatMap((x, i) => [
     ...(i ? [Text({ key: `key-sep-${i}`, dimColor: true, children: ' · ' })] : []),
-    Button({ key: x.id ?? `key-${x.k}`, plain: true, hotkey: x.k, label: x.label, hover: quiet(`claims-${x.id ?? `key-${x.k}`}`), onPress: x.onPress, children: [Text({ key: 'w', dimColor: true, children: `${x.label}${ARROW[x.k] ?? ''}` })] }),
+    Button({
+      key: x.id ?? `key-${x.k}`, plain: true, ...(x.click ? {} : { hotkey: x.k }), label: x.label, hover: quiet(`claims-${x.id ?? `key-${x.k}`}`), onPress: x.onPress,
+      children: x.click ? [Text({ key: 'k', color: 'suggestion', children: x.k }), Text({ key: 'c', children: ': ' }), words(x)] : [words(x)],
+    }),
   ]) })
   return Box({ key: 'keys', flexDirection: 'column', children: lines.map(row) })
 }
@@ -275,6 +284,8 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
   const raw = await withMarks($, paneData(await claimsStore($)))
   const keys: Key[] = []
   const key = (k: string, label: string, onPress: () => unknown, id?: string) => keys.push({ k, label, onPress, ...(id ? { id } : {}) })
+  // w close, a click alone: a w typed goes to the prompt, which closes the pane (the header above)
+  const close = () => keys.push({ k: 'w', label: 'close', onPress: () => closePane($), click: true })
   const keep = {
     claim: a.claim ?? null, group: a.group ?? null, at: a.at ?? null, ...(a.cur != null ? { cur: a.cur } : {}), ...(a.cite != null ? { cite: a.cite } : {}),
     ...(a.open ? { open: true } : {}), ...(a.history ? { history: true } : {}), ...(a.whole ? { whole: true } : {}),
@@ -286,7 +297,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     const text = a.row ? await placeText($, a.row) : null
     const lines = sourceView(c, text, W) as Run[][]
     key('b', 'back', () => showClaims($, keep))
-    key('w', 'close', () => closePane($))
+    close()
     const said = lines.map((r, i) => rowEl(els, r, `s${i}`, () => undefined))
     const keyEls = [rowEl(els, [], 'gap', () => undefined), keysRow(els, keys, W)]
     const fill = Math.max(0, H - treeRows(said, W) - treeRows(keyEls, W))
@@ -405,8 +416,8 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     key('d', 'scroll down', () => scrollDetail($, page()))
     key('u', 'scroll up', () => scrollDetail($, -page()))
   }
-  // w closes the pane, as w at the prompt does
-  key('w', 'close', () => closePane($))
+  // w close, last
+  close()
   const row = (r: Run[], k: string) => rowEl(els, r, k, press)
   // the answers the claims have not read yet (claims are found on demand): f finds theirs, in the ui.press hook of the
   // observer's (observer.ts), which runs the claims step on them

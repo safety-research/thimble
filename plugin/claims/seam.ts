@@ -75,8 +75,9 @@ export async function claimsReady($: Engine): Promise<void> {
 
 async function barItems($: Engine): Promise<BarItem[]> {
   const press = () => toggleClaims($)
-  // no claims yet: the pane finds them on demand, so the item shows, without a count, once an answer waits for it
-  if (!(await claimCount($))) return (await claimsToFind($)).answers ? [{ id: 'claims', key: 'w', words: 'evidence', press }] : []
+  // no claims yet: the pane finds them on demand, so the item shows, without a count, once an answer waits for it, and
+  // while the pane shows (it found none), so that w closes it
+  if (!(await claimCount($))) return (await claimsToFind($)).answers || (await paneShows($, 'claims').catch(() => false)) ? [{ id: 'claims', key: 'w', words: 'evidence', press }] : []
   const words = await claimsBarWords($)
   // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims. The session's
   // first claims: the count pulses

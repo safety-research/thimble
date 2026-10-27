@@ -43,7 +43,7 @@ const key = (k: string) => ({ origin: { kind: 'composer' }, key: { key: k }, tex
 /** A resumed session with one answer, TEXT (or `more.text`), whose citation the check left as `item` (or whose
  *  citations, a list of items); `more`: the turn's cards, the message's parts and kept files to add (a card's meta.json
  *  under cards/<id>/). */
-async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string>; scrolls?: Any[] } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
+async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { cards?: Any[]; parts?: Any; kept?: Record<string, string>; text?: string; env?: Record<string, string>; scrolls?: Any[]; panes?: () => Any[] } = {}): Promise<{ submitted: Any[]; clock: Any; spawns: Any[] }> {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...(more.env ?? {}) })
   const clock = mock.clock(on, { now: 0 })
   const submitted: Any[] = []
@@ -69,7 +69,7 @@ async function resumed($: Any, on: Any, item: Any, session = 's-tray', more: { c
   on('command.register', () => ({ value: { command: 'x' } }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.scroll', (_$: unknown, e: Any) => { more.scrolls?.push(e); return { value: undefined } })
-  on('ui.panes', () => ({ value: [] }))
+  on('ui.panes', () => ({ value: more.panes?.() ?? [] }) as never)
   on('model.fork', () => ({ value: { isAnswered: true, text: '{}' } }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('agent.spawn', (_$: unknown, e: Any) => { spawns.push(e); return { model: 'claude-made-up', agentId: `agent-repair-${spawns.length}` } as never })
@@ -723,6 +723,42 @@ test("c with words selected reads the selection once and no state at the key, ho
   expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
   await clock.advance(1000)
   expect(spawns.length).toBe(2)
+})
+
+test("the Evidence pane's w close is a click alone: a w typed while the pane holds the keyboard reaches the prompt, where it closes the pane once its word window closed, and a question that starts with w is typed whole", CITES, async ($, on) => {
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  on('ui.selection', () => ({ value: undefined }))
+  // the side pane as Claude Code keeps it: up from an open until a close
+  let up = false
+  const opens: Any[] = []
+  const closes: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); up = true; return { value: { isPlaced: true } } as never })
+  on('ui.close', (_$: unknown, e: Any) => { closes.push(e.id); up = false; return { value: undefined } as never })
+  const { clock } = await resumed($, on, QUOTED, 's-tray-wclose', { panes: () => (up ? [{ id: 'thimble', title: 'Evidence' }] : []) })
+  expect(textOf(await $.ui.render(above()))).toContain('w evidence')
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(opens).toEqual(['Evidence'])
+  // the pane's key row ends with w close, a click alone: no Button of the pane takes w, so Claude Code types a w typed
+  // in the pane into the prompt
+  const pane = await $.ui.render({ plugin: 'thimble', component: 'Pane', surface: 'terminal', requestId: 'thimble', props: { title: 'Evidence', isFocused: true, bodyColumns: 90, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }, viewport: view } as never)
+  const buttons = all(pane).filter(n => n.type === 'Button')
+  expect(buttons.filter(b => b.props.hotkey === 'w')).toEqual([])
+  const close = buttons.find(b => String(b.key ?? b.props.key) === 'key-w')
+  expect([close?.props.label, textOf(close)]).toEqual(['close', 'w: close'])
+  // that w, alone: the pane closes once its word window closed
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(closes).toEqual(['thimble'])
+  // open again: a question that starts with w, typed on, is a word, whole in the prompt, and the pane stays
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(opens).toEqual(['Evidence', 'Evidence'])
+  expect(await $.prompt.edit(key('w'))).toEqual({ text: '', cursor: 0 })
+  expect(await $.prompt.edit(key('h'))).toEqual({ text: 'wh', cursor: 2 })
+  expect(await $.prompt.edit({ ...(key('y') as Any), text: 'wh', cursor: 2, start: 2, end: 2 } as never)).toEqual({ text: 'why', cursor: 3 })
+  await clock.advance(1000)
+  expect(closes).toEqual(['thimble'])
 })
 
 test('a sentence the check rewrote draws as rewritten, its citation corrected, though the analyst asked about other words of it: those step aside', CITES, async ($, on) => {

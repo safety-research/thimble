@@ -207,6 +207,13 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   expect(paneNow(s)).toMatchObject({ kind: 'claims' })
   const draw = (args: Any) => drawClaimsPane(s.$, { props: { bodyColumns: 100, scroll: { bodyRows: 36 } } }, args, els)
   const keysOf = (pane: Any) => buttons(pane).filter(b => b.hotkey).map(b => [b.hotkey, b.label])
+  // the key row ends with w close, a click alone: no Button takes w, so a w typed while the pane holds the keyboard goes
+  // to the prompt, where w closes the pane once its word window closed, and a question that starts with w stays whole
+  const closeOf = (pane: Any) => {
+    const last = buttons(findKey(pane, 'keys')).at(-1)
+    expect([last.key, last.hotkey, last.label, textOf(last.children)]).toEqual(['key-w', undefined, 'close', 'w: close'])
+    return last
+  }
   const pane = await draw({})
   const t = textOf(pane)
   expect(t).toContain('Evidence · 3 claims')
@@ -216,11 +223,10 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   const dots = buttons(pane).filter(b => /^g\d+:d:/.test(b.key))
   expect(new Set(dots.map(b => b.key.replace(/^g\d+:/, ''))).size).toBe(3)
   expect(t).not.toMatch(/click|─{10}/)
-  // at rest: f (the answer whose look failed waits to be read), n, the first cluster, and w, which closes the pane as
-  // coverage's r closes its own; a plain Button Claude Code draws as its key, then its words, dim; under the pointer
-  // its words brighten, never Claude Code's inverse
-  expect(keysOf(pane)).toEqual([['f', 'extract claims of the newest answer'], ['n', 'first cluster'], ['w', 'close']])
-  expect(buttons(pane).filter(b => b.hotkey).map(b => b.hover?.inverse)).toEqual([false, false, false])
+  // at rest: f (the answer whose look failed waits to be read), n, the first cluster, and w close; a plain Button
+  // Claude Code draws as its key, then its words, dim; under the pointer its words brighten, never Claude Code's inverse
+  expect(keysOf(pane)).toEqual([['f', 'extract claims of the newest answer'], ['n', 'first cluster']])
+  expect([...buttons(pane).filter(b => b.hotkey), closeOf(pane)].map(b => b.hover?.inverse)).toEqual([false, false, false])
   await buttons(pane).find(b => b.hotkey === 'n').onPress()
   expect(paneNow(s).args).toMatchObject({ group: 'k1' })
   // a press on a cluster's name on the map chooses it
@@ -236,7 +242,8 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   // its current claim's dot on the map is inverse in the cluster's color, the same ●
   expect(JSON.stringify(cluster)).toMatch(/"color":"#[0-9a-f]{6}","bold":true,"inverse":true,"children":"●"/)
   // k j move the current claim (the ends hold), e opens it, p n the other clusters; each move keeps the keyboard
-  expect(keysOf(cluster)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'open claim'], ['p', 'previous cluster'], ['n', 'next cluster'], ['w', 'close']])
+  expect(keysOf(cluster)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'open claim'], ['p', 'previous cluster'], ['n', 'next cluster']])
+  closeOf(cluster)
   await buttons(cluster).find(b => b.hotkey === 'j').onPress()
   expect(paneNow(s).args).toMatchObject({ group: 'k1', cur: 1 })
   expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', focus: true })
@@ -261,7 +268,8 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   expect(pt).not.toContain('╭─')
   expect(pt).not.toContain('Run 9 failed on a timeout')
   // every key in the one row above the input, the last of the pane's rows; the evidence line in the detail a click
-  expect(keysOf(picked)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'show evidence'], ['w', 'close']])
+  expect(keysOf(picked)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'show evidence']])
+  closeOf(picked)
   expect((picked as Any).props.children.at(-1).props.key).toBe('keys')
   expect(buttons(picked).some(b => !b.hotkey && /:evidence$/.test(b.key) && b.label === 'show evidence (1 citation)')).toBe(true)
   await buttons(picked).find(b => b.hotkey === 'e').onPress()
@@ -274,7 +282,8 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   expect(st).toContain('The check did not run.')
   expect(buttons(shown).some(b => /^p\d+:ev:0$/.test(b.key) && textOf(b.children).includes('p95 check'))).toBe(true)
   // one citation: k j still the claims; e hides it, back to the claim
-  expect(keysOf(shown)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'hide evidence'], ['w', 'close']])
+  expect(keysOf(shown)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['e', 'hide evidence']])
+  closeOf(shown)
   await buttons(shown).find(b => b.hotkey === 'e').onPress()
   expect(paneNow(s).args.open).toBeUndefined()
   await buttons(picked).find(b => b.hotkey === 'j').onPress()
@@ -289,7 +298,8 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   const bare = await draw({ claim: 'c2' })
   expect(textOf(bare)).toContain('No citation: the reply cites no record for it.')
   expect(textOf(bare)).not.toContain('╭')
-  expect(keysOf(bare)).toEqual([['k', 'previous claim'], ['j', 'next claim'], ['w', 'close']])
+  expect(keysOf(bare)).toEqual([['k', 'previous claim'], ['j', 'next claim']])
+  closeOf(bare)
   // its cluster's name on top chooses the cluster, with the claim it came from current
   await buttons(bare).find(b => /^p\d+:g:k1$/.test(b.key)).onPress()
   expect(paneNow(s).args).toMatchObject({ group: 'k1', cur: 1 })
@@ -299,11 +309,12 @@ test('a look that fails leaves a gap the pane names; w opens the pane: the map o
   // where a claim was said: the message with the claim's words, b back, and w close
   const said = await drawClaimsPane(s.$, { props: { bodyColumns: 100 } }, { claim: 'c1', source: 'c1', row: 't1-row-0' }, els)
   expect(textOf(said)).toContain("Where it was said  Claude's message")
-  expect(buttons(said).filter(b => b.hotkey).map(b => b.hotkey)).toEqual(['b', 'w'])
+  expect(buttons(said).filter(b => b.hotkey).map(b => b.hotkey)).toEqual(['b'])
+  closeOf(said)
   await buttons(said).find(b => b.hotkey === 'b').onPress()
   expect(paneNow(s).args).toMatchObject({ claim: 'c1' })
-  // w in the pane, which holds the keyboard (a focused pane hands a plugin only its Buttons' hotkeys), closes it
-  await buttons(await draw({ claim: 'c1' })).find(b => b.hotkey === 'w').onPress()
+  // a click on w close closes it
+  await closeOf(await draw({ claim: 'c1' })).onPress()
   expect(closed.length).toBe(2)
   expect(paneNow(s)).toBe(null)
 })
@@ -366,7 +377,7 @@ test("a narrow pane whose keys wrap: the map and the claim's detail keep to the 
       const pane = await drawClaimsPane(s.$, { props: { bodyColumns: W, scroll: { bodyRows: H } } }, { group: 'k1' }, els)
       expect(`${W}x${H}: ${treeRows(pane, W)}`).toBe(`${W}x${H}: ${Math.min(H, treeRows(pane, W))}`)
       // the keys come in rows no wider than the pane as Claude Code draws them, each key with its `k: `
-      const drawnWidth = (row: Any) => (row.props.children as Any[]).reduce((n: number, c: Any) => n + (c.type === 'Button' ? c.props.hotkey.length + 2 : 0) + [...textOf(c)].length, 0)
+      const drawnWidth = (row: Any) => (row.props.children as Any[]).reduce((n: number, c: Any) => n + (c.type === 'Button' && c.props.hotkey ? c.props.hotkey.length + 2 : 0) + [...textOf(c)].length, 0)
       const rows = (findKey(pane, 'keys').props.children as Any[])
       for (const r of rows) expect(drawnWidth(r)).toBeLessThanOrEqual(W)
       if (W < 50) expect(rows.length).toBeGreaterThan(1)
@@ -445,6 +456,37 @@ test("a press on the bar's claims item does what w does: it opens the pane, and 
   await press()
   expect(s.opened.length).toBe(opens + 1)
   expect(paneNow(s)).toMatchObject({ kind: 'claims' })
+})
+
+test('while the pane shows the claims the bar names w, though no claim was found, so w typed in the pane still closes it', async () => {
+  setOptions({ explain: false, details: false, claimsMode: 'on demand' })
+  const s = setup([reply([])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Hello?', rows: ['Hello. Ask me about the runs.'] })
+  const closed: Any[] = []
+  s.$.ui.close = async (o: Any) => { closed.push(o) }
+  s.$.ui.panes = async () => []
+  // an answer waits: w evidence opens the pane
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'evidence']])
+  await (await claimsKey(s.$, 'w', 0))!.later!()
+  expect(paneNow(s)).toMatchObject({ kind: 'claims' })
+  s.$.ui.panes = async () => [{ id: 'thimble' }]
+  // f finds no claim in it: no answer waits and there is no count, but the pane shows, so the bar still names w
+  await s.call('ui.press', { plugin: 'thimble', element: 'claims-find', component: 'Pane', requestId: 'thimble', surface: 'terminal' }, async () => ({ element: 'none' }))
+  await settle()
+  await drainNow(s.$)
+  await settle()
+  expect((await claimsToFind(s.$)).answers).toBe(0)
+  expect((await claimsStore(s.$)).claims).toEqual([])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', 'evidence']])
+  // w, typed while the pane holds the keyboard, reaches the prompt and closes the pane
+  await (await claimsKey(s.$, 'w', 0))!.later!()
+  expect(closed).toEqual([{ id: 'thimble' }])
+  // closed, nothing names w: it is typed
+  s.$.ui.panes = async () => []
+  expect(await claimsBar(s.$, () => true, false)).toEqual([])
+  expect(await claimsKey(s.$, 'w', 0)).toBe(null)
+  setOptions({})
 })
 
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
