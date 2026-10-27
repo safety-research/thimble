@@ -49,12 +49,12 @@ A fix may not change the way back (PROTECTED): the fix flow, which turns fixes o
 a shared fix goes through. Binary files are refused too. It may change the rest (NOTICE), such as the sandbox, the hooks
 file and its command hooks, the launcher, thimble's scripts and lock files (a package added from REGISTRIES): its record
 names the kinds and the files (notice), and the line that asks whether to use it says them in one sentence, as thimble
-fix show does. thimble checks this when the fixer ends (done); the fixer's prompt does not list these files. A check
-that refuses a change (these files, a binary file, failing tests) keeps the refusal on the record (refused: why, the
-files, the tests' output) until the next check, and the plugin gives it back to a fixer in the same copy (again): the
-fixer puts the change elsewhere or fixes the tests, or ends saying why it cannot be done (done with `cannot`), which is
-the failure the person sees. The quick tests run with no network, for one fix at a time, and a suite that fails runs
-once more before the fix fails (run_tests).
+fix show does. A file moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
+prompt does not list these files. A check that refuses a change (these files, a binary file, failing tests) keeps the
+refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
+to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
+cannot be done (done with `cannot`), which is the failure the person sees. The quick tests run with no network, for one
+fix at a time, and a suite that fails runs once more before the fix fails (run_tests).
 
 The programs it runs can be replaced for tests: THIMBLE_CLAUDE (claude), THIMBLE_GH (gh), THIMBLE_GIT (the git that
 pushes), THIMBLE_FIX_TESTS (the quick tests, a shell command), THIMBLE_FIX_PUSH_URL (where a pull request's commit is
@@ -804,8 +804,10 @@ def _fix_ref(rec: dict[str, Any]) -> str:
 
 
 def _numstat(repo: Path, a: str, b: str) -> list[dict[str, Any]]:
+    """The files changed from a to b, each with its lines added and removed (None for a binary file). A file moved is
+    two files, the one it was and the one it is, so that the checks of what a fix changes see both names."""
     out = []
-    for line in git("-c", "core.quotePath=false", "diff", "--numstat", a, b, cwd=repo).splitlines():
+    for line in git("-c", "core.quotePath=false", "diff", "--numstat", "--no-renames", a, b, cwd=repo).splitlines():
         add, dele, path = (line.split("\t", 2) + ["", "", ""])[:3]
         out.append({"path": path, "add": None if add == "-" else int(add), "del": None if dele == "-" else int(dele)})
     return out
@@ -1715,8 +1717,8 @@ def _quoted(words: list[str]) -> str:
 
 
 def _set_aside_files(fid: int) -> list[str]:
-    out = git("-c", "core.quotePath=false", "show", "--name-only", "--format=", f"refs/thimble/fixes/{fid}", cwd=live_dir(),
-              check=False)
+    out = git("-c", "core.quotePath=false", "show", "--name-only", "--no-renames", "--format=", f"refs/thimble/fixes/{fid}",
+              cwd=live_dir(), check=False)
     return [x for x in out.splitlines() if x.strip()]
 
 

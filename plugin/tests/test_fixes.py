@@ -256,6 +256,27 @@ def release_with(w, files: dict[str, str]) -> str:
     return head
 
 
+def test_a_file_a_fix_moves_counts_as_both_its_names(world):
+    release_with(world, {"plugin/fix/line.ts": "const KEYS = ['y', 'd', 'n']\n",
+                         "plugin/cards/argv.mjs": "export const flags = []\n"})
+    # a file of the fix flow moved elsewhere, with a line added: refused as the file it was
+    r = FX.new("move the fix line")
+    wt = Path(r["work"])
+    (wt / "plugin" / "fix" / "line.ts").rename(wt / "plugin" / "fixline.ts")
+    with open(wt / "plugin" / "fixline.ts", "a") as f:
+        f.write("const more = 1\n")
+    r = FX.done(r["id"], "Fix line moved", "")
+    assert r["state"] == "failed" and r["refused"]["files"] == ["plugin/fix/line.ts"]
+    assert r["error"] == f"it changes plugin/fix/line.ts (the fix flow); {WAY_BACK}"
+    # the card runner's rules moved: the line that asks for y names the file of the sandbox it takes away
+    c = FX.new("rename the card runner's rules")
+    wt = Path(c["work"])
+    (wt / "plugin" / "cards" / "argv.mjs").rename(wt / "plugin" / "cards" / "argv-loose.mjs")
+    c = FX.done(c["id"], "Card rules renamed", "")
+    assert c["state"] == "ready" and c["notice"] == {"the sandbox": ["plugin/cards/argv.mjs"]}
+    assert [f["path"] for f in c["files"]] == ["plugin/cards/argv-loose.mjs", "plugin/cards/argv.mjs"]
+
+
 def test_the_way_back_runs_from_a_checkout_of_the_release_that_no_fix_changes(world, monkeypatch, capsys):
     from kernel import cli  # noqa: PLC0415
 
