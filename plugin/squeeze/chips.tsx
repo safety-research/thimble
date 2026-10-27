@@ -3,14 +3,14 @@
 // did, and the hooks answer with the chips as they are now.
 //
 //   props: {items: [{id, n, name, levels, level, level0, ends, word, picked}], plus: what is typed after + (null when
-//           nothing is), width, ack}
-//   in a frame in thimble's color, one row of chips, wrapped to the width: each its digit (a key, drawn as the bar draws its keys), its name, its two ends either
-//   side of its dots (`1 Length shorter ○●○○ longer`), each dot a press that sets its level and each end a press that
-//   moves the chip one level toward it, and its level in words where it stands away from the original or is picked
-//   (` · as written`), the picked chip in thimble's color, as its frame
-//   and its keys are; then `+`, which adds a chip of the person's own; then
-//   `s close`, its key drawn as the bar draws its keys, which closes the chips (not while words are typed after +,
-//   where s is a letter)
+//           nothing is), about: what a rewrite changes, width, ack}
+//   in a frame in thimble's color, `about` in one dim line (the chips stand under the answer's last card, yet rewrite
+//   the whole answer), then one row of chips, wrapped to the width: each its digit (a key, drawn as the bar draws its
+//   keys), its name, its two ends either side of its dots (`1 Length shorter ○●○○ longer`), each dot a press that sets
+//   its level and each end a press that moves the chip one level toward it, and its level in words where it stands away
+//   from the original or is picked (` · as written`), the picked chip in thimble's color, as its frame and its keys
+//   are; then `+`, which adds a chip of the person's own; then `s close`, its key drawn as the bar draws its keys, which
+//   closes the chips (not while words are typed after +, where s is a letter)
 //
 // It sends {events: [{n, press}] | [{n, key}]}: a press on a chip's name or level words (`chip-<id>`, `word-<id>`), on
 // one of its dots (`lvl-<id>-<i>`), on one of its ends (`step-<id>-down`, `step-<id>-up`), on + (`add`), on s close
@@ -46,6 +46,7 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
 
   const items: Item[] = Array.isArray(props?.items) ? props.items : []
   const plus = typeof props?.plus === 'string' ? props.plus : null
+  const about = typeof props?.about === 'string' ? props.about : ''
   // a key the person can press, in thimble's color as the hooks module read it (core/theme.ts accent())
   const keyColor = typeof props?.color === 'string' ? props.color : undefined
   const press = (id: string, label: string, kids: Any[]) => E.Button({ key: id, plain: true, label, onPress: () => send({ press: id }), children: kids })
@@ -71,8 +72,9 @@ const Chips: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     press('close', 's close', [E.Text({ color: keyColor, bold: true, children: 's' }), E.Text({ dimColor: true, children: ' close' })]),
   ] })] : []
   const width = Number(props?.width) || surface.columns || 80
-  // in a frame in thimble's color, so the chips read as a control apart from the answer's text
-  return E.Box({ key: 'frame', borderStyle: 'single', borderColor: keyColor, paddingX: 1, width, children: [
+  // in a frame in thimble's color, so the chips read as a control apart from the answer's text, `about` above them
+  return E.Box({ key: 'frame', flexDirection: 'column', borderStyle: 'single', borderColor: keyColor, paddingX: 1, width, children: [
+    ...(about ? [E.Text({ key: 'about', dimColor: true, children: about })] : []),
     E.Box({ key: 'chips', flexDirection: 'row', flexWrap: 'wrap', children: [...items.map(chip), add, ...close] }),
   ] })
 }

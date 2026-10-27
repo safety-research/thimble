@@ -404,7 +404,9 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
 
 // ------------------------------------------------------------------------------------------------ the drawing
 
-/** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +. */
+/** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +,
+ *  and what a rewrite changes, said above them: the whole answer, its cards too, written from what it already says
+ *  (term.ts once sends the question, the answer and its cards, and nothing the session ran). */
 async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   const open = await openNow($)
   const rec = await recOf($, id)
@@ -414,6 +416,7 @@ async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   return {
     items: row.map((c: Any, i: number) => ({ id: c.id, n: i + 1, name: c.name, levels: c.levels, level: c.level, level0: c.level0, ends: endsOf(c), word: levelWords(c), picked: c.id === focus && open.typing == null })),
     plus: open.typing, width, color: accent(),
+    about: rec.catchup ? 'rewrites this catch-up from what the replies above say: no new analysis' : 'rewrites this whole answer from what it already says: no new analysis',
   }
 }
 

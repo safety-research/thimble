@@ -151,6 +151,11 @@ test('with two replies since the last prompt, the bar names b apart from s; b wr
   await t.press('b')
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(asked)
+  // s opens the chips on the catch-up, and their line says they rewrite the catch-up, not the replies
+  await t.press('s')
+  const about = (await chipsDrawn($, 'row-t3', 'The retry passed on all runs.')).tree.props.children[0]
+  expect(textOf(about)).toContain('catch-up')
+  expect(textOf(about)).not.toContain('whole answer')
 })
 
 test('keys pressed in a row make one rewrite, at the last level, 1 s after the last press; the chips show each level at once', async ($, on) => {
@@ -380,6 +385,10 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   expect(textOf(at0.tree)).toContain('1 Length shorter ○●○○ longer · as written')
   expect(textOf(at0.tree)).toContain('2 Background novice ○○●○ expert')
   expect(textOf(at0.tree)).not.toContain('Interpretation')
+  // a dim line above the chips says what a rewrite changes: the whole answer, not the card the chips stand under
+  const about = at0.tree.props.children[0]
+  expect(about.props.dimColor).toBe(true)
+  expect(textOf(about)).toContain('whole answer')
   // each of the bar's keys is a press: [ and ] each one way, and 1–2 picks the next chip
   const bar = nodes(await $.ui.render(above)).filter(n => n.type === 'Button').map(n => String(n.props.label))
   expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–2 chip', '+ your own']))
