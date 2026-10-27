@@ -12,8 +12,8 @@
 //     sits 8 px or more inside its cutout, which lies inside the chat panel; step 3, Files, says what the files browser
 //     shows;
 //   - step 4: the step opens the real Labels sidebar with the top bar's Labels button and lays the example sidebar
-//     exactly over it, beside the transcript; the ruler's marks stand at the records' lines in the colours of their
-//     bars; the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
+//     exactly over it, beside the transcript, which opens on records lit by the example's label; the ruler's marks stand
+//     at the records' lines in the colours of their bars; the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
 //     height, the cutout and the example sidebar still and the ruler's thumb following, and the wheel over the ruler
 //     too;
 //   - step 5: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
@@ -653,6 +653,15 @@ async function walk(page: Page, tag: string, send = false) {
     return { open: real?.getAttribute('data-section') ?? null, same, inside, apart: rd.right <= side.left + 0.5, pressed: document.querySelector('.shell-side-btn[data-side="labels"]')?.getAttribute('aria-pressed') ?? null }
   })
   assert.ok(lay.open === 'labels' && lay.same && lay.inside && lay.apart && lay.pressed === 'true', `${tag} 3: the Labels sidebar is open with the example over it, beside the transcript ${JSON.stringify(lay)}`)
+  // the transcript opens on records the label lights: some lit bars show in the part of it on screen
+  const litShown = await page.evaluate(() => {
+    const b = document.querySelector('.tour-ex-reader .reader-body')!.getBoundingClientRect()
+    return [...document.querySelectorAll('.tour-ex-reader .reader-gutter-cell.is-lit')].filter((c) => {
+      const r = c.getBoundingClientRect()
+      return r.height > 0 && r.bottom > b.top && r.top < b.bottom
+    }).length
+  })
+  assert.ok(litShown > 0, `${tag} 3: the transcript opens on records with lit bars (${litShown})`)
   assert.equal(await body(page), 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.', `${tag} 3: what a label is`)
   // the ruler shows the records' colours where they are: every lit cell of a record on line L has a mark in its lane,
   // in the colour its bar shows, over (L − 1)/76 to L/76 of the ruler, and no mark has a colour no bar shows

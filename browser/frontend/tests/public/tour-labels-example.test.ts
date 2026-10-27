@@ -2,8 +2,10 @@
 // The tour's Labels example (src/tour/steps.ts labelsExample, over src/tour/examples.json txReader and labelsSide)
 // agrees with itself: the ruler the step draws beside the transcript is drawn from the records it shows, a mark in a
 // lane per label over each run of records lit in one colour, at their place in the file, in their cells' colour; and
-// the Labels sidebar's legend names those colours and counts those records.
+// the Labels sidebar's legend names those colours and counts those records. The example shows one label, with few
+// values.
 import { expect, test } from 'vitest'
+import { rulerWidth } from '../../src/files/Ruler.tsx'
 import { createTour, type Api, type Snaps } from '../../src/tour/engine.ts'
 import snaps from '../../src/tour/examples.json'
 import { tourSteps } from '../../src/tour/steps.ts'
@@ -34,7 +36,7 @@ test("the step's ruler marks the records' lit cells: in their lane, at their lin
   const reader = drawExample('Labels').els!.reader as HTMLElement
   const lanes = [...reader.querySelectorAll<HTMLElement>('.reader-ruler-bar > .reader-ruler-marks > *')]
   // a lane is 7 px wide, 2 px from the next, 3 px in (files/Ruler.tsx TRACK_LANES), and holds a row per line
-  expect(lanes.map((l) => [l.style.left, l.style.width])).toEqual([['3px', '7px'], ['12px', '7px']])
+  expect(lanes.map((l) => [l.style.left, l.style.width])).toEqual([['3px', '7px']])
   for (const l of lanes) expect(l.style.gridTemplateRows).toBe(`repeat(${LINES}, minmax(0, 1fr))`)
   // every line each mark spans, by lane, with its colour: exactly the lit cells
   const marks = lanes.flatMap((l, lane) => [...l.children].map((m) => ({ lane, m: m as HTMLElement })))
@@ -43,7 +45,7 @@ test("the step's ruler marks the records' lit cells: in their lane, at their lin
     return Array.from({ length: end - from }, (_, i) => `${lane}:${from + i}:${m.style.background}`)
   })
   const cells = litCells(reader).map((c) => `${c.lane}:${c.line}:${c.colour}`)
-  expect(cells.length).toBe(78)
+  expect(cells.length).toBe(18)
   expect(covered.sort()).toEqual(cells.sort())
   // a run of records lit one after another in one colour is one mark
   expect(marks.length).toBeLessThan(cells.length)
@@ -53,7 +55,7 @@ test("the Labels sidebar's legend names the records' colours and counts the reco
   const cells = litCells(html(snaps.txReader))
   const side = html(snaps.labelsSide)
   const rows = [...side.querySelectorAll<HTMLElement>('.lside-row')]
-  expect(rows.map((r) => r.querySelector('.lside-name')?.textContent)).toEqual(['what the step does', 'coordinates with other agents'])
+  expect(rows.map((r) => r.querySelector('.lside-name')?.textContent)).toEqual(['coordinates with other agents'])
   const named = new Set<string>()
   for (const row of rows) {
     const values = [...row.querySelectorAll<HTMLElement>('.lside-value')].map((v) => ({
@@ -69,4 +71,20 @@ test("the Labels sidebar's legend names the records' colours and counts the reco
     }
   }
   expect([...new Set(cells.map((c) => c.colour))].every((c) => named.has(c))).toBe(true)
+})
+
+test('the example shows one label, with few values: one lane beside the records and one label in the sidebar', () => {
+  const side = html(snaps.labelsSide)
+  const rows = [...side.querySelectorAll<HTMLElement>('.lside-row')]
+  expect(rows.length).toBe(1)
+  expect(side.querySelector('.lside-heading .lside-n')?.textContent).toBe('1')
+  expect(rows[0].querySelectorAll('.lside-value').length).toBeLessThanOrEqual(3)
+  const reader = html(snaps.txReader)
+  const gutters = [...reader.querySelectorAll('.reader-record[data-line] .reader-gutter')]
+  expect(gutters.length).toBeGreaterThan(0)
+  expect(gutters.every((g) => g.querySelectorAll('.reader-gutter-cell').length === 1)).toBe(true)
+  expect(reader.querySelectorAll('.reader-lanehead-tag').length).toBe(1)
+  expect(reader.querySelector<HTMLElement>('.reader-body')!.style.getPropertyValue('--lanes')).toBe('1')
+  // the ruler as wide as thimble draws it for one lane
+  expect(reader.querySelector<HTMLElement>('.reader-ruler-bar')!.style.width).toBe(`${rulerWidth(1)}px`)
 })
