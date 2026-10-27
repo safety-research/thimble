@@ -5,8 +5,9 @@
 //
 // A line of the selection is an answer's when its words stand in the words of one of Claude's text rows, compared word
 // by word (runs of letters and digits: a table's borders, a list's bullet, a link's brackets and the signs after a
-// citation are no words), and it holds one of them whole (a piece of one word, as a click that slid a cell leaves, `im`
-// of the bar's `thimble`, is none):
+// citation are no words; in a script written without spaces, as Chinese, Japanese and Thai are, each letter is a
+// word), and it holds one of them whole (a piece of one word, as a click that slid a cell leaves, `im` of the bar's
+// `thimble`, is none):
 //   - in a row (Claude Code names the row a selection lies in): one of Claude's text rows, as it draws its words (as
 //     Claude wrote them, a link's words and its target, the version shown in their place: a rewrite, corrected
 //     citations; shownWords), and the selection's first and last words may be cut where the drag began and ended. A
@@ -58,8 +59,13 @@ async function noteDone($: Engine, k: keyof Done, sel: Sel): Promise<void> {
 /** The marks Claude Code draws before a row (● ⎿ and the like). */
 const LEAD = /^[\s●⏺⎿▎│]+/u
 
-/** The words of a text, as compared: its runs of letters and digits, lowercased. */
-const wordsOf = (s: string): string[] => s.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []
+/** The scripts written without spaces between words: each of their letters is a word of its own. */
+const SOLO = '\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\p{Script=Thai}\\p{Script=Lao}\\p{Script=Khmer}\\p{Script=Myanmar}'
+const WORD = new RegExp(`[${SOLO}]|(?:(?![${SOLO}])[\\p{L}\\p{N}\\p{M}])+`, 'gu')
+
+/** The words of a text, as compared: its runs of letters and digits (each letter of a script in SOLO alone),
+ *  lowercased. */
+const wordsOf = (s: string): string[] => s.toLowerCase().match(WORD) ?? []
 
 /** A selection or a control's words, as compared whole: one space, lowercased, without a row's leading marks. */
 const asWhole = (s: string) => s.replace(LEAD, '').replace(/\s+/g, ' ').trim().toLowerCase()

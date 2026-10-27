@@ -410,6 +410,33 @@ test("what a click on thimble's controls or Claude Code's own rows leaves select
   }
 })
 
+test('words selected in a Chinese or a Japanese answer count, inside a sentence, in no row and across its rows: the bar names e and c', async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: '上传为什么失败？', text: '上传失败是因为重试次数用完了：四十四次失败中有四十一次发生在断网三十秒之后。' })
+    await answered(s, { id: 't2', prompt: 'アップロードはなぜ失敗しますか？', text: 'アップロードは再試行の上限に達すると失敗します。ネットワークが切れてから三十秒後に止まります。' })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    // a phrase inside a sentence, in its row
+    expect(await counts({ text: '重试次数', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: '再試行の上限', requestId: 't2-row' })).toBe(true)
+    // in no row: a line alone, and a drag across the rows the answer wraps on
+    expect(await counts({ text: '重试次数用完了' })).toBe(true)
+    expect(await counts({ text: 'ネットワークが切れて' })).toBe(true)
+    expect(await counts({ text: '四十四次失败中\n有四十一次发生在' })).toBe(true)
+    // words no answer holds are none
+    expect(await counts({ text: '下载' })).toBe(false)
+  } finally {
+    setOptions({})
+  }
+})
+
 test('a selection over several rows explains its words on the newest answer that holds them; words that are a heads-up open it, unwritten', async () => {
   setOptions({})
   const s = setup([LOOK, reply({ glosses: [], heads: null })], { complete: reply({ body: 'How many tries are left.', here: '' }) })
