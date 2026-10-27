@@ -15,9 +15,9 @@
 // text dims, and the bar's busy line says `rewriting` (term.ts); a version seen before comes back at once.
 //   · s close · + a chip in the person's own words (typed as `/rewrite <words>`, with the earlier ones offered as it is typed)
 // The bar names `s close` first while the chips are open, and the chips' row ends with it too (a press there closes them).
-// A click on the chips hands them the keyboard (their Client, chips.tsx): then ↑ and ↓ (and tab and shift+tab) move
-// between the chips, ← and → between the levels, s closes them, and + types the chip's words in the chips, until esc
-// gives the keys back. ↵ does nothing there: a level shows once it is picked, so a ↵ pressed to pick one keeps them open.
+// A click on the chips hands them the keyboard (their Client, chips.tsx): then tab and shift+tab move between the chips,
+// ← and → between the levels, s closes them, and + types the chip's words in the chips, until esc gives the keys back.
+// ↵ does nothing there: a level shows once it is picked, so a ↵ pressed to pick one keeps them open.
 //
 //   state squeezeOpen: {id, focus, edge, typing, held, hint} | null   the record the chips are open on (term.ts ids)
 //   state squeezeOwn: [words]                                          the chips the person typed this session
@@ -287,9 +287,9 @@ export async function promptHasKeys($: Engine, text?: string): Promise<void> {
   if (open.typing != null || open.held || hint) await setOpen($, { typing: null, held: false, ...(hint ? { hint: false } : {}) })
 }
 
-/** What a key in the chips does, once a click gave them the keyboard: ↑ and ↓ (and tab, shift+tab) move between the
- *  chips, ← and → between the levels, s closes them, and ↵ does nothing (a ↵ pressed to pick a level keeps them open);
- *  + types a chip's words, ↵ adds it, tab lets it go. The prompt's keys work too. */
+/** What a key in the chips does, once a click gave them the keyboard: tab and shift+tab move between the chips, ← and
+ *  → between the levels, s closes them, and ↵ does nothing (a ↵ pressed to pick a level keeps them open); + types a
+ *  chip's words, ↵ adds it, tab lets it go. The prompt's keys work too. */
 async function heldKey($: Engine, open: Open, key: string, shift: boolean): Promise<void> {
   const rec = await recOf($, open.id)
   if (!rec) return
@@ -305,8 +305,7 @@ async function heldKey($: Engine, open: Open, key: string, shift: boolean): Prom
   }
   const row = rowOf(rec, (await levelsNow($, rec)).at)
   const at0 = Math.max(0, row.findIndex((c: Any) => c.id === open.focus))
-  const move = key === 'tab' ? (shift ? -1 : 1) : key === 'down' ? 1 : key === 'up' ? -1 : 0
-  if (move) { await setOpen($, { focus: row[(at0 + move + row.length) % row.length].id, edge: null }); return }
+  if (key === 'tab') { await setOpen($, { focus: row[(at0 + (shift ? -1 : 1) + row.length) % row.length].id, edge: null }); return }
   if (key === 'left' || key === 'right') { await step($, open, open.focus, key === 'left' ? -1 : 1, null); return }
   if (key === 'return' || key === 'enter') return
   if (key === '+') { await setOpen($, { typing: '', edge: null }); return }
@@ -370,7 +369,7 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
   const focus = row.find((c: Any) => c.id === open.focus) ?? row[0]
   const orig = isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at } })) && typeof rec.shown !== 'string'
   const [down, up] = WAYS[focus.id] || (String(focus.id).startsWith('x-') ? ['less', 'more'] : ['down', 'up'])
-  // the next chip, from the picked one (a press on `1–N chip` or `↑↓ chip`)
+  // the next chip, from the picked one (a press on `1–N chip` or `tab next chip`)
   const nextChip = () => setOpen($, { focus: row[(Math.max(0, row.findIndex((c: Any) => c.id === focus.id)) + 1) % row.length].id, edge: null })
   const out: BarItem[] = []
   const say = (id: string, words: string, color?: string) => out.push({ id, words, focus: true, ...(color ? { color } : {}) })
@@ -388,7 +387,7 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
   else if ((rec.squeeze?.problems ?? [])[0] && typeof rec.shown === 'string') say('sq-problem', `! ${rec.squeeze.problems[0]}`, accent())
   const revertable = !!rec.catchup || !orig || pending
   if (open.held) {
-    key('sq-chip', '↑↓', 'chip', nextChip)
+    key('sq-tab', 'tab', 'next chip', nextChip)
     key('sq-left', '←', down, () => step($, open, focus.id, -1, null))
     key('sq-right', '→', up, () => step($, open, focus.id, 1, null))
     if (revertable) key('sq-revert', '0', 'revert', () => revert($, open))
@@ -407,9 +406,7 @@ async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
 
 // ------------------------------------------------------------------------------------------------ the drawing
 
-/** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +,
- *  and what a rewrite changes, said above them: the whole answer, its cards too, written from what it already says
- *  (term.ts once sends the question, the answer and its cards, and nothing the session ran). */
+/** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +. */
 async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   const open = await openNow($)
   const rec = await recOf($, id)
@@ -419,7 +416,6 @@ async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   return {
     items: row.map((c: Any, i: number) => ({ id: c.id, n: i + 1, name: c.name, levels: c.levels, level: c.level, level0: c.level0, ends: endsOf(c), word: levelWords(c), picked: c.id === focus && open.typing == null })),
     plus: open.typing, width, color: accent(),
-    about: rec.catchup ? 'rewrites this catch-up from what the replies above say: no new analysis' : 'rewrites this whole answer from what it already says: no new analysis',
   }
 }
 
