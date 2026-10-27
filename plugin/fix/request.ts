@@ -8,6 +8,8 @@
 //                  version the person has stays as it is until their y puts the new one on (u goes back to it)
 //   new <words>    a new fix
 //   <words>        the fixer that still works, else the fix the line shows while its copy is there, else a new fix
+//
+// A mark after the form is part of it, as Claude may write it: `2: <words>`, `#2 - <words>`, `new: <words>`.
 import type { EngineInterface } from 'claude-code'
 
 import { tellAtNextPrompt } from '../core/tell'
@@ -25,11 +27,12 @@ export type Requested = { text: string; fix: Fix | null; failed: boolean; round:
 /** The fixes the words may change: any the person has in the list, at work or not. */
 const CHANGEABLE = ['on', 'off', 'ready', 'working', 'failed', 'redo']
 
-/** The explicit forms: `N <words>` for fix N, when N is a fix the person has, and `new <words>`. */
+/** The explicit forms: `N <words>` for fix N, when N is a fix the person has, and `new <words>`, each with a mark after
+ *  it or none (`2: …`, `new: …`), and a space before the words. */
 export function formOf(words: string, fixes: Fix[]): { words: string; target: number | null; fresh: boolean } {
-  const n = /^#?(\d+)\s+([\s\S]+)$/.exec(words)
+  const n = /^#?(\d+)(?:\s*[:.)–—-])?\s+([\s\S]+)$/.exec(words)
   if (n && fixes.some(f => f.id === Number(n[1]) && CHANGEABLE.includes(f.state))) return { words: n[2]!.trim(), target: Number(n[1]), fresh: false }
-  const fresh = /^new\s+([\s\S]+)$/i.exec(words)
+  const fresh = /^new(?:\s*[:.)–—-])?\s+([\s\S]+)$/i.exec(words)
   if (fresh) return { words: fresh[1]!.trim(), target: null, fresh: true }
   return { words, target: null, fresh: false }
 }
@@ -47,15 +50,18 @@ export function fixesContext(fixes: Fix[]): string {
 }
 
 /** The fix-thimble skill (after /thimble-fix <words>, or Claude's own): words for a fix's live fixer, a round of a fix
- *  the person has, or a new fix. `tell`: Claude hears of a request it did not make at the person's next prompt. */
-export async function request($: Engine, said: string, by: Asker = 'person', tell = true): Promise<Requested> {
+ *  the person has, or a new fix. `tell`: Claude hears of a request it did not make at the person's next prompt.
+ *  `asked`: the words the person typed after /thimble-fix, which the kernel keeps beside Claude's (thimble fixes shows
+ *  them). */
+export async function request($: Engine, said: string, by: Asker = 'person', tell = true, asked = ''): Promise<Requested> {
   const who = by === 'claude' ? 'Claude' : 'The person'
   const form = formOf(said, (await refreshFixes($))?.fixes ?? [])
   const words = form.words
+  const own = asked.trim() ? [`--asked=${asked.trim()}`] : []
   // a fixer still works on the fix (the one named, or any without a form): the words go to it, as a round of its fix
   const live = form.fresh ? null : await liveFixer($, form.target)
   if (live) {
-    const r = await kernelFix($, ['round', String(live.fix.id)], { stdin: words, timeoutMs: 60000 })
+    const r = await kernelFix($, ['round', String(live.fix.id), ...own], { stdin: words, timeoutMs: 60000 })
     const fix = r.ok ? jsonOf<Fix>(r.out) : null
     if (!fix) return { text: `× thimble could not add these words to “${fixName(live.fix)}”: ${cut(r.err || 'thimble fix gave nothing', 240)}`, fix: null, failed: true, round: true }
     await refreshFixes($)
@@ -76,8 +82,8 @@ export async function request($: Engine, said: string, by: Asker = 'person', tel
   // the screen as the person saw it when they asked, before thimble starts on the copy
   const screen = await screenNow($)
   const r = round
-    ? await kernelFix($, ['round', String(cur!.id)], { stdin: words, timeoutMs: 180000, doing: 'making a copy of thimble' })
-    : await kernelFix($, ['new', '--made-in', 'terminal'], { stdin: words, timeoutMs: 180000, doing: 'making a copy of thimble' })
+    ? await kernelFix($, ['round', String(cur!.id), ...own], { stdin: words, timeoutMs: 180000, doing: 'making a copy of thimble' })
+    : await kernelFix($, ['new', '--made-in', 'terminal', ...own], { stdin: words, timeoutMs: 180000, doing: 'making a copy of thimble' })
   const fix = r.ok ? jsonOf<Fix>(r.out) : null
   if (!fix) return { text: `× thimble could not make a copy of itself to change${cur ? ` “${fixName(cur)}”` : ''}: ${cut(r.err || 'thimble fix gave nothing', 240)}`, fix: null, failed: true, round }
   if (round && (await fixLineNow($))?.id === fix.id) await setFixLine($, null)

@@ -9,6 +9,18 @@ while [ -L "$self" ]; do
   case $to in /*) self=$to ;; *) self=$(dirname "$self")/$to ;; esac
 done
 here=$(cd "$(dirname "$self")/.." && pwd)
+# the way back from your fixes runs from the release, which no fix changes (engine/kernel/fixes.py): `thimble fix`,
+# `thimble file`, `thimble update` and `thimble reapply` run the launcher of the release checkout in
+# $THIMBLE_HOME/fixes/release, and that launcher hands the other commands to live's, so a fix to them works
+fixes=${THIMBLE_HOME:-$HOME/.thimble}/fixes
+release=$(cd "$fixes/release/plugin" 2>/dev/null && pwd -P)
+if [ -n "$release" ] && [ -x "$release/bin/thimble" ]; then
+  me=$(cd "$here" && pwd -P)
+  case "$1" in
+    fix|fixes|file|update|reapply) [ "$me" = "$release" ] || exec "$release/bin/thimble" "$@" ;;
+    *) if [ "$me" = "$release" ] && [ -x "$fixes/live/plugin/bin/thimble" ]; then exec "$fixes/live/plugin/bin/thimble" "$@"; fi ;;
+  esac
+fi
 py=${THIMBLE_PYTHON:-}
 if [ -z "$py" ] && [ -x "$here/.venv/bin/python" ]; then py="$here/.venv/bin/python"; fi
 # for whoever works on thimble (not in its help): `thimble dev prompts`, the prompt registry (prompts/node.mjs);

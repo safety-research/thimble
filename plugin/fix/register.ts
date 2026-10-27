@@ -5,7 +5,8 @@
 //                          typed, and Claude reads the person's fixes beside it (fixesContext: number, name, state).
 //                          Claude starts the fix with the fix-thimble skill, `N <words>` when the words follow up on
 //                          fix N, `new <words>` when they are about something else, or first asks one short question.
-//                          Typed mid-turn, it waits for the turn's end
+//                          The kernel keeps the person's own words beside Claude's (--asked). Typed mid-turn, it
+//                          waits for the turn's end
 //   the fix-thimble skill  a request: the kernel makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer
 //                          (fixer.ts) works in it in the background; N <words> is a round of fix N itself (its fixer's,
 //                          or in place: the version the person has stays until y), new <words> a new fix; words with
@@ -16,17 +17,19 @@
 //                          of it in the skill's place, and is told when the fix ends
 //   /thimble-fix           how to ask for a fix, and that fixes are listed and managed in a shell (thimble fix), at
 //                          once, without a turn of Claude's
-//   the fixer's calls      its shell runs in the sandbox runtime (no network, reads only the system, its tools and
-//                          the copy, writes only the copy), at most 5 minutes a command, with no dialog unless the
-//                          person's rules deny the command; Write and Edit only in its copy; its other calls go
-//                          through Claude Code's own permission handling, in the person's mode (fixer.ts)
+//   the fixer's calls      its shell runs in the sandbox runtime (no site but the package registries, reads only the
+//                          system, its tools and the copy, writes only the copy), at most 5 minutes a command, with no
+//                          dialog unless the person's rules deny the command, and never publishes to the registries;
+//                          Write and Edit only in its copy; its other calls go through Claude Code's own permission
+//                          handling, in the person's mode (fixer.ts)
 //   every call             only thimble and the person's keys apply, submit or record a fix: Claude's `thimble fix`
 //                          calls of those verbs (the fixer's too), and writes into the fixes' folder outside the
 //                          fixes' copies, are refused
 //   the fixer's end        thimble commits and tests the change; the line above the bar offers y use it now · d what
 //                          changed · n later, and Claude Code sends a notification
-//   the person's prompt    a line that only told something goes (line.ts)
-//   session start          a newer release is out: one line says so (thimble update, in a shell, moves to it)
+//   the person's prompt    a line that only told something goes, a failed fix's too (line.ts)
+//   session start          a newer release is out: one line says so (thimble update, in a shell, moves to it); a
+//                          fixer that works on across a reload keeps its step on the bar, and its time
 //
 // A newer release comes with `thimble update` in a shell, never inside Claude Code.
 //
@@ -37,7 +40,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
-import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes, recoverFixers } from './fixer'
+import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes, recoverFixers, watch } from './fixer'
 import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { fixesContext, request } from './request'
@@ -70,10 +73,15 @@ export function notStarted(error: { kind?: string; message?: string } | undefine
 /** The fix-thimble skill with Claude's words: the request, and what Claude reads of it in the skill's place. */
 async function startFromSkill($: Engine, words: string): Promise<string> {
   if (!words) return 'thimble started no fix: the skill needs, as its argument, what thimble does wrong and what it should do. Call it again with those words.'
-  // after the person's /thimble-fix <words>, the request is theirs: the fixer reads their words as theirs
+  // after the person's /thimble-fix <words>, the request is theirs: the fixer reads their words as theirs, and the
+  // kernel keeps the words they typed beside Claude's, which restate them
   const asked = Number((await $.state.get(ASKED)).value ?? 0) > 0
-  if (asked) await $.state.set(ASKED, 0 as never)
-  const r = await request($, words, asked ? 'person' : 'claude', false)
+  const said = asked ? String((await $.state.get(ASKED_WORDS)).value ?? '') : ''
+  if (asked) {
+    await $.state.set(ASKED, 0 as never)
+    await $.state.set(ASKED_WORDS, '' as never)
+  }
+  const r = await request($, words, asked ? 'person' : 'claude', false, said)
   if (r.failed || !r.fix) return `${r.text.replace(/^×\s*/, '')} Tell the person in one short line.`
   // the fix by its name, never its number: a round changes the fix in place, a new fix is one of its own
   const then = 'Tell the person in one short line, then go on with their request.'
@@ -118,8 +126,9 @@ const UPDATED = { plugin: 'thimble', key: 'fixUpdated' } as const
 const fixerAgents = new Set<string>()
 
 /** The person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is still the person's request
- *  (the turn of the command, and the one after Claude's question). */
+ *  (the turn of the command, and the one after Claude's question), and the words they typed. */
 const ASKED = { plugin: 'thimble', key: 'fixAsked' } as const
+const ASKED_WORDS = { plugin: 'thimble', key: 'fixAskedWords' } as const
 
 async function knowFixers($: Engine): Promise<void> {
   for (const id of Object.keys(((await $.state.get({ plugin: 'thimble', key: 'fixers' })).value ?? {}) as Record<string, number>)) fixerAgents.add(id)
@@ -173,8 +182,13 @@ export const registerFix: Register = on => {
       else await reloaded($)
       // a follow-up from before rounds changed a fix in place, folded in by the kernel: once, its fix's line
       await strayLine($, list?.fixes ?? [])
+      // a fixer that works on across the reload: its step on the bar again, with its time, and the look that takes its
+      // end should the end not reach this load
       const working = await ownFixes($, (list?.fixes ?? []).filter(f => f.state === 'working'))
-      for (const f of working) busyFixer($, f, async () => (await refreshFixes($))?.fixes.find(x => x.id === f.id))
+      for (const f of working) {
+        busyFixer($, f)
+        watch($, f.id)
+      }
       await recoverFixers($, working)
       // a newer release: one line says so, once per session (a reload starts the module again)
       if (list?.pointed && !(await $.state.get(UPDATED)).value) {
@@ -193,6 +207,7 @@ export const registerFix: Register = on => {
     if (/^update$/i.test(words)) return { text: UPDATE_IN_SHELL }
     if (!words) return { text: FIX_ALONE }
     await $.state.set(ASKED, 2 as never)
+    await $.state.set(ASKED_WORDS, words as never)
     if (e.command !== 'thimble-fix') {
       // the prompt command: Claude reads the person's fixes beside it, to tell a follow-up from a new fix
       const r = await next(e)

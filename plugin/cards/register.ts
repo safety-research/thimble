@@ -21,7 +21,7 @@ import { failNotice } from '../bar/notice'
 import { askOnce } from '../core/rowhook'
 import { cut } from '../core/text.js'
 import { featureOn } from '../settings/features.mjs'
-import { sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
+import { noteCode, sandbox, sandboxNotice, sandboxWhy, stopRunner } from './ask'
 import { cardOfKey, cardPost, clientFault, firstWaits, frame, framesUnder, noteRun, noteShown, noteViewport, runFolded } from './draw'
 import { cardRef } from '../marks/message.js'
 import { registerCardCopy } from './copy'
@@ -37,6 +37,8 @@ export const registerCards: Register = (on, options) => {
   on('session.start', { cwd: /^(\/|[A-Za-z]:)/ }, async ($, e, next) => {
     const r = await next(e)
     if (!featureOn('cards')) return r
+    // the runner's code as this load of the module runs it, so a runner that cannot start on code patched since says so
+    await noteCode($).catch(() => undefined)
     try {
       await registerCardTool($)
     } catch (err) {

@@ -124,6 +124,8 @@ declare module 'claude-code' {
       fixUpdated: boolean
       /** after the person's /thimble-fix <words>: the turns of main's in which the fix-thimble skill is their request (fix/register.ts) */
       fixAsked: number
+      /** the words the person typed after /thimble-fix, which the kernel keeps beside Claude's (fix/register.ts) */
+      fixAskedWords: string
       /** the strays from before rounds changed a fix in place that the fix's line told of already (fix/register.ts) */
       fixStrays: string[]
       /** the fixer agents that run: the fix's id, by the agent's id (fixer.ts) */

@@ -9,8 +9,10 @@ The kernel holds every record and makes every change, in the terminal plugin's h
 
     fixes/fixes.jsonl   the records          fixes/live/      the checkout with the fixes that are on (branch mine)
     fixes/work/<id>/    a fix's copy          fixes/tmp/<id>/  its temp folder
+    fixes/release/      the release commit, which no fix changes
 
-This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home.
+This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, from fixes/release once it is there
+(kernel_script), so that no fix can break the clicks that undo it.
 
     ask(c, words, page)      the person's `/thimble-fix <words>` in main's chat, as the terminal's /thimble-fix: main's
                              chat shows the message, and main reads prompts/thimble-fix.md with the words and the
@@ -29,8 +31,9 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home.
                              (`fixing <name>`, or `changing <name>` for a round of a fix the person has): main's chat
                              shows it where main started it, as the card of a subagent with its steps (an `agent`
                              record whose `run` is the round), and its thread shows its whole run
-    its end (settle)         the kernel commits the change, refuses a safety file or a binary file, and runs the tests
-                             of what the change touched (`fix done`); a fix that passes is ready. How it ended is a row
+    its end (settle)         the kernel commits the change, refuses a change to the way back (the fix flow, the privacy
+                             scan) or a binary file, and runs the tests of what the change touched (`fix done`), one fix
+                             at a time; a fix that passes is ready. How it ended is a row
                              in main's chat and in the fix's thread, at the time it ended (note: a `fix` chip): a ready
                              fix asks the person there, Use it now, What changed, Later. Nothing goes on by itself
     the person's clicks      Use it now, or Use it in Your fixes (`fix apply`, with a secret made at the click as the
@@ -152,9 +155,16 @@ def fixing_word(rec: dict[str, Any]) -> str:
 # ------------------------------------------------------------------ the kernel
 
 
+def kernel_script() -> Path:
+    """The kernel `thimble fix` runs: the release checkout's (fixes/release, which the kernel keeps at the release
+    commit), so that a fix to the kernel's own modules cannot break its undo; this tree's before there is one."""
+    release = fixes_home() / "release" / "plugin" / "engine" / "thimble.py"
+    return release if release.is_file() else plugin_dir() / "engine" / "thimble.py"
+
+
 def kernel(args: list[str], *, stdin: str | None = None, timeout: float = 120, env: dict[str, str] | None = None) -> Ran:
     """`thimble fix ARGS` in the plugin's home. Blocking: call it in a thread."""
-    script = plugin_dir() / "engine" / "thimble.py"
+    script = kernel_script()
     full = {**config.passed_environ(), "THIMBLE_HOME": str(plugin_home()), "PYTHONDONTWRITEBYTECODE": "1",
             **(env or {})}
     if config.CLI_PATH and not full.get("THIMBLE_CLAUDE"):
@@ -591,7 +601,8 @@ async def settle(fid: int, answer: str) -> None:
                "THIMBLE_FIX_READ": os.pathsep.join(map(str, lent_reads()))}
         args = ["done", str(fid), "--summary", "-", *(["--title", end["title"]] if end["title"] else []),
                 *(["--request"] if end["request"] else [])]
-        r = await asyncio.to_thread(kernel, args, stdin=end["summary"] or " ", timeout=660, env=env)
+        # the tests run for one fix at a time, and once more when they fail (the kernel's run_tests)
+        r = await asyncio.to_thread(kernel, args, stdin=end["summary"] or " ", timeout=2400, env=env)
         done = json.loads(r.out) if r.ok else {}
     except Exception as e:  # noqa: BLE001 — the end is told either way
         r, done = Ran(False, "", str(e)), {}

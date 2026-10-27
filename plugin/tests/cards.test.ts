@@ -38,7 +38,7 @@ function textOf(n: Any): string {
   return textOf(n.props?.children) + textOf(n.children)
 }
 
-function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
+function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<string, unknown>; firstSetupHangs?: boolean; noRunner?: boolean; runnerEnds?: { stderr: string; code: number | null; signal: string | null }; runnerHangs?: boolean; deadRunner?: boolean; refused?: boolean; wide?: boolean; env?: Record<string, string> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', ...o.env })
   const clock = mock.clock(on, { now: 0 })
   const files: Record<string, string> = {}
@@ -66,10 +66,13 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
   on('fs.list', (_$: unknown, e: { path?: string }) => ({ value: (dirs[e.path ?? ''] ?? []).map(name => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })) }))
   // a path's real path, `.` and `..` folded
   const real = (p: string) => `/${p.split('/').reduce((a: string[], x) => (x === '..' ? a.slice(0, -1) : x && x !== '.' ? [...a, x] : a), []).join('/')}`
+  // when the runner's code on disk was last changed (a test patches it in place)
+  const code = { mtimeMs: 1 }
   on('fs.stat', (_$: unknown, e: { path: string }) => ({
     // escape.json looks local but its real target is outside every allowed root (a symlink out of the folder); so does
     // link.json in the temp folder
-    value: e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
+    value: e.path.endsWith('/cards/argv.mjs') ? { kind: 'file', size: 64, mtimeMs: code.mtimeMs, isLink: false, realPath: e.path }
+      : e.path === `${DATA}/escape.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/etc/shadow' }
       : e.path.endsWith('/link.json') ? { kind: 'file', size: 64, mtimeMs: 0, isLink: true, realPath: '/made-up/home/.ssh/id' }
         : e.path === `${DATA}/runs.json` || e.path === `${DATA}/secret.json` ? { kind: 'file', size: 64, mtimeMs: 0, isLink: false, realPath: e.path }
           : e.path === DATA || e.path.startsWith('/made-up/tmp') ? { kind: e.path.endsWith('.json') ? 'file' : 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: real(e.path) }
@@ -109,6 +112,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     // no runner listens until the hooks start one; with `runnerEnds` or `runnerHangs`, none ever does
     if (o.noRunner && op === 'ping' && !spawned.length) throw new Error('made-up: no such socket')
     if ((o.runnerEnds || o.runnerHangs) && op === 'ping') throw new Error('made-up: no such socket')
+    if (o.deadRunner && op === 'ping') throw new Error('made-up: no such socket')
     // a view that takes all the runner's memory: the socket closes while it answers
     if (op === o.crash) throw new Error('made-up: socket hang up')
     const body = JSON.parse(e.init?.body || '{}')
@@ -149,7 +153,7 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     return { type: 'Text', props: {}, children: [e.props?.output ?? 'the engine'] } as never
   })
   on('prompt.edit', (_$: unknown, e: { text: string; start: number; end: number; inputText: string }) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
-  return { files, asked, dirs, clock, spawned, runs, look, forks, answers }
+  return { files, asked, dirs, clock, spawned, runs, look, forks, answers, code }
 }
 
 const callRow = (toolUseId: string, input: Record<string, unknown>) => ({
@@ -682,6 +686,26 @@ test('a runner that does not answer in time, while setup.mjs\'s own runner start
   expect(text).not.toContain('ended with')
   expect(w.spawned.length).toBe(1)
 })
+
+// the session's runner stops at once while setup.mjs's probe, which starts the code on disk, starts: when that code
+// changed since the session loaded it (patched in place), the session runs the old code, and only a reload helps
+for (const patched of [true, false]) {
+  test(`a runner that does not start ${patched ? 'on card code patched on disk since the session loaded it says to type /reload-plugins' : 'on the code the session loaded says only that it stopped'}`, async ($, on) => {
+    const w = world(on, { deadRunner: true })
+    await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+    await w.clock.advance(10)
+    if (patched) w.code.mtimeMs = 2
+    let done = false
+    const call = ($.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_16', title: 'Scores', data: 'runs.json', view: VIEW } as never) as Promise<Any>).finally(() => { done = true })
+    for (let i = 0; i < 400 && !done; i++) await w.clock.advance(20)
+    const text = String(((await call) as Any).result)
+    const reload = "thimble's card code changed on disk after this session loaded it, so the session runs the old code: type /reload-plugins"
+    if (patched) expect(text).toContain(reload)
+    // how it ended is the runner's own line (tested above); unpatched code is told nothing about a reload
+    else expect(text).toMatch(/the card runner did not (start in its sandbox|answer in)/)
+    if (!patched) expect(text).not.toContain('/reload-plugins')
+  })
+}
 
 test('a card called while the session start still installs the sandbox draws: it does not wait on that install\'s answer', async ($, on) => {
   const w = world(on, { firstSetupHangs: true })

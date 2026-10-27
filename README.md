@@ -46,7 +46,7 @@ The browser workbench builds about 1 GB in the checkout and runs from it, so kee
 
 Run `claude` in a folder with files you'd like to analyze. thimble is on in every session. Click `thimble` above the prompt, or run `/thimble-settings`, to turn features on or off; `/plugin` turns thimble off.
 
-When thimble does something wrong, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble. In a shell, `thimble file issue N` posts fix N as a GitHub issue and `thimble file pr N` opens a pull request with its code; each shows you the text first.
+When thimble does something wrong, `/thimble-fix <what should work differently>` has Claude change your own copy of thimble, and a key puts the change to use, or not; a fix that changes the sandbox, the hooks file or a command hook, the launcher or a package says so first. A fix never changes the way back: `thimble fix off` in a shell, or `sh ~/.thimble/fixes/off.sh` when thimble does not load, brings back the plain release. In a shell, `thimble file issue N` gives a link to GitHub's new-issue form with fix N's text, which you read and submit there, and `thimble file pr N` shows you the text and the code, then opens a pull request with them.
 
 ![thimble in the terminal: a card of each agent's activity during the incident, a side thread on one agent, and a reply with checked citations](docs/assets/thimble-term.png)
 
@@ -62,7 +62,7 @@ Claude Code, macOS or Linux, Python 3.10+ and Node.js 22.18+. The browser workbe
 
 ## Security & Privacy
 
-thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). The plugin runs inside your Claude Code session: it collects no data of its own, its model calls go through your session, and Claude's card code runs in Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime) with no network.
+thimble is a research prototype. Please report any security issues privately to [@mjoerke](https://github.com/mjoerke). The plugin runs inside your Claude Code session: it collects no data of its own, its model calls go through your session, and Claude's card code runs in Anthropic's [sandbox runtime](https://github.com/anthropics/sandbox-runtime) with no network. A fix of thimble is made in a copy, by a Claude whose shell runs in the same sandbox and reaches only the npm and PyPI registries; the code that turns fixes off and undoes them runs from the installed release, which no fix changes.
 
 ## License
 

@@ -625,6 +625,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true")
     p.add_argument("--to", metavar="DIR")
     p.add_argument("--words", help=argparse.SUPPRESS)
+    p.add_argument("--asked", help=argparse.SUPPRESS)  # new, round: the person's own words, which Claude's restate
     p.add_argument("--title", help=argparse.SUPPRESS)
     p.add_argument("--summary", help=argparse.SUPPRESS)
     p.add_argument("--made-in", dest="made_in", default="terminal", help=argparse.SUPPRESS)

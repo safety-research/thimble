@@ -224,8 +224,9 @@ launcher() {
   esac
 }
 # link_cli TARGET: bin_dir/thimble, a link to TARGET (the installed plugin's bin/thimble), so that thimble is a command
-# in a shell once bin_dir is on PATH. thimble update points the link at ~/.thimble/fixes/live when Claude Code loads
-# thimble from there; cli-link in thimble's home names the link for it. Another program of that name is left alone.
+# in a shell once bin_dir is on PATH. Once Claude Code loads thimble from ~/.thimble/fixes/live, thimble points the link
+# at the command of ~/.thimble/fixes/release, the release no fix changes; cli-link in thimble's home names the link for
+# it. Another program of that name is left alone.
 link_cli() {
   local to="$bin_dir/thimble" home="${THIMBLE_HOME:-$HOME/.thimble}"
   mkdir -p "$bin_dir"
