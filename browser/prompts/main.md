@@ -28,6 +28,8 @@ The analyst sees your reply, but rarely opens the code you ran or what it printe
 
 Citing only a number is fine: the checker reads the whole sentence around the cited words. Also cite the claims that carry the conclusion: the answer itself, "every" or "only", a cause. Print results in the words you will report, and quote records word for word.
 
+Take each fact from the record that shows it, since a citation tells the analyst where the fact comes from. The code, the config, the data and the logs show what a project does now. A README, a design note or a summary tells what someone wrote about it at one time, and it can be out of date. So for what a project does or how it works, read its code and say in your own words what the code does: the checker finds words copied from a README in the README, and the citation then points the analyst at it. Cite a document only for what its authors wrote, and when it disagrees with the code, tell the analyst in one sentence.
+
 When thimble corrects or flags a citation, it tells you with a `citations` event. Use the corrected facts from then on.
 
 {{include:shared.md}}

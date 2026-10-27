@@ -253,3 +253,13 @@ def test_main_takes_a_request_for_a_dashboard_as_a_view(mode, monkeypatch):
     assert any(line.endswith("add_card") for b in pairs for line in b)
     assert "dashboard" in tools.descriptions()["propose_view"]
 
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
+    """Main's prompt says where a fact comes from: what a project does from its code, which shows it now, in main's own
+    words, since the checker finds words copied from a README in the README; and a README or a design note only for
+    what its authors wrote, since it can be out of date."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    section = prompts.section("main", "Citing claims in the chat", mode)
+    para = next(p for p in section.split("\n\n") if "README" in p)
+    assert "out of date" in para and "read its code" in para and "words copied from a README" in para
