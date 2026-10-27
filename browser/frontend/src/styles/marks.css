@@ -53,7 +53,8 @@
   max-height: calc(100vh - 16px);
   overflow: auto;
 }
-.mark-pop .refchip-lines { margin-top: 6px; }
+/* the lines wrap in the label, so a long one reads whole (Mark.tsx lineWindow cuts it at words around the marked ones) */
+.mark-pop .refchip-lines { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mark-pop-why {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -83,7 +84,10 @@
 /* the marked words: the accent's wash a cited table cell takes (refchip.css .cite-cell) */
 .mark-pop .refchip-lines .cite-cell { border-radius: 2px; }
 .mark-ev-more { color: var(--text-tertiary); }
-.mark-ev-n { display: inline-block; min-width: 3ch; margin-right: 1ch; color: var(--text-tertiary); text-align: right; user-select: none; }
+/* a cited place's row: its line number, then its text, which wraps beside the number */
+.mark-ev-line { display: flex; }
+.mark-ev-text { flex: 1 1 auto; min-width: 0; }
+.mark-ev-n { display: inline-block; flex: none; min-width: 3ch; margin-right: 1ch; color: var(--text-tertiary); text-align: right; user-select: none; }
 
 /* the line under a reply some of whose marks failed: how many */
 .marks-foot { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font: var(--type-body-sm); }

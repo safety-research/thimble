@@ -5,15 +5,16 @@
 //
 //   computed   the head names the code that ran; the lines of its real output around the marked words, the words
 //              highlighted, then the code
-//   quote      each cited place: its `path:line` chip (a click opens the file there) over the cited lines, the words
-//   code       highlighted
+//   quote      each cited place: its `path:line` chip (a click opens the file there) over the cited lines and the lines
+//   code       around them that hold text, the words highlighted
 //   card       a value a card shows: the card's chip (a click opens it) over the table around the cited cell, the cell
 //              marked, as a card's citation shows it (components/RefChip); a line of its printed output shows as the
 //              computed output does. The card is read when the label opens: when it changed after the check (the card
 //              check rewrote it, say), the label shows it as it is now, or says the place is gone and shows what the
 //              check read.
 //
-// Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked.
+// Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked. The lines wrap;
+// a long one shows only the words around its highlighted ones, cut at words (lineWindow).
 //
 // A failed mark's label says why in one line first, with Repair, which checks it again and makes it correct (the
 // terminal's x); a corrected one's says what it was. Words that hold several values (a range, a pair) cite a place for
@@ -40,6 +41,11 @@ export const MarkItems = createContext<{ items: readonly (MarkItem | undefined)[
 /** output lines shown around the first highlight: this many before it, and up to OUTPUT_LINES in all */
 const OUTPUT_BEFORE = 2
 const OUTPUT_LINES = 7
+/** a line longer than LINE_SHOWN characters shows only the words around its marked ones: up to LINE_BEFORE characters
+ * before them and LINE_AFTER after (lineWindow) */
+const LINE_SHOWN = 240
+const LINE_BEFORE = 60
+const LINE_AFTER = 160
 /** the label waits this long for the pointer to settle, and this long before it goes (RefChip's) */
 const HOVER_DELAY_MS = 90
 const HIDE_DELAY_MS = 160
@@ -274,10 +280,13 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
   return (
     <>
       {places.map((p, i) => {
-        const at = `${p.file}#L${String(p.line).split('-')[0]}`
+        const [lo, hi = lo] = String(p.line).split('-').map(Number)
+        const at = `${p.file}#L${lo}`
         // the words the check found on the cited line, which the record opens with highlighted
-        const cited = p.lines?.find((l) => String(l.n) === String(p.line).split('-')[0] && l.highlight)
+        const cited = p.lines?.find((l) => l.n === lo && l.highlight)
         const words = cited?.highlight ? cited.text.slice(cited.highlight[0], cited.highlight[1]) : ''
+        // the cited lines, and the lines around them that hold any text
+        const rows = (p.lines ?? []).filter((l) => l.text.trim() || (l.n >= lo && l.n <= hi))
         return (
           <div key={i} className="mark-ev">
             <div className="refchip-pop-head">
@@ -287,20 +296,30 @@ function EvidenceView({ ev, value }: { ev: Evidence; value: string }) {
               {i === 0 && <span className="refchip-pop-value">{value}</span>}
             </div>
             <div className="refchip-lines mono">
-              {(p.lines ?? []).map((l) => (
-                <div key={l.n} className="refchip-line">
-                  <span className="mark-ev-n">{l.n}</span>
-                  {l.highlight ? (
-                    <>
-                      {l.text.slice(0, l.highlight[0])}
-                      <span className={CITED}>{l.text.slice(l.highlight[0], l.highlight[1])}</span>
-                      {l.text.slice(l.highlight[1])}
-                    </>
-                  ) : (
-                    l.text || ' '
-                  )}
-                </div>
-              ))}
+              {rows.map((l) => {
+                // a long line shows the words around the ones the check found, cut at words
+                const cut = lineWindow(l.text, l.highlight)
+                const text = l.text.slice(cut.from, cut.to)
+                const [x, y] = l.highlight ? [l.highlight[0] - cut.from, l.highlight[1] - cut.from] : [-1, -1]
+                return (
+                  <div key={l.n} className="refchip-line mark-ev-line">
+                    <span className="mark-ev-n">{l.n}</span>
+                    <span className="mark-ev-text">
+                      {cut.lead && '…'}
+                      {x >= 0 ? (
+                        <>
+                          {text.slice(0, x)}
+                          <span className={CITED}>{text.slice(x, y)}</span>
+                          {text.slice(y)}
+                        </>
+                      ) : (
+                        text || ' '
+                      )}
+                      {cut.tail && '…'}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )
@@ -426,10 +445,14 @@ export function outputLines(output: string, spans: [number, number][]): ReactNod
   const out: ReactNode[] = from > 0 ? [<div key="above" className="refchip-line mark-ev-more">…</div>] : []
   const sorted = [...spans].sort((p, q) => p[0] - q[0])
   for (let i = from; i < to; i++) {
-    const a = starts[i]
-    const b = a + lines[i].length
+    // of a long line, the words around its first highlighted span (lineWindow)
+    const start = starts[i]
+    const mark = sorted.find(([x, y]) => y > start && x < start + lines[i].length)
+    const cut = lineWindow(lines[i], mark && [Math.max(0, mark[0] - start), Math.min(lines[i].length, mark[1] - start)])
+    const a = start + cut.from
+    const b = start + cut.to
     let pos = a
-    const parts: ReactNode[] = []
+    const parts: ReactNode[] = cut.lead ? ['…'] : []
     // in order, each part once: the check may give a span twice, or spans that overlap (the terminal's highlighted)
     for (const [x, y] of sorted) {
       const s = Math.max(x, a, pos)
@@ -444,6 +467,7 @@ export function outputLines(output: string, spans: [number, number][]): ReactNod
       pos = e
     }
     parts.push(output.slice(pos, b))
+    if (cut.tail) parts.push('…')
     out.push(
       <div key={i} className="refchip-line">
         {lines[i] ? parts : ' '}
@@ -452,4 +476,30 @@ export function outputLines(output: string, spans: [number, number][]): ReactNod
   }
   if (to < lines.length) out.push(<div key="below" className="refchip-line mark-ev-more">…</div>)
   return out
+}
+
+/** The part of a line, `from` to `to`, that a mark's label shows: the whole line when it is LINE_SHOWN characters or
+ * fewer; else the words around its marked span `at`, from the first that starts at most LINE_BEFORE characters before
+ * it to the last that ends at most LINE_AFTER characters after it, or its first LINE_SHOWN characters' words when
+ * nothing on it is marked. `lead` and `tail` say where it is cut, for a "…". A line the check cut short (it keeps 600
+ * characters from 150 before the words, mid-word, with "…") is cut again here, at a word. Pure. */
+export function lineWindow(text: string, at?: readonly [number, number]): { from: number; to: number; lead: boolean; tail: boolean } {
+  if (text.length <= LINE_SHOWN) return { from: 0, to: text.length, lead: false, tail: false }
+  const [a, b] = at ?? [0, 0]
+  let from = Math.max(0, a - LINE_BEFORE)
+  // the start of the next word, unless the marked words come first
+  if (from > 0 && !/\s/.test(text[from - 1])) {
+    const gap = text.slice(from, a).search(/\s/)
+    if (gap >= 0) from += gap
+  }
+  while (from < a && /\s/.test(text[from])) from++
+  let to = Math.min(text.length, at ? b + LINE_AFTER : LINE_SHOWN)
+  // the end of the word before, unless the marked words end later
+  if (to < text.length) {
+    let k = to
+    while (k > b && !/\s/.test(text[k])) k--
+    if (k > b) to = k
+    while (to > b && /\s/.test(text[to - 1])) to--
+  }
+  return { from, to, lead: from > 0, tail: to < text.length }
 }
