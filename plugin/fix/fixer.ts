@@ -98,13 +98,15 @@ export function refusedText(r: Refusal, earlier: boolean): string {
   return `thimble did not use the last change for this fix: ${r.why}. ${where}. ${fix} When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`
 }
 
-/** The fixer's first message: the task (prompts/fixer.md), the words of each round, where it works, the fix these
+/** The fixer's first message: the task (prompts/fixer.md), the words of each round (Claude's, which say what to change
+ *  without the conversation, and the person's own beside them when they typed them), where it works, the fix these
  *  words change, what the check refused last time, and a text copy of what thimble shows now. */
 function firstMessage(fix: Fix, earlier: string | null, task: string, by: Asker, screen: string): string {
   const words = fix.words || []
+  const own = (i: number) => (fix.asked?.[i] && fix.asked[i] !== words[i] ? ` (the person's own words: "${fix.asked[i]}")` : '')
   const asked = words.length > 1
-    ? words.map((w, i) => `Round ${i + 1}: ${w}`).join('\n')
-    : words[0] || fix.title
+    ? words.map((w, i) => `Round ${i + 1}: ${w}${own(i)}`).join('\n')
+    : words[0] ? `${words[0]}${own(0)}` : fix.title
   return [
     task.trim(),
     '',

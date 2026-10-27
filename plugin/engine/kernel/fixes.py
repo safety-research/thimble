@@ -623,9 +623,10 @@ def _tests_once(argv: list[str], fid: int | str) -> tuple[bool, str]:
 REFINABLE = ("on", "off", "ready")
 
 
-def new(words: str, made_in: str = "terminal", title: str | None = None, session: str | None = None) -> dict[str, Any]:
+def new(words: str, made_in: str = "terminal", title: str | None = None, session: str | None = None,
+        asked: str | None = None) -> dict[str, Any]:
     """A request: a copy cut from mine. `session`: the Claude Code session whose fixer works on it; only that session
-    checks it at the fixer's end."""
+    checks it at the fixer's end. `asked`: the person's own words, when Claude wrote `words` from them (_asked_of)."""
     words = (words or "").strip()
     if not words:
         raise FixError("say what should work differently: /thimble-fix make the bar say how many citations failed")
@@ -642,11 +643,37 @@ def new(words: str, made_in: str = "terminal", title: str | None = None, session
         _give_types(wt)
         tmp_dir(fid).mkdir(parents=True, exist_ok=True)
         now = time.time()
-        rec = {"id": fid, "title": (title or short(words)).strip(), "words": [words], "rounds": 1, "made_in": made_in,
+        rec = {"id": fid, "title": (title or short(words)).strip(), "words": [], "rounds": 1, "made_in": made_in,
                "created": now, "started": now, "state": "working", "work": str(wt), "base": base, "commit": None,
                "files": [], "tests": None, "summary": "", "error": None, "root": os.environ.get("THIMBLE_ROOT") or None,
                "session": session or None}
-        return put(rec)
+        return put(_with_words(rec, [words], asked))
+
+
+def _asked_of(rec: dict[str, Any]) -> list[str | None]:
+    """The person's own words of each round, beside `words`, which Claude wrote from them for the fixer (after the
+    person's /thimble-fix <words>): None for a round with no words of theirs (a fix Claude offered, a record from before
+    thimble kept them)."""
+    asked = list(rec.get("asked") or [])
+    n = len(rec.get("words") or [])
+    return (asked + [None] * n)[:n]
+
+
+def _with_words(rec: dict[str, Any], words: list[str], asked: str | None = None) -> dict[str, Any]:
+    """The record with more words for its fixer (a round's), and the person's own words beside the last of them."""
+    out = {**rec, "words": [*(rec.get("words") or []), *words]}
+    mine = [*_asked_of(rec), *[None] * len(words)]
+    if words and asked and asked.strip():
+        mine[-1] = asked.strip()
+    if any(mine):
+        out["asked"] = mine
+    return out
+
+
+def _asked_field(recs: list[dict[str, Any]]) -> dict[str, Any]:
+    """{asked} for one record made of these records' words in turn (a merge), or {} when none has the person's own."""
+    mine = [a for r in recs for a in _asked_of(r)]
+    return {"asked": mine} if any(mine) else {}
 
 
 def _give_types(wt: Path) -> None:
@@ -686,22 +713,22 @@ def _fresh(rec: dict[str, Any]) -> dict[str, Any]:
     return {**out, "started": time.time()}
 
 
-def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, Any]:
+def round_(fid: int | str, words: str, session: str | None = None, asked: str | None = None) -> dict[str, Any]:
     """More words for a fix, whose fixer works in `session`: a new round of the same fix, never a new fix. A fix whose
     copy is still there (working, ready, or refused) gets the round in that copy. A fix that is on, off or ready with
     no copy is changed in place: a new copy holds its change, and its version as it is now (prev) stays on, or off,
     until the person's y puts the new version on (apply), and u goes back to it (undo). A fix that failed, or no longer
-    fits, starts again in a new copy (redo)."""
+    fits, starts again in a new copy (redo). `asked`: the person's own words, as in new."""
     rec = get(fid)
     words = (words or "").strip()
     if _is_checkout(rec.get("work")):
         # words for a fixer that still works go on in its time; any other round starts its own
         rec = rec if rec.get("state") == "working" else _fresh(rec)
-        rec.update(words=[*rec.get("words", []), words], rounds=int(rec.get("rounds") or 1) + 1, state="working",
-                   error=None, **({"session": session} if session else {}))
-        return put(_named_patches(rec, words))
+        rec.update(rounds=int(rec.get("rounds") or 1) + 1, state="working", error=None,
+                   **({"session": session} if session else {}))
+        return put(_named_patches(_with_words(rec, [words], asked), words))
     if rec.get("state") in ("failed", "redo"):
-        return redo(rec["id"], words, session)
+        return redo(rec["id"], words, session, asked)
     if rec.get("state") not in REFINABLE or not rec.get("commit"):
         raise FixError(f"fix {rec['id']} is {state_word(rec)}; only a fix that is on, off or ready can change")
     if not words:
@@ -715,9 +742,8 @@ def round_(fid: int | str, words: str, session: str | None = None) -> dict[str, 
         rec.pop("refused", None)
         rec = _fresh(rec)
         rec.update(state="working", work=str(wt), base=base, prev=prev, error=None, tests=None, note=None,
-                   words=[*rec.get("words", []), words], rounds=int(rec.get("rounds") or 1) + 1,
-                   session=session or rec.get("session"))
-        return put(_named_patches(rec, words))
+                   rounds=int(rec.get("rounds") or 1) + 1, session=session or rec.get("session"))
+        return put(_named_patches(_with_words(rec, [words], asked), words))
 
 
 def _named_patches(rec: dict[str, Any], words: str) -> dict[str, Any]:
@@ -1252,11 +1278,13 @@ def _merge(recs: list[dict[str, Any]]) -> dict[str, Any]:
             put(x)
         f = get(first["id"])
         _drop_work(f)
+        f.pop("asked", None)
         f.update(title=name, summary=text, commit=commit, base=parent, files=_numstat(live, parent, commit),
                  words=[w for r in recs for w in (r.get("words") or [])], error=None, note=None,
                  rounds=sum(int(r.get("rounds") or 1) for r in recs), merged=[r["id"] for r in recs[1:]],
                  tests=next((r.get("tests") for r in code), None),
-                 state="on" if was_on else "ready" if first.get("state") in ("ready", "request") else first.get("state"))
+                 state="on" if was_on else "ready" if first.get("state") in ("ready", "request") else first.get("state"),
+                 **_asked_field(recs))
         if was_on:
             f["on_at"] = min(float(all_recs[i].get("on_at") or 0) for i in was_on)
         put(f)
@@ -1328,9 +1356,11 @@ def _pending_fold(tgt: dict[str, Any], stray: dict[str, Any]) -> None:
     t = get(tgt["id"])
     prev = {k: t.get(k) for k in ("state", "commit", "files", "summary", "title", "tests", "tests_tail", "on_at", "base",
                                    "note")}
+    asked = _asked_field([t, stray])
+    t.pop("asked", None)
     t.update(prev=prev, state="ready", commit=commit, files=_numstat(live, m["parent"], commit), summary=summary,
              words=[*(t.get("words") or []), *(stray.get("words") or [])], tests=stray.get("tests"),
-             rounds=int(t.get("rounds") or 1) + int(stray.get("rounds") or 1), merged=[stray["id"]], error=None)
+             rounds=int(t.get("rounds") or 1) + int(stray.get("rounds") or 1), merged=[stray["id"]], error=None, **asked)
     put(t)
 
 
@@ -1366,7 +1396,7 @@ def not_now(fid: int | str) -> dict[str, Any]:
     return put(rec)
 
 
-def redo(fid: int | str, words: str = "", session: str | None = None) -> dict[str, Any]:
+def redo(fid: int | str, words: str = "", session: str | None = None, asked: str | None = None) -> dict[str, Any]:
     """y on a failed fix's line (try again): a new copy, cut from mine as it is now, for the same fix: the fixer gets
     the person's words again, and the earlier change (tmp/<id>/earlier.patch) to start from. A fix whose fixer could
     not do without the files no fix may change (blocked) tries again only with new words."""
@@ -1399,9 +1429,8 @@ def redo(fid: int | str, words: str = "", session: str | None = None) -> dict[st
             (tmp_dir(rec["id"]) / "earlier.patch").write_text(earlier)
         rec = _fresh(rec)
         rec.update(state="working", work=str(wt), base=base, error=None, tests=None, rounds=int(rec.get("rounds") or 1) + 1,
-                   session=session or None,
-                   words=[*rec.get("words", []), *([words.strip()] if words.strip() else [])])
-        return put(rec)
+                   session=session or None)
+        return put(_with_words(rec, [words.strip()] if words.strip() else [], asked))
 
 
 def undo(fid: int | str) -> dict[str, Any]:
@@ -2283,9 +2312,12 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     width = min(width or shutil.get_terminal_size((100, 24)).columns, 100)
     made = f"{_date(r.get('created'))}, {r.get('made_in') or 'terminal'}"
     out = [f"{c('title', r['title'])} · fix {r['id']} · {_state_paint(c, r, is_on())} · {made}"]
-    words = [str(w).strip() for w in r.get("words") or [] if str(w).strip()]
-    for i, w in enumerate(words):
-        out += _wrapped("You asked" if i == 0 else "Then", f'"{" ".join(w.split())}"', width)
+    rounds_said = [(str(w).strip(), str(a or "").strip()) for w, a in zip(r.get("words") or [], _asked_of(r))]
+    for i, (w, a) in enumerate(x for x in rounds_said if x[0] or x[1]):
+        # the person's own words, and the words Claude wrote from them for the fixer when they differ
+        out += _wrapped("You asked" if i == 0 else "Then", f'"{" ".join((a or w).split())}"', width)
+        if a and w and " ".join(a.split()) != " ".join(w.split()):
+            out += _wrapped("Claude wrote", f'"{" ".join(w.split())}"', width)
     if str(r.get("summary") or "").strip():
         out += _wrapped("Claude did", " ".join(str(r["summary"]).split()), width)
     if r.get("pr"):
@@ -2367,8 +2399,10 @@ def _tilde(p: str) -> str:
 
 
 def _first_line(r: dict[str, Any]) -> str:
+    """The start of the first words of a fix: the person's own when thimble has them, else the words of its request."""
     words = r.get("words") or [""]
-    return next((x.strip() for x in str(words[0]).splitlines() if x.strip()), "")
+    first = next(iter(_asked_of(r)), None) or words[0]
+    return next((x.strip() for x in str(first).splitlines() if x.strip()), "")
 
 
 def diff_of(rec: dict[str, Any]) -> str:
@@ -2804,9 +2838,9 @@ def cmd(a) -> int:
             if r.get("reload"):
                 print(RELOAD)
         elif verb == "new":
-            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.session))
+            out_json(new(stdin_text() or a.words or "", a.made_in, a.title, a.session, a.asked))
         elif verb == "round":
-            out_json(round_(a.id, stdin_text() or a.words or "", a.session))
+            out_json(round_(a.id, stdin_text() or a.words or "", a.session, a.asked))
         elif verb == "again":
             out_json(again(a.id, a.session))
         elif verb == "done":

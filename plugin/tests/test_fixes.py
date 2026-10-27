@@ -1155,6 +1155,34 @@ def test_the_list_tags_a_fix_made_in_the_browser_after_its_date(world):
     assert FX.list_lines(160)[2].endswith("made    you asked")
 
 
+def test_the_list_quotes_the_persons_own_words_and_show_has_claudes_beside_them(world, capsys, monkeypatch):
+    from kernel import cli  # noqa: PLC0415
+
+    monkeypatch.setattr(cli, "stdin_text", lambda wait=1.0: "")  # no words on stdin: --words gives them
+
+    # the person typed /thimble-fix <their words>; Claude wrote the words the fixer works from
+    mine, claudes = "add a feature to customize the model in charge of citations", \
+        "Add a way for the analyst to choose the model that checks citations"
+    r = FX.new(claudes, asked=mine)
+    assert r["words"] == [claudes] and r["asked"] == [mine]
+    row = next(x for x in FX.list_lines(200) if x.strip().startswith(f"{r['id']} "))
+    assert row.endswith(f'"{mine}"')
+    shown = FX.show_lines(r["id"], width=200)
+    assert f'  You asked     "{mine}"' in shown and f'  Claude wrote  "{claudes}"' in shown
+    # a round of Claude's own words keeps the two lists in step; a round of the person's adds theirs
+    (Path(r["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    FX.done(r["id"], "Citations model", "")
+    r = FX.round_(r["id"], "Show the model in the settings pane")
+    r = FX.round_(r["id"], "Say which model it is", asked="and say which one")
+    assert r["asked"] == [mine, None, "and say which one"] and len(r["words"]) == 3
+    # through the command, as the plugin gives it, also when the words start with a dash
+    assert cli.main(["fix", "new", "--words", "The bar says read", "--asked=-- the bar, say read"]) == 0
+    assert json.loads(capsys.readouterr().out)["asked"] == ["-- the bar, say read"]
+    # a fix with no words of the person's (Claude offered it) shows Claude's, as before
+    c = FX.new("the legend hides its last row")
+    assert "asked" not in c and FX._first_line(c) == "the legend hides its last row"
+
+
 def test_merge_makes_one_fix_of_several_with_the_persons_key_and_keeps_the_old_refs(world):
     a = on_fix(world)
     b = FX.new("a note")

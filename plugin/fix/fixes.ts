@@ -59,6 +59,9 @@ export type Fix = {
   /** which try of the same request this is, after the check refused the tries before (again); when this round of work
    *  started, in seconds, which a refused try and a reload keep */
   tries?: number; started?: number
+  /** the person's own words of each round, beside `words` (Claude's, for the fixer), when they typed /thimble-fix
+   *  <words>; null for a round without them */
+  asked?: (string | null)[]
 }
 /** A fix as the person and Claude read it in a session: its name (its title), cut to `n` cells. The number is the
  *  shell's handle (thimble fix off 2), never the name. */
@@ -293,12 +296,6 @@ export async function notNow($: Engine, id: number): Promise<string | null> {
   if ((await fixLineNow($))?.id === id) await setFixLine($, null)
   return r.ok ? null : `× ${cut(r.err || 'thimble fix notnow gave nothing', 220)}`
 }
-
-/** /thimble-fix alone: how to ask, and where the fixes are listed and managed (a shell: they act across sessions). */
-export const FIX_ALONE = [
-  'Ask for a change to thimble with /thimble-fix <what should work differently>.',
-  'Your fixes are listed and managed in a shell: thimble fix list (thimble fix --help shows the rest).',
-].join('\n')
 
 /** /thimble-fix update: thimble update runs in a shell, not in this session, because it changes the thimble the session
  *  runs. The reply says so, with the commands. */

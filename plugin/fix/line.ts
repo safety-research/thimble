@@ -8,7 +8,7 @@
 //             until y, and d shows each round's words)
 //             d shows what changed in its place, in a few lines, not a diff:
 //             <title>
-//               You asked   <the words>
+//               You asked   <the person's words, else the request's>
 //               Claude did  <what it does>
 //               Changed     2 files · tests pass
 //               Note        This fix changes the sandbox (plugin/cards/argv.mjs).
@@ -107,8 +107,8 @@ function keysRow(els: Any, keys: [string, string][], press: (k: string) => unkno
 /** How many files a fix changed: `2 files`. */
 const filesWord = (f: Fix) => `${(f.files || []).length} file${(f.files || []).length === 1 ? '' : 's'}`
 
-/** What changed, in a few rows (d): the person's words, what Claude did, what it changed, and the files the person
- *  is told of (noticeText). */
+/** What changed, in a few rows (d): the person's words (their own when thimble has them, else the request's), what
+ *  Claude did, what it changed, and the files the person is told of (noticeText). */
 function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
   const { Box, Text } = els
   const room = Math.max(20, width - 16)
@@ -120,7 +120,7 @@ function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
   const words = f.words || []
   return [
     Box({ key: 'fix-what-head', flexDirection: 'row', width, children: [Text({ key: 'i', children: '  ' }), Text({ key: 't', bold: true, children: cut(f.title, Math.max(12, width - 4)) })] }),
-    ...words.map((w, i) => row(`fix-what-asked-${i}`, i ? 'then' : 'You asked', cut(w, room * 2))),
+    ...words.map((w, i) => row(`fix-what-asked-${i}`, i ? 'then' : 'You asked', cut(f.asked?.[i] || w, room * 2))),
     ...(f.summary ? [row('fix-what-did', 'Claude did', cut(f.summary, room * 3))] : []),
     row('fix-what-changed', 'Changed', changed),
     ...(noticeText(f) ? [row('fix-what-notice', 'Note', noticeText(f))] : []),

@@ -4,16 +4,16 @@
 // send a fix, the fixer included; the fixer's end puts the fix's line above the bar and sends a notification; d shows
 // what changed; y applies it with a secret only that press holds and reloads the plugins (at the turn's end when Claude
 // is mid-reply; a --plugin-dir session is told to restart); u undoes it; n leaves it ready in the list; /thimble-fix
-// alone says that fixes are listed and managed in a shell; a failed fix's line says what its keys do and goes at the
-// next prompt. The fixer's shell runs in the sandbox the kernel describes, with a time limit, and its writes stay in its
-// copy. All data is made up. `claude plugin test plugin`.
+// alone goes to Claude, for the fix it offered; a failed fix's line says what its keys do and goes at the next prompt.
+// The fixer's shell runs in the sandbox the kernel describes, with a time limit, and its writes stay in its copy. All
+// data is made up. `claude plugin test plugin`.
 import { expect, test } from 'claude-code/testing'
 
 import { busyNow, busySteps } from '../bar/busy'
 import { fixSlug, fixingWord, noticeText } from '../fix/fixes'
 import { fixKey, fixLineRows } from '../fix/line'
 import { notStarted, registerFix, wordsOfSkill } from '../fix/register'
-import { fixesContext } from '../fix/request'
+import { fixesContext, formOf } from '../fix/request'
 import { textOf as screenText, TEXT_ELS } from '../fix/screen'
 import { promptStub } from './stubs'
 
@@ -85,6 +85,9 @@ function setup() {
     if (verb === 'new') {
       made = true
       if (stdin) fix.words = [stdin]
+      // the person's own words, which the kernel keeps beside Claude's
+      const own = argv.find(x => x.startsWith('--asked='))
+      if (own) fix.asked = [own.slice('--asked='.length)]
       return ok(fix)
     }
     // the check refused the change: another try in the same copy, counted; the test's refusal was for the first try only
@@ -186,8 +189,9 @@ function setup() {
     for (let n = 0; n < 5 && timers.length; n++) for (const fn of timers.splice(0)) await fn()
     await new Promise(r => setTimeout(r, 5))
   }
-  // the session the plugin names on new, round, redo and done is left out: one test looks at it
-  const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).join(' ').replace(/ --session \S+/, '')).filter(Boolean)
+  // the session the plugin names on new, round, redo and done, and the person's own words, are left out: tests look at
+  // them apart
+  const verbs = () => ran.map(r => r.argv.slice(r.argv.indexOf('fix') + 1).filter(x => !x.startsWith('--asked=')).join(' ').replace(/ --session \S+/, '')).filter(Boolean)
   /** The fixer's end: its agent idles, and its turn's end reaches the hooks. */
   const end = async (answer: string, agentId = 'agent-fixer-1') => {
     for (const a of agents) if (a.id === agentId) a.status = 'idle'
@@ -555,13 +559,20 @@ test('a fixer that finds the request cannot be met ends with Cannot: the line sh
   expect(String(t.spawns[2].prompt)).toContain(`is in ${HOME}/fixes/tmp/1/earlier.patch;`)
 })
 
-test('/thimble-fix alone says how to ask and that fixes are listed and managed in a shell; it opens no pane and starts no turn', async () => {
+test('/thimble-fix alone goes to Claude, who starts the fix it offered: the prompt command runs with no words, a moment later, and opens no pane', async () => {
   const s = setup()
-  await requested(s, 'Title: Bar says read\nWhat it does: The bar says read.')
-  const r = await s.call('command.run', { command: 'thimble-fix', args: '' }, async () => { throw new Error('/thimble-fix alone answers at once') })
-  expect(r.text).toBe('Ask for a change to thimble with /thimble-fix <what should work differently>.\nYour fixes are listed and managed in a shell: thimble fix list (thimble fix --help shows the rest).')
+  await s.call('session.start', { cwd: '/made-up/data' })
+  const runs: Any[] = []
+  s.$.command.run = async (c: Any) => { runs.push(c); return {} }
+  const r = await s.call('command.run', { command: 'thimble-fix', args: '' }, async () => { throw new Error('/thimble-fix runs no command of its own') })
+  expect(r).toEqual({})
+  await s.tick()
+  expect(runs).toEqual([{ command: 'thimble:thimble-fix', args: '' }])
+  // Claude starts the fix with the skill: the request is the person's, with no words of theirs to keep
+  await skillCall(s, "the card's legend hides its last row")
+  expect(String(s.spawns[0].prompt)).toContain('The person asked for this change to their thimble:')
+  expect(s.ran.find(x => x.argv.includes('new'))?.argv.some(a => a.startsWith('--asked'))).toBe(false)
   expect(s.opened).toEqual([])
-  expect(s.commands).toEqual([])
 })
 
 test("Claude starts a fix it offered, on the person's yes, with the fix-thimble skill: the same fork starts, Claude reads what came of it, and is told when it ends", async () => {
@@ -618,11 +629,10 @@ test("a fix-thimble hook that fails tells Claude why, never that thimble's hooks
   expect(String((await caught.call({}, {}, next)).deny)).toContain('made-up failure')
 })
 
-test('/thimble-fix alone and /thimble-fix update answer at once, with no turn of Claude; words go to Claude as the prompt command, with the fix the person\'s', async () => {
+test('/thimble-fix update answers at once, with no turn of Claude; words go to Claude as the prompt command, with the fix the person\'s', async () => {
   const s = setup()
   await s.call('session.start', { cwd: '/made-up/data' })
   const none = async () => { throw new Error('no command runs') }
-  expect(String((await s.call('command.run', { command: 'thimble-fix', args: '' }, none)).text)).toContain('thimble fix list')
   expect(s.opened.length).toBe(0)
   expect(String((await s.call('command.run', { command: 'thimble-fix', args: 'update' }, none)).text)).toContain('thimble update')
   await s.tick()
@@ -638,9 +648,11 @@ test('/thimble-fix alone and /thimble-fix update answer at once, with no turn of
   expect(s.spawns).toEqual([])
   // the prompt command stays out of the menu, so the person sees one /thimble-fix
   expect((await s.call('command.describe', { command: 'thimble:thimble-fix', description: 'd', isHidden: false, immediate: false }, async (e: Any) => ({ description: e.description, isHidden: e.isHidden }))).isHidden).toBe(true)
-  // Claude's skill after it: the fixer reads the words as the person's, and Claude is not told of it again
+  // Claude's skill after it: the fixer reads the words as the person's, the kernel keeps the words they typed, and
+  // Claude is not told of it again
   await skillCall(s, "2 make the bar's coverage item bold")
   expect(String(s.spawns[0].prompt)).toContain('The person asked for this change to their thimble:')
+  expect(s.ran.find(x => x.argv.includes('new'))?.argv).toContain('--asked=2')
   expect(((await s.$.state.get({ plugin: 'thimble', key: 'tell' })).value ?? {}) as Record<string, string>).toEqual({})
   // after two of main's turns (Claude's question, and its answer), a skill call is a fix Claude offered again
   await s.call('command.run', { command: 'thimble-fix', args: 'the bar' })
@@ -784,4 +796,27 @@ test("the fixes Claude reads, the bar's words and the subagent's name use the fi
   expect(fixesContext([f({ state: 'working', prev: { state: 'on' } }), f({ id: 3, title: 'Bar says read', state: 'off' }), f({ id: 4, state: 'removed' })])).toBe(
     "The person's thimble fixes (start the fix-thimble skill with `N <words>` to change fix N, `new <words>` for a new fix):\n2  \"Click any card element to ask about it\" (on, being changed (working))\n3  \"Bar says read\" (off)")
   expect(fixesContext([])).toBe('')
+})
+
+test("the person's own words reach the kernel beside Claude's, the fixer reads both, and `N: …` or `new: …` is the form Claude meant", async () => {
+  const f = (o: Any) => ({ id: 2, title: 'Bar says read', words: [], rounds: 1, made_in: 'terminal', created: 0, state: 'on', work: null, commit: 'c', files: [], tests: null, summary: '', error: null, ...o })
+  expect(formOf('2: it breaks when I click', [f({})])).toEqual({ words: 'it breaks when I click', target: 2, fresh: false })
+  expect(formOf('#2 - it breaks', [f({})])).toEqual({ words: 'it breaks', target: 2, fresh: false })
+  expect(formOf('new: Add a way to pick the model', [f({})])).toEqual({ words: 'Add a way to pick the model', target: null, fresh: true })
+  expect(formOf('new-style labels should wrap', [])).toEqual({ words: 'new-style labels should wrap', target: null, fresh: false })
+  expect(formOf('3: no such fix', [f({})])).toEqual({ words: '3: no such fix', target: null, fresh: false })
+  const s = setup()
+  await s.call('session.start', { cwd: '/made-up/data' })
+  const mine = 'add a feature to customize the model in charge of citations'
+  expect(await s.call('command.run', { command: 'thimble-fix', args: mine }, async () => ({}))).toEqual({})
+  await s.tick()
+  await skillCall(s, 'new: Add a way for the analyst to choose the model that checks citations')
+  const made = s.ran.find(x => x.argv.includes('new'))!
+  expect(made.stdin).toBe('Add a way for the analyst to choose the model that checks citations')
+  expect(made.argv).toContain(`--asked=${mine}`)
+  expect(String(s.spawns[0].prompt)).toContain(`Add a way for the analyst to choose the model that checks citations (the person's own words: "${mine}")`)
+  // d shows their words
+  await s.end('Title: Citations model setting\nWhat it does: The settings pane picks the model that checks citations.')
+  await (await fixKey(s.$, 'd'))!.later()
+  expect((await fixLineRows(s.$, ELS, 160)).map(textOf)).toContain(`    You asked   ${mine}`)
 })
