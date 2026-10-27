@@ -9,6 +9,7 @@
 //   store: settingsOpened (true once the person opened the settings)
 import type { EngineInterface } from 'claude-code'
 
+import { fullscreenNow } from '../cards/draw'
 import { failCleared } from './notice'
 
 type Engine = EngineInterface
@@ -16,12 +17,14 @@ type Engine = EngineInterface
 const OPENED = 'settingsOpened'
 
 export const INTRO = 'click thimble for settings.'
+/** In Claude Code's default layout, where no click reaches the bar (cards/draw.ts fullscreenNow). */
+export const INTRO_TYPED = 'type /thimble-settings for settings.'
 
 export async function introText($: Engine): Promise<string | null> {
   let opened: unknown = true
   try { opened = await $.store.get(OPENED) } catch { /* with no store to keep its end, the hint would never end: none */ }
   if (opened === true) return null
-  return INTRO
+  return fullscreenNow() === false ? INTRO_TYPED : INTRO
 }
 
 export async function introDone($: Engine): Promise<void> {

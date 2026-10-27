@@ -1,16 +1,18 @@
-// hints.ts: the hints that say how to use a feature, and the reminders of the features asked for on demand. A how-to
-// hint (select a passage first) shows until the person has used that
+// hints.ts: the hints that say how to use a feature, the reminders of the features asked for on demand, and the notices
+// that teach the session something once. A how-to hint (select a passage first) shows until the person has used that
 // feature once in the session; after each of main's answers, one reminder names a feature set to on demand (or
 // manual) that the session has not used yet, each at most once a session. Both are hints (notice.ts hintLine): the bar
-// shows them in place of its keys, and they go after a few seconds, at the next key, or at a prompt.
+// shows them in place of its keys, and they go after a few seconds, at the next key, or at a prompt. A notice told once
+// a session (noticeOnce: Claude Code's default layout) stands in the failure line's place until the next prompt.
 //
-//   state: hintsUsed (the features the session used), hintsReminded (the ones a reminder named, and `intro` once its
-//          hint showed)
+//   state: hintsUsed (the features the session used), hintsReminded (the ones a reminder named, and `intro` and
+//          `fullscreen` once told)
 import type { EngineInterface } from 'claude-code'
 
+import { fullscreenNow } from '../cards/draw'
 import { choiceOf, featureOn } from '../settings/features.mjs'
 import { introText } from './intro'
-import { failLineNow, hintLine } from './notice'
+import { failLineNow, hintLine, noticeLine } from './notice'
 
 type Engine = EngineInterface
 
@@ -46,10 +48,28 @@ export const REMINDERS: { feature: string; on: () => boolean; text: string }[] =
   { feature: 'rewrite', on: () => featureOn('squeezeAnswers') === true, text: 'press s to rewrite the last answer shorter or longer, more novice or more expert.' },
 ]
 
-/** The end of one of main's answers: the hint that says where the settings are, at the session's first answer
- *  (intro.ts); after that, one reminder, of the first feature waiting to be asked that the session has neither used
- *  nor been reminded of. A line already showing (a failure, a hint) stays. */
+/** What Claude Code's default layout lacks for thimble, and the command that changes it. */
+export const FULLSCREEN = "thimble's clicks, word selection and side panes need Claude Code's fullscreen layout: type /tui fullscreen. Its keys work in either layout: ] opens an answer's citations, explainers and heads-ups one by one."
+
+/** A notice the session is told once (`id`), in the failure line's place until the next prompt, while no failure or
+ *  other notice stands there (a hint gives way to it). Answers whether it was told now. */
+export async function noticeOnce($: Engine, id: string, text: string): Promise<boolean> {
+  const line = await failLineNow($)
+  if (line && line.hint === undefined) return false
+  const reminded = await remindedNow($)
+  if (reminded.includes(id)) return false
+  await $.state.set(REMINDED, [...reminded, id])
+  noticeLine($, text, id)
+  $.ui.invalidate('ui.render')
+  return true
+}
+
+/** The end of one of main's answers. In Claude Code's default layout, where thimble's clicks do nothing, the session is
+ *  told once to change it. Else, while no line shows (a failure, a hint), the hint that says where the settings are, at
+ *  the session's first answer (intro.ts); after that, one reminder, of the first feature waiting to be asked that the
+ *  session has neither used nor been reminded of. */
 export async function remindAfterAnswer($: Engine): Promise<void> {
+  if (fullscreenNow() === false && (await noticeOnce($, 'fullscreen', FULLSCREEN))) return
   if (await failLineNow($)) return
   const used = await usedNow($)
   const reminded = await remindedNow($)

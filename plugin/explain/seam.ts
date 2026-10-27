@@ -371,7 +371,7 @@ export async function explainSelection($: Engine): Promise<void> {
   await selectionUsed($, 'explain', sel)
   const { words, cut } = pickedWords(sel?.text ?? '')
   if (!words) {
-    if (fullscreenNow() === false) hintLine($, 'selecting a passage needs Claude Code\'s fullscreen layout ("tui": "fullscreen" in its settings).', 'explain')
+    if (fullscreenNow() === false) hintLine($, 'selecting words needs Claude Code\'s fullscreen layout: type /tui fullscreen.', 'explain')
     else await howTo($, 'explain', 'select a passage in an answer and press e to explain it.', 'explain')
     return
   }

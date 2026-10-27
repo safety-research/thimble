@@ -5,8 +5,8 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
 import { busyWhile } from '../bar/busy'
-import { INTRO, introDone, introText } from '../bar/intro'
-import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
+import { INTRO, INTRO_TYPED, introDone, introText } from '../bar/intro'
+import { FULLSCREEN, hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
 import { textWidth } from '../core/text.js'
 import { setOptions } from '../settings/features.mjs'
@@ -267,13 +267,15 @@ test('a narrow bar gives way in order: the busy step to its glyph and seconds, t
   alive = false
 })
 
-/** The person's prompt, then main's answer to it, and the hooks' work after it done. The prompt comes once the work
- *  before it is done (the session's start, whose card sandbox cannot start here and says so), and takes that line. */
-async function answer($: Any, w: ReturnType<typeof world>, n: number): Promise<void> {
+/** The person's prompt, then main's answer to it, drawn in Claude Code's fullscreen layout or its default one, and the
+ *  hooks' work after it done. The prompt comes once the work before it is done (the session's start, whose card
+ *  sandbox cannot start here and says so), and takes that line. */
+async function answer($: Any, w: ReturnType<typeof world>, n: number, isFullscreen = true): Promise<void> {
   await w.clock.advance(100)
   await $.prompt.submit({ text: `question ${n}`, origin: { kind: 'composer' } } as never)
   const row = `row-answer-${n}`
   await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: `Answer ${n}.` }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: row } as never)
+  await $.ui.render({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId: row, viewport: { columns: 100, rows: 40, isFullscreen }, props: { text: `Answer ${n}.`, isFirstOfReply: true } } as never)
   await $.turn.complete({ turnId: `t${n}`, reason: 'answer', answer: `Answer ${n}.`, durationMs: 10, isAborted: false } as never)
   await w.clock.advance(100)
 }
@@ -321,6 +323,30 @@ test('the settings opened keep the hint away for good, in the store; with no sto
   await introDone($)
   expect(await introText($)).toBe(null)
   expect(await introText(stateOnly({}))).toBe(null)
+})
+
+test('in Claude Code\'s default layout the first answer brings one notice that says to type /tui fullscreen, once a session; the hint about the settings then names the command', async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  try {
+    await answer($, w, 1, false)
+    const rows = await $.ui.render(BAND)
+    expect(textOf(rows)).toContain(FULLSCREEN)
+    expect(textOf(rows)).toContain('type /tui fullscreen')
+    // it stays until the person's next prompt, and no later answer of the session gives it again
+    await w.clock.advance(HINT_MS * 2)
+    expect(textOf(await $.ui.render(BAND))).toContain(FULLSCREEN)
+    await $.prompt.submit({ text: 'which runs failed?', origin: { kind: 'composer' } } as never)
+    expect(textOf(await $.ui.render(BAND))).not.toContain(FULLSCREEN)
+    await answer($, w, 2, false)
+    const later = textOf(await $.ui.render(BAND))
+    expect(later).not.toContain(FULLSCREEN)
+    expect(later).toContain(`Hint: ${INTRO_TYPED}`)
+  } finally {
+    // the tests after it draw in the fullscreen layout
+    await answer($, w, 3)
+  }
 })
 
 test('a hint above the bar goes by itself after a few seconds, or at the next key thimble takes; a failure stays', async () => {

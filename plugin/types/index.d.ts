@@ -55,7 +55,7 @@ declare module 'claude-code' {
       failLine: { kind: 'failed' | 'notice'; text: string; about?: string } | null
       /** the features the session used, whose how-to hints and reminders stop (bar/hints.ts) */
       hintsUsed: string[]
-      /** the features a reminder named in the session, and the hints it was told once (bar/hints.ts) */
+      /** the features a reminder named in the session, and the hints and notices it was told once (bar/hints.ts) */
       hintsReminded: string[]
 
       // ---- labels (labels/)
