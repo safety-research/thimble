@@ -258,11 +258,15 @@ if [ "$plugin" = 1 ]; then
   source="safety-research/thimble"
   [ "$local" = 1 ] && source="$root"
   # once a fix went on, Claude Code loads thimble from the fixes' live folder, and refuses another source for its
-  # marketplace: thimble update moves that folder to the new release and keeps the fixes
-  fixes_live="$(cd / && "$py" -c '
+  # marketplace: thimble update moves that folder to the new release and keeps the fixes. Its source is such a folder
+  # when it is a fixes/live checkout with release.json beside it, in this shell's THIMBLE_HOME or any other. A source
+  # that names a fixes/live folder that is gone (its thimble home was deleted) is removed, and the plugin installs as
+  # usual
+  found="$(cd / && "$py" -c '
 import json, os
 cc = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
-live = os.path.realpath(os.path.join(os.environ.get("THIMBLE_HOME") or os.path.expanduser("~/.thimble"), "fixes", "live"))
+home = os.path.realpath(os.path.join(os.environ.get("THIMBLE_HOME") or os.path.expanduser("~/.thimble"), "fixes", "live"))
+named = []
 for at, keys in ((("plugins", "known_marketplaces.json"), ("thimble", "source")),
                  (("settings.json",), ("extraKnownMarketplaces", "thimble", "source"))):
     try:
@@ -272,13 +276,27 @@ for at, keys in ((("plugins", "known_marketplaces.json"), ("thimble", "source"))
         p = os.path.realpath(d["path"]) if d.get("source") == "directory" else ""
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         p = ""
-    if p and (p + os.sep).startswith(live + os.sep):
-        print(live)
-        break
+    live = home if p and (p + os.sep).startswith(home + os.sep) else p
+    if live and os.path.basename(live) == "live" and os.path.basename(os.path.dirname(live)) == "fixes":
+        named.append(live)
+real = [p for p in named if os.path.exists(os.path.join(p, ".git"))
+        and os.path.isfile(os.path.join(os.path.dirname(p), "release.json"))]
+if real:
+    print("live " + real[0])
+elif named:
+    print("gone " + named[0])
 ' || true)"
+  fixes_live="" gone=""
+  case "$found" in
+    "live "*) fixes_live="${found#live }" ;;
+    "gone "*) gone="${found#gone }" ;;
+  esac
   if [ -n "$fixes_live" ]; then
     say "Claude Code loads thimble from your fixes ($fixes_live), so the plugin is left as it is: run thimble update, which updates both products and keeps your fixes."
   elif command -v claude >/dev/null 2>&1; then
+    if [ -n "$gone" ]; then
+      claude plugin marketplace remove thimble
+    fi
     claude plugin marketplace add "$source"
     if claude plugin list --json 2>/dev/null | grep -q '"thimble@thimble"'; then
       claude plugin marketplace update thimble

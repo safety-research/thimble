@@ -449,19 +449,22 @@ def _leftovers_aside(repo: Path) -> None:
 def _thimbles_mine(repo: Path) -> bool:
     """Whether the clone's mine is one that a deleted thimble home left: no worktree has it checked out, rebases or
     bisects it (git refuses to move a branch a worktree uses), no worktree is another thimble home's live (which is
-    detached while that home's fixes are off), and thimble made or recorded each commit that is only on mine (on no
-    other branch, tag or remote branch, and not in HEAD's history): thimble committed it, or it is the very commit that a
-    ref under refs/thimble/fixes/ names (a fix thimble update --continue recorded, which Claude committed as the person).
+    detached while that home's fixes are off), it tracks no upstream (branch.mine.remote, which thimble never sets), and
+    thimble made or recorded each commit that is only on mine (on no other branch, tag or remote branch; a detached HEAD
+    on top of mine, as in a rebase onto it, does not count): thimble committed it, or it is the very commit that a ref
+    under refs/thimble/fixes/ names (a fix thimble update --continue recorded, which Claude committed as the person).
     A mine with no commits of its own, such as the release commit, is one."""
     wts = git("worktree", "list", "--porcelain", cwd=repo).splitlines()
     if "branch refs/heads/mine" in wts or _other_live(repo):
+        return False
+    if git("config", "--get", "branch.mine.remote", cwd=repo, check=False):
         return False
     if run(["git", "branch", "-f", "--no-track", "mine", "refs/heads/mine"], cwd=repo, check=False).returncode != 0:
         return False
     me = as_thimble()
     recorded = set(git("for-each-ref", "--format=%(objectname)", "refs/thimble/fixes/", cwd=repo).split())
     own = git("log", "--format=%H %cn <%ce>", "refs/heads/mine", "--not", "--exclude=mine", "--branches", "--tags",
-              "--remotes", "HEAD", "--", cwd=repo).splitlines()
+              "--remotes", "--", cwd=repo).splitlines()
     return all(x.partition(" ")[0] in recorded
                or x.partition(" ")[2] == f"{me['GIT_COMMITTER_NAME']} <{me['GIT_COMMITTER_EMAIL']}>" for x in own)
 
@@ -1624,8 +1627,13 @@ def _rebuild(order: list[int]) -> list[int]:
 
 
 def _move(change) -> dict[str, Any]:
-    """Change live (a function of the records), then have Claude Code copy it."""
+    """Change live (a function of the records), then have Claude Code copy it. Before Claude Code loads live (not
+    pointed yet), the release first follows the code that runs (ensure_live), as at a request: a y right after another
+    way updated the plugin (claude plugin update, scripts/install.sh) puts the fix onto that release, not the one before."""
     with Lock():
+        rel = release()
+        if rel and not rel.get("pointed") and (live_dir() / ".git").exists():
+            ensure_live()
         out = change()
         synced = _sync()
     return {**(out or {}), **synced}
@@ -2192,9 +2200,10 @@ def _vtuple(tag: str) -> tuple[int, ...]:
     return tuple(int(x) for x in m.groups()) if m else ()
 
 
-def latest_release() -> dict[str, str]:
-    """The newest release, {tag, version, commit, url}: the highest vX.Y.Z tag of thimble's repository. A tag with more
-    after the numbers (v0.11.0-rc1) is not a release."""
+def latest_release() -> dict[str, Any]:
+    """The newest release, {tag, version, commit, url, tags}: the highest vX.Y.Z tag of thimble's repository, and each
+    release tag's commit (tags), which names a release that a clone without tags has. A tag with more after the numbers
+    (v0.11.0-rc1) is not a release."""
     url = update_url()
     p = run(["git", "ls-remote", "--tags", url, "refs/tags/v*"], check=False, timeout=120)
     if p.returncode != 0:
@@ -2212,7 +2221,7 @@ def latest_release() -> dict[str, str]:
     if not tags:
         raise FixError(f"{url} has no release (no tag such as v0.10.3)")
     tag = max(tags, key=_vtuple)
-    return {"tag": tag, "version": tag[1:], "commit": tags[tag], "url": url}
+    return {"tag": tag, "version": tag[1:], "commit": tags[tag], "url": url, "tags": tags}
 
 
 def release_name(rel: dict[str, Any] | None = None) -> str:
@@ -2466,8 +2475,10 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
         # Claude Code's clone of the marketplace is at the release already (Claude Code refreshed it), while Claude Code
         # still runs the plugin it had: it copies the release from its clone
         run([claude(), "plugin", "update", "thimble@thimble"])
-        out.update({"from": _described(repo, installed) or installed[:7], "newer": True, "aside": [], "reload": True,
-                    "said": f"thimble {latest['version']}"})
+        # the release it had, by the tags read above: Claude Code's clone, one commit deep, has none
+        had = max((t for t, c in latest["tags"].items() if c == installed), key=_vtuple, default="")
+        out.update({"from": had[1:] or _described(repo, installed) or installed[:7], "newer": True, "aside": [],
+                    "reload": True, "said": f"thimble {latest['version']}"})
         out["lines"] = _summary(out)
         return out
     if check or not out["newer"]:

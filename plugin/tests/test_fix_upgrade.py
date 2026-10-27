@@ -93,6 +93,41 @@ def test_a_clone_install_follows_its_plugin_until_a_fix_goes_on(world):
     assert FX.release()["base"] == new and sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == new
 
 
+def on_top_of(new: str, fid: int) -> None:
+    """Fix fid is on, on top of the release `new`, which Claude Code copies: the release and its checkout are `new`."""
+    live = FX.live_dir()
+    assert FX.get(fid)["state"] == "on" and sh("git", "rev-parse", "mine^", cwd=live) == new
+    assert FX.release()["base"] == new and sh("git", "rev-parse", "HEAD", cwd=FX.release_dir()) == new
+    assert (live / "plugin" / "notes.md").read_text() == "made-up note\n"
+
+
+@pytest.mark.parametrize("shallow", [True, False], ids=["shallow-clones", "whole-clones"])
+def test_a_y_right_after_claude_plugin_update_puts_the_fix_onto_the_new_release(world, upstream, monkeypatch, shallow):
+    if shallow:
+        reclone(world, world["rel"])
+    # a fix made on 0.10.2 and never used
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    # 0.10.3 is out, and claude plugin update (or a pull and scripts/install.sh) installs it; then, first of all, y
+    if shallow:
+        monkeypatch.setenv("GIT_COMMITTER_DATE", f"{int(time.time()) + 86400} +0000")
+    new = upstream({"plugin/notes.md": "made-up note\n"}, "v0.10.3")
+    monkeypatch.delenv("GIT_COMMITTER_DATE", raising=False)
+    reclone(world)
+    installed(world, new)
+    FX.apply(a["id"], press(a["id"]))
+    on_top_of(new, a["id"])
+
+
+def test_a_y_right_after_scripts_install_on_a_clone_install_puts_the_fix_onto_the_new_commit(world):
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    # the person's clone moves on, and scripts/install.sh --local installs it; then, first of all, y
+    new = release_with(world, {"plugin/notes.md": "made-up note\n"})
+    FX.apply(a["id"], press(a["id"]))
+    on_top_of(new, a["id"])
+
+
 def test_a_release_checkout_from_before_the_hand_off_runs_nothing(world, tmp_path):
     release_with(world, {"plugin/bin/thimble": OLD_LAUNCHER, "plugin/engine/thimble.py": KERNEL})
     made(world)  # live and the release checkout at that release
@@ -157,7 +192,8 @@ def test_update_brings_claude_codes_plugin_to_the_release_its_clone_has(world, u
     out = FX.update()
     assert calls(world)[before:] == ["plugin update thimble@thimble"]
     assert (out["newer"], out["to"], out["aside"], out["reload"]) == (True, "0.10.3", [], True)
-    assert out["lines"] == [f"Updated thimble {world['base'][:7]} → 0.10.3 (terminal plugin)", "",
+    # the release Claude Code ran is named by the release's tags, which its clone, one commit deep, does not have
+    assert out["lines"] == ["Updated thimble 0.10.2 → 0.10.3 (terminal plugin)", "",
                             "Then  Terminal: /reload-plugins in Claude Code"]
     assert not FX.live_dir().exists()
     # once Claude Code runs the release, it is the newest
