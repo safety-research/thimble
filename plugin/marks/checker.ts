@@ -29,8 +29,8 @@
 // The setting Citations (settings/features.mjs citations) says when marks are made and checked: `auto cite + verify`,
 // Claude's marks after each reply; `auto cite` (the default), a reply's marks wait `deferred` (drawn as the reply's own
 // cited words), and opening one (tray.ts openMark) checks that one (checkOpened), as a reply's check would; `manual`,
-// Claude makes none, and words the person selects and asks about (c, marks/cite.ts) wait `deferred` until the tray
-// opens them, as one Claude made; `off`, none.
+// Claude makes none; `off`, none. In every mode but off, words the person selects and asks about (c, marks/cite.ts)
+// wait `deferred` until the tray opens them, as one Claude made.
 //
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
 // mark of its share `checking`: a mark it gave no answer for is failed, as the person sees it (store.ts notRun). When a reply's last mark settles, main is told what changed (tellText), once; when a
@@ -178,7 +178,7 @@ const fixedLine = (m: MarkItem) => (m.rewrite
     : `- ${q(m.was ?? m.words)} is corrected to ${q(m.shown)}${why(m)}`)
 
 export function tellText(items: MarkItem[]): string {
-  // words the analyst asked about (Citations manual): main cited nothing, the analyst asked where those words come from
+  // words the analyst asked about (c, marks/cite.ts): main did not cite them, the analyst asked where they come from
   // a mark whose check did not run is no finding of the check's
   const said = items.filter(m => m.status === 'corrected' || (m.status === 'failed' && m.failedBy !== 'none')).map(m => {
     if (m.status === 'corrected') return fixedLine(m)
@@ -442,7 +442,7 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
   }
 }
 
-/** A citation opened (tray.ts openMark) whose reply waits to be checked until one is opened (Citations `auto cite`, or words the person asked about in `manual`): its check,
+/** A citation opened (tray.ts openMark) whose reply waits to be checked until one is opened (Citations `auto cite`, or words the person asked about with c): its check,
  *  one fork for it alone, as a reply's check is made. Call it inside the hook of the press or key that opened it (the
  *  spawn is its first call). Nothing for a citation that is checked, or whose check runs. */
 export async function checkOpened($: Engine, row: string, n: number): Promise<void> {

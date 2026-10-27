@@ -31,7 +31,7 @@ import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
 import { EXPLAIN_KEYS, HEADS_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, headsBar, headsKey, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
-import { citeBar, citeKey, citeShown } from '../marks/cite'
+import { citeBar, citeKey, citeSelection, citeShown } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
@@ -193,9 +193,10 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
 
 /** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
  *  claims and the side threads (the left names what acts on an answer). While c cites the selected words (`c cite` at
- *  the left), the claims' item steps aside until the words are cited or let go, so c names one thing. */
+ *  the left), the claims' item steps aside until the words are cited or let go, so c names one thing. The settings'
+ *  preview shows both, as it shows every item the switches leave on. */
 export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  const citing = preview ? on('cite') : await safe(citeShown($), false)
+  const citing = !preview && (await safe(citeShown($), false))
   return [
     ...(citing ? [] : items(await safe(claimsBar($, on, preview), []), preview)),
     ...items(await safe(threadsBar($, on, preview), []), preview),
@@ -215,9 +216,18 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
     ?? (await safe(headsKey($, key, until), null))
-    ?? (await safe(citeKey($, key, until), null))
-    ?? (await safe(claimsKey($, key, until), null))
+    ?? (await safe(cKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
+}
+
+/** c: the selected words cited while they wait (marks/cite.ts citeShown), else the claims. Both act once the word
+ *  window closed, so while the claims take c the choice is made then: the key itself reads no selection, which keeps
+ *  it within the few milliseconds Claude Code gives its hook (past them, Claude Code types the key into the prompt).
+ *  With the claims off, c is cite's only while words wait. */
+async function cKey($: Engine, key: string, until: number): Promise<Take | null> {
+  const later = (await safe(claimsKey($, key, until), null))?.later
+  if (!later) return safe(citeKey($, key, until), null)
+  return { later: async () => ((await safe(citeShown($), false)) ? citeSelection($) : later()) }
 }
 
 // ------------------------------------------------------------------------------------------------ hooks

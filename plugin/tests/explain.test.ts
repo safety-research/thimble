@@ -17,6 +17,7 @@ import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { readText, withAsked } from '../marks/message.js'
 import { rowMarks } from '../marks/store'
+import { noteRow, startCheck } from '../marks/checker'
 import { citeBar, citeKey, citeWords, placeOf } from '../marks/cite'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
@@ -462,10 +463,45 @@ test('with Citations manual, c makes the selected words a citation of their answ
     await citeWords(s.$, 't1-row', '41 of the 44')
     expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
     expect(await citeWords(s.$, 't1-row', 'not in this answer')).toContain("isn't in the answer as Claude wrote it")
-    // in any other mode, c is the claims' even with words selected
-    setOptions({ citations: 'auto cite' })
+    // with Citations off, c is the claims' even with words selected
+    setOptions({ citations: 'off' })
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
+  } finally {
+    setOptions({})
+  }
+})
+
+test('with Citations auto cite, c cites the selected words too: words inside a citation Claude wrote open it, other words become a citation beside it; an answer whose turn still runs waits for its end', async () => {
+  setOptions({ citations: 'auto cite' })
+  try {
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+    // the answer's citation, as the end of its turn stores it: checked once opened
+    await noteRow(s.$, 't1-row', ANSWER)
+    await startCheck(s.$, { turnId: 't1', reason: 'answer' })
+    s.$.ui.open = async () => ({ isPlaced: true })
+    // words inside Claude's citation: the bar names c cite, and c opens that citation
+    s.$.ui.selection = async () => ({ text: '41 of the 44', requestId: 't1-row' })
+    expect((await citeBar(s.$, k => k === 'cite', false)).map(x => `${x.key} ${x.words}`)).toEqual(['c cite'])
+    await (await citeKey(s.$, 'c', 0))!.later!()
+    await settle()
+    expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'citation', n: 1 })
+    expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
+    // other words: a citation of their own, after Claude's
+    s.$.ui.selection = async () => ({ text: 'failures came 30 seconds', requestId: 't1-row' })
+    await (await citeKey(s.$, 'c', 0))!.later!()
+    await settle()
+    expect((await rowMarks(s.$, 't1-row'))!.items.map(m => [m.n, m.words, !!m.asked])).toEqual([[1, '41 of the 44', false], [2, 'failures came 30 seconds', true]])
+    expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'citation', n: 2 })
+    // words of an answer whose turn still runs: the turn's end stores its citations, so c waits for it
+    await answered(s, { id: 't2', prompt: 'And now?', text: 'Nothing changed since then.' })
+    await noteRow(s.$, 't2-row', 'Nothing changed since then.')
+    expect(await citeWords(s.$, 't2-row', 'Nothing changed')).toContain('still answering')
+    // in manual, the turn's end stores no citations, so c cites them at once
+    setOptions({ citations: 'manual' })
+    expect(await citeWords(s.$, 't2-row', 'Nothing changed')).toBeUndefined()
+    expect((await rowMarks(s.$, 't2-row'))!.items.map(m => m.words)).toEqual(['Nothing changed'])
   } finally {
     setOptions({})
   }

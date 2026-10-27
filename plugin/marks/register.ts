@@ -213,7 +213,7 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   const written = marksOn ? view.text : withoutMarks(view.text)
   const reply = marksOn ? await rowMarks($, row) : null
   const own = written === raw
-  // the words the analyst asked about (Citations manual) stand as marks in Claude's own words, and the row's marks in
+  // the words the analyst asked about (c, marks/cite.ts) stand as marks in Claude's own words, and the row's marks in
   // the order the text holds them
   const asked = own ? withAsked(written, reply?.items ?? []) : { text: written, items: reply?.items ?? [] }
   const words: string = asked.text

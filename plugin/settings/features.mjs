@@ -206,8 +206,8 @@ export const atPreset = values => Object.entries(PRESET).every(([k, v]) => value
  *  is it with the plugin's options. */
 export function switchesFrom(values) {
   return key => {
-    // c on selected words, a citation the analyst asks for, is Citations' manual mode
-    if (key === 'cite') return valueIn(values, 'citations') === 'manual'
+    // c on selected words, a citation the analyst asks for, works in every mode of Citations but off
+    if (key === 'cite') return valueIn(values, 'citations') !== 'off'
     // h, heads-ups on an answer the person asks for, is Heads-ups' on demand
     if (key === 'heads') return valueIn(values, 'details') === 'on demand'
     const v = valueIn(values, ALIAS[key] ?? key)

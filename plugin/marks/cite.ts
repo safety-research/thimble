@@ -1,12 +1,14 @@
-// cite.ts: c, a citation of words the analyst selected, while Citations is manual (settings/features.mjs): Claude
-// cites nothing, and the analyst selects words of an answer with the mouse ($.ui.selection, fullscreen layout only) and
-// presses c. The words become a citation of the answer, as one Claude wrote would be (store.ts MarkItem `asked`, drawn
-// as a mark by message.js withAsked), and the tray opens on it, which starts its check (checker.ts checkOpened): a
-// second Claude finds where they come from in the files or in what code printed, and the tray shows the evidence,
-// verified, corrected or failed, as for any citation.
+// cite.ts: c, a citation of words the analyst selected, in every mode of Citations but off (settings/features.mjs; in
+// manual, Claude cites nothing, so c is the only way): the analyst selects words of an answer with the mouse
+// ($.ui.selection, fullscreen layout only) and presses c. The words become a citation of the answer, as one Claude wrote
+// would be (store.ts MarkItem `asked`, drawn as a mark by message.js withAsked), and the tray opens on it, which starts
+// its check (checker.ts checkOpened): a second Claude finds where they come from in the files or in what code printed,
+// and the tray shows the evidence, verified, corrected or failed, as for any citation. Words inside a citation Claude
+// wrote open that one.
 //
 // c is also the Claims pane's key: c cites only while words are selected that it has not cited yet, which the bar shows
-// as `c cite` (beside `e explain`, the claims' item set aside meanwhile); else c opens the claims.
+// as `c cite` (beside `e explain`, the claims' item set aside meanwhile); else c opens the claims (core/answerview.ts
+// asks which once the word window closed).
 //
 //   citeKey($, key), citeBar, citeShown   c at an empty prompt while words wait, `c cite` on the bar
 //   citeWords($, row, words)              the citation of these words on that answer: an existing one (Claude's, or
@@ -20,9 +22,10 @@ import { answerRows, messageOf, turnOfRow } from '../core/answers'
 import { answerSelection, selectionUsed, usedBy } from '../core/selection'
 import { pickedWords } from '../explain/seam'
 import type { Take } from '../hooks/keys'
-import { featureOn } from '../settings/features.mjs'
+import { claudeCites, featureOn } from '../settings/features.mjs'
 import { squeezeView } from '../squeeze/seam'
 import { openTray } from '../tray/seam'
+import { awaitsCheck } from './checker'
 import { askedWords, codeRanges, marksIn, sentenceOf, withoutMarks } from './message.js'
 import { editReply, newReply, replyKeyOf, replyOf, type MarkItem } from './store'
 
@@ -75,6 +78,8 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
   if (n != null) { await openTray($, { row, kind: 'citation', n }); return }
   if (hit >= 0) return 'those words are in a citation still being checked; try again in a moment.'
   if (codeRanges(raw).some(([a, b]) => at.start < b && at.end > a)) return 'those words are code, which has no source; select words of the answer\'s text.'
+  // while Claude cites, the end of the answer's turn stores its citations as a new reply, in place of one stored now
+  if (!reply && claudeCites() && (await awaitsCheck($, row))) return 'Claude is still answering; select the words again once the answer is done.'
   const text = askedWords(raw.slice(at.start, at.end))
   const next = Math.max(0, ...(reply?.items ?? []).map(m => m.n)) + 1
   const marked = raw.slice(0, at.start) + `[${text}](#)` + raw.slice(at.end)
@@ -106,7 +111,7 @@ export async function citeSelection($: Engine): Promise<void> {
   else await hintUsed($, 'cite')
 }
 
-/** Whether c cites now: Citations is manual, an answer exists, and words are selected that c has not cited yet (Claude
+/** Whether c cites now: Citations is on, an answer exists, and words are selected that c has not cited yet (Claude
  *  Code answers the last selection until the person selects again, so once c has cited it, c opens the claims again). */
 export async function citeShown($: Engine): Promise<boolean> {
   if (!featureOn('cite')) return false
@@ -116,7 +121,8 @@ export async function citeShown($: Engine): Promise<boolean> {
 }
 
 /** c at an empty prompt while words wait to be cited (citeShown): after the word window (a c that starts a word is
- *  typed), the selected words are cited. Else c is the claims' (claims/seam.ts claimsKey). */
+ *  typed), the selected words are cited. Else c is the claims' (claims/seam.ts claimsKey). It reads the selection, so
+ *  core/answerview.ts asks it at the key only while the claims do not take c. */
 export async function citeKey($: Engine, key: string, _until: number): Promise<Take | null> {
   if (key !== 'c' || !(await citeShown($))) return null
   return { later: () => citeSelection($) }

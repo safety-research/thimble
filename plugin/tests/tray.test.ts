@@ -549,6 +549,32 @@ test("an explainer's or a heads-up's links to a file's lines draw as the answer'
   expect(textOf(await $.ui.render(above(40)))).toContain('The time that 95 of 100 checks stay under.')
 })
 
+test('c cites the selected words in auto cite + verify too: while they wait the bar says c cite in place of the claims, and c opens their citation in the tray; with none selected, c opens Evidence', CITES, async ($, on) => {
+  const opens: Any[] = []
+  on('ui.open', (_$: unknown, e: Any) => { opens.push(e.title); return { value: { isPlaced: true } } as never })
+  let selected: Any = { text: 'failed on the p95 check', requestId: 'row-t1' }
+  on('ui.selection', () => ({ value: selected }))
+  const { clock, spawns } = await resumed($, on, QUOTED, 's-tray-cite')
+  let band = textOf(await $.ui.render(above()))
+  expect(band).toContain('c cite')
+  expect(band).not.toContain('c evidence')
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  // the words are a citation of their own, open in the tray, and its check started; the selection no longer waits, so
+  // the bar names the claims again
+  band = textOf(await $.ui.render(above(40)))
+  expect(band).toContain('failed on the p95 check')
+  expect(band).toContain('a ask · 0 close')
+  expect(spawns.length).toBe(1)
+  expect(band).not.toContain('c cite')
+  expect(band).toContain('c evidence')
+  // with nothing selected, c opens Evidence
+  selected = undefined
+  expect(await $.prompt.edit(key('c'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(1000)
+  expect(opens).toEqual(['Evidence'])
+})
+
 test("with Citations manual, ] passes the citations Claude wrote (they draw as plain words); a click on their words still opens one", { options: { citations: 'manual' } }, async ($, on) => {
   // the answer's only citation is Claude's: nothing for ] to open, so ] is the prompt's and types
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
