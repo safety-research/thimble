@@ -432,13 +432,13 @@ test('selected words inside a mark open it; words over or across marks get one e
 
 // ------------------------------------------------------------------------------------------------ c: cite
 
-test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is the claims\' again', async () => {
+test('with Citations manual, c makes the selected words a citation of their answer, drawn as a mark, and opens it in the tray; with no words waiting, c is typed again', async () => {
   setOptions({ citations: 'manual' })
   try {
     const s = setup([LOOK])
     const plain = 'Uploads fail after the retry budget runs out: **41 of the 44** failures came 30 seconds after a drop.'
     await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: plain })
-    // with nothing selected, c is not cite's (the claims take it) and the bar does not name it
+    // with nothing selected, c is not cite's (it is typed) and the bar does not name it
     s.$.ui.selection = async () => undefined
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
@@ -454,7 +454,8 @@ test('with Citations manual, c makes the selected words a citation of their answ
     // the answer reads the words as a citation; squeeze and the claims read them as plain words
     expect(withAsked(plain, [item]).text).toContain('out: [41 of the 44 failures](#) came')
     expect(readText(plain, [item])).toBe(plain.replace('**41 of the 44** failures', '41 of the 44 failures'))
-    // once cited, the same selection no longer waits: c and the bar are the claims' again until words are selected anew
+    // once cited, the same selection no longer waits: c is typed and the bar does not name it until words are
+    // selected anew
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])
     s.$.ui.selection = async () => ({ text: '41 of the 44', requestId: 't1-row' })
@@ -463,7 +464,7 @@ test('with Citations manual, c makes the selected words a citation of their answ
     await citeWords(s.$, 't1-row', '41 of the 44')
     expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
     expect(await citeWords(s.$, 't1-row', 'not in this answer')).toContain("isn't in the answer")
-    // with Citations off, c is the claims' even with words selected
+    // with Citations off, c is typed even with words selected
     setOptions({ citations: 'off' })
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
     expect(await citeBar(s.$, k => k === 'cite', false)).toEqual([])

@@ -70,10 +70,10 @@ export const SWITCHES = [
   },
   {
     key: 'claimsMode', title: 'Evidence', group: 'Panes', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
-    does: 'Press c to see the conversation\'s claims and their evidence. auto: claims are found after each answer, the largest part of the call after it. on demand: press f in the pane to find them, which spends fewer tokens. off: no Evidence pane.',
+    does: 'Press w to see the conversation\'s claims and their evidence. auto: claims are found after each answer, the largest part of the call after it. on demand: press f in the pane to find them, which spends fewer tokens. off: no Evidence pane.',
     says: {
-      'auto': 'Press c to see the conversation\'s claims and their evidence. Claims are found after each answer.',
-      'on demand': 'Press c to see the conversation\'s claims and their evidence. Press f in the pane to find them.',
+      'auto': 'Press w to see the conversation\'s claims and their evidence. Claims are found after each answer.',
+      'on demand': 'Press w to see the conversation\'s claims and their evidence. Press f in the pane to find them.',
       'off': 'No Evidence pane.',
     },
   },

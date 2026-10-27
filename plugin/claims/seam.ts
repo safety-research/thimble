@@ -1,11 +1,12 @@
 // seam.ts: where Claims meet the rest of thimble (core/answerview.ts, core/pane.ts and observer/observer.ts
 // call each function by name, since Claude Code follows `$` only into functions a file declares or imports). The
-// feature's modules stand beside this file: term.ts (the store, a look's claims, c), store.js (the claims as
+// feature's modules stand beside this file: term.ts (the store, a look's claims, w), store.js (the claims as
 // pure functions), graph.js and pane.tsx (the pane), lens.mjs (the observer's claims lens); prompts/lens-claims.md.
 //
 //   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
-//   claimsKey($, key, until)           c: the Claims pane, once the word window closed (a taker as hooks/keys.ts takes it)
-//   claimsBar($, on, preview)          its items at the bar's left (`c 11 claims`, lit when a claim was corrected)
+//   claimsKey($, key, until)           w: the Claims pane, or closed while the side pane shows it, once the word
+//                                      window closed (a taker as hooks/keys.ts takes it)
+//   claimsBar($, on, preview)          its items at the bar's right (`w 11 claims`, lit when a claim was corrected)
 //   claimsState($)                     what the claims lens's digest reads (./lens.mjs): every claim so far and the
 //                                      clusters, as its {{CLAIMS}}, {{CLUSTERS}} and {{GROWN}} lines
 //   claimsMerge($, look)               what one look of the observer gave for the claims lens (look.out.claims,
@@ -25,6 +26,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { failNotice } from '../bar/notice'
+import { closePane, paneShows } from '../core/pane'
 import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
 import type { Look } from '../observer/observer'
@@ -37,26 +39,27 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export const CLAIMS_KEYS = ['c']
+export const CLAIMS_KEYS = ['w']
 export const CLAIMS_FIND = FIND
 
 export async function claimsKey($: Engine, key: string, _until: number): Promise<Take | null> {
-  if (key !== 'c' || !featureOn('claims')) return null
-  // after the word window, as 0.10 did: `c` that starts a word is typed
-  return { later: () => openClaims($, {}, true) }
+  if (key !== 'w' || !featureOn('claims')) return null
+  // after the word window, as 0.10 did: `w` that starts a word is typed. While the side pane shows the claims, w
+  // closes it, as r and l close theirs (bar/register.ts)
+  return { later: async () => ((await paneShows($, 'claims')) ? closePane($) : openClaims($, {}, true)) }
 }
 
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (!on('claims')) return []
-  if (preview) return [{ id: 'claims', key: 'c', words: 'evidence' }]
+  if (preview) return [{ id: 'claims', key: 'w', words: 'evidence' }]
   // no claims yet: the pane finds them on demand, so the item shows, without a count, once an answer waits for it
-  if (!(await claimCount($))) return (await claimsToFind($)).answers ? [{ id: 'claims', key: 'c', words: 'evidence', press: () => openClaims($) }] : []
+  if (!(await claimCount($))) return (await claimsToFind($)).answers ? [{ id: 'claims', key: 'w', words: 'evidence', press: () => openClaims($) }] : []
   const words = await claimsBarWords($)
   // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims. The session's
   // first claims: the count pulses, and says `new` until the pane is first opened
   const first = await claimsFresh($)
   const look = first.lit || await claimsLit($) ? { color: accent() } : {}
-  return [{ id: 'claims', key: 'c', words: first.fresh ? `${words} · new` : words, ...look, ...(first.lit || await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
+  return [{ id: 'claims', key: 'w', words: first.fresh ? `${words} · new` : words, ...look, ...(first.lit || await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
 }
 
 export async function claimsState($: Engine): Promise<Record<string, unknown>> {

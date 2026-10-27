@@ -31,7 +31,7 @@ import { CLAIMS_KEYS, claimsBar, claimsKey } from '../claims/seam'
 import { EXPLAIN_KEYS, HEADS_KEYS, explainBar, explainKey, explainSpans, explainSpansOf, headsBar, headsKey, pendingSpans } from '../explain/seam'
 import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
-import { citeBar, citeKey, citeSelection, citeShown } from '../marks/cite'
+import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
@@ -66,7 +66,7 @@ export type MarkRef = { row: string; kind: 'citation'; n: number } | { row: stri
  *  import modules that come back here through the card tool, so a list made as this module loads could read a seam's
  *  keys before its module set them.) */
 export function restoredKeys(): string[] {
-  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...HEADS_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
+  return [...SQUEEZE_KEYS, ...EXPLAIN_KEYS, ...HEADS_KEYS, ...CITE_KEYS, ...CLAIMS_KEYS, ...THREADS_KEYS]
 }
 
 const safe = async <T>(p: Promise<T>, none: T): Promise<T> => {
@@ -192,20 +192,18 @@ export async function barLeft($: Engine, on: (key: string) => boolean, preview: 
 }
 
 /** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
- *  claims and the side threads (the left names what acts on an answer). While c cites the selected words (`c cite` at
- *  the left), the claims' item steps aside until the words are cited or let go, so c names one thing. The settings'
- *  preview shows both, as it shows every item the switches leave on. */
+ *  claims and the side threads (the left names what acts on an answer). */
 export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  const citing = !preview && (await safe(citeShown($), false))
   return [
-    ...(citing ? [] : items(await safe(claimsBar($, on, preview), []), preview)),
+    ...items(await safe(claimsBar($, on, preview), []), preview),
     ...items(await safe(threadsBar($, on, preview), []), preview),
   ]
 }
 
 /** A key at an empty prompt, to the first feature that takes it now: the tray while open (a press on a citation
  *  opens it over the chips, and 0 closes it), the squeeze chips while open (their keys came first in 0.10 too), the
- *  tray's ] [ at rest, s, { } over the answers, e, c (cite while words wait, else the claims), then t. */
+ *  tray's ] [ at rest, s, { } over the answers, e, c (the selected words cited, while they wait; else typed), w (the
+ *  claims), then t. */
 export async function restoredKey($: Engine, key: string, until: number): Promise<Take | null> {
   const tray = await safe(trayHolds($), false)
   const chips = await safe(squeezeHolds($), false)
@@ -216,18 +214,9 @@ export async function restoredKey($: Engine, key: string, until: number): Promis
     ?? (await safe(answerStepKey($, key), null))
     ?? (await safe(explainKey($, key, until), null))
     ?? (await safe(headsKey($, key, until), null))
-    ?? (await safe(cKey($, key, until), null))
+    ?? (await safe(citeKey($, key, until), null))
+    ?? (await safe(claimsKey($, key, until), null))
     ?? (await safe(threadsKey($, key, until), null))
-}
-
-/** c: the selected words cited while they wait (marks/cite.ts citeShown), else the claims. Both act once the word
- *  window closed, so while the claims take c the choice is made then: the key itself reads no selection, which keeps
- *  it within the few milliseconds Claude Code gives its hook (past them, Claude Code types the key into the prompt).
- *  With the claims off, c is cite's only while words wait. */
-async function cKey($: Engine, key: string, until: number): Promise<Take | null> {
-  const later = (await safe(claimsKey($, key, until), null))?.later
-  if (!later) return safe(citeKey($, key, until), null)
-  return { later: async () => ((await safe(citeShown($), false)) ? citeSelection($) : later()) }
 }
 
 /** What the features' keys read of the state (whether the tray and the squeeze chips hold the keys), read as the plugin

@@ -87,18 +87,27 @@ test('a key at an empty prompt reads no state once the plugin has read it: its h
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text}${e.inputText}`, cursor: e.text.length + e.inputText.length }))
   let gets = 0
   on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
-  // words stand selected, which c cites in every mode of Citations but off
+  // the words selected, which c cites in every mode of Citations but off
+  let selected: Any
   let selections = 0
-  on('ui.selection', () => { selections++; return { value: { text: 'two runs failed', requestId: 'row-t1' } } })
+  on('ui.selection', () => { selections++; return { value: selected } })
   const press = (key: string) => $.prompt.edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never)
-  // the first key reads what the keys need; a letter no one takes then reads nothing, nor does c, which reads the
-  // selection only once its word window closed, to cite the words or open the claims
+  // the first key reads what the keys need; a letter no one takes then reads nothing
   expect(await press('h')).toEqual({ text: 'h', cursor: 1 })
   expect(gets).toBeGreaterThan(0)
   gets = 0
   expect(await press('q')).toEqual({ text: 'q', cursor: 1 })
   expect(gets).toBe(0)
-  expect(await press('c')).toEqual({ text: '', cursor: 0 })
+  // c cites the selected words, and is typed while none are: a key done once its word window closed can no longer be
+  // typed, so c reads the selection at the key, once, and with none selected nothing else
+  selections = 0
+  expect(await press('c')).toEqual({ text: 'c', cursor: 1 })
+  expect(gets).toBe(0)
+  expect(selections).toBe(1)
+  // w opens the claims once its word window closed: at the key it reads nothing, though words stand selected
+  selected = { text: 'two runs failed', requestId: 'row-t1' }
+  selections = 0
+  expect(await press('w')).toEqual({ text: '', cursor: 0 })
   expect(gets).toBe(0)
   expect(selections).toBe(0)
 })
@@ -124,13 +133,13 @@ test('the keys read what they need as the plugin loads, so even the first key af
   on('state.get', async (_$: unknown, e: Any, next: Any) => { gets++; return next(e) })
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   gets = 0
-  // the first key, c: taken, and nothing read
-  expect(await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'c' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'c' } as never)).toEqual({ text: '', cursor: 0 })
+  // the first key, w: taken, and nothing read
+  expect(await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'w' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'w' } as never)).toEqual({ text: '', cursor: 0 })
   expect(gets).toBe(0)
 })
 
 test("the features' letters are thimble's own, so no card takes them", () => {
-  expect(restoredKeys()).toEqual(['s', 'b', 'e', 'h', 'c', 't'])
+  expect(restoredKeys()).toEqual(['s', 'b', 'e', 'h', 'c', 'w', 't'])
   for (const k of restoredKeys()) expect(ownKeys()).toContain(k)
 })
 

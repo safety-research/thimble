@@ -59,7 +59,7 @@ plugin in the next `claude` they start in a terminal, and the workbench when the
    take. Once it works, end with a short reply on how to use what was installed:
    - The plugin: open `claude` in a folder of data files. Claude cites each claim, and a second Claude checks it
      against the files; a click on the underlined words opens the evidence. The line above the prompt shows the keys:
-     `v` visualize, `s` rewrite, `c` evidence, `r` coverage. A click on `thimble` in that line, or
+     `v` visualize, `s` rewrite, `w` evidence, `r` coverage. A click on `thimble` in that line, or
      `/thimble-settings`, opens the settings; `/plugin` turns thimble off.
    - The workbench: run `thimble-browser` in a folder of files and open the sign-in link it prints.
 6. When the plugin works, offer to show it on the checkout's `examples/sample/runs.csv` (40 made-up nightly test

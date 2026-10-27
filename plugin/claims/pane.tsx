@@ -15,6 +15,7 @@
 //     a cluster chosen   k j the previous or next claim of its list (the ends hold) · e opens it · p n the previous or
 //                        next cluster
 //     any, overflowing   d u the detail a page down or up
+//     always, last       w closes the pane, as w at the prompt does (as r closes coverage's, panes/coverage.tsx)
 //     a claim picked     k j the previous or next claim of its cluster (its evidence shown: citation) · e its
 //                        evidence shown or hidden (the line in the detail that says so) · h its History (a corrected
 //                        claim) · c the current citation's code and output whole · x repair the current citation
@@ -36,7 +37,7 @@ import { markPressed } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { tellOpened } from '../core/engaged'
 import { failNotice } from '../bar/notice'
-import { openPane, paneNow, scrollsOwn } from '../core/pane'
+import { closePane, openPane, paneNow, scrollsOwn } from '../core/pane'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, themeNow } from '../core/theme'
@@ -285,6 +286,7 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     const text = a.row ? await placeText($, a.row) : null
     const lines = sourceView(c, text, W) as Run[][]
     key('b', 'back', () => showClaims($, keep))
+    key('w', 'close', () => closePane($))
     const said = lines.map((r, i) => rowEl(els, r, `s${i}`, () => undefined))
     const keyEls = [rowEl(els, [], 'gap', () => undefined), keysRow(els, keys, W)]
     const fill = Math.max(0, H - treeRows(said, W) - treeRows(keyEls, W))
@@ -403,6 +405,8 @@ export async function drawClaims($: Engine, e: Any, args: unknown, els: Any): Pr
     key('d', 'scroll down', () => scrollDetail($, page()))
     key('u', 'scroll up', () => scrollDetail($, -page()))
   }
+  // w closes the pane, as w at the prompt does
+  key('w', 'close', () => closePane($))
   const row = (r: Run[], k: string) => rowEl(els, r, k, press)
   // the answers the claims have not read yet (claims are found on demand): f finds theirs, in the ui.press hook of the
   // observer's (observer.ts), which runs the claims step on them

@@ -64,17 +64,20 @@ test('Citations has four modes: a press on one sets it, the line under the row s
   expect((await pane.find({ key: 'switch-citations' }))?.text).toContain('Citations')
   for (const mode of ['auto cite + verify', 'auto cite', 'manual', 'off']) expect(await pane.find({ key: `mode-citations-${mode}` })).toBeDefined()
   expect((await pane.find({ key: 'says-citations' }))?.text).toContain('verified when you open it')
-  // the bar's preview shows every item the switches leave on: c cite, as with words selected, beside c evidence
+  // the bar's preview shows every item the switches leave on: c cite, as with words selected, beside w evidence
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: /^ evidence$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^c cite$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^w evidence$/ })).toBeDefined()
   await pane.press({ key: 'mode-citations-manual' })
   expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.citations', value: 'manual' })])
   expect((await pane.find({ key: 'says-citations' }))?.text).toContain('Select words and press c to cite them.')
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeDefined()
-  // off: no c cite, and the claims keep c
+  // off: no c cite; the claims keep w
   await pane.press({ key: 'mode-citations-off' })
   expect(await pane.find({ type: 'Text', text: /^ cite$/ })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: /^ evidence$/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /^w evidence$/ })).toBeDefined()
   // the row picked is the first, Minimal, tinted with no mark; a click on a name picks its row, changing nothing (↑ ↓:
   // tests/pane.test.ts)
   expect((await pane.find({ key: 'sw-minimal' }))?.text).not.toContain('›')

@@ -5,7 +5,7 @@
 //   labels     ../labels/pane.tsx       the folder's labels and their records
 //   coverage   ../panes/coverage.tsx    what Claude read of the folder
 //   settings   ../panes/settings.tsx    the three switches
-//   claims     ../claims/seam.ts        the conversation's claims (c)
+//   claims     ../claims/seam.ts        the conversation's claims (w)
 //   threads    ../threads/seam.ts       the side threads (t)
 //   thread     ../threads/seam.ts       one side thread: what it is about, its turns, its input
 //
@@ -156,6 +156,12 @@ export async function closePane($: Engine): Promise<void> {
 
 export async function paneNow($: Engine): Promise<PaneNow | null> {
   return ((await $.state.get(NOW)).value ?? null) as PaneNow | null
+}
+
+/** Whether the side pane shows this kind now: the key that opens it (r, l, w) closes it then. */
+export async function paneShows($: Engine, kind: string): Promise<boolean> {
+  if ((await paneNow($))?.kind !== kind) return false
+  return (await $.ui.panes()).some(p => p.id === PANE_ID)
 }
 
 /** A /clear or a /resume (hooks/turnover.ts): a pane on the earlier conversation's records closes (thimble's settings
