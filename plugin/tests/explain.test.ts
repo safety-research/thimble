@@ -16,7 +16,7 @@ import { explainBar, explainKey, registerExplain, explainState, explaining, expl
 import { trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { readText, withAsked } from '../marks/message.js'
-import { rowMarks } from '../marks/store'
+import { editReply, replyKeyOf, rowMarks } from '../marks/store'
 import { noteRow, startCheck } from '../marks/checker'
 import { citeBar, citeKey, citeWords, placeOf } from '../marks/cite'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
@@ -462,7 +462,7 @@ test('with Citations manual, c makes the selected words a citation of their answ
     // the same words again open the same citation; words that are not in the answer say so
     await citeWords(s.$, 't1-row', '41 of the 44')
     expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
-    expect(await citeWords(s.$, 't1-row', 'not in this answer')).toContain("isn't in the answer as Claude wrote it")
+    expect(await citeWords(s.$, 't1-row', 'not in this answer')).toContain("isn't in the answer")
     // with Citations off, c is the claims' even with words selected
     setOptions({ citations: 'off' })
     expect(await citeKey(s.$, 'c', 0)).toBe(null)
@@ -507,8 +507,49 @@ test('with Citations auto cite, c cites the selected words too: words inside a c
   }
 })
 
-test('placeOf finds the words as the analyst read them in the text Claude wrote, across its emphasis, on one line', () => {
+test('c finds the selected words in the answer as it draws: words that run into or across a citation open it, as do its corrected words and words over the × of a failed one; other words become a citation at their place in the text Claude wrote', async () => {
+  setOptions({ citations: 'auto cite' })
+  try {
+    const s = setup([LOOK, reply({ glosses: [], heads: null })])
+    await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+    await noteRow(s.$, 't1-row', ANSWER)
+    await startCheck(s.$, { turnId: 't1', reason: 'answer' })
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const key = (await replyKeyOf(s.$, 't1-row'))!
+    const cite = async (text: string) => {
+      s.$.ui.selection = async () => ({ text, requestId: 't1-row' })
+      expect((await citeBar(s.$, k => k === 'cite', false)).map(x => `${x.key} ${x.words}`)).toEqual(['c cite'])
+      await (await citeKey(s.$, 'c', 0))!.later!()
+      await settle()
+      return (await trayNow(s.$))!.stack[0]
+    }
+    // the citation's brackets are not drawn, so words that run into it or across it are found, and open it; while the
+    // tray shows it, c leaves it open
+    for (const words of ['41 of the 44 failures', 'runs out: 41 of the 44', 'out: 41 of the']) expect(await cite(words)).toMatchObject({ row: 't1-row', kind: 'citation', n: 1 })
+    // its check corrected it: the corrected words, drawn in place of Claude's, open it
+    await editReply(s.$, key, r => ({ ...r, items: r.items.map(m => ({ ...m, status: 'corrected', shown: 'all but one of the 44', was: m.words })) }))
+    expect(await cite('all but one of the 44 failures')).toMatchObject({ n: 1 })
+    // failed: the × drawn after it is no word of the answer
+    await editReply(s.$, key, r => ({ ...r, items: r.items.map(m => ({ ...m, status: 'failed', shown: m.words })) }))
+    expect(await cite('the 44 × failures came')).toMatchObject({ n: 1 })
+    expect((await rowMarks(s.$, 't1-row'))!.items.length).toBe(1)
+    // words after a corrected citation, and after one asked about before, stand at their place in Claude's text
+    await editReply(s.$, key, r => ({ ...r, items: r.items.map(m => ({ ...m, status: 'corrected', shown: 'all but one of the 44', was: m.words })) }))
+    expect(await cite('came 30 seconds')).toMatchObject({ n: 2 })
+    expect(await cite('after a drop')).toMatchObject({ n: 3 })
+    const items = (await rowMarks(s.$, 't1-row'))!.items
+    expect(items.filter(m => m.asked).map(m => ANSWER.slice(m.start, m.end))).toEqual(['came 30 seconds', 'after a drop'])
+    expect(withAsked(ANSWER, items).text).toContain('[41 of the 44](#) failures [came 30 seconds](#) [after a drop](#).')
+  } finally {
+    setOptions({})
+  }
+})
+
+test('placeOf finds the words as the analyst read them in the text Claude wrote, across its emphasis and the brackets of its citations, on one line', () => {
   expect(placeOf('A **bold claim** here.', 'bold claim here')).toEqual({ start: 2, end: 21 })
+  // a place on a citation's words takes in the whole citation; the × drawn after a failed one is no word of the text
+  expect(placeOf('Of [12 of 40](#) runs.', 'of 40 runs')).toEqual({ start: 3, end: 21 })
+  expect(placeOf('Of [12 of 40](#) runs.', '12 of 40 × runs.')).toEqual({ start: 3, end: 22 })
   expect(placeOf('A **bold claim** here.', 'bold claim')).toEqual({ start: 4, end: 14 })
   expect(placeOf('one  two three', 'one two')).toEqual({ start: 0, end: 8 })
   expect(placeOf('one\ntwo three', 'one two')).toBe(null)
