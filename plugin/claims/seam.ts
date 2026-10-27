@@ -56,10 +56,10 @@ export async function claimsBar($: Engine, on: (key: string) => boolean, preview
   if (!(await claimCount($))) return (await claimsToFind($)).answers ? [{ id: 'claims', key: 'w', words: 'evidence', press: () => openClaims($) }] : []
   const words = await claimsBarWords($)
   // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims. The session's
-  // first claims: the count pulses, and says `new` until the pane is first opened
+  // first claims: the count pulses
   const first = await claimsFresh($)
   const look = first.lit || await claimsLit($) ? { color: accent() } : {}
-  return [{ id: 'claims', key: 'w', words: first.fresh ? `${words} · new` : words, ...look, ...(first.lit || await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
+  return [{ id: 'claims', key: 'w', words, ...look, ...(first.lit || await claimsBright($) ? { bold: true } : {}), press: () => openClaims($) }]
 }
 
 export async function claimsState($: Engine): Promise<Record<string, unknown>> {

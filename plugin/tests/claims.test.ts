@@ -128,7 +128,7 @@ const textOf = (node: Any): string => {
   return node.type === 'Box' && node.props?.flexDirection === 'column' ? `${kids}\n` : kids
 }
 
-test("an answer's claims come in with the citations near their words; w counts them, and lights when a later answer corrects one", async () => {
+test("an answer's claims come in with the citations near their words; w counts them, never with `new`, and lights when a later answer corrects one", async () => {
   setOptions({ claimsMode: 'auto' })
   const s = setup([
     reply([{ claim: 'Alice made 212 of the edits.', quote: 'Alice made 212 edits', cluster: 'who tilted it' }, { claim: 'The edits after June 18 were biased.', quote: 'the edits after June 18 biased', by: 'analyst', cluster: 'who tilted it' }]),
@@ -144,13 +144,13 @@ test("an answer's claims come in with the citations near their words; w counts t
     ['c2', 'person', []],
   ])
   expect(JSON.parse(s.files.get(`${KEPT}/claims.json`)!).claims.length).toBe(2)
-  // the session's first claims: the count says `new` until the pane is first opened
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', '2 claims · new']])
+  // the session's first claims: the count alone, though the pane was never opened
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['w', '2 claims']])
   // the next look reads every claim so far
   await answered(s, { id: 't2', prompt: 'Are you sure?', rows: ['The edits were not biased: one editor tilted them.'] })
   expect(s.forks[1]).toContain('PROMPT lens-claims')
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.words, x.color])).toEqual([['3 claims · new', 'merged']])
-  // opened once, the count no longer says new
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.words, x.color])).toEqual([['3 claims', 'merged']])
+  // opened, the count reads the same
   await openClaims(s.$)
   expect((await claimsBar(s.$, () => true, false)).map(x => x.words)).toEqual(['3 claims'])
   // switched off, w is not on the bar and the key is typed
@@ -525,7 +525,7 @@ test('claims on demand: no look reads them after a reply; w shows the pane with 
   const found = await draw({})
   expect(buttons(found).some(b => b.hotkey === 'f')).toBe(false)
   expect(textOf(found)).not.toContain('Finding')
-  expect((await claimsBar(s.$, () => true, false)).map(x => x.words)).toEqual(['1 claim · new'])
+  expect((await claimsBar(s.$, () => true, false)).map(x => x.words)).toEqual(['1 claim'])
   // a newer answer waits: f offers it alone
   await answered(s, { id: 't2', prompt: 'Why?', rows: ['The cache was cold.'] })
   expect(s.forks.length).toBe(1)

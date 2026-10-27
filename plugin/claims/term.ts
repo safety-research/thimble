@@ -52,13 +52,13 @@ const BRIGHT = { plugin: 'thimble', key: 'claimsBright' } as const
 /** How long the bar's count is bold after new claims, as in 0.10. */
 const BRIGHT_MS = 1600
 /** The first claims of a session: the bar's count pulses (in thimble's color, then plain) this many times this far
- *  apart, and says `new` until the pane is first opened, so a person sees that it appeared. */
+ *  apart, so a person sees that it appeared. */
 const PULSE = { times: 6, ms: 450 }
 const FIRST = { plugin: 'thimble', key: 'claimsFirst' } as const
 /** The answers a look reads the claims of now (on demand, or after a reply), and when it began: the pane says the
  *  claims are being found. */
 const FINDING = { plugin: 'thimble', key: 'claimsFinding' } as const
-type First = { lit: boolean; opened: boolean }
+type First = { lit: boolean }
 const FILE = 'claims.json'
 
 // ------------------------------------------------------------------------------------------------ the store
@@ -101,18 +101,16 @@ function pulse($: Engine): void {
   for (let i = 0; i <= 2 * PULSE.times; i++) {
     $.clock.after(i * PULSE.ms, () => {
       void (async () => {
-        const was = (await $.state.get(FIRST)).value as First | null | undefined
-        await $.state.set(FIRST, { lit: i < 2 * PULSE.times && i % 2 === 0, opened: !!was?.opened })
+        await $.state.set(FIRST, { lit: i < 2 * PULSE.times && i % 2 === 0 })
       })().catch(() => undefined)
     })
   }
 }
 
-/** How the bar's count draws attention after the session's first claims: `lit` while it pulses on, `fresh` from then
- *  until the pane was first opened. */
-export async function claimsFresh($: Engine): Promise<{ lit: boolean; fresh: boolean }> {
+/** How the bar's count draws attention after the session's first claims: `lit` while it pulses on. */
+export async function claimsFresh($: Engine): Promise<{ lit: boolean }> {
   const f = (await $.state.get(FIRST)).value as First | null | undefined
-  return { lit: !!f?.lit, fresh: !!f && !f.opened }
+  return { lit: !!f?.lit }
 }
 
 /** A /clear or a /resume (hooks/turnover.ts): the new conversation's claims are held before anything draws their
@@ -260,7 +258,6 @@ export async function claimsLit($: Engine): Promise<boolean> {
  *  item, a click on which opens it. */
 export async function openClaims($: Engine, args: ClaimsArgs = {}, byKey = false): Promise<void> {
   await reloadClaims($)
-  await $.state.set(FIRST, { lit: false, opened: true }).catch(() => undefined)
   const placed = await openPane($, 'claims', args, args.source ? 'Where it was said' : 'Evidence', { focus: true, rows: 36 })
   if (placed) { await failCleared($, 'pane:claims'); return }
   const words = `w ${(await claimCount($)) ? await claimsBarWords($) : 'evidence'}`
