@@ -540,6 +540,60 @@ test('a tray taller than the rows the band has over the bar shows its body in a 
   expect(bandScrolls()).toBe(1)
 })
 
+test('a tray cut at a short height pages: ↓ N more lines is a click that moves its window a page, ↑ N lines above one back, and d and u do the same; a word that starts with d is typed', CITES, async ($, on) => {
+  const { clock } = await resumed($, on, TALL, 's-tray-page')
+  const drawn = async (maxRows = 8) => {
+    const band = await $.ui.render(above(maxRows))
+    const top = all(band).find(n => n.props?.key === 'tray-window-in')?.props?.top
+    return { band, text: textOf(band), top: typeof top === 'number' ? -top : 0, button: (id: string) => all(band).find(n => n.type === 'Button' && n.props?.key === `tray-page-${id}`) }
+  }
+  // a click on the row under the window, in the band as mounted at the same height
+  const click = async (id: string) => {
+    const band = await $.ui.mount(above(8))
+    await band.press({ key: `tray-page-${id}` })
+    await band.unmount()
+  }
+  // ] then +: all the code and its output
+  const open = async () => {
+    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+  }
+  await open()
+  await drawn(10)
+  // the failure line of the session's start goes with the next prompt, which closes the tray; opened again
+  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
+  await open()
+  let d = await drawn()
+  const below = Number(/↓ (\d+) more line/.exec(d.text)?.[1])
+  expect(below).toBeGreaterThan(5)
+  expect(d.top).toBe(0)
+  // a click on ↓ N more lines: a page further down, and ↑ N lines above under the window too
+  const down = d.button('down')
+  expect(textOf(down)).toBe(`d ↓ ${below} more lines`)
+  await click('down')
+  d = await drawn()
+  const page = d.top
+  expect(page).toBeGreaterThan(0)
+  expect(d.text).toContain(`↑ ${page} line${page === 1 ? '' : 's'} above`)
+  // ↑ N lines above: a page back up
+  await click('up')
+  expect((await drawn()).top).toBe(0)
+  // d at an empty prompt pages down, u back up
+  expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
+  expect((await drawn()).top).toBe(page)
+  await clock.advance(2000)
+  expect(await $.prompt.edit(key('u'))).toEqual({ text: '', cursor: 0 })
+  expect((await drawn()).top).toBe(0)
+  await clock.advance(2000)
+  // a word that starts with d: the page goes back, and the word is typed
+  expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
+  const word = await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'o' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'o' } as never) as Any
+  expect(word.text).toBe('do')
+  expect((await drawn()).top).toBe(0)
+})
+
 // a heads-up whose words are a citation's words, or hold them
 const headsOn = (term: string) => ({ explain: { order: ['h1'], items: { h1: { id: 'h1', kind: 'heads', term, title: 'Names are typed in', bullets: ['Anyone who edits types a name.'] } } } })
 const filledOf = (drawn: Any[]) => drawn.filter(n => n.type === 'Text' && n.props?.backgroundColor).map(textOf)

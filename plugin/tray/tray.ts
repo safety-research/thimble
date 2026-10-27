@@ -24,6 +24,8 @@
 //               card too (this module's ui.press hook, so the fork starts inside a hook)
 //   0 close     back to the mark under it, or close
 //   ] [         the next mark or card, and the one before
+//   d u         a body taller than the tray's rows: a page further down, a page back up, while no other key holder (the
+//               fix line, a card on screen) takes the letter; the row under the window names them
 //
 // Each key's words in the tray are a click too: the header's keys, `x repair` in the card, `+ expand all` (and `− collapse`)
 // under the evidence is + (and -); a click on the citation's words, in the tray's title as in the
@@ -31,7 +33,8 @@
 //
 // The tray takes only the rows the band above the prompt has over the bar (bar/register.ts), so the bar stays on
 // screen: a body taller than that shows in a window of those rows, which the wheel over the band scrolls, over a dim
-// row that says how many more lines there are. A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks
+// row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click
+// that moves the window a page, as d and u do. A card ] reaches takes the keys (cards/store.ts setFocus); `a` asks
 // about it and 0 gives the keys back. An open tray does not change what the next prompt asks: a question about the
 // mark goes to a side thread (a). The tray closes when the person sends a prompt. What the person opens reaches main
 // through core/engaged.ts.
@@ -47,7 +50,7 @@ import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
 import { controlWords } from '../core/selection'
-import { revealCard } from '../cards/draw'
+import { keyOwner, revealCard } from '../cards/draw'
 import { quiet } from '../core/askcell.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
@@ -63,6 +66,7 @@ import { marksIn, plainSentence, withAsked, withoutMarks, withRewrites } from '.
 import { looksByWords, quietLooks } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl, wordsLook, type MarkStatus } from '../marks/view'
+import { fixKey } from '../fix/line'
 import { featureOn } from '../settings/features.mjs'
 import { squeezeBar, squeezeHidesCard, squeezeHolds, squeezeView } from '../squeeze/seam'
 import { openThread } from '../threads/seam'
@@ -462,6 +466,8 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
   }
   const f = top(tray) as Frame | null
   if (!f) return null
+  const page = pageKey($, key)
+  if (page) return page
   if (key === '0') return { now: () => goBack($) }
   if (key === 'a') return { later: () => askAbout($, f, true) }
   if (key === '1') return { now: () => askAbout($, f, true) }
@@ -752,25 +758,52 @@ async function placeBody($: Engine, els: Any, f: Frame & { kind: 'place' }, w: n
 let scrolled = 0
 let windowed: { over: number; rows: number } | null = null
 
+/** The keys that move the window a page down and up, each while no one before the tray takes it (the fix line, fix/
+ *  line.ts) and no card on screen lists it (cards/draw.ts keyOwner): the tray takes a key before a card does. */
+const PAGE_KEYS = { down: 'd', up: 'u' } as const
+/** The page keys the row under the window named as it was last drawn, null where none: a key reads no state. */
+let paging: { down: string | null; up: string | null } = { down: null, up: null }
+
+/** The page keys free now: each one no key holder before the tray takes, and no card on screen lists. */
+async function freePageKeys($: Engine): Promise<{ down: string | null; up: string | null }> {
+  const free = async (k: string) => !(await fixKey($, k).catch(() => null)) && !(await keyOwner($, k).catch(() => null))
+  return { down: (await free(PAGE_KEYS.down)) ? PAGE_KEYS.down : null, up: (await free(PAGE_KEYS.up)) ? PAGE_KEYS.up : null }
+}
+
+/** The rows a page moves the window: all its rows but one, which stays in view. */
+const pageOf = (w: { rows: number }) => Math.max(1, w.rows - 1)
+
 /** The tray's body in at most `fit` rows: whole when it fits; else a window of `fit` − 1 of its rows, and under it a dim
- *  row that says how many more lines there are below (at the end, above). Claude Code scrolls the band only when its
- *  whole tree is taller than its rows, so the wheel over the band moves the window (registerTray's ui.scroll hook).
- *  With fewer than two rows for the body, it shows whole, and the band scrolls as Claude Code scrolls it. */
-function fitBody(els: Any, body: Any[], w: number, fit: number): Any[] {
-  const { Box, Text } = els
+ *  row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click that
+ *  moves the window a page, after the key that does the same when it is free (`keys`). Claude Code scrolls the band
+ *  only when its whole tree is taller than its rows, so the wheel over the band moves the window too (registerTray's
+ *  ui.scroll hook). With fewer than two rows for the body, it shows whole, and the band scrolls as Claude Code scrolls
+ *  it. */
+function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }): Any[] {
+  const { Box, Button, Text } = els
   const tall = treeRows(body, w)
-  if (tall <= fit || fit < 2) { windowed = null; return body }
+  if (tall <= fit || fit < 2) { windowed = null; paging = { down: null, up: null }; return body }
   const rows = fit - 1
   const over = tall - rows
   windowed = { over, rows }
   scrolled = Math.max(0, Math.min(over, scrolled))
   const below = over - scrolled
-  const words = below > 0 ? `↓ ${below} more line${below === 1 ? '' : 's'}` : `↑ ${over} line${over === 1 ? '' : 's'} above`
+  const page = pageOf(windowed)
+  paging = { down: below > 0 ? keys.down : null, up: scrolled > 0 ? keys.up : null }
+  const lines = (n: number) => `${n} line${n === 1 ? '' : 's'}`
+  // each part a click that moves the window a page, its key first when the key is free
+  const part = (id: string, key: string | null, words: string, by: number): Any => Button({ key: `tray-page-${id}`, plain: true, label: words, hover: quiet(`tray-page-${id}`), onPress: () => scrollTray($, by), children: [
+    ...(key ? [Text({ key: 'k', color: accent(), bold: true, children: `${key} ` })] : []), Text({ key: 'w', dimColor: true, children: words }),
+  ] })
+  const parts = [
+    ...(scrolled > 0 ? [part('up', paging.up, `↑ ${lines(scrolled)} above`, -page)] : []),
+    ...(below > 0 ? [part('down', paging.down, `↓ ${below} more line${below === 1 ? '' : 's'}`, page)] : []),
+  ]
   return [
     Box({ key: 'tray-window', flexDirection: 'column', height: rows, overflow: 'hidden', children: [
       Box({ key: 'tray-window-in', flexDirection: 'column', flexShrink: 0, ...(scrolled ? { position: 'relative', top: -scrolled } : {}), children: body }),
     ] }),
-    Text({ key: 'tray-scroll', dimColor: true, wrap: 'truncate-end', children: words }),
+    Box({ key: 'tray-scroll', flexDirection: 'row', height: 1, overflow: 'hidden', children: parts.flatMap((x, i) => [...(i ? [Text({ key: `tray-page-s${i}`, dimColor: true, children: ' · ' })] : []), x]) }),
   ]
 }
 
@@ -784,6 +817,19 @@ function scrollTray($: Engine, by: number): boolean {
   return true
 }
 
+/** d or u while the row under the window names it: the window a page down or up, undone when a letter follows (the
+ *  person types a word). Null for any other key, which reads nothing. */
+function pageKey($: Engine, key: string): Any | null {
+  const dir = key === paging.down ? 1 : key === paging.up ? -1 : 0
+  if (!dir || !windowed) return null
+  const by = dir * pageOf(windowed)
+  let was = scrolled
+  return {
+    now: async () => { was = scrolled; scrollTray($, by) },
+    undo: async () => { if (scrolled !== was) { scrolled = was; $.ui.invalidate('ui.render') } },
+  }
+}
+
 /** The tray, drawn above the bar while it is open: one frame, its title (a citation's words, drawn and clicked as in
  *  the reply) on top, a citation's status and its keys at its right (trayKeys), then the mark's card, its rows starting where the
  *  title starts. `room`: the rows it may take, so the bar under it stays on screen (0: no limit); a taller body shows
@@ -791,7 +837,7 @@ function scrollTray($: Engine, by: number): boolean {
 export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
   const tray = await trayNow($)
   const f = top(tray) as Frame | null
-  if (!tray || !f) { windowed = null; controlWords('tray', []); return [] }
+  if (!tray || !f) { windowed = null; paging = { down: null, up: null }; controlWords('tray', []); return [] }
   const { Box, Text } = els
   const w = Math.max(40, Math.min(104, width - 3))
   const inner = w - 4
@@ -864,8 +910,11 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const head = oneRow
     ? Box({ key: 'tray-head', flexDirection: 'row', justifyContent: 'space-between', children: [Box({ key: 'l', flexShrink: 1, children: [titleEl] }), rightEl] })
     : Box({ key: 'tray-head', flexDirection: 'column', children: [titleEl, Box({ key: 'r-row', flexDirection: 'row', justifyContent: 'flex-end', width: inner, children: [rightEl] })] })
-  // of the rows the tray may take, the frame's two borders and its head take theirs, and the body what is left
-  const shown = fitBody(els, body, inner, room > 0 ? room - 2 - treeRows(head, inner) : Infinity)
+  // of the rows the tray may take, the frame's two borders and its head take theirs, and the body what is left; a body
+  // taller than that pages with d and u while they are free
+  const fit = room > 0 ? room - 2 - treeRows(head, inner) : Infinity
+  const keysFree = fit >= 2 && treeRows(body, inner) > fit ? await freePageKeys($) : { down: null, up: null }
+  const shown = fitBody($, els, body, inner, fit, keysFree)
   const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: shown })] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
 }
