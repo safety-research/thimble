@@ -10,9 +10,9 @@
 // While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey):
 //   [ shorter, ] longer on the picked chip (Length: short · as written · longer · much longer); < > , . the same, unnamed
 //   1–N pick a chip · 0 the original (on a catch-up: no catch-up)
-// Each chip names its two ends either side of its dots (`Interpretation facts ○●○ expert reading`); a press on an end
-// or a dot sets that level. While a rewrite is on its way the old text dims, and the bar's busy line says `rewriting`
-// (term.ts); a version seen before comes back at once.
+// Each chip names its two ends either side of its dots (`Length shorter ○●○○ longer`); a press on a dot sets that
+// level, and a press on an end moves the chip one level toward it, as [ and ] do. While a rewrite is on its way the old
+// text dims, and the bar's busy line says `rewriting` (term.ts); a version seen before comes back at once.
 //   · s close · + a chip in the person's own words (typed as `/rewrite <words>`, with the earlier ones offered as it is typed)
 // The bar names `s close` first while the chips are open, and the chips' row ends with it too (a press there closes them).
 // A click on the chips hands them the keyboard (their Client, chips.tsx): then tab and shift+tab move between the chips,
@@ -124,8 +124,8 @@ function rowOf(rec: Rec, at: At): Any[] {
 /** A level that would bring a catch-up to its original: it never stands there (0 shows the replies again). */
 const toOriginal = (rec: Rec, to: At) => !!rec.catchup && isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at: to } }))
 
-/** One chip moved a step: the rewrite asked for, or the edge said when it goes no further. On a catch-up a step that
- *  would land on the original goes on past it. */
+/** One chip moved a step, by a key or a press on one of its ends: the rewrite asked for, or the edge said when it goes
+ *  no further. On a catch-up a step that would land on the original goes on past it. */
 async function step($: Engine, open: Open, cid: string, dir: number, key: string | null): Promise<void> {
   const rec = await recOf($, open.id)
   if (!rec) return
@@ -133,8 +133,8 @@ async function step($: Engine, open: Open, cid: string, dir: number, key: string
   const probe = (a: At) => ({ ...rec, squeeze: { ...rec.squeeze, at: a } })
   let to = stepAt(probe(at), cid, dir) as At | null
   if (to && toOriginal(rec, to)) to = stepAt(probe(to), cid, dir) as At | null
-  if (!to) { await setOpen($, { focus: cid, edge: cid }); return }
-  await setOpen($, { focus: cid, edge: null })
+  if (!to) { await setOpen($, { focus: cid, edge: cid, typing: null }); return }
+  await setOpen($, { focus: cid, edge: null, typing: null })
   await wantLevels($, open.id, to)
   void setLevels($, open.id, to, key).catch(() => undefined)
 }
@@ -331,6 +331,8 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
     if (r === 'close') { await setOpen($, null); continue }
     const dot = /^lvl-(.+)-(\d+)$/.exec(r)
     if (dot) { await setLevel($, open, dot[1]!, Number(dot[2])); continue }
+    const end = /^step-(.+)-(down|up)$/.exec(r)
+    if (end) { await step($, open, end[1]!, end[2] === 'up' ? 1 : -1, null); continue }
     const cid = r.replace(/^(chip|word)-/, '')
     if (cid !== r) await pressChip($, open, cid)
   }

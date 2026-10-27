@@ -380,8 +380,6 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   expect(textOf(at0.tree)).toContain('1 Length shorter ○●○○ longer · as written')
   expect(textOf(at0.tree)).toContain('2 Background novice ○○●○ expert')
   expect(textOf(at0.tree)).not.toContain('Interpretation')
-  // a press on an end sets that level
-  expect(nodes(at0.tree).some(n => n.type === 'Button' && n.props.label === 'Background: novice')).toBe(true)
   // each of the bar's keys is a press: [ and ] each one way, and 1–2 picks the next chip
   const bar = nodes(await $.ui.render(above)).filter(n => n.type === 'Button').map(n => String(n.props.label))
   expect(bar).toEqual(expect.arrayContaining(['s close', '[ shorter', '] longer', '1–2 chip', '+ your own']))
@@ -406,6 +404,31 @@ test('each chip names its ends; while a rewrite is on its way the text dims and 
   await t.clock.advance(3000)
   expect(t.asked.length).toBe(1)
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('in plain words.')
+})
+
+test('a press on a chip\'s end moves it one level toward that end, as [ and ] do, and no further than the end; a press on a dot sets that level', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  const level = async (id: string) => (await chipsDrawn($, 'row-t1', LONG)).client.props.props.items.find((c: Any) => c.id === id).level
+  const ui = await $.ui.mount(answer('row-t1', LONG))
+  // Length stands at as written: longer, then much longer, one level a press
+  await ui.press({ key: 'step-length-up' })
+  expect(await level('length')).toBe(2)
+  await ui.press({ key: 'step-length-up' })
+  expect(await level('length')).toBe(3)
+  // at its end it stays, and the bar says it goes no further
+  await ui.press({ key: 'step-length-up' })
+  expect(await level('length')).toBe(3)
+  expect(await t.bar()).toContain('goes no further')
+  // Background stands at working: its novice end moves it to learning, and picks it
+  await ui.press({ key: 'step-familiarity-down' })
+  expect(await level('familiarity')).toBe(1)
+  expect((await chipsDrawn($, 'row-t1', LONG)).client.props.props.items.find((c: Any) => c.picked).id).toBe('familiarity')
+  // a dot sets its level at once
+  await ui.press({ key: 'lvl-length-0' })
+  expect(await level('length')).toBe(0)
+  await ui.unmount()
 })
 
 test('the rewrite starts from the corrected citations: the request holds the corrected value alone, and names no correction', async ($, on) => {
