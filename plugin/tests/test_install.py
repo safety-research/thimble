@@ -176,23 +176,71 @@ def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_
     assert (tmp_path / "bin" / "thimble-browser").exists() and not (tmp_path / "bin" / "thimble").exists()
 
 
-def plugin_install(tmp_path, source, claude="exit 0\n", listed=True):
+# The made-up claude's `plugin marketplace add SOURCE` and `plugin marketplace remove NAME`, as Claude Code 2.1.307 does
+# them. It keeps a marketplace in its list (plugins/known_marketplaces.json) and in its user settings
+# (extraKnownMarketplaces in settings.json). remove says that the name is not found when the list does not have it, and
+# changes nothing; else it removes the name from both. add refuses a source other than the one the settings give for
+# thimble (Claude Code 2.1.307 refuses GitHub's so); else it puts thimble in both.
+MARKETPLACE = r'''
+import json, os, sys
+cc = os.environ["CLAUDE_CONFIG_DIR"]
+files = {"known": os.path.join(cc, "plugins", "known_marketplaces.json"), "settings": os.path.join(cc, "settings.json")}
+data = {}
+for k, at in files.items():
+    try:
+        data[k] = json.load(open(at, encoding="utf-8"))
+    except OSError:
+        data[k] = {}
+known, declared = data["known"], data["settings"].setdefault("extraKnownMarketplaces", {})
+verb, arg = (sys.argv[1:] + ["", ""])[:2]
+if verb == "remove":
+    if arg not in known:
+        sys.exit(f"Failed to remove marketplace: Marketplace '{arg}' not found")
+    del known[arg]
+    declared.pop(arg, None)
+elif verb == "add":
+    source = ({"source": "directory", "path": os.path.realpath(arg)} if os.path.isdir(arg)
+              else {"source": "github", "repo": arg})
+    if declared.get("thimble", {}).get("source", source) != source:
+        sys.exit('Failed to add marketplace: Cannot add marketplace "thimble": its source doesn\'t match its '
+                 "extraKnownMarketplaces entry in user or managed settings; add it from the source that entry lists, "
+                 "or change the entry.")
+    known["thimble"] = {"source": source, "installLocation": os.path.join(cc, "plugins", "marketplaces", "thimble")}
+    declared["thimble"] = {"source": source}
+else:
+    sys.exit(0)
+for k, at in files.items():
+    with open(at, "w", encoding="utf-8") as f:
+        json.dump(data[k], f, indent=2, ensure_ascii=False)
+        f.write("\n")
+'''
+
+
+def plugin_install(tmp_path, source, claude="", listed=True, settings=None):
     """scripts/install.sh --no-browser with made-up commands, when Claude Code's marketplace thimble (in its list unless
-    `listed` is false, and in its user settings) is the folder `source`, and this shell's THIMBLE_HOME is
-    tmp_path/thimble. The made-up claude logs each call, says its version, lists no plugin, and else runs `claude`; with
-    `claude` None, there is no claude command. The run, and the plugin calls."""
+    `listed` is false, and in its user settings, a file of mode 640 with the other `settings`) is the folder `source`,
+    and this shell's THIMBLE_HOME is tmp_path/thimble. The made-up claude logs each call, says its version, lists no
+    plugin, runs `claude`, then adds and removes a marketplace as Claude Code does (MARKETPLACE), and else succeeds;
+    with `claude` None, there is no claude command. The run, and the plugin calls."""
     entry = {"source": "directory", "path": str(source)}
     cc = tmp_path / "cc"
     (cc / "plugins").mkdir(parents=True)
     known = {"thimble": {"source": entry, "installLocation": str(source)}} if listed else {}
     (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps(known))
-    (cc / "settings.json").write_text(json.dumps({"extraKnownMarketplaces": {"thimble": {"source": entry}}}))
+    others = settings or {}
+    declared = {**others.get("extraKnownMarketplaces", {}), "thimble": {"source": entry}}
+    (cc / "settings.json").write_text(json.dumps({**others, "extraKnownMarketplaces": declared}, indent=2,
+                                                 ensure_ascii=False) + "\n", encoding="utf-8")
+    (cc / "settings.json").chmod(0o640)
     bin_ = tmp_path / "stubs"
     log = tmp_path / "claude.log"
     if claude is not None:
+        model = tmp_path / "marketplace.py"
+        model.write_text(MARKETPLACE)
         stub(bin_ / "claude", f'echo "$@" >> "{log}"\n'
              'case "$1 $2" in "--version ") echo "2.1.311 (Claude Code)"; exit 0 ;; "plugin list") echo "[]"; exit 0 ;; esac\n'
-             + claude)
+             + claude
+             + f'[ "$1 $2" = "plugin marketplace" ] && exec "{sys.executable}" "{model}" "$3" "$4"\nexit 0\n')
     stub(bin_ / "node", "echo v22.20.0\n")
     home = tmp_path / "home"
     home.mkdir()
@@ -241,21 +289,37 @@ def test_without_claude_the_commands_it_prints_first_remove_a_marketplace_on_the
                                     "  claude plugin install thimble@thimble"]
 
 
-def test_a_marketplace_on_the_deleted_fixes_that_only_the_settings_name_is_nothing_to_remove(tmp_path):
+def test_a_marketplace_on_the_deleted_fixes_that_only_the_settings_name_goes_from_them_and_the_plugin_installs(tmp_path):
     """Claude Code's list has no marketplace thimble, and only its user settings name the fixes' live folder, which is
-    gone: claude plugin marketplace remove thimble fails, as Claude Code's does, with "Marketplace 'thimble' not found".
-    The install takes it as nothing to remove, shows no failure, and installs the plugin as usual. Another failure of
-    the remove still stops the install, with what Claude Code said."""
-    remove = '[ "$1 $2 $3" = "plugin marketplace remove" ] && { echo "%s" >&2; exit 1; }\nexit 0\n'
-    p, calls = plugin_install(tmp_path, tmp_path / "thimble" / "fixes" / "live",
-                              remove % "Failed to remove marketplace: Marketplace 'thimble' not found", listed=False)
+    gone: claude plugin marketplace remove thimble fails with "Marketplace 'thimble' not found", and Claude Code refuses
+    GitHub's source for thimble while its settings name that folder. The install removes thimble from the settings, and
+    only it: the other settings and the file's mode stay. It shows no failure, and installs the plugin as usual."""
+    others = {"env": {"MADE_UP_NAME": "été"},
+              "extraKnownMarketplaces": {"made-up": {"source": {"source": "directory", "path": "/made/up/market"}}}}
+    p, calls = plugin_install(tmp_path, tmp_path / "thimble" / "fixes" / "live", listed=False, settings=others)
     assert p.returncode == 0, p.stdout + p.stderr
     assert calls == ["plugin marketplace remove thimble", "plugin marketplace add safety-research/thimble",
                      "plugin list --json", "plugin install thimble@thimble"]
     assert "not found" not in p.stdout + p.stderr
-    other = tmp_path / "other"
-    p, calls = plugin_install(other, other / "thimble" / "fixes" / "live", remove % "made-up failure", listed=False)
+    settings = tmp_path / "cc" / "settings.json"
+    # thimble's entry is now the one the add wrote (GitHub's), and the rest is as it was
+    assert json.loads(settings.read_text(encoding="utf-8")) == {
+        "env": {"MADE_UP_NAME": "été"},
+        "extraKnownMarketplaces": {"made-up": {"source": {"source": "directory", "path": "/made/up/market"}},
+                                   "thimble": {"source": {"source": "github", "repo": "safety-research/thimble"}}}}
+    assert settings.stat().st_mode & 0o777 == 0o640
+
+
+def test_a_failure_of_the_remove_other_than_not_found_stops_the_install(tmp_path):
+    """Only Claude Code's settings name the fixes' live folder, which is gone, and claude plugin marketplace remove
+    thimble fails for a reason other than "not found": the install stops with what Claude Code said, and changes
+    nothing in the settings."""
+    live = tmp_path / "thimble" / "fixes" / "live"
+    p, calls = plugin_install(tmp_path, live, '[ "$1 $2 $3" = "plugin marketplace remove" ] && '
+                              '{ echo "made-up failure" >&2; exit 1; }\n', listed=False)
     assert p.returncode == 1 and "made-up failure" in p.stderr and calls == ["plugin marketplace remove thimble"]
+    settings = json.loads((tmp_path / "cc" / "settings.json").read_text())
+    assert settings == {"extraKnownMarketplaces": {"thimble": {"source": {"source": "directory", "path": str(live)}}}}
 
 
 def test_install_md_updates_with_thimble_update():
