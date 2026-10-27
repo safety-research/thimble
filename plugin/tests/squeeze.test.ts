@@ -6,6 +6,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { cardWidth } from '../cards/draw'
+import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { resetSqueeze } from '../squeeze/term'
 import Chips from '../squeeze/chips.tsx'
@@ -172,6 +173,20 @@ test('keys pressed in a row make one rewrite, at the last level, 1 s after the l
   await t.clock.advance(5000)
   expect(t.asked.length).toBe(2)
   expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('the much longer version.')
+})
+
+test("a bar narrower than the open chips' items lays them on more rows, each whole on one row and none wider than the bar, the line that says a chip goes no further too", async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  await t.press('s')
+  // the second chip, Background, down to its first level and a step past it
+  for (const k of ['2', '[', '[', '[']) await t.press(k)
+  const band = await $.ui.render({ ...(above as Any), props: { ...(above as Any).props, bodyColumns: 60 } } as never)
+  const kids = (n: Any): Any[] => { const c = n?.children ?? n?.props?.children; return Array.isArray(c) ? c : c == null ? [] : [c] }
+  const rows = kids(band).filter(n => /^bar/.test(String(n.props?.key))).map(textOf)
+  expect(rows.length).toBeGreaterThan(1)
+  for (const r of rows) expect(textWidth(r)).toBeLessThanOrEqual(60)
+  for (const item of ['s close', 'Background goes no further than novice', '[ more novice', '] more expert', '+ your own']) expect(rows.some(r => r.includes(item))).toBe(true)
 })
 
 test('a key pressed while a rewrite runs: the running one is not shown, the latest one is', async ($, on) => {
