@@ -5,7 +5,8 @@
 //
 //   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   claimsKey($, key, until)           w, while the bar names it: the Claims pane, or closed while the side pane shows
-//                                      it, once the word window closed (a taker as hooks/keys.ts takes it)
+//                                      it, once the word window closed (a taker as hooks/keys.ts takes it); a w while
+//                                      the bar last drew beside the pane only closes it, if it still shows then
 //   claimsBar($, on, preview)          its items at the bar's right (`w 11 claims`, lit when a claim was corrected); a
 //                                      press does what w does. claimsReady: whether it names w, as the plugin loads
 //   claimsState($)                     what the claims lens's digest reads (./lens.mjs): every claim so far and the
@@ -46,11 +47,21 @@ export const CLAIMS_FIND = FIND
 /** Whether the bar names w, as it last drew (claimsBar): w acts only then, as r and l act only while the bar names them
  *  (bar/register.ts barKey). Kept in memory, so the key reads no state. */
 let named = false
+/** Whether the side pane showed the claims as the bar last drew: a w then means to close it. */
+let drawnOpen = false
 
 export async function claimsKey($: Engine, key: string, _until: number): Promise<Take | null> {
   if (key !== 'w' || !named || !featureOn('claims')) return null
-  // after the word window, as 0.10 did: `w` that starts a word is typed
-  return { later: () => toggleClaims($, true) }
+  // after the word window, as 0.10 did: `w` that starts a word is typed. A w typed while the pane shows the claims (in
+  // the pane, which leaves w to the prompt) closes it, if esc, its × or a click has not closed it within the window;
+  // it never opens it again
+  const close = drawnOpen
+  return { later: () => (close ? closeClaims($) : toggleClaims($, true)) }
+}
+
+/** The pane closed, while it shows the claims. */
+async function closeClaims($: Engine): Promise<void> {
+  if (await paneShows($, 'claims').catch(() => false)) await closePane($)
 }
 
 /** w, or a press on the bar's item: the Claims pane, or closed while the side pane shows it, as r and l do for theirs
@@ -75,9 +86,10 @@ export async function claimsReady($: Engine): Promise<void> {
 
 async function barItems($: Engine): Promise<BarItem[]> {
   const press = () => toggleClaims($)
+  drawnOpen = await paneShows($, 'claims').catch(() => false)
   // no claims yet: the pane finds them on demand, so the item shows, without a count, once an answer waits for it, and
   // while the pane shows (it found none), so that w closes it
-  if (!(await claimCount($))) return (await claimsToFind($)).answers || (await paneShows($, 'claims').catch(() => false)) ? [{ id: 'claims', key: 'w', words: 'evidence', press }] : []
+  if (!(await claimCount($))) return (await claimsToFind($)).answers || drawnOpen ? [{ id: 'claims', key: 'w', words: 'evidence', press }] : []
   const words = await claimsBarWords($)
   // in thimble's color when a claim was corrected, as squeeze's; bold for a moment after new claims. The session's
   // first claims: the count pulses

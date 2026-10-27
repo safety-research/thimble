@@ -18,6 +18,9 @@
 //   cardRef(line)              -> the card a line of its own places there (`[title](card:<id>)`), or null
 //   withoutCardLinks(text)     -> the text with each link to a card as its words alone, as the person reads it
 //   cardLinksIn(text)          -> each link to a card outside code: {start, end, words}
+//   linksIn(text)              -> each link outside code that is no mark (a file's, a web page's, a card's): {start,
+//                                 end, words, target}
+//   withoutLinks(text)         -> the text with each of those links as its words alone
 //   inline(text, from, to, marks) -> one block's content as runs: words with their style, and each mark as one run
 //   wrapRuns(runs, width)      -> the runs cut into lines at spaces, a mark's words as plain words are
 //   tableOf(text, block, marks) -> a table block's cells as runs
@@ -85,11 +88,11 @@ export function askedWords(raw) {
  * the text's marks then stand, so the k-th mark of the text is the k-th of `items`, as for Claude's own marks
  * (rewritesIn, withCorrections, the looks). An asked mark (store.ts MarkItem `asked`) gives its words' place in the text
  * as Claude wrote it (`start`, `end`), and its words as the analyst read them there (askedWords: without emphasis),
- * each link to a card among them read as its title (withoutCardLinks); the mark is written on those words with their
- * links kept, so a link stays whole inside it and draws as its title. One whose words no longer stand there, that lies
- * in code, across a mark, on part of a card's link or in a sentence the check of one of Claude's marks rewrote
- * (rewritesIn: the new sentence holds only the marks it was written with), or whose words hold a bracket, is left out
- * of the text and of the order.
+ * each link among them (a file's, a web page's, a card's) read as its words (withoutLinks); the mark is written on
+ * those words with their links kept, so a link stays whole inside it and draws as its words. One whose words no longer
+ * stand there, that lies in code, across a mark, on part of a link or in a sentence the check of one of Claude's marks
+ * rewrote (rewritesIn: the new sentence holds only the marks it was written with), or whose words hold a bracket, is
+ * left out of the text and of the order.
  */
 export function withAsked(text, items) {
   const s = String(text ?? '')
@@ -99,13 +102,13 @@ export function withAsked(text, items) {
   const own = all.filter(it => !it?.asked)
   const marks = marksIn(s)
   const code = codeRanges(s)
-  const links = cardLinksIn(s)
+  const links = linksIn(s)
   const rewritten = [...rewritesIn(s, own).placed].map(k => sentenceSpan(s, marks[k]))
   const over = (a, b, x, y) => a < y && b > x
   const placed = []
   for (const it of [...asked].sort((x, y) => x.start - y.start)) {
     const [a, b] = [it.start, it.end]
-    if (!(b > a) || withoutCardLinks(askedWords(s.slice(a, b))) !== it.words || /[[\]\n]/.test(it.words)) continue
+    if (!(b > a) || withoutLinks(askedWords(s.slice(a, b))) !== it.words || /[[\]\n]/.test(it.words)) continue
     if ([...code, ...rewritten].some(([x, y]) => over(a, b, x, y)) || marks.some(m => over(a, b, m.start, m.end)) || placed.some(p => over(a, b, p.start, p.end))) continue
     if (links.some(l => over(a, b, l.start, l.end) && !(a <= l.start && b >= l.end))) continue
     placed.push(it)
@@ -455,6 +458,25 @@ export function cardLinksIn(text) {
   return [...s.matchAll(/\[([^[\]\n]*)\]\(card:[^)\n]*\)/g)].filter(m => !inCode(code, m.index)).map(m => ({ start: m.index, end: m.index + m[0].length, words: m[1] }))
 }
 
+/** Each link in a text, outside code, that is no mark (a mark links to `#`): a file's (`[upload.py](client/upload.py#L3)`),
+ *  a web page's, a card's. {start, end, words, target}: start..end the whole link, its words, its target. A mark may hold
+ *  one (`[as [the log](logs/a.log) shows](#)`), whose words then draw as the mark's words (inline). */
+export function linksIn(text) {
+  const s = String(text ?? '')
+  const code = codeRanges(s)
+  return [...s.matchAll(/\[([^[\]\n]*)\]\(([^)\n]*)\)/g)].filter(m => m[2] !== '#' && !inCode(code, m.index))
+    .map(m => ({ start: m.index, end: m.index + m[0].length, words: m[1], target: m[2] }))
+}
+
+/** The text with each link that is no mark (linksIn) as its words alone, outside code. */
+export function withoutLinks(text) {
+  const s = String(text ?? '')
+  let out = ''
+  let at = 0
+  for (const l of linksIn(s)) { out += s.slice(at, l.start) + l.words; at = l.end }
+  return out + s.slice(at)
+}
+
 /** The marks that lie inside [from, to), each with its index `i` among all marks (a span, too: {start, end}). */
 export const marksWithin = (marks, from, to) => (marks || []).map((m, i) => ({ ...m, i })).filter(m => m.start >= from && m.end <= to)
 
@@ -472,7 +494,8 @@ function linkAt(s) {
  * own: an explainer, a heads-up; core/answerview.ts Span), and `tag` the drawing's own (a glyph after a mark's words).
  * Bold, italic and inline code as Claude Code draws them; a mark's words keep their own bold, `*` italic and code, and
  * draw each `_` as written; a link that is no mark reads as its words then its target, as Claude Code draws one, and a
- * link to a card as its words alone, among other words or in a mark's (withoutCardLinks). A span lies on plain words,
+ * link to a card as its words alone (withoutCardLinks); in a mark's words, every link draws as its words alone (a
+ * citation of a link's words takes in the whole link: withAsked). A span lies on plain words,
  * inside one mark's words, or over whole marks, whose runs then carry both ({start, end}: offsets into the text).
  */
 export function inline(text, from, to, marks = [], spans = []) {
@@ -538,8 +561,8 @@ export function inline(text, from, to, marks = [], spans = []) {
       }
       if (c === '[') {
         const l = linkAt(s.slice(i, end))
-        // inside a mark's words, only a link to a card is one: its title, as among other words
-        if (l && extra.mark !== undefined && /^card:/i.test(l[2])) { push(l[1], extra); i += l[0].length; continue }
+        // inside a mark's words, a link (a file's, a web page's, a card's) draws as its words, the mark's
+        if (l && extra.mark !== undefined) { push(l[1], extra); i += l[0].length; continue }
         if (l && extra.mark === undefined) {
           push(l[1], { ...extra, link: true })
           if (!/^(https?|file|card):/i.test(l[2])) push(` (${l[2]})`, { ...extra, dim: true })

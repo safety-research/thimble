@@ -46,6 +46,7 @@ import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type Tur
 import { tellOpened } from '../core/engaged'
 import { startDir } from '../core/env'
 import { openPane } from '../core/pane'
+import { controlWords } from '../core/selection'
 import { revealCard } from '../cards/draw'
 import { quiet } from '../core/askcell.js'
 import { accent, themeLast, themeNow } from '../core/theme'
@@ -833,6 +834,9 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const tone = TONES[f.kind]
   // its keys at the right, after a citation's status, each drawn as the bar draws a key and a click that presses it
   const keys = await trayKeys($, tray, f)
+  // its keys' words, which a double click on one selects, then and once it closed: no answer's words
+  // (core/selection.ts)
+  controlWords('tray', keys.flatMap(k => [k.words, `${k.key} ${k.words}`]))
   const keysLen = keys.reduce((n, k) => n + (n ? 3 : 0) + `${k.key} ${k.words}`.length, 0)
   const rightLen = (status ? status.word.length + 2 : 0) + keysLen
   // the title and the keys on one row when both fit, else the title on a row of its own above them

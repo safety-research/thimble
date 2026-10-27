@@ -119,6 +119,53 @@ test('after an answer the bar names v, coverage and the labels; r opens the cove
   await pane.unmount()
 })
 
+test("the coverage pane's r close is a click alone: an r typed while the pane holds the keyboard reaches the prompt, where it closes the pane once its word window closed and never opens it again, and a word that starts with r is typed whole", async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  // the box as Claude Code keeps it, and the side pane: up from an open until a close
+  on('prompt.edit', (_$: unknown, e: Any) => ({ text: `${e.text.slice(0, e.start)}${e.inputText}${e.text.slice(e.end)}`, cursor: e.start + e.inputText.length }))
+  const closes: string[] = []
+  on('ui.close', (_$: unknown, e: { id: string }) => { closes.push(e.id); w.opened.splice(0); return { value: undefined } })
+  const key = (k: string, text = '') => $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text, cursor: text.length, start: text.length, end: text.length, inputText: k } as never) as Promise<Any>
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-answer-1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 43% (3/7 files)')
+  expect((await key('r')).text).toBe('')
+  await w.clock.advance(400)
+  expect(w.opened).toEqual(['thimble'])
+  // the pane's key row ends with r close, a click alone: no Button of the pane takes r
+  const buttons: Any[] = []
+  const walk = (n: Any): void => { if (Array.isArray(n)) n.forEach(walk); else if (n && typeof n === 'object') { if (n.type === 'Button') buttons.push(n); walk(n.props?.children); walk(n.children) } }
+  walk(await $.ui.render(PANE))
+  expect(buttons.filter(b => b.props.hotkey === 'r')).toEqual([])
+  const close = buttons.find(b => String(b.key ?? b.props.key) === 'key-r')
+  expect([close?.props.label, textOf(close)]).toEqual(['close', 'r: close'])
+  // the bar drawn beside the pane: an r typed in the pane reaches the prompt and closes it once its word window closed
+  await $.ui.render(BAND)
+  expect((await key('r')).text).toBe('')
+  await w.clock.advance(400)
+  expect(closes).toEqual(['thimble'])
+  // open again; an r typed in it, then esc before its word window closed: the pane stays closed
+  await $.ui.render(BAND)
+  expect((await key('r')).text).toBe('')
+  await w.clock.advance(400)
+  expect(w.opened).toEqual(['thimble'])
+  await $.ui.render(BAND)
+  const opens = w.opens.length
+  expect((await key('r')).text).toBe('')
+  w.opened.splice(0)
+  await w.clock.advance(400)
+  expect(w.opens.length).toBe(opens)
+  // a question that starts with r, typed on: a word, whole in the prompt, and nothing opens
+  await $.ui.render(BAND)
+  expect((await key('r')).text).toBe('')
+  expect((await key('u')).text).toBe('ru')
+  expect((await key('n', 'ru')).text).toBe('run')
+  await w.clock.advance(400)
+  expect(w.opens.length).toBe(opens)
+})
+
 test("a drawing never starts a count, since Claude Code stops a drawing's calls when a newer one replaces it; the session's start counts once", async ($, on) => {
   const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   const counted = () => w.ran.filter(a => a.includes('coverage')).length

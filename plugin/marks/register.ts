@@ -28,6 +28,7 @@ import { checkSpans, markFocus, markPressed, passagesFor, spansFor, textView, un
 import { forkOf } from '../core/forks'
 import { askOnce, type Below } from '../core/rowhook'
 import { openPane } from '../core/pane'
+import { shownWords } from '../core/selection'
 import { framesIn } from '../cards/draw'
 import { themeNow } from '../core/theme'
 import { mainRuns } from '../core/turn'
@@ -222,6 +223,8 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
   // each corrected citation's words in place of its own, so the explainers and heads-ups stand on the words shown
   const rewrote = own ? rewritesIn(words, items) : { text: words, placed: new Set<number>() }
   const text = own ? withCorrections(rewrote.text, items) : words
+  // the words a selection in this row is read against (core/selection.ts)
+  shownWords(row, raw, text)
   const marks = marksOn ? marksIn(text) : []
   // the explainers and heads-ups stand on the words Claude wrote, where the look found them, and follow those words
   // into the words shown (a correction's words in place of a citation's)

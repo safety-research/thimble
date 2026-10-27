@@ -489,6 +489,40 @@ test('while the pane shows the claims the bar names w, though no claim was found
   setOptions({})
 })
 
+test('w typed while the pane shows the claims means to close it: when esc, its close mark or a click closed it within the word window, the w opens nothing', async () => {
+  setOptions({ claimsMode: 'auto' })
+  const s = setup([reply([{ claim: 'Run 4 failed.', quote: 'Run 4 failed', cluster: 'failures' }])])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: ['[Run 4 failed](#).'] })
+  const closed: Any[] = []
+  s.$.ui.close = async (o: Any) => { closed.push(o) }
+  s.$.ui.panes = async () => []
+  // w opens the pane; the bar draws again beside it
+  expect((await claimsBar(s.$, () => true, false)).map(x => x.key)).toEqual(['w'])
+  await (await claimsKey(s.$, 'w', 0))!.later!()
+  expect(paneNow(s)).toMatchObject({ kind: 'claims' })
+  s.$.ui.panes = async () => [{ id: 'thimble' }]
+  await claimsBar(s.$, () => true, false)
+  // w typed in the pane reaches the prompt; esc closes the pane before its word window closed
+  const opens = s.opened.length
+  const take = (await claimsKey(s.$, 'w', 0))!
+  s.$.ui.panes = async () => []
+  await take.later!()
+  expect(s.opened.length).toBe(opens)
+  expect(closed).toEqual([])
+  // the pane still there when the window closes: the w closes it
+  s.$.ui.panes = async () => [{ id: 'thimble' }]
+  await (await claimsKey(s.$, 'w', 0))!.later!()
+  expect(closed).toEqual([{ id: 'thimble' }])
+  expect(s.opened.length).toBe(opens)
+  // the bar drawn with the pane closed: w opens it again
+  s.$.ui.panes = async () => []
+  await claimsBar(s.$, () => true, false)
+  await (await claimsKey(s.$, 'w', 0))!.later!()
+  expect(s.opened.length).toBe(opens + 1)
+  setOptions({})
+})
+
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
   setOptions({ claimsMode: 'auto' })
   const s = setup([reply([{ claim: 'Run 4 failed on the p95 check.', quote: 'Run 4 failed on the p95 check', cluster: 'failures' }])])

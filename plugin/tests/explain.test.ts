@@ -281,7 +281,7 @@ test('e explains the words selected in an answer, on the row the selection lies 
   const s = setup([LOOK], { complete: reply({ body: 'The client gives up on an upload.', here: '' }) })
   // no answer yet: e is typed, and the bar names no key
   expect(await explainKey(s.$, 'e', 0)).toBe(null)
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER} Then the client gives up.` })
   // the bar names e only while words are selected
   s.$.ui.selection = async () => undefined
   expect(await explainBar(s.$, () => true, false)).toEqual([])
@@ -371,6 +371,45 @@ test('a drag over wrapped rows and paragraphs counts its answer lines: one that 
   }
 })
 
+test("what a click on thimble's controls or Claude Code's own rows leaves selected is no answer's words, nor is a piece of one word; words selected in an answer still are, across rows too", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const text = 'The retry loop in [upload.py](client/upload.py#L7) gives up after three tries, as the [requests docs](https://example.org/docs) describe.\n\n| day | edits |\n|---|---|\n| Mon | 41 |\n| Tue | 17 |\n\nSetting a longer timeout would let slow uploads finish before starting over.'
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text })
+    const counts = async (sel: Any) => {
+      s.$.ui.selection = async () => sel
+      const e = (await explainBar(s.$, () => true, false)).map(x => x.key)
+      const c = (await citeBar(s.$, k => k === 'cite', false)).map(x => x.key)
+      expect(c.length).toBe(e.length)
+      return e.length > 0
+    }
+    // a click that slid a cell on the bar's `thimble`, a stray drag over Claude Code's busy word: pieces of a word
+    expect(await counts({ text: 'im' })).toBe(false)
+    expect(await counts({ text: 'ting' })).toBe(false)
+    expect(await counts({ text: 'ry lo' })).toBe(false)
+    // in a row of Claude Code's own (the turn's time, a tool call, the person's prompt), though the answer has its words
+    expect(await counts({ text: 'for', requestId: 'turn-time-row' })).toBe(false)
+    expect(await counts({ text: 'Read 1 file', requestId: 'collapsed-tool-row' })).toBe(false)
+    // under the answer, in its row: a card's header, its line and then one of its words, which the answer draws nowhere
+    expect(await counts({ text: 'Edits by day       checking  [ previous heads up · a ask · 0 close', requestId: 't1-row' })).toBe(false)
+    expect(await counts({ text: 'artifact', requestId: 't1-row' })).toBe(false)
+    // words selected in the answer, as it draws them: inside it, from its dot, a table's row, a link with its target,
+    // a drag that begins and ends inside words, and across rows
+    expect(await counts({ text: 'longer', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'gives up after three tries', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: '● The retry loop', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: '│ Mon │ 41    │', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'upload.py (client/upload.py#L7) gives up', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'the requests docs (https://example.org/docs) describe', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'ries, as the requests do', requestId: 't1-row' })).toBe(true)
+    expect(await counts({ text: 'ow uploads finish before starting over.\n\n✻ Cooked f' })).toBe(true)
+    expect(await counts({ text: 'Ran 2 shell commands\n\n● The retry loop in upload.py' })).toBe(true)
+  } finally {
+    setOptions({})
+  }
+})
+
 test('a selection over several rows explains its words on the newest answer that holds them; words that are a heads-up open it, unwritten', async () => {
   setOptions({})
   const s = setup([LOOK, reply({ glosses: [], heads: null })], { complete: reply({ body: 'How many tries are left.', here: '' }) })
@@ -396,7 +435,7 @@ test('the selected words are trimmed to one line, and a long selection is cut af
   expect(long.startsWith(`${got.words} `)).toBe(true)
   setOptions({})
   const s = setup([LOOK], { complete: { isAnswered: false, reason: 'aborted' } })
-  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: ANSWER })
+  await answered(s, { id: 't1', prompt: 'Why do uploads fail?', text: `${ANSWER}\n\n${long}` })
   s.$.ui.selection = async () => ({ text: long, requestId: 't1-row' })
   await (await explainKey(s.$, 'e', 0))!.later!()
   expect(String((await failLineNow(s.$))?.text)).toContain('the explainer covers its first')
@@ -498,6 +537,41 @@ test("c finds words on a card's link as they draw, the card's title, and the cit
     expect(readText(text, (await rowMarks(s.$, 't2-row'))!.items)).toBe(text)
     // a citation stored on part of a link is left out, so the link still draws
     const part = { n: 9, row: 't3-row', words: 'Edits by day', start: text.indexOf('Edits by'), end: text.indexOf('](card'), status: 'deferred', shown: 'Edits by day', asked: true }
+    expect(withAsked(text, [part]).text).toBe(text)
+  } finally {
+    setOptions({})
+  }
+})
+
+test("c on the words of a file's link or a web link cites them as they draw: the citation takes in the whole link, which still draws as its words", async () => {
+  setOptions({ citations: 'manual' })
+  try {
+    const s = setup([LOOK])
+    const text = 'The retry loop in [upload.py](client/upload.py#L3) gives up after [three tries](https://example.org/retries).'
+    s.$.ui.open = async () => ({ isPlaced: true })
+    const drawn = async (row: string) => {
+      const a = withAsked(text, (await rowMarks(s.$, row))!.items)
+      const runs = inline(a.text, 0, a.text.length, marksIn(a.text))
+      return { text: a.text, read: runsText(runs), cited: runs.filter(r => r.mark === 0).map(r => r.s).join('') }
+    }
+    // a file's link: its words, as a citation of the whole link, drawn as its words; the web link draws as before
+    await answered(s, { id: 't1', prompt: 'Why do uploads stop?', text })
+    expect(await citeWords(s.$, 't1-row', 'upload.py')).toBeUndefined()
+    expect((await rowMarks(s.$, 't1-row'))!.items.map(m => m.words)).toEqual(['upload.py'])
+    expect(await drawn('t1-row')).toEqual({ text: 'The retry loop in [[upload.py](client/upload.py#L3)](#) gives up after [three tries](https://example.org/retries).', read: 'The retry loop in upload.py gives up after three tries.', cited: 'upload.py' })
+    // words that run into a web link
+    await answered(s, { id: 't2', prompt: 'And again?', text })
+    expect(await citeWords(s.$, 't2-row', 'after three tries')).toBeUndefined()
+    expect((await rowMarks(s.$, 't2-row'))!.items.map(m => m.words)).toEqual(['after three tries'])
+    expect(await drawn('t2-row')).toEqual({ text: 'The retry loop in [upload.py](client/upload.py#L3) gives up [after [three tries](https://example.org/retries)](#).', read: 'The retry loop in upload.py (client/upload.py#L3) gives up after three tries.', cited: 'after three tries' })
+    expect(readText(text, (await rowMarks(s.$, 't2-row'))!.items)).toBe(text)
+    // words selected with the link's target, as Claude Code draws it after them
+    await answered(s, { id: 't3', prompt: 'Once more?', text })
+    expect(await citeWords(s.$, 't3-row', 'upload.py (client/upload.py#L3) gives up')).toBeUndefined()
+    expect((await rowMarks(s.$, 't3-row'))!.items.map(m => m.words)).toEqual(['upload.py gives up'])
+    expect((await drawn('t3-row')).cited).toBe('upload.py gives up')
+    // a citation stored on part of a link is left out, so the link still draws
+    const part = { n: 9, row: 't4-row', words: 'upload', start: text.indexOf('upload.py'), end: text.indexOf('.py]'), status: 'deferred', shown: 'upload', asked: true }
     expect(withAsked(text, [part]).text).toBe(text)
   } finally {
     setOptions({})

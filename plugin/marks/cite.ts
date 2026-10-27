@@ -5,8 +5,8 @@
 // its check (checker.ts checkOpened): a second Claude finds where they come from in the files or in what code printed,
 // and the tray shows the evidence, verified, corrected or failed, as for any citation. The words are found in the answer
 // as it draws: words inside or across a citation (Claude's, or one asked before) open that one, and so do words of a
-// sentence a check rewrote, which is the check's; a card's link reads as its title, and a new citation on any of its
-// words takes in the whole link, which still draws as the title.
+// sentence a check rewrote, which is the check's; a link (a file's, a web page's, a card's) reads as its words, and a
+// new citation on any of them takes in the whole link, which still draws as its words.
 //
 // c only cites: it acts while words are selected that it has not cited yet, which the bar shows as `c cite` (beside
 // `e explain`; the claims keep their item at the right, under their own key, w); with none, c is typed into the prompt.
@@ -24,7 +24,7 @@ import type { BarItem } from '../bar/bar'
 import { SPIN } from '../bar/busy'
 import { howTo, hintUsed } from '../bar/hints'
 import { failCleared, hintLine } from '../bar/notice'
-import { answerRows, messageOf, turnOfRow } from '../core/answers'
+import { answerRows, messageOf, turnIds, turnOf, turnOfRow } from '../core/answers'
 import { answerSelectionOf, selectionKey, selectionNow, selectionUsed, usedBy, type Sel } from '../core/selection'
 import { pickedWords } from '../explain/seam'
 import type { Take } from '../hooks/keys'
@@ -32,7 +32,7 @@ import { claudeCites, featureOn } from '../settings/features.mjs'
 import { squeezeView } from '../squeeze/seam'
 import { openTray, trayFocus } from '../tray/seam'
 import { awaitsCheck } from './checker'
-import { askedWords, cardLinksIn, carrier, codeRanges, marksIn, rewritesIn, sentenceOf, sentenceSpan, withAsked, withCorrections, withoutCardLinks } from './message.js'
+import { askedWords, carrier, codeRanges, linksIn, marksIn, rewritesIn, sentenceOf, sentenceSpan, withAsked, withCorrections, withoutLinks } from './message.js'
 import { editReply, newReply, replyKeyOf, replyOf, type MarkItem } from './store'
 
 type Engine = EngineInterface
@@ -45,34 +45,45 @@ export const CITE_KEYS = ['c']
 const SIGN = new RegExp(`(^| )[×${SPIN}]`, 'g')
 
 /** Where `words`, as the analyst read them, stand in an answer's text, on one line: each citation (`[words](#)`) reads
- *  as its words and each link to a card as its title, as they draw, and a place on them takes in the whole citation or
- *  link; the spaces and markdown emphasis between words may differ (`**`, `*`, `` ` ``), and the place found starts and
- *  ends on the words themselves. Words not found as selected are looked for without the signs drawn after citations. */
+ *  as its words and each link (a file's, a web page's, a card's) as its words, as they draw, and a place on them takes
+ *  in the whole citation or link; the spaces and markdown emphasis between words may differ (`**`, `*`, `` ` ``), and
+ *  the place found starts and ends on the words themselves. Words not found as selected are looked for without the
+ *  signs drawn after citations, then with each link's target after its words, as Claude Code draws a link outside a
+ *  citation (`upload.py (client/upload.py#L3)`; a card's never). */
 export function placeOf(text: string, words: string): { start: number; end: number } | null {
   const marks = marksIn(text)
-  const links = cardLinksIn(text)
-  // the text with each citation as its words and each card's link as its title, and where each of its characters
-  // stands in `text`
+  const links = linksIn(text)
+  // the text with each citation as its words and each link as its words (`targets`: then its target, as drawn), and
+  // where each of its characters stands in `text`
   const brackets = new Set<number>()
   for (const m of marks) {
     brackets.add(m.start)
     for (let k = m.start + 1 + m.words.length; k < m.end; k++) brackets.add(k)
   }
-  let read = ''
-  const at: number[] = []
-  for (let i = 0; i < text.length;) {
-    const l = links.find(x => x.start === i)
-    if (l) {
-      for (let k = 0; k < l.words.length; k++) { read += l.words[k]; at.push(l.start + 1 + k) }
-      i = l.end
-      continue
+  const reading = (targets: boolean) => {
+    let read = ''
+    const at: number[] = []
+    for (let i = 0; i < text.length;) {
+      const l = links.find(x => x.start === i)
+      if (l) {
+        for (let k = 0; k < l.words.length; k++) { read += l.words[k]; at.push(l.start + 1 + k) }
+        if (targets && !/^card:/i.test(l.target)) for (const ch of ` (${l.target})`) { read += ch; at.push(l.end - 1) }
+        i = l.end
+        continue
+      }
+      if (!brackets.has(i)) { read += text[i]; at.push(i) }
+      i++
     }
-    if (!brackets.has(i)) { read += text[i]; at.push(i) }
-    i++
+    return { read, at }
   }
-  const p = wordsIn(read, words) ?? wordsIn(read, words.replace(SIGN, ''))
+  const find = (targets: boolean) => {
+    const r = reading(targets)
+    const p = wordsIn(r.read, words) ?? wordsIn(r.read, words.replace(SIGN, ''))
+    return p ? { start: r.at[p.start]!, end: r.at[p.end - 1]! + 1 } : null
+  }
+  const p = find(false) ?? (links.length ? find(true) : null)
   if (!p) return null
-  let [start, end] = [at[p.start]!, at[p.end - 1]! + 1]
+  let { start, end } = p
   for (const m of [...links, ...marks]) if (start < m.end && end > m.start) [start, end] = [Math.min(start, m.start), Math.max(end, m.end)]
   return { start, end }
 }
@@ -162,9 +173,9 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
   if (codeRanges(raw).some(([a, b]) => place.start < b && place.end > a)) return 'those words are code, which has no source; select words of the answer\'s text.'
   // while Claude cites, the end of the answer's turn stores its citations as a new reply, in place of one stored now
   if (!reply && claudeCites() && (await awaitsCheck($, row))) return 'Claude is still answering; select the words again once the answer is done.'
-  // the citation is written on the words with their card links kept (withAsked); its words are as they draw
+  // the citation is written on the words with their links kept (withAsked); its words are as they draw
   const written = askedWords(raw.slice(place.start, place.end))
-  const text = withoutCardLinks(written)
+  const text = withoutLinks(written)
   const next = Math.max(0, ...(reply?.items ?? []).map(m => m.n)) + 1
   const marked = raw.slice(0, place.start) + `[${written}](#)` + raw.slice(place.end)
   const item: MarkItem = {
@@ -180,10 +191,10 @@ export async function citeWords($: Engine, row: string, words: string): Promise<
 }
 
 // Whether words wait for c (citeShown), as this module last worked it out, for the selection Claude Code answered then:
-// at each drawing of the bar (citeBar) and as c cites them. Claude Code gives a key's hook a few milliseconds of its own
-// time, and the full check reads the state of every answer, so many reads in a long session: c's key reads the selection
-// alone and takes this while the selection is the same (citeKey), as the other keys read what their modules keep
-// (squeeze/ui.ts, tray/tray.ts).
+// at each drawing of the bar (citeBar), as the selection's watch sees a new one (explain/seam.ts watchSelection) and
+// as c cites them. Claude Code gives a key's hook a few milliseconds of its own time, and the full check reads the
+// state of every answer, so many reads in a long session: c's key reads the selection alone and takes this while the
+// selection is the same (citeKey), as the other keys read what their modules keep (squeeze/ui.ts, tray/tray.ts).
 let waitKept: { sel: string; shown: boolean } | null = null
 
 /** c, or a click on `c cite`: the words the analyst last selected with the mouse, on the answer they lie in (else
@@ -215,9 +226,16 @@ export async function citeShown($: Engine): Promise<boolean> {
 /** citeShown of a selection read before, kept for c's key (waitKept). */
 async function shownFor($: Engine, raw: Sel | undefined): Promise<boolean> {
   const sel = await answerSelectionOf($, raw)
-  const shown = !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'cite', sel)) && (await answerRows($).catch(() => [])).length > 0
+  const shown = !!pickedWords(sel?.text ?? '').words && !(await usedBy($, 'cite', sel)) && (await answered($))
   waitKept = { sel: selectionKey(raw), shown }
   return shown
+}
+
+/** Whether an answer exists: the newest turns first, so it reads one or two of them, never every turn. */
+async function answered($: Engine): Promise<boolean> {
+  const ids = await turnIds($).catch(() => [] as string[])
+  for (let k = ids.length - 1; k >= 0; k--) if ((await turnOf($, ids[k]!).catch(() => null))?.answer) return true
+  return false
 }
 
 /** c at an empty prompt while words wait to be cited (citeShown): after the word window (a c that starts a word is
