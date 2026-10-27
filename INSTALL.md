@@ -195,12 +195,13 @@ The terminal plugin:
 - **`thimble: command not found` in Claude's Bash calls.** The same: the plugin is not loaded.
 - **A line above the prompt says something failed.** It says what failed and why, and what to try when there is
   something to try. It goes when you type your next prompt.
-- **"Cards cannot draw: cards run only in Anthropic's sandbox runtime, which cannot start here".** Cards never run
-  without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
-  ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, the command that allows it; when npm
-  cannot reach its registry to install the sandbox, `npm ping` shows why. The next card tries again, with no new
-  session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, where
-  `<plugin>` is the installed plugin's folder, `~/.claude/plugins/cache/thimble/thimble/<version>`.
+- **"Cards cannot draw: cards run the code Claude writes for them, so only in Anthropic's sandbox runtime, which cannot
+  start here".** Cards never run without the sandbox; the rest of thimble works without it. The line says why and
+  gives the fix: on Linux, the command that installs bubblewrap, socat or ripgrep, or, on a Linux whose AppArmor keeps
+  bubblewrap from making namespaces, the command that allows it; when npm cannot reach its registry to install the
+  sandbox, `npm ping` shows why. The next card tries again, with no new session. To test the sandbox by hand, run
+  `node <plugin>/sandbox/setup.mjs --probe`, where `<plugin>` is the installed plugin's folder,
+  `~/.claude/plugins/cache/thimble/thimble/<version>`.
 
 The browser workbench:
 

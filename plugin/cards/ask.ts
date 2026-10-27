@@ -86,14 +86,16 @@ export async function sandbox($: Engine): Promise<Sandbox> {
   return s
 }
 
-/** Why the sandbox does not work, and its fix. */
-export const sandboxWhy = (s: Pick<Sandbox, 'why' | 'fix'>) => `cards run only in Anthropic's sandbox runtime, which cannot start here: ${String(s.why).replace(/\.$/, '')}${s.fix ? `. ${s.fix.replace(/\.$/, '')}` : ''}`
+/** Why the sandbox does not work, and its fix, after what the sandbox is for. */
+export const sandboxWhy = (s: Pick<Sandbox, 'why' | 'fix'>) => `cards run the code Claude writes for them, so only in Anthropic's sandbox runtime, which cannot start here: ${String(s.why).replace(/\.$/, '')}${s.fix ? `. ${s.fix.replace(/\.$/, '')}` : ''}`
 
-/** The line above the prompt when cards cannot draw: a notice when the fix is the machine's (a package to install, a
- *  setting, which needs the person's sudo), else a failure line. */
+/** The line above the prompt when cards cannot draw, which ends by saying that the rest of thimble works: a notice
+ *  when the fix is the machine's (a package to install, a setting, which needs the person's sudo), else a failure
+ *  line. */
 export function sandboxNotice($: Engine, text: string, machine: boolean): void {
-  if (machine) noticeLine($, text, 'sandbox')
-  else failNotice($, text, 'sandbox')
+  const line = `${text.trim().replace(/\.?$/, '.')} The rest of thimble works.`
+  if (machine) noticeLine($, line, 'sandbox')
+  else failNotice($, line, 'sandbox')
 }
 
 /** The runner's socket in its own folder: its path, or why no folder can hold it. */

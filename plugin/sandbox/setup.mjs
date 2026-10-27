@@ -29,7 +29,10 @@ import { GRANTS, SOCKET_MAX, runnerArgv } from '../cards/argv.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN = dirname(HERE)
+// the check is srt's own floor (package.json's engines), since the browser workbench, whose Node may be that old,
+// installs srt with this setup too; its fix names the terminal plugin's minimum (scripts/install.sh checks it)
 const NODE_MIN = [22, 12]
+const PLUGIN_NODE_MIN = '22.18'
 const PROBE_MS = 15000
 
 const args = process.argv.slice(2)
@@ -219,7 +222,7 @@ function read(path) {
 async function main() {
   const [major, minor] = process.versions.node.split('.').map(Number)
   if (major < NODE_MIN[0] || (major === NODE_MIN[0] && minor < NODE_MIN[1])) {
-    return { why: `Node ${process.versions.node} is too old for the sandbox runtime`, fix: `Install Node ${NODE_MIN.join('.')} or later.` }
+    return { why: `${thisNode} is too old for the sandbox runtime`, fix: `Install Node ${PLUGIN_NODE_MIN} or later, thimble's minimum, as the first node on your PATH, then start claude again.` }
   }
   if (!installed()) {
     const failed = await locked(() => (installed() ? null : install()))
@@ -251,8 +254,9 @@ else out.ok = true
 if (flag('--json')) {
   console.log(JSON.stringify(out))
 } else if (out.ok) {
-  console.log(`thimble: cards run in Anthropic's sandbox runtime ${pin} (${platform === 'darwin' ? 'Seatbelt' : 'bubblewrap'}), installed in ${srt}${out.ms ? `; the runner started in ${out.ms} ms` : ''}.`)
+  console.log(`thimble: cards run in Anthropic's sandbox runtime ${pin} (${platform === 'darwin' ? 'Seatbelt' : 'bubblewrap'}), installed in ${srt}, on ${thisNode}${out.ms ? `; the runner started in ${out.ms} ms` : ''}.`)
 } else {
   console.log(`thimble: cards cannot run yet: ${out.why}.${out.fix ? `\n  ${out.fix}` : ''}`)
+  console.log("  Cards run the code Claude writes for them, so thimble runs them only in Anthropic's sandbox runtime; the rest of thimble works without it.")
 }
 process.exitCode = out.ok ? 0 : 1

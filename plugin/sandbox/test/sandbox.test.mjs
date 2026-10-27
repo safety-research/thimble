@@ -66,6 +66,17 @@ test('the runner gets each of its grants that its Node takes, and no other: --al
   assert.deepEqual(given({ '--allow-net': true, '--allow-child-process': true, '--allow-fs-read=/': true }), ['--allow-net'])
 })
 
+test('a Node too old for srt is told the plugin\'s minimum, the one scripts/install.sh and the hooks name; the check stays at srt\'s floor', () => {
+  const text = path => readFileSync(join(PLUGIN, '..', path), 'utf8')
+  const setup = text('plugin/sandbox/setup.mjs')
+  const minimum = /const PLUGIN_NODE_MIN = '([\d.]+)'/.exec(setup)?.[1]
+  assert.equal(/\[ "\$plugin" = 1 \] && node_min=([\d.]+)\.0/.exec(text('scripts/install.sh'))?.[1], minimum)
+  assert.equal(/Install Node ([\d.]+) or later/.exec(text('plugin/cards/ask.ts'))?.[1], minimum)
+  // srt's own floor, which the browser workbench's Node may be at when it installs srt with setup.mjs
+  const [, major, minor] = /const NODE_MIN = \[(\d+), (\d+)\]/.exec(setup)
+  assert.equal(JSON.parse(text('plugin/sandbox/package.json')).engines.node, `>=${major}.${minor}.0`)
+})
+
 // ---------------------------------------------------------------- in the sandbox, on this machine
 
 let s
@@ -180,8 +191,11 @@ test('a runner that ends before it opens its socket: the probe says how it ended
   assert.ok(said.why.includes(node), said.why)
   // a signal stopped it: run.mjs exits with 128 and the signal's number
   assert.match(probeWith("sh -c 'kill -KILL $$'").why, /SIGKILL/)
-  // the line it prints says why
-  assert.match(probeWith('true', false), /cards cannot run yet: .*exit 0/)
+  // the line it prints says why, what the sandbox is for, and that the rest of thimble works without it
+  const line = probeWith('true', false)
+  assert.match(line, /cards cannot run yet: .*exit 0/)
+  assert.match(line, /code Claude writes/)
+  assert.match(line, /rest of thimble works/)
 })
 
 test('the sandbox starts its command with the system\'s bash, also when PATH finds another bash first', () => {
