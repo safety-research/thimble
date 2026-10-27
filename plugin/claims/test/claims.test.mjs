@@ -142,16 +142,14 @@ test('the map: ten clusters of five to ten claims at the pane sizes of 160×50 a
     const tu = text(rest)
     assert.equal(mapCapacity(w, h), 3 * Math.floor(Math.floor(h * 0.4) / 4))
     assert.equal(rest.rowsView, false, `${w}×${h}: the map, not the rows`)
-    // the head, then a dim line that says what the pane holds
-    assert.match(tu, /^Evidence · 71 claims\n/)
-    assert.ok(rest.head.length > 1 && rest.head.slice(1).every(r => r.every(x => x.tone === 'dim')))
+    assert.match(tu, /^Evidence · 71 claims\n\n/)
     assert.ok(rest.head[0][0].bold && !rest.head[0][0].tone)
     // at rest: no claim, nothing chosen, no detail, no caption; every cluster and every claim drawn
     assert.equal(rest.chosen, false)
     assert.deepEqual(rest.panel, [])
     assert.equal(new Set(rest.graph.flat().filter(x => /^g:/.test(x.part || '') && x.s.trim()).map(x => x.part)).size, 10)
     assert.equal(dotRuns(rest).length, 71)
-    const cols = tu.split('\n').slice(rest.head.length + 1).flatMap(l => [...l].map((ch, x) => (ch === '●' ? x : -1)).filter(x => x >= 0))
+    const cols = tu.split('\n').slice(2).flatMap(l => [...l].map((ch, x) => (ch === '●' ? x : -1)).filter(x => x >= 0))
     assert.ok(Math.min(...cols) < w * 0.2 && Math.max(...cols) > w * 0.8, `${w}×${h}: dots from ${Math.min(...cols)} to ${Math.max(...cols)}`)
     // a cluster chosen: the map stays, the detail under it, all within the pane
     const chosen = graphView(data, { group: String(data.groups[4].id) }, { w, h })

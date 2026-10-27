@@ -5,7 +5,7 @@
 //
 //   CLAIMS_KEYS                        its letters at an empty prompt, which no card may take (hooks/keys.ts ownKeys)
 //   claimsKey($, key, until)           c: the Claims pane, once the word window closed (a taker as hooks/keys.ts takes it)
-//   claimsBar($, on, preview)          its items at the bar's left (`c evidence 11`, lit when a claim was corrected)
+//   claimsBar($, on, preview)          its items at the bar's left (`c 11 claims`, lit when a claim was corrected)
 //   claimsState($)                     what the claims lens's digest reads (./lens.mjs): every claim so far and the
 //                                      clusters, as its {{CLAIMS}}, {{CLUSTERS}} and {{GROWN}} lines
 //   claimsMerge($, look)               what one look of the observer gave for the claims lens (look.out.claims,

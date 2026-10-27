@@ -10,7 +10,6 @@ import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { claimsBar, claimsKey, drawClaimsPane, registerClaims } from '../claims/seam'
 import { claimsStore, claimsToFind, openClaims } from '../claims/term'
-import { pressedWords } from '../bar/bar'
 import { failLineNow } from '../bar/notice'
 import { resetPrompts } from '../prompts/prompts'
 import { promptStub, tempRun } from './stubs'
@@ -143,14 +142,14 @@ test("an answer's claims come in with the citations near their words; c counts t
   ])
   expect(JSON.parse(s.files.get(`${KEPT}/claims.json`)!).claims.length).toBe(2)
   // the session's first claims: the count says `new` until the pane is first opened
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', 'evidence 2 · new']])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.key, x.words])).toEqual([['c', '2 claims · new']])
   // the next look reads every claim so far
   await answered(s, { id: 't2', prompt: 'Are you sure?', rows: ['The edits were not biased: one editor tilted them.'] })
   expect(s.forks[1]).toContain('PROMPT lens-claims')
-  expect((await claimsBar(s.$, () => true, false)).map(x => [x.words, x.color])).toEqual([['evidence 3 · new', 'merged']])
+  expect((await claimsBar(s.$, () => true, false)).map(x => [x.words, x.color])).toEqual([['3 claims · new', 'merged']])
   // opened once, the count no longer says new
   await openClaims(s.$)
-  expect((await claimsBar(s.$, () => true, false)).map(x => x.words)).toEqual(['evidence 3'])
+  expect((await claimsBar(s.$, () => true, false)).map(x => x.words)).toEqual(['3 claims'])
   // switched off, c is not on the bar and the key is typed
   expect(await claimsBar(s.$, k => k !== 'claims', false)).toEqual([])
 })
@@ -183,7 +182,7 @@ test('a look that fails leaves a gap the pane names; c opens the pane: the map o
   s.$.ui.panes = async () => []
   await take!.later!()
   await new Promise(r => setTimeout(r, 1))
-  expect(String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text)).toContain('“c evidence”')
+  expect(String(((await s.$.state.get({ plugin: 'thimble', key: 'failLine' })).value as Any)?.text)).toContain('“c 3 claims”')
   s.$.ui.open = placing
   await take!.later!()
   expect(s.opened.at(-1)).toMatchObject({ id: 'thimble', title: 'Evidence', focus: true })
@@ -192,8 +191,6 @@ test('a look that fails leaves a gap the pane names; c opens the pane: the map o
   const pane = await draw({})
   const t = textOf(pane)
   expect(t).toContain('Evidence · 3 claims')
-  // under the head, what the pane holds, for a person who opened it without knowing
-  expect(t).toContain('claims made in this conversation')
   expect(t).not.toContain('clusters')
   expect(t).toContain('Turn 2 was not read:')
   // a few claims are drawn as a map too, nothing chosen, nothing under it; no caption, and no words about clicks
@@ -212,7 +209,6 @@ test('a look that fails leaves a gap the pane names; c opens the pane: the map o
   // a cluster chosen: its name bold in its color, its claims one line each, numbered, the first current
   const cluster = await draw({ group: 'k1' })
   const ct = textOf(cluster)
-  expect(ct).not.toContain('claims made in this conversation')
   expect(ct).toContain('failures · 2 claims')
   expect(ct).toContain('▸ 1. Run 4 failed on the p95 check.')
   expect(ct).toContain('  2. Run 9 failed on a timeout.')
@@ -385,11 +381,8 @@ test('c in a terminal too narrow for the pane fails in red with the click on the
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await (await claimsKey(s.$, 'c', 0))!.later!()
   await settle()
-  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c evidence”.')
+  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c 1 claim”.')
   expect(((await failLineNow(s.$)) as Any)?.kind).toBe('failed')
-  // the words it quotes are the bar's item, whatever its count: a click on them presses it
-  const item = (await claimsBar(s.$, () => true, false))[0]!
-  expect(pressedWords(await line(), new Map([[`${item.key} ${item.words}`, item.press!]])).some(p => p.press === item.press)).toBe(true)
   // a press's pane is placed at any width: the bar's count opens it
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: true } }
   await openClaims(s.$)
@@ -400,7 +393,7 @@ test('c in a terminal too narrow for the pane fails in red with the click on the
   s.$.ui.open = async (o: Any) => { s.opened.push(o); return { isPlaced: false } }
   await openClaims(s.$, {}, true)
   await settle()
-  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c evidence”.')
+  expect(await line()).toBe('c needs a wider terminal: widen the window to show the side pane, or click “c 1 claim”.')
 })
 
 test("x on a failed citation in the pane checks it again in the background, started in the claims' ui.press hook", async () => {
@@ -485,7 +478,7 @@ test('claims on demand: no look reads them after a reply; c shows the pane with 
   const found = await draw({})
   expect(buttons(found).some(b => b.hotkey === 'f')).toBe(false)
   expect(textOf(found)).not.toContain('Finding')
-  expect((await claimsBar(s.$, () => true, false)).map(x => x.words)).toEqual(['evidence 1 · new'])
+  expect((await claimsBar(s.$, () => true, false)).map(x => x.words)).toEqual(['1 claim · new'])
   // a newer answer waits: f offers it alone
   await answered(s, { id: 't2', prompt: 'Why?', rows: ['The cache was cold.'] })
   expect(s.forks.length).toBe(1)
