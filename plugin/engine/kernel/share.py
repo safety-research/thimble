@@ -226,12 +226,6 @@ def lines(r: dict[str, Any]) -> list[str]:
     return out
 
 
-def checking(fid: int, quiet: bool = False) -> None:
-    """The line a person reads at once, while the scan reads their folder's names (seconds in a large folder)."""
-    if not quiet:
-        print(f"Checking fix {fid}'s text for your names and paths…", file=sys.stderr, flush=True)
-
-
 def cmd(a) -> int:
     """thimble file issue ID [--json] [--open] [--draft -]: see cli.py FILE_HELP."""
     from .cli import out_json, stdin_text  # noqa: PLC0415
@@ -246,7 +240,6 @@ def cmd(a) -> int:
                 raise FX.FixError("--draft - reads one JSON object: {\"title\", \"wrong\", \"fixed\"}")
         root = os.environ.get("THIMBLE_ROOT")
         st = Store(root, session=os.environ.get("THIMBLE_CONVERSATION")) if root else None
-        checking(FX.get(a.id)["id"], a.json)
         r = share(a.id, given if isinstance(given, dict) else None, st, open_it=a.open)
     except FX.FixError as e:
         print(f"thimble file issue: {e}", file=sys.stderr)
@@ -561,7 +554,6 @@ def pr_cmd(a) -> int:
         user = _gh_ready()
         root = os.environ.get("THIMBLE_ROOT")
         st = Store(root, session=os.environ.get("THIMBLE_CONVERSATION")) if root else None
-        checking(FX.get(a.id)["id"])
         r = pr_preview(a.id, st)
         print("\n".join(pr_lines(r, user, c)))
         if r["code"]:

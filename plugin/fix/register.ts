@@ -5,9 +5,8 @@
 //                          typed, and Claude reads the person's fixes beside it (fixesContext: number, name, state).
 //                          Claude starts the fix with the fix-thimble skill, `N <words>` when the words follow up on
 //                          fix N, `new <words>` when they are about something else, or first asks one short question.
-//                          The kernel keeps the person's own words beside Claude's (--asked). With no words, Claude
-//                          starts the fix it just offered, or asks what should change. Typed mid-turn, it waits for
-//                          the turn's end
+//                          The kernel keeps the person's own words beside Claude's (--asked). Typed mid-turn, it
+//                          waits for the turn's end
 //   the fix-thimble skill  a request: the kernel makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer
 //                          (fixer.ts) works in it in the background; N <words> is a round of fix N itself (its fixer's,
 //                          or in place: the version the person has stays until y), new <words> a new fix; words with
@@ -16,6 +15,8 @@
 //                          /thimble-fix <words>; else Claude did, on the person's yes to the fix it offered when it
 //                          saw thimble misbehave (skills/fix-thimble/SKILL.md, guidance.md). Claude reads what came
 //                          of it in the skill's place, and is told when the fix ends
+//   /thimble-fix           how to ask for a fix, and that fixes are listed and managed in a shell (thimble fix), at
+//                          once, without a turn of Claude's
 //   the fixer's calls      its shell runs in the sandbox runtime (no site but the package registries, reads only the
 //                          system, its tools and the copy, writes only the copy), at most 5 minutes a command, with no
 //                          dialog unless the person's rules deny the command, and never publishes to the registries;
@@ -40,7 +41,7 @@ import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, ownFixes, recoverFixers, watch } from './fixer'
-import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, UPDATE_IN_SHELL, updateRan } from './fixes'
+import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
 import { fixesContext, request } from './request'
 
@@ -165,7 +166,7 @@ export const registerFix: Register = on => {
     const r = await next(e)
     // not immediate: words typed mid-turn wait for the turn's end, as a prompt does
     try {
-      await $.command.register({ name: 'thimble-fix', description: 'Change thimble for yourself: say what should work differently. Alone: the fix Claude offered.', argumentHint: '[what should work differently]' })
+      await $.command.register({ name: 'thimble-fix', description: 'Change thimble for yourself: say what should work differently. Alone: your fixes.', argumentHint: '[what should work differently]' })
     } catch {
       // the command is missing in this session; the shell's `thimble fix list` still works
     }
@@ -198,12 +199,13 @@ export const registerFix: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // /thimble-fix update answers here, without a turn; words, or none (the fix Claude just offered), become the prompt
-  // command's run (commands/thimble-fix.md), whose row in the transcript shows them, a moment after this hook (a run
-  // from inside it would wait on it)
+  // /thimble-fix alone and /thimble-fix update answer here, without a turn; words become the prompt command's run
+  // (commands/thimble-fix.md), whose row in the transcript shows them, a moment after this hook (a run from inside it
+  // would wait on it)
   on('command.run', { command: /^(?:thimble:)?thimble-fix$/ }, async ($, e, next) => {
     const words = String(e.args || '').trim()
     if (/^update$/i.test(words)) return { text: UPDATE_IN_SHELL }
+    if (!words) return { text: FIX_ALONE }
     await $.state.set(ASKED, 2 as never)
     await $.state.set(ASKED_WORDS, words as never)
     if (e.command !== 'thimble-fix') {

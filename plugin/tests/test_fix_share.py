@@ -164,7 +164,7 @@ def test_in_a_shell_the_scan_takes_out_the_names_of_the_folder_the_fix_was_asked
     assert "board-7.jsonl" not in out["body"] + out["url"] and "after Claude read ‹data file›" in out["body"]
 
 
-def test_a_fix_asked_in_the_home_folder_lists_none_of_its_files_and_the_shell_says_at_once_what_runs(world, monkeypatch, opened, capsys, tmp_path):
+def test_a_fix_asked_in_the_home_folder_lists_none_of_its_files(world, monkeypatch, opened, capsys, tmp_path):
     from kernel import sources  # noqa: PLC0415
 
     # a session started in the home folder (a made-up one): the fix's folder is the home folder
@@ -199,8 +199,7 @@ def test_a_fix_asked_in_the_home_folder_lists_none_of_its_files_and_the_shell_sa
                   {**DRAFT, "wrong": "dana-made-up saw the bar say coverage after Claude read board-7.jsonl."})
     assert CLI.main(["file", "issue", str(r["id"])]) == 0
     cap = capsys.readouterr()
-    # a line at once, before the scan, then the link: the user's name and the file the conversation read are out
-    assert cap.err.splitlines()[0] == f"Checking fix {r['id']}'s text for your names and paths…"
+    # the link: the user's name and the file the conversation read are out
     took = next(x for x in cap.out.splitlines() if "privacy check" in x)
     assert "1 file name" in took and " 1 name" in took
     assert "board-7.jsonl" not in cap.out and "dana-made-up" not in cap.out

@@ -716,17 +716,17 @@ def again(fid: int | str, session: str | None = None) -> dict[str, Any]:
     if rec.get("state") != "failed" or not rec.get("refused"):
         raise FixError(f"fix {rec['id']} is {state_word(rec)}, with no refusal to answer")
     if not _is_checkout(rec.get("work")):
-        raise FixError(f"fix {rec['id']} has no copy any more; y on its line starts it again in a new copy")
-    # the same request, tried again: its time and its name go on, and the bar says which try it is (tries)
+        raise FixError(f"fix {rec['id']} has no copy any more; r starts it again in a new copy")
+    # the same request, tried again: its time and its name go on
     rec.update(state="working", error=None, rounds=int(rec.get("rounds") or 1) + 1,
-               tries=int(rec.get("tries") or 1) + 1, **({"session": session} if session else {}))
+               **({"session": session} if session else {}))
     return put(rec)
 
 
 def _fresh(rec: dict[str, Any]) -> dict[str, Any]:
-    """A record that starts a round of its own (new words, or the person's y to try again): its time starts now, and the
-    tries and the block of the round before go."""
-    out = {k: v for k, v in rec.items() if k not in ("tries", "blocked")}
+    """A record that starts a round of its own (new words, or the person's r): its time starts now, and the block of the
+    round before goes."""
+    out = {k: v for k, v in rec.items() if k != "blocked"}
     return {**out, "started": time.time()}
 
 
@@ -883,8 +883,7 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
     a ready change becomes the fix's new version, the fix's change and the round's in one commit (settle), which waits
     for the person's y while the version before stays as it was; a round that changed nothing leaves the fix as it was.
     `session`: the session that asks; a fix whose fixer works in another session is that session's to check.
-    `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for
-    another try."""
+    `cannot`: the fixer ended saying why the request cannot be met: the fix fails with its words, its copy kept for r."""
     rec = get(fid)
     if session and rec.get("session") and rec["session"] != session:
         raise FixError(f"fix {rec['id']} is being made in another Claude Code session, which checks it when its fixer ends")
@@ -907,7 +906,7 @@ def done(fid: int | str, title: str | None = None, summary: str = "", request: b
 def settle(rec: dict[str, Any]) -> dict[str, Any]:
     """A ready round of a fix changed in place: its new version is the fix's change as it is now (its ref) plus the
     round's change, as one commit on the commit the fix's change sits on, kept under refs/thimble/next/<id> until the
-    person's y. A round's change that does not apply to the fix fails, for another try."""
+    person's y. A round's change that does not apply to the fix fails, for r."""
     wt = Path(rec["work"])
     with Lock():
         old = git("rev-parse", _fix_ref(rec), cwd=wt)
@@ -964,7 +963,7 @@ def _done(fid: int | str, title: str | None, summary: str, request: bool, tests:
         _drop_work(rec)
         rec.update(state="failed", commit=None, files=[], tests=None,
                    error="its copy of thimble was gone or no longer a git checkout, so thimble could not check it; "
-                         "y on its line starts it again in a new copy")
+                         "r starts it again in a new copy")
         return put(rec)
     wt = Path(rec["work"])
     rec.pop("refused", None)
@@ -1107,8 +1106,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}, so there is nothing to apply")
     if rec.get("state") == "redo":
-        raise FixError(f"fix {rec['id']} does not fit your thimble any more; /thimble-fix {rec['id']} redo it, in Claude "
-                       "Code, has Claude make it fit")
+        raise FixError(f"fix {rec['id']} does not fit your thimble any more; r asks Claude to redo it")
     if rec.get("state") == "pending":
         raise FixError(f"thimble update set fix {rec['id']} aside at {release_name()}, so that nothing is fixed twice: "
                        "thimble reapply in a shell has Claude check it against the release and bring it back")
@@ -1129,8 +1127,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
             r = get(rec["id"])
             r.update(state="redo", error="it does not fit the fixes you have on")
             put(r)
-            raise FixError(f"fix {rec['id']} does not fit the fixes you have on; /thimble-fix {rec['id']} redo it, in Claude "
-                           "Code, has Claude make it fit")
+            raise FixError(f"fix {rec['id']} does not fit the fixes you have on; r asks Claude to redo it")
         new_commit = git("rev-parse", "HEAD", cwd=live)
         git("update-ref", f"refs/thimble/fixes/{rec['id']}", new_commit, cwd=live)
         _repoint()
@@ -1165,8 +1162,7 @@ def _swap(fid: int) -> dict[str, Any]:
     if fid in failed:
         git("update-ref", f"refs/thimble/fixes/{fid}", old, cwd=live)
         _rebuild([i for i in order if p.get("state") == "on" or i != fid])
-        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; /thimble-fix {fid} redo it, in "
-                       "Claude Code, has Claude make it fit")
+        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; r asks Claude to redo it")
     for i in failed:
         x = get(i)
         x.update(state="redo", error=f"it did not fit once fix {fid} changed")
@@ -1416,9 +1412,9 @@ def not_now(fid: int | str) -> dict[str, Any]:
 
 
 def redo(fid: int | str, words: str = "", session: str | None = None, asked: str | None = None) -> dict[str, Any]:
-    """y on a failed fix's line (try again): a new copy, cut from mine as it is now, for the same fix: the fixer gets
-    the person's words again, and the earlier change (tmp/<id>/earlier.patch) to start from. A fix whose fixer could
-    not do without the files no fix may change (blocked) tries again only with new words."""
+    """r: a new copy, cut from mine as it is now, for the same fix: the fixer gets the person's words again, and the
+    earlier change (tmp/<id>/earlier.patch) to start from. A fix whose fixer could not do without the files no fix may
+    change (blocked) starts again only with new words."""
     rec = get(fid)
     if rec.get("state") not in ("redo", "pending", "failed", "off", "ready", "request"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}")
@@ -2378,8 +2374,6 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     elif r.get("error"):
         out += _wrapped("Why", str(r["error"]), width)
     tests = {"passed": "tests pass", "failed": "tests fail", "skipped": "tests not run"}.get(str(r.get("tests") or ""), "")
-    if tests == "tests pass" and str(r.get("tests_tail") or "").startswith(PASSED_AGAIN):
-        tests = "tests pass (the second time)"
     n = len(files) or len(p.get("files") or [])
     rounds = int(r.get("rounds") or 1)
     if n:
@@ -2726,8 +2720,7 @@ def draft(fid: int | str, title: str, summary: str, st: Store | None) -> dict[st
         named, _ = P.scan({"diff": "\n".join(added)}, {k: v for k, v in terms.items() if k != "path"}, known,
                           use_gitleaks=False)
         if named:
-            raise FixError(f"a new file of the fix is named after your data. In Claude Code, /thimble-fix {rec['id']} give "
-                           "the new file a made-up name asks Claude to rename it")
+            raise FixError("a new file of the fix is named after your data; ask Claude to give it a made-up name (r)")
     repo_paths = [(str(live_dir()) + os.sep, ""), (str(PLUGIN) + os.sep, "plugin/")]
     hits, notes = P.scan({k: v for k, v in held_parts.items() if k != "diff"}, words_terms, known, repo_paths, allow=[base])
     if "diff" in held_parts:

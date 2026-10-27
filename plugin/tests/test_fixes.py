@@ -358,7 +358,6 @@ def test_the_tests_run_for_one_fix_at_a_time_and_once_more_before_they_fail(worl
     r = FX.done(made(world)["id"], "Bar says read", "")
     assert r["state"] == "ready" and r["tests"] == "passed"
     assert r["tests_tail"].startswith("The tests passed only the second time") and "made-up-flake" in r["tests_tail"]
-    assert "tests pass (the second time)" in "\n".join(FX.show_lines(r["id"]))
     # one that fails twice fails
     monkeypatch.setenv("THIMBLE_FIX_TESTS", "echo made-up-failure >> runs.log; false")
     t = FX.done(made(world)["id"], "Bar says read", "")
@@ -387,11 +386,11 @@ def test_a_refused_change_goes_back_to_the_fixer_in_the_same_copy_and_the_next_r
     assert r["state"] == "failed" and r["work"] == str(wt) and r["title"] == "make the fix line blue"
     assert r["refused"] == {"why": r["error"], "files": ["plugin/fix/line.ts"]}
     # again: another try in the same copy, no new words, the refusal still there for the fixer; its name and its time
-    # go on, and it counts the tries
+    # go on
     r = FX.again(r["id"], session="s-made-up")
     assert r["state"] == "working" and r["rounds"] == 2 and r["words"] == ["make the fix line blue"]
     assert r["refused"]["files"] == ["plugin/fix/line.ts"] and r["work"] == str(wt) and r["session"] == "s-made-up"
-    assert r["tries"] == 2 and r["started"] == started and r["title"] == "make the fix line blue"
+    assert r["started"] == started and r["title"] == "make the fix line blue"
     # round 2 puts the change elsewhere: it passes, and the refusal is gone
     (wt / "plugin" / "fix" / "line.ts").unlink()
     (wt / "plugin" / "fix").rmdir()
@@ -423,7 +422,7 @@ def test_a_refused_change_goes_back_to_the_fixer_in_the_same_copy_and_the_next_r
     with pytest.raises(FX.FixError, match=f"thimble file issue {b['id']}"):
         FX.redo(b["id"])
     b = FX.redo(b["id"], "make the bar blue instead")
-    assert b["state"] == "working" and "blocked" not in b and "tries" not in b and b["words"][-1] == "make the bar blue instead"
+    assert b["state"] == "working" and "blocked" not in b and b["words"][-1] == "make the bar blue instead"
 
 
 def test_a_follow_up_made_a_fix_of_its_own_merges_into_the_fix_it_repairs(world):
@@ -1451,7 +1450,7 @@ def test_two_sessions_check_only_their_own_fixes_and_a_copy_that_is_no_checkout_
     assert three["session"] == "s-made-up-a" and Path(three["work"]).is_dir()
     (Path(three["work"]) / ".git").unlink()
     out = FX.done(three["id"], session="s-made-up-a")
-    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "y on its line starts it again" in out["error"]
+    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "r starts it again" in out["error"]
     assert out["work"] is None and not Path(three["work"]).exists()
     again = FX.redo(three["id"], session="s-made-up-a")
     p = Path(again["work"]) / "plugin" / "bar" / "bar.tsx"

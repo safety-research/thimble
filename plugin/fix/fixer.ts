@@ -4,8 +4,8 @@
 //
 //   startFixer($, fix, words)   forks the session into the copy, with the words and a text copy of what thimble shows
 //                               now (screen.ts); the bar shows `fixing <name>` with its time since the round started
-//                               (`changing <name>` for a round of a fix the person has, `· try 2` for another try of
-//                               it); the subagent is named after the fix (fix-<slug>)
+//                               (`changing <name>` for a round of a fix the person has); the subagent is named after
+//                               the fix (fix-<slug>)
 //   fixerCall($, e, id)         each of its tool calls: Bash runs in the sandbox runtime (the kernel's `fix sandbox`
 //                               gives the command's start: reads only the system, its tools and the copy, writes only
 //                               the copy and its temp folder, reaches only the package registries, by the release's
@@ -20,9 +20,9 @@
 //                               then the line above the bar asks whether to use it (y; the person's key applies it), and
 //                               Claude Code sends a notification. When Claude started the fix, Claude is told, so that it
 //                               can tell the person. When the check does not use the change (a file no fix may change,
-//                               a binary file, failing tests), a new fixer gets another try in the same copy at once
-//                               (`thimble fix again`), told why, and a toast says so; the person sees a failure only
-//                               when a fixer ends with `Cannot: <why>`.
+//                               a binary file, failing tests), a new fixer gets another round in the same copy at once
+//                               (`thimble fix again`), told why; the person sees a failure only when a fixer ends with
+//                               `Cannot: <why>`.
 //
 //   state: fixers (agentId → the fix's id), fixBy (the fixes Claude started, by their id), fixerBox (the sandbox
 //          command's start, by the fix's id)
@@ -87,10 +87,9 @@ export function changingText(f: Fix): string {
   return `These words change the fix the person already ${had}, "${f.prev?.title || f.title}"${f.prev?.summary || f.summary ? ` (${f.prev?.summary || f.summary})` : ''}; its change is in your copy, and your change becomes part of it.`
 }
 
-/** For the next fixer after the check did not use a change (another try in the same copy, or y in a new one): what
+/** For the next fixer after the check did not use a change (another round in the same copy, or r in a new one): what
  *  was refused and why, so that it puts the change elsewhere or fixes the tests, or says why it cannot. The prompt does
- *  not list the files no fix may change; this names only the ones the change touched. `earlier`: another try in a new
- *  copy (y on the failed line). */
+ *  not list the files no fix may change; this names only the ones the change touched. `earlier`: r, whose copy is new. */
 export function refusedText(r: Refusal, earlier: boolean): string {
   const where = earlier ? 'The earlier change is not in your copy' : 'Your last change is in your copy'
   const fix = r.files?.length
@@ -99,15 +98,13 @@ export function refusedText(r: Refusal, earlier: boolean): string {
   return `thimble did not use the last change for this fix: ${r.why}. ${where}. ${fix} When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`
 }
 
-/** The fixer's first message: the task (prompts/fixer.md), the words of each round (Claude's, which say what to change
- *  without the conversation, and the person's own beside them when they typed them), where it works, the fix these
+/** The fixer's first message: the task (prompts/fixer.md), the words of each round, where it works, the fix these
  *  words change, what the check refused last time, and a text copy of what thimble shows now. */
 function firstMessage(fix: Fix, earlier: string | null, task: string, by: Asker, screen: string): string {
   const words = fix.words || []
-  const own = (i: number) => (fix.asked?.[i] && fix.asked[i] !== words[i] ? ` (the person's own words: "${fix.asked[i]}")` : '')
   const asked = words.length > 1
-    ? words.map((w, i) => `Round ${i + 1}: ${w}${own(i)}`).join('\n')
-    : words[0] ? `${words[0]}${own(0)}` : fix.title
+    ? words.map((w, i) => `Round ${i + 1}: ${w}`).join('\n')
+    : words[0] || fix.title
   return [
     task.trim(),
     '',
@@ -348,16 +345,13 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
     return null
   }
   const done = jsonOf<Fix>(r.out)
-  // the check did not use the change (a file no fix may change, a binary file, failing tests): another try in the same
-  // copy, under the same name and time, which the bar counts (fixingWord) and a toast tells
+  // the check did not use the change (a file no fix may change, a binary file, failing tests): another round in the
+  // same copy, under the same name and time
   if (!end.cannot && done?.state === 'failed' && done.refused && done.work) {
     const a = await kernelFix($, ['again', String(id)], { timeoutMs: 60000 })
     const next = a.ok ? jsonOf<Fix>(a.out) : null
     await refreshFixes($)
-    if (next?.state === 'working') {
-      $.ui.toast(`thimble did not use the last try at “${fixName(next)}” (${cut(done.refused.why, 120)}), so another one runs.`)
-      return next
-    }
+    if (next?.state === 'working') return next
   }
   // a round of a fix the person has that changed no code: the fix stays as it was
   const kind = done?.unchanged ? 'request' : done?.state === 'ready' ? 'ready' : done?.state === 'request' ? 'request' : 'failed'

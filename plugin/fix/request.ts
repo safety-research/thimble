@@ -1,5 +1,5 @@
 // request.ts: a request for a change, as the fix-thimble skill makes it (after the person's /thimble-fix <words>, or on
-// Claude's own), and y (try again) on a fix that failed. Each makes the copy with the kernel, then starts
+// Claude's own), and r (redo) on a fix that failed or no longer fits. Each makes the copy with the kernel, then starts
 // the fixer in it. Claude decides whether the words follow up on a fix the person has: /thimble-fix gives it the list of
 // their fixes (register.ts), and it starts the skill with one of these forms:
 //
@@ -106,8 +106,7 @@ export function roundText(fix: Fix, who: string, words: string): string {
   return `${who} adds to this fix (round ${fix.rounds}): ${words}`
 }
 
-/** y on a failed fix's line (try again): the fix again, in a new copy cut from your thimble as it is now, with the
- *  earlier change to start from. */
+/** r: the fix again, in a new copy cut from your thimble as it is now, with the earlier change to start from. */
 export async function redoFix($: Engine, id: number): Promise<string | null> {
   const r = await kernelFix($, ['redo', String(id)], { timeoutMs: 180000, doing: 'making a copy of thimble' })
   const fix = r.ok ? jsonOf<Fix>(r.out) : null
