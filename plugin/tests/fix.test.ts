@@ -595,6 +595,27 @@ async function until(f: () => Promise<boolean> | boolean): Promise<void> {
   for (let i = 0; i < 200 && !(await f()); i++) await new Promise(r => setTimeout(r, 5))
 }
 
+test("what the kernel's runner wrote just after this session's start read the list gets its line when the look for ended fixers takes the fix", async () => {
+  const s = setup()
+  s.made()
+  Object.assign(s.fix, { session: 's-fix', testing: TESTING })
+  s.agents.push({ id: 'agent-fixer-1', status: 'idle' })
+  await s.$.state.set({ plugin: 'thimble', key: 'fixers' }, { 'agent-fixer-1': 1 })
+  // the start's read of the list says working; the runner writes what came of the tests before the next read
+  const run = s.$.process.run
+  let lists = 0
+  s.$.process.run = async (argv: string[], o: Any = {}) => {
+    if (argv.includes('list') && ++lists === 2) Object.assign(s.fix, { state: 'ready', tests: 'passed', commit: 'c0ffee1', title: 'Bar says read', testing: null, unshown: true })
+    return run(argv, o)
+  }
+  await s.call('session.start', { cwd: '/made-up/data' })
+  await until(async () => (await fixLineRows(s.$, ELS, 110)).length > 0)
+  expect(textOf((await fixLineRows(s.$, ELS, 110))[0])).toBe('  ✓ thimble fixed: Bar says read · tests pass')
+  expect(s.notes.map(n => n.text)).toEqual(['thimble fixed: Bar says read · tests pass'])
+  expect(s.verbs()).toContain('shown 1')
+  expect(s.verbs().some(v => v.startsWith('done'))).toBe(false)
+})
+
 test("a round's fixer that ends while the check of the round before waits: its end is kept, and checked with its own words once that check returns", async () => {
   const s = setup()
   // the first check's done answers only when the test lets it; by then the new round took the copy

@@ -350,6 +350,9 @@ export async function fixerEnded($: Engine, e: Any, id: number, checked?: Fix): 
 async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   // the kernel's record as it is now: another session or the shell may have changed it since this session's list
   const now = (await refreshFixes($))?.fixes.find(f => f.id === id)
+  // what the kernel's runner wrote while no check of this session waited (it came just after the session's start read
+  // the list): shown now, as at the session's start
+  if (now?.unshown && ['ready', 'failed'].includes(now.state) && (await ownFixes($, [now])).length) return afterCheck($, id, now, now, false)
   if (now?.state !== 'working' || !(await ownFixes($, [now])).length) return null
   const all = await fixers($)
   delete all[String(e.agentId)]
