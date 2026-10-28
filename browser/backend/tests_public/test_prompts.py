@@ -271,6 +271,32 @@ def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
+    """Main's prompt asks for a diagram card when the steps of how something works branch or join, and its example of
+    such a question draws one for steps that branch, not for a straight line of steps."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    section = prompts.section("main", "Chat and cards", mode)
+    assert "a diagram card when the steps branch or join" in section
+    how = next(b for b in _examples(section) if b[0].startswith("Analyst") and "how does" in b[0].lower())
+    diagram = next(line for line in how if "diagram" in line)
+    assert "branch" in diagram or "join" in diagram
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_keeps_the_short_reply_for_a_casual_question(mode, monkeypatch):
+    """Main's prompt answers a casual question or a first look at a folder in a few sentences without a card, and not a
+    broad question: a broad question about the data, such as the main ways the runs fail, asks for analysis, whose work
+    goes in cards."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    para = next(line for line in prompts.section("main", "Chat and cards", mode).splitlines()
+                if line.startswith("- Fit the reply"))
+    sentences = para.split(". ")
+    short = next(i for i, s in enumerate(sentences) if s.startswith("Answer it in two to four plain sentences"))
+    assert "casual question" in sentences[short - 1] and "first look at a folder" in sentences[short - 1]
+    assert "broad" not in para
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
     """Main's prompt says where a fact comes from: what a project does from its code, which shows it now, in main's own
     words, since the checker finds words copied from a README in the README; and a README or a design note only for
