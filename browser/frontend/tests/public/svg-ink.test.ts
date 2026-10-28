@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// A matplotlib figure's black and white turn with the paper (src/lib/svg.ts inlineSvg): matplotlib writes no fill for
-// black text or a black face, which SVG then paints black, unreadable on Dark; the root gives them the paper's ink, and
-// a white box the card's paper, so a node's black name on a white or a clear box reads on every paper.
+// A matplotlib figure's black turns with the paper (src/lib/svg.ts inlineSvg): matplotlib writes no fill for black
+// text or a black face, which SVG then paints black, unreadable on Dark; the root gives them the paper's ink, so a
+// node's black name on the figure's own background or a clear box reads on every paper. Its white box keeps its white,
+// and lib/ink gives a name on it the dark ink where the paper is dark (tests/public/browser/paper-ink.test.ts).
 import { expect, test } from 'vitest'
 import { inlineSvg } from '../../src/lib/svg.ts'
 
@@ -17,15 +18,16 @@ const FIGURE = `<?xml version="1.0" encoding="utf-8"?>
  </g></g>
 </svg>`
 
-test("a node's name that matplotlib leaves black takes the paper's ink, and its white box the card's paper", () => {
+test("a node's name that matplotlib leaves black takes the paper's ink, and its white box keeps its white", () => {
   const fig = inlineSvg(FIGURE, 'f-')!
   const doc = new DOMParser().parseFromString(fig.markup, 'image/svg+xml')
   const root = doc.documentElement
   // what declares no fill takes the root's: the paper's text ink, which is near-white on Dark
   expect(root.getAttribute('style')).toMatch(/(^|;)\s*fill:\s*var\(--text-primary\)/)
   for (const id of ['f-name', 'f-name2']) expect(doc.getElementById(id)!.getAttribute('style') ?? '').not.toMatch(/fill/)
-  // a white box turns with the paper too, so the ink reads on it
-  expect(doc.getElementById('f-box')!.getAttribute('style')).toMatch(/fill:\s*var\(--surface-card\)/)
+  // a white box keeps its white, the light box a black name was drawn on (lib/ink gives the name the dark ink again
+  // where the paper is dark)
+  expect(doc.getElementById('f-box')!.getAttribute('style')).toMatch(/fill:\s*#ffffff/)
   expect(doc.getElementById('f-clear')!.getAttribute('style')).toMatch(/fill:\s*none/)
 })
 

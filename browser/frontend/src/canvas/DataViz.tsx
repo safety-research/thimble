@@ -5,7 +5,8 @@ import { useTheme } from '../lib/theme'
 import type { GraphDataset, TimelineDataset } from '../lib/types'
 import { chartScript, frameStyle, frameTokens, useCardLibs, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useVisibleSize } from '../lib/visibleSize'
-import { VIZ_SERIES } from '../lib/vizTheme'
+import { inkScript, paperInks } from '../lib/ink'
+import { token, VIZ_SERIES } from '../lib/vizTheme'
 import { bridgeScript, followCmd, fromCardPage, tellCmd } from './cardBridge'
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -978,7 +979,7 @@ export const CUSTOM_OPEN_MAX_H = 8000
 
 /** A custom card's page in a sandboxed frame, as tall as its content up to CUSTOM_MAX_H; taller pages fade out with a
  * Show all under them. A page wider than its frame scrolls sideways inside it, and a fade at the frame's right edge says
- * there is more. Its head carries the theme, the bridge that tells the page what the ⌘ pointer and the wheel do
+ * there is more. Its head carries the theme, the ink that mends text the paper made hard to read (lib/ink), the bridge that tells the page what the ⌘ pointer and the wheel do
  * in the frame (cardBridge), the chart style (chartScript) and the libraries the card names in workspace `ws`
  * (useCardLibs), before the page's own scripts. */
 export function CustomFrame({ html, title, height, ws = '', libs }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[] }) {
@@ -993,7 +994,8 @@ export function CustomFrame({ html, title, height, ws = '', libs }: { html: stri
   const fonts = useFrameFonts()
   const head = useCardLibs(ws, libs)
   // the tokens are read at embed time, once per theme. It waits for the page's fonts and libraries, so the page is drawn once
-  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + bridgeScript() + chartScript() + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
+  // inkScript: text the paper made hard to read takes the ink that reads (lib/ink)
+  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + bridgeScript() + chartScript() + inkScript(paperInks(token)) + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       const frame = ref.current
