@@ -1,8 +1,8 @@
 // register.ts: marks. Claude marks the claims of its reply as markdown links to `#` (`[352](#) of the [410](#) refund
 // requests`); after each reply one checker fork verifies each mark with evidence, and a deterministic validator checks
 // that evidence (checker.ts). The reply is drawn with its marks (view.ts): underlined, a purple tint on hover, a turning glyph
-// after each mark until its own verdict arrives, corrected words in place with * after them and a line under the row
-// that says what they were and why (fixesEl), Claude Code's error red with × when the check could not confirm it or
+// after each mark until its own verdict arrives, corrected words in place with * after them (a click on them or on the
+// * opens the tray, which says what they were), Claude Code's error red with × when the check could not confirm it or
 // did not run (failed), a dim ? after one not checked yet (deferred). The bar's busy line says the check runs; nothing
 // under the reply counts the marks. A click on a mark opens its evidence in the side pane (evidence.tsx, core/pane.ts kind `evidence`).
 //
@@ -36,9 +36,9 @@ import { mainRuns } from '../core/turn'
 import { checkerModel, choiceOf, featureOn } from '../settings/features.mjs'
 import { firstPartyApi } from '../settings/term'
 import { autoRepair, awaitsCheck, checkerDenial, endCheck, heldRepair, noteRow, REPAIR_DESCRIPTION, resumeChecks, startCheck } from './checker'
-import { carrier, marksIn, plainSentence, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
+import { carrier, marksIn, rewritesIn, withAsked, withCorrections, withoutCardLinks, withoutMarks } from './message.js'
 import { restoreMarks, rowMarks, type MarkItem } from './store'
-import { fixesEl, lostSpansEl, messageEl, type Fix, type LostSpan, type MarkLook } from './view'
+import { lostSpansEl, messageEl, type LostSpan, type MarkLook } from './view'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -274,16 +274,6 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
     })
     : looksByWords(marks, reply?.items ?? [], runs)
   const looks = quietLooks(byStatus, own ? items : reply?.items ?? [], own)
-  // the citations drawn with * after them (view.ts: the check corrected their words): what Claude wrote and why the
-  // check changed it, in a line under the row for each
-  const starred = new Set(looks.filter(l => l.status === 'corrected' && !l.narrowed && !l.quiet && l.n > 0).map(l => l.n))
-  const fixes: Fix[] = (own ? items : reply?.items ?? []).filter(it => starred.has(it.n)).map(it => ({
-    n: it.n, was: it.rewrite ? plainSentence(it.sentence) : (it.was ?? it.words), ...(it.rewrite ? { rewrite: true } : {}), ...(it.reason ? { reason: it.reason } : {}),
-  }))
-  const open = async (n: number) => {
-    if (await markPressed($, row, n)) return
-    if (n > 0) await openPane($, 'evidence', { row, n }, `citation ${n}`)
-  }
   const focusN = await markFocus($, row)
   const focus = focusN != null ? looks.findIndex(l => l.n === focusN) : -1
   // the citations' tint is the theme set's (view.ts citeLook)
@@ -294,11 +284,15 @@ async function drawAnswer($: Engine, e: Any, below: Below): Promise<Any> {
       spans, dim: view.dim, lead: view.lead, focus: focus >= 0 ? focus : null, cards,
       // while a rewrite of it runs, no passage is asked about
       passages: view.dim ? null : await passagesFor($, row),
-      onMark: (k: number) => open(looks[k]!.n),
+      // a press on a citation's words, or on the sign after them (view.ts markEl)
+      onMark: async (k: number) => {
+        const n = looks[k]!.n
+        if (await markPressed($, row, n)) return
+        if (n > 0) await openPane($, 'evidence', { row, n }, `citation ${n}`)
+      },
     })
     : await plain()
-  const fixed = fixesEl(els, fixes, `mf-${row}`, open)
   const gone = lostSpansEl(els, lost, `ml-${row}`)
-  const parts = [body, ...(fixed ? [fixed] : []), ...(gone ? [gone] : []), ...under]
+  const parts = [body, ...(gone ? [gone] : []), ...under]
   return parts.length === 1 ? body : els.Box({ key: `ans-${row}`, flexDirection: 'column', children: parts })
 }
