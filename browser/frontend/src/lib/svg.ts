@@ -2,7 +2,9 @@
 // and a check can measure its text. The kernel writes text as <text> (backend matplotlibrc: svg.fonttype none), and here
 // the figure is made safe and fitted to the page:
 //   - nothing that runs or reaches out survives (scripts, foreignObject, event attributes, external hrefs), then
-//     DOMPurify's SVG profile (lib/sanitize) over the whole;
+//     DOMPurify's SVG profile (lib/sanitize) over the whole. A <use> (matplotlib's markers and ticks) keeps its href
+//     only when it names one shape of the same figure, so nothing outside the figure is drawn and no figure multiplies
+//     what it draws;
 //   - no <style>, which would restyle every svg on the page; a `*` rule's stroke and fill move to the root;
 //   - ids are prefixed per figure, so figures never share clip paths or glyphs;
 //   - fonts and thimble's matplotlibrc colours become the page's tokens; a white background is dropped;
@@ -107,6 +109,8 @@ function isBackground(el: Element): boolean {
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
+/** what a <use> may name: one shape, never a group of them (module note) */
+const ONE_SHAPE = new Set(['path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'image'])
 const DANGEROUS = ['script', 'foreignObject', 'iframe', 'object', 'embed', 'audio', 'video', 'animate', 'set', 'animateTransform', 'animateMotion']
 const LENGTH = /^\s*([\d.]+)\s*(pt|px)?\s*$/
 
@@ -145,11 +149,12 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
     while (a.firstChild) a.parentNode?.insertBefore(a.firstChild, a)
     a.remove()
   }
-  const ids = new Set<string>()
+  // each id, the first element that has it
+  const ids = new Map<string, Element>()
   const all = [svg, ...Array.from(svg.getElementsByTagName('*'))]
   for (const el of all) {
     const id = el.getAttribute('id')
-    if (id) ids.add(id)
+    if (id && !ids.has(id)) ids.set(id, el)
   }
   // read before the ids are prefixed, as a parent's id is before its children are reached below
   const backgrounds = new Set(all.filter(isBackground))
@@ -163,8 +168,10 @@ export function inlineSvg(text: string, prefix: string): { markup: string; width
       }
       if (name === 'href' || name === 'xlink:href') {
         const v = attr.value.trim()
-        if (v.startsWith('#') && ids.has(v.slice(1))) el.setAttribute(attr.name, `#${prefix}${v.slice(1)}`)
-        else if (!/^data:image\/(?:png|jpe?g|gif|webp);/i.test(v)) el.removeAttribute(attr.name)
+        const named = v.startsWith('#') ? ids.get(v.slice(1)) : undefined
+        const use = el.nodeName === 'use'
+        if (named && (!use || ONE_SHAPE.has(named.nodeName))) el.setAttribute(attr.name, `#${prefix}${v.slice(1)}`)
+        else if (use || !/^data:image\/(?:png|jpe?g|gif|webp);/i.test(v)) el.removeAttribute(attr.name)
         continue
       }
       if (name === 'id') el.setAttribute('id', prefix + attr.value)

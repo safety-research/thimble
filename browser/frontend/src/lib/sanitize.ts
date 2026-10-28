@@ -1,6 +1,7 @@
 // HTML and SVG that a model or a corpus wrote, made safe to put in the page itself (DOMPurify). The page's requests carry
 // its sign-in, so injected script could call any route as the analyst, and remote resources
-// could leak what the page shows. Kept: markup, classes, inline style, links, and data:, blob: or media-route images.
+// could leak what the page shows. Kept: markup, classes, inline style, links, data:, blob: or media-route images, and in an
+// SVG figure a <use> of a fragment.
 // Removed: script and event attributes, <style>, forms, every URL to another host, every URL to the app's own routes but
 // the two that serve media (even a GET to some routes changes state), the attributes that open a popover or a dialog in
 // the top layer, and in HTML data-* attributes, which the app's click handlers read; ids are prefixed. The output's box
@@ -57,6 +58,11 @@ function keepLocal(el: Element): void {
       if (isLocalUrl(v)) el.setAttribute(name, apiUrl(v))
       continue
     }
+    // a use draws a copy of what its href names, which may only be in the same markup (lib/svg: one shape of the figure)
+    if (el.localName === 'use') {
+      if (!v.trim().startsWith('#')) el.removeAttribute(name)
+      continue
+    }
     if (!isLocalUrl(v)) el.removeAttribute(name)
     else el.setAttribute(name, apiUrl(v))
   }
@@ -93,6 +99,8 @@ const HTML: Config = {
 
 const SVG: Config = {
   USE_PROFILES: { svg: true, svgFilters: true },
+  // matplotlib draws markers and ticks with <use>; keepLocal keeps its href only to a fragment
+  ADD_TAGS: ['use'],
   FORBID_TAGS: ['style', 'foreignObject', 'a', 'script'],
   FORBID_ATTR: ['srcset', ...TOP_LAYER],
   ADD_ATTR: ['role'],
@@ -105,7 +113,7 @@ export function purifyHtml(html: string): string {
 }
 
 /** An SVG figure's markup made safe to inline: SVG elements only, no <style>, no foreignObject (whose HTML would leave
- * the figure), no link and no URL to another host; '' without a DOM. */
+ * the figure), no link, no URL to another host, and a <use> only of a fragment; '' without a DOM. */
 export function purifySvg(svg: string): string {
   const p = purifier()
   return p ? (p.sanitize(svg, { ...SVG, RETURN_TRUSTED_TYPE: false }) as string) : ''
