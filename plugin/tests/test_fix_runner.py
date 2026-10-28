@@ -31,14 +31,44 @@ def appeared(p: Path) -> str:
     raise AssertionError(f"{p.name} never appeared")
 
 
+# The call's waits for what came of the tests (fixes._wait), each written as a line of waits.jsonl: `left`, the seconds
+# its deadline had left when it began (null without one), and `late`, how many of its sleeps began once the deadline had
+# passed. A wait that keeps to its limit begins with at most the limit left, which counts from the call's start, and
+# sleeps at most once more after it: it looks at the deadline before each sleep.
+WAITS = """_wait, _sleep, WAITS = fixes._wait, time.sleep, sys.argv.pop(1)
+def waits(fid, deadline):
+    left, late = (None if deadline is None else deadline - time.monotonic()), [0]
+    def sleep(s):
+        late[0] += deadline is not None and time.monotonic() >= deadline
+        _sleep(s)
+    time.sleep = sleep
+    try:
+        return _wait(fid, deadline)
+    finally:
+        time.sleep = _sleep
+        with open(WAITS, "a") as f:
+            f.write(json.dumps({"left": left, "late": late[0]}) + "\\n")
+fixes._wait = waits
+"""
+
+
 def call(tmp_path: Path, *args: str) -> subprocess.Popen:
     """`thimble fix ARGS` in a process of its own, as Claude Code runs it, in a process group of its own, as Claude Code
-    stops it; with no sandbox around the tests, as the world fixture has in this process."""
+    stops it; with no sandbox around the tests, as the world fixture has in this process. Its waits for the tests go to
+    tmp_path/waits.jsonl (WAITS)."""
     w = tmp_path / "thimble.py"
-    w.write_text(f"import sys\nsys.path.insert(0, {str(ENGINE)!r})\nfrom kernel import cli, fixes\n"
-                 "fixes.sandbox_argv = lambda fid: ['/bin/bash', '-c']\nsys.exit(cli.main(sys.argv[1:]))\n")
-    return subprocess.Popen([sys.executable, str(w), "fix", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True, start_new_session=True)
+    w.write_text(f"import json, sys, time\nsys.path.insert(0, {str(ENGINE)!r})\nfrom kernel import cli, fixes\n"
+                 f"fixes.sandbox_argv = lambda fid: ['/bin/bash', '-c']\n{WAITS}sys.exit(cli.main(sys.argv[1:]))\n")
+    return subprocess.Popen([sys.executable, str(w), str(tmp_path / "waits.jsonl"), "fix", *args], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+
+
+def waits(tmp_path: Path) -> list[dict]:
+    """The waits the calls so far made for what came of the tests (WAITS), and none after."""
+    p = tmp_path / "waits.jsonl"
+    got = [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+    p.unlink(missing_ok=True)
+    return got
 
 
 def test_done_within_gives_the_fix_still_working_while_its_tests_run_and_a_later_done_what_came_of_them(world, monkeypatch, tmp_path):
@@ -53,6 +83,9 @@ def test_done_within_gives_the_fix_still_working_while_its_tests_run_and_a_later
         got = json.loads(out)
         # still working, as every list reads it, with the mark that its tests run
         assert got["state"] == "working" and got["testing"]["lock"] and FX.get(r["id"])["testing"] == got["testing"]
+        # and back at the limit, however busy the machine: its wait for the tests began with at most 0.3 s left, and
+        # came back at its first look after them
+        assert [(w["left"] is not None and w["left"] <= 0.3, w["late"] <= 1) for w in waits(tmp_path)] == [(True, True)], err
     finally:
         gate.touch()
     out, err = call(tmp_path, "done", str(r["id"]), "--within", "60").communicate(timeout=90)
