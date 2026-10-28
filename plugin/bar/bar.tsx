@@ -7,41 +7,35 @@
 //   the bar        `thimble` (a click opens the settings), the step thimble works on now (busy.ts), the keys of the
 //                  card that takes them now (cards/draw.ts cardKeyWords: `j down · k up`), `v card` while
 //                  Cards is on, an answer exists and no design runs, then the items of the features that act on answers
-//                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, `s squeeze`, `c cite`); at its
+//                  (core/answerview.ts barLeft: a label run's ask, the tray's steps, or at rest `] next heads up` while the
+//                  answer shows marks, `s squeeze`, `c cite`); at its
 //                  right their items (barRight: `w 11 claims`, `t 2 threads`), then `r coverage 43% (3/7 files)` and `l 2 labels` while
 //                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
 //                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands
 //                  in place of the left's keys, after the busy step, while it fits there whole; the right stays, so a
-//                  hint can point at it. The first answer whose words show heads-ups or explainers has the legend above
-//                  the bar, once, until the person's next prompt (bar/intro.ts): the marks' looks in answers
-//                  (`heads-up` on the heads-ups' orange, `explainer` on the explainers' teal, `cited claim` underlined
-//                  when that answer has citations), that a click opens one (`click to open`, in Claude Code's fullscreen
-//                  layout alone, the only one that sends clicks), the citations' turning glyph (`⠋ a second Claude
-//                  checks it`), and the keys that act on selected words (`select words for e and c`), each while its
-//                  feature is on
+//                  hint can point at it
 //
-// A bar too narrow for its items gives way in this order: the busy step's other steps, then its words (whole words,
-// down to its glyph and seconds), then the labels' count, coverage's file counts and coverage. The keys stay: what
-// still does not fit goes on more rows, each item whole, the right's items on a row of their own when beside the first
-// row they would take no fewer rows. The settings pane draws the same bar as its switches would leave it
-// (`preview`), on as many rows as its items take: nothing in it is a press, no work shows and nothing gives way.
+// A bar too narrow for its items gives way in this order: the words of an item that has shorter ones (`] next heads up`
+// to `] next`, then `]` alone), the busy step's other steps, then its words (whole words, down to its glyph and
+// seconds), then coverage's file counts, and only then a whole count: the labels', then coverage. What gave way takes
+// back the room left: coverage's file counts first, then the busy step, then the words of such an item. The keys stay:
+// what still does not fit goes on more rows, each item whole, the right's items on a row of their own when beside the
+// first row they would take no fewer rows. The settings pane draws the same bar as
+// its switches would leave it (`preview`), on as many rows as its items take: nothing in it is a press, no work shows
+// and nothing gives way.
 import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { controlWords } from '../core/selection'
 import { cutWords, textWidth } from '../core/text.js'
-import { accent, themeLast, themeNow } from '../core/theme'
-import { cardKeyWords, fullscreenNow } from '../cards/draw'
-import { turnOfRow } from '../core/answers'
+import { accent } from '../core/theme'
+import { cardKeyWords } from '../cards/draw'
 import { vReady } from '../designer/v'
-import { markColors } from '../explain/place.mjs'
-import { markKinds } from '../explain/seam'
 import { fixLineRows } from '../fix/line'
 import { pressKey } from '../hooks/keys'
-import { rowMarks } from '../marks/store'
-import { featureOn, lensesAfterReply } from '../settings/features.mjs'
-import { busyNow, SPIN } from './busy'
+import { featureOn } from '../settings/features.mjs'
+import { busyNow } from './busy'
 import { countsNow, keptCounts } from './counts'
 import { failLineNow, hintNow } from './notice'
 
@@ -56,15 +50,21 @@ export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'l
 
 /** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
  *  what holds the keys now (the open tray, the open chips); while any shows, the bar's left names only those, after
- *  the busy step. `color` and `bold`: words drawn lit (`s ● short`) or as a failure, not dim. */
-type Item = { id: string; key?: string; words: string; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean }
+ *  the busy step. `color` and `bold`: words drawn lit (`s ● short`) or as a failure, not dim. `shorter`: the words in
+ *  fewer cells, longest first, which a narrow bar draws before any count gives way; '' is the key alone, drawn as the
+ *  bar's other keys are (in the item's color when it has one), never dim, as a dim key reads as one that does nothing. */
+type Item = { id: string; key?: string; words: string; shorter?: string[]; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean }
 /** An item a feature puts on the bar (core/answerview.ts barLeft, barRight). */
 export type BarItem = Item
 
 const len = textWidth
 /** How an item's words are drawn: dim, or in the item's own color. */
 const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
-const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + 1 : 0) + len(x.words)
+/** How an item's key is drawn: in thimble's color, bold; a key alone in the item's color when it has one. */
+const keyLook = (x: Item) => ({ color: !x.words && x.color ? x.color : accent(), bold: true })
+const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + (x.words ? 1 : 0) : 0) + len(x.words)
+/** The item in its shortest words. */
+const shortest = (x: Item): Item => (x.shorter?.length ? { ...x, words: x.shorter[x.shorter.length - 1]! } : x)
 
 /** The bar's items at its right: coverage, then the labels, as the counts last stood, each while its setting is on. */
 async function countItems($: Engine, on: (key: string) => boolean, presses: BarPresses | null, preview = false): Promise<Item[]> {
@@ -139,7 +139,7 @@ export async function barKeys($: Engine): Promise<Set<string>> {
 
 /** The bar's rows: the failure line (or a hint the bar has no room for) when there is one, and the bar, `width` cells
  *  wide, on as many rows as its items need. */
-export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string; legend?: string } = {}): Promise<Any[]> {
+export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string } = {}): Promise<Any[]> {
   const { Box, Button, Text } = els
   const on = o.on ?? featureOn
   const preview = !!o.preview
@@ -159,25 +159,40 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // a hint: in place of the left's keys, after the busy step, while it fits there whole beside what the bar keeps (the
   // busy step's glyph and seconds, the right's keys); an item it names (“a ask”) stays after it, on the right too.
   // Longer, it stands above the bar, and the bar keeps its keys
-  const shownHint = preview ? null : await hintNow($).catch(() => null)
-  const hint = preview ? null : (shownHint ?? o.intro ?? null)
-  // the legend of the marks, with the first answer that shows some (o.legend, that answer's row; intro.ts), above the
-  // bar, while it names something on
-  const legendEl = !preview && !!o.legend ? await legendRow($, els, width, on, o.legend, b?.glyph ?? SPIN[0]!) : null
-  const legend = legendEl ? [legendEl] : []
+  const hint = preview ? null : ((await hintNow($).catch(() => null)) ?? o.intro ?? null)
   const named = (x: Item) => !!hint && !!x.key && hint.includes(`“${x.key} ${x.words}”`)
   const counted = (x: Item) => (x.id === 'coverage' || x.id === 'labels') && !named(x)
   const hinted: Item[] = hint ? [{ id: 'hint', glyph: 'Hint:', words: hint }, ...keys.filter(named)] : []
   const hintIn = !!hint && spare([...(b ? [busyItem(b, 0)] : []), ...hinted], right.filter(x => !counted(x))) >= 0
-  const left = [...(b ? [busyItem(b)] : []), ...(hintIn ? hinted : keys)]
+  const whole = [...(b ? [busyItem(b)] : []), ...(hintIn ? hinted : keys)]
+  let left = whole
   if (!preview) {
-    // a narrow bar: the busy step gives way first, down to its glyph and seconds, then the labels' count, coverage's file
-    // counts and coverage; the busy step takes back the room left
-    const least = b ? [busyItem(b, 0), ...left.slice(1)] : left
+    // a narrow bar: the words of an item that has shorter ones give way first, then the busy step, down to its glyph and
+    // seconds, then coverage's file counts, and only then a whole count: the labels', then coverage. A count that went
+    // comes back when it fits on its own, except beside a hint, which the counts give way to: the labels' count is
+    // shorter, so it can fit where coverage does not. What gave way takes back the room left: coverage's file counts
+    // (beside coverage alone), then the busy step, then each such item the longest of its words that fits
+    const least = whole.map((x, i) => (b && !i ? busyItem(b, 0) : shortest(x)))
+    const all = right
+    const bare = (x: Item) => (x.id === 'coverage' && counted(x) ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x)
+    if (spare(least, right) < 0) right = right.map(bare)
     if (spare(least, right) < 0) right = right.filter(x => x.id !== 'labels' || !counted(x))
-    if (spare(least, right) < 0) right = right.map(x => (x.id === 'coverage' && counted(x) ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
     if (spare(least, right) < 0) right = right.filter(x => x.id !== 'coverage' || !counted(x))
+    for (const id of hintIn ? [] : ['coverage', 'labels']) {
+      if (right.some(x => x.id === id) || !all.some(x => x.id === id && counted(x))) continue
+      const tried = all.filter(x => x.id === id || right.some(y => y.id === x.id)).map(x => (x.id === id ? bare(x) : right.find(y => y.id === x.id)!))
+      if (spare(least, tried) >= 0) right = tried
+    }
+    const back = right.map(x => all.find(y => y.id === x.id) ?? x)
+    if (spare(least, back) >= 0) right = back
+    left = [...least]
     if (b) left[0] = busyItem(b, len(least[0]!.words) + spare(least, right))
+    whole.forEach((x, i) => {
+      if (!x.shorter?.length) return
+      const room = itemLen(left[i]!) + spare(left, right)
+      const fits = [x.words, ...x.shorter].find(w => itemLen({ ...x, words: w }) <= room)
+      if (fits !== undefined) left[i] = { ...x, words: fits }
+    })
   }
   // what still does not fit takes more rows, each item whole: the left's in rows under its first item, beside the right's
   // on the first row, or, when that takes no fewer rows, with the right's on a row of their own under them
@@ -191,10 +206,12 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
 
   const words = (x: Item, i: number): Any[] => [
     ...(x.glyph ? [Text({ key: `g${i}`, color: accent(), children: `${x.glyph} ` })] : []),
-    ...(x.key ? [Text({ key: `k${i}`, color: accent(), bold: true, children: x.key }), Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
+    ...(x.key
+      ? [Text({ key: `k${i}`, ...keyLook(x), children: x.key }), ...(x.words ? [Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [])]
+      : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
   ]
   const drawn = (x: Item, i: number): Any => (x.press
-    ? Button({ key: `bar-${x.id}`, plain: true, label: `${x.key ? `${x.key} ` : ''}${x.words}`, onPress: x.press, children: words(x, i) })
+    ? Button({ key: `bar-${x.id}`, plain: true, label: [x.key, x.words].filter(Boolean).join(' '), onPress: x.press, children: words(x, i) })
     : Text({ key: `bar-${x.id}`, children: words(x, i) }))
   const joined = (xs: Item[], at: number): Any[] => xs.flatMap((x, i) => [...(i ? [Text({ key: `s${at + i}`, dimColor: true, children: ' · ' })] : []), drawn(x, at + i)])
 
@@ -218,52 +235,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const top = preview ? [] : hint && !hintIn ? [hintRow] : await lineRows($, els, width, pressOf)
   // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's
   const fixRows = preview ? [] : await fixLineRows($, els, width).catch(() => [])
-  return [...top, ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), ...legend, ...bar, ...below]
-}
-
-/** The legend of the marks in answers, over the bar's first row where `Hint:` stands, naming only what is on: the
- *  words that name a heads-up and an explainer drawn on their fills, as an answer draws the words they mark
- *  (explain/place.mjs markColors), while those marks come after each answer (Heads-ups and Explainers auto) or the
- *  answer it shows with (`row`) shows one (Minimal leaves them to be asked for); `cited claim` drawn as an answer draws
- *  a citation's words (marks/view.ts citeLook: underlined, no fill), while Citations is on and that answer has
- *  citations; after them `click to open`, as a click on a mark's words opens it (an explainer or a heads-up in the
- *  tray, explain/seam.ts explainSpans; a citation's evidence, marks/register.ts), while clicks reach thimble: only
- *  Claude Code's fullscreen layout sends them (cards/draw.ts fullscreenNow); then, with the citations, the turning
- *  glyph (`glyph`, the busy step's, as the answer draws it after cited words while their check runs) and that a second
- *  Claude checks it; then the keys that act on words the person selects: e while Explainers, and c while Citations,
- *  are not off. Null when it would name nothing. */
-async function legendRow($: Engine, els: Any, width: number, on: (key: string) => boolean, row: string, glyph: string): Promise<Any | null> {
-  const { Box, Text } = els
-  const shown = await markKinds($, row).catch(() => [] as string[])
-  const heads = lensesAfterReply('details') || shown.includes('heads')
-  const explainer = lensesAfterReply('explain') || shown.includes('explain')
-  const cited = on('citations') && (await answerCited($, row).catch(() => false))
-  const keys = [...(on('explain') ? ['e'] : []), ...(on('cite') ? ['c'] : [])]
-  if (!heads && !explainer && !cited && !keys.length) return null
-  await themeNow($).catch(() => undefined)
-  const fills = markColors(themeLast())
-  const dim = (key: string, children: string) => Text({ key, dimColor: true, children })
-  const key = (k: string) => Text({ key: `legend-${k}`, color: accent(), bold: true, children: k })
-  const parts: Any[][] = [
-    ...(heads ? [[Text({ key: 'legend-heads', backgroundColor: fills.headsBg, children: 'heads-up' })]] : []),
-    ...(explainer ? [[Text({ key: 'legend-explain', backgroundColor: fills.glossBg, children: 'explainer' })]] : []),
-    ...(cited ? [[Text({ key: 'legend-cited', underline: true, children: 'cited claim' })]] : []),
-    ...((heads || explainer || cited) && fullscreenNow() === true ? [[dim('open', 'click to open')]] : []),
-    // one Text, so a wrap never parts the glyph from its words
-    ...(cited ? [[Text({ key: 'legend-check', children: [Text({ key: 'glyph', color: accent(), children: glyph }), dim('checks', ' a second Claude checks it')] })]] : []),
-    ...(keys.length ? [[dim('select', 'select words for '), ...keys.flatMap((k, i) => [...(i ? [dim('and', ' and ')] : []), key(k)])]] : []),
-  ]
-  return Box({ key: 'intro-legend', flexDirection: 'row', flexWrap: 'wrap', width, children: [
-    Text({ key: 'indent', children: ' '.repeat(9) }),
-    ...parts.flatMap((p, i) => [...(i ? [dim(`s${i}`, ' · ')] : []), ...p]),
-  ] })
-}
-
-/** Whether the answer `row` stands in holds citations the check keeps (marks/store.ts), on any of its turn's text rows:
- *  Claude's while it cites (Citations auto cite + verify or auto cite), and words the person cited with c. */
-async function answerCited($: Engine, row: string): Promise<boolean> {
-  for (const r of (await turnOfRow($, row))?.rows ?? [row]) if ((await rowMarks($, r))?.items.length) return true
-  return false
+  return [...top, ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), ...bar, ...below]
 }
 
 /** The failure line: what failed, whole, in red, or a notice. A key it names (`Press x to try again`) is a click

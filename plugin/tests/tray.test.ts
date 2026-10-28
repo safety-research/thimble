@@ -3,6 +3,7 @@
 // question typed with it open carries nothing of it and closes the tray; 0 closes it. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
+import { accent } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { citeTint } from '../marks/view'
 import { evidenceOpener } from '../tray/tray'
@@ -1071,4 +1072,92 @@ test('the header names what ] goes to from the mark the tray shows: a heads-up o
   const band = textOf(await $.ui.render(above(40)))
   expect(band).toContain('failed: 12')
   expect(band).not.toContain('Retried runs count twice')
+})
+
+test("at rest the bar names ] and the mark it opens while the answer the keys act on shows marks, in either layout, a press that opens it as ] does; its words are in thimble's color while one of the answer's marks is not opened, and dim as the bar's other keys' words once the person opened each", CITES, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-rest', { parts: HEADS })
+  const rest = async (isFullscreen = true) => all(await $.ui.render({ ...(above(40) as Any), viewport: { ...view, isFullscreen } } as never)).find(n => n.type === 'Button' && n.props?.key === 'bar-tray-next')
+  const words = (b: Any) => all(b).find(n => n.type === 'Text' && textOf(n).startsWith(' next'))
+  // the heads-up on the citation's words comes first; nothing of the answer was opened yet: lit
+  for (const isFullscreen of [true, false]) {
+    const b = await rest(isFullscreen)
+    expect(textOf(b)).toBe('] next heads up')
+    expect(all(b).find(n => n.type === 'Text' && textOf(n) === ']')?.props).toMatchObject({ color: accent(), bold: true })
+    expect(words(b)?.props?.color).toBe(accent())
+  }
+  // a press on it opens the heads-up; the open tray names ] in its header alone
+  const ui = await $.ui.mount(above(40))
+  await ui.press({ key: 'bar-tray-next' })
+  await ui.unmount()
+  const band = textOf(await $.ui.render(above(40)))
+  expect(band).toContain('Retried runs count twice')
+  expect(band.match(/\] next/g)).toEqual(['] next'])
+  // closed: the citation and the explainer are not opened yet, so the words stay lit, and name the citation, which ]
+  // opens now
+  await clock.advance(2000)
+  await $.prompt.edit(key('0'))
+  expect(textOf(await rest())).toBe('] next citation')
+  expect(words(await rest())?.props?.color).toBe(accent())
+  expect(words(await rest())?.props?.dimColor).toBeUndefined()
+  // ] from rest opens the citation, then on to the explainer: each mark opened, so dim, and ] names the first mark again
+  for (const k of [']', ']', '0']) {
+    await clock.advance(2000)
+    await $.prompt.edit(key(k))
+  }
+  expect(textOf(await rest())).toBe('] next heads up')
+  expect(words(await rest())?.props).toMatchObject({ dimColor: true })
+  expect(words(await rest())?.props?.color).toBeUndefined()
+})
+
+test("while the bar's ] is lit, ] from rest opens the first of the answer's marks the person has not opened, which the bar names; from there ] and [ step in reading order; once each was opened, ] from rest opens the first mark again", CITES, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-unopened', { parts: HEADS })
+  const rest = async () => textOf(all(await $.ui.render(above(40))).find(n => n.type === 'Button' && n.props?.key === 'bar-tray-next'))
+  const press = async (k: string) => {
+    await clock.advance(2000)
+    await $.prompt.edit(key(k))
+  }
+  const shows = async () => textOf(await $.ui.render(above(40)))
+  // in reading order: the heads-up on the citation's words, the citation, the explainer. ] opens the heads-up first
+  expect(await rest()).toBe('] next heads up')
+  await press(']')
+  expect(await shows()).toContain('Retried runs count twice')
+  await press('0')
+  // the citation is the first not opened: the bar names it, and ] opens it
+  expect(await rest()).toBe('] next citation')
+  await press(']')
+  let band = await shows()
+  expect(band).toContain('failed: 12')
+  expect(band).not.toContain('Retried runs count twice')
+  // from there ] and [ step in reading order: on to the explainer, back to the citation, back to the heads-up
+  await press(']')
+  band = await shows()
+  expect(band).toContain('The time that 95 of 100 checks stay under.')
+  await press('[')
+  band = await shows()
+  expect(band).toContain('failed: 12')
+  expect(band).not.toContain('The time that 95 of 100 checks stay under.')
+  await press('[')
+  expect(await shows()).toContain('Retried runs count twice')
+  await press('0')
+  // each mark opened: ] is no longer lit, and from rest it opens the first mark again
+  expect(await rest()).toBe('] next heads up')
+  await press(']')
+  expect(await shows()).toContain('Retried runs count twice')
+})
+
+test('an answer that shows no marks: the bar names no ]', CITES, async ($, on) => {
+  await resumed($, on, [], 's-tray-rest-none', { text: 'Of the runs, 12 of 40 failed on the p95 check.' })
+  const band = await $.ui.render(above(40))
+  expect(all(band).some(n => n.props?.key === 'bar-tray-next')).toBe(false)
+  expect(textOf(band)).not.toContain('] next')
+})
+
+test("the pointer over a heads-up's or an explainer's words underlines them, over their stronger fill, as thimble's other presses are underlined under it", CITES, async ($, on) => {
+  await resumed($, on, QUOTED, 's-tray-hover', { parts: HEADS })
+  const drawn = all(await $.ui.render(answer('row-t1', TEXT)))
+  for (const label of ['heads up 12 of 40', 'explain p95']) {
+    const press = drawn.find(n => n.type === 'Button' && String(n.props?.label).startsWith(label))
+    expect(press?.hover ?? press?.props?.hover).toMatchObject({ inverse: false, underline: true })
+    expect((press?.hover ?? press?.props?.hover)?.backgroundColor).toBeTruthy()
+  }
 })

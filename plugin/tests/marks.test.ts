@@ -12,7 +12,7 @@ import { setOptions } from '../settings/features.mjs'
 import { marksIn, withRewrites } from '../marks/message.js'
 import { quietLooks } from '../marks/register'
 import { restoreMarks, rowMarks } from '../marks/store'
-import { messageEl } from '../marks/view'
+import { lostSpansEl, messageEl } from '../marks/view'
 import { tempRun } from './stubs'
 import { test } from './kit'
 
@@ -544,4 +544,12 @@ test("with Citations manual, the citations Claude wrote draw as plain words, und
   } finally {
     setOptions({ citations: 'auto cite + verify' })
   }
+})
+
+test("the pointer over the words of an explainer or a heads-up the check moved off the reply, on their line under it, underlines them over their stronger fill, as on the reply", () => {
+  const line = lostSpansEl(ELS, [
+    { words: 'retry budget', kind: 'explainer', look: { backgroundColor: '#1e4d47', hoverBg: '#2b7068' }, label: 'explain retry budget', onPress: () => undefined },
+  ], 'k')
+  const words = all(line).find(n => n.type === 'Text' && n.props?.children === 'retry budget')
+  expect(words?.props?.hover).toMatchObject({ backgroundColor: '#2b7068', underline: true })
 })
