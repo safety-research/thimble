@@ -61,6 +61,13 @@ def stub(path, text):
     return path
 
 
+def same_login(tmp_path: Path, path: str) -> str:
+    """A made-up login shell for an install run (SHELL), whose `-lic env` gives `path`, the run's own PATH: so the install's
+    card test runs on the run's made-up node wherever the tests run, never on a node the machine's own login shell finds
+    (bash sets SHELL to the user's login shell when it is unset)."""
+    return str(stub(tmp_path / "same-login", f'echo "PATH={path}"\n'))
+
+
 def needs(tmp_path, claude, stubs=()):
     """scripts/install.sh --no-browser with only stubs on PATH, where claude is a link to the made-up Claude Code 2.1.283
     at `claude`: it says what is missing and stops before it installs anything. `stubs`: other commands, by name."""
@@ -72,7 +79,8 @@ def needs(tmp_path, claude, stubs=()):
         stub(bin_ / name, text)
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
-    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable}
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable,
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
     p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser"], capture_output=True, text=True, env=env)
     assert p.returncode == 1, p.stdout + p.stderr
     return next(line for line in p.stdout.splitlines() if "Claude Code is 2.1.283" in line)
@@ -121,7 +129,8 @@ def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
-           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home")}
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
     p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-setup", "--bin-dir", str(tmp_path / "bin")],
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -323,7 +332,8 @@ def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_
     home = tmp_path / "home"
     home.mkdir()
     env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
-           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home")}
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
     p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-setup", "--bin-dir", str(tmp_path / "bin")],
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     assert p.returncode == 0, p.stdout + p.stderr
@@ -405,7 +415,8 @@ def plugin_install(tmp_path, source, claude="", listed=True, settings=None):
     home = tmp_path / "home"
     home.mkdir()
     env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
-           "THIMBLE_HOME": str(tmp_path / "thimble")}
+           "THIMBLE_HOME": str(tmp_path / "thimble"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
     p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     return p, [x for x in log.read_text().splitlines() if x.startswith("plugin")] if log.exists() else []
@@ -539,7 +550,8 @@ def whole_install(tmp_path, *args):
     home = tmp_path / "home"
     home.mkdir()
     env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
-           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home")}
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home"),
+           "SHELL": same_login(tmp_path, f"{bin_}:/usr/bin:/bin")}
     p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-setup", "--bin-dir", str(tmp_path / "bin"), *args],
                        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
     assert p.returncode == 0, p.stdout + p.stderr
