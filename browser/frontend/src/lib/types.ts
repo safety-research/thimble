@@ -1133,6 +1133,14 @@ export interface CheckPatch {
   covers?: CheckCover[]
 }
 
+/** `POST /ws/{c}/cells/{cid}/drawn` (backend card_size.drawn_route): a card's body drew `height` px tall, or its page laid
+ * out `width` px wide in a frame `frame` px wide, each px at the card's width. */
+export interface CardDrawn {
+  height?: number
+  width?: number
+  frame?: number
+}
+
 /** `GET /ws/{c}/card-checks` (backend card_check.status_route): whether the card check runs, whether it starts by
  * itself on a new card (`auto`, thimble's config `agents.cardCheck.auto`), and the checks running now, each with its
  * phase. */

@@ -24,7 +24,7 @@ import { registerCells } from '../lib/cellName'
 import { parseRef } from '../lib/refs'
 import { revealCell, revealLines } from '../lib/tableCell'
 import { track } from '../lib/telemetry'
-import type { CanvasResponse, Cell, ChatMeta, Filters, Pos } from '../lib/types'
+import type { CanvasResponse, CardDrawn, Cell, ChatMeta, Filters, Pos } from '../lib/types'
 import { readStorage, storageKey, writeStorage } from '../lib/workspace'
 import { anchorElement, capturePng, describeElement } from '../pointer/capture'
 import { NO_FILTER, activeParts, bothKeep, cardParts, keepShown, keptBy, readFilter, searchText, type CardFilter, type FilterCard, type FilterPart } from './cardFilter'
@@ -542,7 +542,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     setHistoryOf(null)
     setDetail(id)
   }, [])
-  const ctx: CanvasCtx = useMemo(() => ({ ws, filters, keep: kept, concepts, threadOf, unread, refresh, openThread, openDetail }), [ws, filters, kept, concepts, threadOf, unread, refresh, openThread, openDetail])
+  // a card drawn taller than the canvas shows at rest, or wider than its frame: the server tells its author (backend
+  // card_size)
+  const tall = useCallback((id: string, size: CardDrawn) => void api.cardDrawn(ws, id, size).catch(() => undefined), [ws])
+  const ctx: CanvasCtx = useMemo(() => ({ ws, filters, keep: kept, concepts, threadOf, unread, refresh, openThread, openDetail, drawn: tall }), [ws, filters, kept, concepts, threadOf, unread, refresh, openThread, openDetail, tall])
   // the comments beside the cards: a check's while it is on, on a card that is drawn and that the filters keep
   const shownNotes = useMemo(() => (lay ? shownCanvasComments(notes.comments, checks.on, (id) => lay.rects.has(id), kept) : []), [notes.comments, checks.on, lay, kept])
   const cardEl = useCallback((id: string) => cardEls.current.get(id), [])

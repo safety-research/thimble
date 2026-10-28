@@ -165,8 +165,9 @@ ROUTER_MODULES = [
     # the orientation's, its critic's and the writers' tray entries in the analyst's terminal
     "tray",
     # the card harness (a headless Chromium that draws every card offscreen) and the card check that reads it, and
-    # where the check's records and fixes are kept (the Undo of a fix)
-    "render", "card_check", "checkstore",
+    # where the check's records and fixes are kept (the Undo of a fix); a card drawn taller than the canvas shows,
+    # which its author is told
+    "render", "card_check", "checkstore", "card_size",
     # the review of a built view's pictures, which sends what it finds back to the view's build session
     "view_review",
     # whether the product tour was offered on this install's first launch

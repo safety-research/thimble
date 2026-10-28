@@ -492,6 +492,10 @@ export const api = {
   checkCardAgain: (c: string, id: string) => j<{ card: string; check: string }>(`${ws(c)}/cells/${enc(id)}/check`, { method: 'POST' }),
   /** `POST …/cells/{id}/check/stop`: stop the card's check (Stop in its details); the card stays as it is. */
   stopCardCheck: (c: string, id: string) => j<{ card: string; stopped: boolean }>(`${ws(c)}/cells/${enc(id)}/check/stop`, { method: 'POST' }),
+  /** `POST …/cells/{id}/drawn`: the card's body drew `height` px tall, past what the canvas shows at rest, or its page laid
+   * out `width` px wide in a frame `frame` px wide; the server tells the card's author (backend card_size). `told` says
+   * whether it was told now. */
+  cardDrawn: (c: string, id: string, size: CardDrawn) => j<{ told: boolean }>(`${ws(c)}/cells/${enc(id)}/drawn`, { method: 'POST', body: JSON.stringify(size) }),
   /** `GET /card-checks`: whether the automatic check is on, and the checks running now with their phase. */
   cardChecks: (c: string) => j<CardCheckStatus>(`${ws(c)}/card-checks`),
   /** `POST /card-checks/stop`: stop every card check of the workspace. */
@@ -903,7 +907,7 @@ export const undoApi = {
 }
 
 // --- report checks: the Checks pane's rows (report/Checks.tsx, backend checks.py) ---
-import type { CardCheckStatus, Check, CheckCover, CheckPatch, CheckRun } from './types'
+import type { CardCheckStatus, CardDrawn, Check, CheckCover, CheckPatch, CheckRun } from './types'
 
 export const marksApi = {
   /** `POST /marks/repair`: check a failed citation again and make it correct (backend marks.repair); a 409 says why
