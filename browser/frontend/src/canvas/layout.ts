@@ -6,9 +6,9 @@
 // about. A frame that holds no card of its own and one frame in its flow shares that frame's box, so a card in a path
 // of frames stands in one box (Canvas names the path in one title row). A collapsed frame shows its nested groups and
 // its first card, with the edges of the others stacked under it; a lone card folds to its question, and a frame with
-// no card of its own shows its title alone, with no box under it. Root frames sit at their `pos`, or below the root
-// before them; loose cards sit at their own `pos`, or below the roots, and a thread's frame about a loose card stands
-// right of it. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
+// no card of its own shows its title alone, with no box under it. Root frames and loose cards sit at their `pos`, or in
+// one column in the order they were made, and a thread's frame about a loose card stands right of it. Empty thread
+// groups are not drawn. `View` is the plane's pan and zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
@@ -203,6 +203,10 @@ export function pathOf(lay: Pick<Layout, 'wraps'>, id: string): string[] {
   return out
 }
 
+/** When a card or a group was made, in ms, from its stamp (a card's to the second, a group's to the microsecond); NaN
+ * with none, which never compares as earlier. */
+const madeAt = (stamp: string | null | undefined): number => (stamp ? Date.parse(stamp) : NaN)
+
 /** A card's height: its own, else the measured content, else a guess until it is measured. */
 export const cellHeight = (c: BoardCell, heights: Readonly<Record<string, number>>): number => c.h ?? heights[c.id] ?? UNMEASURED_H
 
@@ -319,19 +323,35 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
       else rects.set(k.it.id, { x: x + p.x, y: y + p.y, w: k.it.w, h: cardH(k.it) })
     }
   }
-  let topY = ROOT_Y
-  for (const g of roots) {
-    if (g.beside) continue
-    const p = g.pos ?? { x: ROOT_X, y: topY }
-    place(g, p.x, p.y, 0)
-    topY = Math.max(topY, p.y + size.get(g.id)!.h + ROOT_GAP)
-  }
+  // the root column: the root frames and the loose cards in the order they were made, so a frame made after a loose
+  // card stands below it. The loose cards keep their stored order among themselves, each frame going before the first
+  // of them made after it (with no stamps to go by, the frames first); what the analyst placed stays at its `pos`.
+  const column: Kid[] = []
+  const frames = roots.filter((g) => !g.beside)
+  let fi = 0
   for (const c of board.cells) {
     if (c.parent) continue
+    const made = madeAt(c.cell.created_ts ?? c.cell.ts)
+    while (fi < frames.length && !(made < madeAt(frames[fi].group.ts))) column.push({ t: 'g', it: frames[fi++] })
+    column.push({ t: 'c', it: c })
+  }
+  while (fi < frames.length) column.push({ t: 'g', it: frames[fi++] })
+  let topY = ROOT_Y
+  let cardFoot = -Infinity // the foot of the column's last loose card: a frame's title needs ROOT_GAP under it
+  for (const k of column) {
+    if (k.t === 'g') {
+      const p = k.it.pos ?? { x: ROOT_X, y: Math.max(topY, cardFoot + ROOT_GAP) }
+      place(k.it, p.x, p.y, 0)
+      topY = Math.max(topY, p.y + size.get(k.it.id)!.h + ROOT_GAP)
+      continue
+    }
+    const c = k.it
     const p = c.pos ?? { x: ROOT_X, y: topY }
     const h = cellHeight(c, heights)
     rects.set(c.id, { x: p.x, y: p.y, w: c.w, h })
-    if (!c.pos) topY += h + GAP
+    if (c.pos) continue
+    topY += h + GAP
+    cardFoot = p.y + h
   }
   // a thread's frame about a loose card: right of the card, its title level with the card's top, and moved down past
   // what it would cover, so two such frames stack downward; in the order of their cards
