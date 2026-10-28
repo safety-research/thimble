@@ -233,7 +233,7 @@ Open a card of a card type as its view in Files, as the card's Open as view does
 
 ## propose_view
 
-Propose a view, a page of the records that the analyst keeps and comes back to, such as a dashboard, which shows them in a form their files hide; or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
+Propose a view, a page of the records that the analyst keeps and comes back to, such as a dashboard, which shows them in a form their files hide; or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes.
 
 ```json
 {
@@ -404,7 +404,7 @@ Delete a thread and its chat from the workspace, stopping its session if it runs
 
 ## start_writing
 
-Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document. Pass a model or an effort only when the analyst names one, so that the writer otherwise runs on the values thimble's Settings give it.
+Start a writer, as a subagent of this session, which writes or revises one document from this conversation, the cards and the documents. thimble shows its steps, and its last message reaches you as a `written` event when it ends. Its result is the exact Agent call that starts the writer, which you then make. Call it when the analyst asks for a document or for a change to one, and use `edit_document` yourself to change one passage, slide or layout of a written document.
 
 ```json
 {
