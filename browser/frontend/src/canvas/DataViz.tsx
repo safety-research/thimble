@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useTheme } from '../lib/theme'
 import type { GraphDataset, TimelineDataset } from '../lib/types'
+import { cardStyle } from '../lib/cardStyle'
 import { chartScript, frameStyle, frameTokens, useCardLibs, useFrameFonts, withFrameStyle } from '../lib/frame'
 import { useVisibleSize } from '../lib/visibleSize'
 import { inkScript, paperInks } from '../lib/ink'
@@ -979,9 +980,9 @@ export const CUSTOM_OPEN_MAX_H = 8000
 
 /** A custom card's page in a sandboxed frame, as tall as its content up to CUSTOM_MAX_H; taller pages fade out with a
  * Show all under them. A page wider than its frame scrolls sideways inside it, and a fade at the frame's right edge says
- * there is more. Its head carries the theme, the ink that mends text the paper made hard to read (lib/ink), the bridge that tells the page what the ⌘ pointer and the wheel do
+ * there is more. Its head carries the theme, thimble's card stylesheet (lib/cardStyle), the ink that mends text the paper made hard to read (lib/ink), the bridge that tells the page what the ⌘ pointer and the wheel do
  * in the frame (cardBridge), the chart style (chartScript) and the libraries the card names in workspace `ws`
- * (useCardLibs), before the page's own scripts. */
+ * (useCardLibs), before the page's own styles and scripts. */
 export function CustomFrame({ html, title, height, ws = '', libs }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[] }) {
   const ref = useRef<HTMLIFrameElement>(null)
   const [full, setFull] = useState(() => Math.max(CUSTOM_MIN_H, Math.ceil(typeof height === 'number' ? height : 160)))
@@ -995,7 +996,7 @@ export function CustomFrame({ html, title, height, ws = '', libs }: { html: stri
   const head = useCardLibs(ws, libs)
   // the tokens are read at embed time, once per theme. It waits for the page's fonts and libraries, so the page is drawn once
   // inkScript: text the paper made hard to read takes the ink that reads (lib/ink)
-  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + bridgeScript() + chartScript() + inkScript(paperInks(token)) + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
+  const doc = useMemo(() => (fonts == null || head == null ? null : withFrameStyle(withSizer(html), frameStyle(resolved, frameTokens(), fonts) + cardStyle() + bridgeScript() + chartScript() + inkScript(paperInks(token)) + head)), [html, resolved, key, fonts, head]) // key: the tokens are read again when the paper or the accent changes
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       const frame = ref.current
