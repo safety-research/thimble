@@ -20,9 +20,7 @@ const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers,
  *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
  *  look runs while one such feature is on. `lensesIn`: the mode in which they join the look after each reply (Claims:
  *  `auto`; in `on demand`, a look of their own runs when the person asks). `says`: what each mode
- *  gives (`on` and `off` for a switch), which the settings pane shows under the row for the one set. `cost`: what a
- *  mode costs, as `does` says it, for the modes it names a cost for; the settings pane adds it to the line under the
- *  row picked. `under`: the
+ *  gives (`on` and `off` for a switch), which the settings pane shows under the row for the one set. `under`: the
  *  feature whose work this setting changes (Checker: the checks of Citations); the pane shows its row only while that
  *  feature is on. `firstParty`: the setting names models by the ids of Anthropic's first-party API (core/models.js),
  *  which Bedrock, Vertex and Foundry do not take: where Claude Code runs on one of them (settings/term.ts
@@ -42,7 +40,6 @@ export const SWITCHES = [
       'manual': 'Select words and press c to cite them.',
       'off': 'No citations.',
     },
-    cost: { 'auto cite + verify': 'The checks run after each answer.', 'auto cite': 'This spends fewer tokens.' },
   },
   {
     key: 'checkerModel', title: 'Checker', group: 'Answers', under: 'citations', firstParty: true, default: 'same as Claude', choices: ['same as Claude', 'haiku', 'sonnet', 'opus'],
@@ -53,7 +50,6 @@ export const SWITCHES = [
       'sonnet': 'The second Claude checks citations on Sonnet.',
       'opus': 'The second Claude checks citations on Opus.',
     },
-    cost: Object.fromEntries(['haiku', 'sonnet', 'opus'].map(m => [m, 'It reads the conversation without the cache of the conversation\'s model.'])),
   },
   {
     key: 'cards', title: 'Cards', group: 'Answers', default: true,
@@ -64,13 +60,11 @@ export const SWITCHES = [
     key: 'squeezeAnswers', title: 'Rewrite', group: 'Answers', default: true,
     does: 'Press s to rewrite an answer shorter or longer, more novice or more expert, or in your own words. Press 0 for the original. One call each time you ask.',
     says: { on: 'Press s to rewrite an answer shorter or longer, more novice or more expert. Press 0 for the original.', off: 'No rewrites.' },
-    cost: { on: 'One call each time you ask.' },
   },
   {
     key: 'catchUp', title: 'Catch-up', group: 'Answers', default: true,
     does: 'Press b to sum up the replies that came in while you were away, in one short note. Press 0 to see the replies again. One call each time you ask.',
     says: { on: 'Press b to sum up the replies that came in while you were away.', off: 'No catch-up.' },
-    cost: { on: 'One call each time you ask.' },
   },
   {
     key: 'explain', title: 'Explainers', group: 'Comments', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['explain'], lensesIn: 'auto',
@@ -80,7 +74,6 @@ export const SWITCHES = [
       'on demand': 'Select words and press e for a short explainer.',
       'off': 'No explainers.',
     },
-    cost: { auto: 'A small part of the call after each answer.' },
   },
   {
     key: 'details', title: 'Heads-ups', group: 'Comments', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['heads'], lensesIn: 'auto',
@@ -90,7 +83,6 @@ export const SWITCHES = [
       'on demand': 'Press h for heads-ups on the last answer.',
       'off': 'No heads-ups.',
     },
-    cost: { auto: 'A small part of the call after each answer.' },
   },
   {
     key: 'claimsMode', title: 'Evidence', group: 'Panes', default: 'auto', choices: ['auto', 'on demand', 'off'], lenses: ['claims'], lensesIn: 'auto',
@@ -100,19 +92,16 @@ export const SWITCHES = [
       'on demand': 'Press w to see the conversation\'s claims and their evidence. Press f in the pane to find them.',
       'off': 'No Evidence pane.',
     },
-    cost: { auto: 'The largest part of the call after each answer.', 'on demand': 'This spends fewer tokens.' },
   },
   {
     key: 'labels', title: 'Labels', group: 'Panes', default: true,
     does: 'Press l to see the labels Claude made, with their values and records. No model call.',
     says: { on: 'Press l to see the labels Claude made, with their values and records.', off: 'No Labels pane.' },
-    cost: { on: 'No model call.' },
   },
   {
     key: 'coverage', title: 'Coverage', group: 'Panes', default: true,
     does: 'Press r to see which files Claude has read, by folder. No model call: thimble counts the files after each turn.',
     says: { on: 'Press r to see which files Claude has read, by folder.', off: 'No Coverage pane.' },
-    cost: { on: 'No model call: thimble counts the files after each turn.' },
   },
 ]
 

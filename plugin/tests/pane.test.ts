@@ -8,7 +8,7 @@ import { barKey, registerBar } from '../bar/register'
 import { noteViewport } from '../cards/draw'
 import { closePane, drawPane, narrowNotice, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
 import { treeRows } from '../core/trail.mjs'
-import { setOptions } from '../settings/features.mjs'
+import { setOptions, SWITCHES } from '../settings/features.mjs'
 import { resetThreads } from '../threads/thread'
 import { test } from './kit'
 
@@ -354,7 +354,7 @@ test('an item of the bar a failure line quotes is a part of its own with that it
   expect(pressedWords('“r coverage” failed. Press x to try again.', named).map(p => p.key ?? (p.press ? 'item' : ''))).toEqual(['item', '', 'x', ''])
 })
 
-test('in the settings, the row picked and the line under it, with what its mode costs, stay in view at any height: ↓ to a row below the window brings it in', async () => {
+test('in the settings, the row picked and the line under it stay in view at any height: ↓ to a row below the window brings it in; its line says what its mode gives, as when it is not picked', async () => {
   const s = setup()
   s.$.ui.focus = async () => ({})
   await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
@@ -374,12 +374,10 @@ test('in the settings, the row picked and the line under it, with what its mode 
   // the window: the pane's rows less its top row and the line that says how much more there is
   expect(top).toBeGreaterThanOrEqual(by)
   expect(top + treeRows(rows[k], 70)).toBeLessThanOrEqual(by + H - 2)
-  // the line under it says what its mode gives and what it costs
+  // the line under it says what its mode gives, and nothing more for being picked
   const says = textOf(nodes(rows[k]).find(n => n.props?.key === 'says-claimsMode'))
   expect(says).toContain('Claims are found after each answer.')
-  expect(says).toContain('The largest part of the call after each answer.')
-  // a row not picked says what its mode gives alone
-  expect(textOf(nodes(tree).find(n => n.props?.key === 'says-coverage'))).not.toContain('No model call')
+  expect(says).toBe((SWITCHES.find(x => x.key === 'claimsMode') as Any).says.auto)
   setOptions({})
 })
 
