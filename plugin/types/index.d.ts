@@ -49,8 +49,8 @@ declare module 'claude-code' {
       /** thimble's own work while it runs: the glyph's frame and how many jobs run (bar/busy.ts) */
       busy: { frame: number; n: number }
       /** the bar's counts: the share of the folder's files Claude touched, in words, the labels, a number that changes
-       *  with each count, and why the last count failed (bar/counts.ts) */
-      counts: { coverage: string | null; labels: number; gen: number; error: string | null } | null
+       *  with each count, why the last count failed, and when the count that runs began (bar/counts.ts) */
+      counts: { coverage: string | null; labels: number; gen: number; error: string | null; since?: number | null } | null
       /** what the person opened inside a pane of the bar's, by kind: coverage {open, file} (panes/) */
       paneView: StateFamily<unknown>
       /** the failure line or a notice, until the person's next prompt (bar/notice.ts) */

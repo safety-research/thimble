@@ -4,9 +4,14 @@
 // model call. Both run as the person's command (core/env.ts runThimble), so nothing they read counts as Claude's; the
 // coverage is of Claude's own session. One count runs at a time per folder. The last coverage is kept for the coverage
 // pane (lastCoverage), and the state's `gen` changes with each count, so what shows it draws again.
+//
+// The last count is kept in the conversation's folder too (coverage.json, core/layout.mjs): a load of the plugin (a
+// reload, a setting changed, a resumed session) shows it on the bar and in the pane while the new count runs. A count
+// that a reload stopped goes on in the next: the kernel keeps each file it counted, and the bar's time for the count
+// goes on from when it began (the state's `since`, which a reload keeps).
 import type { EngineInterface } from 'claude-code'
 
-import { rootHere, runThimble, startDir, type Ran } from '../core/env'
+import { readKept, rootHere, runThimble, startDir, writeKept, type Ran } from '../core/env'
 import { featureOn } from '../settings/features.mjs'
 import { sessionKey } from '../hooks/conversation'
 import { busy } from './busy'
@@ -16,15 +21,21 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-export type Counts = { coverage: string | null; labels: number; gen: number; error: string | null }
+/** `since`: when the count that runs began (the session's clock), null while none runs. */
+export type Counts = { coverage: string | null; labels: number; gen: number; error: string | null; since?: number | null }
 
 const COUNTS = { plugin: 'thimble', key: 'counts' } as const
+/** The conversation's last count of a folder, in its folder: the bar's words, the labels and the kernel's record (the
+ *  pane's). */
+const LAST_FILE = 'coverage.json'
+type LastCount = { root: string; coverage: string | null; labels: number; record: Any }
 
-/** How long one count of the folder's coverage may run. The first count of a big folder reads every row of its
- *  tables (about a minute for 18 GB of records); the kernel keeps the row counts, so later counts are quick. A count
- *  stopped early keeps nothing, so a short limit would stop every count of such a folder (10 minutes is the most
- *  Claude Code allows). */
+/** How long one run of `thimble coverage` may take (10 minutes is the most Claude Code allows), and the seconds after
+ *  which the kernel stops counting the folder's files, keeps what it counted and says how far it got, so that the run
+ *  ends in that time. The first count of a big folder on a slow disk reads every file, which can take longer: it then
+ *  runs again at once and goes on from where it stopped, while each run counts more of the folder. */
 export const COVER_TIMEOUT_MS = 600000
+export const COVER_WITHIN_S = 480
 const counting = new Map<string, Promise<Ran>>()
 const queued = new Map<string, Promise<Ran>>()
 let last: Any = null
@@ -44,9 +55,34 @@ export function coverageOf($: Engine, root: string, session: string): Promise<Ra
     }
     return next
   }
-  const p = runThimble($, root, ['coverage', '--json'], { session, timeoutMs: COVER_TIMEOUT_MS }).finally(() => { counting.delete(key) })
+  const p = countAll($, root, session).finally(() => { counting.delete(key) })
   counting.set(key, p)
   return p
+}
+
+/** One count, in as many runs as the kernel needs: a run that stopped at its time with files left to count runs again,
+ *  and one that counted no more of them than the run before ends the count, saying why. */
+async function countAll($: Engine, root: string, session: string): Promise<Ran> {
+  let before = -1
+  for (;;) {
+    const r = await runThimble($, root, ['coverage', '--json', '--within', String(COVER_WITHIN_S)], { session, timeoutMs: COVER_TIMEOUT_MS })
+    const left = stillCounting(r)
+    if (!left) return r
+    if (left.counted <= before) throw new Error(`counting the folder's ${left.files.toLocaleString('en-US')} files went no further in ${COVER_WITHIN_S / 60} minutes`)
+    before = left.counted
+  }
+}
+
+/** The kernel's word that it stopped counting at its time, with how many of the folder's files it has counted; null
+ *  for any other result. */
+function stillCounting(r: Ran): { counted: number; files: number } | null {
+  if (r.code !== 0 || r.stdout.length > 300) return null
+  try {
+    const c = JSON.parse(r.stdout)?.counting
+    return c && Number.isFinite(Number(c.counted)) ? { counted: Number(c.counted), files: Number(c.files) || 0 } : null
+  } catch {
+    return null
+  }
 }
 
 /** The last coverage counted, as `thimble coverage --json` gave it, or null. */
@@ -108,15 +144,15 @@ export async function recount($: Engine): Promise<void> {
   asked = true
   const root = await coverageRoot($)
   if (!root) return
-  const was = await countsNow($)
-  let coverage = was?.coverage ?? null
-  let labels = was?.labels ?? 0
+  const session = await sessionKey($)
+  const was = await whileCounting($, root)
+  let coverage = was.coverage
+  let labels = was.labels
   let error: string | null = null
   const why = (err: unknown) => String((err as Error)?.message || err).slice(0, 200)
-  const session = await sessionKey($)
   let got: Any = null
   try {
-    got = record(await busy($, 'counting coverage', () => coverageOf($, root, session)), 'thimble coverage', EMPTY_COVERAGE)
+    got = record(await busy($, 'counting coverage', () => coverageOf($, root, session), was.since ?? undefined), 'thimble coverage', EMPTY_COVERAGE)
     const files = Number(got.total?.files) || 0
     coverage = files ? shareOfFiles(Number(got.total?.touched_files) || 0, files) : null
   } catch (err) {
@@ -129,16 +165,37 @@ export async function recount($: Engine): Promise<void> {
   }
   // a count of a conversation the session left (a /clear, a /resume) while it ran: the new one counts its own
   if (session !== (await sessionKey($))) return
-  if (got) last = got
+  if (got) {
+    last = got
+    await writeKept($, LAST_FILE, { root, coverage, labels, record: got } satisfies LastCount).catch(() => undefined)
+  }
   if (error) failNotice($, error, 'coverage')
-  const counts = { coverage, labels, gen: (was?.gen ?? 0) + 1, error }
+  const counts = { coverage, labels, gen: was.gen + 1, error, since: null }
   await $.state.set(COUNTS, counts)
   kept = { counts }
   if (!error) await failCleared($, 'coverage')
 }
 
+/** What the bar and the pane show while a count runs, set in the state: the last count, this load's, else the one the
+ *  conversation kept of `root` (at a reload, a setting changed, a resumed session); and when the count began. A count
+ *  that a reload stopped goes on in this one (the kernel kept each file it counted), so its time goes on too. */
+async function whileCounting($: Engine, root: string): Promise<Counts> {
+  const was = await countsNow($)
+  const counts: Counts = { coverage: was?.coverage ?? null, labels: was?.labels ?? 0, gen: (was?.gen ?? 0) + 1, error: was?.error ?? null, since: was?.since ?? Number(await $.clock.now()) }
+  if (!last || !counts.coverage) {
+    const k = await readKept<LastCount>($, LAST_FILE)
+    if (k?.root === root && k.record) {
+      last ??= k.record
+      if (!counts.coverage) Object.assign(counts, { coverage: k.coverage ?? null, labels: Number(k.labels) || 0 })
+    }
+  }
+  await $.state.set(COUNTS, counts)
+  kept = { counts }
+  return counts
+}
+
 /** A /clear or a /resume (hooks/turnover.ts): the bar and the coverage pane show nothing of the earlier conversation,
- *  and the new one is counted once, a moment after (from the hook that noticed it). */
+ *  and the new one is counted once, a moment after (from the hook that noticed it), its last count shown meanwhile. */
 export async function turnCounts($: Engine): Promise<void> {
   last = null
   asked = false
@@ -151,9 +208,14 @@ export async function turnCounts($: Engine): Promise<void> {
  *  which loads the plugin again): count once, a moment after. Asked from a hook (register.ts at session.start,
  *  turnCounts), never from a drawing: Claude Code stops every call a drawing's hook made that still runs when a newer
  *  drawing replaces it, as at a resume (the marks and claims read back, a light theme read for the first time), and
- *  a count asked from there ended `aborted`. */
+ *  a count asked from there ended `aborted`. With both switches off, a count a reload stopped does not go on: a later
+ *  one keeps no time from it. */
 export function needCounts($: Engine): void {
-  if (asked || (!featureOn('coverage') && !featureOn('labels'))) return
+  if (asked) return
+  if (!featureOn('coverage') && !featureOn('labels')) {
+    void countsNow($).then(c => (c?.since != null ? $.state.set(COUNTS, { ...c, since: null }) : undefined)).catch(() => undefined)
+    return
+  }
   asked = true
   $.clock.after(0, () => { void recount($).catch(() => undefined) })
 }

@@ -5,6 +5,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
 import { busyNow, busyWhile } from '../bar/busy'
+import { recount } from '../bar/counts'
 import { INTRO, INTRO_MS } from '../bar/intro'
 import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
@@ -44,8 +45,9 @@ function textOf(n: Any): string {
 }
 
 /** A made-up session: the folder's coverage counts as `coverage` says (a JSON text, or a failure), with two labels.
- *  `ran`: each command's argv. */
-function world(on: Any, coverage: { ok: boolean; out: string }) {
+ *  `ran`: each command's argv. `o.count`: answers each run of `thimble coverage` instead, when it comes; `o.disk`: the
+ *  files the plugin writes and reads back, by path. */
+function world(on: Any, coverage: { ok: boolean; out: string }, o: { count?: (argv: string[]) => Promise<{ code: number; out: string }>; disk?: Map<string, string> } = {}) {
   mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' })
   const clock = mock.clock(on, { now: 0 })
   const submitted: string[] = []
@@ -56,11 +58,11 @@ function world(on: Any, coverage: { ok: boolean; out: string }) {
   on('session.cwd', () => ({ value: '/made-up/data' }))
   on('session.root', () => ({ value: '/made-up/data' }))
   on('session.messages', () => ({ value: [] }))
-  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: promptStub(e.path) ?? '' }))
+  on('fs.read', (_$: unknown, e: { path: string }) => ({ value: o.disk?.get(e.path) ?? promptStub(e.path) ?? '' }))
   on('tool.register', () => ({ value: undefined }))
-  on('fs.write', () => ({ value: undefined }))
+  on('fs.write', (_$: unknown, e: { path: string; text: string }) => { o.disk?.set(e.path, e.text); return { value: undefined } })
   on('fs.list', () => ({ value: [] }))
-  on('fs.exists', () => ({ value: false }))
+  on('fs.exists', (_$: unknown, e: { path: string }) => ({ value: !!o.disk?.has(e.path) }))
   on('fs.stat', () => ({ value: { kind: 'missing', size: 0 } }))
   on('env.set', () => ({ value: {} }))
   on('ui.toast', () => ({ value: undefined }))
@@ -70,6 +72,7 @@ function world(on: Any, coverage: { ok: boolean; out: string }) {
   on('process.run', (_$: unknown, e: { argv: string[] }) => {
     const out = (exitCode: number, stdout: string, stderr = '') => ({ value: { exitCode, stdout, stderr, isStdoutTruncated: false, isStderrTruncated: false } })
     ran.push(e.argv)
+    if (e.argv.includes('coverage') && o.count) return o.count(e.argv).then(r => out(r.code, r.out))
     if (e.argv.includes('coverage')) return coverage.ok ? out(0, coverage.out) : out(1, '', coverage.out)
     if (e.argv.includes('label')) return out(0, '[{"name": "failing"}, {"name": "slow"}]')
     return out(0, '')
@@ -194,6 +197,105 @@ test('an empty folder: the count ends well with nothing to count, so the bar nam
   expect(line).toContain('l 2 labels')
   expect(line).not.toContain('coverage')
   expect(line).not.toContain('could not be counted')
+})
+
+/** The made-up folder after Claude touched one more file. */
+const NEWER = { ...COVERAGE, total: { files: 7, touched_files: 4, seen_files: 2 } }
+/** Where the conversation's last count is kept (core/layout.mjs). */
+const KEPT_COUNT = '/made-up/.thimble/conversations/s-bar/coverage.json'
+
+test('a count the kernel stopped at its time runs again at once and goes on until it gives the record; a run that counted no further ends the count, saying why', async ($, on) => {
+  const runs: string[][] = []
+  const answers: unknown[] = [{ counting: { counted: 10, files: 30 } }, { counting: { counted: 25, files: 30 } }, COVERAGE]
+  const w = world(on, { ok: true, out: '' }, { count: async argv => { runs.push(argv); return { code: 0, out: JSON.stringify(answers.shift()) } } })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(100)
+  expect(runs.length).toBe(3)
+  // each run stops counting within Claude Code's 10 minutes
+  for (const argv of runs) {
+    expect(argv).toEqual(expect.arrayContaining(['coverage', '--json', '--within']))
+    const within = Number(argv[argv.indexOf('--within') + 1])
+    expect(within > 0 && within < 600).toBe(true)
+  }
+  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 43% (3/7 files)')
+  // after the next answer, a run that counted no more of the folder's files than the run before
+  answers.push({ counting: { counted: 25, files: 30 } }, { counting: { counted: 25, files: 30 } })
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(100)
+  const line = textOf(await $.ui.render(BAND))
+  expect(line).toContain("Coverage could not be counted: counting the folder's 30 files went no further in")
+  expect(line).toContain('r coverage 43% (3/7 files)')
+})
+
+test("at a load of the plugin (a reload, a setting changed, a resumed session), the conversation's last count shows on the bar and in the pane while the new count runs, and the new count is kept in its place", async ($, on) => {
+  const disk = new Map([[KEPT_COUNT, JSON.stringify({ root: '/made-up/data', coverage: '43% (3/7 files)', labels: 2, record: COVERAGE })]])
+  const ends: ((r: { code: number; out: string }) => void)[] = []
+  const w = world(on, { ok: true, out: '' }, { disk, count: () => new Promise(r => { ends.push(r) }) })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(5000)
+  const line = textOf(await $.ui.render(BAND))
+  expect(line).toContain('counting coverage')
+  expect(line).toContain('r coverage 43% (3/7 files)')
+  expect(line).toContain('l 2 labels')
+  // r opens the pane on the last count
+  await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'r' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'r' } as never)
+  await w.clock.advance(400)
+  const pane = await $.ui.mount(PANE)
+  expect((await pane.find({ type: 'Text', text: /files touched/ }))?.text).toMatch(/3\/7 files touched · 43%/)
+  await pane.unmount()
+  ends[0]!({ code: 0, out: JSON.stringify(NEWER) })
+  await w.clock.advance(100)
+  expect(textOf(await $.ui.render(BAND))).toContain('r coverage 57% (4/7 files)')
+  expect(JSON.parse(disk.get(KEPT_COUNT)!)).toMatchObject({ root: '/made-up/data', coverage: '57% (4/7 files)', labels: 2, record: { total: { touched_files: 4 } } })
+})
+
+test("a count that a reload stopped goes on in the next load's count, and the bar's time for it goes on from when it began", async () => {
+  let now = 10_000_000
+  const state = new Map<string, unknown>()
+  const key = (k: Any) => [k.key, k.id].filter(Boolean).join(':')
+  // the state as a reload left it: the count began 300 s ago, and the last count stands
+  state.set('counts', { coverage: '43% (3/7 files)', labels: 2, gen: 3, error: null, since: now - 300000 })
+  const ends: ((r: Any) => void)[] = []
+  const $: Any = {
+    plugin: { root: '/made-up/plugin' },
+    env: { get: async (k: string) => ({ THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', THIMBLE_ROOT: '/made-up/data' } as Record<string, string>)[k] },
+    fs: { read: async () => { throw new Error('missing') }, write: async () => undefined, exists: async () => false, stat: async (p: string) => ({ kind: 'dir', size: 0, realPath: p }) },
+    state: { get: async (k: Any) => ({ value: state.get(key(k)) }), set: async (k: Any, v: unknown) => { state.set(key(k), v); return { isSet: true } } },
+    clock: { now: async () => now, after: () => ({ cancel() {} }) },
+    session: { id: async () => 's-reload', usage: async () => ({}), messages: async () => [], cwd: async () => '/made-up/data', root: async () => '/made-up/data' },
+    process: { run: (argv: string[]) => (argv.includes('coverage') ? new Promise(r => { ends.push(r) }) : Promise.resolve({ exitCode: 0, stdout: '[]', stderr: '' })) },
+    ui: { toast: () => undefined },
+  }
+  const counted = recount($)
+  await new Promise(r => setTimeout(r, 10))
+  now += 4000
+  expect(await busyNow($)).toMatchObject({ word: 'counting coverage', secs: 304 })
+  // the bar keeps the last count meanwhile
+  expect(state.get('counts')).toMatchObject({ coverage: '43% (3/7 files)', labels: 2 })
+  ends[0]!({ exitCode: 0, stdout: JSON.stringify(NEWER), stderr: '' })
+  await counted
+  expect(state.get('counts')).toMatchObject({ coverage: '57% (4/7 files)', since: null })
+  expect(await busyNow($)).toBeNull()
+})
+
+test('while it counts, the bar keeps its keys: v beside the busy step, and the last count on its right, also when narrow', async ($, on) => {
+  const ends: ((r: { code: number; out: string }) => void)[] = []
+  const w = world(on, { ok: true, out: '' }, { count: () => new Promise(r => { ends.push(r) }) })
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await w.clock.advance(100)
+  ends.shift()!({ code: 0, out: JSON.stringify(COVERAGE) })
+  await w.clock.advance(100)
+  // the next answer's count runs
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text: 'Two runs failed.' }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: 'row-answer-1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Two runs failed.', durationMs: 10, isAborted: false } as never)
+  await w.clock.advance(5000)
+  const at = async (width: number) => textOf(await $.ui.render({ ...(BAND as Any), props: { ...(BAND as Any).props, bodyColumns: width } } as never))
+  const wide = await at(100)
+  for (const item of ['counting coverage 5s', 'v visualize', 'r coverage 43% (3/7 files)']) expect(wide).toContain(item)
+  // narrow, the busy step gives way to its glyph and seconds first, and the keys stay
+  const narrow = await at(60)
+  for (const item of ['5s', 'v visualize', 'r coverage 43%']) expect(narrow).toContain(item)
+  ends.forEach(end => end({ code: 0, out: JSON.stringify(COVERAGE) }))
 })
 
 /** Elements as plain data, for drawing the bar without a surface. */
