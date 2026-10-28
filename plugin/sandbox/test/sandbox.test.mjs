@@ -330,6 +330,26 @@ test('with --repair, an install again that fails says both why: the cause it was
   assert.equal(got.repaired, undefined)
 })
 
+test('with --repair, srt is installed again only when its own files fail, not when the machine keeps the runner from starting or answering', () => {
+  const repair = { args: ['--repair'], env: offline() }
+  // the machine's: a runner that ends and says nothing (as Node 25 refused its socket), a kernel that gives bubblewrap
+  // no namespaces, a machine too loaded for the runner to answer in time. srt is not installed again (npm, which
+  // cannot reach its registry here, is not run), and the probe's own cause is said
+  for (const command of ['true', "sh -c 'echo bwrap: No permissions to creating new namespace, likely because the kernel does not allow non-privileged user namespaces >&2; exit 1'", 'sleep 60']) {
+    const got = probeWith(command, true, repair)
+    assert.equal(got.ok, false)
+    assert.match(got.why, /^the card runner /, command)
+    assert.doesNotMatch(got.why, /npm/, command)
+    assert.equal(got.repaired, undefined)
+  }
+  // srt's own: it does not set the sandbox up (run.mjs), or a file of its folder is missing. It is installed again,
+  // which fails here, and says so after the cause
+  const unset = probeWith('', true, { ...repair, wrap: 'throw new Error("made-up: a file of srt is broken")' })
+  assert.match(unset.why, /could not be set up: made-up: a file of srt is broken; .*npm could not install/)
+  const missing = probeWith('', true, { ...repair, wrap: "return \"sh -c 'echo bwrap: execvp \" + new URL('../vendor/seccomp/x64/apply-seccomp', import.meta.url).pathname + \": No such file or directory >&2; exit 1'\"" })
+  assert.match(missing.why, /vendor\/seccomp\/x64\/apply-seccomp: No such file or directory; .*npm could not install/)
+})
+
 test('the sandbox starts its command with the system\'s bash, also when PATH finds another bash first', () => {
   // as Homebrew on Linux, Nix or conda set PATH up: a bash in a folder the rules hide
   const own = join(dir, 'own-bash')

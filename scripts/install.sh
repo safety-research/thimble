@@ -13,8 +13,9 @@ it installs the plugin, it looks for thimble 0.9, and stops while 0.9 is here: i
 workspaces (0.10 cannot open them), and the commands that remove 0.9.
   The terminal plugin: adds the marketplace safety-research/thimble to Claude Code and installs thimble@thimble, then
     the sandbox its cards run in (Anthropic's sandbox runtime, pinned by the plugin, in ~/.thimble/srt), and draws a
-    test card in it on the node a new terminal finds; a sandbox that does not load or start it installs again. On Linux
-    it says which system packages the sandbox lacks, with the one command that installs them (it never runs sudo).
+    test card in it on the node a new terminal finds; a sandbox whose files are missing or broken it installs again.
+    On Linux it says which system packages the sandbox lacks, with the one command that installs them (it never runs
+    sudo).
     Without the claude command, it prints the two commands to run.
     It also links the thimble command into ~/.local/bin, for a shell: thimble update moves both products to the
     newest release, thimble fixes lists your changes to thimble, and thimble --help lists the rest.
@@ -420,7 +421,7 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
     if [ -n "$at" ] && [ -f "$at/sandbox/setup.mjs" ]; then
       say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
       # the test draws a card as a session does: on the node and PATH of a new terminal (fresh_path), else on this
-      # shell's; a failure it can repair (srt that does not load or start) it repairs (--repair)
+      # shell's; a failure it can repair (srt's files missing or broken) it repairs (--repair)
       probe_path="$(fresh_path)"
       probe_node=""
       if [ -n "$probe_path" ]; then

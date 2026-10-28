@@ -11,11 +11,11 @@
 // machine has what it needs (Linux: bubblewrap, socat and ripgrep; macOS: sandbox-exec), and with --probe starts the
 // card runner in the sandbox, waits for its answer, and has it draw a test card, as a card call does (its rows in the
 // card copies' folder, a view that writes them); the card's text copy must show the rows. With --repair (the install,
-// scripts/install.sh), a check that fails for a cause that is not the machine's (srt does not load, or the runner does
-// not start or draw) installs srt again, once, and checks again: what a package or a setting of the machine lacks
-// stays for the person to fix, since only they can. Setups that run at the same time (two sessions start, a card is
-// called while the session start installs) install once: the others wait for that install. It prints one line, or
-// with --json one JSON object:
+// scripts/install.sh), a check that fails because srt's own files are missing or broken (srt does not load, or does not
+// set the sandbox up, or the runner's failure names a file of srt's) installs srt again, once, and checks again: what a
+// package or a setting of the machine lacks, or a runner the machine keeps from starting, stays for the person to fix.
+// Setups that run at the same time (two sessions start, a card is called while the session start installs) install
+// once: the others wait for that install. It prints one line, or with --json one JSON object:
 //   {ok, node, nodeVersion, grants, platform, version, srt, why, fix, ms, repaired}
 // `node` is this Node's binary (the runner's), `nodeVersion` its version, `grants` whether it takes each grant of
 // Node's permission model that the runner needs beyond its files (argv.mjs's GRANTS, such as {'--allow-net': true}),
@@ -249,9 +249,22 @@ function read(path) {
   try { return fs.readFileSync(path, 'utf8').trim() } catch { return '' }
 }
 
+/** Whether what the probe's runner said blames srt's own files, which a new install of srt replaces: srt did not set
+ *  the sandbox up (run.mjs: it did not load, or did not wrap the runner), or it names a file in srt's folder (one that is
+ *  missing or broken, such as its seccomp filter). */
+function srtFailed(said) {
+  const text = String(said || '')
+  if (text.includes('the sandbox could not be set up:')) return true
+  const at = [srt]
+  try { at.push(fs.realpathSync(srt)) } catch { /* gone */ }
+  return at.some(dir => text.includes(`${dir}/`))
+}
+
 /** Whether the sandbox works as installed: what the machine lacks (with its fix), srt that does not load, and with
- *  --probe a runner that does not start or draw the test card. `reinstall`: a cause that installing srt again may
- *  remove, as no package or setting of the machine explains it. */
+ *  --probe a runner that does not start or draw the test card. `reinstall`: a cause that installing srt again removes,
+ *  srt's own files missing or broken (it does not load, or the runner's failure is srt's); not a cause of the machine's,
+ *  such as a temp folder too long for the socket, a runner too slow to answer on a loaded machine, or a kernel that
+ *  gives bubblewrap no namespaces. */
 async function check() {
   let lacking
   try {
@@ -270,7 +283,7 @@ async function check() {
   const fix = userns && platform === 'linux' && read('/proc/sys/kernel/apparmor_restrict_unprivileged_userns') === '1'
     ? 'AppArmor keeps bubblewrap from making its namespaces. Allow them: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0'
     : ''
-  return { why: p.error, fix, reinstall: !fix }
+  return { why: p.error, fix, reinstall: !fix && srtFailed(p.said) }
 }
 
 async function main() {
