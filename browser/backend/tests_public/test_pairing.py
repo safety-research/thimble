@@ -165,13 +165,30 @@ def test_an_old_key_body_gets_410(client):
 
 @pytest.mark.real_write_guard
 def test_the_paired_route_says_whether_this_browser_is_signed_in_and_its_id(client):
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+    assert client.get("/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}
     sign_in(client, hook_auth.mint())
     browser = hook_auth._entries()[0]["hash"][:12]
-    assert client.get("/api/ui/paired").json() == {"paired": True, "id": browser}
+    assert client.get("/api/ui/paired").json() == {"paired": True, "id": browser, "at": hook_auth._entries()[0]["at"]}
     client.cookies.clear()
     client.cookies.set(hook_auth.ui_cookie(), "not-signed-in")
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+    assert client.get("/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}
+
+
+@pytest.mark.real_write_guard
+def test_the_paired_route_says_when_this_browser_signed_in_to_the_millisecond(client):
+    """A browser learns when it signed in, so it leaves out the notices of sign-ins before its own (frontend
+    lib/notices), which are timed to the millisecond (notices.post)."""
+    first = TestClient(client.app, base_url="http://testserver")
+    sign_in(first, hook_auth.mint())
+    sign_in(client, hook_auth.mint())
+    mine, theirs = client.get("/api/ui/paired").json(), first.get("/api/ui/paired").json()
+    [entry] = [e for e in hook_auth._entries() if e["hash"].startswith(mine["id"])]
+    assert mine["at"] == entry["at"]
+    for at in (mine["at"], theirs["at"]):
+        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}\+00:00", at), at
+    assert theirs["at"] <= mine["at"]
+    bare = TestClient(client.app, base_url="http://testserver")
+    assert bare.get("/api/ui/paired").json()["at"] == ""
 
 
 @pytest.mark.real_write_guard
@@ -207,7 +224,7 @@ def test_unpair_with_the_token_signs_every_browser_out_and_signout_with_a_cookie
 
     assert client.post("/api/ui/unpair").status_code == 401, "a signed-in page cannot sign every browser out"
     assert client.post("/api/ui/unpair", headers=plugin_headers()).status_code == 204
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+    assert client.get("/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}
     assert not (hook_auth.home() / hook_auth.PAIRED_FILE).exists()
     # the key went with the cookie: a new sign-in gets a new key, and the old key's path does not count its cookie
     cookie = client.cookies.get(hook_auth.ui_cookie(), path=hook_auth.browser_path(mine_key))
@@ -258,7 +275,7 @@ def test_a_browser_reads_nothing_until_it_signs_in_and_nothing_after_unpair(clie
     assert (r.status_code, r.json()) == (401, refused)
     head = client.head("/api/corpora")
     assert (head.status_code, head.content, head.headers.get("content-length")) == (401, b"", "0")
-    assert client.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+    assert client.get("/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}
     assert set(client.get("/api/health").json()) == {"ok", "boot", "ui"}, "no path or pid without the token"
     sign_in(client, hook_auth.mint(CORPUS))
     assert client.get("/api/corpora").status_code == 200
@@ -288,7 +305,7 @@ def test_a_cookie_counts_only_under_the_path_of_the_key_it_was_given_with(client
     page.cookies.set(hook_auth.ui_cookie(), cookie)  # sent on every path, so each check below is the server's
     refused = {"detail": hook_auth.SIGN_IN_NEEDED, "signin": True}
     for base in ("", f"/b/{other_key}", "/b/no-browser-holds-this-key", f"/b/{key}x"):
-        assert page.get(f"{base}/api/ui/paired").json() == {"paired": False, "id": ""}, base
+        assert page.get(f"{base}/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}, base
         r = page.get(f"{base}/api/corpora")
         assert (r.status_code, r.json()) == (401, refused), base
         r = page.post(f"{base}/api/ui/signout", json={"id": ""})

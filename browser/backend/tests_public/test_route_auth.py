@@ -105,7 +105,7 @@ def test_every_read_needs_the_cookie_or_the_token_and_only_the_open_reads_answer
                 r = client.get(url, headers=headers)
                 assert r.status_code != 401 and "signin" not in r.text, (path, name, r.status_code, r.text[:200])
         assert anyone.get("/api/health").json()["ok"] is True
-        assert anyone.get("/api/ui/paired").json() == {"paired": False, "id": ""}
+        assert anyone.get("/api/ui/paired").json() == {"paired": False, "id": "", "at": ""}
         for path in ("/docs", "/redoc", "/openapi.json"):  # FastAPI's own pages are off; a built page may answer them
             r = anyone.get(path)
             assert r.status_code == 404 or not re.search(r"swagger|redoc|\"openapi\"", r.text, re.I), path

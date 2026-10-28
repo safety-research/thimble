@@ -439,7 +439,8 @@ def signed_in(ws: object, browser: str) -> None:
     notice with Sign it out (sign-in:<browser>) and as a line under main's next reply in its terminal
     (session.tell_terminal), which the browser cannot hide. The workspaces are the one the link named, when it is
     registered, and each whose main this server follows. The browser that signed in shows no notice of its own sign-in
-    (its id, GET /api/ui/paired)."""
+    or of one before it (its id and when it signed in, GET /api/ui/paired); a browser signed in before it shows this
+    one."""
     from . import notices, session  # noqa: PLC0415
 
     name = ws if isinstance(ws, str) else ""
@@ -546,7 +547,8 @@ def create_app() -> FastAPI:
 
     @app.get("/api/ui/paired")
     def ui_paired(request: Request) -> dict:
-        return {"paired": hook_auth.analyst(request), "id": hook_auth.browser_id(request)}
+        return {"paired": hook_auth.analyst(request), "id": hook_auth.browser_id(request),
+                "at": hook_auth.signed_in_at(request)}
 
     # the built UI, last: a mount at / matches everything the routes above did not
     dist = frontend_dist()

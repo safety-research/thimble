@@ -545,6 +545,16 @@ def browser_id(request: Request) -> str:
     return _cookie_hash(request)[:12]
 
 
+def signed_in_at(request: Request) -> str:
+    """When the signed-in browser `request` comes from signed in (UTC, ISO 8601, to the millisecond as a notice's time
+    is); '' for a request from no signed-in browser, or from one an earlier build signed in without a time."""
+    digest = _cookie_hash(request)
+    if not digest:
+        return ""
+    with _pair_lock:
+        return next((e["at"] for e in _entries() if e["hash"] == digest), "")
+
+
 def set_cookie(r: Response, value: str, key: str) -> Response:
     """`r` with this server's cookie `value` (ui_cookie) scoped to the path of the browser key `key` (browser_path), and
     the deletion of a cookie of that name an earlier build scoped to OLD_COOKIE_PATH."""
@@ -571,7 +581,7 @@ def claim(body: Any, request: Request) -> tuple[Response, str]:
     cookie = secrets.token_urlsafe(32)
     key = secrets.token_urlsafe(BROWSER_KEY_BYTES)
     digest = _sha(cookie)
-    at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
     with _pair_lock:
         _save([*[e for e in _entries() if e["hash"] != digest], {"hash": digest, "key": _sha(key), "at": at}])
     return set_cookie(JSONResponse({"key": key}), cookie, key), digest[:12]
