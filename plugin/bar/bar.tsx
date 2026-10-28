@@ -14,7 +14,7 @@
 //                  in place of the left's keys, after the busy step, while it fits there whole; the right stays, so a
 //                  hint can point at it. The first session's hint has the legend above the bar, once: the marks'
 //                  colors in answers (`heads-up` on the heads-ups' orange, `explainer` on the explainers' teal) and
-//                  the keys that act on selected words (`select words for e and c`)
+//                  the keys that act on selected words (`select words for e and c`), each while its feature is on
 //
 // A bar too narrow for its items gives way in this order: the busy step's other steps, then its words (whole words,
 // down to its glyph and seconds), then the labels' count, coverage's file counts and coverage. The keys stay: what
@@ -33,7 +33,7 @@ import { vReady } from '../designer/v'
 import { markColors } from '../explain/place.mjs'
 import { fixLineRows } from '../fix/line'
 import { pressKey } from '../hooks/keys'
-import { featureOn } from '../settings/features.mjs'
+import { featureOn, lensesAfterReply } from '../settings/features.mjs'
 import { busyNow } from './busy'
 import { countsNow, keptCounts } from './counts'
 import { failLineNow, hintNow } from './notice'
@@ -154,8 +154,9 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // Longer, it stands above the bar, and the bar keeps its keys
   const shownHint = preview ? null : await hintNow($).catch(() => null)
   const hint = preview ? null : (shownHint ?? o.intro ?? null)
-  // the first session's hint (intro.ts): the legend shows with it, above the bar
-  const legend = !preview && !shownHint && !!o.intro ? [await legendRow($, els, width)] : []
+  // the first session's hint (intro.ts): the legend shows with it, above the bar, while it names something on
+  const legendEl = !preview && !shownHint && !!o.intro ? await legendRow($, els, width, on) : null
+  const legend = legendEl ? [legendEl] : []
   const named = (x: Item) => !!hint && !!x.key && hint.includes(`“${x.key} ${x.words}”`)
   const counted = (x: Item) => (x.id === 'coverage' || x.id === 'labels') && !named(x)
   const hinted: Item[] = hint ? [{ id: 'hint', glyph: 'Hint:', words: hint }, ...keys.filter(named)] : []
@@ -212,20 +213,27 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   return [...top, ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), ...legend, ...bar, ...below]
 }
 
-/** The first session's legend, over the bar's first row where `Hint:` stands: the words that name a heads-up and an
- *  explainer drawn on their fills, as an answer draws the words they mark (explain/place.mjs markColors), then the keys
- *  that act on words the person selects. */
-async function legendRow($: Engine, els: Any, width: number): Promise<Any> {
+/** The first session's legend, over the bar's first row where `Hint:` stands, naming only what is on: the words that
+ *  name a heads-up and an explainer drawn on their fills, as an answer draws the words they mark (explain/place.mjs
+ *  markColors), while those marks come after each answer (Heads-ups and Explainers auto; Minimal leaves them to be
+ *  asked for), then the keys that act on words the person selects: e while Explainers, and c while Citations, are not
+ *  off. Null when it would name nothing. */
+async function legendRow($: Engine, els: Any, width: number, on: (key: string) => boolean): Promise<Any | null> {
   const { Box, Text } = els
+  const keys = [...(on('explain') ? ['e'] : []), ...(on('cite') ? ['c'] : [])]
+  if (!lensesAfterReply('details') && !lensesAfterReply('explain') && !keys.length) return null
   await themeNow($).catch(() => undefined)
   const fills = markColors(themeLast())
   const dim = (key: string, children: string) => Text({ key, dimColor: true, children })
   const key = (k: string) => Text({ key: `legend-${k}`, color: accent(), bold: true, children: k })
+  const parts: Any[][] = [
+    ...(lensesAfterReply('details') ? [[Text({ key: 'legend-heads', backgroundColor: fills.headsBg, children: 'heads-up' })]] : []),
+    ...(lensesAfterReply('explain') ? [[Text({ key: 'legend-explain', backgroundColor: fills.glossBg, children: 'explainer' })]] : []),
+    ...(keys.length ? [[dim('select', 'select words for '), ...keys.flatMap((k, i) => [...(i ? [dim('and', ' and ')] : []), key(k)])]] : []),
+  ]
   return Box({ key: 'intro-legend', flexDirection: 'row', flexWrap: 'wrap', width, children: [
     Text({ key: 'indent', children: ' '.repeat(9) }),
-    Text({ key: 'legend-heads', backgroundColor: fills.headsBg, children: 'heads-up' }), dim('s1', ' · '),
-    Text({ key: 'legend-explain', backgroundColor: fills.glossBg, children: 'explainer' }), dim('s2', ' · select words for '),
-    key('e'), dim('and', ' and '), key('c'),
+    ...parts.flatMap((p, i) => [...(i ? [dim(`s${i}`, ' · ')] : []), ...p]),
   ] })
 }
 
