@@ -600,6 +600,24 @@ test('w in a narrow terminal before any claims names the bar\'s item by the bar\
   setOptions({})
 })
 
+test("the settings' preview of the bar names w by the bar's words: w evidence before any claim, then the bar's count", async () => {
+  setOptions({ claimsMode: 'auto' })
+  const said = ['Run 2 failed', 'Run 5 failed', 'Run 6 failed']
+  const s = setup([reply(said.map(quote => ({ claim: `${quote}.`, quote, cluster: 'failures' })))])
+  await s.call('session.start', { cwd: '/made-up/data', isInteractive: true }, async () => ({}))
+  const drawn = async (preview: boolean) => (await barRows(s.$, els, 100, { on: () => true, preview })).map(textOf).join('\n')
+  try {
+    expect(await drawn(true)).toContain('w evidence')
+    await answered(s, { id: 't1', prompt: 'Which runs failed?', rows: [said.map(x => `${x}.`).join(' ')] })
+    expect(await drawn(false)).toContain('w 3 claims')
+    const preview = await drawn(true)
+    expect(preview).toContain('w 3 claims')
+    expect(preview).not.toContain('evidence')
+  } finally {
+    setOptions({})
+  }
+})
+
 test('a bar of 80 columns beside a long busy step keeps w and its count, whole: the busy step gives way first', async () => {
   setOptions({ claimsMode: 'auto' })
   const said = Array.from({ length: 7 }, (_, i) => `Run ${i + 1} failed`)

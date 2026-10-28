@@ -80,7 +80,8 @@ async function toggleClaims($: Engine, byKey = false): Promise<void> {
 }
 
 export async function claimsBar($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
-  if (preview) return on('claims') ? [{ id: 'claims', key: 'w', words: 'evidence' }] : []
+  // the settings' preview names w by the bar's words, as it names coverage and the labels: the count once there are claims
+  if (preview) return on('claims') ? [{ id: 'claims', key: 'w', words: (await claimCount($).catch(() => 0)) ? await claimsBarWords($) : 'evidence' }] : []
   const items = on('claims') ? await barItems($) : []
   named = items.length > 0
   return items
