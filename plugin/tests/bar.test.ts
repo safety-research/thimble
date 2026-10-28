@@ -11,6 +11,7 @@ import { INTRO, INTRO_MS } from '../bar/intro'
 import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
 import { textWidth } from '../core/text.js'
+import { accent } from '../core/theme'
 import { setOptions } from '../settings/features.mjs'
 import { test } from './kit'
 import { promptStub } from './stubs'
@@ -598,6 +599,60 @@ test("an answer whose words show a heads-up, an explainer and a citation brings 
   } finally {
     noteViewport({ isFullscreen: true })
   }
+})
+
+/** The bar's item for ] at rest (tray/tray.ts restItem), and whether its words are lit: in thimble's color, not dim. */
+async function restKey($: Any): Promise<{ words: string; lit: boolean } | null> {
+  const find = (n: Any): Any => (!n || typeof n !== 'object' ? null : Array.isArray(n) ? n.map(find).find(Boolean) ?? null : n.props?.key === 'bar-tray-next' ? n : find(n.props?.children) ?? find(n.children))
+  const b = find(await $.ui.render(BAND))
+  if (!b) return null
+  const kids = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(kids) : [n, ...kids(n.props?.children), ...kids(n.children)])
+  const words = kids(b).find(n => n.type === 'Text' && textOf(n).startsWith(' '))
+  return { words: textOf(b), lit: words?.props?.color === accent() && !words?.props?.dimColor }
+}
+
+test("the bar's ] is lit while the answer the keys act on shows a mark that came after the person last opened one of its marks: a heads-up asked for after they opened its explainer lights it again, and a new answer's marks light it", { options: { details: 'on demand' } }, async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  // the look after the first answer gives an explainer; h then asks for a heads-up on it; the look after the second
+  // answer gives an explainer on its words
+  looks(on, [
+    JSON.stringify({ glosses: [{ term: 'retry budget', body: 'How many times the client tries again.' }], heads: null, claims: [] }),
+    JSON.stringify({ glosses: [], heads: { term: '30 seconds after a drop', title: 'Only one network', bullets: ['The log covers one office.'] }, claims: [] }),
+    JSON.stringify({ glosses: [{ term: 'cache key', body: 'What a build looks its cache up by.' }], heads: null, claims: [] }),
+  ])
+  on('agent.spawn', () => ({ model: 'claude-made-up', agentId: 'agent-check-1' }) as never)
+  const press = async (k: string) => {
+    await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never)
+    await w.clock.advance(1000)
+  }
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await answered($, w.clock, 't1', CITED)
+  // (the reminder of h after the answer stands in place of the bar's keys from its first drawing until it goes)
+  await $.ui.render(BAND)
+  await w.clock.advance(HINT_MS)
+  await $.ui.render(answerRow('row-t1', CITED))
+  expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
+  // ] opens the explainer, the answer's first mark: every mark it shows then is seen
+  await press(']')
+  await press('0')
+  expect(await restKey($)).toEqual({ words: '] next explainer', lit: false })
+  // a heads-up asked for on the same answer comes after: lit, until the person opens a mark of it again
+  await press('h')
+  await $.ui.render(answerRow('row-t1', CITED))
+  await w.clock.advance(100)
+  const labels = (n: Any): string[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(labels) : [...(n.type === 'Button' ? [String(n.props?.label)] : []), ...labels(n.props?.children), ...labels(n.children)])
+  expect(labels(await $.ui.render(answerRow('row-t1', CITED)))).toContain('heads up 30 seconds after a drop')
+  expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
+  await press(']')
+  await press('0')
+  expect(await restKey($)).toEqual({ words: '] next explainer', lit: false })
+  // the next answer, with marks of its own
+  await answered($, w.clock, 't2', 'The cache key changed when the lockfile moved.')
+  // (the reminder of s after it, as after the first)
+  await $.ui.render(BAND)
+  await w.clock.advance(HINT_MS)
+  expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
 })
 
 test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {

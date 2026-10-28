@@ -6,8 +6,10 @@
 // step through the answers' citations, explainers, heads-ups and cards (drawn inline at Claude's calls, or under an
 // answer by v), in reading order (a heads-up on a citation's words before the citation), and open the tray on the one
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
-// answer view asks trayFocus). While it is open its keys are in its header, at the right, each where it acts (the bar
-// keeps its own):
+// answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the first one
+// it opens (`] next heads up`), its words in thimble's color while a mark came that the person has not seen: opening
+// any mark of an answer counts every mark it shows then as seen. While it is open its keys are in its header, at the
+// right, each where it acts (the bar keeps its own):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
@@ -39,7 +41,9 @@
 // mark goes to a side thread (a). The tray closes when the person sends a prompt. What the person opens reaches main
 // through core/engaged.ts.
 //
-//   state: tray ({stack} or null), trayCard (the card ] reached: {row, card})
+//   state: tray ({stack} or null), trayCard (the card ] reached: {row, card}), traySeen (the marks an answer showed
+//   when the person last opened one of its marks: `<row>|c<n>` for a citation, `<row>|<id>` for an explainer or a
+//   heads-up)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
@@ -89,6 +93,9 @@ type Stand = { row: string; card: string } | null
 
 const TRAY = { plugin: 'thimble', key: 'tray' } as const
 const STAND = { plugin: 'thimble', key: 'trayCard' } as const
+const SEEN = { plugin: 'thimble', key: 'traySeen' } as const
+/** The most marks the seen list keeps: the newest answers' */
+const SEEN_KEEP = 400
 
 /** The colors of the tray's frame by what it shows, the ones its words are drawn in (explain/place.mjs markColors): a
  *  citation's purple, an explainer's teal and a heads-up's orange, theme keys that follow the person's theme. */
@@ -210,6 +217,32 @@ async function rowStops($: Engine, row: string): Promise<Stop[]> {
     if (m && m.version > 0 && m.anchorRow === row && !(await hiddenCard($, id))) cards.push(id)
   }
   return stopsOfRow(row, await citesOf($, row, shown), await spansOf($, row, shown), cards) as Stop[]
+}
+
+/** The marks of the answer `row` stands in (its turn's text rows), as ] passes them, in reading order: no cards. */
+async function answerMarks($: Engine, row: string): Promise<Stop[]> {
+  const out: Stop[] = []
+  for (const r of (await turnOfRow($, row))?.rows ?? [row]) {
+    const shown = await shownOf($, r)
+    if (shown) out.push(...(stopsOfRow(r, await citesOf($, r, shown), await spansOf($, r, shown), []) as Stop[]))
+  }
+  return out
+}
+
+/** A mark as the seen list names it. */
+const seenRef = (p: { row: string; kind?: string; n?: number; id?: string }) => `${p.row}|${p.kind === 'citation' ? `c${p.n}` : p.id}`
+
+async function seenNow($: Engine): Promise<Set<string>> {
+  const v = (await $.state.get(SEEN)).value
+  return new Set(Array.isArray(v) ? v.map(String) : [])
+}
+
+/** The person opened a mark of the answer `row` stands in: every mark it shows now counts as seen, so the bar's ] is
+ *  lit again only by a mark that comes after. */
+async function marksSeen($: Engine, row: string): Promise<void> {
+  const had = await seenNow($)
+  const add = (await answerMarks($, row)).map(seenRef).filter(r => !had.has(r))
+  if (add.length) await $.state.set(SEEN, [...had, ...add].slice(-SEEN_KEEP))
 }
 
 async function hiddenCard($: Engine, id: string): Promise<boolean> {
@@ -369,6 +402,7 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
   const t = await turnOfRow($, f.row)
   if (t?.answer) await pickAnswer($, t.answer)
   await told($, f)
+  await quietly(marksSeen($, f.row))
   if (o.reveal) await reveal($, f)
 }
 
@@ -376,6 +410,7 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
 async function pushMark($: Engine, f: Frame): Promise<void> {
   await setTray($, push(await trayNow($), f) as Tray)
   await told($, f)
+  await quietly(marksSeen($, f.row))
 }
 
 /** 0: the code back to the output, then the mark under this one, then closed. */
@@ -531,7 +566,7 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
 // ------------------------------------------------------------------------------------------------ the bar
 
 /** The tray's items at the bar's left: while a card ] reached holds the keys, its keys, as `focus` items, so the bar
- *  names only those; an open tray's keys are in its header; at rest none. */
+ *  names only those; an open tray's keys are in its header; at rest, ] (restItem). */
 export async function trayBar($: Engine, _on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   if (preview) return []
   const tray = await trayNow($)
@@ -545,7 +580,18 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
     ]
   }
   // an open tray names its keys in its header (trayKeys), so the bar keeps its own
-  return []
+  return tray ? [] : restItem($)
+}
+
+/** At rest, while the answer the keys act on shows marks: ] and the first of them, which ] opens from rest (restStop),
+ *  a press too; its words in thimble's color while the answer shows a mark the person has not seen (marksSeen). */
+async function restItem($: Engine): Promise<BarItem[]> {
+  const row = await actingRow($)
+  const marks = row ? await answerMarks($, row) : []
+  if (!marks.length) return []
+  const seen = await seenNow($)
+  const fresh = marks.some(p => !seen.has(seenRef(p)))
+  return [{ id: 'tray-next', key: ']', words: `next ${stopWhat(restStop(marks, 1))}`, ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
 }
 
 /** An open tray's keys, in its header at the right, each a click that does what its key does: ] (or [) the next mark,

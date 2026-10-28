@@ -3,6 +3,7 @@
 // question typed with it open carries nothing of it and closes the tray; 0 closes it. All data is made up. `claude plugin test plugin`.
 import { expect, mock } from 'claude-code/testing'
 
+import { accent } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { citeTint } from '../marks/view'
 import { evidenceOpener } from '../tray/tray'
@@ -1088,4 +1089,36 @@ test('the header names what ] goes to from the mark the tray shows: a heads-up o
   const band = textOf(await $.ui.render(above(40)))
   expect(band).toContain('failed: 12')
   expect(band).not.toContain('Retried runs count twice')
+})
+
+test("at rest the bar names ] and the first mark it opens while the answer the keys act on shows marks, in either layout, a press that opens it as ] does; its words are in thimble's color until the person opens one of the answer's marks", CITES, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-rest', { parts: HEADS })
+  const rest = async (isFullscreen = true) => all(await $.ui.render({ ...(above(40) as Any), viewport: { ...view, isFullscreen } } as never)).find(n => n.type === 'Button' && n.props?.key === 'bar-tray-next')
+  const words = (b: Any) => all(b).find(n => n.type === 'Text' && textOf(n) === ' next heads up')
+  // the heads-up on the citation's words comes first; nothing of the answer was opened yet: lit
+  for (const isFullscreen of [true, false]) {
+    const b = await rest(isFullscreen)
+    expect(textOf(b)).toBe('] next heads up')
+    expect(all(b).find(n => n.type === 'Text' && textOf(n) === ']')?.props).toMatchObject({ color: accent(), bold: true })
+    expect(words(b)?.props?.color).toBe(accent())
+  }
+  // a press on it opens the heads-up; the open tray names ] in its header alone
+  const ui = await $.ui.mount(above(40))
+  await ui.press({ key: 'bar-tray-next' })
+  await ui.unmount()
+  const band = textOf(await $.ui.render(above(40)))
+  expect(band).toContain('Retried runs count twice')
+  expect(band.match(/\] next/g)).toEqual(['] next'])
+  // closed: every mark the answer showed when the person opened one is seen, so the words are dim
+  await clock.advance(2000)
+  await $.prompt.edit(key('0'))
+  expect(words(await rest())?.props).toMatchObject({ dimColor: true })
+  expect(words(await rest())?.props?.color).toBeUndefined()
+})
+
+test('an answer that shows no marks: the bar names no ]', CITES, async ($, on) => {
+  await resumed($, on, [], 's-tray-rest-none', { text: 'Of the runs, 12 of 40 failed on the p95 check.' })
+  const band = await $.ui.render(above(40))
+  expect(all(band).some(n => n.props?.key === 'bar-tray-next')).toBe(false)
+  expect(textOf(band)).not.toContain('] next')
 })

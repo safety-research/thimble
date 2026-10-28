@@ -109,6 +109,9 @@ declare module 'claude-code' {
       tray: { stack: unknown[] } | null
       /** the card ] reached, which holds the keys: { row, card } */
       trayCard: { row: string; card: string } | null
+      /** the marks an answer showed when the person last opened one of its marks (`<row>|c<n>`, `<row>|<id>`): the bar's
+       *  ] is lit while the answer shows one not in it */
+      traySeen: string[]
 
       // ---- side threads (threads/)
       /** a side thread, by its key (threads/thread.ts Thread): { id, key, agentId, scope, subject, root, status, asks,
