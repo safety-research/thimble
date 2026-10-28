@@ -64,9 +64,9 @@ const MIN_WIDTH = 20
 /** Rows a card's frame adds to its Client's: the title, a line under it, the keys' line and the two borders. */
 const FRAME_ROWS = 5
 
-/** The rows of a card's drawing its frame shows (the frame not counted): a drawing taller shows these and a line under
- *  them, `+N rows`, whose click opens the rest. With the rows around a card, that fills a 44-row terminal. The card
- *  tool tells Claude when a version draws taller (tool.ts). */
+/** The rows of a card's drawing its frame shows (the frame not counted): a drawing two or more rows taller shows these
+ *  and a line under them, `+N rows`, whose click opens the rest (rowsCut). With the rows around a card, that fills a
+ *  44-row terminal. The card tool tells Claude when a version draws taller (tool.ts). */
 export const CARD_ROWS = 30
 
 /** The rows a frame leaves out of a drawing `n` rows tall, under a `+N rows` line: none when it fits, nor when it is one
@@ -77,6 +77,7 @@ export function rowsCut(n: number): number {
 
 /** `n` rows in words: `1 row`, `12 rows`. */
 export const rowsWord = (n: number): string => `${n} ${n === 1 ? 'row' : 'rows'}`
+
 // the versions of cards whose rows past CARD_ROWS the person opened (`<id>:<gen>`): a new version shows its first
 // CARD_ROWS again
 const opened = new Set<string>()
