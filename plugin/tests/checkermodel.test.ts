@@ -11,8 +11,9 @@ import { setOptions } from '../settings/features.mjs'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** The marks module's hooks, on an engine whose forks start: the model each step of an agent's turn is sent with. */
-async function setup() {
+/** The marks module's hooks, on an engine whose forks start and whose process has the variables `env`: the model each
+ *  step of an agent's turn is sent with. */
+async function setup(env: Record<string, string> = {}) {
   const hooks: Record<string, Any[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {
     ;(hooks[event] ??= []).push(typeof a === 'function' ? a : b)
@@ -24,6 +25,7 @@ async function setup() {
   const $: Any = {
     agent: { spawn: async () => ({ model: 'claude-made-up-opus', agentId: `agent-${++n}` }) },
     state: { get: async (k: Any) => ({ value: state.get(JSON.stringify(k)), version: 0 }), set: async (k: Any, v: unknown) => { state.set(JSON.stringify(k), v); return { isSet: true, version: 1 } } },
+    env: { get: async (name: string) => env[name] },
   }
   const checker = (await spawnFork($, { kind: 'checker', prompt: 'CHECK', description: 'checking citations' })).agentId!
   const designer = (await spawnFork($, { kind: 'designer', prompt: 'DESIGN', description: 'designing a card' })).agentId!
@@ -67,4 +69,22 @@ test("unset, or same as Claude, the checker's requests keep the conversation's m
   setOptions({ checkerModel: 'claude-made-up-tiny' })
   expect(await sent(checker)).toBe('claude-made-up-opus')
   setOptions({})
+})
+
+test("on Bedrock, Vertex or Foundry the checker's requests keep the conversation's model, whatever Checker holds: the ids it names are the first-party API's", async () => {
+  setOptions({ checkerModel: 'haiku' })
+  try {
+    // set to a true value, as Claude Code reads one (1, true, yes or on, in any case)
+    for (const env of [{ CLAUDE_CODE_USE_BEDROCK: '1' }, { CLAUDE_CODE_USE_VERTEX: 'true' }, { CLAUDE_CODE_USE_FOUNDRY: ' Yes ' }]) {
+      const { sent, checker } = await setup(env)
+      expect(await sent(checker)).toBe('claude-made-up-opus')
+    }
+    // any other value is the first-party API
+    for (const env of [{ CLAUDE_CODE_USE_BEDROCK: '0' }, { CLAUDE_CODE_USE_VERTEX: 'false' }, { CLAUDE_CODE_USE_FOUNDRY: '' }]) {
+      const { sent, checker } = await setup(env)
+      expect(await sent(checker)).toBe('claude-haiku-5-5')
+    }
+  } finally {
+    setOptions({})
+  }
 })

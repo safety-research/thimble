@@ -7,6 +7,9 @@
 //   modelOf(alias)                 -> {name, id, input, output}, or null for an alias not listed
 //   dollars(alias, input, output)  -> the list price of `input` and `output` tokens, or null
 //   aboutDollars(x)                -> a rough price in words: 'about $4', 'about $0.30', 'under $0.01'
+//   firstParty(flags)              -> whether Claude Code reaches Claude through Anthropic's first-party API, which
+//                                     takes these ids: `flags`, the values of CLAUDE_CODE_USE_BEDROCK, _VERTEX and
+//                                     _FOUNDRY, hold none that Claude Code reads as true (1, true, yes or on)
 
 const MODELS = {
   opus: { name: 'Claude Opus 5.5', id: 'claude-opus-5-5', input: 4, output: 20 },
@@ -31,4 +34,8 @@ export function aboutDollars(x) {
   if (v < 1) return `about $${(Math.round(v * 20) / 20 || 0.01).toFixed(2)}`
   if (v < 10) return `about $${Math.round(v)}`
   return `about $${Math.round(v / 5) * 5}`
+}
+
+export function firstParty(flags) {
+  return !flags.some(v => ['1', 'true', 'yes', 'on'].includes(String(v ?? '').trim().toLowerCase()))
 }

@@ -7,7 +7,8 @@
 // it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
 // tinted across the pane, with no mark of its own (a `›` there read as a row that opens). A setting that changes the
 // work of another feature (`under`: Checker, the checks of Citations) shows only while that feature is on, as nothing
-// it sets runs otherwise; ↑ and ↓ pass over it then.
+// it sets runs otherwise; ↑ and ↓ pass over it then. One that names first-party model ids (`firstParty`: Checker) shows
+// only where Claude Code reaches Claude through Anthropic's first-party API (settings/term.ts firstPartyApi).
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
@@ -20,12 +21,12 @@ import type { EngineInterface } from 'claude-code'
 import { barRows } from '../bar/bar'
 import { arrowsOwn, PANE_ID } from '../core/pane'
 import { SWITCHES, switchesFrom } from '../settings/features.mjs'
-import { heldValues, settingsAction } from '../settings/term'
+import { firstPartyApi, heldValues, settingsAction } from '../settings/term'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Engine = EngineInterface
-type Switch = { key: string; title: string; group?: string; under?: string; choices?: string[]; says?: Record<string, string> }
+type Switch = { key: string; title: string; group?: string; under?: string; firstParty?: boolean; choices?: string[]; says?: Record<string, string> }
 
 /** The row picked, kept across the plugin's loads (each change loads it again). */
 const PICKED = { plugin: 'thimble', key: 'settingsRow' } as const
@@ -53,12 +54,14 @@ function parseKey(key: string | undefined): { s: Switch; c: string | null } | nu
   return null
 }
 
-/** The rows shown with these values: a setting `under` a feature that is off is not. */
-const shownRows = (values: Record<string, unknown>) => ROWS.filter(s => !s.under || switchesFrom(values)(s.under))
+/** The rows shown with these values: a setting `under` a feature that is off is not, nor one of first-party model ids
+ *  off the first-party API (`firstParty`). */
+const shownRows = (values: Record<string, unknown>, firstParty: boolean) =>
+  ROWS.filter(s => (!s.under || switchesFrom(values)(s.under)) && (firstParty || !s.firstParty))
 
 /** The row picked, of the rows shown: one picked that does not show now stands for the feature it is under. */
 async function pickedNow($: Engine, rows?: Switch[]): Promise<string> {
-  const shown = rows ?? shownRows(await heldValues($))
+  const shown = rows ?? shownRows(await heldValues($), await firstPartyApi($))
   const k = (await $.state.get(PICKED)).value as string | undefined
   if (shown.some(s => s.key === k)) return k!
   const under = ROWS.find(s => s.key === k)?.under
@@ -106,7 +109,7 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
   const { Box, Button, Text } = els
   const width = Math.max(30, Number(e.props?.bodyColumns) || 60)
   const values = await heldValues($)
-  const shown = shownRows(values)
+  const shown = shownRows(values, await firstPartyApi($))
   const picked = await pickedNow($, shown)
   const at = shown.findIndex(s => s.key === picked)
   arrowsOwn(dir => pick($, shown[Math.max(0, Math.min(shown.length - 1, at + dir))]!))
