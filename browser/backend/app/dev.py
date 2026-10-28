@@ -3191,31 +3191,49 @@ def message_view(c: str, slug: str, route: str) -> None:
     _soon(lambda: _send_message(c, slug, route), f"view-message:{c}:{slug}")
 
 
+_message_locks: dict[tuple[str, str], asyncio.Lock] = {}  # (workspace, slug) -> one message sent at a time
+
+
+def _unsent(text: str, sent: str) -> str:
+    """What of the messages about a built view (the proposal's `message`) its builder has not had: `text` past the
+    words `sent` it begins with (`message_sent`)."""
+    return text[len(sent):].strip() if sent and text.startswith(sent) else text
+
+
 async def _send_message(c: str, slug: str, route: str) -> None:
+    """Send the builder the words of the proposal's `message` it has not had yet (_unsent), one send at a time, so a
+    message written before the builder's run starts reaches it once, on its own."""
     from . import subagents, views  # noqa: PLC0415
 
-    prop = views.read_proposal(c, slug)
-    text = str((prop or {}).get("message") or "")
-    if prop is None or not text:
-        return
-    b = _view_runs.get((c, slug))
-    running = b is not None and bool(b.agent)
-    agent_id = str(b.agent if running else prop.get("agent_id") or "")  # type: ignore[union-attr]
-    if running or _reachable(c, agent_id):
-        ans = await subagents.send(c, agent_id, message_text(c, prop, text), values=prop.get("values"), route=route,
-                                   quiet=True)
-        if not ans.refused:
-            if running:  # it joins the run that goes on, which no start handler sees
-                views.update_proposal(c, slug, message=None)
+    async with _message_locks.setdefault((c, slug), asyncio.Lock()):
+        prop = views.read_proposal(c, slug)
+        text = str((prop or {}).get("message") or "")
+        sent = str((prop or {}).get("message_sent") or "")
+        new = _unsent(text, sent)
+        if prop is None or not new:
             return
-        log.info("%s: the message about %s did not reach its builder (%s), so a new builder takes it", c, slug, ans.kind)
-    if (c, slug) in _view_runs:
-        return  # a build of the view started meanwhile, which takes the message (build_task)
-    _view_runs[(c, slug)] = _Build(route=route)
-    ans = await start_build(c, slug, route)
-    if ans.refused:
-        _view_runs.pop((c, slug), None)
-        views.update_proposal(c, slug, message=None)
+        b = _view_runs.get((c, slug))
+        running = b is not None and bool(b.agent)
+        agent_id = str(b.agent if running else prop.get("agent_id") or "")  # type: ignore[union-attr]
+        if running or _reachable(c, agent_id):
+            views.update_proposal(c, slug, message_sent=text)  # its run's start keeps only words after (build_started)
+            ans = await subagents.send(c, agent_id, message_text(c, prop, new), values=prop.get("values"),
+                                       route=route, quiet=True)
+            if not ans.refused:
+                if running:  # it joins the run that goes on, which no start handler sees
+                    now = str((views.read_proposal(c, slug) or {}).get("message") or "")
+                    views.update_proposal(c, slug, message=_unsent(now, text) or None, message_sent=None)
+                return
+            views.update_proposal(c, slug, message_sent=sent or None)
+            log.info("%s: the message about %s did not reach its builder (%s), so a new builder takes it", c, slug,
+                     ans.kind)
+        if (c, slug) in _view_runs:
+            return  # a build of the view started meanwhile, which takes the message (build_task, build_started)
+        _view_runs[(c, slug)] = _Build(route=route)
+        ans = await start_build(c, slug, route)
+        if ans.refused:
+            _view_runs.pop((c, slug), None)
+            views.update_proposal(c, slug, message=None, message_sent=None)
 
 
 def answering(prop: dict[str, Any], agent_id: str | None) -> dict[str, Any] | None:
@@ -3308,6 +3326,8 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
     prop = views.update_proposal(c, slug, **fields) or prop
     if route == subagents.FOLLOW_ON:
         await subagents.out_of_plan(c)
+    if prop.get("message") and not (prop.get("changed") or prop.get("change")):  # its task carries it (build_task)
+        prop = views.update_proposal(c, slug, message_sent=prop["message"]) or prop
     name = str(prop.get("name") or slug)
     asked = bool(prop.get("asked"))
     ans = await subagents.start_job(c, _builder(), _key(slug), build_task(c, prop, repair=repair), vals, route,
@@ -3333,7 +3353,7 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
     nothing; a later run (a change sent to it, or a message typed to it in the agent tray) is a build again. A run that
     takes a message about the built view (message_view) answers it, the view as it is and its attempts kept, until it
     changes the view (message_changes)."""
-    from . import views  # noqa: PLC0415
+    from . import subagents, views  # noqa: PLC0415
 
     slug = run.key.split(":", 1)[-1]
     key = (c, slug)
@@ -3346,10 +3366,16 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
         _view_queue.remove(key)
     held = views.read_proposal(c, slug) or {}
     if held.get("message") and held.get("status") == "built":
-        # the pass its earlier build finished with is no finish of this run (_settle)
-        views.update_proposal(c, slug, message=None, agent_id=run.agent_id, chat=run.chat, request=None, finish=None,
+        # the pass its earlier build finished with is no finish of this run (_settle); words written after the last
+        # send stay in `message` for the run, which gets them after its current step (_send_message)
+        rest = _unsent(str(held["message"]), str(held.get("message_sent") or ""))
+        views.update_proposal(c, slug, message=rest or None, message_sent=None, agent_id=run.agent_id, chat=run.chat,
+                              request=None, finish=None,
                               answering={"agent": run.agent_id, "run": run.k, "text": str(held["message"])})
         views._emit(c, slug, "built", chat=run.chat)  # its thread offers Stop while the run answers (stop_answer)
+        if rest:
+            route = run.route if run.route in (subagents.CLICK, subagents.FOLLOW_ON) else subagents.FOLLOW_ON
+            _soon(lambda: _send_message(c, slug, route), f"view-message:{c}:{slug}")
         return
     prop = views.update_proposal(c, slug, status="building", agent_id=run.agent_id, chat=run.chat, attempt=0,
                                  finish=None, last_report=None, error=None, refused=None, request=None,

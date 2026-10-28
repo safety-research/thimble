@@ -729,6 +729,25 @@ async def test_the_stop_in_the_thread_stops_a_message_s_run_and_leaves_the_view_
         assert not p.get("error") and not p.get("failed_change") and p["attempt"] == 2
 
 
+@pytest.mark.parametrize("wait", [False, True])
+async def test_two_messages_before_the_builder_s_run_starts_reach_it_once_each(board, bridge, gates, monkeypatch, wait):
+    slug = _propose(asked=True)
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Why is run 3 missing?")
+    if wait:  # the first is sent before the second is written
+        await _until(lambda: bridge.ops("send"), "the first message never reached the builder")
+    views.message(CORPUS, slug, "And where is run 4?")
+    await asyncio.sleep(0.1)
+    texts = " ".join(s["text"] for s in bridge.ops("send"))
+    assert texts.count("Why is run 3 missing?") == 1 and texts.count("And where is run 4?") == 1
+    subagents.run_again(CORPUS, agent, "coordinator")
+    await asyncio.sleep(0.1)
+    texts = " ".join(s["text"] for s in bridge.ops("send"))
+    assert texts.count("Why is run 3 missing?") == 1 and texts.count("And where is run 4?") == 1
+    assert _prop(slug)["answering"]["text"] == "Why is run 3 missing?\n\nAnd where is run 4?"
+    assert not _prop(slug).get("message"), "nothing is left to send"
+
+
 async def test_an_extension_s_program_builds_the_view_turn_by_turn_in_place_of_a_builder(board, bridge, gates, heard,
                                                                                          monkeypatch):
     turns: list[str] = []
