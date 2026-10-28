@@ -648,12 +648,12 @@ test("the bar's ] is lit while the answer the keys act on shows a mark the perso
   await w.clock.advance(HINT_MS)
   await $.ui.render(answerRow('row-t1', CITED))
   expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
-  // ] opens the explainer, the answer's first mark; its citation is not opened yet
+  // ] opens the explainer, the answer's first mark; its citation is not opened yet, and ] names it
   await press(']')
   await press('0')
-  expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
-  // ] from rest, then on to the citation: each mark the answer shows was opened
-  for (const k of [']', ']', '0']) await press(k)
+  expect(await restKey($)).toEqual({ words: '] next citation', lit: true })
+  // ] from rest opens the citation: each mark the answer shows was opened, and ] names its first mark again
+  for (const k of [']', '0']) await press(k)
   expect(await restKey($)).toEqual({ words: '] next explainer', lit: false })
   // a heads-up asked for on the same answer comes after: lit, until the person opens it too
   await press('h')
@@ -661,9 +661,9 @@ test("the bar's ] is lit while the answer the keys act on shows a mark the perso
   await w.clock.advance(100)
   const labels = (n: Any): string[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(labels) : [...(n.type === 'Button' ? [String(n.props?.label)] : []), ...labels(n.props?.children), ...labels(n.children)])
   expect(labels(await $.ui.render(answerRow('row-t1', CITED)))).toContain('heads up 30 seconds after a drop')
-  expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
-  // the explainer and the citation again, then on to the heads-up after them
-  for (const k of [']', ']', ']', '0']) await press(k)
+  expect(await restKey($)).toEqual({ words: '] next heads up', lit: true })
+  // ] from rest opens the heads-up, the one mark not opened
+  for (const k of [']', '0']) await press(k)
   expect(await restKey($)).toEqual({ words: '] next explainer', lit: false })
   // the next answer, with marks of its own
   await answered($, w.clock, 't2', 'The cache key changed when the lockfile moved.')

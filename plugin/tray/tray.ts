@@ -6,10 +6,10 @@
 // step through the answers' citations, explainers, heads-ups and cards (drawn inline at Claude's calls, or under an
 // answer by v), in reading order (a heads-up on a citation's words before the citation), and open the tray on the one
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
-// answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the first one
-// it opens (`] next heads up`; on a narrow bar `] next`, then `]` alone), in thimble's color while the answer shows a
-// mark the person has not opened, and dim once they opened each. While it is open its keys are in its header, at the
-// right, each where it acts (the bar keeps its own):
+// answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the mark it
+// opens (`] next heads up`; on a narrow bar `] next`, then `]` alone): while one of the answer's marks is not opened,
+// the first such, its words in thimble's color; once the person opened each, the first mark, drawn as the bar's other
+// keys. While it is open its keys are in its header, at the right, each where it acts (the bar keeps its own):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
@@ -231,6 +231,10 @@ async function answerMarks($: Engine, row: string): Promise<Stop[]> {
 /** A mark as the seen list names it. */
 const seenRef = (p: { row: string; kind?: string; n?: number; id?: string }) => `${p.row}|${p.kind === 'citation' ? `c${p.n}` : p.id}`
 
+/** Where ] goes from rest in an answer's stops: while one of its marks is not opened (the bar's ] lit), the first such,
+ *  in reading order; else its first mark (restStop). */
+const restNext = (stops: Stop[], seen: Set<string>): Stop | null => stops.find(p => !p.card && !seen.has(seenRef(p))) ?? (restStop(stops, 1) as Stop | null)
+
 async function seenNow($: Engine): Promise<Set<string>> {
   const v = (await $.state.get(SEEN)).value
   return new Set(Array.isArray(v) ? v.map(String) : [])
@@ -450,7 +454,8 @@ async function standOn($: Engine, row: string, card: string): Promise<void> {
 }
 
 /** ] and [: the next mark or card in reading order, and the one before. From rest, the answer the keys act on (else
- *  the newest answer's): ] its first mark, [ its last stop (restStop). At the newest reply's last stop, ] stays. */
+ *  the newest answer's): ] the first of its marks the person has not opened, else its first mark (restNext), [ its last
+ *  stop (restStop). At the newest reply's last stop, ] stays. */
 export async function stepMark($: Engine, dir: number): Promise<void> {
   const { list, at } = await stepPlace($)
   let next: Stop | null = null
@@ -460,7 +465,7 @@ export async function stepMark($: Engine, dir: number): Promise<void> {
     const turn = row ? await turnOfRow($, row) : null
     const here = list.filter(p => (turn ? turn.rows.includes(p.row) : p.row === row))
     const pool = here.length ? here : list.filter(p => p.row === list[list.length - 1]?.row)
-    next = restStop(pool, dir) as Stop | null
+    next = (dir > 0 && here.length ? restNext(here, await seenNow($)) : restStop(pool, dir)) as Stop | null
   }
   if (!next) return
   if (next.card) await standOn($, next.row, next.card)
@@ -583,16 +588,16 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
   return tray ? [] : restItem($)
 }
 
-/** At rest, while the answer the keys act on shows marks: ] and the first of them, which ] opens from rest (restStop),
- *  a press too; in thimble's color while the answer shows a mark the person has not opened (markSeen). On a narrow bar
- *  its words give way before any count does: `] next`, then `]` alone (bar/bar.tsx). */
+/** At rest, while the answer the keys act on shows marks: ] and the mark it opens from rest (restNext), a press too; in
+ *  thimble's color while the answer shows a mark the person has not opened (markSeen). On a narrow bar its words give
+ *  way before any count does: `] next`, then `]` alone (bar/bar.tsx). */
 async function restItem($: Engine): Promise<BarItem[]> {
   const row = await actingRow($)
   const marks = row ? await answerMarks($, row) : []
   if (!marks.length) return []
   const seen = await seenNow($)
   const fresh = marks.some(p => !seen.has(seenRef(p)))
-  return [{ id: 'tray-next', key: ']', words: `next ${stopWhat(restStop(marks, 1))}`, shorter: ['next', ''], ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
+  return [{ id: 'tray-next', key: ']', words: `next ${stopWhat(restNext(marks, seen))}`, shorter: ['next', ''], ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
 }
 
 /** An open tray's keys, in its header at the right, each a click that does what its key does: ] (or [) the next mark,
