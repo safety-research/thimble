@@ -1,7 +1,7 @@
 // What every card on the board reads without prop drilling: the workspace, the filter, the concept names, the thread
 // a card came from, and the hooks back into the board (measure, refresh, open a thread, open a card's details).
 import { createContext } from 'react'
-import type { Cell, Concept, Filters } from '../lib/types'
+import type { CardDrawn, Cell, Concept, Filters } from '../lib/types'
 import type { CellThread } from './layout'
 
 export interface CanvasCtx {
@@ -21,9 +21,10 @@ export interface CanvasCtx {
   /** open a card's details in the panel at the board's right (a label card's Definition and records); none where no
    * board holds the card, as in a report's figure and the card harness, where a label card offers no such button */
   openDetail?: (cellId: string) => void
-  /** a card's body drew taller than the canvas shows at rest (DataViz CARD_BODY_MAX): its height, px, which the server
-   * tells the card's author (backend card_size); none where no board holds the card, as in the card harness */
-  drawn?: (cellId: string, height: number) => void
+  /** a card's body drew taller than the canvas shows at rest (DataViz CARD_BODY_MAX), or its page laid out wider than
+   * its frame: the size, px, which the server tells the card's author (backend card_size); none where no board holds
+   * the card, as in the card harness */
+  drawn?: (cellId: string, size: CardDrawn) => void
 }
 
 export const CanvasContext = createContext<CanvasCtx>({
