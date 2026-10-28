@@ -1756,9 +1756,16 @@ def _or_put_back(fid: int):
 
 
 def _misfit(fid: int, commit: str) -> str:
-    """What fix `fid`'s change (`commit`) does not fit, in its error: the one fix in mine that changes a file the change
-    changes, when the change was made on those files as the release has them (so that only that fix's lines can be in
-    its way); else the person's other fixes."""
+    """What fix `fid`'s change (`commit`) does not fit, in its error. When the change was made on its files as the
+    release has them, only the fixes in mine can be in its way: the one fix in mine that changes such a file, else the
+    person's other fixes. Else the release (thimble 0.10.6), when it changed such a file since the release the change was
+    made on, with "and your other fixes" when a fix in mine changes such a file too; else the person's other fixes.
+
+    The release the change was made on is the newest commit under the change that the release's history holds too (git
+    merge-base), so that the lines of the fixes it was made on are not the release's. It comes from the commit the
+    change sits on, which a y picks: the record's base stays mine as it was when the fix was made, also after thimble
+    update --continue or a dev install's update put the change on a newer release. A live whose history does not join
+    the two (a shallow clone) compares that commit itself."""
     live, base = live_dir(), str(release().get("base") or "")
 
     def files(a: str, b: str, paths: list[str]) -> list[str]:
@@ -1766,13 +1773,22 @@ def _misfit(fid: int, commit: str) -> str:
                   check=False)
         return [x for x in out.split("\0") if x]
 
+    def same(a: str, b: str, paths: list[str]) -> bool:
+        return run(["git", "--literal-pathspecs", "diff", "--quiet", a, b, "--", *paths], cwd=live,
+                   check=False).returncode == 0
+
     paths = files(f"{commit}^", commit, [])
-    if base and paths and run(["git", "--literal-pathspecs", "diff", "--quiet", base, f"{commit}^", "--", *paths],
-                              cwd=live, check=False).returncode == 0:
-        hits = [i for i in _on_ids(records())
-                if i != fid and files(f"refs/thimble/fixes/{i}^", f"refs/thimble/fixes/{i}", paths)]
-        if len(hits) == 1:
-            return f"fix {hits[0]}"
+    if not (base and paths):
+        return "your other fixes"
+    hits = [i for i in _on_ids(records())
+            if i != fid and files(f"refs/thimble/fixes/{i}^", f"refs/thimble/fixes/{i}", paths)]
+    if same(base, f"{commit}^", paths):
+        # made on these files as the release has them: only the fixes in mine can be in its way
+        return f"fix {hits[0]}" if len(hits) == 1 else "your other fixes"
+    made_on = git("merge-base", f"{commit}^", base, cwd=live, check=False) or f"{commit}^"
+    if not same(made_on, base, paths):
+        name = f"thimble {release_name()}"
+        return f"{name} and your other fixes" if hits else name
     return "your other fixes"
 
 
@@ -2370,11 +2386,29 @@ def latest_release() -> dict[str, Any]:
 
 
 def release_name(rel: dict[str, Any] | None = None) -> str:
-    """The release live is on, as the person reads it: 0.10.3, else the plugin's version, else the commit."""
+    """The release live is on, as the person reads it: 0.10.3, else the plugin's version, else the commit. Before the
+    first fix makes live (no release.json), the thimble that runs (_own_name)."""
     rel = release() if rel is None else rel
+    if not rel:
+        return _own_name()
     if rel.get("checkout") and not rel.get("tag"):
         return str(rel["checkout"])  # a dev install's commit, as thimble update named it: main at abc1234
     return str(rel.get("tag") or "").removeprefix("v") or str(rel.get("version") or "") or str(rel.get("base") or "")[:7]
+
+
+def _own_name() -> str:
+    """The thimble that runs, as the person reads it: its plugin's own version, else the release tag of its checkout's
+    commit (find_source: Claude Code's clone of the marketplace, or the person's own clone), v0.10.5 as 0.10.5; else
+    nothing, since a release's plugin.json has no version and a checkout may have no tags."""
+    d = read_json(PLUGIN / ".claude-plugin" / "plugin.json")
+    if isinstance(d, dict) and d.get("version"):
+        return str(d["version"])
+    try:
+        src = find_source()
+    except FixError:
+        return ""
+    tag = git("describe", "--tags", "--exact-match", "--match", "v*", src["commit"], cwd=src["repo"], check=False)
+    return tag[1:] if RELEASE_TAG.match(tag) else ""
 
 
 def _has(repo: Path, commit: str) -> bool:
@@ -2999,8 +3033,10 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     d = listing()
     width = width or shutil.get_terminal_size((100, 24)).columns
     fixes = d["fixes"]
+    # thimble 0.10.3, or thimble alone when nothing names the release
+    name = f"thimble {d['version']}" if d["version"] else "thimble"
     if not fixes:
-        return [f"{c('title', 'Your thimble fixes')} · thimble {d['version']} with no fixes of yours"]
+        return [f"{c('title', 'Your thimble fixes')} · {name} with no fixes of yours"]
     words = {r["id"]: (state_word(r) if d["on"] or r.get("state") != "on" else "off") for r in fixes}
     titles = {r["id"]: r["title"] for r in fixes}
     counts: dict[str, int] = {}
@@ -3009,7 +3045,7 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
         counts[w] = counts.get(w, 0) + 1
     parts = [c("green", f"{counts.pop('on')} on")] if "on" in counts else []
     parts += [f"{n} {w}" for w, n in counts.items()]
-    out = [f"{c('title', 'Your thimble fixes')} · thimble {d['version']} with {', '.join(parts)}", ""]
+    out = [f"{c('title', 'Your thimble fixes')} · {name} with {', '.join(parts)}", ""]
     iw = max(1, *(len(str(r["id"])) for r in fixes))
     sw = max(6, *(len(w) for w in words.values()))
     tw = min(40, max(3, *(len(t) for t in titles.values())))

@@ -1220,6 +1220,24 @@ def test_a_follow_up_to_an_off_fix_holds_its_change_and_a_round_that_changes_not
     assert FX.round_(b["id"], "and another")["work"] == b["work"]
 
 
+def test_the_list_before_the_first_fix_names_the_thimble_that_runs(world, monkeypatch, tmp_path):
+    # no fix yet, so no release.json: the plugin's own version
+    plugin = tmp_path / "running" / "plugin"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    pj = plugin / ".claude-plugin" / "plugin.json"
+    pj.write_text(json.dumps({"name": "thimble", "version": "0.10.2"}) + "\n")
+    monkeypatch.setattr(FX, "PLUGIN", plugin)
+    assert FX.list_lines() == ["Your thimble fixes · thimble 0.10.2 with no fixes of yours"]
+    # a plugin with no version, as a release has it: the release tag of its checkout's commit
+    pj.write_text(json.dumps({"name": "thimble"}) + "\n")
+    sh("git", "tag", "v0.10.2", world["base"], cwd=world["rel"])
+    assert FX.list_lines() == ["Your thimble fixes · thimble 0.10.2 with no fixes of yours"]
+    # neither: no empty word in the line
+    sh("git", "tag", "-d", "v0.10.2", cwd=world["rel"])
+    assert FX.list_lines() == ["Your thimble fixes · thimble with no fixes of yours"]
+    assert not (FX.home() / "release.json").exists()
+
+
 def test_the_list_shows_a_fix_being_changed_as_its_own_row_never_as_another_fix(world):
     a = on_fix(world)
     b = FX.new("a note")
@@ -1399,6 +1417,74 @@ def test_a_fix_that_does_not_fit_two_fixes_that_change_its_file_says_your_other_
     # fixes 1 and 3 both change the file, so the line names neither, and never "the fixes you have on"
     assert str(e.value) == f"fix {b['id']} does not fit your other fixes; /thimble-fix {b['id']} tries it again"
     assert FX.get(b["id"])["error"] == "it does not fit your other fixes"
+
+
+def test_a_fix_from_the_release_before_that_does_not_fit_the_new_release_names_the_release(world, upstream):
+    # fix 1 says read, made on 0.10.2 and never used; 0.10.3 changes the same line, and no other fix is on
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "v0.10.3")
+    assert FX.update()["aside"] == []
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(a["id"], press(a["id"]))
+    assert str(e.value) == f"fix {a['id']} does not fit thimble 0.10.3; /thimble-fix {a['id']} tries it again"
+    assert FX.get(a["id"])["state"] == "redo" and FX.get(a["id"])["error"] == "it does not fit thimble 0.10.3"
+
+
+def test_a_fix_that_does_not_fit_the_new_release_and_a_fix_on_names_both(world, upstream):
+    # fix 1 says read, made on 0.10.2 and never used; 0.10.3 changes the same line; fix 2, made on 0.10.3, adds a
+    # line to the same file and is on
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    upstream({"plugin/bar/bar.tsx": "const words = `seen ${n}`\n"}, "v0.10.3")
+    FX.update()
+    b = FX.new("and a title")
+    p = Path(b["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text() + "const title = 'bar'\n")
+    FX.done(b["id"], "Bar has a title", "")
+    FX.apply(b["id"], press(b["id"]))
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(a["id"], press(a["id"]))
+    assert str(e.value) == (f"fix {a['id']} does not fit thimble 0.10.3 and your other fixes; /thimble-fix {a['id']} "
+                            "tries it again")
+    assert FX.get(a["id"])["error"] == "it does not fit thimble 0.10.3 and your other fixes"
+
+
+def test_a_fix_made_on_another_fixs_lines_that_the_new_release_left_alone_names_no_release(world, upstream):
+    # fix 1 says read and is on; fix 2, made on it, says read twice and is never used; 0.10.3 leaves the bar alone,
+    # and thimble update sets fix 1 aside
+    a = on_fix(world)
+    b = FX.new("say read twice")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `read read ${n}`\n")
+    FX.done(b["id"], "Bar says read twice", "")
+    upstream({"plugin/notes.md": "made-up note\n"}, "v0.10.3")
+    assert FX.update()["aside"] == [a["id"]]
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(b["id"], press(b["id"]))
+    # the lines it does not fit are fix 1's, not the release's
+    assert str(e.value) == f"fix {b['id']} does not fit your other fixes; /thimble-fix {b['id']} tries it again"
+
+
+def test_a_fix_brought_back_on_the_new_release_names_the_one_fix_in_its_way(world, upstream):
+    # fix 1 says read and is on; 0.10.3 adds a line to the bar's file, and thimble update sets fix 1 aside
+    a = on_fix(world)
+    upstream({"plugin/bar/bar.tsx": "const words = `coverage ${n}`\nconst title = 'bar'\n"}, "v0.10.3")
+    FX.update()
+    # Claude brings fix 1 back on 0.10.3 (thimble update --continue), and the person turns it off
+    live = FX.live_dir()
+    (live / "plugin" / "bar" / "bar.tsx").write_text("const words = `read ${n}`\nconst title = 'bar'\n")
+    sh("git", "commit", "-q", "-am", "Bar says read", cwd=live)
+    assert FX.continue_()["recorded"] == [a["id"]]
+    FX.undo(a["id"])
+    # fix 2, made on 0.10.3, says seen on the same line and is on
+    b = FX.new("say seen")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `seen ${n}`\nconst title = 'bar'\n")
+    FX.done(b["id"], "Bar says seen", "")
+    FX.apply(b["id"], press(b["id"]))
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(a["id"], press(a["id"]))
+    # fix 1's change sits on 0.10.3 now, so only fix 2's lines are in its way
+    assert str(e.value) == f"fix {a['id']} does not fit fix {b['id']}; /thimble-fix {a['id']} tries it again"
 
 
 def stray(w, refines: int, words: str, path: str, text: str) -> dict:
