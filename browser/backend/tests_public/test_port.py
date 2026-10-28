@@ -219,11 +219,16 @@ def _uvicorns_on(p: int) -> list[int]:
     return out
 
 
+# how long the two homes' test waits for a server to start (THIMBLE_START_WAIT_S) and for its health to answer, the
+# test's own probes and those of the `server up` it runs (THIMBLE_HEALTH_TIMEOUT_S), which a busy machine delays
+WAIT_S = 100
+
+
 def _health(home: Path) -> dict:
     """The proven /api/health of the server home/server.json names."""
     st = json.loads((home / "server.json").read_text())
     req = urllib.request.Request(f"{st['api']}/api/health", headers=hook_auth.headers(st["token"], st["port"]))
-    with urllib.request.urlopen(req, timeout=5) as r:
+    with urllib.request.urlopen(req, timeout=WAIT_S) as r:
         return json.loads(r.read())
 
 
@@ -259,7 +264,8 @@ def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp
         homes[name] = h
         envs[name] = {**_clean_env(dict(os.environ)), "THIMBLE_HOME": str(h),
                       "THIMBLE_DATA_DIR": str(d.parent), "THIMBLE_WORKSPACES_DIR": str(tmp_path / f"ws-{name}"),
-                      "THIMBLE_CLAUDE_BIN": os.environ.get("THIMBLE_CLAUDE_BIN", ""), "THIMBLE_START_WAIT_S": "100"}
+                      "THIMBLE_CLAUDE_BIN": os.environ.get("THIMBLE_CLAUDE_BIN", ""), "THIMBLE_START_WAIT_S": str(WAIT_S),
+                      "THIMBLE_HEALTH_TIMEOUT_S": str(WAIT_S)}
 
     def up(name: str) -> list[str]:
         cwd = Path(envs[name]["THIMBLE_DATA_DIR"]) / "mini"

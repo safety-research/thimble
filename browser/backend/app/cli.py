@@ -103,7 +103,7 @@ STOP_WAIT_S = 6.0
 # how long the server has, after its SIGTERM, to stop its agents and end (runtime.stop_all) before what is left of its
 # session is signalled (_kill): uvicorn's graceful wait (3 s), the agents' (runtime.STOP_WAIT_S) and the modules' own
 SERVER_STOP_S = 15.0
-HEALTH_TIMEOUT_S = 1.0
+HEALTH_TIMEOUT_S = 1.0  # how long a health probe waits for the server's answer (health_timeout_s)
 LOG_TAIL = 15
 
 
@@ -115,6 +115,18 @@ def start_wait_s() -> float:
     except ValueError:
         return WAIT_S
     return got if 0 < got < float("inf") else WAIT_S
+
+
+def health_timeout_s() -> float:
+    """How long a health probe waits for the server's answer: THIMBLE_HEALTH_TIMEOUT_S, as the tests that start real
+    servers set it for a machine their parallel runs keep busy, where an answer can take longer than HEALTH_TIMEOUT_S
+    and a late one would read as no server or as this install's own; else HEALTH_TIMEOUT_S, also when it is not a
+    positive number."""
+    try:
+        got = float(os.environ.get("THIMBLE_HEALTH_TIMEOUT_S") or HEALTH_TIMEOUT_S)
+    except ValueError:
+        return HEALTH_TIMEOUT_S
+    return got if 0 < got < float("inf") else HEALTH_TIMEOUT_S
 
 
 FIX_INSTRUCTION = "File a `file_dev_ticket` titled 'fix: …' describing what broke; the dev agent runs it as a ticket."
@@ -398,9 +410,10 @@ def _server_environ(env: dict[str, Any], p: int, ui: int) -> dict[str, str]:
 # ----------------------------------------------------------------------------- probes
 
 
-def healthy(url: str | None = None, timeout: float = HEALTH_TIMEOUT_S) -> bool:
+def healthy(url: str | None = None, timeout: float | None = None) -> bool:
     try:
-        with config.LOOPBACK.open(f"{url or api_url()}/api/health", timeout=timeout) as r:
+        wait = health_timeout_s() if timeout is None else timeout
+        with config.LOOPBACK.open(f"{url or api_url()}/api/health", timeout=wait) as r:
             return r.status == 200 and bool(json.loads(r.read() or b"{}").get("ok"))
     except Exception:  # noqa: BLE001
         return False
@@ -517,7 +530,7 @@ def is_server(pid: Any, p: int, repo: str | None = None) -> bool:
 def health_leader(url: str | None = None) -> int | None:
     """The pid the server answering at `url` names as the leader of its process session (`leader` of /api/health). None
     when nothing answers or it names none. Seam for tests."""
-    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=HEALTH_TIMEOUT_S)
+    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=health_timeout_s())
     leader = body.get("leader") if status == 200 and isinstance(body, dict) else None
     return leader if isinstance(leader, int) and not isinstance(leader, bool) and leader > 0 else None
 
@@ -528,7 +541,7 @@ def foreign_home(url: str | None = None) -> str | None:
     names its home only to a request that proves its token (main's /api/health), so a healthy server that names none
     took this install's proof for no proof: another install's or another account's, whose home is FOREIGN_UNNAMED
     here."""
-    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=HEALTH_TIMEOUT_S)
+    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=health_timeout_s())
     if status != 200 or not isinstance(body, dict) or body.get("ok") is not True:
         return None
     other = body.get("home")

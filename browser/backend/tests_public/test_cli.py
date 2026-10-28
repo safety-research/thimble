@@ -106,6 +106,34 @@ def test_a_start_wait_that_is_not_a_number_of_seconds_leaves_the_default(monkeyp
     assert r.returncode == 0, r.stderr
 
 
+def test_a_health_probe_waits_as_long_as_thimble_health_timeout_s_says_and_a_bad_value_leaves_the_default(monkeypatch):
+    """THIMBLE_HEALTH_TIMEOUT_S is read at each health probe, so the tests that start real servers on a busy machine
+    let every probe of theirs wait as long as their other waits; a value that is not a positive number of seconds
+    leaves the default."""
+    asked: list[float] = []
+
+    class Loopback:
+        @staticmethod
+        def open(url: str, timeout: float) -> None:
+            asked.append(timeout)
+            raise OSError("no server here")
+
+    def request(method: str, url: str, body: object = None, timeout: float = 5.0) -> tuple[int, dict]:
+        asked.append(timeout)
+        return 0, {}
+
+    monkeypatch.setattr(cli.config, "LOOPBACK", Loopback)
+    monkeypatch.setattr(cli, "_request", request)
+    for bad in ("soon", "-5", "0", "nan", "inf"):
+        monkeypatch.setenv("THIMBLE_HEALTH_TIMEOUT_S", bad)
+        assert cli.health_timeout_s() == cli.HEALTH_TIMEOUT_S, bad
+    monkeypatch.setenv("THIMBLE_HEALTH_TIMEOUT_S", "100")
+    assert not cli.healthy("http://127.0.0.1:9") and cli.health_leader("http://127.0.0.1:9") is None
+    assert cli.foreign_home("http://127.0.0.1:9") is None and asked == [100.0] * 3
+    monkeypatch.delenv("THIMBLE_HEALTH_TIMEOUT_S")
+    assert not cli.healthy("http://127.0.0.1:9") and asked[-1] == cli.HEALTH_TIMEOUT_S
+
+
 def test_two_concurrent_ups_start_one_uvicorn(fake, home):
     results: list[bool] = []
 
@@ -406,7 +434,8 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
     port = _free_port()
     # a session the launcher started, with the plugin's hooks on, so /thimble prints the URL alone
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port),
-           "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws"), "THIMBLE_START_WAIT_S": "100"}
+           "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws"), "THIMBLE_START_WAIT_S": "100",
+           "THIMBLE_HEALTH_TIMEOUT_S": "100"}
     env.pop("THIMBLE_DEV", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
         env.pop(k, None)
