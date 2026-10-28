@@ -143,32 +143,34 @@ async def test_health_answers_while_every_worker_thread_is_taken():
     import anyio
     import httpx
 
-    from app.main import app
+    from app.main import create_app
 
-    # FastAPI builds its table of routes at an app's first request, a second's work on the event loop and several on a
-    # busy machine; a server has answered requests before the health call this test is about
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
-        assert (await client.get("/api/health")).status_code == 200
+    app = create_app()  # a server's first request: the health call of `server up` right after the start
     limiter = anyio.to_thread.current_default_thread_limiter()
     tokens = limiter.total_tokens
     limiter.total_tokens = 1
+    started, release = threading.Event(), threading.Event()
     try:
-        started = threading.Event()
 
         def hold_thread() -> None:
             started.set()
-            time.sleep(3)
+            release.wait(60)  # until the health call came back, however slowly
 
         hold = asyncio.ensure_future(anyio.to_thread.run_sync(hold_thread))
         while not started.is_set():  # the one worker thread is taken
             await asyncio.sleep(0.01)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
-            t0 = time.monotonic()
+            t0, cpu0 = time.monotonic(), time.thread_time()
             r = await client.get("/api/health")
-            took = time.monotonic() - t0
+            took, cpu = time.monotonic() - t0, time.thread_time() - cpu0
             held = not hold.done()
+        release.set()
         await hold
     finally:
+        release.set()
         limiter.total_tokens = tokens
     assert held, "the worker thread was still taken when health answered"
     assert r.status_code == 200 and r.json()["ok"] and took < 1.0, f"health took {took:.1f} s"
+    # the work it did on the event loop (this thread), which a busy machine does not stretch: a few milliseconds, and
+    # about a quarter of a second more when the routes' table is built at this first request instead of at the start
+    assert cpu < 0.05, f"health took {cpu:.3f} s of the event loop's time"
