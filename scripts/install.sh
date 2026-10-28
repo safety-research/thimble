@@ -253,19 +253,37 @@ link_cli() {
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 # fresh_path: the PATH a new terminal starts with, where the claude the person starts finds the node the plugin's cards
 # run on: their login shell ($SHELL), started as a terminal starts it (a login shell, interactive, so it reads their
-# startup files) with no input, prints its environment; '' when it cannot say within 20 s
+# startup files) with no input, prints its environment; '' when it cannot say within 20 s. The shell runs in a session
+# of its own, with no terminal: an interactive shell makes the terminal it finds its own and does not give it back, so
+# the install's next question would stop it ("suspended (tty input)"), and a startup file that reads the terminal would
+# wait there unseen. At 20 s the shell and what it started get SIGKILL (an interactive shell ignores SIGTERM). In the
+# install's Python, as macOS has no setsid command; -I, so no file of the current folder stands in for a module
 fresh_path() {
-  local sh="${SHELL:-}" out pid i
+  local sh="${SHELL:-}"
   [ -n "$sh" ] && [ -x "$sh" ] || return 0
-  out="$(mktemp)"
-  env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-${USER:-}}" SHELL="$sh" TERM="${TERM:-xterm-256color}" LANG="${LANG:-C.UTF-8}" \
-    "$sh" -lic env </dev/null >"$out" 2>/dev/null &
-  pid=$!
-  for i in $(seq 1 200); do kill -0 "$pid" 2>/dev/null || break; sleep 0.1; done
-  kill "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
-  sed -n 's/^PATH=//p' "$out" | tail -n 1
-  rm -f "$out"
+  "$py" -I -c '
+import os, signal, subprocess, sys, tempfile
+sh = sys.argv[1]
+e = os.environ
+env = {"HOME": e.get("HOME", ""), "USER": e.get("USER", ""), "LOGNAME": e.get("LOGNAME") or e.get("USER", ""), "SHELL": sh,
+       "TERM": e.get("TERM") or "xterm-256color", "LANG": e.get("LANG") or "C.UTF-8"}
+# its output in a file, read once the shell ends: a program its startup files leave running may keep a pipe open
+with tempfile.TemporaryFile() as out:
+    p = subprocess.Popen([sh, "-lic", "env"], stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.DEVNULL, env=env,
+                         start_new_session=True)
+    try:
+        p.wait(timeout=20)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        p.wait()
+        sys.exit(0)
+    out.seek(0)
+    paths = [line[5:] for line in out.read().decode(errors="replace").splitlines() if line.startswith("PATH=")]
+print(paths[-1] if paths else "")
+' "$sh" 2>/dev/null || true
 }
 
 # ---- the terminal plugin
