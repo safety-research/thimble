@@ -35,6 +35,9 @@ export interface FixRow {
   change?: boolean
   /** how many files it changed */
   files?: number
+  /** the sentence that names what it changes of the sandbox, the launcher, dependencies and such, before the person
+   * uses it, in the terminal's words: `This fix changes the sandbox (plugin/cards/argv.mjs).`; '' when nothing */
+  notice?: string
   tests: string | null
   error: string | null
   created?: number

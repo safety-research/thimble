@@ -35,7 +35,9 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
                              scan) or a binary file, and runs the tests of what the change touched (`fix done`), one fix
                              at a time; a fix that passes is ready. How it ended is a row
                              in main's chat and in the fix's thread, at the time it ended (note: a `fix` chip): a ready
-                             fix asks the person there, Use it now, What changed, Later. Nothing goes on by itself
+                             fix asks the person there, Use it now, What changed, Later. Nothing goes on by itself. A
+                             fix that changes the sandbox, the launcher, dependencies or another such file says which
+                             in one sentence above its clicks, as the terminal's line does (notice_said)
     the person's clicks      Use it now, or Use it in Your fixes (`fix apply`, with a secret made at the click as the
                              terminal's key press makes one; then the page of live's browser/ is built and the server
                              starts again from live, dev._do_restart; a page that does not build takes the fix off
@@ -150,6 +152,21 @@ def fixing_word(rec: dict[str, Any]) -> str:
     """The fixer's chat in the thread tree: `fixing <name>` for a new fix, `changing <name>` for a round of a fix the
     person has (plugin/fix/fixes.ts fixingWord)."""
     return f"{'changing' if rec.get('prev') else 'fixing'} {fix_name(rec, 40)}"
+
+
+def notice_said(rec: dict[str, Any]) -> str:
+    """The sentence that tells the person what such files a fix changes before they use it, from the kinds and files
+    the kernel's record names (notice): `This fix changes the sandbox (plugin/cards/argv.mjs).`, or ''. The terminal
+    says the same (plugin/engine/kernel/fixes.py notice_said, plugin/fix/fixes.ts noticeText)."""
+    kinds = rec.get("notice")
+    if not isinstance(kinds, dict) or not kinds:
+        return ""
+
+    def joined(xs: list[str]) -> str:
+        return " and ".join(xs) if len(xs) < 3 else ", ".join(xs[:-1]) + ", and " + xs[-1]
+
+    named = [f"{k} ({joined([str(p) for p in (ps if isinstance(ps, list) else [ps])])})" for k, ps in kinds.items()]
+    return f"This fix changes {joined(named)}."
 
 
 # ------------------------------------------------------------------ the kernel
@@ -355,6 +372,7 @@ def status(every: bool = False) -> dict[str, Any]:
                      "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
                      "tests": r.get("tests"), "error": r.get("error"), "words": (r.get("words") or [""])[-1],
                      "summary": r.get("summary") or "", "files": len(files), "change": bool(r.get("prev")),
+                     "notice": notice_said(r),
                      "workspace": conv.c if conv is not None else n.get("workspace"),
                      "agent": conv.agent_id if conv is not None else n.get("agent"),
                      # the row's timer: since this server began the work it shows (a round of a fix made long ago

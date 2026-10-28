@@ -1,6 +1,6 @@
-"""thimble fix (engine/kernel/fixes.py): a y whose first pointing of Claude Code's marketplace fails changes nothing, the
-way back runs only the release's own code, the notice names every file of the sandbox, and the quick tests run the
-copy's launcher. The world is test_fixes.py's made-up thimble 0.10.2; `claude` is a fake. All data here is made up."""
+"""thimble fix (engine/kernel/fixes.py): a y whose first pointing of Claude Code's marketplace fails changes nothing, a y
+that does not fit the fixes on leaves live and the fixes' on or off as they were, the way back runs only the release's
+own code, the notice names every file of the sandbox, and the quick tests run the copy's launcher. The world is test_fixes.py's made-up thimble 0.10.2; `claude` is a fake. All data here is made up."""
 from __future__ import annotations
 
 import json
@@ -98,6 +98,64 @@ def test_a_y_on_a_new_version_whose_first_pointing_at_live_fails_changes_nothing
     assert out["changed"] is True and FX.get(r["id"])["state"] == "on"
     assert "read ${n ?? 0}" in live_file("plugin/bar/bar.tsx")
     assert sh("git", "log", "--format=%s", "mine", cwd=FX.live_dir()).splitlines() == ["Bar says read", "thimble 0.10.2"]
+
+
+def live_now() -> dict:
+    """What the person runs and is told runs: where live is, what its files say, and whether the fixes are on."""
+    live = FX.live_dir()
+    state = FX.home() / "state.json"
+    return {"head": sh("git", "rev-parse", "HEAD", cwd=live), "branch": sh("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=live),
+            "status": sh("git", "status", "--porcelain", cwd=live), "plugin.json": live_file(FX.PLUGIN_JSON),
+            "state": state.read_text() if state.exists() else None}
+
+
+def test_a_y_that_does_not_fit_while_the_fixes_are_off_leaves_them_off(world):
+    # fix 1 and fix 2 change the same line in different ways; fix 1 is on, then the person turns every fix off
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    b = FX.new("say seen")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `seen ${n}`\n")
+    FX.done(b["id"], "Bar says seen", "")
+    FX.apply(a["id"], press(a["id"]))
+    FX.all_off()
+    before = live_now()
+    assert before["branch"] == "HEAD" and before["head"] == world["base"] and not FX.is_on()
+    with pytest.raises(FX.FixError, match="fix 2 does not fit the fixes you have on"):
+        FX.apply(b["id"], press(b["id"]))
+    # live and state.json as they were: the plain release, with every fix off; fix 2 needs a redo, fix 1 is kept for on
+    assert live_now() == before and not FX.is_on()
+    assert "coverage ${n}" in live_file("plugin/bar/bar.tsx")
+    assert FX.get(b["id"])["state"] == "redo" and FX.get(a["id"])["state"] == "on"
+    FX.all_on()
+    assert FX.is_on() and "read ${n}" in live_file("plugin/bar/bar.tsx")
+
+
+def test_a_new_version_that_does_not_fit_while_the_fixes_are_off_leaves_them_off(world):
+    # fix 1 adds a note and is off; its new version adds plugin/bar/extra.ts, which fix 2 adds too, and fix 2 is on;
+    # then the person turns every fix off
+    a = FX.new("a note")
+    (Path(a["work"]) / "plugin" / "notes.md").write_text("made-up note\n")
+    FX.done(a["id"], "A note", "")
+    FX.apply(a["id"], press(a["id"]))
+    FX.undo(a["id"])
+    r = FX.round_(a["id"], "and an extra file")
+    (Path(r["work"]) / "plugin" / "bar" / "extra.ts").write_text("export const extra = 1\n")
+    r = FX.done(r["id"], None, "Adds an extra file.")
+    assert r["state"] == "ready" and r["prev"]["state"] == "off"
+    b = FX.new("an extra file of its own")
+    (Path(b["work"]) / "plugin" / "bar" / "extra.ts").write_text("export const extra = 2\n")
+    FX.done(b["id"], "Extra two", "")
+    FX.apply(b["id"], press(b["id"]))
+    FX.all_off()
+    before = live_now()
+    with pytest.raises(FX.FixError, match="the new version of fix 1 does not fit the fixes you have on"):
+        FX.apply(a["id"], press(a["id"]))
+    # live and state.json as they were; fix 2 is kept for on, and fix 1's new version still waits for a y
+    assert live_now() == before and not FX.is_on()
+    assert not (FX.live_dir() / "plugin" / "bar" / "extra.ts").exists()
+    assert FX.get(b["id"])["state"] == "on" and FX.get(a["id"])["state"] == "ready"
+    FX.all_on()
+    assert FX.is_on() and live_file("plugin/bar/extra.ts") == "export const extra = 2\n"
 
 
 def test_the_release_checkout_is_put_back_as_the_release_has_it(world):
