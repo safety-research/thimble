@@ -309,12 +309,15 @@ async def test_a_headless_session_s_bash_sandbox_gets_a_short_tmpdir_and_fails_c
     box = json.loads(opts.settings)["sandbox"]
     assert box["failIfUnavailable"] is True and box["allowUnsandboxedCommands"] is False
     assert during["tmp"] in box["filesystem"]["allowWrite"] and str(home) in box["filesystem"]["allowWrite"]
-    # the last session in the corpus to end removes it: one the turn started may still be ending on a busy machine
-    for _ in range(100):
+    # the last session in the corpus to end removes it: one the turn started may still be ending on a busy machine (a CI
+    # runner with the other tests on its few CPUs took more than 5 s), so this waits for it as long as other waits here
+    for _ in range(600):
         if str(opts.cwd) not in runtime_cc._open:
             break
         await asyncio.sleep(0.05)
-    assert not (Path(opts.cwd) / ".claude").exists(), "the sandbox's empty .claude/.cc-writes/ goes too"
+    open_now = runtime_cc._open.get(str(opts.cwd), 0)
+    assert not (Path(opts.cwd) / ".claude").exists(), (f"the sandbox's empty .claude/.cc-writes/ goes too (sessions still "
+                                                       f"open in the corpus: {open_now})")
     told = [n for n in notices.open_notices(CORPUS) if n["key"] == runtime_cc.SANDBOX_KEY]
     assert len(told) == 1 and "Failed to create bridge sockets" in told[0]["text"] and "Main" in told[0]["text"]
 
