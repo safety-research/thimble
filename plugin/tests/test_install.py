@@ -138,10 +138,11 @@ def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     assert sandbox.endswith("Install them: sudo made-up-get install bubblewrap socat"), said
 
 
-def install_with_login_shell(tmp_path, login_path):
+def install_with_login_shell(tmp_path, login_path, shell=None):
     """scripts/install.sh --no-browser with made-up commands, run from a shell whose node fails the card test (it says
     the made-up sandbox does not work), for a person whose login shell (SHELL, a made-up one) starts with the PATH
-    `login_path`, where a made-up node passes it. Its output, and the arguments the login shell was started with."""
+    `login_path`, where a made-up node passes it; `shell`: what the login shell does instead, after it notes its
+    arguments. Its output, and the arguments the login shell was started with."""
     market = tmp_path / "market"
     (market / ".claude-plugin").mkdir(parents=True)
     (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
@@ -158,7 +159,8 @@ def install_with_login_shell(tmp_path, login_path):
     stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
     stub(tmp_path / "new-terminal" / "node", 'echo "thimble: cards run in the made-up sandbox; the runner drew a test card in 5 ms ($*)."\n')
     started = tmp_path / "login.log"
-    login = stub(tmp_path / "login-shell", f'echo "$@" > "{started}"\necho "made-up: welcome"\necho "PATH={login_path}"\n')
+    login = stub(tmp_path / "login-shell", f'echo "$@" > "{started}"\n'
+                 + (shell if shell is not None else f'echo "made-up: welcome"\necho "PATH={login_path}"\n'))
     home = tmp_path / "home"
     home.mkdir()
     env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
@@ -187,6 +189,18 @@ def test_a_new_terminal_that_finds_no_node_is_said(tmp_path):
     notes = [x for x in out.splitlines() if x.startswith("Note: a new terminal finds no node")]
     assert notes == [f"Note: a new terminal finds no node, and the plugin's cards run on the node a new terminal finds. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"{tmp_path / 'stubs'}:$PATH\""]
     assert "the made-up node of this shell" in out
+
+
+def test_a_login_shell_that_cannot_start_as_a_terminal_starts_it_is_said(tmp_path):
+    """A login shell that refuses -lic (tcsh takes -l only as its one flag) gives no PATH: the card test runs on this
+    shell's node, and one line, before the test's own, names that node and says the login shell could not be started."""
+    out, started = install_with_login_shell(tmp_path, "", shell="echo \"Unknown option: \\`-l'\" >&2\nexit 1\n")
+    assert started == ["-lic", "env"]
+    lines = out.splitlines()
+    said = [x for x in lines if str(tmp_path / "login-shell") in x]
+    assert said == [f"Your login shell ({tmp_path / 'login-shell'}) could not be started as a new terminal starts it, so "
+                    f"the test card runs on this shell's node: {tmp_path / 'stubs' / 'node'}"], out
+    assert lines.index(said[0]) + 1 == lines.index("thimble: cards cannot run yet: the made-up node of this shell."), out
 
 
 # a terminal (a pty) whose shell runs a command as a person's shell does: in a process group of its own, which it puts

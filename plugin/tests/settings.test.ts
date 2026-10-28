@@ -255,6 +255,33 @@ test('a mode saved under the old fields moves to Citations at the first session,
   setOptions({})
 })
 
+test("/config hides Checker on Bedrock, Vertex or Foundry (a variable set to a true value), whose model ids are not the first-party API's; elsewhere it shows", async () => {
+  const hooks: Record<string, Any[]> = {}
+  const on: Any = (event: string, a: Any, b?: Any) => {
+    ;(hooks[event] ??= []).push(typeof a === 'function' ? a : b)
+    const reg: Any = { catch: () => reg }
+    return reg
+  }
+  let env: Record<string, string> = {}
+  const $: Any = { plugin: { name: 'thimble' }, env: { get: async (name: string) => env[name] } }
+  const hidden = async (key: string) => {
+    const chain = hooks['config.describe'] ?? []
+    const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i]($, ev, (x: Any) => run(i + 1, x)) : ev)
+    return (await run(0, { key, label: 'x', isHidden: false })).isHidden
+  }
+  registerSettings(on, { checkerModel: 'haiku' } as never)
+  const cases: [Record<string, string>, boolean][] = [
+    [{ CLAUDE_CODE_USE_BEDROCK: '1' }, true], [{ CLAUDE_CODE_USE_VERTEX: 'yes' }, true], [{ CLAUDE_CODE_USE_FOUNDRY: 'TRUE' }, true],
+    [{ CLAUDE_CODE_USE_BEDROCK: '0' }, false], [{}, false],
+  ]
+  for (const [vars, hides] of cases) {
+    env = vars
+    expect(await hidden('thimble@inline.checkerModel')).toBe(hides)
+    expect(await hidden('thimble@inline.citations')).toBe(false)
+  }
+  setOptions({})
+})
+
 test('a default that moves is saved once, where the old default stands, with defaultsAt; a value set afterwards stays', async () => {
   const hooks: Record<string, { fn: Any }[]> = {}
   const on: Any = (event: string, a: Any, b?: Any) => {

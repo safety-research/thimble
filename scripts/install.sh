@@ -422,14 +422,18 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
     if [ -n "$at" ] && [ -f "$at/sandbox/setup.mjs" ]; then
       say "The sandbox that cards run in (Anthropic's sandbox runtime)..."
       # the test draws a card as a session does: on the node and PATH of a new terminal (fresh_path), else on this
-      # shell's; a failure it can repair (srt's files missing or broken) it repairs (--repair)
+      # shell's, which a line says when the login shell could not be started (tcsh takes -l only as its one flag); a
+      # failure it can repair (srt's files missing or broken) it repairs (--repair)
       probe_path="$(fresh_path)"
       probe_node=""
       if [ -n "$probe_path" ]; then
         probe_node="$(PATH="$probe_path"; hash -r; command -v node 2>/dev/null || true)"
         [ -n "$probe_node" ] || notes+=("a new terminal finds no node, and the plugin's cards run on the node a new terminal finds. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"$(dirname "$(command -v node)"):\$PATH\"")
       fi
-      [ -n "$probe_node" ] || { probe_node="$(command -v node)"; probe_path="$PATH"; }
+      if [ -z "$probe_node" ]; then
+        [ -n "$probe_path" ] || say "Your login shell${SHELL:+ ($SHELL)} could not be started as a new terminal starts it, so the test card runs on this shell's node: $(command -v node)"
+        probe_node="$(command -v node)"; probe_path="$PATH"
+      fi
       # its line (npm's progress goes to stderr, and shows as it comes); when the sandbox does not work yet, the line's
       # why and fix again in the notes, at the end. The fix, on the line after the why, often ends in a command: it
       # keeps a line of its own, so that no words follow the command

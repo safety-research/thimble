@@ -8,17 +8,32 @@
 //                          again with the new options; a refusal is one line with its fix. Minimal is a preset: on, it
 //                          sets its rows' modes (features.mjs PRESET), keeping theirs (store: beforeMinimal); off puts
 //                          them back; one of its rows changed away from its mode turns it off
+//   firstPartyApi($)       whether Claude Code reaches Claude through Anthropic's first-party API, not Bedrock, Vertex
+//                          or Foundry: a setting that names its model ids (features.mjs `firstParty`) works only there
 //
 // The fields newer settings replaced (features.mjs RETIRED) stay in the manifest, hidden from /config, so a value saved
 // under them reaches the plugin: the first interactive session moves it to the settings that replaced it and sets them
 // back to their defaults. A setting the person changes moves them first too. A default that moved (features.mjs
 // DEFAULTS) is saved the same way, once: a value at the old default takes the new one, and the hidden field defaultsAt
-// says it was done.
+// says it was done. A setting that names first-party model ids is hidden from /config where Claude Code runs on another
+// provider.
 import type { ConfigRow, EngineInterface, Register } from 'claude-code'
 
+import { firstParty } from '../core/models.js'
 import { DEFAULTS, DEFAULTS_FIELD, PRESET, RENAMED, RETIRED, SWITCHES, atDefault, atPreset, currentValues, movedFrom, noteChange, noteDefaults, noteSettled, renamedTo, setOptions, switchOf, valueIn } from './features.mjs'
 
 type Engine = EngineInterface
+
+/** Whether Claude Code reaches Claude through Anthropic's first-party API (core/models.js firstParty): none of
+ *  CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX and CLAUDE_CODE_USE_FOUNDRY is set to a true value. An engine that
+ *  cannot say reads as the first-party API. */
+export async function firstPartyApi($: Engine): Promise<boolean> {
+  try {
+    return firstParty([await $.env.get('CLAUDE_CODE_USE_BEDROCK'), await $.env.get('CLAUDE_CODE_USE_VERTEX'), await $.env.get('CLAUDE_CODE_USE_FOUNDRY')])
+  } catch {
+    return true
+  }
+}
 
 /** Claude Code's rows of thimble's features, by feature: `<plugin>.<field>` (a --plugin-dir plugin may be
  *  `<plugin>@inline.<field>`). */
@@ -170,11 +185,14 @@ async function moveDefaults($: Engine): Promise<void> {
 
 export const registerSettings: Register = (on, options) => {
   setOptions(options)
-  // the retired fields, and defaultsAt, stay out of /config
+  // the retired fields, and defaultsAt, stay out of /config, as does a setting of first-party model ids on another
+  // provider
   on('config.describe', async ($, e, next) => {
     const m = /^(.+)\.([^.]+)$/.exec(e.key)
     const ours = m && (m[1] === $.plugin.name || m[1]!.startsWith(`${$.plugin.name}@`))
-    return ours && (m![2]! in RETIRED || m![2]! in DEFAULTS_FIELD) ? next({ ...e, isHidden: true }) : next(e)
+    if (ours && (m![2]! in RETIRED || m![2]! in DEFAULTS_FIELD)) return next({ ...e, isHidden: true })
+    if (ours && switchOf(m![2]!)?.firstParty && !(await firstPartyApi($))) return next({ ...e, isHidden: true })
+    return next(e)
   }).catch(($, e, next) => next(e))
   on('session.start', { isInteractive: true }, async ($, e, next) => {
     const r = await next(e)

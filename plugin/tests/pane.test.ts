@@ -270,6 +270,28 @@ test('in the settings, the Checker row shows while a checker can run: in every m
   setOptions({})
 })
 
+test("in the settings on Bedrock, Vertex or Foundry, no Checker row, whatever it holds: the models it names are the first-party API's; ↓ from Citations lands on Cards", async () => {
+  const cases: [Record<string, string>, boolean][] = [
+    [{ CLAUDE_CODE_USE_BEDROCK: '1' }, false], [{ CLAUDE_CODE_USE_VERTEX: 'true' }, false], [{ CLAUDE_CODE_USE_FOUNDRY: 'ON' }, false],
+    [{ CLAUDE_CODE_USE_BEDROCK: '0', CLAUDE_CODE_USE_VERTEX: 'false' }, true],
+  ]
+  for (const [env, shows] of cases) {
+    const s = setup()
+    s.$.env = { get: async (name: string) => env[name] }
+    const held: Record<string, unknown> = { citations: 'auto cite + verify', checkerModel: 'haiku' }
+    s.$.config = { list: async () => Object.entries(held).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })), set: async () => ({}) }
+    s.$.ui.focus = async () => ({})
+    await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+    const rows = nodes(await draw(s)).map(n => n.props?.key).filter((k: Any) => typeof k === 'string' && k.startsWith('sw-'))
+    expect(rows.slice(0, 3)).toEqual(['sw-minimal', 'sw-citations', shows ? 'sw-checkerModel' : 'sw-cards'])
+    await s.$.state.set({ plugin: 'thimble', key: 'settingsRow' }, 'citations')
+    await draw(s)
+    expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
+    expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe(shows ? 'checkerModel' : 'cards')
+  }
+  setOptions({})
+})
+
 test('a pane a key could not open in a narrow window: the notice offers the click that opens it here; the panes that lay out by their rows ask for them', async () => {
   const s = setup()
   s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (118 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }
