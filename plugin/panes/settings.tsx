@@ -138,7 +138,8 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
           Text({ key: 'title', bold: true, children: minimal ? MINIMAL_TITLE : s.title.padEnd(NAME) }),
         ] }),
         Text({ key: 'gap', children: ' ' }),
-        Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: [
+        // the choices take the rest of the line, named, so the pane measures the rows they wrap onto as drawn
+        Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, width: Math.max(1, width - at), children: [
           ...choices,
         ] }),
       ] }),
