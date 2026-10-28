@@ -168,14 +168,21 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   let left = whole
   if (!preview) {
     // a narrow bar: the words of an item that has shorter ones give way first, then the busy step, down to its glyph and
-    // seconds, then coverage's file counts, and only then a whole count: the labels', then coverage. What gave way takes
-    // back the room left: coverage's file counts (beside coverage alone), then the busy step, then each such item the
-    // longest of its words that fits
+    // seconds, then coverage's file counts, and only then a whole count: the labels', then coverage. A count that went
+    // comes back when it fits on its own, except beside a hint, which the counts give way to: the labels' count is
+    // shorter, so it can fit where coverage does not. What gave way takes back the room left: coverage's file counts
+    // (beside coverage alone), then the busy step, then each such item the longest of its words that fits
     const least = whole.map((x, i) => (b && !i ? busyItem(b, 0) : shortest(x)))
     const all = right
-    if (spare(least, right) < 0) right = right.map(x => (x.id === 'coverage' && counted(x) ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
+    const bare = (x: Item) => (x.id === 'coverage' && counted(x) ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x)
+    if (spare(least, right) < 0) right = right.map(bare)
     if (spare(least, right) < 0) right = right.filter(x => x.id !== 'labels' || !counted(x))
     if (spare(least, right) < 0) right = right.filter(x => x.id !== 'coverage' || !counted(x))
+    for (const id of hintIn ? [] : ['coverage', 'labels']) {
+      if (right.some(x => x.id === id) || !all.some(x => x.id === id && counted(x))) continue
+      const tried = all.filter(x => x.id === id || right.some(y => y.id === x.id)).map(x => (x.id === id ? bare(x) : right.find(y => y.id === x.id)!))
+      if (spare(least, tried) >= 0) right = tried
+    }
     const back = right.map(x => all.find(y => y.id === x.id) ?? x)
     if (spare(least, back) >= 0) right = back
     left = [...least]

@@ -430,8 +430,12 @@ test("a narrow bar gives way in order: the busy step to its glyph and seconds, t
   const labelsGone = (await bar(50)).join('\n')
   for (const item of ['5s', 'v visualize', 'r coverage 43%']) expect(labelsGone).toContain(item)
   for (const gone of ['(3/7 files)', 'labels']) expect(labelsGone).not.toContain(gone)
-  // then coverage
-  const none = (await bar(40)).join('\n')
+  // then coverage; the labels' count, which is shorter, comes back in the room coverage left when it fits there alone
+  const labelsBack = (await bar(40)).join('\n')
+  for (const item of ['5s', 'v visualize', 'l 2 labels']) expect(labelsBack).toContain(item)
+  expect(labelsBack).not.toContain('coverage')
+  // and where neither fits, no count
+  const none = (await bar(36)).join('\n')
   for (const item of ['5s', 'v visualize']) expect(none).toContain(item)
   for (const gone of ['coverage', 'labels']) expect(none).not.toContain(gone)
   // a hint stays whole, and the counts give way to it; the busy step takes back the room they leave
@@ -752,6 +756,21 @@ test("in a terminal 80 or 100 columns wide (the band 5 narrower), after an answe
   expect(bar.left).toBe('thimble  v visualize · ] next explainer · s rewrite')
   expect(bar.right).toBe('r coverage 43% (3/7 files) · l 2 labels')
 })
+
+for (const c of [
+  { name: 'at rest, in a terminal 56 columns wide', term: 56, o: {} },
+  { name: 'with words selected, in a terminal 77 columns wide', term: 77, o: { selection: 'the retry budget runs out' } },
+  { name: 'while a count runs, in a terminal 60 columns wide', term: 60, o: { counting: true } },
+]) {
+  test(`${c.name} (the band 5 narrower), where coverage does not fit beside the keys, the labels' count, which is shorter, still shows, and ] gives up its words for it`, async ($, on) => {
+    await markedAnswer($, on, c.o)
+    const bar = barIn(await $.ui.render(bandIn(c.term)))
+    expect(bar.rows.length).toBe(1)
+    expect(bar.widest).toBeLessThanOrEqual(c.term - 5)
+    expect(bar.right).toBe('l 2 labels')
+    expect(bar.rest).toBe(']')
+  })
+}
 
 test("with words of an answer with marks selected, in a terminal 80 or 100 columns wide (the band 5 narrower), the bar names e and c, and gives way in order: the words of ], the busy step, coverage's file counts, then a whole count; in Claude Code's fullscreen layout and its default one, while a count runs and after", async ($, on) => {
   const { end } = await markedAnswer($, on, { selection: 'the retry budget runs out', counting: true })
