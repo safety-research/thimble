@@ -750,14 +750,15 @@ export function showCard(view: View, r: Rect, vw: number, vh: number): View {
 }
 
 /**
- * Where a box of `w` × `h` (plane px) stands in `area` (the plane the viewport shows) clear of `taken` by GAP: the first
- * place, row by row from the area's top left, or null when none is clear. Pure.
+ * Where a frame's box of `w` × `h` (plane px) stands in `area` (the plane the viewport shows), it and its title row
+ * (TITLE above the box) clear of `taken` by GAP: the first place, row by row from the area's top left, or null when none
+ * is clear. Pure.
  */
 export function freeSpot(area: Rect, w: number, h: number, taken: readonly Rect[]): Pos | null {
   const step = GAP * 2
   for (let y = area.y; y + h <= area.y + area.h; y += step)
     for (let x = area.x; x + w <= area.x + area.w; x += step) {
-      const box = { x: x - GAP, y: y - GAP, w: w + 2 * GAP, h: h + 2 * GAP }
+      const box = { x: x - GAP, y: y - TITLE - GAP, w: w + 2 * GAP, h: h + TITLE + 2 * GAP }
       if (!taken.some((t) => overlaps(box, t))) return { x: Math.round(x), y: Math.round(y) }
     }
   return null

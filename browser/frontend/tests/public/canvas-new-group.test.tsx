@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { act } from 'react'
 import { Canvas } from '../../src/canvas/Canvas.tsx'
-import { boardOf, layoutBoard, MIN_FRAME_H, MIN_FRAME_W, overlaps, TITLE, toPlane, type View } from '../../src/canvas/layout.ts'
+import { boardOf, freeSpot, GAP, layoutBoard, MIN_FRAME_H, MIN_FRAME_W, overlaps, TITLE, toPlane, type View } from '../../src/canvas/layout.ts'
 import type { CanvasResponse, Cell, Group, Pos } from '../../src/lib/types.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
 
@@ -58,4 +58,11 @@ test('Group with nothing selected makes the frame in view and leaves the view wh
   const before = layoutBoard(boardOf({ ...data, groups: data.groups.filter((g) => g.id === 'g1') }), new Set(['g1']), {})
   for (const r of before.rects.values()) expect(overlaps({ x: pos!.x, y: pos!.y - TITLE, w: MIN_FRAME_W, h: MIN_FRAME_H + TITLE }, r)).toBe(false)
   expect(JSON.parse(localStorage.getItem('thimble:ws:canvas-view') ?? 'null')).toEqual(VIEW)
+})
+
+test("the new frame's title row stands GAP clear of the frame above it, as its box does", () => {
+  // a frame above whose box ends at 100, and room under it
+  const above = { x: 0, y: 0, w: 1000, h: 100 }
+  const pos = freeSpot({ x: 0, y: 0, w: 1000, h: 1000 }, MIN_FRAME_W, MIN_FRAME_H, [above])!
+  expect(pos.y - TITLE - GAP).toBeGreaterThanOrEqual(above.y + above.h)
 })
