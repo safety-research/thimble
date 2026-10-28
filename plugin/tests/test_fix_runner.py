@@ -37,9 +37,11 @@ def appeared(p: Path) -> str:
 # sleeps at most once more after it: it looks at the deadline before each sleep.
 WAITS = """_wait, _sleep, WAITS = fixes._wait, time.sleep, sys.argv.pop(1)
 def waits(fid, deadline):
-    left, late = (None if deadline is None else deadline - time.monotonic()), [0]
+    left, late, over = (None if deadline is None else deadline - time.monotonic()), [0], [0]
     def sleep(s):
-        late[0] += deadline is not None and time.monotonic() >= deadline
+        now = time.monotonic()
+        late[0] += deadline is not None and now >= deadline
+        over[0] += deadline is not None and now < deadline and s > deadline - now + 0.1
         _sleep(s)
     time.sleep = sleep
     try:
@@ -47,7 +49,7 @@ def waits(fid, deadline):
     finally:
         time.sleep = _sleep
         with open(WAITS, "a") as f:
-            f.write(json.dumps({"left": left, "late": late[0]}) + "\\n")
+            f.write(json.dumps({"left": left, "late": late[0], "over": over[0]}) + "\\n")
 fixes._wait = waits
 """
 
@@ -85,7 +87,7 @@ def test_done_within_gives_the_fix_still_working_while_its_tests_run_and_a_later
         assert got["state"] == "working" and got["testing"]["lock"] and FX.get(r["id"])["testing"] == got["testing"]
         # and back at the limit, however busy the machine: its wait for the tests began with at most 0.3 s left, and
         # came back at its first look after them
-        assert [(w["left"] is not None and w["left"] <= 0.3, w["late"] <= 1) for w in waits(tmp_path)] == [(True, True)], err
+        assert [(w["left"] is not None and w["left"] <= 0.3, w["late"] <= 1, w["over"] == 0) for w in waits(tmp_path)] == [(True, True, True)], err
     finally:
         gate.touch()
     out, err = call(tmp_path, "done", str(r["id"]), "--within", "60").communicate(timeout=90)
