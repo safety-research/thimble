@@ -757,8 +757,8 @@ def _kill_kernel_pid(pid: int, wait_s: float = 3.0) -> None:
 
 @pytest.fixture(autouse=True)
 def _kernels_left_by_the_test():
-    """After every test, a kernel still in notebook's tables is terminated through its recorded pid and its files
-    dropped."""
+    """After every test, a kernel still in notebook's tables has its channels closed, is terminated through its
+    recorded pid, and its files dropped."""
     yield
     nb = sys.modules.get("app.notebook")
     if nb is None or not hasattr(nb, "_kernels"):
@@ -767,6 +767,9 @@ def _kernels_left_by_the_test():
     nb._kernels.clear()
     nb._exec_kernels.clear()
     for k in left:
+        kc, k.kc = k.kc, None
+        if kc is not None:
+            nb._close_client(kc)
         pid, pgid = k.pid, k.pgid
         if pid is None:
             rec = nb._read_record(k.record) or {}

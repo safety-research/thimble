@@ -26,7 +26,7 @@ def open_fds() -> int:
 
 class ControlOutOfFiles(AsyncKernelClient):
     """A client whose control channel fails as zmq does in a process out of descriptors: after the shell, iopub and
-    stdin sockets and the heartbeat's thread are made, the last channel's socket is not."""
+    stdin sockets are made, the last channel's socket is not."""
 
     def connect_control(self, identity=None):
         raise zmq.ZMQError(errno.EMFILE)
@@ -65,9 +65,9 @@ def _kernel_procs(spawned: list[subprocess.Popen]) -> list[int]:
 @pytest.mark.parametrize("step", ["channels", "record", "dies"])
 async def test_kernel_starts_that_fail_leave_the_count_of_open_descriptors_flat(step, spawned, monkeypatch):
     """A start whose channels fail part way (zmq out of descriptors), whose record cannot be written after the process
-    was spawned, or whose process dies before it answers: each closes the channels and zmq context it made, ends the
-    process it spawned and drops its files, so after a first failure (which may load what a process loads once) more
-    failures add no descriptor."""
+    was spawned, or whose process dies before it answers: each closes the channels it made, ends the process it spawned
+    and drops its files, so after a first failure (which may load what a process loads once, the server's zmq context
+    among it) more failures add no descriptor."""
     if step == "channels":
         monkeypatch.setattr(notebook, "AsyncKernelClient", ControlOutOfFiles)
     elif step == "record":

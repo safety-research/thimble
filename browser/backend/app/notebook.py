@@ -38,6 +38,7 @@ from queue import Empty
 from typing import Any, Literal
 
 import zmq
+import zmq.asyncio
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse, Response
 from jupyter_client import AsyncKernelClient
@@ -2422,14 +2423,27 @@ def recorded_kernels(workspace: str) -> list[str | None]:
 
 
 CHANNELS = ("_shell_channel", "_iopub_channel", "_stdin_channel", "_control_channel")  # the AsyncKernelClient's we open
+_zmq_context: zmq.asyncio.Context | None = None
+
+
+def _context() -> zmq.asyncio.Context:
+    """The zmq context of every kernel client, made once and kept while the server runs. A client's own context is
+    destroyed by its finalizer when the garbage collector takes it with the client (a start whose task the loop dropped,
+    still holding its channels): by then the collector has cleared the context's list of its sockets, so the finalizer
+    closes none and waits on them for good, wherever the collection ran. Sockets the collector takes alone just close."""
+    global _zmq_context
+    if _zmq_context is None:
+        _zmq_context = zmq.asyncio.Context()
+    return _zmq_context
 
 
 def _client(connection_file: Path) -> AsyncKernelClient:
-    """Channels to the kernel of `connection_file`, all but the heartbeat's: a kernel's liveness is its pid
-    (_Kernel.alive). The heartbeat's channel is a thread of its own, whose stop joins it on the event loop; stopped
-    before the thread had begun (a failed start on a busy machine), the thread ran on and the join never returned. A
-    start that fails part way (a server out of file descriptors fails in zmq) closes what it opened before it raises."""
-    kc = AsyncKernelClient()
+    """Channels to the kernel of `connection_file` on the server's zmq context (_context), all but the heartbeat's: a
+    kernel's liveness is its pid (_Kernel.alive). The heartbeat's channel is a thread of its own, whose stop joins it on
+    the event loop; stopped before the thread had begun (a failed start on a busy machine), the thread ran on and the
+    join never returned. A start that fails part way (a server out of file descriptors fails in zmq) closes what it
+    opened before it raises."""
+    kc = AsyncKernelClient(context=_context())
     try:
         kc.load_connection_file(str(connection_file))
         kc.start_channels(hb=False)
@@ -2440,9 +2454,9 @@ def _client(connection_file: Path) -> AsyncKernelClient:
 
 
 def _close_client(kc: AsyncKernelClient) -> None:
-    """Close the client's channels and the zmq context it made, whatever a failed start left of them. Never raises,
-    never waits, and opens nothing: stop_channels makes each channel it closes, so after a partial start it would open
-    sockets (and fail again where the descriptors ran out) before it reached the context."""
+    """Close the client's channels, and a zmq context it made itself, whatever a failed start left of them. Never
+    raises, never waits, and opens nothing: stop_channels makes each channel it closes, so after a partial start it
+    would open sockets (and fail again where the descriptors ran out)."""
     for attr in CHANNELS:
         ch = getattr(kc, attr, None)
         if ch is None:
