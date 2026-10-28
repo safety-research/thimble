@@ -171,6 +171,8 @@ interface Drag {
   free: boolean
   /** the target is not where it is now */
   move: boolean
+  /** dropped on the target's name in a title row: the card goes at the end of its flow */
+  named?: boolean
 }
 
 export function Canvas({ ws, active, focused = active }: { ws: string; active: boolean; focused?: boolean }) {
@@ -636,6 +638,23 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     window.addEventListener('mouseup', up)
   }
 
+  // the frame whose name in a title row is under the pointer, through the card being dragged: a drop there goes to that
+  // frame, which is the way into a frame around the one that holds the cards of a path of frames sharing one box, and
+  // into a frame drawn as its title alone
+  const nameAt = (clientX: number, clientY: number): string | null => {
+    const b = live.current.board
+    if (!b || typeof document.elementsFromPoint !== 'function') return null
+    for (const el of document.elementsFromPoint(clientX, clientY)) {
+      const title = el.closest<HTMLElement>('.frame-title')
+      if (!title || !vp.current?.contains(title)) continue
+      // a path's title row names each of its frames; another title row its own frame
+      const step = el.closest<HTMLElement>('.frame-step')
+      const id = step ? step.dataset.step : title.querySelector('.frame-step') ? null : title.closest<HTMLElement>('.frame')?.dataset.group
+      return id && b.group.has(id) ? id : null
+    }
+    return null
+  }
+
   const onCardDown = (e: ReactMouseEvent<HTMLElement>, id: string) => {
     if (e.button === 1 || (e.button === 0 && space.current)) {
       e.preventDefault()
@@ -668,13 +687,14 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       moved = true
       const { board: b2, lay: l2 } = live.current
       if (!b2 || !l2) return
-      const target = frameAt(b2, l2, p)
-      // a collapsed frame takes a card at the end of its deck, never free or between the cards it does not show
-      const shut = !!target && !live.current.open.has(target)
+      const named = nameAt(ev.clientX, ev.clientY)
+      const target = named ?? frameAt(b2, l2, p)
+      // a collapsed frame, or a frame's name, takes a card at the end of its flow, never free or between its cards
+      const shut = !!target && (!!named || !live.current.open.has(target))
       // the key Settings did not pick for asking (⌥ by default, else ⌘) places the card free (lib/platform freeKeyHeld)
       const free = freeKeyHeld(ev)
       const ins = target && !free && !shut ? insertionAt(b2, l2, target, p, id) : null
-      last = { t: 'c', id, x: r.x + p.x - p0.x, y: r.y + p.y - p0.y, target, ins, free: !shut && (free || !ins), move: !!target && target !== bc.parent }
+      last = { t: 'c', id, x: r.x + p.x - p0.x, y: r.y + p.y - p0.y, target, ins, free: !shut && (free || !ins), move: !!target && target !== bc.parent, named: !!named }
       setDrag(last)
     }
     const up = () => {
@@ -703,8 +723,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const target = d.target
     const frame = target ? l.rects.get(target) : null
     track('ui-click', { target: `cell:${d.id}`, detail: { action: 'move', to: target, free: d.free, side: d.ins?.side } })
-    if (target && !o.has(target)) {
-      // on a collapsed frame: at the end of its deck; on its own deck the card stays where it is
+    if (target && (!o.has(target) || d.named)) {
+      // on a collapsed frame or a frame's name: at the end of its flow; on its own frame the card stays where it is
       if (target === me.parent) return
       void change((x) => moveLocal(x, [d.id], target, undefined, null), () => canvasApi.move(ws, { cells: [d.id], group: target }))
       return
