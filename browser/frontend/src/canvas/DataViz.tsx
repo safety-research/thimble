@@ -957,7 +957,9 @@ export function Diagram({ dataset, fitWidth }: { dataset: GraphDataset; fitWidth
 // ---- a custom card: html in a sandboxed iframe sized to its content ----
 
 export const SIZE_MESSAGE = 'thimble:size'
-const SIZER = `<script>(function(){var b=document.body;function s(){var c=getComputedStyle(b);parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:b.offsetHeight+parseFloat(c.marginTop)+parseFloat(c.marginBottom)},'*')}addEventListener('load',s);if(window.ResizeObserver)new ResizeObserver(s).observe(b);s()})()</script>`
+// the body's height, and whether the page lays out wider than its frame (`wide`): then the frame scrolls sideways, and
+// the height takes in the scroll bar's room where the bar takes room, so the bar covers none of the page
+const SIZER = `<script>(function(){var b=document.body,d=document.documentElement;function s(){var c=getComputedStyle(b),w=d.scrollWidth>d.clientWidth+1;parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:b.offsetHeight+parseFloat(c.marginTop)+parseFloat(c.marginBottom)+(w?Math.max(0,innerHeight-d.clientHeight):0),wide:w},'*')}addEventListener('load',s);if(window.ResizeObserver){var o=new ResizeObserver(s);o.observe(b);o.observe(d)}s()})()</script>`
 export const CUSTOM_MIN_H = 40
 export const CUSTOM_MAX_H = 1200
 
@@ -975,7 +977,8 @@ export const clampCustomHeight = (h: number): number => Math.min(CUSTOM_MAX_H, M
 export const CUSTOM_OPEN_MAX_H = 8000
 
 /** A custom card's page in a sandboxed frame, as tall as its content up to CUSTOM_MAX_H; taller pages fade out with a
- * Show all under them. Its head carries the theme, the bridge that tells the page what the ⌘ pointer and the wheel do
+ * Show all under them. A page wider than its frame scrolls sideways inside it, and a fade at the frame's right edge says
+ * there is more. Its head carries the theme, the bridge that tells the page what the ⌘ pointer and the wheel do
  * in the frame (cardBridge), the chart style (chartScript) and the libraries the card names in workspace `ws`
  * (useCardLibs), before the page's own scripts. */
 export function CustomFrame({ html, title, height, ws = '', libs }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[] }) {
@@ -984,6 +987,8 @@ export function CustomFrame({ html, title, height, ws = '', libs }: { html: stri
   const [open, setOpen] = useState(false)
   // drawn once the page has loaded and said its height, for the card harness
   const [sized, setSized] = useState(false)
+  // the page lays out wider than its frame
+  const [wide, setWide] = useState(false)
   const { resolved, key } = useTheme()
   const fonts = useFrameFonts()
   const head = useCardLibs(ws, libs)
@@ -993,9 +998,10 @@ export function CustomFrame({ html, title, height, ws = '', libs }: { html: stri
     const onMessage = (e: MessageEvent) => {
       const frame = ref.current
       if (!frame || e.source !== frame.contentWindow) return
-      const d = e.data as { type?: unknown; height?: unknown }
+      const d = e.data as { type?: unknown; height?: unknown; wide?: unknown }
       if (d && d.type === SIZE_MESSAGE && typeof d.height === 'number' && Number.isFinite(d.height)) {
         setFull(Math.min(CUSTOM_OPEN_MAX_H, Math.max(CUSTOM_MIN_H, Math.ceil(d.height))))
+        setWide(d.wide === true)
         setSized(true)
       } else if (d && typeof d === 'object') fromCardPage(frame, d)
     }
@@ -1009,7 +1015,7 @@ export function CustomFrame({ html, title, height, ws = '', libs }: { html: stri
   const capped = full > CUSTOM_MAX_H
   const h = open ? full : clampCustomHeight(full)
   return (
-    <div className={`canvas-card-frame${capped && !open ? ' is-clipped' : ''}`} data-body="" data-settled={sized ? 'true' : 'false'}>
+    <div className={`canvas-card-frame${capped && !open ? ' is-clipped' : ''}${wide ? ' is-wide' : ''}`} data-body="" data-settled={sized ? 'true' : 'false'}>
       {doc != null && <iframe ref={ref} className="canvas-card-html" sandbox="allow-scripts" srcDoc={doc} title={title || 'custom'} style={{ height: h }} onLoad={() => tellCmd(ref.current)} />}
       {capped && (
         <button type="button" className="bcell-more" onMouseDown={(e) => e.stopPropagation()} onClick={() => setOpen((v) => !v)}>

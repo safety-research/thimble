@@ -115,6 +115,33 @@ body[data-cmd] .board-stage * {
 .frame-chev.is-open {
   transform: rotate(90deg);
 }
+/* a frame that shares its box with the one frame it holds (layout.ts wraps) draws no box of its own: the frame it
+   holds draws the one box, and the title row names each frame of the path, a slash between them */
+.frame.is-path {
+  background: none;
+}
+/* a collapsed frame that holds frames and no card of its own (layout.ts bare) is its title alone: no box under the
+   title, and the rings of a selection and of a drop go round the title */
+.frame.is-bare {
+  background: none;
+  box-shadow: none;
+}
+.frame.is-bare.is-selected > .frame-title {
+  border-radius: var(--radius-seg);
+  box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--accent) 60%, transparent);
+}
+.frame.is-bare.is-target > .frame-title {
+  border-radius: var(--radius-seg);
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.frame-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.frame-sep {
+  color: var(--text-tertiary);
+}
 .frame-name {
   font-size: var(--text-lg);
   font-weight: 500;
@@ -350,6 +377,11 @@ body[data-cmd] .board-stage * {
 }
 .bcell.is-collapsed .bcell-grip {
   visibility: hidden;
+}
+/* a collapsed frame's lone card, folded to its question: what is under the question fades out */
+.bcell.is-folded .canvas-card > :not(.bcell-top) {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 12px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 12px), transparent);
 }
 .bcell-acts .btn {
   border-radius: var(--radius-seg);
@@ -2695,9 +2727,21 @@ button.bdetail-hist:hover {
 }
 /* a custom card's frame: faded at the bottom while its page runs past the frame, Show all under it */
 .canvas-card-frame {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
+}
+/* a page wider than its frame scrolls sideways inside it: a fade at the right edge says there is more */
+.canvas-card-frame.is-wide::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 40px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--surface-card));
 }
 .canvas-card-frame.is-clipped .canvas-card-html {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);

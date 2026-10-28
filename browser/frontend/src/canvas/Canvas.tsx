@@ -39,11 +39,17 @@ import { DetailPanel, LabelPanel, type OutputCite } from './DetailPanel'
 import { Focus } from './Focus'
 import { addSeen, canvasLanding, type Landing } from './landing'
 import {
+  BAR_ROOM,
   DEFAULT_VIEW,
   DOUBLE_MS,
+  FOLD_H,
   HEAD,
   MINIMAP,
+  MIN_FRAME_H,
+  MIN_FRAME_W,
+  OPEN_MARGIN,
   PAD,
+  TITLE,
   activeFrame,
   analystGroup,
   boardOf,
@@ -60,8 +66,10 @@ import {
   firstCardOf,
   FIT_MIN_SCALE,
   fitView,
+  foldable,
   frameAt,
   framesAbove,
+  freeSpot,
   insertionAt,
   isWithin,
   kidsOf,
@@ -77,12 +85,14 @@ import {
   openingFrame,
   patchCellLocal,
   patchGroupLocal,
+  pathOf,
   pillAt,
   placeBeside,
   placeFree,
   readable,
   removeLocal,
   scopeForUnit,
+  showCard,
   stepZoom,
   toPlane,
   unreadAnchors,
@@ -161,6 +171,8 @@ interface Drag {
   free: boolean
   /** the target is not where it is now */
   move: boolean
+  /** dropped on the target's name in a title row: the card goes at the end of its flow */
+  named?: boolean
 }
 
 export function Canvas({ ws, active, focused = active }: { ws: string; active: boolean; focused?: boolean }) {
@@ -626,6 +638,23 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     window.addEventListener('mouseup', up)
   }
 
+  // the frame whose name in a title row is under the pointer, through the card being dragged: a drop there goes to that
+  // frame, which is the way into a frame around the one that holds the cards of a path of frames sharing one box, and
+  // into a frame drawn as its title alone
+  const nameAt = (clientX: number, clientY: number): string | null => {
+    const b = live.current.board
+    if (!b || typeof document.elementsFromPoint !== 'function') return null
+    for (const el of document.elementsFromPoint(clientX, clientY)) {
+      const title = el.closest<HTMLElement>('.frame-title')
+      if (!title || !vp.current?.contains(title)) continue
+      // a path's title row names each of its frames; another title row its own frame
+      const step = el.closest<HTMLElement>('.frame-step')
+      const id = step ? step.dataset.step : title.querySelector('.frame-step') ? null : title.closest<HTMLElement>('.frame')?.dataset.group
+      return id && b.group.has(id) ? id : null
+    }
+    return null
+  }
+
   const onCardDown = (e: ReactMouseEvent<HTMLElement>, id: string) => {
     if (e.button === 1 || (e.button === 0 && space.current)) {
       e.preventDefault()
@@ -658,13 +687,14 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       moved = true
       const { board: b2, lay: l2 } = live.current
       if (!b2 || !l2) return
-      const target = frameAt(b2, l2, p)
-      // a collapsed frame takes a card at the end of its deck, never free or between the cards it does not show
-      const shut = !!target && !live.current.open.has(target)
+      const named = nameAt(ev.clientX, ev.clientY)
+      const target = named ?? frameAt(b2, l2, p)
+      // a collapsed frame, or a frame's name, takes a card at the end of its flow, never free or between its cards
+      const shut = !!target && (!!named || !live.current.open.has(target))
       // the key Settings did not pick for asking (⌥ by default, else ⌘) places the card free (lib/platform freeKeyHeld)
       const free = freeKeyHeld(ev)
       const ins = target && !free && !shut ? insertionAt(b2, l2, target, p, id) : null
-      last = { t: 'c', id, x: r.x + p.x - p0.x, y: r.y + p.y - p0.y, target, ins, free: !shut && (free || !ins), move: !!target && target !== bc.parent }
+      last = { t: 'c', id, x: r.x + p.x - p0.x, y: r.y + p.y - p0.y, target, ins, free: !shut && (free || !ins), move: !!target && target !== bc.parent, named: !!named }
       setDrag(last)
     }
     const up = () => {
@@ -693,8 +723,8 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const target = d.target
     const frame = target ? l.rects.get(target) : null
     track('ui-click', { target: `cell:${d.id}`, detail: { action: 'move', to: target, free: d.free, side: d.ins?.side } })
-    if (target && !o.has(target)) {
-      // on a collapsed frame: at the end of its deck; on its own deck the card stays where it is
+    if (target && (!o.has(target) || d.named)) {
+      // on a collapsed frame or a frame's name: at the end of its flow; on its own frame the card stays where it is
       if (target === me.parent) return
       void change((x) => moveLocal(x, [d.id], target, undefined, null), () => canvasApi.move(ws, { cells: [d.id], group: target }))
       return
@@ -778,6 +808,9 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       clickTimer.current = window.setTimeout(() => {
         clickTimer.current = null
         clickOn.current = null
+        // a frame that holds nothing has nothing to fold (it has no caret)
+        const b3 = live.current.board
+        if (b3 && !foldable(b3, gid) && live.current.open.has(gid)) return
         track('ui-click', { target: `group:${gid}`, detail: { action: live.current.open.has(gid) ? 'collapse' : 'expand' } })
         setShut((cur) => {
           const next = new Set(cur)
@@ -921,12 +954,21 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     if (!data) return
     track('ui-click', { target: 'canvas:group', detail: { action: 'add' } })
     try {
-      const g = await canvasApi.createGroup(ws, { title: nextGroupTitle(data.groups) })
+      // the new frame stands where the analyst is looking, clear of what is drawn there, and the view stays; only with no
+      // room in view does it go below the board, and the view to it
+      const v = live.current.view
+      const at = toPlane(v, OPEN_MARGIN, BAR_ROOM + TITLE * v.scale)
+      const area = { x: at.x, y: at.y, w: (vpSize.w - CONTROLS_W - OPEN_MARGIN) / v.scale, h: (vpSize.h - BAR_ROOM) / v.scale - TITLE }
+      const taken = lay ? [...lay.rects].map(([k, r]) => (board?.group.has(k) ? { x: r.x, y: r.y - TITLE, w: r.w, h: r.h + TITLE } : r)) : []
+      const pos = freeSpot(area, MIN_FRAME_W, MIN_FRAME_H, taken)
+      const g = await canvasApi.createGroup(ws, { title: nextGroupTitle(data.groups), ...(pos ? { pos } : {}) })
       setSel([])
       setGsel(g.id)
       setRenaming(g.id)
-      pendingRef.current = `group:${g.id}`
-      pendingShut.current = false
+      if (!pos) {
+        pendingRef.current = `group:${g.id}`
+        pendingShut.current = false
+      }
       await load()
     } catch (e) {
       fail(e)
@@ -1186,10 +1228,10 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
       return
     }
     // placed again while the measures settle: a frame opens from its top, a card is centred (from its top when taller than
-    // the view). The same view is not set twice, so this does not render in a loop
+    // the room under the bar at the top). The same view is not set twice, so this does not render in a loop
     setView((v) => {
       const at = readable(v)
-      const next = p?.kind === 'group' ? openOn(v, r, vpSize.w, CONTROLS_W) : centerOn(at, r.x + r.w / 2, r.y + Math.min(r.h, vpSize.h / at.scale) / 2, vpSize.w, vpSize.h)
+      const next = p?.kind === 'group' ? openOn(v, r, vpSize.w, CONTROLS_W) : showCard(at, r, vpSize.w, vpSize.h)
       return Math.abs(next.x - v.x) < 0.5 && Math.abs(next.y - v.y) < 0.5 && next.scale === v.scale ? v : next
     })
     if (settling.current?.ref === ref) return
@@ -1381,7 +1423,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     const at = el.getBoundingClientRect()
     const box = vp.current.getBoundingClientRect()
     if (at.left >= box.left && at.right <= box.right && at.top >= box.top && at.bottom <= box.bottom) return
-    setView((cur) => centerOn(cur, r.x + r.w / 2, r.y + Math.min(r.h, vpSize.h / cur.scale) / 2, vpSize.w, vpSize.h))
+    setView((cur) => showCard(cur, r, vpSize.w, vpSize.h))
   }
   // a card's page asks to bring a part of it into view (its record opened by a citation): the view pans to that part
   // when it lies outside the viewport, placing its top a third of the way down when it is taller than the viewport
@@ -1451,41 +1493,73 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                       if (!r0) return null
                       const r = placeOf(g.id, g.id, r0)
                       const moving = !!drag && drag.t === 'g' && isWithin(board, g.id, drag.id)
+                      // a frame in the box of the frame around it is named in that frame's title row, and a frame
+                      // that shares its box with the one it holds draws none of its own
+                      const named = !!g.parent && lay.wraps.get(g.parent) === g.id
                       const cls = ['frame']
                       if (lay.depth.get(g.id)) cls.push('is-nested')
+                      if (lay.wraps.has(g.id)) cls.push('is-path')
+                      if (lay.bare.has(g.id)) cls.push('is-bare')
                       if (drag?.target === g.id) cls.push('is-target')
                       if (drag?.target === g.id && drag.move) cls.push('is-into')
                       if (gsel === g.id) cls.push('is-selected')
                       if (moving) cls.push('is-moving')
-                      return (
-                        <div key={g.id} className={cls.join(' ')} style={{ left: r.x, top: r.y, width: r.w, height: r.h }} data-group={g.id} data-anchor={`group:${g.id}`} data-anchor-text={g.group.title}>
-                          <div className="frame-title" data-cellbox="" onMouseDown={(e) => onTitleDown(e, g.id)} onDoubleClick={(e) => e.stopPropagation()}>
-                            <Icon name="chevron-right" size={10} className={`frame-chev${open.has(g.id) ? ' is-open' : ''}`} />
-                            {renaming === g.id ? (
+                      // one frame's title: its caret (a frame that holds nothing has nothing to fold), its name, and
+                      // Delete while it is selected
+                      const titleOf = (id: string) => {
+                        const it = board.group.get(id)
+                        if (!it) return null
+                        return (
+                          <>
+                            {foldable(board, id) && <Icon name="chevron-right" size={10} className={`frame-chev${open.has(id) ? ' is-open' : ''}`} />}
+                            {renaming === id ? (
                               <input
                                 className="frame-rename"
-                                defaultValue={g.group.title}
+                                defaultValue={it.group.title}
                                 autoFocus
                                 onFocus={(e) => e.currentTarget.select()}
                                 onMouseDown={(e) => e.stopPropagation()}
                                 onKeyDown={(e) => {
                                   e.stopPropagation()
-                                  if (e.key === 'Enter') rename(g.id, e.currentTarget.value)
+                                  if (e.key === 'Enter') rename(id, e.currentTarget.value)
                                   if (e.key === 'Escape') setRenaming(null)
                                 }}
-                                onBlur={(e) => rename(g.id, e.currentTarget.value)}
+                                onBlur={(e) => rename(id, e.currentTarget.value)}
                                 aria-label="Name"
                               />
                             ) : (
-                              <span className="frame-name">{g.name}</span>
+                              <span className="frame-name">{it.name}</span>
                             )}
-                            <span className="frame-count">{cardCount(board, g.id)}</span>
-                            {gsel === g.id && renaming !== g.id && (
-                              <TipButton tip="Delete group" className="frame-delete" onMouseDown={(e) => e.stopPropagation()} onClick={() => deleteSelection()}>
-                                <Icon name="trash" size={13} />
-                              </TipButton>
-                            )}
-                          </div>
+                          </>
+                        )
+                      }
+                      const del = (id: string) =>
+                        gsel === id && renaming !== id ? (
+                          <TipButton tip="Delete group" className="frame-delete" onMouseDown={(e) => e.stopPropagation()} onClick={() => deleteSelection()}>
+                            <Icon name="trash" size={13} />
+                          </TipButton>
+                        ) : null
+                      const path = lay.wraps.has(g.id) ? pathOf(lay, g.id) : [g.id]
+                      return (
+                        <div key={g.id} className={cls.join(' ')} style={{ left: r.x, top: r.y, width: r.w, height: r.h }} data-group={g.id} data-anchor={`group:${g.id}`} data-anchor-text={g.group.title}>
+                          {!named && (
+                            <div className="frame-title" data-cellbox="" onMouseDown={(e) => onTitleDown(e, g.id)} onDoubleClick={(e) => e.stopPropagation()}>
+                              {path.length === 1 ? (
+                                titleOf(g.id)
+                              ) : (
+                                // the frames that share this box, outermost first, each its own title
+                                path.map((id, i) => (
+                                  <span key={id} className="frame-step" data-step={id} onMouseDown={(e) => onTitleDown(e, id)}>
+                                    {i > 0 && <span className="frame-sep">/</span>}
+                                    {titleOf(id)}
+                                    {i < path.length - 1 && del(id)}
+                                  </span>
+                                ))
+                              )}
+                              <span className="frame-count">{cardCount(board, g.id)}</span>
+                              {del(path[path.length - 1])}
+                            </div>
+                          )}
                         </div>
                       )
                     })}
@@ -1505,11 +1579,12 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                         x={r.x}
                         y={r.y}
                         w={c.w}
-                        h={c.h}
+                        h={lay.folded.has(c.id) ? FOLD_H : c.h}
                         selected={isSel}
                         alone={isSel && sel.length === 1}
                         collapsed={collapsed}
                         deck={lay.decks.has(c.id)}
+                        folded={lay.folded.has(c.id)}
                         dragging={isDragged}
                         detailOpen={detail === c.id}
                         editing={editing?.id === c.id ? editing.field : null}
