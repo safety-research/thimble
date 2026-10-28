@@ -2975,14 +2975,15 @@ def end_revision(c: str, slug: str, error: str | None = None, *, failed_change: 
 
 def revise(c: str, slug: str, request: str, *, description: str | None = None, task: str | None = None,
            claims: Any = None, arrangement: str | None = None, proposed_by: str = "analyst", asked: bool = False,
-           route: str = CLICK, values: dict[str, Any] | None = None) -> dict[str, Any]:
+           route: str = CLICK, values: dict[str, Any] | None = None, quiet: bool = False) -> dict[str, Any]:
     """A change to the view `slug`, as a build on its proposal (made from the view when it has none): `request` is the
     analyst's words, and given fields replace the proposal's. A `description` is the proposal made again (propose), so
     its task and arrangement replace the old ones with it, a 0.7.0 spec too. A built view's files are copied aside first
     (restore_built), and the proposal is marked `revision` and `changed`. Queued at once (dev.queue_view), as part of
     the start that asked for it (`route`), where a running builder of the view gets the change as a message, and a
     finished one that main's session can still reach runs again with it; a typed change (main's propose_view) is
-    started by its caller. 404 for no such view or proposal."""
+    started by its caller. `quiet`: the build's thread shows the request as the analyst wrote it (message), so the
+    message that carries it to a builder shows nothing more (subagents.send). 404 for no such view or proposal."""
     request = str(request or "").strip()
     _stop_review(c, slug)
     with _proposals_lock:
@@ -3002,7 +3003,7 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
         fields: dict[str, Any] = {"status": "building" if prop.get("status") == "building" else "queued", "error": None,
                                   "change": change or None, "changed": True, "revision": revision or None,
                                   "asked": True if asked else None, "failed_change": None, "ts": _now(),
-                                  "route": route, "refused": None, "stopped_by": None}
+                                  "route": route, "refused": None, "stopped_by": None, "quiet": True if quiet else None}
         if values:
             fields["values"] = {k: str(v) for k, v in values.items() if v}
         if description := _one(description):
@@ -3019,10 +3020,11 @@ def revise(c: str, slug: str, request: str, *, description: str | None = None, t
 
 
 def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = CLICK) -> dict[str, Any]:
-    """What the analyst typed in the thread of the view's build: logged there, then applied as a change to the view
-    (revise, `asked`), as part of the click that sent it from the browser; one typed in the terminal (/thimble:ask,
-    threads.tool_message_thread, `by` terminal) is a typed change, which main's exact Agent call starts (`route`
-    typed). 400 for an empty message, 404 for no such view or proposal."""
+    """What the analyst typed in the thread of the view's build, logged there as they wrote it. About a built view it
+    goes to the view's builder, which answers it or changes the view (ask); while the view is not built, or a change to
+    it is made, it is a change to the view (revise, `asked`). Either way as part of the click that sent it from the
+    browser; one typed in the terminal (/thimble:ask, threads.tool_message_thread, `by` terminal) is started by main's
+    exact Agent call (`route` typed). 400 for an empty message, 404 for no such view or proposal."""
     from . import agents  # noqa: PLC0415
 
     text = str(text or "").strip()
@@ -3032,9 +3034,32 @@ def message(c: str, slug: str, text: str, *, by: str = "browser", route: str = C
     if prop is None and read_built(c, slug) is None:
         raise HTTPException(404, f"no such view: {slug}")
     chat = str((prop or {}).get("chat") or "")
-    if chat and agents.meta_or_none(c, chat) is not None:
+    shown = bool(chat) and agents.meta_or_none(c, chat) is not None
+    if shown:
         agents.Recorder(c, chat).record("user", text=text, by=by)
-    return revise(c, slug, text, asked=True, route=route)
+    if prop is not None and prop.get("status") == "built" and not prop.get("revision") \
+            and read_built(c, slug) is not None:
+        return ask(c, slug, text, route=route)
+    return revise(c, slug, text, asked=True, route=route, quiet=shown)
+
+
+def ask(c: str, slug: str, text: str, *, route: str = CLICK) -> dict[str, Any]:
+    """A message about the built view `slug` from its thread, which may ask for a change or for none: kept on the
+    proposal (`message`) for the builder's run that takes it (dev.message_view), with the view's files kept aside as
+    built (_keep_built), so a run that changes them is a change that can be undone. The view stays built, its attempts
+    as they were, unless that run changes it (dev.message_changes). The proposal."""
+    from . import dev  # noqa: PLC0415
+
+    with _proposals_lock:
+        prop = read_proposal(c, slug) or {}
+        waiting = str(prop.get("message") or "")
+        if not waiting and not prop.get("answering"):
+            drop_built_copy(c, slug)  # left by no change that runs, so not the view as built now
+        _keep_built(c, slug)
+        prop = update_proposal(c, slug, message="\n\n".join(x for x in (waiting, text) if x), asked=True,
+                               route=route) or prop
+    dev.message_view(c, slug, route)
+    return prop
 
 
 def click_refused(c: str, slug: str) -> dict[str, Any] | None:

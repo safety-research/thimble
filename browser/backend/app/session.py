@@ -2988,6 +2988,18 @@ def _continued_in(path: str | None) -> tuple[str, str] | None:
     return None
 
 
+def _sent_quietly(c: str, agent_id: str, prompt: str) -> bool:
+    """Whether a prompt of one of thimble's agents is thimble's own text sent with the person's words (subagents.send
+    `quiet`), which its chat shows as the person wrote them; a store that cannot be read shows the prompt."""
+    from . import subagents  # noqa: PLC0415
+
+    try:
+        return subagents.sent_quietly(c, agent_id, prompt)
+    except Exception:  # noqa: BLE001
+        log.debug("%s: whether %s's prompt was sent quietly is unknown", c, agent_id, exc_info=True)
+        return False
+
+
 def _typed(rec: dict) -> str | None:
     """A message the analyst typed to the subagent in Claude Code's agent view: a queued command or a meta prompt whose
     origin is human, the prompt's wrapper taken off (TYPED_RE). None for any other record."""
@@ -3049,6 +3061,8 @@ def translate_sub(lv: Live, sub: Sub, line: bytes | str) -> int:
             if sub.skip_prompt or sub.own_prompts:
                 sub.skip_prompt = False
                 return 0
+            if sub.thimble and sub.agent_id and _sent_quietly(lv.c, str(sub.agent_id), prompt):
+                return 0  # thimble's wrapping of the person's words, which the chat shows where they were said
             sub.rec.record("user", text=prompt.strip(), by=TERMINAL)
             return 1
     if rec.get("type") == "user":

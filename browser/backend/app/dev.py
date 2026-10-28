@@ -3134,7 +3134,8 @@ async def change_view(c: str, slug: str) -> None:
     if b is None or not b.agent or prop is None or not prop.get("changed"):
         return
     route = prop.get("route") if prop.get("route") in (subagents.CLICK, subagents.FOLLOW_ON) else subagents.FOLLOW_ON
-    ans = await subagents.send(c, b.agent, change_text(c, prop), values=prop.get("values"), route=str(route))
+    ans = await subagents.send(c, b.agent, change_text(c, prop), values=prop.get("values"), route=str(route),
+                               quiet=bool(prop.get("quiet")))
     if ans.refused:
         log.info("%s: the change to %s did not reach its builder: %s (%s)", c, slug, ans.reason, ans.kind)
         return
@@ -3153,7 +3154,8 @@ async def _send_change(c: str, slug: str, route: str) -> bool:
         return False
     _view_runs[(c, slug)] = _Build(agent=agent_id, route=route)
     views.update_proposal(c, slug, status="building", attempt=0, finish=None, last_report=None, refused=None)
-    ans = await subagents.send(c, agent_id, change_text(c, prop), values=prop.get("values"), route=route)
+    ans = await subagents.send(c, agent_id, change_text(c, prop), values=prop.get("values"), route=route,
+                               quiet=bool(prop.get("quiet")))
     if not ans.refused:
         views.update_proposal(c, slug, changed=None)
         views._emit(c, slug, "building", chat=prop.get("chat"))
@@ -3163,15 +3165,95 @@ async def _send_change(c: str, slug: str, route: str) -> bool:
     return False
 
 
+def message_text(c: str, prop: dict[str, Any], text: str) -> str:
+    """A message the analyst wrote in the thread of a built view as its builder gets it (prompts/dev-view-message.md),
+    fenced as data: it may ask for a change to the view, or for none."""
+    from . import views  # noqa: PLC0415
+
+    return prompts.render("dev-view-message", {
+        "name": str(prop.get("name") or prop["slug"]),
+        "proposal": views.proposal_lines(prop),
+        "message": fenced("the analyst's message", text),
+        "folder": str(views.views_dir(c) / prop["slug"]),
+    })
+
+
+def message_view(c: str, slug: str, route: str) -> None:
+    """The message the analyst wrote in the thread of the built view `slug` (views.ask, the proposal's `message`) goes
+    to the view's builder, quietly, since the thread shows it as written: a builder that runs gets it after its current
+    step; one that finished runs again with it when it can be reached; else a new builder takes it (start_build). The
+    view stays as it is: the run that takes the message answers it (`answering`), and is a change only once it changes
+    the view (message_changes). A typed message (route typed) is started by main's exact Agent call instead."""
+    from . import subagents  # noqa: PLC0415
+
+    if route == subagents.TYPED:
+        return
+    _soon(lambda: _send_message(c, slug, route), f"view-message:{c}:{slug}")
+
+
+async def _send_message(c: str, slug: str, route: str) -> None:
+    from . import subagents, views  # noqa: PLC0415
+
+    prop = views.read_proposal(c, slug)
+    text = str((prop or {}).get("message") or "")
+    if prop is None or not text:
+        return
+    b = _view_runs.get((c, slug))
+    running = b is not None and bool(b.agent)
+    agent_id = str(b.agent if running else prop.get("agent_id") or "")  # type: ignore[union-attr]
+    if running or _reachable(c, agent_id):
+        ans = await subagents.send(c, agent_id, message_text(c, prop, text), values=prop.get("values"), route=route,
+                                   quiet=True)
+        if not ans.refused:
+            if running:  # it joins the run that goes on, which no start handler sees
+                views.update_proposal(c, slug, message=None)
+            return
+        log.info("%s: the message about %s did not reach its builder (%s), so a new builder takes it", c, slug, ans.kind)
+    if (c, slug) in _view_runs:
+        return  # a build of the view started meanwhile, which takes the message (build_task)
+    _view_runs[(c, slug)] = _Build(route=route)
+    ans = await start_build(c, slug, route)
+    if ans.refused:
+        _view_runs.pop((c, slug), None)
+        views.update_proposal(c, slug, message=None)
+
+
+def answering(prop: dict[str, Any], agent_id: str | None) -> dict[str, Any] | None:
+    """The run of the builder `agent_id` that takes a message about the built view (`answering`), while it has not
+    changed the view; else None."""
+    a = prop.get("answering")
+    return a if isinstance(a, dict) and agent_id and a.get("agent") == agent_id else None
+
+
+def message_changes(c: str, slug: str, agent_id: str | None) -> dict[str, Any] | None:
+    """The run that answers a message changes the view (its finish_view, or files changed at its end): from here it is
+    a change to the view, the message its request, with the view's files as they were built kept aside (views.ask), its
+    attempts counted from the first, and the view building. The proposal, or None when the run answers no message."""
+    from . import views  # noqa: PLC0415
+
+    prop = views.read_proposal(c, slug) or {}
+    a = answering(prop, agent_id)
+    if a is None:
+        return None
+    prop = views.update_proposal(c, slug, answering=None, status="building", revision=True, asked=True,
+                                 change=str(a.get("text") or "") or None, attempt=0, finish=None, last_report=None,
+                                 error=None) or prop
+    views._emit(c, slug, "building", chat=prop.get("chat"))
+    return prop
+
+
 def build_task(c: str, prop: dict[str, Any], *, repair: str = "") -> str:
     """The prompt a builder of the view `prop` gets (prompts/dev-view-task.md): the view's name and slug, its folder and
-    the builder's own, the proposal fenced as data, and a repair's failures or a change asked for."""
+    the builder's own, the proposal fenced as data, and a repair's failures, a change asked for or a message about the
+    built view (message_text)."""
     from . import view_tools, views  # noqa: PLC0415
 
     slug = str(prop["slug"])
     more = [repair] if repair else []
     if prop.get("changed") or prop.get("change"):
         more.append(change_text(c, prop))
+    elif prop.get("message"):
+        more.append(message_text(c, prop, str(prop["message"])))
     return prompts.render("dev-view-task", {
         "name": str(prop.get("name") or slug), "slug": slug, "folder": str(views.views_dir(c) / slug),
         "work": str(view_work_dir(c, slug)), "proposal": view_tools.fenced_proposal(prop),
@@ -3235,8 +3317,11 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
                                     work=view_work_dir(c, slug), call=call)
     if ans.typed:
         _view_runs[key] = _Build(request=str(ans.get("request") or ""), route=route)
-        views.update_proposal(c, slug, status="building", request=ans.get("request"))
-        views._emit(c, slug, "building", chat=prop.get("chat"))
+        if prop.get("message"):  # a message about the built view, which leaves it as it is (message_view)
+            views.update_proposal(c, slug, request=ans.get("request"))
+        else:
+            views.update_proposal(c, slug, status="building", request=ans.get("request"))
+            views._emit(c, slug, "building", chat=prop.get("chat"))
     elif ans.refused and ans.get("request") is None:  # refused before a request was made (subagents.refusal_before)
         build_refused(c, {"kind": "start", "key": _key(slug), "reason": ans.reason, "refused_kind": ans.kind,
                           "route": route})
@@ -3245,7 +3330,9 @@ async def start_build(c: str, slug: str, route: str, values: dict[str, Any] | No
 
 def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
     """A builder's run started (subagents.Type.started): its first run makes it the view's build, its attempts at
-    nothing; a later run (a change sent to it, or a message typed to it in the agent tray) is a build again."""
+    nothing; a later run (a change sent to it, or a message typed to it in the agent tray) is a build again. A run that
+    takes a message about the built view (message_view) answers it, the view as it is and its attempts kept, until it
+    changes the view (message_changes)."""
     from . import views  # noqa: PLC0415
 
     slug = run.key.split(":", 1)[-1]
@@ -3257,6 +3344,11 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
         b.agent, b.request = run.agent_id, None
     if key in _view_queue:
         _view_queue.remove(key)
+    held = views.read_proposal(c, slug) or {}
+    if held.get("message") and held.get("status") == "built":
+        views.update_proposal(c, slug, message=None, agent_id=run.agent_id, chat=run.chat, request=None,
+                              answering={"agent": run.agent_id, "run": run.k, "text": str(held["message"])})
+        return
     prop = views.update_proposal(c, slug, status="building", agent_id=run.agent_id, chat=run.chat, attempt=0,
                                  finish=None, last_report=None, error=None, refused=None, request=None,
                                  session=None, session_id=None, values=run.values or None)
@@ -3367,6 +3459,8 @@ async def _settled(c: str, slug: str, run: Any, status: str, report: str, why: s
 
 async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: str) -> None:
     """What a builder's end means for its view, the backstop of finish_view:
+    - it answered a message about the built view and left its files as they were: nothing changes; one that changed
+      them is a change to the view from here (message_changes);
     - it passed: done, its work folder lets go of its extracts, and the review starts; a folder that changed after the
       pass is gated again (views.regate: a pass is the new version, a failure puts the version that passed back);
     - it was stopped: main's quit fails the view with MAIN_ENDED and Retry, the analyst's Stop with VIEW_STOPPED, and a
@@ -3384,6 +3478,13 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
         return  # deleted, or a newer build took over
     finish = prop.get("finish") if isinstance(prop.get("finish"), dict) and prop["finish"].get("agent") == run.agent_id else {}
     work = view_work_dir(c, slug)
+    if answering(prop, run.agent_id) is not None:
+        if views.unchanged_since_built(c, slug):  # it answered the message and left the view as it was built
+            views.update_proposal(c, slug, answering=None)
+            views.drop_built_copy(c, slug)
+            work_files.after_run(c, work, "done")
+            return
+        prop = message_changes(c, slug, run.agent_id) or prop  # it changed the view's files: a change, gated below
     if finish.get("result") == "pass":
         regated = await views.regate(c, slug)
         if regated:
