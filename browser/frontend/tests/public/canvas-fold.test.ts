@@ -4,7 +4,7 @@
 // flow shares that frame's box, so one card in a path of three frames stands in one box, under one title row.
 import { describe, expect, test } from 'vitest'
 import * as layout from '../../src/canvas/layout.ts'
-import { boardOf, frameAt, GAP, HEAD, layoutBoard, MIN_FRAME_H, PAD, TITLE } from '../../src/canvas/layout.ts'
+import { boardOf, frameAt, GAP, HEAD, layoutBoard, MIN_FRAME_H, PAD, ROOT_GAP, TITLE } from '../../src/canvas/layout.ts'
 import type { CanvasResponse, Cell, Group } from '../../src/lib/types.ts'
 
 const group = (id: string, extra: Partial<Group> = {}): Group => ({ id, title: id, parent: null, kind: 'sequence', anchor: null, chat: null, role: 'analyst', ...extra })
@@ -32,11 +32,40 @@ describe("a frame's caret folds something", () => {
     expect([shut.get('a')!.x, shut.get('a')!.y]).toEqual([open.get('a')!.x, open.get('a')!.y])
   })
 
-  test('a collapsed frame with no card of its own shows its title alone: the frames in it fold too', () => {
+  test('a collapsed frame with no card of its own shows its title alone: the frames in it fold too, and no box is drawn under its title', () => {
     const shut = lay(DATA, without('path'))
-    expect(shut.rects.get('path')!.h).toBe(MIN_FRAME_H)
+    // its rect is 0 tall: the root frame after it stands ROOT_GAP below its title, not below an empty box
+    expect(shut.rects.get('path')!.h).toBe(0)
+    expect(shut.rects.get('two')!.y - shut.rects.get('path')!.y).toBe(ROOT_GAP)
+    expect(shut.bare.has('path')).toBe(true)
     expect(shut.rects.has('mid')).toBe(false)
     expect(shut.rects.has('s')).toBe(false)
+  })
+
+  test('in the column of the frame around it, such a frame takes its title row alone', () => {
+    // `one` holds the card a, then `inner`, which holds `deep`, which holds the card z
+    const d = { groups: [...DATA.groups, group('inner', { parent: 'one' }), group('deep', { parent: 'inner' })], cells: [...DATA.cells, card('z', 'deep')] }
+    const shut = lay(d, [...ALL, 'deep'])
+    const a = shut.rects.get('a')!
+    const inner = shut.rects.get('inner')!
+    const one = shut.rects.get('one')!
+    expect(inner.h).toBe(0)
+    expect(inner.y).toBe(a.y + a.h + GAP + TITLE)
+    expect(one.y + one.h).toBe(inner.y + PAD)
+    expect(shut.bare.has('inner')).toBe(true)
+  })
+
+  test('a frame that shares its box with such a frame is its title alone with it, both named in its title row', () => {
+    const shut = lay(DATA, without('mid'))
+    expect(shut.rects.get('path')!.h).toBe(0)
+    expect([shut.bare.has('path'), shut.bare.has('mid')]).toEqual([true, true])
+    expect(layout.pathOf(shut, 'path')).toEqual(['path', 'mid'])
+  })
+
+  test('a collapsed frame that holds nothing keeps its box, which a card is dropped in', () => {
+    const shut = lay(DATA, without('empty'))
+    expect(shut.rects.get('empty')!.h).toBe(MIN_FRAME_H)
+    expect(shut.bare.has('empty')).toBe(false)
   })
 
   test('a collapsed frame of several cards is the deck it was: its first card whole, the edges of the others under it', () => {

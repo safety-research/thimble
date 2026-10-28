@@ -6,7 +6,7 @@
 // about. A frame that holds no card of its own and one frame in its flow shares that frame's box, so a card in a path
 // of frames stands in one box (Canvas names the path in one title row). A collapsed frame shows its nested groups and
 // its first card, with the edges of the others stacked under it; a lone card folds to its question, and a frame with
-// no card of its own shows its title alone. Root frames sit at their `pos`, or below the root before them; loose cards
+// no card of its own shows its title alone, with no box under it. Root frames sit at their `pos`, or below the root before them; loose cards
 // sit at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
@@ -184,6 +184,9 @@ export interface Layout {
   folded: Set<string>
   /** each frame that shares its box with the one frame it holds, to that frame */
   wraps: Map<string, string>
+  /** the frames drawn as their title alone, with no box under it: a collapsed frame that holds frames and no card of its
+   * own, and a frame that shares its box with one (their rect is 0 tall, its top the title's foot) */
+  bare: Set<string>
   /** each frame's depth, 0 at the root */
   depth: Map<string, number>
 }
@@ -211,6 +214,7 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
   const decks = new Set<string>()
   const folded = new Set<string>()
   const wraps = new Map<string, string>()
+  const bare = new Set<string>()
   const shown = (g: BoardGroup): Kid[] => {
     const all = kidsOf(board, g.id)
     if (open.has(g.id)) return all
@@ -225,12 +229,21 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
   const measure = (g: BoardGroup): { w: number; h: number } => {
     const ks = shown(g)
     const cards = board.cells.filter((c) => c.parent === g.id).length
+    // collapsed with no card of its own, the frames in it folded too: its title alone (a frame that holds nothing keeps
+    // its box, which a card is dropped in)
+    if (!open.has(g.id) && !cards && foldable(board, g.id)) {
+      const s = { w: MIN_FRAME_W, h: 0 }
+      bare.add(g.id)
+      size.set(g.id, s)
+      return s
+    }
     // no card of its own and one frame in its flow: the two share that frame's box
     const only = ks.length === 1 && ks[0].t === 'g' && !ks[0].it.pos && !ks[0].it.beside && !cards ? ks[0].it : null
     if (only) {
       const s = measure(only)
       rel.set(only.id, { x: 0, y: 0 })
       wraps.set(g.id, only.id)
+      if (bare.has(only.id)) bare.add(g.id)
       size.set(g.id, s)
       return s
     }
@@ -317,7 +330,7 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
     rects.set(c.id, { x: p.x, y: p.y, w: c.w, h })
     if (!c.pos) topY += h + GAP
   }
-  return { rects, decks, folded, wraps, depth }
+  return { rects, decks, folded, wraps, bare, depth }
 }
 
 /** Whether frame `id` is `of` or nested anywhere under it. */

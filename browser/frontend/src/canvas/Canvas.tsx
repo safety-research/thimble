@@ -1479,6 +1479,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
                       const cls = ['frame']
                       if (lay.depth.get(g.id)) cls.push('is-nested')
                       if (lay.wraps.has(g.id)) cls.push('is-path')
+                      if (lay.bare.has(g.id)) cls.push('is-bare')
                       if (drag?.target === g.id) cls.push('is-target')
                       if (drag?.target === g.id && drag.move) cls.push('is-into')
                       if (gsel === g.id) cls.push('is-selected')
