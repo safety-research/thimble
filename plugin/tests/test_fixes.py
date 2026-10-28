@@ -1362,7 +1362,7 @@ def test_two_fixes_that_change_the_same_lines_differently_do_not_merge_and_the_l
     assert "+const words = `seen ${n}`" in Path(r["patches"][0]["path"]).read_text()
 
 
-def test_a_fix_that_does_not_fit_names_y_the_key_its_line_offers_never_r(world):
+def test_a_fix_that_does_not_fit_names_the_command_that_tries_it_again_never_r(world):
     # fix 2 was made while fix 1 was off, on the same line: once fix 1 is on, fix 2 does not go on
     a = on_fix(world)
     FX.undo(a["id"])
@@ -1372,12 +1372,12 @@ def test_a_fix_that_does_not_fit_names_y_the_key_its_line_offers_never_r(world):
     FX.apply(a["id"], press(a["id"]))
     with pytest.raises(FX.FixError) as e:
         FX.apply(b["id"], press(b["id"]))
-    assert str(e.value) == f"fix {b['id']} does not fit the fixes you have on; y tries it again"
-    # it waits for another try, and applying it again says the same key
+    assert str(e.value) == f"fix {b['id']} does not fit the fixes you have on; /thimble-fix {b['id']} tries it again"
+    # it waits for another try, and applying it again names the same command
     assert FX.get(b["id"])["state"] == "redo"
     with pytest.raises(FX.FixError) as e:
         FX.apply(b["id"], press(b["id"]))
-    assert str(e.value) == f"fix {b['id']} does not fit your thimble any more; y tries it again"
+    assert str(e.value) == f"fix {b['id']} does not fit your thimble any more; /thimble-fix {b['id']} tries it again"
 
 
 def stray(w, refines: int, words: str, path: str, text: str) -> dict:

@@ -1704,7 +1704,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}, so there is nothing to apply")
     if rec.get("state") == "redo":
-        raise FixError(f"fix {rec['id']} does not fit your thimble any more; y tries it again")
+        raise FixError(f"fix {rec['id']} does not fit your thimble any more; /thimble-fix {rec['id']} tries it again")
     if rec.get("state") == "pending":
         raise FixError(f"thimble update set fix {rec['id']} aside at {release_name()}, so that nothing is fixed twice: "
                        "thimble reapply in a shell has Claude check it against the release and bring it back")
@@ -1732,7 +1732,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
                 r = get(rec["id"])
                 r.update(state="redo", error="it does not fit the fixes you have on")
                 put(r)
-                raise FixError(f"fix {rec['id']} does not fit the fixes you have on; y tries it again")
+                raise FixError(f"fix {rec['id']} does not fit the fixes you have on; /thimble-fix {rec['id']} tries it again")
             new_commit = git("rev-parse", "HEAD", cwd=live)
             git("update-ref", ref, new_commit, cwd=live)
         r = get(rec["id"])
@@ -1768,7 +1768,7 @@ def _swap(fid: int) -> dict[str, Any]:
     if fid in failed:
         git("update-ref", f"refs/thimble/fixes/{fid}", old, cwd=live)
         _rebuild([i for i in order if p.get("state") == "on" or i != fid])
-        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; y tries it again")
+        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; /thimble-fix {fid} tries it again")
     for i in failed:
         x = get(i)
         x.update(state="redo", error=f"it did not fit once fix {fid} changed")
