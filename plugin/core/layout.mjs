@@ -10,6 +10,7 @@
 //       cards/<card>/                 a card: meta.json, v<version>/{view.js, rows.json}, state.json (cards/store.ts)
 //       tell.json                     what Claude reads with the person's next prompt (core/tell.ts)
 //       answer.json                   the answer v draws under (designer/v.ts)
+//       coverage.json                 the last count of the bar's coverage and labels, and the pane's record (bar/counts.ts)
 //       folders/<folder>/labels/      the labels it made in a folder (engine/kernel/store.py kept_dir)
 //   starts/<first launch>.json      the conversation a first launch belongs to (hooks/conversation.ts)
 //   events/<conversation>.jsonl     the kernel's change feed and the telemetry's lines (core/feed.ts, telemetry/)

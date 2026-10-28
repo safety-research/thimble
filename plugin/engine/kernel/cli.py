@@ -49,6 +49,7 @@ from typing import Any
 from . import coverage as CV
 from . import estimate as EST
 from . import labels as LB
+from . import sources as S
 from .store import Store
 
 
@@ -99,7 +100,17 @@ def cover_groups(groups: list[dict[str, Any]], room: int) -> list[dict[str, Any]
 
 def cmd_coverage(a: argparse.Namespace) -> int:
     st = Store()
-    cov = CV.coverage(st, None if a.all else "", per_folder=COVER_PER_FOLDER)
+    until = time.monotonic() + a.within if a.within is not None else None
+    try:
+        cov = CV.coverage(st, None if a.all else "", per_folder=COVER_PER_FOLDER, until=until)
+    except S.Unfinished as u:
+        # the folder's files were not all counted within --within seconds: what was counted is kept, and the next run
+        # goes on from there (the plugin runs it again at once)
+        if a.json:
+            print(json.dumps({"counting": {"counted": u.done, "files": u.total}}))
+        else:
+            print(f"Still counting the folder's files: {u.done:,} of {u.total:,} counted. Run it again to go on.")
+        return 0
     if a.json:
         # The totals, groups and types count every file and always print (the folders as cover_groups keeps them);
         # then the touched files by status, then the untouched files coverage named (a few of each folder), while the
@@ -612,6 +623,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("coverage", help="what entered Claude's context and what was only computed over")
     p.add_argument("--all", action="store_true", help="every session, not only this one")
     p.add_argument("--json", action="store_true")
+    # the plugin's count: stop counting the folder's files after this many seconds, within Claude Code's time limit
+    p.add_argument("--within", type=float, help=argparse.SUPPRESS)
     p.set_defaults(fn=cmd_coverage)
     p = sub.add_parser("fix", help="your changes to thimble", description=_no_share(FIX_HELP),
                        formatter_class=argparse.RawDescriptionHelpFormatter)
