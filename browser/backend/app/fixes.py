@@ -83,6 +83,7 @@ OFF_LINE = "thimble's fixes are off on this server (THIMBLE_FIXES=off)"
 NO_SOURCE = "thimble's fixes need the terminal plugin's code beside the browser (plugin/), as a git clone has it"
 EMPTY = "say what should work differently: /thimble-fix make the card's title say how many rows it shows"
 RESTART_BY_HAND = "restart thimble-browser to load it"
+RESTART_AFTER_S = 0.3  # restart starts the server again this long after it returns, so the answer its caller gives goes out
 BUSY_WAIT_S = 600.0  # how long a restart waits for main and the other agents to end their turns
 LINKS = (("backend", ".venv"), ("frontend", "node_modules"))  # what the install lends a copy and live's browser/
 PAGE_CHARS = 8000  # of the text copy of the page
@@ -792,7 +793,7 @@ async def restart(fid: int, said: str, kind: str, why: str) -> None:
     while _busy() and time.monotonic() - t0 < BUSY_WAIT_S:
         await asyncio.sleep(2)
     root = target_root()
-    asyncio.get_running_loop().call_later(0.3, lambda: asyncio.ensure_future(
+    asyncio.get_running_loop().call_later(RESTART_AFTER_S, lambda: asyncio.ensure_future(
         dev._do_restart(why, cwd=root / "backend")))
 
 

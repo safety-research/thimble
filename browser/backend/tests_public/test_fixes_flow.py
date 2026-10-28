@@ -512,6 +512,9 @@ async def test_a_page_that_does_not_build_takes_the_fix_off_again(fixing, monkey
     await fixes.apply_route(1, analyst)
     await _went_on()
     await _until(lambda: (fixes.status()["fixes"][0]["said"] or "").endswith("it is off again"), "the failed fix never came off")
+    # a restart the click had scheduled would come RESTART_AFTER_S after it, so before this wait, which starts later,
+    # ends: the loop's timers fire in the order of their deadlines
+    await asyncio.sleep(fixes.RESTART_AFTER_S)
     verbs = [c[0] for c in fixing.calls]
     assert verbs.index("undo") > verbs.index("apply") and fixing.restarts == []
     assert fixes.status()["fixes"][0]["said"].endswith("error TS1005; it is off again")
