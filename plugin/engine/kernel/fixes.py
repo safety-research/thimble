@@ -1756,10 +1756,10 @@ def _or_put_back(fid: int):
 
 
 def _misfit(fid: int, commit: str) -> str:
-    """What fix `fid`'s change (`commit`) does not fit, in its error. The release (thimble 0.10.6), when it changed a
-    file the change changes since the release the change was made on, with "and your other fixes" when a fix in mine
-    changes such a file too. Else the one fix in mine that changes such a file, when the change was made on those files
-    as the release has them (so that only that fix's lines can be in its way); else the person's other fixes.
+    """What fix `fid`'s change (`commit`) does not fit, in its error. When the change was made on its files as the
+    release has them, only the fixes in mine can be in its way: the one fix in mine that changes such a file, else the
+    person's other fixes. Else the release (thimble 0.10.6), when it changed such a file since the release the change was
+    made on, with "and your other fixes" when a fix in mine changes such a file too; else the person's other fixes.
 
     The release the change was made on is the newest commit under the change that the release's history holds too (git
     merge-base), so that the lines of the fixes it was made on are not the release's. It comes from the commit the
@@ -1782,12 +1782,13 @@ def _misfit(fid: int, commit: str) -> str:
         return "your other fixes"
     hits = [i for i in _on_ids(records())
             if i != fid and files(f"refs/thimble/fixes/{i}^", f"refs/thimble/fixes/{i}", paths)]
+    if same(base, f"{commit}^", paths):
+        # made on these files as the release has them: only the fixes in mine can be in its way
+        return f"fix {hits[0]}" if len(hits) == 1 else "your other fixes"
     made_on = git("merge-base", f"{commit}^", base, cwd=live, check=False) or f"{commit}^"
     if not same(made_on, base, paths):
         name = f"thimble {release_name()}"
         return f"{name} and your other fixes" if hits else name
-    if same(base, f"{commit}^", paths) and len(hits) == 1:
-        return f"fix {hits[0]}"
     return "your other fixes"
 
 
