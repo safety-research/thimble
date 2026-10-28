@@ -575,3 +575,32 @@ def test_the_readme_and_the_install_summary_say_when_to_use_each_product(tmp_pat
     text = " ".join((ROOT / "CLAUDE.md").read_text().split())
     reply = text.split(" 5. While something the user chose", 1)[1].split(" 6. ", 1)[0]
     assert "- The plugin, when they work in Claude Code:" in reply and "- The workbench, when they want" in reply, reply
+
+
+def test_the_install_summary_says_once_that_reload_plugins_loads_the_plugin_in_an_open_session(tmp_path):
+    """A claude session that is already open, such as the one Claude runs the install in, loads the plugin with
+    /reload-plugins. It keeps the PATH it started with, so after a change to Node, a new terminal has the plugin. The
+    plugin's summary says both, once, whichever products the install installed."""
+    for name, args in (("both", ()), ("plugin", ("--no-browser",))):
+        out = " ".join(whole_install(tmp_path / name, *args).stdout.split())
+        assert out.count("/reload-plugins") == 1, out
+        summary = out.split("The plugin works in", 1)[1].split(" == ", 1)[0]
+        open_session = summary.split("/reload-plugins", 1)[1].split(". ", 1)[0]
+        assert "already open" in open_session, summary
+        assert "change to Node" in summary and "new terminal" in summary and "PATH" in summary, summary
+
+
+def test_claude_s_reply_after_an_install_says_that_reload_plugins_loads_the_plugin_in_the_open_sessions():
+    """The reply Claude ends an install with (CLAUDE.md, step 5) says that /reload-plugins loads the plugin in this
+    session and in the other open ones, and that a session keeps the PATH it started with, so after a change to Node a
+    new terminal has it. The sample's line (step 6) gives a command for a new terminal when the sample lies outside this
+    session's folder, or after such a change."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    reply = text.split(" 5. While something the user chose", 1)[1].split(" 6. ", 1)[0]
+    plugin = reply.split("- The plugin, when they work in Claude Code:", 1)[1].split(" - The workbench", 1)[0]
+    loads = plugin.split("`/reload-plugins` loads it", 1)[1].split(". ", 1)[0]
+    assert "this session" in loads and "other open" in loads, plugin
+    assert "PATH" in plugin and "change to Node" in plugin and "new terminal" in plugin, plugin
+    sample = text.split(" 6. When the plugin works", 1)[1].split(" ## ", 1)[0]
+    when = sample.split("the line gives a command to run in a new terminal", 1)[0]
+    assert "outside this session's folder" in when and "Node" in when, sample

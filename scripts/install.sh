@@ -451,7 +451,9 @@ except (OSError, ValueError, KeyError, TypeError, StopIteration):
     if [ -n "$at" ] && [ -x "$at/bin/thimble" ]; then
       link_cli "$at/bin/thimble"
     fi
-    say "The plugin works in a new claude session, in a folder of data files that you trust."
+    say "The plugin works in a new claude session, in a folder of data files that you trust, and /reload-plugins loads it in"
+    say "a claude session that is already open. After a change to Node, start claude in a new terminal: a session keeps the"
+    say "PATH it started with."
   else
     say "Claude Code (the claude command) is not installed. Install it, then run:"
     if [ -n "$gone" ]; then
