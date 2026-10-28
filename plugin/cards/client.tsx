@@ -1,5 +1,5 @@
 // client.tsx: the one Client module that draws every card. Claude Code runs it in the terminal's drawing thread; draw.ts
-// names it by this file and hands it the card's drawing as props: {tree, width, need, ack, tint, accent, theme}, the plain tree the runner
+// names it by this file and hands it the card's drawing as props: {tree, width, need, ack, tint, accent, theme, cap}, the plain tree the runner
 // made of the view (Box, Text and Button nodes with the props each element takes), or null before there is one. It
 // holds no data and no logic of the card. It sends the hooks module events:
 //
@@ -191,7 +191,9 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
   // in a chat narrower than it was told), the tree keeps its width and is cut at the region's edge: no row of it wraps
   const tree = props?.tree ? draw(props.tree, false) : E.Text({ dimColor: true, children: 'drawing…' })
   const laid = E.Box({ flexDirection: 'column', width, flexShrink: 0, children: [tree] })
-  return E.Box({ flexDirection: 'column', width, overflow: 'hidden', children: [laid] })
+  // `cap`: the rows the frame shows of a drawing taller than that (draw.ts CARD_ROWS), the rest cut at their foot
+  const cap = Math.max(0, Math.floor(Number(props?.cap) || 0))
+  return E.Box({ flexDirection: 'column', width, overflow: 'hidden', ...(cap ? { height: cap } : {}), children: [laid] })
 }
 
 export default Card

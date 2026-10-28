@@ -22,6 +22,9 @@ const SORTED = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {
 // a bar chart whose second bar a click selected, marked with ▸ as the card guide asks
 const PICKED = { t: 'Box', p: { flexDirection: 'column' }, c: [{ t: 'Text', p: {}, c: ['  ada  ███ 3'] }, { t: 'Text', p: {}, c: ['▸ bram █████ 5'] }] }
 const VIEW = 'const keys = "o"\nfunction onKey(k, s) { s.setState({ sorted: true }) }\nfunction view(p, s) { return s.elements.Text({ children: "x" }) }'
+// a card of 42 rows, one per run: taller than the 30 rows its frame shows (draw.ts CARD_ROWS)
+const TALL_LINES = Array.from({ length: 42 }, (_, i) => `run ${i + 1}  passed`)
+const TALL = { t: 'Box', p: { flexDirection: 'column' }, c: TALL_LINES.map(l => ({ t: 'Text', p: {}, c: [l] })) }
 
 function elements(n: Any, out: Any[] = []): Any[] {
   if (n == null || typeof n !== 'object') return out
@@ -127,11 +130,12 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     if (o.wide && op === 'key' && body.key === 'o') sorted = true
     if (o.wide && op !== 'load' && op !== 'copy' && op !== 'ping') return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, handled: body.key === 'o', tree: laidOut(), state: 'null', seq: ++seq }) } }
     // a view whose tree the terminal refuses: a Text whose bold is not a boolean
-    const tree = String(body.view ?? '').includes('BOLD') ? { t: 'Text', p: { bold: 'yes' }, c: ['ada 3'] } : String(body.view ?? '').includes('SELECTED') ? PICKED : TREE
+    const tall = String(body.view ?? '').includes('TALL')
+    const tree = String(body.view ?? '').includes('BOLD') ? { t: 'Text', p: { bold: 'yes' }, c: ['ada 3'] } : String(body.view ?? '').includes('SELECTED') ? PICKED : tall ? TALL : TREE
     const answers: Record<string, unknown> = {
       ping: { ok: true },
       load: {
-        ok: true, tree, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
+        ok: true, tree, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: tall ? TALL_LINES : ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
         // a view with a row laid out for the card's width: it wraps at the narrower width a side pane leaves it
         ...(String(body.view ?? '').includes('WIDE_ROW') && body.beside > 0 && body.beside < body.width ? { beside: { width: body.beside, lines: ['ada 3 of 9', 'merged', 'bram 5'], cut: [], wrapped: [1] } } : {}),
       },
@@ -900,4 +904,37 @@ test("a view's own Button under the pointer: the whole row shows highlighted, it
   expect(elements(bar).find(n => n.props?.children === '█████')!.props.hover).toEqual({ scope: button.props.hover.scope, color: '#8cb7e3', backgroundColor: 'text' })
   const named = texts.find(n => n.props.color === 'success')!
   expect(elements(named).find(n => n.props?.children === '██')!.props.hover).toEqual({ scope: button.props.hover.scope, color: 'success', backgroundColor: 'text' })
+})
+
+test('a card taller than its frame shows draws its first 30 rows and `+N rows` under them, a click on which opens the rest; the call tells Claude', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const input = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// TALL` }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_51', ...input } as never)) as Any
+  expect(String(r.result)).toContain('Note: the card is up to 42 rows tall, and its frame shows its first 30 rows with "+12 rows" under them, which opens the rest')
+  const frame = async () => elements(await $.ui.render(callRow('toolu_made_up_51', input)))
+  let els = await frame()
+  expect(els.find(n => n.type === 'Client')?.props.props.cap).toBe(30)
+  const more = els.find(n => n.type === 'Button' && n.props?.key === 'more')
+  expect(textOf(more)).toBe('+12 rows')
+  const ui = await $.ui.mount({ plugin: 'thimble', ...(callRow('toolu_made_up_51', input) as Any) })
+  await ui.press({ key: 'more' })
+  await ui.unmount()
+  els = await frame()
+  expect(els.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
+  expect(els.some(n => n.props?.key === 'more')).toBe(false)
+  // a card that fits shows whole, with no such line, and its call says nothing of it
+  const small = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_52', ...small } as never)) as Any
+  expect(String(r2.result)).not.toContain('rows tall')
+  const fits = elements(await $.ui.render(callRow('toolu_made_up_52', small)))
+  expect(fits.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
+  expect(fits.some(n => n.props?.key === 'more')).toBe(false)
+})
+
+test("the Client cuts a drawing at the frame's `cap` rows, and draws it whole without one", async () => {
+  const el = (type: string) => (p: Any) => ({ type, props: p })
+  const surface: Any = { elements: { Box: el('Box'), Text: el('Text'), Button: el('Button') }, columns: 60, rows: 0, post: () => undefined, onPointer: () => undefined }
+  expect((Card as Any)({ tree: TALL, width: 60, cap: 30 }, surface).props).toMatchObject({ height: 30, overflow: 'hidden' })
+  expect((Card as Any)({ tree: TALL, width: 60 }, surface).props.height).toBeUndefined()
 })
