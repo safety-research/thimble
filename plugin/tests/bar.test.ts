@@ -601,10 +601,14 @@ test("an answer whose words show a heads-up, an explainer and a citation brings 
   }
 })
 
-/** The bar's item for ] at rest (tray/tray.ts restItem), and whether its words are lit: in thimble's color, not dim. */
+/** The band above the prompt, `cols` cells wide, in Claude Code's fullscreen layout or its default one. */
+const bandAt = (cols: number, isFullscreen = true) => ({ ...(BAND as Any), props: { ...(BAND as Any).props, bodyColumns: cols }, viewport: { columns: cols, rows: 40, isFullscreen } }) as never
+
+/** The bar's item for ] at rest (tray/tray.ts restItem), and whether its words are lit: in thimble's color, not dim;
+ *  on a bar wide enough for each item's words whole. */
 async function restKey($: Any): Promise<{ words: string; lit: boolean } | null> {
   const find = (n: Any): Any => (!n || typeof n !== 'object' ? null : Array.isArray(n) ? n.map(find).find(Boolean) ?? null : n.props?.key === 'bar-tray-next' ? n : find(n.props?.children) ?? find(n.children))
-  const b = find(await $.ui.render(BAND))
+  const b = find(await $.ui.render(bandAt(140)))
   if (!b) return null
   const kids = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(kids) : [n, ...kids(n.props?.children), ...kids(n.children)])
   const words = kids(b).find(n => n.type === 'Text' && textOf(n).startsWith(' '))
@@ -653,6 +657,73 @@ test("the bar's ] is lit while the answer the keys act on shows a mark that came
   await $.ui.render(BAND)
   await w.clock.advance(HINT_MS)
   expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
+})
+
+/** The bar in a drawing of the band: its rows' words (the first row's left and right, then any more rows), and its ]
+ *  at rest, with the look of its key. */
+function barIn(band: Any): { rows: string[]; rest: { text: string; key: Any } | null } {
+  const rows = ['bar', 'bar-1', 'bar-2', 'bar-right-0', 'bar-right-1'].map(k => byKey(band, k)).filter(Boolean).map(textOf)
+  const b = byKey(band, 'bar-tray-next')
+  const kids = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(kids) : [n, ...kids(n.props?.children), ...kids(n.children)])
+  return { rows, rest: b ? { text: textOf(b), key: kids(b).find(n => n.type === 'Text' && textOf(n) === ']')?.props } : null }
+}
+
+/** A session with one answer, CITED, whose look gave an explainer and a heads-up on its words, its row drawn after the
+ *  reminder after it went. */
+async function markedAnswer($: Any, on: Any, o: { selection?: string } = {}): Promise<{ clock: Any }> {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on, { introDone: true })
+  looks(on, [marksReply()])
+  on('agent.spawn', () => ({ model: 'claude-made-up', agentId: 'agent-check-1' }) as never)
+  if (o.selection) on('ui.selection', () => ({ value: { text: o.selection, requestId: 'row-t1' } }) as never)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await answered($, w.clock, 't1', CITED)
+  // (the reminder after the answer stands in place of the bar's keys from its first drawing until it goes)
+  await $.ui.render(BAND)
+  await w.clock.advance(HINT_MS)
+  await $.ui.render(answerRow('row-t1', CITED))
+  return { clock: w.clock }
+}
+
+test("at 80 columns, after an answer with marks, the bar keeps coverage's file counts and the labels beside ]: the words of ] give way first, to `] next`, then its key alone, which is lit while one of the answer's marks is not opened and dim once each was; wider, it names the mark ] opens", async ($, on) => {
+  const { clock } = await markedAnswer($, on)
+  const at = async (cols: number) => barIn(await $.ui.render(bandAt(cols)))
+  const narrow = await at(80)
+  expect(narrow.rows.length).toBe(1)
+  for (const item of ['v visualize', 's rewrite', 'r coverage 43% (3/7 files)', 'l 2 labels']) expect(narrow.rows[0]).toContain(item)
+  expect(narrow.rest?.text).toBe(']')
+  expect(narrow.rest?.key).toMatchObject({ color: accent(), bold: true })
+  const some = await at(88)
+  expect(some.rest?.text).toBe('] next')
+  for (const item of ['r coverage 43% (3/7 files)', 'l 2 labels']) expect(some.rows[0]).toContain(item)
+  const wide = await at(120)
+  expect(wide.rest?.text).toBe('] next explainer')
+  for (const item of ['r coverage 43% (3/7 files)', 'l 2 labels']) expect(wide.rows[0]).toContain(item)
+  // ] from rest, then on to the citation and the heads-up: each mark of the answer opened, the key alone dims
+  for (const k of [']', ']', ']', '0']) {
+    await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never)
+    await clock.advance(1000)
+  }
+  const seen = await at(80)
+  expect(seen.rest?.text).toBe(']')
+  expect(seen.rest?.key?.dimColor).toBe(true)
+  expect(seen.rest?.key?.color).toBeUndefined()
+  for (const item of ['r coverage 43% (3/7 files)', 'l 2 labels']) expect(seen.rows[0]).toContain(item)
+})
+
+test("with words of an answer with marks selected, at 100 columns, the bar names e and c, coverage's file counts and the labels beside ], in Claude Code's fullscreen layout and its default one", async ($, on) => {
+  await markedAnswer($, on, { selection: 'the retry budget runs out' })
+  try {
+    for (const isFullscreen of [true, false]) {
+      noteViewport({ isFullscreen })
+      const bar = barIn(await $.ui.render(bandAt(100, isFullscreen)))
+      expect(bar.rows.length).toBe(1)
+      for (const item of ['e explain', 'c cite', 'r coverage 43% (3/7 files)', 'l 2 labels']) expect(bar.rows[0]).toContain(item)
+      expect(bar.rest?.text).toBe(']')
+    }
+  } finally {
+    noteViewport({ isFullscreen: true })
+  }
 })
 
 test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {

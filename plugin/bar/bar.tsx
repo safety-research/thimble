@@ -15,11 +15,13 @@
 //                  in place of the left's keys, after the busy step, while it fits there whole; the right stays, so a
 //                  hint can point at it
 //
-// A bar too narrow for its items gives way in this order: the busy step's other steps, then its words (whole words,
-// down to its glyph and seconds), then the labels' count, coverage's file counts and coverage. The keys stay: what
-// still does not fit goes on more rows, each item whole, the right's items on a row of their own when beside the first
-// row they would take no fewer rows. The settings pane draws the same bar as its switches would leave it
-// (`preview`), on as many rows as its items take: nothing in it is a press, no work shows and nothing gives way.
+// A bar too narrow for its items gives way in this order: the words of an item that has shorter ones (`] next heads up`
+// to `] next`, then `]` alone), the busy step's other steps, then its words (whole words, down to its glyph and
+// seconds), then the labels' count, coverage's file counts and coverage. What gave way takes back the room left, the
+// busy step first. The keys stay: what still does not fit goes on more rows, each item whole, the right's items on a
+// row of their own when beside the first row they would take no fewer rows. The settings pane draws the same bar as
+// its switches would leave it (`preview`), on as many rows as its items take: nothing in it is a press, no work shows
+// and nothing gives way.
 import type { EngineInterface } from 'claude-code'
 
 import { barLeft, barRight } from '../core/answerview'
@@ -47,15 +49,22 @@ export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'l
 
 /** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
  *  what holds the keys now (the open tray, the open chips); while any shows, the bar's left names only those, after
- *  the busy step. `color` and `bold`: words drawn lit (`s ● short`) or as a failure, not dim. */
-type Item = { id: string; key?: string; words: string; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean }
+ *  the busy step. `color` and `bold`: words drawn lit (`s ● short`) or as a failure, not dim. `shorter`: the words in
+ *  fewer cells, longest first, which a narrow bar draws before any count gives way; '' is the key alone, drawn as the
+ *  words would be (lit in the item's color, else dim). */
+type Item = { id: string; key?: string; words: string; shorter?: string[]; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean }
 /** An item a feature puts on the bar (core/answerview.ts barLeft, barRight). */
 export type BarItem = Item
 
 const len = textWidth
 /** How an item's words are drawn: dim, or in the item's own color. */
 const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
-const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + 1 : 0) + len(x.words)
+/** How an item's key is drawn: in thimble's color, bold; a key alone as its words would be, so it still says whether
+ *  the item is lit. */
+const keyLook = (x: Item) => (x.words ? { color: accent(), bold: true } : x.color ? { color: x.color, bold: true } : { dimColor: true })
+const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + (x.words ? 1 : 0) : 0) + len(x.words)
+/** The item in its shortest words. */
+const shortest = (x: Item): Item => (x.shorter?.length ? { ...x, words: x.shorter[x.shorter.length - 1]! } : x)
 
 /** The bar's items at its right: coverage, then the labels, as the counts last stood, each while its setting is on. */
 async function countItems($: Engine, on: (key: string) => boolean, presses: BarPresses | null, preview = false): Promise<Item[]> {
@@ -155,15 +164,24 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const counted = (x: Item) => (x.id === 'coverage' || x.id === 'labels') && !named(x)
   const hinted: Item[] = hint ? [{ id: 'hint', glyph: 'Hint:', words: hint }, ...keys.filter(named)] : []
   const hintIn = !!hint && spare([...(b ? [busyItem(b, 0)] : []), ...hinted], right.filter(x => !counted(x))) >= 0
-  const left = [...(b ? [busyItem(b)] : []), ...(hintIn ? hinted : keys)]
+  const whole = [...(b ? [busyItem(b)] : []), ...(hintIn ? hinted : keys)]
+  let left = whole
   if (!preview) {
-    // a narrow bar: the busy step gives way first, down to its glyph and seconds, then the labels' count, coverage's file
-    // counts and coverage; the busy step takes back the room left
-    const least = b ? [busyItem(b, 0), ...left.slice(1)] : left
+    // a narrow bar: the words of an item that has shorter ones give way first, then the busy step, down to its glyph and
+    // seconds, then the labels' count, coverage's file counts and coverage. What gave way takes back the room left: the
+    // busy step first, then each such item the longest of its words that fits
+    const least = whole.map((x, i) => (b && !i ? busyItem(b, 0) : shortest(x)))
     if (spare(least, right) < 0) right = right.filter(x => x.id !== 'labels' || !counted(x))
     if (spare(least, right) < 0) right = right.map(x => (x.id === 'coverage' && counted(x) ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
     if (spare(least, right) < 0) right = right.filter(x => x.id !== 'coverage' || !counted(x))
+    left = [...least]
     if (b) left[0] = busyItem(b, len(least[0]!.words) + spare(least, right))
+    whole.forEach((x, i) => {
+      if (!x.shorter?.length) return
+      const room = itemLen(left[i]!) + spare(left, right)
+      const fits = [x.words, ...x.shorter].find(w => itemLen({ ...x, words: w }) <= room)
+      if (fits !== undefined) left[i] = { ...x, words: fits }
+    })
   }
   // what still does not fit takes more rows, each item whole: the left's in rows under its first item, beside the right's
   // on the first row, or, when that takes no fewer rows, with the right's on a row of their own under them
@@ -177,10 +195,12 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
 
   const words = (x: Item, i: number): Any[] => [
     ...(x.glyph ? [Text({ key: `g${i}`, color: accent(), children: `${x.glyph} ` })] : []),
-    ...(x.key ? [Text({ key: `k${i}`, color: accent(), bold: true, children: x.key }), Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
+    ...(x.key
+      ? [Text({ key: `k${i}`, ...keyLook(x), children: x.key }), ...(x.words ? [Text({ key: `w${i}`, ...wordLook(x), children: ` ${x.words}` })] : [])]
+      : [Text({ key: `w${i}`, ...wordLook(x), children: x.words })]),
   ]
   const drawn = (x: Item, i: number): Any => (x.press
-    ? Button({ key: `bar-${x.id}`, plain: true, label: `${x.key ? `${x.key} ` : ''}${x.words}`, onPress: x.press, children: words(x, i) })
+    ? Button({ key: `bar-${x.id}`, plain: true, label: [x.key, x.words].filter(Boolean).join(' '), onPress: x.press, children: words(x, i) })
     : Text({ key: `bar-${x.id}`, children: words(x, i) }))
   const joined = (xs: Item[], at: number): Any[] => xs.flatMap((x, i) => [...(i ? [Text({ key: `s${at + i}`, dimColor: true, children: ' · ' })] : []), drawn(x, at + i)])
 

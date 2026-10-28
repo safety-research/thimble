@@ -7,9 +7,9 @@
 // answer by v), in reading order (a heads-up on a citation's words before the citation), and open the tray on the one
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
 // answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the first one
-// it opens (`] next heads up`), its words in thimble's color while a mark came that the person has not seen: opening
-// any mark of an answer counts every mark it shows then as seen. While it is open its keys are in its header, at the
-// right, each where it acts (the bar keeps its own):
+// it opens (`] next heads up`; on a narrow bar `] next`, then `]` alone), in thimble's color while a mark came that the
+// person has not seen: opening any mark of an answer counts every mark it shows then as seen. While it is open its keys
+// are in its header, at the right, each where it acts (the bar keeps its own):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
@@ -584,14 +584,15 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
 }
 
 /** At rest, while the answer the keys act on shows marks: ] and the first of them, which ] opens from rest (restStop),
- *  a press too; its words in thimble's color while the answer shows a mark the person has not seen (marksSeen). */
+ *  a press too; in thimble's color while the answer shows a mark the person has not seen (marksSeen). On a narrow bar
+ *  its words give way before any count does: `] next`, then `]` alone (bar/bar.tsx). */
 async function restItem($: Engine): Promise<BarItem[]> {
   const row = await actingRow($)
   const marks = row ? await answerMarks($, row) : []
   if (!marks.length) return []
   const seen = await seenNow($)
   const fresh = marks.some(p => !seen.has(seenRef(p)))
-  return [{ id: 'tray-next', key: ']', words: `next ${stopWhat(restStop(marks, 1))}`, ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
+  return [{ id: 'tray-next', key: ']', words: `next ${stopWhat(restStop(marks, 1))}`, shorter: ['next', ''], ...(fresh ? { color: accent() } : {}), press: () => stepMark($, 1) }]
 }
 
 /** An open tray's keys, in its header at the right, each a click that does what its key does: ] (or [) the next mark,
