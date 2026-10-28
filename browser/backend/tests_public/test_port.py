@@ -20,6 +20,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import bound_port
 
 from app import cli, config, hook_auth, permission_hook, procs
 
@@ -30,9 +31,8 @@ PLUGIN_BIN = config.REPO_ROOT / "plugin" / "bin"
 
 
 def _held() -> socket.socket:
-    """A listener on a free port of the loopback, as another program holds a port."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.bind(("127.0.0.1", 0))
+    """A listener on a free port of the loopback, as another program holds a port (conftest.SERVER_PORTS)."""
+    s = bound_port()
     s.listen(8)
     return s
 

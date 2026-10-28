@@ -72,9 +72,9 @@ def test_a_write_under_the_users_thimble_home_is_refused(monkeypatch):
 # ----------------------------------------------------------------------------- no live server
 
 
-# _Counter's ports: below the ports the system hands out for port 0 (32768 and up on Linux, 49152 and up on macOS) and
-# away from the ports the tests name (8300, 5301, 21101, 27755, ...), so neither a client of another test's server on a
-# port it was given nor `server up`'s look at the 50 ports above a taken one (cli.pick_port) reaches the counter
+# _Counter's ports: below the ports the system hands out for port 0, as conftest.SERVER_PORTS are, and apart from those
+# too, so that nothing but the test reaches the counter: no client of another test's server on a port it was given,
+# and no `server up` looking at the 50 ports above a taken one (cli.pick_port)
 COUNTER_PORTS = range(30000, 32700)
 
 
@@ -83,20 +83,10 @@ class _Counter:
     test can show that a refused connection never reached it, without connecting to the user's port."""
 
     def __init__(self) -> None:
-        import random
-        import socket
-
-        self.sock = socket.socket()
-        for port in random.sample(COUNTER_PORTS, len(COUNTER_PORTS)):
-            try:
-                self.sock.bind(("127.0.0.1", port))
-                break
-            except OSError:  # taken, as by the same test of another run
-                continue
+        self.sock = conftest.bound_port(COUNTER_PORTS)
         self.sock.listen(8)
         self.sock.settimeout(0.05)
         self.port = self.sock.getsockname()[1]
-        assert self.port in COUNTER_PORTS, "no port of COUNTER_PORTS was free"
 
     def accepted(self) -> int:
         import socket

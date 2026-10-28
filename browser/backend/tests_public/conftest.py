@@ -262,6 +262,36 @@ UI_COOKIE_VALUE = "cookie-of-the-test-browser"  # the cookie of a browser signed
 UI_KEY_VALUE = "key-of-the-test-browser"  # the key of that browser's path, /b/<key>/api/ (hook_auth.browser_path)
 
 
+# The ports of the servers the tests start, and of the ports they hold or look at: below the ports the system hands out
+# for port 0 (32768 and up on Linux, 49152 and up on macOS), where kernels' connection files and every client's
+# connection come and go, so none of those takes one between a test's look and its server's bind; and away from the
+# ports the tests name (8300, 5301, 21101, 21240, 27755). `server up` also looks at the 50 above a taken one
+# (cli.PORT_SCAN).
+SERVER_PORTS = range(22000, 27000)
+
+
+def bound_port(ports: range = SERVER_PORTS) -> "socket.socket":
+    """A socket bound to a port of `ports` on the loopback that nothing held."""
+    import random
+    import socket
+
+    s = socket.socket()
+    for port in random.sample(ports, len(ports)):
+        try:
+            s.bind(("127.0.0.1", port))
+            return s
+        except OSError:
+            continue
+    s.close()
+    raise AssertionError(f"no port of {ports} is free")
+
+
+def free_port(ports: range = SERVER_PORTS) -> int:
+    """A port of `ports` that nothing holds now, for a server the test starts on it."""
+    with bound_port(ports) as s:
+        return s.getsockname()[1]
+
+
 def card_wait(minutes: float | None) -> float:
     """Set `cardWait` in the test's thimble config, keeping its other keys (None takes it out); the wait in seconds."""
     import json

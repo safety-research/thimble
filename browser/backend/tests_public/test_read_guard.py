@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from conftest import free_port
 from starlette.datastructures import Headers
 
 from app import cli, dev, hook_auth, main
@@ -291,15 +292,12 @@ async def test_a_ticket_s_shot_hands_the_server_s_token_to_its_run(monkeypatch, 
 def served(monkeypatch):
     """thimble's app on a free port in a thread (a real server, since an event stream never ends); its base URL.
     THIMBLE_PORT names the port, as the supervisor's does, so the cookie's name is that server's."""
-    import socket  # noqa: PLC0415
     import threading  # noqa: PLC0415
     import time  # noqa: PLC0415
 
     import uvicorn  # noqa: PLC0415
 
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
+    port = free_port()  # conftest.SERVER_PORTS
     monkeypatch.setenv("THIMBLE_PORT", str(port))
     monkeypatch.delenv("THIMBLE_DEV", raising=False)
     server = uvicorn.Server(uvicorn.Config(main.create_app(), host="127.0.0.1", port=port, log_level="warning",

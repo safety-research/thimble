@@ -8,7 +8,6 @@ import contextlib
 import json
 import os
 import re
-import socket
 import subprocess
 import sys
 import threading
@@ -18,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import free_port
 
 from app import cli, config, procs
 
@@ -380,9 +380,7 @@ def test_stop_kills_only_a_pid_whose_command_line_is_ours(home):
 
 
 def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return free_port()  # conftest.SERVER_PORTS
 
 
 def _uvicorns_on(p: int) -> list[int]:

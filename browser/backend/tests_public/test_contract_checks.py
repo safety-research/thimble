@@ -9,6 +9,8 @@ import sys
 import urllib.request
 from pathlib import Path
 
+from conftest import free_port
+
 from app import config, hook_auth
 
 E2E = Path(__file__).resolve().parents[2] / "scripts" / "e2e"
@@ -193,11 +195,7 @@ def test_the_stand_in_server_proves_the_token_as_thimble_s_hooks_expect(tmp_path
 
 
 def _free_port() -> int:
-    import socket
-
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return free_port()  # conftest.SERVER_PORTS
 
 
 def test_other_thimble_copies_are_turned_off_for_the_runs():

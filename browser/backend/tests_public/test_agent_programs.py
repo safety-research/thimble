@@ -10,7 +10,6 @@ import asyncio
 import json
 import os
 import shutil
-import socket
 import sys
 import threading
 import time
@@ -18,6 +17,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from conftest import free_port
 
 from app import agent_session, config, extensions, harness, hook_auth, kernel_wrap, notebook, roles, tools, userconf
 
@@ -227,9 +227,7 @@ thimble.serve(run)
 
 
 def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return free_port()  # conftest.SERVER_PORTS
 
 
 @pytest.fixture()
