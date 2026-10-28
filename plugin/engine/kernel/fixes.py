@@ -75,6 +75,7 @@ pushed, with {login} and {name}).
 """
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import getpass
 import hashlib
@@ -1682,33 +1683,55 @@ def _rebuild(order: list[int]) -> list[int]:
     return failed
 
 
-def _move(change) -> dict[str, Any]:
-    """Change live (a function of the records), then have Claude Code copy it. Before Claude Code loads live (not
-    pointed yet), the release first follows the code that runs (ensure_live), as at a request: a y right after another
-    way updated the plugin (claude plugin update, scripts/install.sh) puts the fix onto that release, not the one before."""
+def _move(change, copied: bool = False) -> dict[str, Any]:
+    """Change live (a function of the records), then have Claude Code copy it; `copied`: the change had it copy live
+    itself (a y, before its records say so). Before Claude Code loads live (not pointed yet), the release first follows
+    the code that runs (ensure_live), as at a request: a y right after another way updated the plugin (claude plugin
+    update, scripts/install.sh) puts the fix onto that release, not the one before."""
     with Lock():
         rel = release()
         if rel and not rel.get("pointed") and (live_dir() / ".git").exists():
             ensure_live()
         out = change()
-        synced = _sync()
+        synced = {} if copied else _sync()
     return {**(out or {}), **synced}
 
 
-def _live_as_is() -> dict[str, Any]:
-    """What a y changes before it knows that its fix fits the fixes on: the branch or commit live shows, and state.json
-    (None when there is none), for _put_back."""
+def _refs_at(names: list[str]) -> dict[str, str]:
+    """The commit each of the refs `names` points to, for those that exist."""
+    out = git("for-each-ref", "--format=%(refname) %(objectname)", *names, cwd=live_dir())
+    return {n: sha for n, _, sha in (x.partition(" ") for x in out.splitlines()) if n in names}
+
+
+def _live_as_is(fid: int) -> dict[str, Any]:
+    """What a y on fix `fid` changes once live moves, for _put_back: the branch or commit live shows, state.json (None
+    when there is none), and the refs it moves: mine, the ref of each fix in mine (a rebuild makes their commits anew),
+    and the fix's own (its version before, under prev/, and a new one, under next/)."""
     live = live_dir()
     state = home() / "state.json"
+    names = ["refs/heads/mine", *(f"refs/thimble/fixes/{i}" for i in sorted({*_on_ids(records()), fid})),
+             f"refs/thimble/prev/{fid}", f"refs/thimble/next/{fid}"]
     return {"branch": run(["git", "symbolic-ref", "-q", "--short", "HEAD"], cwd=live, check=False).stdout.strip(),
-            "head": git("rev-parse", "HEAD", cwd=live), "state": state.read_text() if state.exists() else None}
+            "head": git("rev-parse", "HEAD", cwd=live), "names": names, "refs": _refs_at(names),
+            "state": state.read_text() if state.exists() else None}
 
 
 def _put_back(was: dict[str, Any]) -> None:
-    """live and state.json as they were before a y whose fix does not fit the fixes on (_live_as_is): fixes that were
-    all off stay off, and live shows what it showed, its plugin.json with the version it had (_stamp)."""
+    """live, the refs a y moves and state.json as they were before a y that failed (_live_as_is): fixes that were all
+    off stay off, mine and the fixes' refs hold what they held, and live shows what it showed, its plugin.json with the
+    version it had (_stamp)."""
+    live = live_dir()
+    # a pick that the failure stopped half way
+    run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
     _unstamp()
-    git("checkout", "-q", *([was["branch"]] if was["branch"] else ["--detach", was["head"]]), cwd=live_dir(), hooks=False)
+    # off mine first, so that mine moves back without its files
+    git("checkout", "-q", "--detach", cwd=live, hooks=False)
+    now = _refs_at(was["names"])
+    moves = [f"update {n} {was['refs'][n]}" for n in was["names"] if n in was["refs"] and now.get(n) != was["refs"][n]]
+    moves += [f"delete {n}" for n in was["names"] if n not in was["refs"] and n in now]
+    if moves:
+        run(["git", "update-ref", "--stdin"], cwd=live, stdin="\n".join(moves) + "\n")
+    git("checkout", "-q", *([was["branch"]] if was["branch"] else ["--detach", was["head"]]), cwd=live, hooks=False)
     state = home() / "state.json"
     if was["state"] is None:
         state.unlink(missing_ok=True)
@@ -1719,11 +1742,46 @@ def _put_back(was: dict[str, Any]) -> None:
     _stamp()
 
 
+@contextlib.contextmanager
+def _or_put_back(fid: int):
+    """The steps of a y on fix `fid` from the move of live on, up to Claude Code's copy of it: when any of them fails (a
+    fix that does not fit, a git error, a copy that fails), live, the refs it moves and state.json go back as they were
+    (_put_back), and the same error goes on. The records change after these steps, except for why a fix needs a redo."""
+    was = _live_as_is(fid)
+    try:
+        yield
+    except BaseException:
+        _put_back(was)
+        raise
+
+
+def _misfit(fid: int, commit: str) -> str:
+    """What fix `fid`'s change (`commit`) does not fit, in its error: the one fix in mine that changes a file the change
+    changes, when the change was made on those files as the release has them (so that only that fix's lines can be in
+    its way); else the person's other fixes."""
+    live, base = live_dir(), str(release().get("base") or "")
+
+    def files(a: str, b: str, paths: list[str]) -> list[str]:
+        out = git("--literal-pathspecs", "diff", "--no-renames", "--name-only", "-z", a, b, "--", *paths, cwd=live,
+                  check=False)
+        return [x for x in out.split("\0") if x]
+
+    paths = files(f"{commit}^", commit, [])
+    if base and paths and run(["git", "--literal-pathspecs", "diff", "--quiet", base, f"{commit}^", "--", *paths],
+                              cwd=live, check=False).returncode == 0:
+        hits = [i for i in _on_ids(records())
+                if i != fid and files(f"refs/thimble/fixes/{i}^", f"refs/thimble/fixes/{i}", paths)]
+        if len(hits) == 1:
+            return f"fix {hits[0]}"
+    return "your other fixes"
+
+
 def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     """y: the fix goes on. thimble points the marketplace at live the first time (before anything else, so that a y
     whose pointing fails changes nothing), cherry-picks the fix's commit onto mine unless mine holds it already, and has
-    Claude Code copy live; the plugin then runs /reload-plugins. A fix that does not fit the fixes on leaves live and
-    state.json as they were (_put_back), so a y while every fix is off turns none of them on."""
+    Claude Code copy live; the plugin then runs /reload-plugins. A y that fails after live moved, such as one whose fix
+    does not fit the others, leaves live and state.json as they were (_or_put_back), so a y while every fix is off turns
+    none of them on."""
     rec = get(fid)
     check_ask(rec["id"], secret)
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
@@ -1735,85 +1793,86 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
                        "thimble reapply in a shell has Claude check it against the release and bring it back")
 
     if rec.get("prev"):
-        return _move(lambda: _swap(rec["id"]))
+        return _move(lambda: _swap(rec["id"]), copied=True)
 
     def change():
         live = live_dir()
-        was = _live_as_is()
         # Claude Code's marketplace on live first: when that fails, mine, the fix's ref and its record stay as they were
         _repoint()
-        _unstamp()
-        # a fix the person turns on while all are off: the others come back with it
-        git("checkout", "-q", "mine", cwd=live, hooks=False)
-        write_json(home() / "state.json", {"on": True})
-        ref = f"refs/thimble/fixes/{rec['id']}"
-        if run(["git", "merge-base", "--is-ancestor", ref, "mine"], cwd=live, check=False).returncode == 0:
-            # mine holds the fix's commit already: it goes on as it is, with no empty commit after it
-            new_commit = git("rev-parse", ref, cwd=live)
-        else:
-            p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", ref], cwd=live, check=False,
-                    env=as_thimble())
-            if p.returncode != 0:
-                run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
-                _put_back(was)
-                r = get(rec["id"])
-                r.update(state="redo", error="it does not fit the fixes you have on")
-                put(r)
-                raise FixError(f"fix {rec['id']} does not fit the fixes you have on; /thimble-fix {rec['id']} tries it again")
-            new_commit = git("rev-parse", "HEAD", cwd=live)
-            git("update-ref", ref, new_commit, cwd=live)
+        with _or_put_back(rec["id"]):
+            _unstamp()
+            # a fix the person turns on while all are off: the others come back with it
+            git("checkout", "-q", "mine", cwd=live, hooks=False)
+            write_json(home() / "state.json", {"on": True})
+            ref = f"refs/thimble/fixes/{rec['id']}"
+            if run(["git", "merge-base", "--is-ancestor", ref, "mine"], cwd=live, check=False).returncode == 0:
+                # mine holds the fix's commit already: it goes on as it is, with no empty commit after it
+                new_commit = git("rev-parse", ref, cwd=live)
+            else:
+                p = run(["git", *THIMBLE_ID, "cherry-pick", "--keep-redundant-commits", ref], cwd=live, check=False,
+                        env=as_thimble())
+                if p.returncode != 0:
+                    run(["git", "cherry-pick", "--abort"], cwd=live, check=False)
+                    whom = _misfit(rec["id"], ref)
+                    r = get(rec["id"])
+                    r.update(state="redo", error=f"it does not fit {whom}")
+                    put(r)
+                    raise FixError(f"fix {rec['id']} does not fit {whom}; /thimble-fix {rec['id']} tries it again")
+                new_commit = git("rev-parse", "HEAD", cwd=live)
+                git("update-ref", ref, new_commit, cwd=live)
+            synced = _sync()
         r = get(rec["id"])
         r.update(state="on", on_at=time.time(), commit=new_commit, error=None)
         _drop_work(r)
         put(r)
-        return {"id": r["id"], "title": r["title"], "commit": new_commit}
+        return {"id": r["id"], "title": r["title"], "commit": new_commit, **synced}
 
-    return _move(change)
+    return _move(change, copied=True)
 
 
 def _swap(fid: int) -> dict[str, Any]:
     """y on a fix changed in place: its new version takes the place of the one before, which stays under
-    refs/thimble/prev/<id> for u. A fix that was on is rebuilt in its place in mine; one that was off goes on last. A new
-    version that does not fit the fixes on leaves live and state.json as they were (_put_back)."""
+    refs/thimble/prev/<id> for u. A fix that was on is rebuilt in its place in mine; one that was off goes on last. A y
+    that fails after live moved, such as one whose new version does not fit the other fixes, leaves live, mine, the
+    fixes' refs and state.json as they were (_or_put_back)."""
     live = live_dir()
     rec = get(fid)
     p = rec.get("prev") or {}
     old = git("rev-parse", "-q", "--verify", f"refs/thimble/fixes/{fid}", cwd=live, check=False) or str(p.get("commit") or "")
-    was = _live_as_is()
     # Claude Code's marketplace on live first: when that fails, mine, the fix's refs and its record stay as they were
     _repoint()
-    _unstamp()
-    git("checkout", "-q", "mine", cwd=live, hooks=False)
-    write_json(home() / "state.json", {"on": True})
-    git("update-ref", f"refs/thimble/fixes/{fid}", rec["commit"], cwd=live)
-    order = _on_ids(records())
-    if fid not in order:
-        order.append(fid)
-    failed = _rebuild(order)
-    if fid in failed and order[-1] != fid:
-        # a new version that needs fixes after it in mine underneath it (a stray folded in): last
-        order = [*[i for i in order if i != fid], fid]
+    with _or_put_back(fid):
+        _unstamp()
+        git("checkout", "-q", "mine", cwd=live, hooks=False)
+        write_json(home() / "state.json", {"on": True})
+        git("update-ref", f"refs/thimble/fixes/{fid}", rec["commit"], cwd=live)
+        order = _on_ids(records())
+        if fid not in order:
+            order.append(fid)
         failed = _rebuild(order)
-    if fid in failed:
-        git("update-ref", f"refs/thimble/fixes/{fid}", old, cwd=live)
-        _rebuild([i for i in order if p.get("state") == "on" or i != fid])
-        _put_back(was)
-        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; /thimble-fix {fid} tries it again")
+        if fid in failed and order[-1] != fid:
+            # a new version that needs fixes after it in mine underneath it (a stray folded in): last
+            order = [*[i for i in order if i != fid], fid]
+            failed = _rebuild(order)
+        if fid in failed:
+            raise FixError(f"the new version of fix {fid} does not fit {_misfit(fid, rec['commit'])}; /thimble-fix {fid} "
+                           "tries it again")
+        if old:
+            git("update-ref", f"refs/thimble/prev/{fid}", old, cwd=live)
+        git("update-ref", "-d", f"refs/thimble/next/{fid}", cwd=live)
+        new_commit = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
+        synced = _sync()
     for i in failed:
         x = get(i)
         x.update(state="redo", error=f"it did not fit once fix {fid} changed")
         put(x)
-    if old:
-        git("update-ref", f"refs/thimble/prev/{fid}", old, cwd=live)
-    git("update-ref", "-d", f"refs/thimble/next/{fid}", cwd=live)
     r = get(fid)
-    new_commit = git("rev-parse", f"refs/thimble/fixes/{fid}", cwd=live)
     r.pop("round_commit", None)
     r.update(state="on", on_at=p.get("on_at") if p.get("state") == "on" else time.time(), commit=new_commit, error=None,
              note=None, prev={**p, "commit": old})
     _drop_work(r)
     put(r)
-    return {"id": fid, "title": r["title"], "commit": new_commit, "changed": True, "redo": failed}
+    return {"id": fid, "title": r["title"], "commit": new_commit, "changed": True, "redo": failed, **synced}
 
 
 def merge(ids: list[int | str], secret: str | None) -> dict[str, Any]:

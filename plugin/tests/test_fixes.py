@@ -1372,12 +1372,33 @@ def test_a_fix_that_does_not_fit_names_the_command_that_tries_it_again_never_r(w
     FX.apply(a["id"], press(a["id"]))
     with pytest.raises(FX.FixError) as e:
         FX.apply(b["id"], press(b["id"]))
-    assert str(e.value) == f"fix {b['id']} does not fit the fixes you have on; /thimble-fix {b['id']} tries it again"
+    # fix 1 is the one fix in mine that changes the file, so the line names it
+    assert str(e.value) == f"fix {b['id']} does not fit fix {a['id']}; /thimble-fix {b['id']} tries it again"
     # it waits for another try, and applying it again names the same command
-    assert FX.get(b["id"])["state"] == "redo"
+    assert FX.get(b["id"])["state"] == "redo" and FX.get(b["id"])["error"] == f"it does not fit fix {a['id']}"
     with pytest.raises(FX.FixError) as e:
         FX.apply(b["id"], press(b["id"]))
     assert str(e.value) == f"fix {b['id']} does not fit your thimble any more; /thimble-fix {b['id']} tries it again"
+
+
+def test_a_fix_that_does_not_fit_two_fixes_that_change_its_file_says_your_other_fixes(world):
+    # fix 2 says seen, made on the release; fix 1 says read, and fix 3, made on it, adds a line to the same file
+    a = made(world)
+    FX.done(a["id"], "Bar says read", "")
+    b = FX.new("say seen")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `seen ${n}`\n")
+    FX.done(b["id"], "Bar says seen", "")
+    FX.apply(a["id"], press(a["id"]))
+    c = FX.new("and a title")
+    p = Path(c["work"]) / "plugin" / "bar" / "bar.tsx"
+    p.write_text(p.read_text() + "const title = 'bar'\n")
+    FX.done(c["id"], "Bar has a title", "")
+    FX.apply(c["id"], press(c["id"]))
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(b["id"], press(b["id"]))
+    # fixes 1 and 3 both change the file, so the line names neither, and never "the fixes you have on"
+    assert str(e.value) == f"fix {b['id']} does not fit your other fixes; /thimble-fix {b['id']} tries it again"
+    assert FX.get(b["id"])["error"] == "it does not fit your other fixes"
 
 
 def stray(w, refines: int, words: str, path: str, text: str) -> dict:
