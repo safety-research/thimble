@@ -19,6 +19,7 @@ import { DatasetView } from '../canvas/DataViz'
 import { FrameTable } from '../canvas/FrameTable'
 import { FRAME_MIME, asFrame } from '../lib/dataFrame'
 import { inlineSvg } from '../lib/svg'
+import { mendInk, paperInks, unmendInk } from '../lib/ink'
 import { purifyHtml } from '../lib/sanitize'
 import { specObject } from '../lib/vegaLoader'
 import { drawChart, NOTHING_DRAWN, refitChart, type DrawnChart, type NothingDrawn } from '../lib/vegaDraw'
@@ -349,13 +350,35 @@ function Raster({ src }: { src: string }) {
 
 /**
  * A figure's SVG inlined (lib/svg: made safe, its ids its own, its text in the page's faces and its colours the
- * theme's), as wide as the room up to its own width. A document that does not parse is shown as an image.
+ * theme's), as wide as the room up to its own width, its text mended where the paper made it hard to read on what is
+ * drawn under it (lib/ink). A document that does not parse is shown as an image.
  */
 function InlineSvg({ svg }: { svg: string }) {
   const id = useId().replace(/[^A-Za-z0-9_-]/g, '')
   const fig = useMemo(() => inlineSvg(svg, `f${id}-`), [svg, id])
+  // one object per figure: React writes the markup again whenever it gets a new one, which would drop the mended ink
+  const inner = useMemo(() => ({ __html: fig?.markup ?? '' }), [fig])
+  const box = useRef<HTMLDivElement>(null)
+  const { key } = useTheme()
+  // a text the paper made hard to read on what is drawn under it takes the ink that reads, after the figure draws and
+  // again when its size or the paper changes
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    const mend = () => {
+      unmendInk(el)
+      mendInk(el, paperInks(token))
+    }
+    mend()
+    const sized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(mend)
+    sized?.observe(el)
+    return () => {
+      sized?.disconnect()
+      unmendInk(el)
+    }
+  }, [fig, key])
   if (!fig) return <Raster src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} />
-  return <div className="outputs-svg" style={fig.width ? { maxWidth: fig.width } : undefined} data-body="" data-settled="true" dangerouslySetInnerHTML={{ __html: fig.markup }} />
+  return <div ref={box} className="outputs-svg" style={fig.width ? { maxWidth: fig.width } : undefined} data-body="" data-settled="true" dangerouslySetInnerHTML={inner} />
 }
 
 /** What the canvas keeps of a chart it drew: the drawing (lib/vegaDraw), and what it was drawn from, so a resize with
