@@ -302,12 +302,14 @@ def test_main_says_why_a_finding_nobody_asked_for_gets_one_sentence(mode, monkey
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_answers_beside_one_card_in_a_sentence_or_two(mode, monkeypatch):
-    """The guidance says what the reply beside a single card holds, the answer in a sentence or two, and why, so that the
-    analyst does not read what the card shows twice; its example's one-card turn shows that reply, one sentence that
-    links the card. Before, the example's one-card turn had no chat line, and replies beside one card said the card's
-    rows again as a list."""
+    """The guidance opens with what the chat is for, talking with the analyst, while a card shows the evidence; it says
+    what the reply beside a single card holds, the answer in a sentence or two, and why, so that the analyst does not
+    read what the card shows twice; and its example's one-card turn shows that reply, one sentence that links the card.
+    Before, the example's one-card turn had no chat line, and replies beside one card said the card's rows again as a
+    list."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     para, turns = _what_to_make(mode)
+    assert para.startswith("The chat is where you talk with the analyst")
     beside = next(s for s in para.split(". ") if "reply beside it" in s)
     assert "the answer in a sentence or two" in beside and "the same thing twice" in beside
     one = next(t for t in turns if any(line.startswith("card") for line in t[1:]) and "diagram" not in " ".join(t))
