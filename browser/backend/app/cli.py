@@ -4514,6 +4514,9 @@ def _failed_up(what: str, e: BaseException) -> int:
 BROWSER_LINE = "thimble browser: {what}"
 # `thimble-browser --link` (cmd_link) when no server of this install answers: no page to sign in to
 LINK_NO_SERVER_LINE = "no server answers. Start one with thimble-browser in a folder of files."
+# on stderr, after a link --link printed with no sign-in code, as its output is not a terminal (to_terminal)
+LINK_NO_TERMINAL_LINE = ("the link has no sign-in code because the output is not a terminal; run thimble-browser --link "
+                         "in a terminal to get one.")
 
 
 SESSION_NONE_LINE = {"continue": "no earlier session in {cwd} to continue.",
@@ -4690,8 +4693,9 @@ def cmd_link(args: argparse.Namespace) -> int:
     it, for the folder's workspace (known_corpus), or for the start page, which lists the server's workspaces, when the
     server holds none for the folder. It starts no server, opens no session and registers nothing, so the page keeps
     its chat. The new code voids the last one made for that workspace (hook_auth.mint), and only a terminal gets one
-    (to_terminal), as at the start. 1, with LINK_NO_SERVER_LINE, when no server of this install answers (none runs, or
-    one runs but does not answer), and with NO_CODE_LINE when the server gives the terminal no code."""
+    (to_terminal), as at the start; another output gets the link without one, and LINK_NO_TERMINAL_LINE on stderr. 1,
+    with LINK_NO_SERVER_LINE, when no server of this install answers (none runs, or one runs but does not answer), and
+    with NO_CODE_LINE when the server gives the terminal no code."""
     cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
     url = api_url()
     if refuse_foreign(url):
@@ -4706,6 +4710,8 @@ def cmd_link(args: argparse.Namespace) -> int:
     other = asked is not None and asked != int(read_state().get("port") or 0)
     link = ui_url(known[0] if known else None, pair=pair, api=url if other else None)
     print(BROWSER_LINE.format(what=link), flush=True)
+    if not pair:
+        print(BROWSER_LINE.format(what=LINK_NO_TERMINAL_LINE), file=sys.stderr, flush=True)
     if pair and "#p=" not in link:
         print(NO_CODE_LINE.format(log=log_path()))
         return 1

@@ -91,6 +91,28 @@ def test_link_with_a_port_links_to_that_server_not_the_one_server_json_names(hom
     assert posted == ["http://127.0.0.1:8393/api/ui/pair"]
 
 
+def test_a_link_whose_output_is_not_a_terminal_says_on_stderr_why_it_has_no_code(home, data, monkeypatch, capsys, tmp_path):
+    """--link whose output a program reads (Claude ran it, or a pipe): the link alone on stdout, with no sign-in code,
+    and one line on stderr that says why and how to get one. A terminal's link with its code has no such line."""
+    cli.write_state({"port": 8399, "url": "http://127.0.0.1:8399", "env": {}})
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
+    monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0:
+                        (200, {"code": "c1", "expires_s": 300}) if m == "POST" else (404, {"detail": "Not Found"}))
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (data / "runs.corpus.json").write_text(json.dumps({"name": "runs", "root": str(runs), "path": str(runs)}))
+    monkeypatch.setattr(cli, "to_terminal", lambda: False)
+    assert cli.main(["link", "--cwd", str(runs)]) == 0
+    out, err = capsys.readouterr()
+    assert out.splitlines() == ["thimble browser: http://127.0.0.1:8399/?ws=runs"]
+    assert err.splitlines() == ["thimble browser: the link has no sign-in code because the output is not a terminal; run "
+                                "thimble-browser --link in a terminal to get one."]
+    monkeypatch.setattr(cli, "to_terminal", lambda: True)
+    assert cli.main(["link", "--cwd", str(runs)]) == 0
+    out, err = capsys.readouterr()
+    assert out.splitlines() == ["thimble browser: http://127.0.0.1:8399/?ws=runs#p=c1"] and err == ""
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
