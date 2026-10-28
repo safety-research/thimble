@@ -9,9 +9,10 @@
 //   code       around them that hold text, the words highlighted
 //   card       a value a card shows: the card's chip (a click opens it) over the table around the cited cell, the cell
 //              marked, as a card's citation shows it (components/RefChip); a line of its printed output shows as the
-//              computed output does, its chip naming the line as the citation's chip does (lib/refs cardPartLabel).
-//              The card is read when the label opens: when it changed after the check (the card check rewrote it, say),
-//              the label shows it as it is now, or says the place is gone and shows what the check read.
+//              computed output does, its chip naming the line as the citation's chip does (lib/refs cardPartLabel),
+//              a click on which shows the line in the card's output. The card is read when the label opens: when it
+//              changed after the check (the card check rewrote it, say), the label shows it as it is now, or says the
+//              place is gone and shows what the check read.
 //
 // Printed output that is a table (a printed DataFrame) shows as that small table, its cited cell marked. The lines wrap;
 // a long one shows only the words around its highlighted ones, cut at words (lineWindow).
@@ -360,10 +361,10 @@ export const CHANGED_READ = 'The card changed after the check. The check read th
 
 /** A value a card shows: the card's chip, by the card's title now, over the table around the cited cell, or the
  * printed lines around the cited one, as the card shows them now (api.resolveRef, as RefChip reads them). A line of the
- * printed output is named as the citation's chip names it (lib/refs cardPartLabel): `printed output · line 8` in the
- * card, after the card's title elsewhere. The check's own copy shows while the card is read and stays when the card
- * still shows the same (sameAsChecked). When the card changed, a note says so over the cell as it is now, or over the
- * copy when the place no longer holds what the check read. */
+ * printed output is named as the citation's chip names it (lib/refs cardPartLabel): `line 8` in the card, after the
+ * card's title elsewhere; a click on the chip shows the line in the card's output. The check's own copy shows while the
+ * card is read and stays when the card still shows the same (sameAsChecked). When the card changed, a note says so over
+ * the cell as it is now, or over the copy when the place no longer holds what the check read. */
 function CardEvidence({ ev, value }: { ev: Evidence; value: string }) {
   const open = useContext(OpenPlace)
   const home = useContext(CiteHome)
