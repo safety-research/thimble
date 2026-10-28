@@ -2,7 +2,7 @@
 // before the fork started; a later question joins the running fork; its answer is read from the fork's transcript at its
 // end; m sends it to main; t and the bar list the threads; a card the fork draws stands in the thread. All data is made
 // up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { registerForks } from '../core/forks'
 import { registerTell } from '../core/tell'
@@ -14,6 +14,7 @@ import { registerThreads, resetThreads, sendToMain, threadList, threadOf } from 
 import { threadKey } from '../threads/threads.mjs'
 import { treeRows } from '../core/trail.mjs'
 import { promptStub } from './stubs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

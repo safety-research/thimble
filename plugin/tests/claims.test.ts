@@ -1,7 +1,7 @@
 // Claims (claims/): the observer's claims lens places each answer's claims by their words, with the citations near them,
 // in the conversation's kept folder; w on the bar counts them and lights when a claim was corrected; a look that fails
 // leaves a gap the pane names; w opens the pane, where a click selects a cluster, then a claim. All data is made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { registerAnswers, resetAnswers } from '../core/answers'
 import { registerTell } from '../core/tell'
@@ -18,6 +18,7 @@ import { busyWhile } from '../bar/busy'
 import { textWidth } from '../core/text.js'
 import { promptStub, tempRun } from './stubs'
 import { treeRows } from '../core/trail.mjs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

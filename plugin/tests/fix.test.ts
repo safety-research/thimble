@@ -7,7 +7,7 @@
 // alone says that fixes are listed and managed in a shell; a failed fix's line goes at the next prompt. The fixer's
 // shell runs in the sandbox the kernel describes, with a time limit, its writes stay in its copy, and it publishes
 // nothing to the package registries it reaches. All data is made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { busyNow, busySteps } from '../bar/busy'
 import { FIX_ALONE, fixSlug, fixingWord, noticeText, refreshFixes } from '../fix/fixes'
@@ -16,6 +16,7 @@ import { notStarted, registerFix, wordsOfSkill } from '../fix/register'
 import { fixesContext, formOf } from '../fix/request'
 import { textOf as screenText, TEXT_ELS } from '../fix/screen'
 import { promptStub } from './stubs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

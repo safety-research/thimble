@@ -4,7 +4,7 @@
 // not run) with one failure line, and x starts their check; the checker may only read, and run code as one Python
 // script. All data is made up.
 // `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
 import { autoRepair, awaitsCheck, checkAnswer, checkerDenial, checkerPrompt, checkOpened, endCheck, launchRepair, noteRow, PER_FORK, repairOf, resumeChecks, splitMarks, startCheck } from '../marks/checker'
@@ -14,6 +14,7 @@ import { quietLooks } from '../marks/register'
 import { restoreMarks, rowMarks } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { tempRun } from './stubs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

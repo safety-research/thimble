@@ -1,7 +1,7 @@
 // The side pane (core/pane.ts): its trail of the panes it showed, the top row that names esc, which goes back down it (`esc back to …`)
 // or closes it (`esc close`), esc going back while the trail holds a pane and closing on the first one, passing over a pane it can no longer show, and
 // closing when Claude Code does not place the pane it goes back to; and the docked frame that keeps the top row and the input bar at its bottom. All data is made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { keyedWords, pressedWords } from '../bar/bar'
 import { barKey, registerBar } from '../bar/register'
@@ -10,6 +10,7 @@ import { closePane, drawPane, narrowNotice, openPane, paneNow, registerPanes, sc
 import { treeRows } from '../core/trail.mjs'
 import { setOptions } from '../settings/features.mjs'
 import { resetThreads } from '../threads/thread'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

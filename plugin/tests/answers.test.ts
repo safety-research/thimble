@@ -1,11 +1,12 @@
 // The record of main's turns (core/answers.ts): each turn's prompt and who sent it, its text rows, its answer, the
 // labels its Bash calls ran and the cards it drew, each feature's part of a message, the answer the keys act on ({ }),
 // and a resumed session's turns read back. All data is made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { actingRow, answerRows, answerStepKey, labelsOf, partOf, pickedRow, questionOf, registerAnswers, resetAnswers, restoreAnswers, setPart, sinceLast, textRows, turnOf, turnOfRow, turnsNow } from '../core/answers'
 import { registerTurn } from '../core/turn'
 import { tempRun } from './stubs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

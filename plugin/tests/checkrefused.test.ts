@@ -4,13 +4,14 @@
 // a mode that refuses checks, the mode and the key that changes it, once a session for the replies' own checks; for
 // any other refusal, its first sentence whole. The failure line wraps a long text at word edges, no row wider than
 // the line. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
 import { failNotice, reasonOf } from '../bar/notice'
 import { textWidth } from '../core/text.js'
 import { cannotStart, refusingMode } from '../marks/checker'
 import { promptStub, tempRun } from './stubs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

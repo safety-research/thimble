@@ -2,7 +2,7 @@
 // press, in 0.10's teal and orange; a term is explained once per conversation; each lens's switch hides what it gave;
 // Claude reads each one shown, with the next prompt; words the analyst picks get an explainer on demand, and one that
 // fails says why. All data is made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { partOf, registerAnswers, resetAnswers } from '../core/answers'
 import { closePane } from '../core/pane'
@@ -23,6 +23,7 @@ import { controlWords, titleWords } from '../core/selection'
 import { drainNow, registerObserver, resetObserver } from '../observer/observer'
 import { setOptions } from '../settings/features.mjs'
 import { promptStub, tempRun } from './stubs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

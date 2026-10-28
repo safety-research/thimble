@@ -2,7 +2,8 @@
 // checked yet has a dim ? after it; one the check corrected has a * after its new words, and a line under the row says
 // what Claude wrote and why the check changed it; a press on that line opens the citation. On a resumed session whose
 // replies' citations are kept as their check left them. All data is made up. `claude plugin test plugin`.
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock } from 'claude-code/testing'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any

@@ -2,11 +2,12 @@
 // conversation's model, so each request of a checker fork's turn names the model the setting names, by its id
 // (core/models.js); unset, or same as Claude, the request goes as it is. Main's requests and another fork's never
 // change. All data is made up. `claude plugin test plugin`.
-import { expect, test } from 'claude-code/testing'
+import { expect } from 'claude-code/testing'
 
 import { spawnFork } from '../core/forks'
 import { registerMarks } from '../marks/register'
 import { setOptions } from '../settings/features.mjs'
+import { test } from './kit'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
