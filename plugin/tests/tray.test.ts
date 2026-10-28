@@ -594,6 +594,41 @@ test('a tray cut at a short height pages: ↓ N more lines is a click that moves
   expect((await drawn()).top).toBe(0)
 })
 
+// a value code computed, the citation's evidence three hundred lines of output
+const LONG_OUTPUT = ['runs: 300', ...Array.from({ length: 300 }, (_, i) => `run ${i + 1}: ok`), 'failed: 12'].join('\n')
+const LONG = { ...TALL, evidence: { ...TALL.evidence, output: LONG_OUTPUT, highlight: [[LONG_OUTPUT.length - 2, LONG_OUTPUT.length]] } }
+
+test('at the narrowest tray, with lines above and below in the hundreds, the row under the window shows both parts whole, each with its key, on its one row', CITES, async ($, on) => {
+  const { clock } = await resumed($, on, LONG, 's-tray-page-narrow')
+  // a band 40 columns wide: the tray at its narrowest, 36 columns inside its frame
+  const narrow = (maxRows: number) => { const a = above(maxRows) as Any; return { ...a, props: { ...a.props, bodyColumns: 40 }, viewport: { ...a.viewport, columns: 40 } } as never }
+  const open = async () => {
+    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+  }
+  await open()
+  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
+  await open()
+  await $.ui.render(narrow(8))
+  // the window in the middle of the body, with more than a hundred lines above it and below it
+  await $.ui.scroll({ component: 'AbovePrompt', requestId: 'above', offset: 0, by: 150, bodyRows: 7, contentRows: 8, origin: { kind: 'person' } } as never)
+  const band = await $.ui.render(narrow(8))
+  const row = all(band).find(n => n.props?.key === 'tray-scroll')
+  const text = textOf(row)
+  // both parts, each with its key, in the row's 36 columns
+  expect(text.length).toBeLessThanOrEqual(36)
+  const [, above_, below_] = /^u ↑ (\d+) above · d ↓ (\d+) more$/.exec(text) ?? []
+  expect(Number(above_)).toBeGreaterThanOrEqual(100)
+  expect(Number(below_)).toBeGreaterThanOrEqual(100)
+  // each part still a click named by its whole words
+  expect(all(row).filter(n => n.type === 'Button').map(n => n.props.label)).toEqual([`↑ ${above_} lines above`, `↓ ${below_} more lines`])
+  // a wider tray keeps the whole words
+  const wide = textOf(all(await $.ui.render(above(8))).find(n => n.props?.key === 'tray-scroll'))
+  expect(wide).toMatch(/^u ↑ \d+ lines above · d ↓ \d+ more lines$/)
+})
+
 // a heads-up whose words are a citation's words, or hold them
 const headsOn = (term: string) => ({ explain: { order: ['h1'], items: { h1: { id: 'h1', kind: 'heads', term, title: 'Names are typed in', bullets: ['Anyone who edits types a name.'] } } } })
 const filledOf = (drawn: Any[]) => drawn.filter(n => n.type === 'Text' && n.props?.backgroundColor).map(textOf)

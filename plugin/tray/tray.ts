@@ -52,6 +52,7 @@ import { openPane } from '../core/pane'
 import { controlWords } from '../core/selection'
 import { keyOwner, revealCard } from '../cards/draw'
 import { quiet } from '../core/askcell.js'
+import { textWidth } from '../core/text.js'
 import { accent, themeLast, themeNow } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { markColors } from '../explain/place.mjs'
@@ -775,10 +776,11 @@ const pageOf = (w: { rows: number }) => Math.max(1, w.rows - 1)
 
 /** The tray's body in at most `fit` rows: whole when it fits; else a window of `fit` − 1 of its rows, and under it a dim
  *  row that says how many more lines there are below (`↓ N more lines`) and above (`↑ N lines above`), each a click that
- *  moves the window a page, after the key that does the same when it is free (`keys`). Claude Code scrolls the band
- *  only when its whole tree is taller than its rows, so the wheel over the band moves the window too (registerTray's
- *  ui.scroll hook). With fewer than two rows for the body, it shows whole, and the band scrolls as Claude Code scrolls
- *  it. `words`: the words of the row under the window, as drawn, each part's with its key and without. */
+ *  moves the window a page, after the key that does the same when it is free (`keys`); in a row too narrow for both,
+ *  `↓ N more` and `↑ N above`. Claude Code scrolls the band only when its whole tree is taller than its rows, so the
+ *  wheel over the band moves the window too (registerTray's ui.scroll hook). With fewer than two rows for the body, it
+ *  shows whole, and the band scrolls as Claude Code scrolls it. `words`: the words of the row under the window, as
+ *  drawn, each part's with its key and without. */
 function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }): { rows: Any[]; words: string[] } {
   const { Box, Button, Text } = els
   const tall = treeRows(body, w)
@@ -792,14 +794,17 @@ function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys:
   paging = { down: below > 0 ? keys.down : null, up: scrolled > 0 ? keys.up : null }
   const lines = (n: number) => `${n} line${n === 1 ? '' : 's'}`
   // each part a click that moves the window a page, its key first when the key is free
-  const part = (id: string, key: string | null, words: string, by: number): Any => Button({ key: `tray-page-${id}`, plain: true, label: words, hover: quiet(`tray-page-${id}`), onPress: () => scrollTray($, by), children: [
+  const part = (id: string, key: string | null, label: string, words: string, by: number): Any => Button({ key: `tray-page-${id}`, plain: true, label, hover: quiet(`tray-page-${id}`), onPress: () => scrollTray($, by), children: [
     ...(key ? [Text({ key: 'k', color: accent(), bold: true, children: `${key} ` })] : []), Text({ key: 'w', dimColor: true, children: words }),
   ] })
-  const shown = [
-    ...(scrolled > 0 ? [{ id: 'up', key: paging.up, words: `↑ ${lines(scrolled)} above`, by: -page }] : []),
-    ...(below > 0 ? [{ id: 'down', key: paging.down, words: `↓ ${below} more line${below === 1 ? '' : 's'}`, by: page }] : []),
+  const both = [
+    ...(scrolled > 0 ? [{ id: 'up', key: paging.up, words: `↑ ${lines(scrolled)} above`, short: `↑ ${scrolled} above`, by: -page }] : []),
+    ...(below > 0 ? [{ id: 'down', key: paging.down, words: `↓ ${below} more line${below === 1 ? '' : 's'}`, short: `↓ ${below} more`, by: page }] : []),
   ]
-  const parts = shown.map(x => part(x.id, x.key, x.words, x.by))
+  // the row's words whole while they fit its one row, else each part without `lines` (the narrowest tray, both parts)
+  const short = both.reduce((n, x, i) => n + (i ? 3 : 0) + (x.key ? textWidth(x.key) + 1 : 0) + textWidth(x.words), 0) > w
+  const shown = both.map(x => ({ ...x, words: short ? x.short : x.words, label: x.words }))
+  const parts = shown.map(x => part(x.id, x.key, x.label, x.words, x.by))
   return {
     rows: [
       Box({ key: 'tray-window', flexDirection: 'column', height: rows, overflow: 'hidden', children: [
