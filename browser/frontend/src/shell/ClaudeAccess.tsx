@@ -13,9 +13,10 @@ import { bus } from '../lib/bus'
 
 type How = 'api-key' | 'claude-code' | 'wif'
 
-const CHOICES: { how: How; label: string; note: string }[] = [
+/** `mark`: after the label, in the words of the install's question (backend claude_access.py setup). */
+const CHOICES: { how: How; label: string; mark?: string; note: string }[] = [
   { how: 'api-key', label: 'Anthropic API key', note: 'thimble calls the Claude API itself.' },
-  { how: 'claude-code', label: 'Claude Code sign-in', note: 'Uses your Claude subscription through Claude Code.' },
+  { how: 'claude-code', label: 'Claude Code sign-in', mark: 'recommended if you have a Claude subscription', note: 'Uses your Claude subscription through Claude Code.' },
   { how: 'wif', label: 'Workload Identity Federation', note: 'thimble calls the Claude API with a config file you name.' },
 ]
 
@@ -98,7 +99,10 @@ export function ClaudeAccessDialog({ first, onClose }: { first: boolean; onClose
           {CHOICES.map((c) => (
             <label key={c.how} className={`access-choice${how === c.how ? ' on' : ''}`} data-how={c.how}>
               <input type="radio" name="access-how" checked={how === c.how} onChange={() => setHow(c.how)} />
-              <span className="access-choice-label">{c.label}</span>
+              <span className="access-choice-label">
+                {c.label}
+                {c.mark && <span className="access-choice-mark"> ({c.mark})</span>}
+              </span>
               <span className="access-choice-note">{c.note}</span>
             </label>
           ))}

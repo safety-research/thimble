@@ -57,3 +57,14 @@ test('on the first run Not now and Escape close the step, so the person can look
   await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
   expect(closed).toHaveBeenCalledTimes(2)
 })
+
+test("the Claude Code sign-in is marked as the install's question marks it, recommended with a Claude subscription; the API key stays the default", async () => {
+  const status = { how: '', describe: 'not chosen yet', problem: null, key_saved: false, wif_file: '', consent_text: '' }
+  vi.stubGlobal('fetch', async () => new Response(JSON.stringify(status), { status: 200, headers: { 'content-type': 'application/json' } }))
+  const el = await mount(<ClaudeAccessDialog first onClose={() => undefined} />)
+  const label = (how: string) => el.querySelector(`[data-how="${how}"] .access-choice-label`)?.textContent
+  expect(label('claude-code')).toBe('Claude Code sign-in (recommended if you have a Claude subscription)')
+  expect(label('api-key')).toBe('Anthropic API key')
+  expect(label('wif')).toBe('Workload Identity Federation')
+  expect((el.querySelector('[data-how="api-key"] input') as HTMLInputElement).checked).toBe(true)
+})
