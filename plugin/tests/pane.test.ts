@@ -245,6 +245,31 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   setOptions({})
 })
 
+test('in the settings, the Checker row shows while a checker can run: in every mode of Citations but off, where ↑ and ↓ pass over it', async () => {
+  const s = setup()
+  const held: Record<string, unknown> = { citations: 'off' }
+  s.$.config = { list: async () => Object.entries(held).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })), set: async () => ({}) }
+  s.$.ui.focus = async () => ({})
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const rows = async () => nodes(await draw(s)).map(n => n.props?.key).filter((k: Any) => typeof k === 'string' && k.startsWith('sw-'))
+  // Citations off: no citation is checked, so no Checker row; a step down from Citations lands on Cards
+  expect((await rows()).slice(0, 3)).toEqual(['sw-minimal', 'sw-citations', 'sw-cards'])
+  await s.$.state.set({ plugin: 'thimble', key: 'settingsRow' }, 'citations')
+  await draw(s)
+  expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('cards')
+  // the Checker row picked before Citations went off: the tint stands on Citations, the row it belongs to
+  await s.$.state.set({ plugin: 'thimble', key: 'settingsRow' }, 'checkerModel')
+  const tinted = nodes(await draw(s)).filter(n => String(n.props?.key).startsWith('sw-') && n.props?.backgroundColor)
+  expect(tinted.map(n => n.props.key)).toEqual(['sw-citations'])
+  // every other mode checks citations (manual: the words c cites), so the row shows, after Citations
+  for (const mode of ['auto cite + verify', 'auto cite', 'manual']) {
+    held.citations = mode
+    expect((await rows()).slice(0, 3)).toEqual(['sw-minimal', 'sw-citations', 'sw-checkerModel'])
+  }
+  setOptions({})
+})
+
 test('a pane a key could not open in a narrow window: the notice offers the click that opens it here; the panes that lay out by their rows ask for them', async () => {
   const s = setup()
   s.$.ui.open = async (a: Any) => { s.opens.push(a); return { isPlaced: false, reason: 'unasked below 144 columns (118 now): placed when the person opens it, or when the terminal is widened to 144 columns' } }

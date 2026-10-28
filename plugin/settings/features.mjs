@@ -20,7 +20,9 @@ const MINIMAL_SAYS = 'No background tokens. Cards are enabled, while explainers,
  *  and off, its default one of them. `lenses`: the lenses of the observer's look it needs (observer/lenses.mjs): the
  *  look runs while one such feature is on. `lensesIn`: the mode in which they join the look after each reply (Claims:
  *  `auto`; in `on demand`, a look of their own runs when the person asks). `says`: what each mode
- *  gives (`on` and `off` for a switch), which the settings pane shows under the row for the one set. */
+ *  gives (`on` and `off` for a switch), which the settings pane shows under the row for the one set. `under`: the
+ *  feature whose work this setting changes (Checker: the checks of Citations); the pane shows its row only while that
+ *  feature is on. */
 export const SWITCHES = [
   {
     key: 'minimal', title: 'Minimal', default: false,
@@ -38,7 +40,7 @@ export const SWITCHES = [
     },
   },
   {
-    key: 'checkerModel', title: 'Checker', group: 'Answers', default: 'same as Claude', choices: ['same as Claude', 'haiku', 'sonnet', 'opus'],
+    key: 'checkerModel', title: 'Checker', group: 'Answers', under: 'citations', default: 'same as Claude', choices: ['same as Claude', 'haiku', 'sonnet', 'opus'],
     does: 'The model of the second Claude that checks citations. same as Claude: the model of the conversation. haiku, sonnet or opus: that model, which reads the conversation without the cache of the conversation\'s model.',
     says: {
       'same as Claude': 'The second Claude checks citations on the model of the conversation.',

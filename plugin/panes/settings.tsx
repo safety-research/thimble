@@ -5,7 +5,9 @@
 // set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). Minimal reads
 // `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); turning it on sets the rows
 // it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
-// tinted across the pane, with no mark of its own (a `›` there read as a row that opens).
+// tinted across the pane, with no mark of its own (a `›` there read as a row that opens). A setting that changes the
+// work of another feature (`under`: Checker, the checks of Citations) shows only while that feature is on, as nothing
+// it sets runs otherwise; ↑ and ↓ pass over it then.
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
@@ -23,7 +25,7 @@ import { heldValues, settingsAction } from '../settings/term'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Engine = EngineInterface
-type Switch = { key: string; title: string; group?: string; choices?: string[]; says?: Record<string, string> }
+type Switch = { key: string; title: string; group?: string; under?: string; choices?: string[]; says?: Record<string, string> }
 
 /** The row picked, kept across the plugin's loads (each change loads it again). */
 const PICKED = { plugin: 'thimble', key: 'settingsRow' } as const
@@ -51,9 +53,16 @@ function parseKey(key: string | undefined): { s: Switch; c: string | null } | nu
   return null
 }
 
-async function pickedNow($: Engine): Promise<string> {
+/** The rows shown with these values: a setting `under` a feature that is off is not. */
+const shownRows = (values: Record<string, unknown>) => ROWS.filter(s => !s.under || switchesFrom(values)(s.under))
+
+/** The row picked, of the rows shown: one picked that does not show now stands for the feature it is under. */
+async function pickedNow($: Engine, rows?: Switch[]): Promise<string> {
+  const shown = rows ?? shownRows(await heldValues($))
   const k = (await $.state.get(PICKED)).value as string | undefined
-  return ROWS.some(s => s.key === k) ? k! : ROWS[0]!.key
+  if (shown.some(s => s.key === k)) return k!
+  const under = ROWS.find(s => s.key === k)?.under
+  return shown.some(s => s.key === under) ? under! : shown[0]!.key
 }
 
 /** Set a choice: on and off are a switch's true and false. */
@@ -97,14 +106,15 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
   const { Box, Button, Text } = els
   const width = Math.max(30, Number(e.props?.bodyColumns) || 60)
   const values = await heldValues($)
-  const picked = await pickedNow($)
-  const at = ROWS.findIndex(s => s.key === picked)
-  arrowsOwn(dir => pick($, ROWS[Math.max(0, Math.min(ROWS.length - 1, at + dir))]!))
+  const shown = shownRows(values)
+  const picked = await pickedNow($, shown)
+  const at = shown.findIndex(s => s.key === picked)
+  arrowsOwn(dir => pick($, shown[Math.max(0, Math.min(shown.length - 1, at + dir))]!))
   const bar = await barRows($, els, width - 4, { on: switchesFrom(values), preview: true })
-  const rows = ROWS.flatMap((s, i) => {
+  const rows = shown.flatMap((s, i) => {
     const set = shownOf(s, values[s.key])
     const here = s.key === picked
-    const head = s.group && ROWS[i - 1]?.group !== s.group
+    const head = s.group && shown[i - 1]?.group !== s.group
       ? [Box({ key: `group-${s.group}`, marginTop: 1, children: [Text({ bold: true, dimColor: true, children: s.group.toUpperCase() })] })]
       : []
     const choices = choicesOf(s).flatMap((c, k) => [
