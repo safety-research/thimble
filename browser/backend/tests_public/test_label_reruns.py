@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -190,7 +191,9 @@ async def test_a_rerun_waits_for_a_run_under_way_and_skips_a_card_it_left_curren
 
 
 async def test_three_verdicts_in_a_row_rerun_each_card_once_after_the_last(kernel, monkeypatch):
-    monkeypatch.setattr(concepts, "VERDICT_RERUN_DELAY_S", 0.3)
+    # the first two verdicts' waits are longer than any test, so none ends before the next verdict however busy the
+    # machine; the last one's ends soon
+    monkeypatch.setattr(concepts, "VERDICT_RERUN_DELAY_S", 600.0)
     cid = await _label("even", r"value \d*[02468]$")
     await _rerun_ends(cid)
     a = await _card(f"count reads {cid}", "Ten records are even.")
@@ -207,16 +210,23 @@ async def test_three_verdicts_in_a_row_rerun_each_card_once_after_the_last(kerne
         real_emit(workspace, cell, **kw)
 
     monkeypatch.setattr(notebook, "_emit", emit)
+    waits = []
     for n in (2, 4, 6):
+        if n == 6:
+            monkeypatch.setattr(concepts, "VERDICT_RERUN_DELAY_S", 0.3)
         concepts.verdict_route(CORPUS, cid, concepts.VerdictBody(ref=f"log.jsonl#L{n}", label="no"))
+        waits.append(concepts._verdict_timers[(CORPUS, cid)])
         await asyncio.sleep(0.1)
-    assert kernel.ran == [] and concepts._reruns[(CORPUS, cid)] is before, "each verdict restarts the wait"
-    for _ in range(100):
-        if concepts._reruns[(CORPUS, cid)] is not before:
-            break
+        if n < 6:
+            assert kernel.ran == [] and concepts._reruns[(CORPUS, cid)] is before, "nothing runs during the burst"
+    assert len(set(map(id, waits))) == 3 and all(w.cancelled() for w in waits[:2]), "each verdict restarts the wait"
+    end = time.monotonic() + 60
+    while concepts._reruns[(CORPUS, cid)] is before:  # until the last verdict's wait ended and the rerun started
+        assert time.monotonic() < end, "the rerun never started"
         await asyncio.sleep(0.02)
     await _rerun_ends(cid)
-    await asyncio.sleep(0.5)
+    # each reader ran once: no wait is left that could start another rerun
+    assert (CORPUS, cid) not in concepts._verdict_timers
     assert sorted(kernel.ran) == sorted([f"count reads {cid}", f"share reads {cid}"]), "each reader ran once, the locked card not"
     rev = concepts._rev_of(config.workspace_dir(CORPUS), cid)
     for card in (a, b):
