@@ -180,7 +180,10 @@ const Card: ClientModule<Any> = (props: Any, surface: ClientSurface) => {
     if (n.t === 'Box') {
       // a row's runs each ask about themselves on that row's line (a bar beside its label and number)
       const row = n.p?.flexDirection !== 'column' && n.p?.flexDirection !== 'column-reverse'
-      return E.Box({ ...pick(n.p, BOX), children: kids(n.c, false, row ? line || wordsOf(n) : '', owned || typeof n.p?.onPress === 'number', path) })
+      // a border the view gives no color of its own is a hairline, dim as the card's own frame at rest
+      const p = pick(n.p, BOX)
+      if (typeof p.borderStyle === 'string' && p.borderColor === undefined && p.borderDimColor === undefined) p.borderDimColor = true
+      return E.Box({ ...p, children: kids(n.c, false, row ? line || wordsOf(n) : '', owned || typeof n.p?.onPress === 'number', path) })
     }
     return null
   }

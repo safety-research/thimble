@@ -938,3 +938,14 @@ test("the Client cuts a drawing at the frame's `cap` rows, and draws it whole wi
   expect((Card as Any)({ tree: TALL, width: 60, cap: 30 }, surface).props).toMatchObject({ height: 30, overflow: 'hidden' })
   expect((Card as Any)({ tree: TALL, width: 60 }, surface).props.height).toBeUndefined()
 })
+
+test("a border the view gives no color of its own draws dim, as the card's frame does; one with a color keeps it", async () => {
+  const el = (type: string) => (p: Any) => ({ type, props: p })
+  const surface: Any = { elements: { Box: el('Box'), Text: el('Text'), Button: el('Button') }, columns: 60, rows: 0, post: () => undefined, onPointer: () => undefined }
+  const boxes = { t: 'Box', p: { flexDirection: 'column' }, c: [
+    { t: 'Box', p: { borderStyle: 'round', paddingX: 1 }, c: [{ t: 'Text', p: {}, c: ['plain'] }] },
+    { t: 'Box', p: { borderStyle: 'single', borderColor: '#80b2ea' }, c: [{ t: 'Text', p: {}, c: ['colored'] }] },
+  ] }
+  const drawn = elements((Card as Any)({ tree: boxes, width: 60 }, surface)).filter(n => n.type === 'Box' && n.props.borderStyle)
+  expect(drawn.map(n => [n.props.borderStyle, n.props.borderDimColor, n.props.borderColor])).toEqual([['round', true, undefined], ['single', undefined, '#80b2ea']])
+})
