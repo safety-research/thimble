@@ -288,12 +288,16 @@ def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
-    """The card kinds say a diagram is for how things branch and connect, and steps in a straight line read better as a
-    timeline; the guidance's example of how something works draws a diagram for steps that branch."""
+    """The guidance answers a question about how something works with its steps in order, one sentence each, and a
+    diagram card when they branch, as the card kinds say a diagram is for how things branch and connect; its example of
+    such a question draws one for steps that branch, not for a straight line of steps."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     kinds = prompts.section("main", "Cards", mode)
     assert "`diagram` for how things branch" in kinds and "Steps in a straight line read better as a timeline" in kinds
-    _, turns = _what_to_make(mode)
+    para, turns = _what_to_make(mode)
+    how_works = next(s for s in para.split(". ") if "how something works" in s)
+    assert "order of its steps" in how_works and "in order in the chat, one sentence each" in how_works
+    assert "a diagram card when they branch" in how_works
     how = next(t for t in turns if "how does" in t[0].lower())
     diagram = next(line for line in how if "diagram" in line)
     assert "branch" in diagram or "join" in diagram
@@ -301,13 +305,17 @@ def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_keeps_the_short_reply_for_a_casual_question(mode, monkeypatch):
-    """The guidance answers a casual question, such as what a folder holds, in a few sentences in the chat, and not a
-    broad question: a broad question about the data, such as the main ways the runs fail, asks for analysis, whose work
-    goes in cards."""
+    """The guidance says why a casual question, such as what a folder holds, gets two to four sentences in the chat:
+    it comes before any analysis, so that the analyst can choose what to ask next. Not a broad question: a broad
+    question about the data, such as the main ways the runs fail, asks for analysis, whose work goes in cards."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     para, _ = _what_to_make(mode)
-    casual = next(s for s in para.split(". ") if "casual question" in s)
-    assert "folder" in casual and "few plain sentences in the chat" in casual
+    sentences = para.split(". ")
+    i = next(i for i, s in enumerate(sentences) if "casual question" in s)
+    assert "folder" in sentences[i] and "before any analysis" in sentences[i] and "what to ask next" in sentences[i]
+    short = sentences[i + 1]
+    assert "two to four plain sentences in the chat" in short and "without a list or a card" in short
+    assert "one thing that stands out" in short
     assert "broad" not in para
 
 
@@ -357,8 +365,8 @@ def test_main_names_a_group_only_for_a_sequence_of_cards(mode, monkeypatch):
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     group = tools.tool_sections(["add_card"])["add_card"][1]["properties"]["group"]["description"]
     assert "sequence of cards" in group and "single card" in group
-    blocks = [*_examples(prompts.section("main", "What to make", mode)), *_examples(prompts.section("main", "Cards", mode)),
-              *_examples(prompts.load("card-types", mode))]
+    blocks = [*_examples(prompts.section("main", "What to make", mode)),
+              *_examples(prompts.section("main", "Cards", mode)), *_examples(prompts.load("card-types", mode))]
     counts = _grouped(blocks)
     assert counts and min(counts) >= 2, counts
     own = [ln for b in _examples(prompts.section("main", "What to make", mode)) for ln in b if ln.startswith("group")]
