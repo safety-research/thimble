@@ -1122,3 +1122,13 @@ test('an answer that shows no marks: the bar names no ]', CITES, async ($, on) =
   expect(all(band).some(n => n.props?.key === 'bar-tray-next')).toBe(false)
   expect(textOf(band)).not.toContain('] next')
 })
+
+test("the pointer over a heads-up's or an explainer's words underlines them, over their stronger fill, as thimble's other presses are underlined under it", CITES, async ($, on) => {
+  await resumed($, on, QUOTED, 's-tray-hover', { parts: HEADS })
+  const drawn = all(await $.ui.render(answer('row-t1', TEXT)))
+  for (const label of ['heads up 12 of 40', 'explain p95']) {
+    const press = drawn.find(n => n.type === 'Button' && String(n.props?.label).startsWith(label))
+    expect(press?.hover ?? press?.props?.hover).toMatchObject({ inverse: false, underline: true })
+    expect((press?.hover ?? press?.props?.hover)?.backgroundColor).toBeTruthy()
+  }
+})
