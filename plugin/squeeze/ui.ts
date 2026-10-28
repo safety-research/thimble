@@ -424,8 +424,8 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
 
 /** The chips' keys and lines on the bar while they are open; at rest, s: `s rewrite`, the same words whether the
  *  answer shows its original or a squeezed version (the chips name the levels), and `b catch up on N replies` while
- *  replies piled up since the person's last prompt. While main's turn runs, s waits for the answer it writes, and once
- *  it waits the bar says `rewrite opens when the answer finishes`. */
+ *  replies piled up since the person's last prompt. While main's turn runs, s waits for the answer it writes: while it
+ *  waits, `s rewrite` is lit (its words in thimble's color), and a press ends the wait, as s again does. */
 export async function barItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const squeezing = on('squeezeAnswers')
   if (preview) return [...(squeezing ? [{ id: 'squeeze', key: 's', words: 'rewrite' }] : []), ...(on('catchUp') ? [{ id: 'catchup', key: CATCH_UP_KEY, words: 'catch up' }] : [])]
@@ -433,16 +433,15 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const rec = open ? await recOf($, open.id) : null
   if (open && rec) return openItems($, open, rec)
   const row = await latestAnswer($)
-  // while main's turn runs, s waits for the answer it writes, and the bar says so once it waits
+  // while main's turn runs, s waits for the answer it writes, lit while it waits
   const turn = squeezing ? await mainTurn($) : ''
   if (!row && !turn) return []
   const id = row && (await catchUpOn($, row)) ? cuId(row) : row
   const pile = row ? await pileUp($, on) : null
+  const wait = turn ? await waitNow($) : null
   const s: BarItem = !turn
     ? { id: 'squeeze', key: 's', words: 'rewrite', press: () => openTake($, id!).now!() }
-    : (await waitNow($))
-      ? { id: 'squeeze', words: 'rewrite opens when the answer finishes' }
-      : { id: 'squeeze', key: 's', words: 'rewrite', press: () => waitTake($, { turn }, null).now!() }
+    : { id: 'squeeze', key: 's', words: 'rewrite', ...(wait ? { color: accent() } : {}), press: () => waitTake($, wait ? null : { turn }, wait).now!() }
   return [
     ...(squeezing ? [s] : []),
     ...(pile ? [{ id: 'catchup', key: CATCH_UP_KEY, words: `catch up on ${pile.n} replies`, press: () => catchUpNow($) }] : []),

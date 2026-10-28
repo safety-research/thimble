@@ -6,6 +6,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { cardWidth } from '../cards/draw'
+import { accent } from '../core/theme'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { resetSqueeze } from '../squeeze/term'
@@ -605,23 +606,39 @@ test('s with the tray open closes it and opens the chips with their keys; over o
   expect(word).not.toContain('s close')
 })
 
-test('s while an answer is being written waits for it: the bar says rewrite opens when the answer finishes, and the chips open on that answer, never on the one before', async ($, on) => {
+test('s while an answer is being written waits for it, `s rewrite` lit on the bar while it waits (a press ends the wait, as s again does), and the chips open on that answer, never on the one before', async ($, on) => {
   const t = await setup($, on, [])
   await t.turn('t1', LONG)
+  // the item's words: dim at rest, in thimble's color while s waits
+  const item = async () => {
+    const press = nodes(await $.ui.render(above)).find(n => n.type === 'Button' && n.props?.key === 'bar-squeeze')
+    return { text: textOf(press), words: nodes(press).find(n => n.type === 'Text' && textOf(n) === ' rewrite')?.props }
+  }
   // the next turn runs: its answer is being written
   await t.ask('and the retries?')
   await $.turn.start({ text: 'and the retries?', turnId: 't2' } as never)
-  expect(await t.bar()).toContain('s rewrite')
+  expect(await item()).toMatchObject({ text: 's rewrite', words: { dimColor: true } })
   await t.press('s')
   expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
-  expect(await t.bar()).toContain('rewrite opens when the answer finishes')
+  // waiting: the same key and words, lit; no words say so
+  let waits = await item()
+  expect(waits.text).toBe('s rewrite')
+  expect(waits.words?.color).toBe(accent())
+  expect(waits.words?.dimColor).toBeUndefined()
+  expect(await t.bar()).not.toContain('when the answer finishes')
+  // a press on it ends the wait, as s again does; s waits again
+  const ui = await $.ui.mount(above)
+  await ui.press({ key: 'bar-squeeze' })
+  await ui.unmount()
+  expect((await item()).words).toMatchObject({ dimColor: true })
+  await t.press('s')
+  waits = await item()
+  expect(waits.words?.color).toBe(accent())
   // the answer finishes: the chips open on it
   const two = 'The retries passed on the second try.'
   await t.say('row-t2', two)
   await $.turn.complete({ turnId: 't2', reason: 'answer', answer: two, durationMs: 10, isAborted: false } as never)
   expect((await chipsDrawn($, 'row-t2', two)).client).toBeTruthy()
   expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
-  const bar = await t.bar()
-  expect(bar).toContain('s close')
-  expect(bar).not.toContain('when the answer finishes')
+  expect(await t.bar()).toContain('s close')
 })
