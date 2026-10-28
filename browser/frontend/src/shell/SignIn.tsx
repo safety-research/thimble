@@ -3,7 +3,7 @@
 // server answers its reads all the same (lib/api signedIn: a page thimble's screenshot tool loads with a read
 // credential of its own). Every read of the server's data needs one of them (backend hook_auth), so a browser that is
 // not signed in sees one line that says so and names the way in, and neither the start page nor the shell mounts, so nothing polls. A read refused later for want of sign-in
-// (`thimble unpair`, a sign-in notice's Sign it out: bus `signedOut`) brings the line back. A link opened in this tab
+// (a sign-in notice's Sign it out: bus `signedOut`) brings the line back. A link opened in this tab
 // (bus `newLink`), or the tab shown again while it shows the line, checks once more. Nothing shows while the first check
 // is under way; when the server does not answer it, the app mounts and says so itself.
 import { useEffect, useRef, useState, type ReactNode } from 'react'

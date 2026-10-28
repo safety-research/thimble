@@ -236,16 +236,32 @@ def test_a_new_sign_in_shows_a_notice_in_the_named_and_the_attached_workspace_an
     for c in ("other", CORPUS):
         [n] = [n for n in notices.open_notices(c) if n["key"] == f"sign-in:{browser}"]
         assert n["kind"] == "sign-in" and n["action"] == {"label": "Sign it out", "do": "sign-out", "slug": browser}
-        assert re.fullmatch(r"A browser signed in to thimble at \d\d:\d\d\. If it was not you, click Sign it out, or "
-                            r"run `thimble unpair` in a shell to sign out every browser\.", n["text"]), n["text"]
+        assert re.fullmatch(r"A browser signed in to thimble at \d\d:\d\d\. If it was not you, click Sign it out\.",
+                            n["text"]), n["text"]
     line = (hook_auth.home() / "links" / SID).read_text()
-    assert re.fullmatch(r"\nthimble: a browser signed in to thimble at \d\d:\d\d\. If it was not you, run "
-                        r"`thimble unpair` in a shell\.", line), line
+    assert re.fullmatch(r"\nthimble: a browser signed in to thimble at \d\d:\d\d\. If it was not you, click Sign it out "
+                        r"on its notice in thimble's page\.", line), line
     assert not (hook_auth.home() / "links" / "other").exists()
     another = TestClient(client.app, base_url="http://testserver")
     r = another.post("/api/ui/key", json={"code": hook_auth.mint(), "ws": "no-such-workspace"})
     assert r.status_code == 200, "a link of no registered workspace still signs in, and tells the attached main"
     assert line != (hook_auth.home() / "links" / SID).read_text()
+
+
+def test_the_sign_in_texts_name_only_commands_this_version_has():
+    """The sign-in notice, its line in main's terminal and the line in place of the link name none of 0.8's commands
+    (`thimble up`, `thimble unpair`): a command they name is one thimble-browser --help lists (--link prints a new
+    sign-in link), and a browser is signed out with Sign it out on its sign-in notice."""
+    from pathlib import Path
+
+    from app import cli
+
+    usage = "\n".join((Path(__file__).resolve().parents[2] / "scripts" / "thimble-browser").read_text().splitlines()[1:22])
+    for text in (main.SIGNED_IN_NOTICE, main.SIGNED_IN_LINE, cli.LINK_LINE):
+        for command in re.findall(r"`([^`]+)`", text):
+            assert command.startswith("thimble-browser") and command in usage, (command, text)
+    assert "`thimble-browser --link`" in cli.LINK_LINE
+    assert "click Sign it out" in main.SIGNED_IN_NOTICE and "click Sign it out" in main.SIGNED_IN_LINE
 
 
 @pytest.mark.real_read_guard

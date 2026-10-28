@@ -429,9 +429,9 @@ async def _startup() -> None:
 
 
 # what a new sign-in of a browser shows (signed_in), in each workspace whose main may act for it, at {at} (HH:MM)
-SIGNED_IN_NOTICE = ("A browser signed in to thimble at {at}. If it was not you, click Sign it out, or run `thimble unpair`"
-                    " in a shell to sign out every browser.")
-SIGNED_IN_LINE = "thimble: a browser signed in to thimble at {at}. If it was not you, run `thimble unpair` in a shell."
+SIGNED_IN_NOTICE = "A browser signed in to thimble at {at}. If it was not you, click Sign it out."
+SIGNED_IN_LINE = ("thimble: a browser signed in to thimble at {at}. If it was not you, click Sign it out on its notice in "
+                  "thimble's page.")
 
 
 def signed_in(ws: object, browser: str) -> None:
