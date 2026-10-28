@@ -195,7 +195,7 @@ def test_thimble_port_taken_gets_todays_answer_and_without_it_the_port_is_passed
         out = capsys.readouterr().out
         assert server.ports == [p], "THIMBLE_PORT alone"
         assert f"thimble: no server answers: {p} is taken by another program" in out and foreign not in out
-        assert "start thimble on a free port with THIMBLE_PORT=<port> thimble" in out
+        assert "start thimble-browser on a free port with `thimble-browser --port <port>`" in out
     finally:
         held.close()
 

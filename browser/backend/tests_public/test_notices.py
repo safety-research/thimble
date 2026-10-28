@@ -173,8 +173,9 @@ def test_each_fix_says_where_it_runs():
         "main's model (a side thread's fork's) changes only with Claude Code's /model"
     words, action = notices.reason("x", cls="auth", server=True)
     assert words == ("Claude Code isn't signed in for thimble's server. In your terminal: run /login (or `claude auth "
-                     "login` in a shell), or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), run "
-                     "`thimble server restart`") and action is None
+                     "login` in a shell), or if you changed your sign-in (for example exported ANTHROPIC_API_KEY), "
+                     "restart the server: press Ctrl-C in the terminal that runs thimble-browser, then run "
+                     "`thimble-browser --continue`") and action is None
 
 
 def test_a_long_reason_keeps_its_first_sentence_and_its_fix():
@@ -185,7 +186,7 @@ def test_a_long_reason_keeps_its_first_sentence_and_its_fix():
     words, _ = notices.reason(plan)
     assert words.startswith("Your Claude Code session is in plan mode") and " … " in words
     assert words.endswith("Switch out of plan mode first (shift+tab in your terminal)")
-    assert notices.reason("Not logged in", server=True)[0].endswith("run `thimble server restart`")
+    assert notices.reason("Not logged in", server=True)[0].endswith("run `thimble-browser --continue`")
 
 
 def test_a_long_reason_cut_short_ends_on_a_whole_sentence():

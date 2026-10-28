@@ -90,8 +90,7 @@ def manual_hint(claude_mode: str | None) -> str:
 MANUAL_LINE = ("thimble: Claude Code is in Manual mode, so it asks you before most commands that main or thimble's "
                "agents run.")
 MANUAL_LINES = {
-    "switch": f"{MANUAL_LINE} For fewer prompts, press shift+tab to switch to auto mode, or start with "
-              "`thimble --permission-mode auto`.",
+    "switch": f"{MANUAL_LINE} For fewer prompts, press shift+tab to switch to auto mode.",
     "org": f"{MANUAL_LINE} Your organization turned auto mode off.",
     "settings": f"{MANUAL_LINE} Your Claude Code settings turn auto mode off (disableAutoMode).",
 }
@@ -109,8 +108,7 @@ def manual_line(claude_mode: str | None) -> str:
 MANUAL_NOTICE = ("Manual mode: Claude Code asks before most commands, and thimble's agents wait in your terminal until you "
                  "answer there.")
 MANUAL_NOTICES = {
-    "switch": f"{MANUAL_NOTICE} In your terminal, press shift+tab for auto mode, or start with "
-              "`thimble --permission-mode auto`.",
+    "switch": f"{MANUAL_NOTICE} In your terminal, press shift+tab for auto mode.",
     "org": f"{MANUAL_NOTICE} Your organization turned auto mode off.",
     "settings": f"{MANUAL_NOTICE} Your Claude Code settings turn auto mode off (disableAutoMode).",
 }

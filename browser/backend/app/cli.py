@@ -110,8 +110,8 @@ FIX_INSTRUCTION = "File a `file_dev_ticket` titled 'fix: …' describing what br
 # can do: a release install has no dev agent to repair it and no applied change to take back (dev.RELEASE_LINE)
 DEV_ONLY_LINES = {
     "fix": ("thimble fix changes thimble's own code, which only a development install (a git clone of thimble) can do, "
-            "and this is a release install. `thimble doctor` says what is wrong, and `thimble feedback` writes a problem "
-            "report to send the developer."),
+            "and this is a release install. Report a problem, in thimble's page, writes a problem report to send the "
+            "developer."),
     "revert": ("thimble revert takes back a change thimble's dev agent made to thimble's own code, which happens only in a "
                "development install (a git clone of thimble). This is a release install, so there is nothing to revert."),
 }
@@ -121,17 +121,18 @@ SOURCE_CHANGED = "source changed"  # restart.json's title; dev.PLAIN_REASONS
 RESTARTED_LINE = "thimble: server restarted (source changed)"
 NOT_RESTARTED_LINE = "thimble: source changed since the server started; not restarting while {reason}"
 REGISTER_FAILED_LINE = "thimble: could not open {path} as a workspace (the server refused to register it); see {log} and say `/thimble` again."
-NO_UI_LINE = ("thimble: the dashboard is not built yet, so its link shows no page; run `thimble doctor --verbose` in a "
-              "shell for the fix.")
+NO_UI_LINE = ("thimble: the dashboard is not built yet, so its link shows no page; press Ctrl-C, then run "
+              "`thimble-browser` again, which builds it first.")
 NO_AUTH_LINE = "thimble: WARNING - {problem}. Nothing that calls a model runs until then."
 FEEDBACK = "feedback"  # /thimble feedback: the problem report (feedback.py)
 # where the server did not start: how to send the developer a problem report, which needs no server
-REPORT_LINE = ("thimble: to report it, say `/thimble feedback` or run `thimble feedback \"the server did not start\"` in a "
-               "shell; either writes a zip with the logs to send the developer.")
+REPORT_LINE = ("thimble: to report it, click Report a problem in thimble's page once it opens; it writes a zip with the "
+               "logs to send the developer.")
 # a server of this install that runs, holding its port, but does not answer (out of file descriptors, or its loop held)
-STUCK_LINE = "thimble's server (pid {pid}) is running but does not answer; restart it with `thimble server restart`"
+STUCK_LINE = f"thimble's server (pid {{pid}}) is running but does not answer; to restart it, {config.RESTART_HOW}"
 STUCK_AFTER_S = 60.0  # a server server.json says started less long ago may still be starting, so is not called stuck
-UNINSTALL_SHELL_LINE = "thimble: uninstall is a shell command, not a /thimble action. Run `thimble uninstall` in a terminal; it says what it will remove and asks first."
+UNINSTALL_SHELL_LINE = ("thimble: uninstall is not a /thimble action. To remove the browser workbench, delete "
+                        "~/.local/bin/thimble-browser and the checkout (INSTALL.md, \"Update and uninstall\").")
 # What /thimble prints where the plugin's hooks are off, so that thimble connects through main's Monitor
 # (cc_plugin.route): on that route permission prompts stay in the terminal, and after /clear the Monitor is gone, so the
 # note asks for /thimble again.
@@ -206,10 +207,9 @@ ACTIVE_KEY_MAX = 200  # a marker's name longer than this is not written; the wat
 # /thimble in a session the launcher started in terminal mode starts nothing: the renderer opens the home panel, and the
 # skill's command prints this hint of prompts/tools.md (TERMINAL_HOME_LINE when the file has none), which main repeats
 TERMINAL_HOME_HINT = "thimble-terminal-home"
-TERMINAL_HOME_LINE = ("thimble: terminal mode. For the browser workspace, quit, run `thimble mode browser`, and start "
-                      "`thimble` again.")
-TERMINAL_ACTION_LINE = ("thimble: `/thimble {action}` works only in browser mode. For the browser workspace, quit, run "
-                        "`thimble mode browser`, and start `thimble` again.")
+TERMINAL_HOME_LINE = "thimble: terminal mode. For the browser workspace, quit and run `thimble-browser` in this folder."
+TERMINAL_ACTION_LINE = ("thimble: `/thimble {action}` works only in browser mode. For the browser workspace, quit and run "
+                        "`thimble-browser` in this folder.")
 HOOK_RESULT_S = 60.0  # a result older than this is not the one the hook left for this /thimble
 MANUAL_RESTART = "manual restart"  # dev.PLAIN_REASONS
 # what `restart` says before it asks (running_work, module note)
@@ -1440,10 +1440,10 @@ PAIR_TIMEOUT_S = 3.0
 PAIRED_FILE = "paired.json"  # in <home>: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
 NO_CODE_LINE = ("thimble: the server gave no sign-in code, so this link opens thimble read-only in a browser that is "
                 "not signed in yet; see {log}.")
-UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. To sign one in again, open the link /thimble shows, "
-                 "or run `thimble up` in a shell.")
+UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. To sign one in again, open the link "
+                 "`thimble-browser --link` prints.")
 UNPAIR_FAILED_LINE = ("thimble: the server did not sign the browsers out ({why}), so they stay signed in until it "
-                      "restarts. In a shell: thimble server restart")
+                      f"restarts. To restart it, {config.RESTART_HOW}.")
 
 
 def pair_code(api: str, name: str | None) -> str:
@@ -2054,8 +2054,7 @@ RENDERER_NAME = "thimble-term"
 CARD_RUNNER = "bin/thimble-run"  # under the plugin copy: runs a card's code in the caller's Bash (`thimble-run card <cell>`)
 RUNNER_NAME = "thimble-run"  # the card runner by its name on the session's PATH, as the tools give its command
 NO_RENDERER_LINE = ("thimble: WARNING - terminal mode's renderer cannot load ({why}), so thimble's cards, citations and "
-                    "agents are not drawn in the terminal; `thimble doctor` says more. `thimble mode browser` opens the "
-                    "browser workspace instead.")
+                    "agents are not drawn in the terminal. `thimble-browser` opens the browser workspace instead.")
 OPEN_ELSEWHERE_LINE = "thimble: This workspace is open in {mode} mode in another terminal. Quit that session first."
 LAUNCH_REFUSED_EXIT = 3  # launch-args' exit when the launch is refused (open_elsewhere); the launcher prints nothing more
 # exported into main's environment: no "Move to background" and no ← agent view, the ↓ tray kept, since moving a thimble
@@ -3140,8 +3139,7 @@ TOO_OLD_LINE = ("thimble: WARNING - Claude Code {version} does not load plugin m
 OLDER_LINE = ("thimble: WARNING - Claude Code {version} is older than {tested}, the version thimble is tested with; if "
               "something fails, run `claude update` and start thimble again.")
 NEWER_LINE = ("thimble: Claude Code {version} is newer than {tested}, the version {thimble} was tested with. If agents do "
-              "not start or their chats stop updating, run `thimble doctor` and report it.")
-NEWER_DOCTOR_TAIL = ("run `thimble doctor` and report it.", "report it (`thimble feedback`).")  # the doctor's own words
+              "not start or their chats stop updating, report it with Report a problem in thimble's page.")
 
 
 def _thimble_named() -> str:
@@ -3206,7 +3204,7 @@ def claude_code_line(commands: bool = True) -> str:
     if not warning:
         return f"{v} (thimble is tested with {TESTED_CLAUDE_CODE})"
     if commands:
-        return warning.removeprefix("thimble: WARNING - ").removeprefix("thimble: ").replace(*NEWER_DOCTOR_TAIL)
+        return warning.removeprefix("thimble: WARNING - ").removeprefix("thimble: ")
     if case == TOO_OLD:
         return (f"{v}, older than {MODS_CLAUDE_CODE}, the first version that loads plugin mods by default, so thimble's "
                 "agents cannot start")
@@ -3319,6 +3317,12 @@ def disk_line(paths: list[Path]) -> str:
     return "; ".join(seen.values()) or "unknown"
 
 
+PORT_STUCK_LINE = (f"{{p}} is held by thimble's server (pid {{pid}}), which does not answer; to restart it, "
+                   f"{config.RESTART_HOW}")
+PORT_TAKEN_LINE = ("{p} is taken by another program ({who}) and thimble cannot start there; stop that program, or start "
+                   "thimble-browser on a free port with `thimble-browser --port <port>`")
+
+
 def port_line(p: int, up: bool) -> str:
     """Who holds the server's port: thimble, nobody, or another program, named, with the way around it."""
     if up:
@@ -3327,10 +3331,9 @@ def port_line(p: int, up: bool) -> str:
         return f"{p} (free)"
     holder = procs.listener(p)
     if holder and is_server(holder, p):
-        return f"{p} is held by thimble's server (pid {holder}), which does not answer; restart it with `thimble server restart`"
+        return PORT_STUCK_LINE.format(p=p, pid=holder)
     who = f"pid {holder}: {procs.cmdline(holder)[:80]}" if holder else "a process this user cannot see"
-    return (f"{p} is taken by another program ({who}) and thimble cannot start there; stop that program, or start "
-            "thimble on a free port with THIMBLE_PORT=<port> thimble")
+    return PORT_TAKEN_LINE.format(p=p, who=who)
 
 
 def delivery_line(cwd: Path) -> str:
@@ -3469,7 +3472,7 @@ def doctor_text(commands: bool = True) -> str:
     lines.append(f"  python: {_checked(python_line)}")
     port_text = _checked(port_line, p, up)
     lines.append(f"  port: {port_text}")
-    stuck = None if up or "thimble server restart" in port_text else _checked(stuck_server, url)
+    stuck = None if up or config.RESTART_HOW in port_text else _checked(stuck_server, url)
     lines.append(f"  server: {'up' if up else 'down'} at {url}; pid {pid or '-'} "
                  f"({'alive' if pid_alive(pid) else 'gone'}); started {st.get('started') or '-'}"
                  + (f"; stopped {st['stopped']}" if st.get("stopped") else "")

@@ -953,9 +953,7 @@ NO_SANDBOX_WHY = {
     "never": ('thimble\'s config turns it off (sandbox.use "never")',
               "To run the agents without it, set sandbox.enforce to false in thimble's config as well."),
     "env": ("THIMBLE_SANDBOX=0 turns it off", "Unset THIMBLE_SANDBOX and restart thimble to use it."),
-    "missing": ("it can't run on this machine",
-                "`thimble doctor --verbose` names the commands that install what it needs, which the analyst runs in "
-                "their own terminal."),
+    "missing": ("it can't run on this machine", ""),
 }
 
 

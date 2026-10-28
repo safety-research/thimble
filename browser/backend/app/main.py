@@ -30,6 +30,9 @@ from .http_guard import OriginCheck, SecurityHeaders, dev_origins
 # every line of thimble's own loggers carries a wall-clock stamp, so the server log can be read against the other logs
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("thimble")
+# the server log's line while the server cannot accept connections (the loop's exception handler, below)
+NO_ACCEPT_LOG = ("the server cannot accept connections: %s (tries that failed since the last such line: %d); to "
+                 f"restart it, {config.RESTART_HOW}")
 
 
 def stamp_uvicorn_logs() -> None:
@@ -94,8 +97,7 @@ def quiet_accept_errors(loop: asyncio.AbstractEventLoop, every: float = ACCEPT_L
         now = time.monotonic()
         if now - state["at"] < every:
             return
-        log.error("the server cannot accept connections: %s (tries that failed since the last such line: %d); restart "
-                  "it with `thimble server restart`", context.get("exception"), state["n"])
+        log.error(NO_ACCEPT_LOG, context.get("exception"), state["n"])
         state["at"], state["n"] = now, 0
 
     loop.set_exception_handler(handler)
