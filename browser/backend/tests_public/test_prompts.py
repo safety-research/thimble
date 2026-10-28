@@ -351,7 +351,9 @@ def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
 def test_main_keeps_the_runs_that_lead_to_an_answer_in_the_shell(mode, monkeypatch):
     """The guidance keeps the runs that lead to an answer, such as a first look at the files, in the shell, which shows
     them folded, and puts only what answers on the canvas; main's prompt no longer puts all of its analysis work in
-    cards, which made a first look at the data a card on the canvas."""
+    cards, which made a first look at the data a card on the canvas. The card that answers shows the numbers or records
+    the answer rests on, since the analyst rarely opens the shell's output; without that reason, those numbers moved
+    into longer replies."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     main = prompts.load("main", mode)
     assert "analysis work in cards" not in main and "never sees your shell output" not in main
@@ -359,6 +361,8 @@ def test_main_keeps_the_runs_that_lead_to_an_answer_in_the_shell(mode, monkeypat
     runs = next(s for s in para.split(". ") if "in the shell" in s)
     assert "first look at the files" in runs and "folded" in runs and "Only what answers goes on the canvas" in para
     assert any(line.startswith("shell") for line in turns[0])
+    card = next(s for s in para.split(". ") if "is one card" in s)
+    assert "numbers or records the answer rests on" in card and "rarely opens your shell output" in card
 
 
 def _grouped(blocks: list[list[str]]) -> list[int]:
