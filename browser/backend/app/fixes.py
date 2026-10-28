@@ -373,6 +373,8 @@ def status(every: bool = False) -> dict[str, Any]:
                      "tests": r.get("tests"), "error": r.get("error"), "words": (r.get("words") or [""])[-1],
                      "summary": r.get("summary") or "", "files": len(files), "change": bool(r.get("prev")),
                      "notice": notice_said(r),
+                     # it needs a change to a file no fix may change: another try without new words fails the same way
+                     "blocked": bool(r.get("blocked")),
                      "workspace": conv.c if conv is not None else n.get("workspace"),
                      "agent": conv.agent_id if conv is not None else n.get("agent"),
                      # the row's timer: since this server began the work it shows (a round of a fix made long ago

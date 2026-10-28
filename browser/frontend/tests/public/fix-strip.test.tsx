@@ -4,7 +4,7 @@
 // fixes. How the fix ended is a row of the chat, where it ended: the newest row of a fix asks, when it passed its
 // checks, Use it now (the person's click puts it on), What changed (a few lines, not a diff) and Later. After Use it
 // now: "Reloading thimble…", then the row says what it said, with nothing left to ask (Your fixes offers Undo). A fix
-// that did not pass says why, with Redo. An earlier row of a fix is a quiet line of what it said.
+// that did not pass says why, with Try again. An earlier row of a fix is a quiet line of what it said.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { changedLines, fixActions, fixText, fixWords, pageText, workingText, type FixRow } from '../../src/chat/fix.ts'
@@ -50,10 +50,12 @@ describe('the row and the notice', () => {
     expect(fixText(row())).toBe('Card says how many rows is on')
   })
 
-  test('a ready fix asks; Undo on a fix that is on, Redo on one that did not pass, nothing while it works', () => {
+  test('a ready fix asks; Undo on a fix that is on, Try again on one that did not pass, nothing while it works', () => {
     expect(fixActions(ready())).toEqual(['use', 'what', 'later'])
     expect(fixActions(row())).toEqual(['undo'])
     expect(fixActions(row({ state: 'failed', kind: 'failed' }))).toEqual(['redo'])
+    // one that needs a file no fix may change: another try fails the same way, so none is offered
+    expect(fixActions(row({ state: 'failed', kind: 'failed', blocked: true }))).toEqual([])
     expect(fixActions(row({ state: 'off', kind: 'undone' }))).toEqual([])
     expect(fixActions(row({ phase: 'testing' }))).toEqual([])
   })
@@ -195,13 +197,13 @@ describe('the row and the notice', () => {
     expect(sent).toEqual(['POST /fixes/3/undo'])
   })
 
-  test('a fix that did not pass says why, with Redo', async () => {
+  test('a fix that did not pass says why, with Try again', async () => {
     fixes = [row({ state: 'failed', kind: 'failed', said: '“Card says how many rows” did not pass: its tests failed in the sandbox' })]
     const el = await mount(result(true, '“Card says how many rows” did not pass: its tests failed in the sandbox', 'failed'))
     await settle()
     expect(el.querySelector('.chat-fix-text')?.textContent).toContain('its tests failed in the sandbox')
-    expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Redo'])
-    await click(button(el, 'Redo'))
+    expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Try again'])
+    await click(button(el, 'Try again'))
     expect(sent).toEqual(['POST /ws/mini/fixes/3/redo'])
   })
 
