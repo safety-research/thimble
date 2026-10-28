@@ -224,3 +224,58 @@ def test_the_lens_checks_say_what_the_terminal_lenses_say(check):
     browser = _shared((REPO / "prompts" / "checks" / f"{check}.md").read_text("utf-8"))
     terminal = _shared((REPO.parent / "plugin" / "prompts" / f"{LENS_TEXTS[check]}.md").read_text("utf-8"))
     assert browser and browser == terminal
+
+
+def _examples(text: str) -> list[list[str]]:
+    """The example blocks of a prompt's text: each run of lines indented by four spaces, its lines stripped."""
+    blocks: list[list[str]] = []
+    run: list[str] = []
+    for line in text.splitlines() + [""]:
+        if line.startswith("    ") and line.strip():
+            run.append(line.strip())
+        elif run:
+            blocks.append(run)
+            run = []
+    return blocks
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_takes_a_request_for_a_dashboard_as_a_view(mode, monkeypatch):
+    """Main's prompt says what a view is for, a page the analyst keeps and comes back to, and pairs a request for a
+    dashboard with propose_view and a question about the records with add_card; propose_view's description takes the
+    request in the analyst's own words, such as a dashboard, so main does not answer it with cards."""
+    from app import tools
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    agents = prompts.section("main", "thimble's agents", mode)
+    pairs = [b for b in _examples(agents) if all(line.startswith("Analyst") for line in b)]
+    assert any("dashboard" in line and line.endswith("propose_view") for b in pairs for line in b)
+    assert any(line.endswith("add_card") for b in pairs for line in b)
+    assert "dashboard" in tools.descriptions()["propose_view"]
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
+    """Main's prompt shows a reply sized to its question, each beside a bad reply: a casual question answered in a few
+    sentences without a card, and a question about how something works answered with its steps in order and a diagram
+    card, where the bad reply is a table."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    blocks = _examples(prompts.section("main", "Chat and cards", mode))
+    casual = next(b for b in blocks if b[0].startswith("Analyst") and "folder" in b[0])
+    good = next(line for line in casual if line.startswith("Good"))
+    assert "card:" not in good and good.count(". ") <= 2
+    assert any(line.startswith("Bad") for line in casual)
+    how = next(b for b in blocks if b[0].startswith("Analyst") and "how does" in b[0].lower())
+    assert any(line.startswith("Good") for line in how) and any("diagram" in line for line in how)
+    assert any(line.startswith("Bad") and "table" in line for line in how)
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
+    """Main's prompt says where a fact comes from: what a project does from its code, which shows it now, in main's own
+    words, since the checker finds words copied from a README in the README; and a README or a design note only for
+    what its authors wrote, since it can be out of date."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    section = prompts.section("main", "Citing claims in the chat", mode)
+    para = next(p for p in section.split("\n\n") if "README" in p)
+    assert "out of date" in para and "read its code" in para and "words copied from a README" in para

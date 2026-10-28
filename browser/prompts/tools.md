@@ -233,7 +233,7 @@ Open a card of a card type as its view in Files, as the card's Open as view does
 
 ## propose_view
 
-Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes. Call it only when the analyst asks for a view; thimble shows the analyst view proposals of its own. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
+Propose a view, a page that shows records in a form their files hide, or a viewer for one unusual file type. thimble's dev agent builds it from these fields and reads the files itself. When main proposes one, the result is the exact Agent call that starts its build as a subagent of main, which main then makes. Call it when the analyst asks for a page of the records to keep and come back to, such as a dashboard, whatever they call it. thimble shows the analyst view proposals of its own, so propose no view the analyst did not ask for. Pass a model or an effort only when the analyst names one, so that the build otherwise runs on the dev agent's values in thimble's Settings.
 
 ```json
 {
