@@ -22,17 +22,20 @@
 // ↵ does nothing there: a level shows once it is picked, so a ↵ pressed to pick one keeps them open.
 //
 //   state squeezeOpen: {id, focus, edge, typing, held, hint} | null   the record the chips are open on (term.ts ids)
+//   state squeezeWait: {turn} | null                                   s pressed while main's turn ran: its answer was
+//                                                                      still being written, so the chips open on it when
+//                                                                      the turn ends (answerDone), never on the one before
 //   state squeezeOwn: [words]                                          the chips the person typed this session
 import { update, type EngineInterface } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { hintUsed } from '../bar/hints'
 import { markPressed, spansOver } from '../core/answerview'
-import { latestAnswer, pickAnswer } from '../core/answers'
+import { latestAnswer, pickAnswer, turnOf } from '../core/answers'
 import { openPane } from '../core/pane'
 import { controlWords } from '../core/selection'
 import { accent } from '../core/theme'
-import { mainRuns } from '../core/turn'
+import { mainRuns, mainTurn } from '../core/turn'
 import type { Take } from '../hooks/keys'
 import { marksIn } from '../marks/message.js'
 import { looksByWords } from '../marks/register'
@@ -52,9 +55,12 @@ type Any = any
 export type CardsIn = (text: string, rows: string[], o?: { indent?: number }) => Promise<Record<string, Any>>
 type At = Record<string, number>
 type Open = { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean }
+/** s pressed while main's turn `turn` ran: the chips open on its answer when it ends. */
+type Wait = { turn: string }
 
 const OPEN = { plugin: 'thimble', key: 'squeezeOpen' } as const
 const OWN = { plugin: 'thimble', key: 'squeezeOwn' } as const
+const WAIT = { plugin: 'thimble', key: 'squeezeWait' } as const
 /** What [ and ] do to each chip, in its words: the way down, then the way up. */
 const WAYS: Record<string, [string, string]> = { length: ['shorter', 'longer'], familiarity: ['more novice', 'more expert'] }
 
@@ -66,6 +72,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.string
  *  conversation are not offered. */
 export async function turnChips($: Engine): Promise<void> {
   await writeOpen($, null)
+  await writeWait($, null)
   await $.state.set(OWN, [])
 }
 
@@ -95,6 +102,35 @@ async function setOpen($: Engine, change: Partial<Open> | null): Promise<void> {
   openKept = { open: now }
 }
 
+// The wait, as this module last wrote or read it: a key reads the copy, as it reads the open chips' (keptOpen); the bar
+// and the turn's end read the state.
+let waitKept: { wait: Wait | null } | null = null
+
+async function waitNow($: Engine): Promise<Wait | null> {
+  const wait = ((await $.state.get(WAIT)).value ?? null) as Wait | null
+  waitKept = { wait }
+  return wait
+}
+
+async function keptWait($: Engine): Promise<Wait | null> {
+  return waitKept ? waitKept.wait : waitNow($)
+}
+
+async function writeWait($: Engine, wait: Wait | null): Promise<void> {
+  await $.state.set(WAIT, wait)
+  waitKept = { wait }
+}
+
+/** Main's turn ended: the chips that s asked for while it ran open on its answer (none when it ended with none); the
+ *  wait ends either way. (seam.ts, turn.complete) */
+export async function answerDone($: Engine, turnId: string): Promise<void> {
+  if (!(await waitNow($))) return
+  await writeWait($, null)
+  const row = (await turnOf($, turnId))?.answer
+  if (!row || !featureOn('squeezeAnswers')) return
+  await openChips($, (await catchUpOn($, row)) ? cuId(row) : row)
+}
+
 /** The record the keys act on: the catch-up standing on the newest answer, else that answer. */
 export async function targetNow($: Engine): Promise<string | null> {
   const row = await latestAnswer($)
@@ -111,6 +147,7 @@ export async function openChips($: Engine, id: string, focus = 'length'): Promis
 
 export async function closeChips($: Engine): Promise<void> {
   if (await openNow($)) await setOpen($, null)
+  if (await waitNow($)) await writeWait($, null)
 }
 
 /** The chips take the keys from the tray (an open tray, or a card ] reached), which holds them while it stands over
@@ -126,6 +163,16 @@ function openTake($: Engine, id: string): Take {
   return {
     now: async () => { back = await takeKeys($); await openChips($, id) },
     undo: async () => { await setOpen($, null); await back?.() },
+  }
+}
+
+/** s, or a press on `s rewrite`, while main's turn runs: the chips wait for the answer it writes (`to`; null: s again,
+ *  they no longer wait), the tray giving way as when they open; undone, the wait and the tray stand as they were. */
+function waitTake($: Engine, to: Wait | null, was: Wait | null): Take {
+  let back: (() => Promise<void>) | null = null
+  return {
+    now: async () => { if (to) back = await takeKeys($); await writeWait($, to) },
+    undo: async () => { await writeWait($, was); await back?.() },
   }
 }
 
@@ -297,6 +344,12 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
   }
   if (key === CATCH_UP_KEY) return (await pileUp($)) ? catchUpTake($, null) : null
   if (key !== 's' || !squeezing) return null
+  // main's turn runs: its answer is still being written, so s waits for it (answerDone), never the answer before it
+  const turn = await mainTurn($)
+  if (turn) {
+    const was = await keptWait($)
+    return waitTake($, was ? null : { turn }, was)
+  }
   const row = await latestAnswer($)
   if (!row) return null
   return openTake($, (await catchUpOn($, row)) ? cuId(row) : row)
@@ -371,7 +424,8 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
 
 /** The chips' keys and lines on the bar while they are open; at rest, s: `s rewrite`, the same words whether the
  *  answer shows its original or a squeezed version (the chips name the levels), and `b catch up on N replies` while
- *  replies piled up since the person's last prompt. */
+ *  replies piled up since the person's last prompt. While main's turn runs, s waits for the answer it writes, and once
+ *  it waits the bar says `rewrite opens when the answer finishes`. */
 export async function barItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const squeezing = on('squeezeAnswers')
   if (preview) return [...(squeezing ? [{ id: 'squeeze', key: 's', words: 'rewrite' }] : []), ...(on('catchUp') ? [{ id: 'catchup', key: CATCH_UP_KEY, words: 'catch up' }] : [])]
@@ -379,11 +433,18 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const rec = open ? await recOf($, open.id) : null
   if (open && rec) return openItems($, open, rec)
   const row = await latestAnswer($)
-  if (!row) return []
-  const id = (await catchUpOn($, row)) ? cuId(row) : row
-  const pile = await pileUp($, on)
+  // while main's turn runs, s waits for the answer it writes, and the bar says so once it waits
+  const turn = squeezing ? await mainTurn($) : ''
+  if (!row && !turn) return []
+  const id = row && (await catchUpOn($, row)) ? cuId(row) : row
+  const pile = row ? await pileUp($, on) : null
+  const s: BarItem = !turn
+    ? { id: 'squeeze', key: 's', words: 'rewrite', press: () => openTake($, id!).now!() }
+    : (await waitNow($))
+      ? { id: 'squeeze', words: 'rewrite opens when the answer finishes' }
+      : { id: 'squeeze', key: 's', words: 'rewrite', press: () => waitTake($, { turn }, null).now!() }
   return [
-    ...(squeezing ? [{ id: 'squeeze', key: 's', words: 'rewrite', press: () => openTake($, id).now!() }] : []),
+    ...(squeezing ? [s] : []),
     ...(pile ? [{ id: 'catchup', key: CATCH_UP_KEY, words: `catch up on ${pile.n} replies`, press: () => catchUpNow($) }] : []),
   ]
 }

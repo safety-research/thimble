@@ -603,3 +603,24 @@ test('s with the tray open closes it and opens the chips with their keys; over o
   expect(word).toContain('0 close')
   expect(word).not.toContain('s close')
 })
+
+test('s while an answer is being written waits for it: the bar says rewrite opens when the answer finishes, and the chips open on that answer, never on the one before', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  // the next turn runs: its answer is being written
+  await t.ask('and the retries?')
+  await $.turn.start({ text: 'and the retries?', turnId: 't2' } as never)
+  expect(await t.bar()).toContain('s rewrite')
+  await t.press('s')
+  expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
+  expect(await t.bar()).toContain('rewrite opens when the answer finishes')
+  // the answer finishes: the chips open on it
+  const two = 'The retries passed on the second try.'
+  await t.say('row-t2', two)
+  await $.turn.complete({ turnId: 't2', reason: 'answer', answer: two, durationMs: 10, isAborted: false } as never)
+  expect((await chipsDrawn($, 'row-t2', two)).client).toBeTruthy()
+  expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
+  const bar = await t.bar()
+  expect(bar).toContain('s close')
+  expect(bar).not.toContain('when the answer finishes')
+})
