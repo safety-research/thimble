@@ -382,16 +382,39 @@ async def test_a_prompt_apply_asks_a_batch_cut_off_twice_in_halves_until_only_th
 
 class _RunClock:
     """concepts' time module with monotonic() `ahead` seconds ahead of the real one, which a test moves: a classifier
-    call that takes minutes on the run's clock, which its eta reads (concepts._eta), costs the test none of them."""
+    call that takes minutes on the run's clock, which its eta reads (concepts._eta), costs the test none of them. With
+    `stopped`, monotonic() moves only when the test moves it, so an eta is the same on any machine."""
 
-    def __init__(self) -> None:
+    def __init__(self, stopped: bool = False) -> None:
         self.ahead = 0.0
+        self.at = time.monotonic() if stopped else None
 
     def monotonic(self) -> float:
-        return time.monotonic() + self.ahead
+        return (time.monotonic() if self.at is None else self.at) + self.ahead
 
     def __getattr__(self, name: str):
         return getattr(time, name)
+
+
+class _WaitPolls:
+    """concepts' asyncio module, whose wait() also notes each time wait_apply looks at the run while it goes on (its
+    timed wait on the run's task): `seen_labeled` is set once one of those looks found `labeled` units in the run
+    record. wait_apply decides what it answers right after that wait, before anything else runs."""
+
+    def __init__(self, c: str, labeled: int) -> None:
+        self.c, self.labeled = c, labeled
+        self.seen_labeled = asyncio.Event()
+
+    async def wait(self, fs, *, timeout=None, return_when=asyncio.ALL_COMPLETED):
+        out = await asyncio.wait(fs, timeout=timeout, return_when=return_when)
+        if timeout is not None and any(t is concepts._tasks.get(k) for t in fs for k in list(concepts._tasks)):
+            runs = [r for (c, _k), r in list(concepts._runs.items()) if c == self.c]
+            if any(int(r.get("labeled") or 0) >= self.labeled and r.get("status") not in ("done", "error") for r in runs):
+                self.seen_labeled.set()
+        return out
+
+    def __getattr__(self, name: str):
+        return getattr(asyncio, name)
 
 
 async def test_a_prompt_label_that_will_not_end_within_the_wait_answers_with_its_first_rows(workspaces_tmp, monkeypatch):
@@ -418,7 +441,22 @@ async def test_a_prompt_label_that_will_not_end_within_the_wait_answers_with_its
 
 
 async def test_a_prompt_label_that_will_end_within_the_wait_answers_whole(workspaces_tmp, monkeypatch):
-    s, _took = await _scoped_prompt_label(monkeypatch, in_flight=4, wait_s=60.0)
+    """With APPLY_ENOUGH units labeled but an eta within the wait left, apply_scoped keeps waiting, and answers with the
+    whole run once it ends."""
+    clock, polls = _RunClock(stopped=True), _WaitPolls(CORPUS, labeled=1)
+    monkeypatch.setattr(concepts, "time", clock)
+    monkeypatch.setattr(concepts, "asyncio", polls)
+
+    async def pace(n: int) -> None:
+        # the first call takes a second on the run's clock, so the 7 units left put its eta at 7 s, well within the
+        # wait; the others go on only once wait_apply has looked at the run with that unit labeled, and kept waiting
+        if n == 0:
+            clock.ahead += 1.0
+        else:
+            await polls.seen_labeled.wait()
+
+    s, _took = await _scoped_prompt_label(monkeypatch, in_flight=4, wait_s=60.0, pace=pace)
+    assert polls.seen_labeled.is_set()
     assert not s["partial"] and sum(s["counts"].values()) == 8
 
 
