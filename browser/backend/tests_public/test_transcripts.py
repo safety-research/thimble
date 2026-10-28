@@ -640,9 +640,10 @@ TOOL_CALL = ("Assistant: I will check the parser.\nTool call: python\n```python\
 
 def test_lines_inside_a_tool_call_start_no_turn(chats, monkeypatch):
     """A tool call's code and output (Python's try: and except:, an error message, a header line) start no turn: not in
-    a fenced block, on a page that starts inside one (read back to the turn it is in, at most about LOOKBACK_MAX
-    lines), in the speakers Color by reads, nor in aider's edits; nor do a line of code and an error message outside a
-    block. A block left open (a message cut in its code) ends at the next turn of a speaker the log has."""
+    a fenced block, on a page that starts inside one (read back to the turn it is in, at most LOOKBACK_MAX lines and
+    LOOKBACK_BYTES bytes, else none), in the speakers Color by reads, nor in aider's edits; nor do a line of code and an
+    error message outside a block. A block left open (a message cut in its code) ends at the next turn of a speaker the
+    log has."""
     log = "User: Why does the parser fail?\n" + TOOL_CALL * 3 + "Assistant: The parser module is missing.\nUser: ok\n"
     (chats / "logs" / "agent.txt").write_text(log)
     hint = transcripts.sniff(chats / "logs" / "agent.txt", "logs/agent.txt")
@@ -660,7 +661,9 @@ def test_lines_inside_a_tool_call_start_no_turn(chats, monkeypatch):
     with monkeypatch.context() as m:
         m.setattr(transcripts, "LOOKBACK_LINES", 1)
         m.setattr(transcripts, "LOOKBACK_MAX", 2)
-        assert transcripts._lead_texts(chats / "logs" / "agent.txt", hint, 40) == lines[36:39]
+        assert transcripts._lead_texts(chats / "logs" / "agent.txt", hint, 40) == [], "the turn starts 7 lines back"
+        m.setattr(transcripts, "LOOKBACK_MAX", 7)
+        assert transcripts._lead_texts(chats / "logs" / "agent.txt", hint, 40) == lines[32:39]
     keys = client.get(f"{CHATS}/source/keys", params={"path": "logs/agent.txt"}).json()["keys"]
     assert {v["value"] for v in keys[0]["values"]} == {"User", "Assistant", "Tool call", "Tool result"}
 
@@ -790,6 +793,36 @@ def test_a_fence_before_the_first_turn_that_no_line_closes_hides_no_turns(chats)
         assert got == {"format": "text", "score": transcripts.STRONG, "style": "colon",
                        "speakers": ["assistant", "user"]}, name
         assert [w for _, w in chat_turns(name)] == ["User", "Assistant", "User", "Assistant"], name
+
+
+def test_a_page_deep_in_a_long_turn_reads_back_a_few_mb_at_most(chats, monkeypatch):
+    """A page inside a tool's long output reads back to the turn it is in through at most about LOOKBACK_BYTES bytes
+    of lines, and keeps only the lines from that turn's first line on; when the turn starts further back, it keeps none
+    and reads as if no block were open."""
+    from app import corpus
+
+    log = ("User: a\nAssistant: b\n" * 2 + "User: dump it\nAssistant: Here it is:\n```\n" + ("x" * 1023 + "\n") * 300
+           + "```\nAssistant: done\nUser: ok\n")
+    p = chats / "logs" / "dump.txt"
+    p.write_text(log)
+    hint = transcripts.sniff(p, "logs/dump.txt")
+    assert hint["speakers"] == ["assistant", "user"]
+    read: list[int] = []
+    real = corpus.page_lines
+
+    def page_lines(path, start, end):
+        got = real(path, start, end)
+        read.append(sum(len(raw) + 1 for raw in got[0]))
+        return got
+
+    monkeypatch.setattr(corpus, "page_lines", page_lines)
+    monkeypatch.setattr(transcripts, "LOOKBACK_LINES", 8)
+    monkeypatch.setattr(transcripts, "LOOKBACK_BYTES", 64 * 1024)
+    assert transcripts._lead_texts(p, hint, 300) == [], "the turn starts 294 KB back"
+    assert sum(read) < 2 * 64 * 1024
+    read.clear()
+    assert transcripts._lead_texts(p, hint, 40) == log.split("\n")[5:39], "from line 6, the turn's first line"
+    assert sum(read) < 2 * 64 * 1024
 
 
 def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():

@@ -214,7 +214,8 @@ DISTINCT_STYLES = {"whatsapp", "bracket", "irc", "vtt", "clock-name", "name-cloc
 # of a turn's words (`User: ```python`); backticks with a backtick after them (```a```) are code inside the line
 _FENCE = re.compile(r"[ \t]*(`{3,}|~{3,})(.*)")
 LOOKBACK_LINES = 200  # lines of a text chat log first read back from a page's first line (_lead_texts), twice as many
-LOOKBACK_MAX = 20_000  # each time after, up to about this many lines in all
+LOOKBACK_MAX = 20_000  # each time after, up to this many lines in all
+LOOKBACK_BYTES = 4 * 1024 * 1024  # ... and this many bytes of them
 
 _lock = threading.Lock()
 _SNIFFS: "OrderedDict[str, tuple[tuple[int, int], dict[str, Any] | None]]" = OrderedDict()
@@ -2089,21 +2090,36 @@ def _resets(text: str, hint: dict[str, Any]) -> bool:
 def _lead_texts(path: Path, hint: dict[str, Any], start: int) -> list[str]:
     """The lines before line `start` of a text chat log that what its lines start depends on (a block of code still
     open, aider's kind of line before): from the last one before it that sets that afresh (_resets), else from the
-    file's first line. A page inside a turn longer than LOOKBACK_MAX lines (a tool's long output) reads its lines from
-    there as if no block were open."""
+    file's first line. It reads back a chunk of lines at a time, each chunk sized to the bytes left, through at most
+    LOOKBACK_MAX lines and LOOKBACK_BYTES bytes, and keeps only the lines from that line on: a page further inside a
+    turn (a tool's long output) keeps none and reads its lines as if no block were open."""
     from .corpus import decode_line, page_lines  # noqa: PLC0415 — corpus reads this module
 
-    lead: list[str] = []
+    chunks: list[list[str]] = []  # the lines read back, a chunk at a time, the page's nearest first
+    n = used = 0
     end, size = start - 1, LOOKBACK_LINES
-    while end >= 1 and len(lead) < LOOKBACK_MAX:
+    while end >= 1:
         first = max(1, end - size + 1)
-        lines = [decode_line(raw) for raw in page_lines(path, first, end)[0]]
-        for i in range(len(lines) - 1, -1, -1):
-            if _resets(lines[i], hint):
-                return lines[i:] + lead
-        lead = lines + lead
-        end, size = first - 1, size * 2
-    return lead
+        raws = page_lines(path, first, end)[0]
+        if not raws:
+            break
+        lines: list[str] = []
+        found = False
+        for raw in reversed(raws):
+            n, used = n + 1, used + len(raw) + 1
+            if n > LOOKBACK_MAX or used > LOOKBACK_BYTES:
+                return []
+            lines.append(decode_line(raw))
+            if _resets(lines[-1], hint):
+                found = True
+                break
+        lines.reverse()
+        chunks.append(lines)
+        if found:
+            break
+        end = first - 1
+        size = max(1, min(size * 2, LOOKBACK_MAX - n + 1, (LOOKBACK_BYTES - used) * n // used + 1))
+    return [text for lines in reversed(chunks) for text in lines]
 
 
 def dress(page: dict[str, Any], path: Path, rel: str) -> dict[str, Any]:
