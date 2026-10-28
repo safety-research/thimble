@@ -138,6 +138,22 @@ async def test_a_start_s_limit_holds_while_its_socket_has_no_pipe_to_send_to(tmp
         ctx.term()
 
 
+def test_a_kernel_client_starts_no_thread_whose_stop_could_hold_the_server(tmp_path):
+    """The heartbeat's channel is a thread, and its stop joins it on the event loop: stopped before the thread had
+    begun, as a failed start on a busy machine did, it ran on and the join never returned. The server opens no
+    heartbeat channel (a kernel's liveness is its pid), so a client starts no thread and its close waits for none."""
+    from jupyter_client.connect import write_connection_file
+
+    conn = tmp_path / "k.conn.json"
+    write_connection_file(str(conn), ip="127.0.0.1", key=b"k")
+    before = set(threading.enumerate())
+    kc = notebook._client(conn)
+    try:
+        assert set(threading.enumerate()) - before == set()
+    finally:
+        notebook._close_client(kc)
+
+
 async def test_kernel_cwd_is_the_scratch_mirror_and_writes_never_reach_the_corpus(corpus):
     """The kernel starts in workspaces/<c>/scratch, a symlink mirror of the corpus, so relative
     reads work while every file a cell creates lands in scratch — never in the corpus directory."""

@@ -2421,17 +2421,18 @@ def recorded_kernels(workspace: str) -> list[str | None]:
 # --- start, attach, detach, kill ---
 
 
-CHANNELS = ("_shell_channel", "_iopub_channel", "_stdin_channel", "_hb_channel", "_control_channel")  # AsyncKernelClient's
-HB_SOCKET_WAIT_S = 1.0  # _close_client: the most it waits for a heartbeat thread just started to make its socket
+CHANNELS = ("_shell_channel", "_iopub_channel", "_stdin_channel", "_control_channel")  # the AsyncKernelClient's we open
 
 
 def _client(connection_file: Path) -> AsyncKernelClient:
-    """Channels to the kernel of `connection_file`. A start that fails part way (a server out of file descriptors fails
-    in zmq) closes what it opened before it raises."""
+    """Channels to the kernel of `connection_file`, all but the heartbeat's: a kernel's liveness is its pid
+    (_Kernel.alive). The heartbeat's channel is a thread of its own, whose stop joins it on the event loop; stopped
+    before the thread had begun (a failed start on a busy machine), the thread ran on and the join never returned. A
+    start that fails part way (a server out of file descriptors fails in zmq) closes what it opened before it raises."""
     kc = AsyncKernelClient()
     try:
         kc.load_connection_file(str(connection_file))
-        kc.start_channels()
+        kc.start_channels(hb=False)
     except BaseException:
         _close_client(kc)
         raise
@@ -2439,22 +2440,15 @@ def _client(connection_file: Path) -> AsyncKernelClient:
 
 
 def _close_client(kc: AsyncKernelClient) -> None:
-    """Close the client's channels and the zmq context it made, whatever a failed start left of them. Never raises, and
-    opens nothing: stop_channels makes each channel it closes, so after a partial start it would open sockets (and fail
-    again where the descriptors ran out) before it reached the context."""
+    """Close the client's channels and the zmq context it made, whatever a failed start left of them. Never raises,
+    never waits, and opens nothing: stop_channels makes each channel it closes, so after a partial start it would open
+    sockets (and fail again where the descriptors ran out) before it reached the context."""
     for attr in CHANNELS:
         ch = getattr(kc, attr, None)
         if ch is None:
             continue
         try:
-            if isinstance(ch, threading.Thread) and ch.is_alive():
-                # the heartbeat's thread, joined once it has made its socket: stopped before, the thread fails in zmq
-                deadline = time.monotonic() + HB_SOCKET_WAIT_S
-                while ch.is_alive() and ch.socket is None and time.monotonic() < deadline:
-                    time.sleep(0.005)
-                ch.stop()
-            else:
-                ch.close()
+            ch.close()
         except Exception:  # noqa: BLE001
             log.debug("closing a kernel channel failed", exc_info=True)
     try:
