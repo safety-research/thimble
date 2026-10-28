@@ -5,12 +5,12 @@
 // set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). Minimal reads
 // `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); turning it on sets the rows
 // it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
-// tinted across the pane, with no mark of its own (a `›` there read as a row that opens); its line also says what its
-// mode costs, where it costs anything to say (its `cost`), and the pane keeps that row and its line in view at any
-// height (core/pane.ts keepsInView), as the pick moves with ↑ and ↓. A setting that changes the
-// work of another feature (`under`: Checker, the checks of Citations) shows only while that feature is on, as nothing
-// it sets runs otherwise; ↑ and ↓ pass over it then. One that names first-party model ids (`firstParty`: Checker) shows
-// only where Claude Code reaches Claude through Anthropic's first-party API (settings/term.ts firstPartyApi).
+// tinted across the pane, with no mark of its own (a `›` there read as a row that opens), and the pane keeps that row
+// and its line in view at any height (core/pane.ts keepsInView), as the pick moves with ↑ and ↓. A setting that
+// changes the work of another feature (`under`: Checker, the checks of Citations) shows only while that feature is on,
+// as nothing it sets runs otherwise; ↑ and ↓ pass over it then. One that names first-party model ids (`firstParty`:
+// Checker) shows only where Claude Code reaches Claude through Anthropic's first-party API (settings/term.ts
+// firstPartyApi).
 //
 // ↑ and ↓ pick a row (core/pane.ts arrowsOwn: Claude Code sends them as scrolls), and the focus ring lands on its
 // choice set. ← and → (or tab) move the ring along the row's choices, and the ring landing on one sets it (settingsFocus,
@@ -29,7 +29,7 @@ import { firstPartyApi, heldValues, settingsAction } from '../settings/term'
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Engine = EngineInterface
-type Switch = { key: string; title: string; group?: string; under?: string; firstParty?: boolean; choices?: string[]; says?: Record<string, string>; cost?: Record<string, string> }
+type Switch = { key: string; title: string; group?: string; under?: string; firstParty?: boolean; choices?: string[]; says?: Record<string, string> }
 
 /** The row picked, kept across the plugin's loads (each change loads it again). */
 const PICKED = { plugin: 'thimble', key: 'settingsRow' } as const
@@ -129,10 +129,9 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
         Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: c }),
       ] }),
     ])
-    // Minimal stands over the rows as a heading would, what it does under it; the row picked adds what its mode costs
+    // Minimal stands over the rows as a heading would, what it does under it
     const minimal = s.key === 'minimal'
-    const cost = here ? s.cost?.[set] : undefined
-    const says = [minimal ? s.says?.on : s.says?.[set], cost].filter(Boolean).join(' ')
+    const says = minimal ? s.says?.on : s.says?.[set]
     const at = minimal ? 2 + MINIMAL_TITLE.length + 1 : IN
     return [...head, Box({ key: `sw-${s.key}`, flexDirection: 'column', width, ...(here ? { backgroundColor: SEL_TINT } : {}), children: [
       Box({ key: 'line', flexDirection: 'row', children: [
