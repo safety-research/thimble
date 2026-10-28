@@ -150,6 +150,31 @@ async def client():
         yield c
 
 
+@pytest.mark.parametrize("dragged", [False, True], ids=["empty-frame", "card-dragged-in"])
+async def test_a_card_made_where_the_analyst_wrote_lands_in_your_work_never_in_a_frame_they_made(client, dragged):
+    """With main's single cards loose, the canvas has no Your work yet when the analyst first makes a frame with Group.
+    A `request:<id>` card still lands in a Your work made for it, never in that frame, empty or holding a card the
+    analyst dragged in, and never in a frame settings.active_notebook names when that frame is not Your work."""
+    single = await card("How many runs failed?")
+    r = await client.post(f"/api/ws/{CORPUS}/notebooks", json={"title": "Group 1", "pos": {"x": 1600, "y": 0}})
+    assert r.status_code == 200, r.text
+    frame = r.json()["id"]
+    if dragged:
+        r = await client.post(f"/api/ws/{CORPUS}/cells/move", json={"cells": [single], "group": frame})
+        assert r.status_code == 200, r.text
+    req = await card("Runs per day?", group="request:r1")
+    yours = group_of(req)
+    assert yours["title"] == tools.ANALYST_NOTEBOOK_TITLE and yours["id"] != frame and yours["parent"] is None
+    held = notebook.read_notebook(ws(), frame)
+    assert [c["id"] for c in held["cells"]] == ([single] if dragged else []) and not held.get("created_by")
+    (ws() / "settings.json").write_text(json.dumps({"active_notebook": frame}))
+    assert group_of(await card("And per week?", group="request:r2"))["id"] == yours["id"]
+    # a Your work stored before groups carried their maker is still the analyst's, beside the frame they made
+    notebook.write_notebook(ws(), {k: v for k, v in notebook.read_notebook(ws(), yours["id"]).items() if k != "created_by"})
+    (ws() / "settings.json").write_text(json.dumps({"active_notebook": frame}))
+    assert group_of(await card("And per month?", group="request:r3"))["id"] == yours["id"]
+
+
 async def test_the_analyst_s_new_card_on_the_canvas_stands_loose(client):
     """The canvas's Card makes a card outside every frame, where the analyst is looking (`pos`), or below the board."""
     r = await client.post(f"/api/ws/{CORPUS}/cells", json={"kind": "code", "title": "New card", "code": "", "pos": {"x": 120, "y": 340}})

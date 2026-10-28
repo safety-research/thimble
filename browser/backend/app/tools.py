@@ -492,21 +492,32 @@ def _own_root(r: dict) -> bool:
     return not r.get("parent") and not r.get("anchor") and not r.get("chat")
 
 
+def _your_work(r: dict) -> bool:
+    """Whether a group row is the analyst's Your work: a root of role analyst that no thread owns (_own_root) and no
+    session stamped (SESSION_GROUP_KEY), which analyst_notebook made (created_by BROWSER_AUTHOR), or which was stored
+    with no maker under that title or as the workspace's first group (notebook.MAIN). A frame the analyst made with
+    Group has no maker and a title of its own, so it is never Your work; nor is the loose group, a group main made for
+    a sequence of cards, or the terminal session's own group."""
+    from . import notebook
+
+    if ((r.get("role") or notebook.DEFAULT_ROLE) != "analyst" or not _own_root(r) or r.get(SESSION_GROUP_KEY)
+            or r.get("kind") == notebook.LOOSE_KIND):
+        return False
+    if r.get("created_by"):
+        return r["created_by"] == BROWSER_AUTHOR
+    return r["id"] == notebook.MAIN or str(r.get("title") or "").strip().casefold() == ANALYST_NOTEBOOK_TITLE.casefold()
+
+
 def analyst_notebook(c: str) -> str:
-    """The human's notebook id, where a card made where the analyst wrote (`request:<id>`) lands, and the own group of
-    the analyst's callers other than main (Ctx.nb_id): settings.active_notebook when it is theirs, else the newest of theirs with cells, else the newest, else a new
-    "Your
-    work", bound as settings.active_notebook. Theirs means a root group of role analyst that no thread owns
-    (_own_root), and neither the loose group nor a group main made for a sequence of cards."""
+    """The analyst's Your work (_your_work), where a card made where the analyst wrote (`request:<id>`) lands, and the
+    own group of the analyst's callers other than main (Ctx.nb_id): settings.active_notebook when it is Your work, else
+    the newest Your work with cells, else the newest, else a new one, bound as settings.active_notebook. Never a frame
+    the analyst made with Group, which with main's single cards loose is often the canvas's first frame."""
     from . import notebook
     from .ledger import read_json, write_json
 
     ws = config.workspace_dir(c)
-    term = find_terminal_notebook(ws)
-    own = [r for r in notebook.list_notebooks(ws)
-           if (r.get("role") or notebook.DEFAULT_ROLE) == "analyst" and (term is None or r["id"] != term["id"])
-           and r.get("kind") != notebook.LOOSE_KIND  # the cards dragged out of every frame are nobody's notebook
-           and r.get("created_by") != MAIN_GROUP_AUTHOR and _own_root(r)]
+    own = [r for r in notebook.list_notebooks(ws) if _your_work(r)]
     settings = read_json(ws / "settings.json", {})
     settings = settings if isinstance(settings, dict) else {}
     active = settings.get("active_notebook")
