@@ -682,6 +682,20 @@ def test_lines_inside_a_tool_call_start_no_turn(chats, monkeypatch):
                                 (9, "Assistant")]
 
 
+def test_a_readme_with_much_code_around_an_example_exchange_keeps_rendered_first(chats):
+    """Only the code between two turn lines is a transcript's tool calls: a README whose 50 lines of code stand before
+    and after a 4-line example exchange, among 13 lines of prose and headings, keeps Rendered first."""
+    prose = "\n".join(f"Line {i} of prose on how rangetools works." for i in range(8))
+    install = "```bash\n" + "\n".join(f"pip install rangetools==1.{i}" for i in range(23)) + "\n```"
+    usage = "```python\n" + "\n".join(f"r{i} = rng.make({i}, {i + 5})" for i in range(23)) + "\n```"
+    doc = (f"# rangetools\n\n{prose}\n\n## Install\n\n{install}\n\n## Example\n\nUser: how do I make a range?\n"
+           f"Assistant: call rng.make(1, 5).\nUser: and step by two?\nAssistant: pass step=2.\n\n## Usage\n\n{usage}\n\n"
+           "That is all.\n")
+    (chats / "logs" / "rangetools.md").write_text(doc)
+    got = transcripts.sniff(chats / "logs" / "rangetools.md", "logs/rangetools.md")
+    assert got == {"format": "text", "score": transcripts.WEAK, "style": "colon", "speakers": ["assistant", "user"]}
+
+
 def test_a_markdown_transcript_whose_turns_hold_tool_calls_opens_in_transcript(chats):
     """In markdown the share of turn lines is taken over the file's own lines, not the lines of the code it quotes: an
     agent's transcript whose turns hold long tool calls in code blocks is sure (Transcript first), as the same text is

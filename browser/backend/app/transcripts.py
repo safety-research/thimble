@@ -1543,14 +1543,14 @@ def _closers_after(lines: list[str]) -> list[tuple[int, int]]:
     return out
 
 
-def _style_hits(lines: list[str], style: str) -> tuple[list[tuple[str, dict[str, Any]]], int]:
-    """The lines of a head that start turns in `style`, as text_turns reads them, and how many lines its fenced blocks
-    of code hold. A line inside a block starts a turn only for a speaker who spoke outside one before it (in a style
-    of DISTINCT_STYLES, for anyone), which ends a block left open (a message cut inside its code); in aider's history,
-    as _aider_turns reads it, only a line of the user's message (_aider_user), and a session's head line ends a
-    block. A fence before the first turn line that no line after it closes (a banner of tildes, a title's line of
-    tildes, a fence left open) opens no block, so it hides no turns."""
-    hits: list[tuple[str, dict[str, Any]]] = []
+def _style_hits(lines: list[str], style: str) -> list[tuple[str, dict[str, Any], int]]:
+    """The lines of a head that start turns in `style`, as text_turns reads them, each with how many lines of fenced
+    blocks of code stand before it. A line inside a block starts a turn only for a speaker who spoke outside one before
+    it (in a style of DISTINCT_STYLES, for anyone), which ends a block left open (a message cut inside its code); in
+    aider's history, as _aider_turns reads it, only a line of the user's message (_aider_user), and a session's head
+    line ends a block. A fence before the first turn line that no line after it closes (a banner of tildes, a title's
+    line of tildes, a fence left open) opens no block, so it hides no turns."""
+    hits: list[tuple[str, dict[str, Any], int]] = []
     seen: set[str] = set()
     fence: str | None = None
     code = 0
@@ -1576,10 +1576,10 @@ def _style_hits(lines: list[str], style: str) -> tuple[list[tuple[str, dict[str,
                     fence = None
             code += fence is not None
             continue
-        hits.append((ln, got[0]))
+        hits.append((ln, got[0], code))
         seen.add(got[0]["speaker"].lower())
         fence = None if style == "aider" else _fence_opened(ln[got[1]:])
-    return hits, code
+    return hits
 
 
 # the first line of a front matter: a YAML `key:`, a TOML `key =` or a TOML `[table]`
@@ -1605,9 +1605,10 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     """A text or markdown chat log: the style whose turn lines recur most in the head, with at least two speakers who
     take turns, one of them more than once. In markdown, which reads well rendered, the sniff is sure only when turn
     lines are at least a fifth of the head's own lines, so a document quoting an example exchange keeps Rendered first;
-    the lines of its fenced blocks of code are the code's, so an agent's turns full of tool calls read as the transcript
-    they are. A front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's
-    nested keys), nor the lines inside a block of code (_style_hits)."""
+    the lines of the fenced blocks of code between two turn lines are the turns' tool calls, so an agent's turns full
+    of them read as the transcript they are, while a document's code before and after its example stays its own. A
+    front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's nested keys),
+    nor the lines inside a block of code (_style_hits)."""
     raw = text.split("\n")
     lines = [ln for ln in raw[front_matter_lines(raw):] if ln.strip()][:TEXT_HEAD_LINES]
     if len(lines) < 2:
@@ -1616,15 +1617,16 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     for name, _ in STYLES:
         counts: dict[str, int] = {}
         turns = 0
-        hits, code = _style_hits(lines, name)
+        hits = _style_hits(lines, name)
         if name == "colon" and hits:
             # a chat log's turns start at its shallowest indent, a YAML file's repeated keys under parents shallower
             # than them: only the shallowest indent that two `Word:` lines share counts
-            by_indent: dict[int, list[tuple[str, dict[str, Any]]]] = {}
-            for ln, t in hits:
-                by_indent.setdefault(len(ln) - len(ln.lstrip()), []).append((ln, t))
+            by_indent: dict[int, list[tuple[str, dict[str, Any], int]]] = {}
+            for hit in hits:
+                by_indent.setdefault(len(hit[0]) - len(hit[0].lstrip()), []).append(hit)
             hits = next((by_indent[n] for n in sorted(by_indent) if len(by_indent[n]) >= 2), [])
-        for _, t in hits:
+        code = hits[-1][2] - hits[0][2] if hits else 0  # the lines of code between the first turn line and the last
+        for _, t, _ in hits:
             turns += 1
             low = t["speaker"].lower()
             counts[low] = counts.get(low, 0) + 1
