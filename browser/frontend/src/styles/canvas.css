@@ -2727,21 +2727,9 @@ button.bdetail-hist:hover {
 }
 /* a custom card's frame: faded at the bottom while its page runs past the frame, Show all under it */
 .canvas-card-frame {
-  position: relative;
   display: flex;
   flex-direction: column;
   min-width: 0;
-}
-/* a page wider than its frame scrolls sideways inside it: a fade at the right edge says there is more */
-.canvas-card-frame.is-wide::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 40px;
-  pointer-events: none;
-  background: linear-gradient(to right, transparent, var(--surface-card));
 }
 .canvas-card-frame.is-clipped .canvas-card-html {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
