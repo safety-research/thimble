@@ -374,7 +374,7 @@ MAIN_MODEL_FIX = "In your terminal: run /model to pick another model"
 # environment is the one the server started with
 SERVER_AUTH = ("Claude Code isn't signed in for thimble's server",
                "In your terminal: run /login (or `claude auth login` in a shell), or if you changed your sign-in (for "
-               "example exported ANTHROPIC_API_KEY), run `thimble server restart`", TERMINAL)
+               f"example exported ANTHROPIC_API_KEY), restart the server: {config.RESTART_HOW}", TERMINAL)
 
 
 def fix_where(cls: Any) -> str:

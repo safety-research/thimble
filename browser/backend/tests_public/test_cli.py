@@ -63,7 +63,7 @@ def fake(monkeypatch, home):
 
 def test_a_server_that_runs_but_does_not_answer_is_named_with_the_command_that_restarts_it(home, monkeypatch):
     """thimble's own server alive on its port but not answering (out of file descriptors, as on a Mac whose views'
-    kernels took its 256): start_failure and the doctor's port line name it and say `thimble server restart`, rather
+    kernels took its 256): start_failure and the doctor's port line name it and say how to restart it, rather
     than "see the log" or "another program". Its own new server is still starting, and server.json's server that started
     moments ago is not called stuck."""
     p = cli.port()
@@ -77,10 +77,11 @@ def test_a_server_that_runs_but_does_not_answer_is_named_with_the_command_that_r
     cli.write_state({"port": p, "pid": 4242, "started": "2026-01-01T00:00:00+00:00"})
     cli.LAST_START.clear()
     line = cli.STUCK_LINE.format(pid=4242)
-    assert "thimble server restart" in line
+    assert line.endswith("to restart it, press Ctrl-C in the terminal that runs thimble-browser, then run "
+                         "`thimble-browser --continue`")
     assert cli.stuck_server() == 4242 and cli.start_failure(cli.api_url()) == line
     assert cli.port_line(p, False).startswith(f"{p} is held by thimble's server (pid 4242)")
-    assert "thimble server restart" in cli.port_line(p, False)
+    assert cli.port_line(p, False).endswith(f"to restart it, {config.RESTART_HOW}")
 
     cli.LAST_START.update(pid=4242, port=p)
     monkeypatch.setattr(cli, "spawned_exited", lambda pid: False)
@@ -190,12 +191,13 @@ def test_unpair_signs_every_browser_out_and_says_how_to_sign_in_again(home, monk
     assert cli.main(["unpair"]) == 0
     assert asked == [("POST", f"{cli.api_url()}/api/ui/unpair")] and not (home / cli.PAIRED_FILE).exists()
     assert capsys.readouterr().out.splitlines() == [cli.UNPAIRED_LINE]
-    assert "`thimble up`" in cli.UNPAIRED_LINE
+    assert "`thimble-browser --link`" in cli.UNPAIRED_LINE
     monkeypatch.setattr(cli, "_request", lambda m, u, b=None, timeout=5.0: (404, {"detail": "Not Found"}))
     assert cli.main(["unpair"]) == 1
     out = capsys.readouterr().out
     assert out.startswith("thimble: the server did not sign the browsers out (it answered 404)")
-    assert out.rstrip().endswith("In a shell: thimble server restart")
+    assert out.rstrip().endswith("To restart it, press Ctrl-C in the terminal that runs thimble-browser, then run "
+                                 "`thimble-browser --continue`.")
     monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: False)
     assert cli.main(["unpair"]) == 0 and capsys.readouterr().out.splitlines() == [cli.UNPAIRED_LINE], "server down"
 

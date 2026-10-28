@@ -33,9 +33,8 @@ export function ServerDown() {
     <div className="shell-down" role="alert">
       <Mark kind="failed" label="error" />
       <span>
-        thimble's server is not answering, so messages sent here do not arrive. Say <code>/thimble</code> in the Claude Code
-        session to start it again; your work is saved. If it does not come back, run <code>thimble doctor</code> in a
-        terminal.
+        thimble's server is not answering, so messages sent here do not arrive. To start it again, run{' '}
+        <code>thimble-browser --continue</code> in the same folder; your work is saved.
       </span>
       <Button variant="icon" size="sm" icon="x" title="Dismiss" aria-label="Dismiss" className="shell-down-x" onClick={() => setHidden(true)} />
     </div>

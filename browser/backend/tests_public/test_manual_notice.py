@@ -42,7 +42,7 @@ async def test_a_manual_report_shows_the_notice_in_the_hint_s_words_and_an_auto_
     assert _shown() == [modes.manual_notice("default")] == [modes.MANUAL_NOTICES["switch"]]
     n = next(n for n in notices.open_notices(CORPUS) if n["key"] == "manual-mode")
     assert n["kind"] == "manual-mode" and n["action"] is None
-    assert "shift+tab" in n["text"] and "`thimble --permission-mode auto`" in n["text"]
+    assert n["text"] == f"{modes.MANUAL_NOTICE} In your terminal, press shift+tab for auto mode."
     await _report("manual")
     assert len(_shown()) == 1, "still Manual mode: the one notice"
     await _report("default", sid="sid-other")

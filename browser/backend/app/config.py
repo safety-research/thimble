@@ -60,6 +60,9 @@ WORKSPACES_DIR = Path(os.environ.get("THIMBLE_WORKSPACES_DIR") or REPO_ROOT / "w
 # Vite); cli.py's ensure and doctor print NO_UI_BUILD_HINT when it is missing. Tests point FRONTEND_DIST at a scratch dir.
 FRONTEND_DIST = Path(os.environ.get("THIMBLE_FRONTEND_DIST") or REPO_ROOT / "frontend" / "dist").resolve()
 NO_UI_BUILD_HINT = "no frontend build: run scripts/release.sh or npm run build, or start with THIMBLE_DEV=1"
+# how a person restarts the server in this version: thimble-browser holds it until Ctrl-C, and --continue brings the
+# folder's latest session back (the texts that say to restart it: cli, notices, main)
+RESTART_HOW = "press Ctrl-C in the terminal that runs thimble-browser, then run `thimble-browser --continue`"
 
 
 EFFORTS = ("low", "medium", "high", "xhigh")
