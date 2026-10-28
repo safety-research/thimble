@@ -886,16 +886,11 @@ test("a click on thimble's controls that slid a cell leaves a piece of their wor
   expect(await counts({ text: 'as', requestId: 'row-t1' })).toBe(true)
 })
 
-test("a click that slid a cell on the row under a paged tray's window, or on copy after a card's artifact link, leaves a piece of their words selected: no answer's words, though the answer holds them whole", CITES, async ($, on) => {
+test("a click that slid a cell on the row under a paged tray's window leaves a piece of its words selected: no answer's words, though the answer holds them whole", CITES, async ($, on) => {
   let selected: Any
   on('ui.selection', () => ({ value: selected }))
-  const text = 'Of the runs, [12 of 40](#) failed on the p95 check; more lines of its output follow, and you can copy them.'
-  const id = 'c0123456789af'
-  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_7', agentId: 'a-made-up', anchorRow: 'row-t1', keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_7: { version: 1 } }, at: 1 }
-  // the card's artifact, published: its link under the card, and copy after it
-  const made = { card: id, status: 'done', agentId: 'agent-made-up-1', until: 0, url: 'https://claude.ai/artifact/made-up-7' }
-  on('state.get', async (_$: unknown, e: Any, next: Any) => (e.key === 'cardArtifacts' && e.id === id ? { value: { value: made, version: 1 } } : next(e)))
-  const { clock } = await resumed($, on, TALL, 's-tray-slid-page', { text, kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  const text = 'Of the runs, [12 of 40](#) failed on the p95 check; more lines of its output follow.'
+  const { clock } = await resumed($, on, TALL, 's-tray-slid-page', { text })
   const counts = async (sel: Any, maxRows: number) => {
     // a selection made anew: none in between, as the click that makes it takes the one before down
     selected = undefined
@@ -922,17 +917,6 @@ test("a click that slid a cell on the row under a paged tray's window, or on cop
   expect(await counts({ text: 'd ↓' }, 8)).toBe(false)
   // the answer's own words still count
   expect(await counts({ text: 'failed on the p95 check', requestId: 'row-t1' }, 8)).toBe(true)
-  // the card under the answer, on screen, with its artifact's link: a click on copy, in the answer's row
-  const drawn = await $.ui.render(answer('row-t1', text))
-  expect(textOf(drawn)).toContain('Runs by status')
-  expect(all(drawn).some(n => n.type === 'Link' && n.props?.href === made.url)).toBe(true)
-  expect(textOf(drawn)).toContain('↗  · copy')
-  expect(await counts({ text: 'copy', requestId: 'row-t1' }, 40)).toBe(false)
-  expect(await counts({ text: 'op', requestId: 'row-t1' }, 40)).toBe(false)
-  // the card out of view: copy in the answer counts again
-  await $.ui.render({ ...(answer('row-t1', text) as Any), props: { text, isFirstOfReply: true, onScreen: null } } as never)
-  await clock.advance(10)
-  expect(await counts({ text: 'copy', requestId: 'row-t1' }, 40)).toBe(true)
 })
 
 test("a click that slid a cell on a card's title, a press that asks about the card, leaves a piece of it selected in the answer's row: the bar names neither c nor e; the card's body, a chart label and a word of the answer that the title holds too still count", CITES, async ($, on) => {

@@ -48,7 +48,7 @@ import { cardRef } from '../marks/message.js'
 import { citeTint } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
-import { artifactLine, artifactWords } from './head'
+import { artifactLine } from './head'
 import { layoutLines } from './layout.js'
 import { type CardDrawing, type CardMeta, type CardTree, anchoredAt, drawingAt, focusNow, keptFocus, keptMeta, keptSeen, markSeen, metaOf, readState, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
@@ -396,9 +396,9 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // alone; every card's words are clicks
   const lettered = (await headOwner($))?.id === meta.id
   const word = (key: string, words: string) => [...(lettered ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
-  // their words, and the click under the card that copies its artifact's link, which a click on one leaves selected: no
-  // answer's words while the card is on screen (core/selection.ts)
-  controlWords(`card ${meta.id}`, shown.get(meta.id) === false ? [] : ['a ask', 'ask', 'p artifact', 'artifact', ...(await artifactWords($, meta.id))], { inRow: true })
+  // their words, which a click on one leaves selected: no answer's words while the card is on screen
+  // (core/selection.ts)
+  controlWords(`card ${meta.id}`, shown.get(meta.id) === false ? [] : ['a ask', 'ask', 'p artifact', 'artifact'], { inRow: true })
   const askEl = ask ? E.Box({ key: 'head-keys', flexDirection: 'row', children: [
     E.Button({ key: 'ask-visible', plain: true, label: `ask about ${ask.label}`, onPress: ask.press, hover: quiet(`card-ask-visible-${meta.id}`), children: word('a', 'ask') }),
     E.Text({ key: 'head-sep', dimColor: true, children: ' · ' }),
