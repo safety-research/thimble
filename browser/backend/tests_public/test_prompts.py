@@ -287,6 +287,20 @@ def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_says_why_a_finding_nobody_asked_for_gets_one_sentence(mode, monkeypatch):
+    """The guidance says why a reply stays short: the analyst asks in the middle of other work and reads the answer once,
+    so a reply shaped like a report makes them read past what they did not ask for; and a finding they did not ask about
+    gets one sentence at most, since they ask when they want more. Without these reasons, replies grew longer and added
+    paragraphs that nobody asked for."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    para, _ = _what_to_make(mode)
+    assert "in the middle of other work" in para and "shaped like a report" in para
+    assert "read past what they did not ask for" in para
+    unasked = next(s for s in para.split(". ") if "did not ask about" in s)
+    assert "one sentence at most" in unasked and "they ask when they want more" in unasked
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
     """The guidance answers a question about how something works with its steps in order, one sentence each, and a
     diagram card when they branch, as the card kinds say a diagram is for how things branch and connect; its example of
