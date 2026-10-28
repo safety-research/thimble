@@ -4,8 +4,9 @@ measure a body at the card's width: the page, when it draws a custom card's page
 the card check's render of a card of any kind (render.Rendered.body, card_check).
 A body past BODY_MAX is told to the card's author, once for each version of the card, with the author's next thimble
 tool result (tools.call, with_notes), in the words of prompts/tools.md `## card-tall`, as the terminal's card tool tells
-Claude that a card is taller than the screen. The author is the card's `created_by`, which is the cell_author of the
-calls of the session that made it; a card the analyst made by hand has no author to tell."""
+Claude that a card is taller than the screen. A note keeps the version it was measured on, and is dropped when the card
+is gone or is another version by the author's next call. The author is the card's `created_by`, which is the
+cell_author of the calls of the session that made it; a card the analyst made by hand has no author to tell."""
 from __future__ import annotations
 
 import hashlib
@@ -23,8 +24,9 @@ HINT = "card-tall"
 BY_HAND = frozenset({"", "user"})  # created_by of a card the analyst made: no session to tell
 KEPT = 50  # notes kept for one author before its next call; the oldest go first
 
-_told: dict[tuple[str, str], str] = {}  # (workspace, card) -> the version of the card told
-_notes: dict[tuple[str, str], dict[str, str]] = {}  # (workspace, author) -> {card: the note}, oldest first
+_told: dict[tuple[str, str, str], str] = {}  # (workspace, card, hint) -> the version of the card told
+# (workspace, author) -> {(card, hint): (the version measured, the note)}, oldest first
+_notes: dict[tuple[str, str], dict[tuple[str, str], tuple[str, str]]] = {}
 
 
 def version(cell: dict[str, Any]) -> str:
@@ -44,17 +46,17 @@ def tell(c: str, cell: dict[str, Any] | None, height: float | int | None) -> boo
     if author in BY_HAND or not cid:
         return False
     v = version(cell)
-    if _told.get((c, cid)) == v:
+    if _told.get((c, cid, HINT)) == v:
         return False
-    _told[(c, cid)] = v
+    _told[(c, cid, HINT)] = v
     from .tools import hint  # noqa: PLC0415 — tools imports this module
 
     note = hint(HINT, cid=cid, height=int(round(height)), limit=BODY_MAX)
     if not note:
         return False
     notes = _notes.setdefault((c, author), {})
-    notes.pop(cid, None)
-    notes[cid] = note
+    notes.pop((cid, HINT), None)
+    notes[(cid, HINT)] = (v, note)
     while len(notes) > KEPT:
         notes.pop(next(iter(notes)))
     log.info("%s: card:%s draws %d px tall; told to %s with its next call", c, cid, height, author)
@@ -62,8 +64,22 @@ def tell(c: str, cell: dict[str, Any] | None, height: float | int | None) -> boo
 
 
 def take(c: str, author: str) -> list[str]:
-    """The notes waiting for `author`, and no longer waiting."""
-    return list((_notes.pop((c, author), None) or {}).values())
+    """The notes waiting for `author`, and no longer waiting: each whose card is still the version it was measured on.
+    A card deleted, or changed into another version, since then is no longer what its note says, so its note is
+    dropped, and that version counts as not told (the card changed back to it is told again)."""
+    from . import notebook  # noqa: PLC0415
+
+    out = []
+    for (cid, kind), (v, note) in (_notes.pop((c, author), None) or {}).items():
+        try:
+            cell = notebook.get_cell(c, cid)
+        except Exception:  # noqa: BLE001 — a workspace that is gone: so is its card
+            cell = None
+        if cell is not None and version(cell) == v:
+            out.append(note)
+        elif _told.get((c, cid, kind)) == v:
+            _told.pop((c, cid, kind), None)
+    return out
 
 
 def with_notes(c: str, author: str, res: Any) -> Any:
