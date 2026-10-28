@@ -4,13 +4,14 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
-import { busyNow, busyWhile } from '../bar/busy'
+import { busyNow, busyWhile, SPIN } from '../bar/busy'
 import { recount } from '../bar/counts'
+import { noteViewport } from '../cards/draw'
 import { INTRO, INTRO_MS } from '../bar/intro'
 import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
 import { textWidth } from '../core/text.js'
-import { themeLast } from '../core/theme'
+import { accent, themeLast } from '../core/theme'
 import { markColors } from '../explain/place.mjs'
 import { PRESET, setOptions } from '../settings/features.mjs'
 import { promptStub } from './stubs'
@@ -644,6 +645,59 @@ for (const [what, options, legend] of LEGENDS) {
     }
     const found = byKey(await $.ui.render(BAND), 'intro-legend')
     expect(found ? textOf(found) : null).toBe(legend)
+  })
+}
+
+/** MARKED with one of its claims cited, as Claude cites (made up). */
+const CITED = 'Uploads fail after the retry budget runs out: [41 of the 44 failures](#) came 30 seconds after a drop.'
+/** An answer's row drawn in Claude Code's fullscreen layout, or in its default one, which sends thimble no click. */
+const answerIn = (requestId: string, text: string, isFullscreen: boolean) => ({ ...(answerRow(requestId, text) as Any), viewport: { columns: 100, rows: 40, isFullscreen } }) as never
+const SPINS = new RegExp(`^[${SPIN}]$`)
+
+// the legend with the first answer that has citations: the options, the layout the answer is drawn in, and the
+// legend, `@` where the turning glyph stands (the same glyph the answer draws after the cited words while their check
+// runs; the first frame when none runs)
+const CITED_LEGENDS: [string, Record<string, unknown>, boolean, string][] = [
+  ['Citations auto cite + verify', {}, true, '         heads-up · explainer · cited claim · click to open · @ a second Claude checks it · select words for e and c'],
+  ['Citations auto cite + verify, default layout', {}, false, '         heads-up · explainer · cited claim · @ a second Claude checks it · select words for e and c'],
+  ['Citations auto cite', { citations: 'auto cite' }, true, '         heads-up · explainer · cited claim · click to open · @ a second Claude checks it · select words for e and c'],
+  // Claude's citations, quiet while Citations is manual, read as plain words: the legend does not name them
+  ['Citations manual', { citations: 'manual' }, true, '         heads-up · explainer · click to open · select words for e and c'],
+  ['Citations off', { citations: 'off' }, true, '         heads-up · explainer · click to open · select words for e'],
+  ['Citations off, default layout', { citations: 'off' }, false, '         heads-up · explainer · select words for e'],
+]
+for (const [what, options, fullscreen, legend] of CITED_LEGENDS) {
+  test(`the legend names an answer's citations while Citations is on, and says click to open only where a click reaches thimble: ${what}`, { options }, async ($, on) => {
+    const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+    mock.store(on)
+    looks(on, [marksReply()])
+    // the check of the answer's citations starts, and runs
+    on('agent.spawn', () => ({ model: 'claude-made-up', agentId: 'agent-check-1' }) as never)
+    await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+    await answered($, w.clock, 't1', CITED)
+    try {
+      const drawn = await $.ui.render(answerIn('row-t1', CITED, fullscreen))
+      const texts = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(texts) : [...(n.type === 'Text' ? [n] : []), ...texts(n.props?.children), ...texts(n.children)])
+      // the turning glyph after the answer's cited words, while their check runs
+      const turning = texts(drawn).map(t => textOf(t).trim()).find(s => SPINS.test(s))
+      const found = byKey(await $.ui.render(BAND), 'intro-legend')
+      const glyph = texts(found).map(t => textOf(t)).find(s => SPINS.test(s))
+      expect(textOf(found).replace(glyph ?? '@', '@')).toBe(legend)
+      if (!legend.includes('cited claim')) return
+      // auto cite + verify: the glyph the answer turns after its cited words while their check runs; auto cite, whose
+      // citations wait to be opened: none turns, and the legend's is the first frame
+      if (options.citations) expect([turning, glyph]).toEqual([undefined, SPIN[0]])
+      else expect(turning).toBe(glyph)
+      const said = (s: string) => texts(found).find(t => textOf(t) === s)
+      // drawn as the answer draws its citations: underlined, in the text's own color, no fill; the glyph purple
+      expect(said('cited claim')?.props).toMatchObject({ underline: true })
+      expect(said('cited claim')?.props?.backgroundColor).toBeUndefined()
+      expect(said('cited claim')?.props?.dimColor).toBeUndefined()
+      expect(said(glyph!)?.props?.color).toBe(accent())
+      expect(said(' a second Claude checks it')?.props).toMatchObject({ dimColor: true })
+    } finally {
+      noteViewport({ isFullscreen: true })
+    }
   })
 }
 
