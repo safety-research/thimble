@@ -152,7 +152,7 @@ PRECACHED_LINE = ("thimble: opening the orientation that ran in advance on these
                   "from its cards and report; `/thimble fresh` starts over")
 # what /thimble prints in place of the link: main's Stop hook shows the link under the reply with a sign-in code it gets
 # as it shows it (leave_link, plugin/bin/.thimble-watch link_lines), outside the model's context
-LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble up` in a shell)"
+LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble-browser --link` in a shell)"
 LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
