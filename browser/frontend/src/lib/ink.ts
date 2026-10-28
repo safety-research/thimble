@@ -279,9 +279,11 @@ export function paperInks(token: (name: string) => string): Inks {
   return { paper: token('--surface-card'), inks: [token('--text-primary'), token('--text-on-inverse')], tokens: TEXT_TOKENS.map(token).filter(Boolean) }
 }
 
-/** A frame's script that runs mendInk over its page once it has drawn and again when its page changes. */
+/** A frame's script that runs mendInk over its page once it has drawn and again when its page changes: a node or a
+ * text added or removed, or a style or a class changed (a box the page's own script fills white). The changes of 100 ms
+ * run it once, and its own writes are not watched. */
 export function inkScript(o: Inks): string {
   const data = JSON.stringify(o).replace(/</g, '\\u003c')
   const src = mendInk.toString().replace(/<\/script/gi, '<\\/script')
-  return `<script>(function(){var mend=${src},o=${data},t=0;function run(){t=0;try{if(document.body)mend(document.body,o)}catch(e){}}function later(){if(!t)t=setTimeout(run,100)}addEventListener('load',run);document.addEventListener('DOMContentLoaded',run);new MutationObserver(later).observe(document.documentElement,{childList:true,subtree:true,characterData:true})})()</script>`
+  return `<script>(function(){var mend=${src},o=${data},t=0,ob=new MutationObserver(later),what={childList:true,subtree:true,characterData:true,attributeFilter:['style','class']};function run(){t=0;ob.disconnect();try{if(document.body)mend(document.body,o)}catch(e){}ob.observe(document.documentElement,what)}function later(){if(!t)t=setTimeout(run,100)}addEventListener('load',run);document.addEventListener('DOMContentLoaded',run);ob.observe(document.documentElement,what)})()</script>`
 }
