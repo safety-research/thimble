@@ -1220,6 +1220,24 @@ def test_a_follow_up_to_an_off_fix_holds_its_change_and_a_round_that_changes_not
     assert FX.round_(b["id"], "and another")["work"] == b["work"]
 
 
+def test_the_list_before_the_first_fix_names_the_thimble_that_runs(world, monkeypatch, tmp_path):
+    # no fix yet, so no release.json: the plugin's own version
+    plugin = tmp_path / "running" / "plugin"
+    (plugin / ".claude-plugin").mkdir(parents=True)
+    pj = plugin / ".claude-plugin" / "plugin.json"
+    pj.write_text(json.dumps({"name": "thimble", "version": "0.10.2"}) + "\n")
+    monkeypatch.setattr(FX, "PLUGIN", plugin)
+    assert FX.list_lines() == ["Your thimble fixes · thimble 0.10.2 with no fixes of yours"]
+    # a plugin with no version, as a release has it: the release tag of its checkout's commit
+    pj.write_text(json.dumps({"name": "thimble"}) + "\n")
+    sh("git", "tag", "v0.10.2", world["base"], cwd=world["rel"])
+    assert FX.list_lines() == ["Your thimble fixes · thimble 0.10.2 with no fixes of yours"]
+    # neither: no empty word in the line
+    sh("git", "tag", "-d", "v0.10.2", cwd=world["rel"])
+    assert FX.list_lines() == ["Your thimble fixes · thimble with no fixes of yours"]
+    assert not (FX.home() / "release.json").exists()
+
+
 def test_the_list_shows_a_fix_being_changed_as_its_own_row_never_as_another_fix(world):
     a = on_fix(world)
     b = FX.new("a note")

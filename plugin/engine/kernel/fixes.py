@@ -2385,11 +2385,29 @@ def latest_release() -> dict[str, Any]:
 
 
 def release_name(rel: dict[str, Any] | None = None) -> str:
-    """The release live is on, as the person reads it: 0.10.3, else the plugin's version, else the commit."""
+    """The release live is on, as the person reads it: 0.10.3, else the plugin's version, else the commit. Before the
+    first fix makes live (no release.json), the thimble that runs (_own_name)."""
     rel = release() if rel is None else rel
+    if not rel:
+        return _own_name()
     if rel.get("checkout") and not rel.get("tag"):
         return str(rel["checkout"])  # a dev install's commit, as thimble update named it: main at abc1234
     return str(rel.get("tag") or "").removeprefix("v") or str(rel.get("version") or "") or str(rel.get("base") or "")[:7]
+
+
+def _own_name() -> str:
+    """The thimble that runs, as the person reads it: its plugin's own version, else the release tag of its checkout's
+    commit (find_source: Claude Code's clone of the marketplace, or the person's own clone), v0.10.5 as 0.10.5; else
+    nothing, since a release's plugin.json has no version and a checkout may have no tags."""
+    d = read_json(PLUGIN / ".claude-plugin" / "plugin.json")
+    if isinstance(d, dict) and d.get("version"):
+        return str(d["version"])
+    try:
+        src = find_source()
+    except FixError:
+        return ""
+    tag = git("describe", "--tags", "--exact-match", "--match", "v*", src["commit"], cwd=src["repo"], check=False)
+    return tag[1:] if RELEASE_TAG.match(tag) else ""
 
 
 def _has(repo: Path, commit: str) -> bool:
@@ -3014,8 +3032,10 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
     d = listing()
     width = width or shutil.get_terminal_size((100, 24)).columns
     fixes = d["fixes"]
+    # thimble 0.10.3, or thimble alone when nothing names the release
+    name = f"thimble {d['version']}" if d["version"] else "thimble"
     if not fixes:
-        return [f"{c('title', 'Your thimble fixes')} · thimble {d['version']} with no fixes of yours"]
+        return [f"{c('title', 'Your thimble fixes')} · {name} with no fixes of yours"]
     words = {r["id"]: (state_word(r) if d["on"] or r.get("state") != "on" else "off") for r in fixes}
     titles = {r["id"]: r["title"] for r in fixes}
     counts: dict[str, int] = {}
@@ -3024,7 +3044,7 @@ def list_lines(width: int | None = None, paint: Paint | None = None) -> list[str
         counts[w] = counts.get(w, 0) + 1
     parts = [c("green", f"{counts.pop('on')} on")] if "on" in counts else []
     parts += [f"{n} {w}" for w, n in counts.items()]
-    out = [f"{c('title', 'Your thimble fixes')} · thimble {d['version']} with {', '.join(parts)}", ""]
+    out = [f"{c('title', 'Your thimble fixes')} · {name} with {', '.join(parts)}", ""]
     iw = max(1, *(len(str(r["id"])) for r in fixes))
     sw = max(6, *(len(w) for w in words.values()))
     tw = min(40, max(3, *(len(t) for t in titles.values())))
