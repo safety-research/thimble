@@ -1290,6 +1290,19 @@ MARK_PAGES = {  # name: (style, extra attribute on each row, script), and whethe
 }
 
 
+async def _rows_shot(style: str, own: str, script: str) -> dict:
+    """The rows' page with `style`, `own` on each row and `script`, saved as the view `rows` and loaded headless with the
+    test label on: its state as view_shot.mjs measured it."""
+    legend = ("thimble.onLabels((s) => { document.getElementById('labs').innerHTML = (s.all || [])"
+              ".map((l) => `<span data-label=\"${l.id}\">${l.name}</span>`).join('') })")
+    html = (f"<!doctype html><html><head><style>body{{font:13px sans-serif}} table{{border-collapse:collapse}} {style}"
+            f"</style></head><body><div id=labs></div><div class=wrap><table id=t>{ROWS.replace('{own}', own)}</table></div>"
+            f"<script>thimble.onOpen(() => {{}}); {legend}; {script}</script></body></html>")
+    views.write_view(CORPUS, "rows", reader=THREADS_READER, html=html, **{**VIEW, "name": "Rows"})
+    (s,) = await views.shoot_states(CORPUS, "rows", [{"open": {}, "labels": views.probe_context(), "size": views.PANE_NARROW}])
+    return s
+
+
 @pytest.mark.parametrize("name", sorted(MARK_PAGES))
 async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(name, ws, inproc, bound):
     """The checks count a mark only where a picture of the page shows the test label's colour on the record: a bar a
@@ -1301,13 +1314,7 @@ async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(n
             pytest.fail(why)
         pytest.skip(why)
     style, own, script, seen = MARK_PAGES[name]
-    legend = ("thimble.onLabels((s) => { document.getElementById('labs').innerHTML = (s.all || [])"
-              ".map((l) => `<span data-label=\"${l.id}\">${l.name}</span>`).join('') })")
-    html = (f"<!doctype html><html><head><style>body{{font:13px sans-serif}} table{{border-collapse:collapse}} {style}"
-            f"</style></head><body><div id=labs></div><div class=wrap><table id=t>{ROWS.replace('{own}', own)}</table></div>"
-            f"<script>thimble.onOpen(() => {{}}); {legend}; {script}</script></body></html>")
-    views.write_view(CORPUS, "rows", reader=THREADS_READER, html=html, **{**VIEW, "name": "Rows"})
-    (s,) = await views.shoot_states(CORPUS, "rows", [{"open": {}, "labels": views.probe_context(), "size": views.PANE_NARROW}])
+    s = await _rows_shot(style, own, script)
     assert s["ok"], s["errors"]
     view = views.read_view(CORPUS, "rows")
     problems, _ = views.label_problems(view, [("board.jsonl", 100, 0)], [{**s, "state": "overview"}])
@@ -1319,6 +1326,30 @@ async def test_the_checks_look_for_the_label_s_colour_in_a_picture_of_the_page(n
         n = p["checked"]
         assert p["seen"] == 0 and len(problems) == 1, (p, problems)
         assert f"does not show the test label's color on {n} of the {n}" in problems[0], problems
+
+
+# the page's rows move to the right once, as the check first measures the marks in view (the hidden span it adds to the
+# body and takes away again), as a redraw does that lands while the page is pictured, such as the filter of the place
+# a state opens when a busy machine applies it late
+MOVES_ONCE = ("let moved = false; new MutationObserver((rs) => { if (moved || !rs.some((r) => [...r.removedNodes]"
+              ".some((n) => n.nodeName === 'SPAN'))) return; moved = true; document.getElementById('t').style.marginLeft"
+              " = '160px' }).observe(document.body, { childList: true })")
+
+
+async def test_a_page_that_moves_while_the_checks_picture_it_is_pictured_again_once_it_holds_still(ws, inproc, bound):
+    """The pictures of the label's colour are compared with where the marked records were measured, so a page that
+    moves its records between the two (a redraw that lands then, which a busy machine makes likely) would show none of
+    their marks where they were measured. The checks measure and picture the page again until the records hold still
+    over a measurement and its pictures, and then find every mark."""
+    if why := views.build_problem():
+        if os.environ.get("CI") == "true":
+            pytest.fail(why)
+        pytest.skip(why)
+    s = await _rows_shot("td{padding:10px}", "", MOVES_ONCE)
+    assert s["ok"], s["errors"]
+    p = s["painted"]
+    assert p["due"] == 4 and p["checked"] >= 2 and p["seen"] == p["checked"], p
+    assert p["tries"] >= 2, "the page moved after the first measurement and was measured and pictured again"
 
 
 SELF_LABEL_HTML = """<!doctype html><html><head><style>body{font:13px sans-serif;margin:8px}</style></head><body>

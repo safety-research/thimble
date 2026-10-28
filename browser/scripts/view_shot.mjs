@@ -68,6 +68,9 @@ const plain = (e) => String(e && e.message ? e.message : e).split('\n').filter((
 const BAR = 3 // px, the bridge's label bar (viewer_bridge.js BAR)
 const PAINT_MAX = 40 // marked elements in view whose pixels are looked at
 const PAINT_TOL = 64 // how far, summed over r, g and b, a pixel may be from the label's colour and still show it
+// the most paintedMarks measures and pictures the marked elements again while they do not hold still; a page that never
+// does is judged on its last pictures
+const PAINT_STEADY_MS = HARD_MS
 
 // The marked elements in the frame's view whose pixels show whether the label's mark can be seen, as the outermost
 // visible element per ref: {due, list: [{ref, own, svg, record, box: {l, t, r, b}, body, rgb}]}, `due` the refs whose
@@ -161,13 +164,15 @@ function markTargets({ marks, record, bar, max, scroll }) {
   return { due, list: shown.slice(0, max).map(({ el, inView, ...x }) => x) }
 }
 
-// How many of the targets show their label's mark, from two PNGs of the frame (base64, one pixel per CSS px), `on` as
-// it is and `off` with the bridge's label styles switched off: {checked, seen, unseen: [ref...]}. A target shows it
-// where pixels of its `box` move towards the label's colour (by MOVE, summed over r, g and b) when the styles are on,
-// as many as the bar's strip is high, up to 24, for a bar, and 6 for the halo of an SVG mark; or where the page draws
-// the colour itself, 8 pixels of its `body` within `tol` of it. An element marked data-anchor-unmarked that names a
-// unit is excused when a record in view shows its mark, since a unit's mark is its records'. Runs in the page.
-async function paintedCount({ on, off, targets, tol }) {
+// How many of the targets show their label's mark, from three PNGs of the frame (base64, one pixel per CSS px), `on` as
+// it is, `off` with the bridge's label styles switched off, and `again` as it is once more after that:
+// {checked, seen, unseen: [ref...], steady}. A target shows it where pixels of its `box` move towards the label's colour
+// (by MOVE, summed over r, g and b) when the styles are on, as many as the bar's strip is high, up to 24, for a bar,
+// and 6 for the halo of an SVG mark; or where the page draws the colour itself, 8 pixels of its `body` within `tol` of
+// it. An element marked data-anchor-unmarked that names a unit is excused when a record in view shows its mark, since a
+// unit's mark is its records'. `steady`: `again` has the pixels of `on` in each target's box and body, so nothing the
+// pictures look at changed while they were taken. Runs in the page.
+async function paintedCount({ on, off, again, targets, tol }) {
   const MOVE = 30
   const pixels = async (png) => {
     const img = new Image()
@@ -182,10 +187,17 @@ async function paintedCount({ on, off, targets, tol }) {
   }
   const a = await pixels(on)
   const b = await pixels(off)
+  const a2 = await pixels(again)
   const dist = (d, i, c) => Math.abs(d[i] - c[0]) + Math.abs(d[i + 1] - c[1]) + Math.abs(d[i + 2] - c[2])
-  const out = { checked: 0, seen: 0, unseen: [] }
+  const out = { checked: 0, seen: 0, unseen: [], steady: a2.w === a.w && a2.h === a.h }
   const units = []
   let records = 0
+  // whether `again` has the pixels of `on` from (l, t) to (r, b)
+  const same = (l, t, r, b) => {
+    for (let y = t; y < b; y++)
+      for (let i = (y * a.w + l) * 4; i < (y * a.w + r) * 4; i++) if (a.d[i] !== a2.d[i]) return false
+    return true
+  }
   for (const t of targets) {
     const l = Math.max(0, Math.floor(t.box.l))
     const top = Math.max(0, Math.floor(t.box.t))
@@ -201,6 +213,7 @@ async function paintedCount({ on, off, targets, tol }) {
     const [bl, bt, br, bb] = [Math.max(0, Math.floor(t.body.l)), Math.max(0, Math.floor(t.body.t)), Math.min(a.w, Math.ceil(t.body.r)), Math.min(a.h, Math.ceil(t.body.b))]
     for (let y = bt; t.rgb && y < bb && drawn < 8; y++)
       for (let x = bl; x < br && drawn < 8; x++) if (dist(a.d, (y * a.w + x) * 4, t.rgb) <= tol) drawn++
+    if (out.steady && !(same(l, top, r, btm) && same(bl, bt, br, bb))) out.steady = false
     out.checked++
     if ((!t.own && moved >= (t.svg ? 6 : Math.max(3, Math.min(24, btm - top)))) || drawn >= 8) {
       out.seen++
@@ -848,32 +861,61 @@ async function shootState(browser, opt, doc, state, i) {
   }
 }
 
+// Until the frame has drawn twice, or HARD_MS where it draws nothing: what the page and the bridge put off to the next
+// frame has run by then (the bridge draws its marks there), and the browser has drawn the frame that shows it.
+const framesDrawn = (frame) =>
+  frame
+    .evaluate(
+      (ms) =>
+        new Promise((done) => {
+          const t = setTimeout(done, ms)
+          requestAnimationFrame(() => requestAnimationFrame(() => (clearTimeout(t), done())))
+        }),
+      HARD_MS,
+    )
+    .catch(() => {})
+
 // Whether the label marks in the frame's view can be seen, from pictures of the frame with the bridge's label styles on
-// and off: {due, checked, seen, unseen} (markTargets, paintedCount), null when no shown record is marked. It runs last,
-// since it may scroll the page.
+// and off: {due, checked, seen, unseen, tries} (markTargets, paintedCount), null when no shown record is marked. Each
+// round measures the marked elements in view, pictures the frame with the styles on, off and on again, and measures
+// them again. A page that redraws meanwhile, as a late redraw or a scroll's does, shows its marks elsewhere than they
+// were measured: while the elements moved over a round, or their pixels differ in its two pictures with the styles
+// on, the round is made again once the frame has drawn, for at most PAINT_STEADY_MS; `tries` counts the rounds. It
+// runs last, since it may scroll the page.
 async function paintedMarks(page, el, frame, marks) {
   if (!Object.values(marks).some((m) => m && typeof m.bar === 'string' && m.bar)) return null
   const want = { marks, record: RECORD_REF.source, bar: BAR, max: PAINT_MAX }
-  let got = await frame.evaluate(markTargets, { ...want, scroll: true })
-  if (got.retry) {
-    await page.waitForTimeout(300)
-    got = await frame.evaluate(markTargets, { ...want, scroll: false })
-  }
-  if (!got.due) return null
-  if (!got.list.length) return { due: got.due, checked: 0, seen: 0, unseen: [] }
-  const on = (await el.screenshot()).toString('base64')
+  // a picture of the frame as it is, CSS animations and transitions at their end
+  const shot = async () => (await el.screenshot({ animations: 'disabled' })).toString('base64')
   const styles = (off) =>
     frame.evaluate((x) => {
       for (const s of document.querySelectorAll('style[data-thimble="labels"]')) s.disabled = x
     }, off)
-  await styles(true)
-  let off
-  try {
-    off = (await el.screenshot()).toString('base64')
-  } finally {
-    await styles(false)
+  const until = Date.now() + PAINT_STEADY_MS
+  let got = await frame.evaluate(markTargets, { ...want, scroll: true })
+  for (let tries = 1; ; tries++) {
+    // after a scroll to the first marked element (none was in view) and after a round the page moved in, measured
+    // again once the frame has drawn
+    if (got.retry || tries > 1) {
+      await framesDrawn(frame)
+      got = await frame.evaluate(markTargets, { ...want, scroll: false })
+    }
+    if (!got.due) return null
+    if (!got.list.length) return { due: got.due, checked: 0, seen: 0, unseen: [], tries }
+    const on = await shot()
+    await styles(true)
+    let off
+    try {
+      off = await shot()
+    } finally {
+      await styles(false)
+    }
+    const again = await shot()
+    const after = await frame.evaluate(markTargets, { ...want, scroll: false })
+    const { steady, ...count } = await page.evaluate(paintedCount, { on, off, again, targets: got.list, tol: PAINT_TOL })
+    const still = steady && JSON.stringify(after.list) === JSON.stringify(got.list)
+    if (still || Date.now() >= until) return { due: got.due, ...count, tries }
   }
-  return { due: got.due, ...(await page.evaluate(paintedCount, { on, off, targets: got.list, tol: PAINT_TOL })) }
 }
 
 async function main() {
