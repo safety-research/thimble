@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 import pytest
 from conftest import card_wait
@@ -90,12 +91,13 @@ async def test_requests_from_one_agent_at_once_are_all_on_its_card_and_each_answ
 async def test_a_request_is_declined_unanswered_after_the_card_wait_rather_than_waiting_for_good():
     assert card_wait(0.004) == 0.24
     chat = _agent("orient", role="orient", title="Orientation")
+    t0 = time.monotonic()
     call = asyncio.ensure_future(agent_session.hook_request(CORPUS, _body("orient", "venv")))
     [p] = await _pending(chat, 1)
     assert p["wait_s"] == 0.24
-    await asyncio.sleep(0.1)
-    assert not call.done(), "it waits the whole card wait"
-    got = await asyncio.wait_for(call, 5)
+    got = await asyncio.wait_for(call, 60)
+    # declined no sooner than the card wait after the request came (a busy machine only makes it later)
+    assert time.monotonic() - t0 >= 0.24, "it waits the whole card wait"
     assert got == {"behavior": "deny", "message": agent_session.timed_out_line(0.24)}
     [p] = agents.read_meta(CORPUS, chat)["permissions"]
     assert p["expired"], "it stays on the card, declined, until dismissed"
