@@ -10,8 +10,9 @@ text or markdown chat log whose lines start turns (`User: …`, `**Assistant:** 
 open and no corpus is walked. A false positive costs one more mode beside Raw, so the rules are lenient: a key names
 who speaks in any case style and nesting (`speakerName`, `agent_speaker_id`, `data.speakerId`), but JSON lines read as
 messages only when several of them take turns (_takes_turns), and a markdown file's front matter is never a chat log.
-In a chat log, a line inside a fenced block of code (a tool call's code or its output) starts no turn, and neither does
-a line of code or an error message that reads as `Word: …` (`try:`, `except ValueError as e:`, `ValueError: …`).
+In a chat log, a line inside a fenced block of code that opens inside a turn (a tool call's code or its output) starts no
+turn, and neither does a line of code or an error message that reads as `Word: …` (`try:`, `except ValueError as e:`,
+`ValueError: …`).
 
 The answer, or None:
     {"format": "stream" | "messages" | "conversations" | "json" | "csv" | "text", "score": 0..1,
@@ -213,8 +214,6 @@ DISTINCT_STYLES = {"whatsapp", "bracket", "irc", "vtt", "clock-name", "name-cloc
 # a fence that opens or closes a block of code in markdown: three or more backticks or tildes at the start of a line or
 # of a turn's words (`User: ```python`); backticks with a backtick after them (```a```) are code inside the line
 _FENCE = re.compile(r"[ \t]*(`{3,}|~{3,})(.*)")
-# a line that can underline the line above it (_underlines): four or more tildes or backticks alone
-_UNDERLINE = re.compile(r"(`{4,}|~{4,})[ \t\r]*")
 LOOKBACK_LINES = 200  # lines of a text chat log first read back from a page's first line (_lead_texts), twice as many
 LOOKBACK_MAX = 20_000  # each time after, up to this many lines in all
 LOOKBACK_BYTES = 4 * 1024 * 1024  # ... and this many bytes of them
@@ -1524,96 +1523,71 @@ def _fence_closes(fence: str, line: str) -> bool:
     return bool(m) and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip()
 
 
-def _underlines(above: str, line: str) -> bool:
-    """Whether a line underlines the line of text right above it, as a title's line of tildes in reStructuredText or a
-    label's banner in a text file does: four or more tildes or backticks alone, at least as many as that text has
-    characters. Such a line opens no block of code."""
-    m = _UNDERLINE.fullmatch(line)
-    text = above.strip()
-    return bool(m and text) and not _FENCE.match(above) and len(text) <= len(m.group(1))
-
-
-def _opens(above: str, line: str) -> str | None:
-    """The fence a line that starts no turn opens (_fence_opened), none when it underlines the line above it."""
-    fence = _fence_opened(line)
-    return None if fence and _underlines(above, line) else fence
-
-
 def _aider_user(text: str) -> bool:
     """Whether a line of aider's history is a line of the user's message as aider writes it: `#### `, the words and the
     two spaces aider writes after each line. A `#### ` heading inside an edit of a markdown file has no such spaces."""
     return text.startswith("#### ") and text.rstrip("\r").endswith("  ")
 
 
-def _closers_after(lines: list[str]) -> list[tuple[int, int]]:
-    """Per line, the longest run of backticks and the longest run of tildes that a line after it holds alone: a fence
-    of the line has a line after it that closes its block (_fence_closes) when its run is no longer."""
-    out: list[tuple[int, int]] = [(0, 0)] * len(lines)
-    ticks = tildes = 0
-    for i in range(len(lines) - 1, -1, -1):
-        out[i] = (ticks, tildes)
-        m = _FENCE.match(lines[i])
-        if m and not m.group(2).strip():
-            if m.group(1)[0] == "`":
-                ticks = max(ticks, len(m.group(1)))
-            else:
-                tildes = max(tildes, len(m.group(1)))
-    return out
-
-
-def _style_hits(lines: list[str], style: str, above: list[str]) -> list[tuple[str, dict[str, Any], int]]:
-    """The non-empty lines of a head that start turns in `style`, as text_turns reads them, each with how many lines of
-    fenced blocks of code stand before it. A line inside a block starts a turn only for a speaker who spoke outside one
-    before it (in a style of DISTINCT_STYLES, for anyone), which ends a block left open (a message cut inside its code);
-    in aider's history, as _aider_turns reads it, only a line of the user's message (_aider_user), and a session's head
-    line ends a block. In the other styles a line that underlines the line right above it in the file (`above`) opens
-    no block (_underlines). Before the first turn line no speaker is known yet, so a fence there opens a block only
-    when a line after it closes it (a banner of tildes or a fence left open opens none), and a bare fence (no language
-    after it) only when the block holds fewer turn lines than the lines after it: a block of code before a chat (a
-    config, a command's output) holds a few lines that read as turns, if any, while a bare fence whose block would hold
-    most of them stands above the chat, as a banner whose pair stands below it or a fence left open whose closer closes
-    a block inside the chat."""
-    hits: list[tuple[str, dict[str, Any], int]] = []
-    seen: set[str] = set()
+def _aider_code(texts: Iterable[Any]) -> Iterator[tuple[Any, bool]]:
+    """Per line of aider's chat history, the line and whether it is code: inside a fenced block that a line of the model's
+    reply opens inside a turn (after a `#### ` or `> ` line since the session's head). The block ends at its closing
+    fence, or before a session's head line or a line of the user's message (_aider_user), so a reply cut inside its code
+    (^C) ends at the user's next message."""
     fence: str | None = None
-    code = 0
-    closers: list[tuple[int, int]] | None = None
-    found = [_turn_match(ln, style) for ln in lines]
-    before: list[int] | None = None  # per line, how many turn lines stand before it
-    for i, ln in enumerate(lines):
-        got = found[i]
+    inturn = False
+    for text in texts:
+        if not isinstance(text, str):
+            yield text, False
+            continue
         if fence is not None:
-            if style == "aider":
-                ends = ln.startswith(AIDER_HEAD) or _aider_user(ln)
-            else:
-                ends = got is not None and (style in DISTINCT_STYLES or got[0]["speaker"].lower() in seen)
-            if not ends:
-                code += 1
-                if _fence_closes(fence, ln):
+            if not (text.startswith(AIDER_HEAD) or _aider_user(text)):
+                if _fence_closes(fence, text):
                     fence = None
+                yield text, True
                 continue
             fence = None
-        if got is None:
-            if style == "aider":
-                fence = _fence_opened(ln)
-            else:
-                fence = _opens(above[i], ln)
-                if fence is not None and not hits:
-                    closers = closers or _closers_after(lines)
-                    if closers[i][fence[0] == "~"] < len(fence):
-                        fence = None
-                    elif not ln.strip().strip(fence[0]):  # a bare fence: the turn lines its block holds, and after it
-                        end = next(j for j in range(i + 1, len(lines)) if _fence_closes(fence, lines[j]))
-                        before = before or list(itertools.accumulate((g is not None for g in found), initial=0))
-                        inside, after = before[end] - before[i + 1], before[-1] - before[end + 1]
-                        if inside and inside >= after:
-                            fence = None
-            code += fence is not None
-            continue
-        hits.append((ln, got[0], code))
-        seen.add(got[0]["speaker"].lower())
-        fence = None if style == "aider" else _fence_opened(ln[got[1]:])
-    return hits
+        if text.startswith(AIDER_HEAD):
+            inturn = False
+        elif text.startswith(("#### ", ">")):
+            inturn = True
+        elif inturn:
+            fence = _fence_opened(text)
+        yield text, False
+
+
+def _head_code(lines: list[str], hint: dict[str, Any]) -> list[bool]:
+    """Per line of a head, whether it is code in the chat log the sniff read as `hint`: inside a fenced block that opens
+    inside a turn, with a turn line's words (`User: ```python`) or on a line after one, or the line that opens it. A
+    turn line is one text_turns marks for `hint`; such a block ends at its closing fence, or before a turn line of a
+    speaker who spoke outside a block before it (a message cut inside its code). A block that opens before the first
+    turn line (a config, a banner, a title's underline, a fence left open) is no code: its lines read as they always
+    did, turns too, up to its closing fence, which so opens no block."""
+    if hint["style"] == "aider":
+        return [code for _, code in _aider_code(lines)]
+    speakers = set(hint["speakers"]) if "speakers" in hint else None
+    out: list[bool] = []
+    seen: set[str] = set()
+    fence: str | None = None
+    code = inturn = False
+    for ln in lines:
+        got = _turn_match(ln, hint["style"])
+        low = got[0]["speaker"].lower() if got else ""
+        turn = got is not None and (speakers is None or low in speakers or low in ROLE_WORDS)
+        if fence is not None and not (code and turn and (speakers is None or low in seen)):
+            if _fence_closes(fence, ln):
+                fence = None
+            if code:
+                out.append(True)
+                continue
+        else:
+            fence = _fence_opened(ln[got[1]:] if got else ln)
+            code = inturn or turn
+        if turn:
+            seen.add(low)
+            inturn = True
+        out.append(code and fence is not None and got is None)
+    return out
 
 
 # the first line of a front matter: a YAML `key:`, a TOML `key =` or a TOML `[table]`
@@ -1638,38 +1612,37 @@ def front_matter_lines(lines: list[str]) -> int:
 def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     """A text or markdown chat log: the style whose turn lines recur most in the head, with at least two speakers who
     take turns, one of them more than once. In markdown, which reads well rendered, the sniff is sure only when turn
-    lines are at least a fifth of the head's own lines, so a document quoting an example exchange keeps Rendered first;
-    the lines of the fenced blocks of code between two turn lines are the turns' tool calls, so an agent's turns full
-    of them read as the transcript they are, while a document's code before and after its example stays its own. A
-    front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's nested keys),
-    nor the lines inside a block of code (_style_hits)."""
+    lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first. A
+    front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's nested keys).
+    When the chat log so read has fenced blocks of code inside its turns (_head_code: a tool call's code or output), the
+    head is read again without their lines, which start no turn in any style; in markdown, the code between the first
+    turn line and the last is then the turns' own and leaves the share (I100)."""
     raw = text.split("\n")
-    lines: list[str] = []  # the head's non-empty lines
-    above: list[str] = []  # per line, the line right above it in the file, which it may underline (_underlines)
-    prev = ""
-    for ln in raw[front_matter_lines(raw):]:
-        if ln.strip():
-            lines.append(ln)
-            above.append(prev)
-            if len(lines) == TEXT_HEAD_LINES:
-                break
-        prev = ln
+    lines = [ln for ln in raw[front_matter_lines(raw):] if ln.strip()][:TEXT_HEAD_LINES]
     if len(lines) < 2:
         return None
+    got = _read_head(lines, markdown, [False] * len(lines))
+    if got is None:
+        return None
+    code = _head_code(lines, got)
+    return _read_head(lines, markdown, code) if any(code) else got
+
+
+def _read_head(lines: list[str], markdown: bool, code: list[bool]) -> dict[str, Any] | None:
+    """sniff_text's reading of a head whose lines of code (`code`, per line) start no turn."""
     best: tuple[float, str, int, dict[str, int], int] | None = None
     for name, _ in STYLES:
         counts: dict[str, int] = {}
         turns = 0
-        hits = _style_hits(lines, name, above)
+        hits = [(i, t) for i, ln in enumerate(lines) if not code[i] and (t := turn_of(ln, name)) is not None]
         if name == "colon" and hits:
             # a chat log's turns start at its shallowest indent, a YAML file's repeated keys under parents shallower
             # than them: only the shallowest indent that two `Word:` lines share counts
-            by_indent: dict[int, list[tuple[str, dict[str, Any], int]]] = {}
-            for hit in hits:
-                by_indent.setdefault(len(hit[0]) - len(hit[0].lstrip()), []).append(hit)
+            by_indent: dict[int, list[tuple[int, dict[str, Any]]]] = {}
+            for i, t in hits:
+                by_indent.setdefault(len(lines[i]) - len(lines[i].lstrip()), []).append((i, t))
             hits = next((by_indent[n] for n in sorted(by_indent) if len(by_indent[n]) >= 2), [])
-        code = hits[-1][2] - hits[0][2] if hits else 0  # the lines of code between the first turn line and the last
-        for _, t, _ in hits:
+        for _, t in hits:
             turns += 1
             low = t["speaker"].lower()
             counts[low] = counts.get(low, 0) + 1
@@ -1677,7 +1650,7 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
             continue
         if name == "cc" and len(counts) < 2:
             continue  # a prompt and a reply, so quoted lines alone are no export
-        if name == "aider" and not any(ln.startswith(AIDER_HEAD) for ln in lines):
+        if name == "aider" and not any(ln.startswith(AIDER_HEAD) for ln, c in zip(lines, code) if not c):
             continue
         roles = sum(n for s, n in counts.items() if s in ROLE_WORDS or re.fullmatch(r"(speaker|person|participant|agent)[ _-]?\w{1,3}", s))
         repeated = max(counts.values()) >= 2
@@ -1688,13 +1661,13 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
             continue
         rank = turns + 2 * roles
         if best is None or rank > best[0]:
-            best = (rank, name, turns, counts, code)
+            best = (rank, name, turns, counts, sum(code[hits[0][0]:hits[-1][0]]))
     if best is None:
         return None
-    _, name, turns, counts, code = best
+    _, name, turns, counts, between = best
     roles = sum(n for s, n in counts.items() if s in ROLE_WORDS)
     strong = name in ("cc", "aider") or (
-        (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines) - code))
+        (roles >= 2 or (name in DISTINCT_STYLES and turns >= 4)) and (not markdown or turns * 5 >= len(lines) - between))
     out: dict[str, Any] = {"format": "text", "score": STRONG if strong else WEAK, "style": name}
     if name not in DISTINCT_STYLES and name != "aider":
         # a heading, a bold label or a `Word:` line starts a turn only for a speaker the head shows taking turns
@@ -2054,38 +2027,25 @@ def get_turns(c: str, path: str, start: int = 0, count: int = 100, line: int | N
 def _aider_turns(texts: Iterable[Any]) -> Iterator[dict[str, Any] | None]:
     """aider's chat history as turns, per line the turn it starts or None: a run of `#### ` lines is the user's message,
     a run of `> ` lines aider's own output, and the first other line after either starts the model's reply. The lines
-    of a fenced block of code in a reply (an edit's SEARCH and REPLACE lines, a file's code) are the reply's; a
-    session's head line and a line of the user's message (_aider_user) end any block, so a reply cut inside its code
-    (^C) ends at the user's next message."""
+    of a fenced block of code in a turn (an edit's SEARCH and REPLACE lines, a file's code) start none (_aider_code)."""
     prev = ""
-    fence: str | None = None
-    for text in texts:
-        if not isinstance(text, str):
-            yield None
-            continue
-        if fence is not None and not (text.startswith(AIDER_HEAD) or _aider_user(text)):
-            if _fence_closes(fence, text):
-                fence = None
-            yield None
-            continue
-        if not text.strip():
+    for text, code in _aider_code(texts):
+        if code or not isinstance(text, str) or not text.strip():
             yield None
             continue
         kind, turn = "reply", None
         if text.startswith(AIDER_HEAD):
-            kind, fence = "head", None
+            kind = "head"
         elif text.startswith("#### "):
-            kind, fence = "user", None
+            kind = "user"
             if prev != "user":
                 turn = {"speaker": MARKS["####"], "at": 5}
         elif text.startswith(">"):
             kind = "aider"
             if prev != "aider":
                 turn = {"speaker": AIDER_OUTPUT, "at": 2 if text.startswith("> ") else 1}
-        else:
-            if prev in ("user", "aider"):
-                turn = {"speaker": AIDER_REPLY, "at": 0}
-            fence = _fence_opened(text)
+        elif prev in ("user", "aider"):
+            turn = {"speaker": AIDER_REPLY, "at": 0}
         yield turn
         prev = kind
 
@@ -2093,29 +2053,32 @@ def _aider_turns(texts: Iterable[Any]) -> Iterator[dict[str, Any] | None]:
 def text_turns(texts: Iterable[Any], hint: dict[str, Any]) -> Iterator[dict[str, Any] | None]:
     """Per line of a text chat log the sniff read as `hint`, the turn it starts (turn_of, aider's runs of lines), else
     None: only for the speakers the sniff names when it names them, or a role such as `System` that first speaks past
-    the head. A line inside a fenced block of code (a tool call's code or output) starts none, unless it starts a turn
-    of a speaker the sniff names (of anyone, when it names none), which ends a block left open (a message cut inside
-    its code). As in the sniff (_style_hits), a turn line opens a block with its words, also one of a label that names
-    no speaker (`Command: ```bash`), and a line that underlines the line above it opens none (_underlines)."""
+    the head. A line inside a fenced block of code that opens inside a turn, with a turn line's words or on a line after
+    one (a tool call's code or output), starts none, unless it starts a turn of a speaker the sniff names (of anyone,
+    when it names none), which ends a block left open (a message cut inside its code). A fence before the first turn
+    line is text, as it always was."""
     if hint.get("style") == "aider":
         yield from _aider_turns(texts)
         return
     style = hint["style"]
     speakers = set(hint["speakers"]) if "speakers" in hint else None
     fence: str | None = None
-    above = ""
+    inturn = False
     for text in texts:
         turn = None
         if isinstance(text, str):
             got = _turn_match(text, style)
             low = got[0]["speaker"].lower() if got else ""
-            if got and (speakers is None or low in speakers or (fence is None and low in ROLE_WORDS)):
-                turn, fence = got[0], _fence_opened(text[got[1]:])
-            elif fence is None:
-                fence = _fence_opened(text[got[1]:]) if got else _opens(above, text)
-            elif _fence_closes(fence, text):
+            if fence is not None and got and (speakers is None or low in speakers):
                 fence = None
-        above = text if isinstance(text, str) else ""
+            if fence is not None:
+                if _fence_closes(fence, text):
+                    fence = None
+            else:
+                if got and (speakers is None or low in speakers or low in ROLE_WORDS):
+                    turn, inturn = got[0], True
+                if inturn:
+                    fence = _fence_opened(text[got[1]:] if got else text)
         yield turn
 
 
@@ -2134,7 +2097,8 @@ def _lead_texts(path: Path, hint: dict[str, Any], start: int) -> list[str]:
     open, aider's kind of line before): from the last one before it that sets that afresh (_resets), else from the
     file's first line. It reads back a chunk of lines at a time, each chunk sized to the bytes left, through at most
     LOOKBACK_MAX lines and LOOKBACK_BYTES bytes, and keeps only the lines from that line on: a page further inside a
-    turn (a tool's long output) keeps none and reads its lines as if no block were open."""
+    turn (a tool's long output) keeps none and reads its lines as a file's first lines are read, no block open and no
+    turn before them."""
     from .corpus import decode_line, page_lines  # noqa: PLC0415 — corpus reads this module
 
     chunks: list[list[str]] = []  # the lines read back, a chunk at a time, the page's nearest first

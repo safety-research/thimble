@@ -781,67 +781,41 @@ def test_a_label_that_opens_a_block_of_code_opens_it_in_the_turns_too(chats):
     assert {v["value"] for v in keys[0]["values"]} == {"User", "Assistant"}
 
 
-def test_a_fence_before_the_first_turn_that_no_line_closes_hides_no_turns(chats):
-    """A banner of tildes, a title's line of tildes (reStructuredText) or a fence left open before a chat log's first
-    turn line opens no block of code, so the log's turns count; a block closed before the first turn line hides only
-    its own lines."""
-    chat = "User: My order is late.\nAssistant: What is its number?\nUser: 4411.\nAssistant: It ships today.\n"
-    for name, head in (("banner.txt", "~~~~~~~~\n"), ("support.rst", "Support chat\n~~~~~~~~~~~~\n\n"),
-                       ("pasted.txt", "```\n"), ("config.txt", "```yaml\nserver: alpha\nport: 80\n```\n\n")):
-        (chats / "logs" / name).write_text(head + chat)
-        got = transcripts.sniff(chats / "logs" / name, f"logs/{name}")
-        assert got == {"format": "text", "score": transcripts.STRONG, "style": "colon",
-                       "speakers": ["assistant", "user"]}, name
-        assert [w for _, w in chat_turns(name)] == ["User", "Assistant", "User", "Assistant"], name
-
-
+CHAT = "User: My order is late.\nAssistant: What is its number?\nUser: 4411.\nAssistant: It ships today.\n"
 FORTY = "".join(f"User: question {i}?\nAssistant: answer {i}.\n" for i in range(20))  # a chat log of 40 turns
+CODE = "User: show the code\nAssistant: Here:\n```python\nprint(1)\n```\nUser: ok\nAssistant: ok\n"
+NAMED = "Else: Did you get the tickets?\nMarta: Yes, two.\nElse: See you at eight.\nMarta: See you.\n"
 SURE = {"format": "text", "score": transcripts.STRONG, "style": "colon", "speakers": ["assistant", "user"]}
+# chat logs with a fence before their first turn line (a banner of tildes, alone or a pair around the chat, a title's or
+# a label's line of tildes, a fence left open, a block of code), each with the sniff and the turns thimble 0.10.5 reads
+BEFORE_THE_CHAT = [
+    ("banner.txt", "~~~~~~~~\n" + CHAT, SURE, ["User", "Assistant"] * 2),
+    ("support.rst", "Support chat\n~~~~~~~~~~~~\n\n" + CHAT, SURE, ["User", "Assistant"] * 2),
+    ("pasted.txt", "```\n" + CHAT, SURE, ["User", "Assistant"] * 2),
+    ("pasted-code.txt", "```\n" + FORTY + CODE, SURE, ["User", "Assistant"] * 22),
+    ("config.txt", "```yaml\nserver: alpha\nport: 80\n```\n\n" + CHAT, None, []),  # more names than four turns allow
+    ("config-forty.txt", "```\nserver: alpha\nport: 80\n```\n\n" + FORTY, SURE, ["User", "Assistant"] * 20),
+    ("sections.rst", "Support chat\n~~~~~~~~~~~~\n\n" + FORTY + "\nFollow-up notes\n~~~~~~~~~~~~~~~\n\nThe customer was "
+     "satisfied.\n", SURE, ["User", "Assistant"] * 20),
+    ("banners.txt", "~~~~~~~~~~\n" + FORTY + "~~~~~~~~~~\n", SURE, ["User", "Assistant"] * 20),
+    ("banners.md", "~~~~~~~~~~\n" + FORTY + "~~~~~~~~~~\n", SURE, ["User", "Assistant"] * 20),
+    ("named.txt", "~~~~~~~~~~\n" + NAMED + "~~~~~~~~~~\n",
+     {"format": "text", "score": transcripts.WEAK, "style": "colon", "speakers": ["else", "marta"]}, ["Else", "Marta"] * 2),
+    ("desk.txt", "From: support desk\n~~~~~~~~~~~~~~~~~~~~\n" + FORTY, SURE, ["User", "Assistant"] * 20),
+    ("model.txt", "```yaml\nmodel: m1\n```\n" + CHAT,
+     {"format": "text", "score": transcripts.STRONG, "style": "colon", "speakers": ["assistant", "model", "user"]},
+     ["model"] + ["User", "Assistant"] * 2),
+]
 
 
-def test_a_fence_left_open_above_a_chat_whose_code_closes_it_hides_no_turns(chats):
-    """A fence left open above a chat log, whose closer is the end of a block of code inside the chat, would hold the
-    chat: it opens no block, so every turn counts. A block of code above a chat (a config) holds fewer turn lines than
-    the chat after it and stays a block."""
-    tail = "User: show the code\nAssistant: Here:\n```python\nprint(1)\n```\nUser: ok\nAssistant: ok\n"
-    for name, log, turns in (("pasted.txt", "```\n" + FORTY + tail, 44),
-                             ("config.txt", "```\nserver: alpha\nport: 80\n```\n\n" + FORTY, 40)):
-        (chats / "logs" / name).write_text(log)
-        assert transcripts.sniff(chats / "logs" / name, f"logs/{name}") == SURE, name
-        assert [w for _, w in chat_turns(name)] == ["User", "Assistant"] * (turns // 2), name
-
-
-def test_a_title_s_line_of_tildes_in_restructuredtext_opens_no_block(chats):
-    """A title's line of tildes underlines it: a chat under one section's title, before a later section's longer line
-    of tildes, keeps its turns."""
-    doc = "Support chat\n~~~~~~~~~~~~\n\n" + FORTY + "\nFollow-up notes\n~~~~~~~~~~~~~~~\n\nThe customer was satisfied.\n"
-    (chats / "logs" / "support.rst").write_text(doc)
-    assert transcripts.sniff(chats / "logs" / "support.rst", "logs/support.rst") == SURE
-    assert [w for _, w in chat_turns("support.rst")] == ["User", "Assistant"] * 20
-
-
-def test_a_chat_between_two_banners_keeps_its_turns(chats):
-    """Two equal banners of tildes around a chat log, in a text or a markdown file, would hold it as a block of code:
-    the first opens none, so the turns count, as they do between two people named by name (a weak sniff, as without
-    the banners)."""
-    banner = "~~~~~~~~~~\n"
-    for name in ("banners.txt", "banners.md"):
-        (chats / "logs" / name).write_text(banner + FORTY + banner)
-        assert transcripts.sniff(chats / "logs" / name, f"logs/{name}") == SURE, name
-        assert [w for _, w in chat_turns(name)] == ["User", "Assistant"] * 20, name
-    named = "Else: Did you get the tickets?\nMarta: Yes, two.\nElse: See you at eight.\nMarta: See you.\n"
-    (chats / "logs" / "named.txt").write_text(banner + named + banner)
-    got = transcripts.sniff(chats / "logs" / "named.txt", "logs/named.txt")
-    assert got == {"format": "text", "score": transcripts.WEAK, "style": "colon", "speakers": ["else", "marta"]}
-    assert [w for _, w in chat_turns("named.txt")] == ["Else", "Marta", "Else", "Marta"]
-
-
-def test_a_banner_under_a_label_above_a_chat_opens_no_block(chats):
-    """A banner of tildes right under a label line (`From: support desk`) underlines it, so the chat after it keeps its
-    turns."""
-    (chats / "logs" / "desk.txt").write_text("From: support desk\n~~~~~~~~~~~~~~~~~~~~\n" + FORTY)
-    assert transcripts.sniff(chats / "logs" / "desk.txt", "logs/desk.txt") == SURE
-    assert [w for _, w in chat_turns("desk.txt")] == ["User", "Assistant"] * 20
+def test_a_fence_before_the_first_turn_line_reads_as_it_always_did(chats):
+    """A fence before a chat log's first turn line opens no block that hides a turn: each log reads as thimble 0.10.5
+    reads it, so each chat log it found is found, with the same turns. A block of code before the chat keeps its own
+    lines too, even one that reads as a turn (`model: m1`), and its closing fence opens no block."""
+    for name, text, sniffed, who in BEFORE_THE_CHAT:
+        (chats / "logs" / name).write_text(text)
+        assert transcripts.sniff(chats / "logs" / name, f"logs/{name}") == sniffed, name
+        assert [w for _, w in chat_turns(name)] == who, name
 
 
 def test_a_page_deep_in_a_long_turn_reads_back_a_few_mb_at_most(chats, monkeypatch):
