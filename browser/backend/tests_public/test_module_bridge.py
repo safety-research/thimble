@@ -806,29 +806,58 @@ async def test_a_request_in_terminal_mode_goes_through_subagents_json_and_module
     assert list(held["roles"]) == ["orientation"], "roles.json written before the spawn"
 
 
+class _BridgeClock:
+    """module_bridge's time module with monotonic() `ahead` seconds ahead of the real one, which a test moves: a
+    request's time runs out when the test says, not when a busy machine lets it."""
+
+    def __init__(self) -> None:
+        self.ahead = 0.0
+
+    def monotonic(self) -> float:
+        return time.monotonic() + self.ahead
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
+
+
 async def test_a_request_the_module_does_not_answer_in_time_expires_and_a_late_spawn_is_stopped(terminal, monkeypatch):
-    monkeypatch.setattr(module_bridge, "REQUEST_TIMEOUT_S", 0.3)
-    late: list[str] = []
-    mod = FileModule(terminal, session=MAIN, answer=lambda op, args: None if op == "spawn" else {"agentId": args.get("agent")})
+    clock, taken = _BridgeClock(), threading.Event()
+    monkeypatch.setattr(module_bridge, "time", clock)
+    monkeypatch.setattr(module_bridge, "REQUEST_TIMEOUT_S", 60.0)
+
+    def answer(op: str, args: dict) -> dict | None:
+        if op == "spawn":  # taken, and not answered in time
+            taken.set()
+            return None
+        return {"agentId": args.get("agent")}
+
+    mod = FileModule(terminal, session=MAIN, answer=answer)
     mod.start()
     try:
-        got = await module_bridge.request(CORPUS, "spawn", role="writer", prompt="p", description="d", values={})
+        ask = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="writer", prompt="p", description="d",
+                                                        values={}))
+        assert await asyncio.to_thread(taken.wait, 60), "the module never took the request"
+        clock.ahead += module_bridge.REQUEST_TIMEOUT_S  # its time runs out once the module has taken it
+        got = await ask
         assert got == {"no-module": module_bridge.NOT_ANSWERING, "expired": True}
         [(rid, _, _)] = mod.seen
         r = module_bridge.sf.requests(module_bridge.sf.read(terminal))[rid]
         assert (r["module"], r["state"]) == ("expired", "expired")
-        mod.out["answers"][rid] = {"agentId": "aLate"}  # the module's answer comes after all
+        # the module's answer comes after all, written while its thread is stopped, so no write of the thread's own
+        # from before the answer lands after it
+        mod.stop()
+        mod.out["answers"][rid] = {"agentId": "aLate"}
         mod.write()
         assert module_bridge.reconcile(CORPUS) == ["aLate"]
         assert module_bridge.reconcile(CORPUS) == [], "stopped once"
-        for _ in range(100):
-            if mod.ops("stop"):
-                break
+        mod.start()
+        end = time.monotonic() + 60
+        while not mod.ops("stop"):  # until the module took the stop request
+            assert time.monotonic() < end, "the module never took the stop request"
             await asyncio.sleep(0.02)
         assert mod.ops("stop") == [{"agent": "aLate"}]
     finally:
         mod.stop()
-    assert not late
 
 
 async def test_without_a_live_module_a_request_in_terminal_mode_answers_no_module_and_writes_nothing(terminal):

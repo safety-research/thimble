@@ -107,9 +107,13 @@ class FileModule:
         return self
 
     def stop(self) -> None:
+        """Ends the thread, and returns once it wrote its last (a busy machine only makes that later)."""
         self._stop.set()
         if self._thread is not None:
-            self._thread.join(timeout=2)
+            self._thread.join(timeout=60)
+            assert not self._thread.is_alive(), "the module's thread did not end"
+            self._thread = None
+        self._stop = threading.Event()
 
     def ops(self, op: str) -> list[dict]:
         return [a for _, o, a in self.seen if o == op]
