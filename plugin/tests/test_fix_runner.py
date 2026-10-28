@@ -14,8 +14,6 @@ import threading
 import time
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_fixes import FX, made, world  # noqa: E402, F401  (world is the fixture)
@@ -44,16 +42,14 @@ def call(tmp_path: Path, *args: str) -> subprocess.Popen:
 
 
 def test_done_within_gives_the_fix_still_working_while_its_tests_run_and_a_later_done_what_came_of_them(world, monkeypatch, tmp_path):
-    gate = tmp_path / "tests-may-end"  # the tests run until the test makes it, so they outlast the first call however slow
-    monkeypatch.setenv("THIMBLE_FIX_TESTS", f"while [ ! -e '{gate}' ]; do sleep 0.05; done")
+    # the tests run until the test makes the gate, which it does only once the call came back, so the call can come
+    # back only at its limit, while they run (and they end with this process, should the call wait for them after all)
+    gate = tmp_path / "tests-may-end"
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", f"while [ ! -e '{gate}' ] && kill -0 {os.getpid()}; do sleep 0.05; done")
     r = made(world)
     try:
-        # the call ends at its limit while the tests run on: their runner holds none of its pipes, so a call that waited
-        # for them would never end
-        try:
-            out, err = call(tmp_path, "done", str(r["id"]), "--title", "Bar says read", "--within", "0.3").communicate(timeout=90)
-        except subprocess.TimeoutExpired:
-            pytest.fail("the call waited for the tests")
+        # the call ends at its limit while the tests run on: their runner holds none of its pipes
+        out, err = call(tmp_path, "done", str(r["id"]), "--title", "Bar says read", "--within", "0.3").communicate()
         got = json.loads(out)
         # still working, as every list reads it, with the mark that its tests run
         assert got["state"] == "working" and got["testing"]["lock"] and FX.get(r["id"])["testing"] == got["testing"]
