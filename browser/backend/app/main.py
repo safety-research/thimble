@@ -566,8 +566,8 @@ def create_app() -> FastAPI:
 
 def _build_routes(app: FastAPI) -> None:
     """Build the table of each included router's routes now, before the server listens. FastAPI builds it when a
-    request first reaches the router, on the event loop: about a second's work, and several on a busy machine, which
-    the first health call of `server up` or the plugin (1 s, cli.HEALTH_TIMEOUT_S) would wait for."""
+    request first reaches the router, on the event loop: a quarter of a second's work or more, and seconds on a busy
+    machine, which the first health call of `server up` or the plugin (1 s, cli.HEALTH_TIMEOUT_S) would wait for."""
     from fastapi.routing import iter_route_contexts  # noqa: PLC0415
 
     for _route in iter_route_contexts(app.router.routes):
