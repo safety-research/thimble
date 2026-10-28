@@ -3372,6 +3372,9 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
         views.update_proposal(c, slug, message=rest or None, message_sent=None, agent_id=run.agent_id, chat=run.chat,
                               request=None, finish=None,
                               answering={"agent": run.agent_id, "run": run.k, "text": str(held["message"])})
+        # the run starts from the view as it is now: a copy of it aside, which an earlier run that was stopped may have
+        # used up (its _settle put the view back from it, or dropped it), so the run's end can tell a change and put it back
+        views._keep_built(c, slug)
         views._emit(c, slug, "built", chat=run.chat)  # its thread offers Stop while the run answers (stop_answer)
         if rest:
             route = run.route if run.route in (subagents.CLICK, subagents.FOLLOW_ON) else subagents.FOLLOW_ON
