@@ -959,9 +959,9 @@ export function Diagram({ dataset, fitWidth }: { dataset: GraphDataset; fitWidth
 // ---- a custom card: html in a sandboxed iframe sized to its content ----
 
 export const SIZE_MESSAGE = 'thimble:size'
-// the body's height, and whether the page lays out wider than its frame (`wide`): then the frame scrolls sideways, and
-// the height takes in the scroll bar's room where the bar takes room, so the bar covers none of the page. `width` is
-// the page's laid-out width and `frame` the frame's, which a page wider than its frame tells its author (onWide)
+// the body's height, and whether the page lays out wider than its frame (`wide`), which the frame cuts at its edge
+// (cardBridge); the height takes in a sideways scroll bar's room where a page still shows one. `width` is the page's
+// laid-out width and `frame` the frame's, which a page wider than its frame tells its author (onWide)
 const SIZER = `<script>(function(){var b=document.body,d=document.documentElement;function s(){var c=getComputedStyle(b),w=d.scrollWidth>d.clientWidth+1;parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:b.offsetHeight+parseFloat(c.marginTop)+parseFloat(c.marginBottom)+(w?Math.max(0,innerHeight-d.clientHeight):0),wide:w,width:d.scrollWidth,frame:d.clientWidth},'*')}addEventListener('load',s);if(window.ResizeObserver){var o=new ResizeObserver(s);o.observe(b);o.observe(d)}s()})()</script>`
 export const CUSTOM_MIN_H = 40
 /** The most of a card's body the canvas shows at rest, px: about one laptop screen with the card's question and
@@ -986,8 +986,8 @@ export const CUSTOM_OPEN_MAX_H = 8000
  * Show all under them, and `onTall` hears the page's whole height once for each html; a page that lays out wider than
  * its frame, `onWide` hears its width and the frame's once for each html. Each hears only what the page drawn from the
  * html now measured, never a size of the page before it. The frame's `data-height` is that
- * height, which the card harness measures (render.tsx). A page wider than its frame scrolls sideways inside it, and a
- * fade at the frame's right edge says there is more. Its head carries the theme, thimble's card stylesheet (lib/cardStyle), the ink that mends text the paper made hard to read (lib/ink), the bridge that tells the page what the ⌘ pointer and the wheel do
+ * height, which the card harness measures (render.tsx). A page wider than its frame is cut at the frame's edge, and the
+ * card dragged wider shows more of it. Its head carries the theme, thimble's card stylesheet (lib/cardStyle), the ink that mends text the paper made hard to read (lib/ink), the bridge that tells the page what the ⌘ pointer and the wheel do
  * in the frame (cardBridge), the chart style (chartScript) and the libraries the card names in workspace `ws`
  * (useCardLibs), before the page's own styles and scripts. */
 export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide }: { html: string; title: string; height?: number; ws?: string; libs?: readonly string[]; onTall?: (height: number) => void; onWide?: (width: number, frame: number) => void }) {
@@ -996,8 +996,6 @@ export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide
   const [open, setOpen] = useState(false)
   // drawn once the page has loaded and said its height, for the card harness
   const [sized, setSized] = useState(false)
-  // the page lays out wider than its frame
-  const [wide, setWide] = useState(false)
   // what the page that last said its size measured: the html it was drawn from (the html of the frame when it said it),
   // and its width and the frame's when it lays out wider than the frame
   const htmlNow = useRef(html)
@@ -1018,7 +1016,6 @@ export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide
       const d = e.data as { type?: unknown; height?: unknown; wide?: unknown; width?: unknown; frame?: unknown }
       if (d && d.type === SIZE_MESSAGE && typeof d.height === 'number' && Number.isFinite(d.height)) {
         setFull(Math.min(CUSTOM_OPEN_MAX_H, Math.max(CUSTOM_MIN_H, Math.ceil(d.height))))
-        setWide(d.wide === true)
         setSized(true)
         const over = d.wide === true && typeof d.width === 'number' && typeof d.frame === 'number' && Number.isFinite(d.width) && Number.isFinite(d.frame)
         setMeasured({ html: htmlNow.current, width: over ? Math.ceil(d.width as number) : 0, frame: over ? Math.floor(d.frame as number) : 0 })
@@ -1049,7 +1046,7 @@ export function CustomFrame({ html, title, height, ws = '', libs, onTall, onWide
     onWide(measured.width, measured.frame)
   }, [measured, html, onWide])
   return (
-    <div className={`canvas-card-frame${capped && !open ? ' is-clipped' : ''}${wide ? ' is-wide' : ''}`} data-body="" data-settled={sized ? 'true' : 'false'} data-height={sized ? full : undefined}>
+    <div className={`canvas-card-frame${capped && !open ? ' is-clipped' : ''}`} data-body="" data-settled={sized ? 'true' : 'false'} data-height={sized ? full : undefined}>
       {doc != null && <iframe ref={ref} className="canvas-card-html" sandbox="allow-scripts" srcDoc={doc} title={title || 'custom'} style={{ height: h }} onLoad={() => tellCmd(ref.current)} />}
       {capped && (
         <button type="button" className="bcell-more" onMouseDown={(e) => e.stopPropagation()} onClick={() => setOpen((v) => !v)}>
