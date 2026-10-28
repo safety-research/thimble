@@ -264,12 +264,14 @@ UI_KEY_VALUE = "key-of-the-test-browser"  # the key of that browser's path, /b/<
 
 # The ports of the servers the tests start, and of the ports they hold or look at: below the ports the system hands out
 # for port 0 (32768 and up on Linux, 49152 and up on macOS), where kernels' connection files and every client's
-# connection come and go, so none of those takes one between a test's look and its server's bind; and away from the
-# ports the tests name (8300, 5301, 21101, 21240, 27755). A test takes them from a block of PORT_BLOCK ports that it
-# alone holds on this machine while it runs (_PortBlock): every other test, of this run or of another run beside it,
-# takes its own from another block, so none takes a port of this test's between its look and its server's bind, nor
-# the one `server up` picks among the 50 above a taken one (cli.PORT_SCAN), which stay in the block.
-SERVER_PORTS = range(22000, 27000)
+# connection come and go, so none of those takes one between a test's look and its server's bind; away from the ports
+# the tests name (8300, 5301, 21101, 21240, 27755); and apart from 22000-26999, where earlier versions of these tests
+# took theirs without a block, so that a run of one of those beside this run takes none of its ports. A test takes them
+# from a block of PORT_BLOCK ports that it alone holds on this machine while it runs (_PortBlock): every other test, of
+# this run or of another run beside it, takes its own from another block, so none takes a port of this test's between
+# its look and its server's bind, nor the one `server up` picks among the 50 above a taken one (cli.PORT_SCAN), which
+# stay in the block.
+SERVER_PORTS = range(12000, 17000)
 PORT_BLOCK = 100
 PORT_BLOCK_WAIT_S = 120.0  # how long a test waits for a block while every block is held
 
