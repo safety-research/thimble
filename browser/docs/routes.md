@@ -126,7 +126,6 @@ knows the key.
 | GET | `/api/ws/{c}/calls/{chat}` | calls | cookie or token |
 | GET | `/api/ws/{c}/calls/{chat}/{n}` | calls | cookie or token |
 | GET | `/api/ws/{c}/canvas` | notebook | cookie or token |
-| PUT | `/api/ws/{c}/canvas/active-group` | tools | cookie |
 | GET | `/api/ws/{c}/canvas/comments` | canvas_comments | cookie or token |
 | POST | `/api/ws/{c}/canvas/comments/{cid}/reopen` | canvas_comments | cookie |
 | POST | `/api/ws/{c}/canvas/comments/{cid}/resolve` | canvas_comments | cookie |
@@ -137,6 +136,7 @@ knows the key.
 | GET | `/api/ws/{c}/cards/{cell_id}/plan-runs` | plans | cookie or token |
 | GET | `/api/ws/{c}/cardtypes/{name}/frame` | cardtypes | cookie or token |
 | POST | `/api/ws/{c}/cardtypes/{name}/records` | cardtypes | cookie |
+| POST | `/api/ws/{c}/cells` | notebook | cookie |
 | POST | `/api/ws/{c}/cells/move` | notebook | cookie |
 | GET | `/api/ws/{c}/cells/names` | notebook | cookie or token |
 | DELETE | `/api/ws/{c}/cells/{cell_id}` | notebook | cookie |

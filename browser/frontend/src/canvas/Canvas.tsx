@@ -51,8 +51,8 @@ import {
   PAD,
   TITLE,
   activeFrame,
-  analystGroup,
   boardOf,
+  CARD_W,
   cardCount,
   cardsIn,
   contains,
@@ -95,6 +95,7 @@ import {
   showCard,
   stepZoom,
   toPlane,
+  UNMEASURED_H,
   unreadAnchors,
   wheelView,
   zoomTo,
@@ -466,16 +467,14 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     return () => ro.disconnect()
   }, [data != null])
 
-  // the frame the analyst last selected or worked in, reported to the server as it changes: a model's card whose call
-  // names no group goes there (tools.default_group). Clearing the selection reports nothing, so the last frame stays.
+  // the frame the analyst last selected or worked in, recorded as it changes (telemetry's notebook-switch). Clearing the
+  // selection records nothing, so the last frame stays.
   const workFrame = useMemo(() => (board ? activeFrame(board, gsel, sel) : null), [board, gsel, sel])
   const reported = useRef<{ ws: string; group: string } | null>(null)
   useEffect(() => {
     if (!workFrame || (reported.current?.ws === ws && reported.current.group === workFrame)) return
     reported.current = { ws, group: workFrame }
-    canvasApi.activeGroup(ws, workFrame).catch(() => {
-      reported.current = null
-    })
+    track('notebook-switch', { target: `group:${workFrame}` })
   }, [ws, workFrame])
 
   // the latest of everything, for the window listeners a press installs
@@ -932,18 +931,31 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     }
   }
 
+  /** Where a new box of `w` × `h` stands where the analyst is looking, clear of what is drawn there (a frame with its
+   * title's room above it); null when the view has no room for it. */
+  const spotInView = (w: number, h: number) => {
+    const v = live.current.view
+    const at = toPlane(v, OPEN_MARGIN, BAR_ROOM + TITLE * v.scale)
+    const area = { x: at.x, y: at.y, w: (vpSize.w - CONTROLS_W - OPEN_MARGIN) / v.scale, h: (vpSize.h - BAR_ROOM) / v.scale - TITLE }
+    const taken = lay ? [...lay.rects].map(([k, r]) => (board?.group.has(k) ? { x: r.x, y: r.y - TITLE, w: r.w, h: r.h + TITLE } : r)) : []
+    return freeSpot(area, w, h, taken)
+  }
+
   const addCell = async () => {
     if (!data) return
     track('ui-click', { target: 'canvas:cell', detail: { action: 'add' } })
     try {
-      const g = analystGroup(data.groups) ?? (await api.createGroup(ws, { title: 'Your work', role: 'analyst' }))
-      const cell = await api.addCell(ws, g.id, { kind: 'code', title: 'New card', code: '' })
-      openFrames([g.id])
+      // the canvas has no group by default: the new card stands loose, where the analyst is looking, clear of what is
+      // drawn there; only with no room in view does it go below the board, and the view to it
+      const pos = spotInView(CARD_W, UNMEASURED_H)
+      const cell = await canvasApi.addCard(ws, { kind: 'code', title: 'New card', code: '', ...(pos ? { pos } : {}) })
       setSel([cell.id])
       setGsel(null)
       setEditing({ id: cell.id, field: 'title' })
-      pendingRef.current = `card:${cell.id}`
-      pendingShut.current = false
+      if (!pos) {
+        pendingRef.current = `card:${cell.id}`
+        pendingShut.current = false
+      }
       await load()
     } catch (e) {
       fail(e)
@@ -956,11 +968,7 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     try {
       // the new frame stands where the analyst is looking, clear of what is drawn there, and the view stays; only with no
       // room in view does it go below the board, and the view to it
-      const v = live.current.view
-      const at = toPlane(v, OPEN_MARGIN, BAR_ROOM + TITLE * v.scale)
-      const area = { x: at.x, y: at.y, w: (vpSize.w - CONTROLS_W - OPEN_MARGIN) / v.scale, h: (vpSize.h - BAR_ROOM) / v.scale - TITLE }
-      const taken = lay ? [...lay.rects].map(([k, r]) => (board?.group.has(k) ? { x: r.x, y: r.y - TITLE, w: r.w, h: r.h + TITLE } : r)) : []
-      const pos = freeSpot(area, MIN_FRAME_W, MIN_FRAME_H, taken)
+      const pos = spotInView(MIN_FRAME_W, MIN_FRAME_H)
       const g = await canvasApi.createGroup(ws, { title: nextGroupTitle(data.groups), ...(pos ? { pos } : {}) })
       setSel([])
       setGsel(g.id)

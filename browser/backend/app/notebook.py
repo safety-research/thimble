@@ -4062,6 +4062,26 @@ async def create_cell(c: str, nb: str, body: NewCell) -> dict:
     return insert_cell(c, nb, cell, body.after)
 
 
+class NewLooseCell(NewCell):
+    pos: dict | None = None  # where the card stands on the board; null for below what is drawn
+
+
+@router.post("/ws/{c}/cells")
+async def create_loose_cell(c: str, body: NewLooseCell) -> dict:
+    """A new card on the board outside every frame, in the loose group (made on first use), at `pos` or below the
+    board: the canvas's own new card, since the canvas has no group by default. 400 as create_cell, or for a pos that is
+    not {x, y}."""
+    if body.pos is not None and pos_of(body.pos) is None:
+        raise HTTPException(400, "pos must be {x, y} numbers or null")
+    try:
+        cell = new_cell(body.kind, body.created_by, body.title, code=body.code, payload=body.payload,
+                        created_at_event=body.created_at_event)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    cell["pos"] = pos_of(body.pos)
+    return insert_cell(c, loose_group(_ws(c)), cell, body.after)
+
+
 def _cell_in(c: str, nb: str, cell_id: str) -> dict:
     """The cell when it is in that group; 404 otherwise."""
     return _find(load_notebook(c, nb), cell_id)

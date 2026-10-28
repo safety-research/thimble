@@ -98,8 +98,7 @@ The bad chat retells the work and lists numbers instead of answering, the cards 
                      2  plot   the same two distributions, one panel per product           For every product except the X200 the two months overlap.
                      3  plot   the X200 alone, January against March, with its share       Most March X200 refunds were approved within a day, and they were 60 of every 100 refunds.
     Bad       chat   Yes, the median fell from 3.1 to 2.2 days. The table has the breakdown by product and month.
-              group  "Refund handling time"
-                     1  table  median days to resolve, by product and month, 36 rows   Medians range from 0.3 to 4.8 days.
+              card   table  median days to resolve, by product and month, 36 rows   Medians range from 0.3 to 4.8 days.
 
 The bad chat gives the headline drop without what explains it, and the one table leaves the analyst to find the pattern in 36 rows.
 

@@ -18,8 +18,7 @@ When a card type fits the question, answer it with labels and a group of cards n
               group  "Who told other accounts which page to edit next, and did they?"
                      1  plot   thimble.card("multiagent-swimlane", labels=["how told"], actions=[…], goals={…}, links=[…])   Most instructions came in chat posts, and the accounts told edited the page soon after.
                      2  table  instructions and the edits that followed them, per way of telling                                    Posts in chat were followed most often, 29 of 41.
-    Bad       group  "Instructions"
-                     1  plot   instructions per hour                                                                                 Instructions peaked at 02:00.
+    Bad       card   plot   instructions per hour   Instructions peaked at 02:00.
 
 The bad card counts instructions over time, so it shows neither who told whom nor whether they followed, which is what the question asks.
 
