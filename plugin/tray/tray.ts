@@ -7,9 +7,9 @@
 // answer by v), in reading order (a heads-up on a citation's words before the citation), and open the tray on the one
 // reached; a press on a citation or an explainer opens it too. The marked words draw in focus (the
 // answer view asks trayFocus). At rest, while the answer the keys act on shows marks, the bar names ] and the first one
-// it opens (`] next heads up`; on a narrow bar `] next`, then `]` alone), in thimble's color while a mark came that the
-// person has not seen: opening any mark of an answer counts every mark it shows then as seen. While it is open its keys
-// are in its header, at the right, each where it acts (the bar keeps its own):
+// it opens (`] next heads up`; on a narrow bar `] next`, then `]` alone), in thimble's color while the answer shows a
+// mark the person has not opened, and dim once they opened each. While it is open its keys are in its header, at the
+// right, each where it acts (the bar keeps its own):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
@@ -41,9 +41,8 @@
 // mark goes to a side thread (a). The tray closes when the person sends a prompt. What the person opens reaches main
 // through core/engaged.ts.
 //
-//   state: tray ({stack} or null), trayCard (the card ] reached: {row, card}), traySeen (the marks an answer showed
-//   when the person last opened one of its marks: `<row>|c<n>` for a citation, `<row>|<id>` for an explainer or a
-//   heads-up)
+//   state: tray ({stack} or null), trayCard (the card ] reached: {row, card}), traySeen (the marks the person opened:
+//   `<row>|c<n>` for a citation, `<row>|<id>` for an explainer or a heads-up)
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
@@ -94,7 +93,7 @@ type Stand = { row: string; card: string } | null
 const TRAY = { plugin: 'thimble', key: 'tray' } as const
 const STAND = { plugin: 'thimble', key: 'trayCard' } as const
 const SEEN = { plugin: 'thimble', key: 'traySeen' } as const
-/** The most marks the seen list keeps: the newest answers' */
+/** The most marks the seen list keeps: the newest opened */
 const SEEN_KEEP = 400
 
 /** The colors of the tray's frame by what it shows, the ones its words are drawn in (explain/place.mjs markColors): a
@@ -237,12 +236,13 @@ async function seenNow($: Engine): Promise<Set<string>> {
   return new Set(Array.isArray(v) ? v.map(String) : [])
 }
 
-/** The person opened a mark of the answer `row` stands in: every mark it shows now counts as seen, so the bar's ] is
- *  lit again only by a mark that comes after. */
-async function marksSeen($: Engine, row: string): Promise<void> {
+/** The person opened the mark `f`: it counts as seen, and the bar's ] dims once each mark of its answer does. Lines of a
+ *  file an explainer cites are no mark of the answer. */
+async function markSeen($: Engine, f: Frame): Promise<void> {
+  if (f.kind === 'place') return
   const had = await seenNow($)
-  const add = (await answerMarks($, row)).map(seenRef).filter(r => !had.has(r))
-  if (add.length) await $.state.set(SEEN, [...had, ...add].slice(-SEEN_KEEP))
+  const ref = seenRef(f)
+  if (!had.has(ref)) await $.state.set(SEEN, [...had, ref].slice(-SEEN_KEEP))
 }
 
 async function hiddenCard($: Engine, id: string): Promise<boolean> {
@@ -402,7 +402,7 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
   const t = await turnOfRow($, f.row)
   if (t?.answer) await pickAnswer($, t.answer)
   await told($, f)
-  await quietly(marksSeen($, f.row))
+  await quietly(markSeen($, f))
   if (o.reveal) await reveal($, f)
 }
 
@@ -410,7 +410,7 @@ export async function openMark($: Engine, f: Frame, o: { reveal?: boolean } = {}
 async function pushMark($: Engine, f: Frame): Promise<void> {
   await setTray($, push(await trayNow($), f) as Tray)
   await told($, f)
-  await quietly(marksSeen($, f.row))
+  await quietly(markSeen($, f))
 }
 
 /** 0: the code back to the output, then the mark under this one, then closed. */
@@ -584,7 +584,7 @@ export async function trayBar($: Engine, _on: (key: string) => boolean, preview:
 }
 
 /** At rest, while the answer the keys act on shows marks: ] and the first of them, which ] opens from rest (restStop),
- *  a press too; in thimble's color while the answer shows a mark the person has not seen (marksSeen). On a narrow bar
+ *  a press too; in thimble's color while the answer shows a mark the person has not opened (markSeen). On a narrow bar
  *  its words give way before any count does: `] next`, then `]` alone (bar/bar.tsx). */
 async function restItem($: Engine): Promise<BarItem[]> {
   const row = await actingRow($)

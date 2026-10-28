@@ -615,7 +615,7 @@ async function restKey($: Any): Promise<{ words: string; lit: boolean } | null> 
   return { words: textOf(b), lit: words?.props?.color === accent() && !words?.props?.dimColor }
 }
 
-test("the bar's ] is lit while the answer the keys act on shows a mark that came after the person last opened one of its marks: a heads-up asked for after they opened its explainer lights it again, and a new answer's marks light it", { options: { details: 'on demand' } }, async ($, on) => {
+test("the bar's ] is lit while the answer the keys act on shows a mark the person has not opened, and dim once they opened each: opening its explainer leaves it lit while its citation is not opened, a heads-up asked for after lights it again, and a new answer's marks light it", { options: { details: 'on demand' } }, async ($, on) => {
   const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   mock.store(on)
   // the look after the first answer gives an explainer; h then asks for a heads-up on it; the look after the second
@@ -637,19 +637,22 @@ test("the bar's ] is lit while the answer the keys act on shows a mark that came
   await w.clock.advance(HINT_MS)
   await $.ui.render(answerRow('row-t1', CITED))
   expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
-  // ] opens the explainer, the answer's first mark: every mark it shows then is seen
+  // ] opens the explainer, the answer's first mark; its citation is not opened yet
   await press(']')
   await press('0')
+  expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
+  // ] from rest, then on to the citation: each mark the answer shows was opened
+  for (const k of [']', ']', '0']) await press(k)
   expect(await restKey($)).toEqual({ words: '] next explainer', lit: false })
-  // a heads-up asked for on the same answer comes after: lit, until the person opens a mark of it again
+  // a heads-up asked for on the same answer comes after: lit, until the person opens it too
   await press('h')
   await $.ui.render(answerRow('row-t1', CITED))
   await w.clock.advance(100)
   const labels = (n: Any): string[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(labels) : [...(n.type === 'Button' ? [String(n.props?.label)] : []), ...labels(n.props?.children), ...labels(n.children)])
   expect(labels(await $.ui.render(answerRow('row-t1', CITED)))).toContain('heads up 30 seconds after a drop')
   expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
-  await press(']')
-  await press('0')
+  // the explainer and the citation again, then on to the heads-up after them
+  for (const k of [']', ']', ']', '0']) await press(k)
   expect(await restKey($)).toEqual({ words: '] next explainer', lit: false })
   // the next answer, with marks of its own
   await answered($, w.clock, 't2', 'The cache key changed when the lockfile moved.')

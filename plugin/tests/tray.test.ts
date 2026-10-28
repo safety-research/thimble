@@ -1091,7 +1091,7 @@ test('the header names what ] goes to from the mark the tray shows: a heads-up o
   expect(band).not.toContain('Retried runs count twice')
 })
 
-test("at rest the bar names ] and the first mark it opens while the answer the keys act on shows marks, in either layout, a press that opens it as ] does; its words are in thimble's color until the person opens one of the answer's marks", CITES, async ($, on) => {
+test("at rest the bar names ] and the first mark it opens while the answer the keys act on shows marks, in either layout, a press that opens it as ] does; its words are in thimble's color while one of the answer's marks is not opened, and dim once the person opened each", CITES, async ($, on) => {
   const { clock } = await resumed($, on, QUOTED, 's-tray-rest', { parts: HEADS })
   const rest = async (isFullscreen = true) => all(await $.ui.render({ ...(above(40) as Any), viewport: { ...view, isFullscreen } } as never)).find(n => n.type === 'Button' && n.props?.key === 'bar-tray-next')
   const words = (b: Any) => all(b).find(n => n.type === 'Text' && textOf(n) === ' next heads up')
@@ -1109,9 +1109,16 @@ test("at rest the bar names ] and the first mark it opens while the answer the k
   const band = textOf(await $.ui.render(above(40)))
   expect(band).toContain('Retried runs count twice')
   expect(band.match(/\] next/g)).toEqual(['] next'])
-  // closed: every mark the answer showed when the person opened one is seen, so the words are dim
+  // closed: the citation and the explainer are not opened yet, so the words stay lit
   await clock.advance(2000)
   await $.prompt.edit(key('0'))
+  expect(words(await rest())?.props?.color).toBe(accent())
+  expect(words(await rest())?.props?.dimColor).toBeUndefined()
+  // ] from rest opens the heads-up again, then on to the citation and the explainer: each mark opened, so dim
+  for (const k of [']', ']', ']', '0']) {
+    await clock.advance(2000)
+    await $.prompt.edit(key(k))
+  }
   expect(words(await rest())?.props).toMatchObject({ dimColor: true })
   expect(words(await rest())?.props?.color).toBeUndefined()
 })
