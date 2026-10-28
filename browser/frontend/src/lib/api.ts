@@ -723,6 +723,8 @@ export const canvasApi = {
   patchCell: (c: string, id: string, patch: CellPatch) => j<Cell>(`${ws(c)}/cells/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   /** `POST /cells/move`: reorder cards, move them to another group, or place one free. */
   move: (c: string, body: CellMoveBody) => j<Cell[]>(`${ws(c)}/cells/move`, { method: 'POST', body: JSON.stringify(body) }),
+  /** `POST /cells`: a new card outside every frame (the loose group), at `pos` on the board or below what is drawn. */
+  addCard: (c: string, body: NewCellBody & { pos?: Pos | null }) => j<Cell>(`${ws(c)}/cells`, { method: 'POST', body: JSON.stringify(body) }),
 }
 
 // --- the report editor ---

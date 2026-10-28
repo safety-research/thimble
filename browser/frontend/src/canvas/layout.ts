@@ -578,13 +578,6 @@ export function placeBeside(data: CanvasResponse, id: string, group: string, ref
   return { pos: null, after, ref: clearPos(patchCellLocal(moved, ref, { pos }), ref, open, heights) ?? pos }
 }
 
-/** The analyst's own group, where a new card goes: role analyst, a root, no thread; with several, the one with the most cards. */
-export function analystGroup(groups: readonly Group[]): Group | null {
-  const own = groups.filter((g) => (g.role || 'analyst') === 'analyst' && !isThreadGroup(g) && !g.parent && g.kind !== 'loose')
-  if (!own.length) return null
-  return [...own].sort((a, b) => (b.n_cells ?? 0) - (a.n_cells ?? 0))[0]
-}
-
 /**
  * The frame the analyst has active: the frame whose title is selected, else the frame of the selected cards when they
  * all sit in one; null otherwise.

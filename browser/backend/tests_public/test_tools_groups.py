@@ -11,7 +11,9 @@ from __future__ import annotations
 import json
 import re
 
+import httpx
 import pytest
+from fastapi import FastAPI
 
 from app import concepts, config, notebook, tools
 
@@ -139,3 +141,23 @@ async def test_a_writer_s_card_without_a_group_lands_in_its_own_group_as_before(
     g = group_of(cid)
     assert g["kind"] != notebook.LOOSE_KIND and g.get(tools.SESSION_GROUP_KEY) == "writer:report" and g["parent"] is None
 
+
+@pytest.fixture()
+async def client():
+    a = FastAPI()
+    a.include_router(notebook.router, prefix="/api")
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=a), base_url="http://t", timeout=60) as c:
+        yield c
+
+
+async def test_the_analyst_s_new_card_on_the_canvas_stands_loose(client):
+    """The canvas's Card makes a card outside every frame, where the analyst is looking (`pos`), or below the board."""
+    r = await client.post(f"/api/ws/{CORPUS}/cells", json={"kind": "code", "title": "New card", "code": "", "pos": {"x": 120, "y": 340}})
+    assert r.status_code == 200, r.text
+    cell = r.json()
+    assert cell["pos"] == {"x": 120, "y": 340} and cell["created_by"] == "user"
+    assert group_of(cell["id"])["kind"] == notebook.LOOSE_KIND
+    r = await client.post(f"/api/ws/{CORPUS}/cells", json={"kind": "code", "title": "Another", "code": ""})
+    assert r.status_code == 200 and r.json()["pos"] is None and group_of(r.json()["id"])["kind"] == notebook.LOOSE_KIND
+    assert (await client.post(f"/api/ws/{CORPUS}/cells", json={"kind": "code", "title": "x", "pos": {"x": "a"}})).status_code == 400
+    assert tools.ANALYST_NOTEBOOK_TITLE not in titles()
