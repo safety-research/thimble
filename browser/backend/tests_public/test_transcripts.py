@@ -715,6 +715,30 @@ def test_a_person_named_like_a_word_of_python_still_speaks(chats):
     assert transcripts.turn_of("else:", "colon") is None and transcripts.turn_of("Try: it", "colon") is not None
 
 
+# aider's chat history as aider writes it: two spaces end each line of the user's message and of its own output, a ^C
+# writes its notice before the cut reply, and the cut reply stops inside an edit of a markdown file
+AIDER_CUT = ("\n# aider chat started at 2026-09-01 10:00:00\n\n> Aider v0.60.0  \n> Main model: m with diff edit format  \n\n"
+             "#### Add an install section to the README.  \n>  \n>  \n> ^C again to exit  \n\n"
+             "I will add it under the title.\n\nREADME.md\n```markdown\n<<<<<<< SEARCH\n# Range tools\n=======\n"
+             "# Range tools\n\n#### Install\n\n\n#### No, put it under Usage.  \n\n"
+             "I will put it under Usage.\n\nREADME.md\n```markdown\n<<<<<<< SEARCH\n## Usage\n=======\n## Usage\n\n"
+             "#### Install\n\nRun pip install range-tools.\n>>>>>>> REPLACE\n```\n\n> Applied edit to README.md  \n")
+
+
+def test_an_aider_reply_cut_inside_an_edit_ends_at_the_user_s_next_message(chats):
+    """A reply cut inside its code (^C) leaves a block open: the user's next message, a `#### ` line with the two spaces
+    aider writes after it, ends that block in the sniff and in the turns, and a page after it reads back only to it. A
+    `#### ` heading inside an edit of a markdown file stays code."""
+    p = chats / "logs" / "cut.aider.chat.history.md"
+    p.write_text(AIDER_CUT)
+    hint = transcripts.sniff(p, "logs/cut.aider.chat.history.md")
+    assert hint == {"format": "text", "score": transcripts.STRONG, "style": "aider"}
+    assert chat_turns("cut.aider.chat.history.md") == [(4, "Aider"), (7, "User"), (8, "Aider"), (12, "Assistant"),
+                                                        (24, "User"), (26, "Assistant"), (41, "Aider")]
+    assert chat_turns("cut.aider.chat.history.md", start=29, count=20) == [(41, "Aider")], "a page inside the second edit"
+    assert transcripts._lead_texts(p, hint, 30) == AIDER_CUT.split("\n")[23:29], "from line 24, the user's message"
+
+
 def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():
     """A harness that logs each tool call with its result on its own line, between the agent's spoken turns: the tool
     turns count toward the transcript, so it is strong (Transcript the default), with `tools` set for the view, even

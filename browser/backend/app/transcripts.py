@@ -1521,19 +1521,25 @@ def _fence_closes(fence: str, line: str) -> bool:
     return bool(m) and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence) and not m.group(2).strip()
 
 
+def _aider_user(text: str) -> bool:
+    """Whether a line of aider's history is a line of the user's message as aider writes it: `#### `, the words and the
+    two spaces aider writes after each line. A `#### ` heading inside an edit of a markdown file has no such spaces."""
+    return text.startswith("#### ") and text.rstrip("\r").endswith("  ")
+
+
 def _style_hits(lines: list[str], style: str) -> tuple[list[tuple[str, dict[str, Any]]], int]:
     """The lines of a head that start turns in `style`, as text_turns reads them, and how many lines its fenced blocks
     of code hold. A line inside a block starts a turn only for a speaker who spoke outside one before it (in a style
     of DISTINCT_STYLES, for anyone), which ends a block left open (a message cut inside its code); in aider's history,
-    never."""
+    only a line of the user's message (_aider_user), which ends a reply cut inside its code."""
     hits: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
     fence: str | None = None
     code = 0
     for ln in lines:
         got = _turn_match(ln, style)
-        if fence is not None and (got is None or style == "aider" or (
-                style not in DISTINCT_STYLES and got[0]["speaker"].lower() not in seen)):
+        if fence is not None and (got is None or (style == "aider" and not _aider_user(ln)) or (
+                style not in DISTINCT_STYLES and style != "aider" and got[0]["speaker"].lower() not in seen)):
             code += 1
             if _fence_closes(fence, ln):
                 fence = None
@@ -1976,14 +1982,15 @@ def _aider_turns(texts: Iterable[Any]) -> Iterator[dict[str, Any] | None]:
     """aider's chat history as turns, per line the turn it starts or None: a run of `#### ` lines is the user's message,
     a run of `> ` lines aider's own output, and the first other line after either starts the model's reply. The lines
     of a fenced block of code in a reply (an edit's SEARCH and REPLACE lines, a file's code) are the reply's; a
-    session's head line ends any block."""
+    session's head line and a line of the user's message (_aider_user) end any block, so a reply cut inside its code
+    (^C) ends at the user's next message."""
     prev = ""
     fence: str | None = None
     for text in texts:
         if not isinstance(text, str):
             yield None
             continue
-        if fence is not None and not text.startswith(AIDER_HEAD):
+        if fence is not None and not (text.startswith(AIDER_HEAD) or _aider_user(text)):
             if _fence_closes(fence, text):
                 fence = None
             yield None
@@ -1995,7 +2002,7 @@ def _aider_turns(texts: Iterable[Any]) -> Iterator[dict[str, Any] | None]:
         if text.startswith(AIDER_HEAD):
             kind, fence = "head", None
         elif text.startswith("#### "):
-            kind = "user"
+            kind, fence = "user", None
             if prev != "user":
                 turn = {"speaker": MARKS["####"], "at": 5}
         elif text.startswith(">"):
@@ -2041,9 +2048,10 @@ def text_turns(texts: Iterable[Any], hint: dict[str, Any]) -> Iterator[dict[str,
 
 def _resets(text: str, hint: dict[str, Any]) -> bool:
     """Whether a line of a text chat log sets what text_turns reads from it on, whatever the lines before it: a turn of
-    a speaker the sniff names, which no block of code holds, or the head of an aider session."""
+    a speaker the sniff names, which no block of code holds, or in aider's history a session's head or a line of the
+    user's message (_aider_user)."""
     if hint.get("style") == "aider":
-        return text.startswith(AIDER_HEAD)
+        return text.startswith(AIDER_HEAD) or _aider_user(text)
     got = _turn_match(text, hint["style"])
     return got is not None and ("speakers" not in hint or got[0]["speaker"].lower() in hint["speakers"])
 
