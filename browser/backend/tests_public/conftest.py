@@ -265,30 +265,89 @@ UI_KEY_VALUE = "key-of-the-test-browser"  # the key of that browser's path, /b/<
 # The ports of the servers the tests start, and of the ports they hold or look at: below the ports the system hands out
 # for port 0 (32768 and up on Linux, 49152 and up on macOS), where kernels' connection files and every client's
 # connection come and go, so none of those takes one between a test's look and its server's bind; and away from the
-# ports the tests name (8300, 5301, 21101, 21240, 27755). `server up` also looks at the 50 above a taken one
-# (cli.PORT_SCAN).
+# ports the tests name (8300, 5301, 21101, 21240, 27755). A test takes them from a block of PORT_BLOCK ports that it
+# alone holds on this machine while it runs (_PortBlock): every other test, of this run or of another run beside it,
+# takes its own from another block, so none takes a port of this test's between its look and its server's bind, nor
+# the one `server up` picks among the 50 above a taken one (cli.PORT_SCAN), which stay in the block.
 SERVER_PORTS = range(22000, 27000)
+PORT_BLOCK = 100
+PORT_BLOCK_WAIT_S = 120.0  # how long a test waits for a block while every block is held
 
 
-def bound_port(ports: range = SERVER_PORTS) -> "socket.socket":
-    """A socket bound to a port of `ports` on the loopback that nothing held."""
+class _PortBlock:
+    """The block of SERVER_PORTS the running test holds: a socket of this process bound to the block's first port, which
+    no other process can bind while it is held, and so no other test takes the block. The ports after it are the
+    test's, handed out in turn (bound_port), each one nothing held then; those up to PORT_BLOCK - cli.PORT_SCAN, so
+    that `server up`'s look above one stays in the block. The block is let go when the test ends (_port_block_freed)."""
+
+    sock = None
+    first = 0  # the block's first port
+    next = 0  # the next port to hand out
+
+    @classmethod
+    def held(cls) -> range:
+        """The ports of the block this test holds, still to hand out, claiming a free block at the test's first call."""
+        import random
+        import socket
+        import time
+
+        from app import cli
+
+        if cls.sock is None:
+            firsts = list(range(SERVER_PORTS.start, SERVER_PORTS.stop - PORT_BLOCK + 1, PORT_BLOCK))
+            end = time.monotonic() + PORT_BLOCK_WAIT_S
+            while cls.sock is None:
+                for first in random.sample(firsts, len(firsts)):
+                    s = socket.socket()
+                    try:
+                        s.bind(("127.0.0.1", first))
+                    except OSError:  # held by another test, here or in another run
+                        s.close()
+                        continue
+                    cls.sock, cls.first, cls.next = s, first, first + 1
+                    break
+                else:
+                    assert time.monotonic() < end, f"every block of {SERVER_PORTS} was held for {PORT_BLOCK_WAIT_S:g} s"
+                    time.sleep(0.1)
+        return range(cls.next, cls.first + PORT_BLOCK - cli.PORT_SCAN)
+
+    @classmethod
+    def free(cls) -> None:
+        if cls.sock is not None:
+            cls.sock.close()
+            cls.sock = None
+
+
+@pytest.fixture(autouse=True)
+def _port_block_freed():
+    """The block of ports a test held (_PortBlock) is let go once the test and its fixtures ended."""
+    yield
+    _PortBlock.free()
+
+
+def bound_port(ports: range | None = None) -> "socket.socket":
+    """A socket bound to a port on the loopback that nothing held: the next of the block of SERVER_PORTS this test
+    holds (_PortBlock), or one of `ports` at random."""
     import random
     import socket
 
     s = socket.socket()
-    for port in random.sample(ports, len(ports)):
+    for port in _PortBlock.held() if ports is None else random.sample(ports, len(ports)):
         try:
             s.bind(("127.0.0.1", port))
-            return s
         except OSError:
             continue
+        if ports is None:
+            _PortBlock.next = port + 1
+        return s
     s.close()
-    raise AssertionError(f"no port of {ports} is free")
+    raise AssertionError(f"no port of {ports or 'the block this test holds'} is free")
 
 
-def free_port(ports: range = SERVER_PORTS) -> int:
-    """A port of `ports` that nothing holds now, for a server the test starts on it."""
-    with bound_port(ports) as s:
+def free_port() -> int:
+    """A port of the block of SERVER_PORTS this test holds that nothing holds now, for a server the test starts on
+    it (_PortBlock)."""
+    with bound_port() as s:
         return s.getsockname()[1]
 
 

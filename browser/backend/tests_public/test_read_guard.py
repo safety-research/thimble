@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from conftest import free_port
+from conftest import bound_port
 from starlette.datastructures import Headers
 
 from app import cli, dev, hook_auth, main
@@ -291,18 +291,20 @@ async def test_a_ticket_s_shot_hands_the_server_s_token_to_its_run(monkeypatch, 
 @pytest.fixture()
 def served(monkeypatch):
     """thimble's app on a free port in a thread (a real server, since an event stream never ends); its base URL.
-    THIMBLE_PORT names the port, as the supervisor's does, so the cookie's name is that server's."""
+    THIMBLE_PORT names the port, as the supervisor's does, so the cookie's name is that server's. The server listens
+    on the socket the test bound, so no other process can take the port before it does."""
     import threading  # noqa: PLC0415
     import time  # noqa: PLC0415
 
     import uvicorn  # noqa: PLC0415
 
-    port = free_port()  # conftest.SERVER_PORTS
+    sock = bound_port()  # conftest.SERVER_PORTS
+    port = sock.getsockname()[1]
     monkeypatch.setenv("THIMBLE_PORT", str(port))
     monkeypatch.delenv("THIMBLE_DEV", raising=False)
     server = uvicorn.Server(uvicorn.Config(main.create_app(), host="127.0.0.1", port=port, log_level="warning",
                                            lifespan="off"))
-    thread = threading.Thread(target=server.run, daemon=True)
+    thread = threading.Thread(target=server.run, kwargs={"sockets": [sock]}, daemon=True)
     thread.start()
     end = time.monotonic() + 15
     while not server.started and time.monotonic() < end:
@@ -311,6 +313,7 @@ def served(monkeypatch):
     yield f"http://127.0.0.1:{port}"
     server.should_exit = True
     thread.join(10)
+    sock.close()
 
 
 @pytest.mark.real_read_guard
