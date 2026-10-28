@@ -778,11 +778,11 @@ const pageOf = (w: { rows: number }) => Math.max(1, w.rows - 1)
  *  moves the window a page, after the key that does the same when it is free (`keys`). Claude Code scrolls the band
  *  only when its whole tree is taller than its rows, so the wheel over the band moves the window too (registerTray's
  *  ui.scroll hook). With fewer than two rows for the body, it shows whole, and the band scrolls as Claude Code scrolls
- *  it. */
-function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }): Any[] {
+ *  it. `words`: the words of the row under the window, as drawn, each part's with its key and without. */
+function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys: { down: string | null; up: string | null } = { down: null, up: null }): { rows: Any[]; words: string[] } {
   const { Box, Button, Text } = els
   const tall = treeRows(body, w)
-  if (tall <= fit || fit < 2) { windowed = null; paging = { down: null, up: null }; return body }
+  if (tall <= fit || fit < 2) { windowed = null; paging = { down: null, up: null }; return { rows: body, words: [] } }
   const rows = fit - 1
   const over = tall - rows
   windowed = { over, rows }
@@ -795,16 +795,20 @@ function fitBody($: Engine, els: Any, body: Any[], w: number, fit: number, keys:
   const part = (id: string, key: string | null, words: string, by: number): Any => Button({ key: `tray-page-${id}`, plain: true, label: words, hover: quiet(`tray-page-${id}`), onPress: () => scrollTray($, by), children: [
     ...(key ? [Text({ key: 'k', color: accent(), bold: true, children: `${key} ` })] : []), Text({ key: 'w', dimColor: true, children: words }),
   ] })
-  const parts = [
-    ...(scrolled > 0 ? [part('up', paging.up, `↑ ${lines(scrolled)} above`, -page)] : []),
-    ...(below > 0 ? [part('down', paging.down, `↓ ${below} more line${below === 1 ? '' : 's'}`, page)] : []),
+  const shown = [
+    ...(scrolled > 0 ? [{ id: 'up', key: paging.up, words: `↑ ${lines(scrolled)} above`, by: -page }] : []),
+    ...(below > 0 ? [{ id: 'down', key: paging.down, words: `↓ ${below} more line${below === 1 ? '' : 's'}`, by: page }] : []),
   ]
-  return [
-    Box({ key: 'tray-window', flexDirection: 'column', height: rows, overflow: 'hidden', children: [
-      Box({ key: 'tray-window-in', flexDirection: 'column', flexShrink: 0, ...(scrolled ? { position: 'relative', top: -scrolled } : {}), children: body }),
-    ] }),
-    Box({ key: 'tray-scroll', flexDirection: 'row', height: 1, overflow: 'hidden', children: parts.flatMap((x, i) => [...(i ? [Text({ key: `tray-page-s${i}`, dimColor: true, children: ' · ' })] : []), x]) }),
-  ]
+  const parts = shown.map(x => part(x.id, x.key, x.words, x.by))
+  return {
+    rows: [
+      Box({ key: 'tray-window', flexDirection: 'column', height: rows, overflow: 'hidden', children: [
+        Box({ key: 'tray-window-in', flexDirection: 'column', flexShrink: 0, ...(scrolled ? { position: 'relative', top: -scrolled } : {}), children: body }),
+      ] }),
+      Box({ key: 'tray-scroll', flexDirection: 'row', height: 1, overflow: 'hidden', children: parts.flatMap((x, i) => [...(i ? [Text({ key: `tray-page-s${i}`, dimColor: true, children: ' · ' })] : []), x]) }),
+    ],
+    words: shown.flatMap(x => [x.words, ...(x.key ? [`${x.key} ${x.words}`] : [])]),
+  }
 }
 
 /** The tray's body `by` rows further on in its window (back toward its top when negative), within its ends; false when
@@ -880,8 +884,6 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const tone = TONES[f.kind]
   // its keys at the right, after a citation's status, each drawn as the bar draws a key and a click that presses it
   const keys = await trayKeys($, tray, f)
-  // its keys' words, which a click on one leaves selected: no answer's words (core/selection.ts)
-  controlWords('tray', keys.flatMap(k => [k.words, `${k.key} ${k.words}`]))
   const keysLen = keys.reduce((n, k) => n + (n ? 3 : 0) + `${k.key} ${k.words}`.length, 0)
   const rightLen = (status ? status.word.length + 2 : 0) + keysLen
   // the title and the keys on one row when both fit, else the title on a row of its own above them
@@ -915,7 +917,10 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
   const fit = room > 0 ? room - 2 - treeRows(head, inner) : Infinity
   const keysFree = fit >= 2 && treeRows(body, inner) > fit ? await freePageKeys($) : { down: null, up: null }
   const shown = fitBody($, els, body, inner, fit, keysFree)
-  const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: shown })] })
+  // the words of its keys and of the row under its window, which a click on one leaves selected: no answer's words
+  // (core/selection.ts)
+  controlWords('tray', [...keys.flatMap(k => [k.words, `${k.key} ${k.words}`]), ...shown.words])
+  const frame = Box({ key: 'tray', flexDirection: 'column', borderStyle: 'round', borderColor: tone, paddingX: 1, width: w, children: [head, Box({ key: 'tray-body', flexDirection: 'column', children: shown.rows })] })
   return [Box({ key: 'tray-band', marginLeft: 2, flexDirection: 'column', children: [frame] })]
 }
 

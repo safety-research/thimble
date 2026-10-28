@@ -170,6 +170,16 @@ export async function headKey($: Engine, key: string, until: number): Promise<{ 
   return startArtifact($, meta.id, until)
 }
 
+/** The word of the click after an artifact's link that copies it. */
+const COPY = 'copy'
+
+/** The words of the line under a card about its artifact that are a click (`copy` after its link), which a click on
+ *  them leaves selected: the card's header words hold them too (draw.ts, core/selection.ts). */
+export async function artifactWords($: Engine, card: string): Promise<string[]> {
+  const m = await madeOf($, card)
+  return m?.status === 'done' && m.url ? [COPY] : []
+}
+
 /** The line under a card about its artifact: being made, its link and a click that copies it, or why there is none.
  *  Null when it has none. */
 export async function artifactLine($: Engine, E: Any, card: string): Promise<Any | null> {
@@ -184,7 +194,7 @@ export async function artifactLine($: Engine, E: Any, card: string): Promise<Any
     return box([
       E.Text({ key: 'a', dimColor: true, children: '↗ ' }), E.Link({ key: 'l', href: url }), E.Text({ key: 's', dimColor: true, children: ' · ' }),
       E.Button({ key: `artifact-copy-${card}`, plain: true, label: 'copy the link', hover: quiet(`artifact-copy-${card}`), onPress: (press: Any) => $.ui.copy({ text: url, ...(press?.surface ? { surface: press.surface } : {}) }),
-        children: [E.Text({ key: 'c', color: accent(), children: 'copy' })] }),
+        children: [E.Text({ key: 'c', color: accent(), children: COPY })] }),
     ])
   }
   return box([E.Text({ key: 'x', color: 'error', wrap: 'wrap', children: `× no artifact${m.error ? `: ${m.error}` : ''}` })])
