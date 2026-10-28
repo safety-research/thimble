@@ -129,6 +129,9 @@ export interface StartOptions {
   showTab?: (tab: 'files' | 'canvas' | 'report') => void
   /** called once the tour has closed, however it closed */
   onEnd?: () => void
+  /** called once the person answers the welcome (Take the tour, Skip or Esc); a welcome closed otherwise (the session
+   * ended, the page closed) was not answered */
+  onAnswer?: () => void
   /** a question typed in the page's ask box, which the tour closed (closeBox): it outlasts the box */
   keep?: (question: string) => void
 }
@@ -1134,6 +1137,12 @@ export function createTour(snaps: Snaps): Tour {
     if (!leaving) end()
   }
   const focusables = () => [...pop.querySelectorAll<HTMLElement>('button'), ...(liveMock() ? [liveMock()!.querySelector('textarea')] : [])].filter((x): x is HTMLElement => !!x)
+  // the person answered the welcome (Take the tour, Skip or Esc): told once (StartOptions.onAnswer)
+  const answered = () => {
+    const told = opts.onAnswer
+    opts = { ...opts, onAnswer: undefined }
+    told?.()
+  }
   const guard = (ev: Event) => {
     if ((i < 0 && !welcome) || !ev.isTrusted || !root) return
     const t = ev.target
@@ -1144,7 +1153,10 @@ export function createTour(snaps: Snaps): Tour {
       const inPop = t instanceof Node && pop.contains(t)
       if (isKey && ke.key === 'Escape') {
         stop(ev)
-        if (ev.type === 'keydown') end()
+        if (ev.type === 'keydown') {
+          answered()
+          end()
+        }
         return
       }
       if (isKey && (ke.key === 'Tab' || ke.key === 'Enter' || ke.key === ' ') && inPop) return
@@ -1242,6 +1254,7 @@ export function createTour(snaps: Snaps): Tour {
       const b = (e.target as Element).closest<HTMLElement>('[data-tour]')
       if (!b || b.dataset.i !== String(i)) return
       const act = b.dataset.tour
+      if (welcome && (act === 'begin' || act === 'skip')) answered()
       if (act === 'begin') {
         welcome = false
         pop.classList.remove('tour-welcome')

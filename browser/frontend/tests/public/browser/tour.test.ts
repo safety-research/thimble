@@ -2,8 +2,9 @@
 // and fonts, against a made-up workspace whose every API answer this file gives, at 1440x900. What it proves, measured
 // with getBoundingClientRect:
 //   - the first launch asks first (a welcome, "Would you like a short tour? The demo tour uses example data.", with
-//     Skip and Take the tour) and records the offer in thimble's own state (POST /api/tour/seen); a page loaded after
-//     that offers nothing; Settings' Take the tour replays the tour from step 1;
+//     Skip and Take the tour) and records the answer (Skip, Take the tour or Esc) in thimble's own state (POST
+//     /api/tour/seen); a welcome no one answered is offered again by the next page, and a page loaded after an answer
+//     offers nothing; Settings' Take the tour replays the tour from step 1;
 //   - every step: each cutout lies inside the window, everything an example shows in a cutout lies inside that cutout,
 //     the popover lies inside the window, covers no cutout wherever the window has room for it beside the first, and its
 //     caret points at the first cutout;
@@ -1133,10 +1134,11 @@ test('the first launch asks first, records the offer in thimble’s own state, a
     }))
     assert.deepEqual(w, { title: 'Welcome to thimble', text: 'Would you like a short tour? The demo tour uses example data.', buttons: ['Skip', 'Take the tour'], count: false, holes: 1 })
     assert.ok(await fontOk(page), 'the tour is drawn in Hanken Grotesk, loaded')
-    assert.ok(server.seen, 'the offer is recorded once it shows')
+    assert.equal(server.seen, false, 'the offer is recorded once answered, not as it shows')
     await page.click('.tour-pop [data-tour="skip"]')
     await sleep(300)
     assert.equal(await page.$('.tour-root'), null, 'Skip closes it')
+    assert.ok(server.seen, 'Skip records the offer')
     await page.reload()
     await page.waitForSelector('.shell .chat-foot')
     await sleep(2500)
@@ -1147,6 +1149,34 @@ test('the first launch asks first, records the offer in thimble’s own state, a
     await close()
   }
 }, 60_000)
+
+test('a welcome no one answered is offered again by the next page; Esc and Take the tour record the offer as Skip does', async () => {
+  const first = await open({ W: 1440, H: 900 })
+  try {
+    // a page that shows the welcome and is left unanswered, as one opened before the person's own
+    await first.page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
+    await sleep(500)
+    assert.equal(first.server.seen, false, 'a welcome that only shows records nothing')
+    // the next page offers it again; Esc answers it
+    await first.page.reload()
+    await first.page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
+    await first.page.keyboard.press('Escape')
+    await sleep(300)
+    assert.equal(await first.page.$('.tour-root'), null, 'Esc closes it')
+    assert.ok(first.server.seen, 'Esc records the offer')
+  } finally {
+    await first.close()
+  }
+  const second = await open({ W: 1440, H: 900 })
+  try {
+    await second.page.waitForSelector('.tour-pop.tour-welcome', { timeout: 20000 })
+    await second.page.click('.tour-pop [data-tour="begin"]')
+    await onStep(second.page, 1, 'Your chat with Claude')
+    assert.ok(second.server.seen, 'Take the tour records the offer')
+  } finally {
+    await second.close()
+  }
+}, 90_000)
 
 const cfg = { W: 1440, H: 900, dpr: 1, chat: 308, send: true }
 const tag = `${cfg.W}x${cfg.H}`

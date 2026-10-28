@@ -1,6 +1,8 @@
-// The product tour's place in the shell. The first time this install's dashboard opens (backend tour.py, in thimble's
-// own home), once the shell is drawn with its session attached, a welcome asks whether to take the tour, and says that
-// the tour uses example data. The offer is recorded as it shows, whatever the answer. Settings'
+// The product tour's place in the shell. Each dashboard this install opens (backend tour.py, in thimble's own home),
+// once the shell is drawn with its session attached, shows a welcome that asks whether to take the tour, and says that
+// the tour uses example data, until the person answers one (Take the tour, Skip or Esc), whatever the answer: that
+// answer is recorded, so a welcome no one answered, on a page opened before the person's own, leaves the offer to the
+// next page. Settings'
 // Take the tour (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While it runs,
 // telemetry records nothing and the chat shows no view proposal (lib/touring). A question typed in its ask box goes to
 // main's composer when the tour closes the box. When it closes, the focused pane shows the surface it showed before; a
@@ -40,7 +42,6 @@ export function TourHost() {
           await sleep(900)
           while (alive && !ready()) await sleep(250)
           if (!alive) return void (running = false)
-          api.tourSeen().catch(() => undefined)
         }
         const { runTour } = await import('../tour/run')
         if (!alive) return void (running = false)
@@ -55,6 +56,7 @@ export function TourHost() {
           chat: chatOn(),
           showTab: (tab) => bus.emit('showTab', { tab, from: null }),
           keep: (question) => offerDraft('main', question),
+          onAnswer: welcome ? () => void api.tourSeen().catch(() => undefined) : undefined,
           onEnd: () => {
             running = false
             watch.disconnect()
