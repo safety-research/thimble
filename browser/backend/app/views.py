@@ -3106,13 +3106,17 @@ def retry(c: str, slug: str, values: dict[str, Any] | None = None) -> dict[str, 
 def stop_build(c: str, slug: str) -> dict[str, Any]:
     """The Stop in a view's build thread: the build ends with its session stopped and its draft kept, and the proposal
     fails with Retry; a change to a built view leaves the view as it was, the change kept for Retry (dev._view_stopped,
-    once the session has stopped). 404 for no such proposal, 409 for one that is neither queued nor building."""
+    once the session has stopped); a builder's run that takes a message about the built view stops, and the view is as
+    it was (dev.stop_answer). 404 for no such proposal, 409 for one that is neither queued nor building and whose
+    builder takes no message."""
     from . import dev  # noqa: PLC0415
 
     prop = read_proposal(c, slug)
     if prop is None:
         raise HTTPException(404, f"no such proposal: {slug}")
     if prop.get("status") not in PENDING:
+        if dev.stop_answer(c, slug, prop):
+            return {"ok": True}
         raise HTTPException(409, f"the view {prop['name']!r} is {prop.get('status')}, not building")
     if not dev.stop_view(c, slug, dev.VIEW_STOPPED):
         dev._view_stopped(c, slug)

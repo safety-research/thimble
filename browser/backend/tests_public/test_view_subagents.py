@@ -702,6 +702,33 @@ async def test_main_s_quit_and_an_error_end_a_message_s_run_that_changed_the_vie
     assert p.get("stopped_by") == ("quit" if end == "quit" else None)
 
 
+@pytest.mark.parametrize("html", [None, "<p>v2</p>"])
+async def test_the_stop_in_the_thread_stops_a_message_s_run_and_leaves_the_view_as_it_was(
+        board, bridge, gates, monkeypatch, html):
+    slug = _propose(asked=True)
+    shown: list[tuple[str, str]] = []
+    real = views._emit
+    monkeypatch.setattr(views, "_emit", lambda c, s, st, **kw: shown.append((s, st)) or real(c, s, st, **kw))
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Make the lanes taller.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    shown.clear()
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert shown == [(slug, "built")], "the thread hears of the run that answers, which its Stop stops"
+    if html:
+        _draft(slug, html)  # a change made before finish_view
+    assert views.stop_build(CORPUS, slug) == {"ok": True}
+    await _until(lambda: bridge.ops("stop"), "no TaskStop through the module")
+    subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
+    p = await _settled_end(slug)
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>", "the view is as it was"
+    assert p["status"] == "built" and not p.get("revision")
+    if html:
+        assert p.get("error") == dev.VIEW_STOPPED and p.get("failed_change") == "Make the lanes taller."
+    else:
+        assert not p.get("error") and not p.get("failed_change") and p["attempt"] == 2
+
+
 async def test_an_extension_s_program_builds_the_view_turn_by_turn_in_place_of_a_builder(board, bridge, gates, heard,
                                                                                          monkeypatch):
     turns: list[str] = []

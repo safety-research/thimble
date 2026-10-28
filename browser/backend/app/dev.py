@@ -3349,6 +3349,7 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
         # the pass its earlier build finished with is no finish of this run (_settle)
         views.update_proposal(c, slug, message=None, agent_id=run.agent_id, chat=run.chat, request=None, finish=None,
                               answering={"agent": run.agent_id, "run": run.k, "text": str(held["message"])})
+        views._emit(c, slug, "built", chat=run.chat)  # its thread offers Stop while the run answers (stop_answer)
         return
     prop = views.update_proposal(c, slug, status="building", agent_id=run.agent_id, chat=run.chat, attempt=0,
                                  finish=None, last_report=None, error=None, refused=None, request=None,
@@ -3483,6 +3484,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             views.update_proposal(c, slug, answering=None)
             views.drop_built_copy(c, slug)
             work_files.after_run(c, work, "done")
+            views._emit(c, slug, "built", chat=run.chat)
             return
         prop = message_changes(c, slug, run.agent_id) or prop  # it changed the view's files: a change, gated below
     finish = prop.get("finish") if isinstance(prop.get("finish"), dict) and prop["finish"].get("agent") == run.agent_id else {}
@@ -3578,6 +3580,22 @@ def stop_view(c: str, slug: str, why: str) -> bool:
         subagents.refuse(c, b.request, why, subagents.HOOK)
     _start_views()
     return False
+
+
+def stop_answer(c: str, slug: str, prop: dict[str, Any]) -> bool:
+    """The analyst's Stop on the builder's run that takes a message about the built view `slug` (`answering`): the
+    builder stops, and its end leaves the view as it was, or puts back the files the run changed, as a stopped change
+    does (_settle). False when no run takes a message."""
+    from . import subagents  # noqa: PLC0415
+
+    a = prop.get("answering")
+    agent_id = str(a.get("agent") or "") if isinstance(a, dict) else ""
+    if not agent_id:
+        return False
+    if not stop_view(c, slug, VIEW_STOPPED):  # no place in the pool, as after a restart of the server
+        _view_stopping[(c, agent_id)] = VIEW_STOPPED
+        _soon(lambda: subagents.stop(c, agent_id), f"view-stop:{c}:{slug}")
+    return True
 
 
 async def stop_views(c: str) -> None:
