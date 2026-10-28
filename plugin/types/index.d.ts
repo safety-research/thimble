@@ -22,7 +22,7 @@ declare module 'claude-code' {
 
       // ---- cards (cards/)
       /** a card, by its id (cards/store.ts CardMeta): { id, version, title, toolUseId, agentId, anchorRow, keys, rows,
-       *  columns, file, gen, error, calls: { [tool_use_id]: { version, error? } }, at, by?, fix?: { version, was, change } } */
+       *  columns, file, gen, error, calls: { [tool_use_id]: { version, error? } }, at } */
       card: StateFamily<unknown>
       /** a card's drawing as the runner made it, by the card's id: { gen, width, tree, seq } */
       cardTree: StateFamily<unknown>
