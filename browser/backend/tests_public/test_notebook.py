@@ -71,7 +71,7 @@ async def test_create_and_run_print(client, corpus, workspaces_tmp):
 async def test_a_kernel_whose_port_another_process_took_first_starts_again_on_new_ports(wrap, client, corpus,
                                                                                         monkeypatch):
     """write_connection_file finds free ports and lets them go; a process that binds one before the kernel does keeps
-    it, and the kernel ends at its start. Here another process's zmq socket takes the first file's shell port, so the
+    it, and the kernel ends at its start. Here another process's zmq socket holds the first file's shell port, so the
     server's socket also meets a peer that is not the kernel, after which zmq drops its only pipe and a blocking send
     would never return. The start never waits on the socket: it sees the kernel end, also inside a sandbox that
     outlives it a while, and starts it on new ports."""
@@ -86,21 +86,19 @@ async def test_a_kernel_whose_port_another_process_took_first_starts_again_on_ne
     real = notebook.write_connection_file
 
     def first_port_taken(fname: str, **kw):
-        out = real(fname, **kw)
-        if not taken:
-            sock = ctx.socket(zmq.PUB)
-            sock.bind(f"tcp://127.0.0.1:{json.loads(open(fname).read())['shell_port']}")
-            taken.append(sock)
-        return out
+        if taken:
+            return real(fname, **kw)
+        # the foreign socket holds its port before the file names it, so no other process can take it in between
+        sock = ctx.socket(zmq.PUB)
+        taken.append(sock)
+        return real(fname, **{**kw, "shell_port": sock.bind_to_random_port("tcp://127.0.0.1")})
 
     monkeypatch.setattr(notebook, "write_connection_file", first_port_taken)
     try:
         cell = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells", json={"code": "print(6 * 7)"})).json()
         ran = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells/{cell['id']}/run")).json()
     finally:
-        for sock in taken:
-            sock.close(linger=0)
-        ctx.term()
+        ctx.destroy(linger=0)  # closes every socket it made first, so it never waits on one
     assert taken and ran["status"] == "ok" and _text(ran) == "42\n", ran["outputs"]
 
 
