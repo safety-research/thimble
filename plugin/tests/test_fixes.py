@@ -1362,6 +1362,24 @@ def test_two_fixes_that_change_the_same_lines_differently_do_not_merge_and_the_l
     assert "+const words = `seen ${n}`" in Path(r["patches"][0]["path"]).read_text()
 
 
+def test_a_fix_that_does_not_fit_names_y_the_key_its_line_offers_never_r(world):
+    # fix 2 was made while fix 1 was off, on the same line: once fix 1 is on, fix 2 does not go on
+    a = on_fix(world)
+    FX.undo(a["id"])
+    b = FX.new("say seen")
+    (Path(b["work"]) / "plugin" / "bar" / "bar.tsx").write_text("const words = `seen ${n}`\n")
+    FX.done(b["id"], "Bar says seen", "")
+    FX.apply(a["id"], press(a["id"]))
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(b["id"], press(b["id"]))
+    assert str(e.value) == f"fix {b['id']} does not fit the fixes you have on; y tries it again"
+    # it waits for another try, and applying it again says the same key
+    assert FX.get(b["id"])["state"] == "redo"
+    with pytest.raises(FX.FixError) as e:
+        FX.apply(b["id"], press(b["id"]))
+    assert str(e.value) == f"fix {b['id']} does not fit your thimble any more; y tries it again"
+
+
 def stray(w, refines: int, words: str, path: str, text: str) -> dict:
     """A follow-up made by the old path: a fix of its own, cut from mine, whose record refines another fix."""
     r = FX.put({**FX.new(words), "refines": refines, "refines_always": False})
@@ -1450,7 +1468,7 @@ def test_two_sessions_check_only_their_own_fixes_and_a_copy_that_is_no_checkout_
     assert three["session"] == "s-made-up-a" and Path(three["work"]).is_dir()
     (Path(three["work"]) / ".git").unlink()
     out = FX.done(three["id"], session="s-made-up-a")
-    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "r starts it again" in out["error"]
+    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "y starts it again" in out["error"]
     assert out["work"] is None and not Path(three["work"]).exists()
     again = FX.redo(three["id"], session="s-made-up-a")
     p = Path(again["work"]) / "plugin" / "bar" / "bar.tsx"

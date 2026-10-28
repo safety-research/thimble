@@ -106,8 +106,9 @@ function keysRow(els: Any, keys: [string, string][], press: (k: string) => unkno
 const filesWord = (f: Fix) => `${(f.files || []).length} file${(f.files || []).length === 1 ? '' : 's'}`
 
 /** What changed, in a few rows (d): the person's words (their own when thimble has them, else the request's), what
- *  Claude did, what it changed, and the files the person is told of (noticeText). */
-function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
+ *  Claude did, what it changed (`label`: `Tried` for a failed fix, whose d shows what it tried), and the files the person
+ *  is told of (noticeText). */
+function whatChanged(els: Any, f: Fix, width: number, changed: string, label = 'Changed'): Any[] {
   const { Box, Text } = els
   const room = Math.max(20, width - 16)
   const row = (key: string, label: string, text: string) => Box({ key, flexDirection: 'row', width, children: [
@@ -120,7 +121,7 @@ function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
     Box({ key: 'fix-what-head', flexDirection: 'row', width, children: [Text({ key: 'i', children: '  ' }), Text({ key: 't', bold: true, children: cut(f.title, Math.max(12, width - 4)) })] }),
     ...words.map((w, i) => row(`fix-what-asked-${i}`, i ? 'then' : 'You asked', cut(f.asked?.[i] || w, room * 2))),
     ...(f.summary ? [row('fix-what-did', 'Claude did', cut(f.summary, room * 3))] : []),
-    row('fix-what-changed', 'Changed', changed),
+    row('fix-what-changed', label, changed),
     ...(noticeText(f) ? [row('fix-what-notice', 'Note', noticeText(f))] : []),
   ]
 }
@@ -148,7 +149,7 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     return [...whatChanged(els, f, width, `${filesWord(f)} · ${testsWord(f)}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: keysRow(els, [['y', 'use it now'], ['n', 'later']], press) })]
   }
   if (l.kind === 'failed' && f && l.open) {
-    return [...whatChanged(els, f, width, `${filesWord(f)} · ${f.error || 'its tests failed'}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: failedKeys(els, f, true, press) })]
+    return [...whatChanged(els, f, width, `${filesWord(f)} · ${f.error || 'its tests failed'}`, 'Tried'), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: failedKeys(els, f, true, press) })]
   }
   let first: Any[] = []
   let second: Any[] = []

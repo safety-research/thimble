@@ -835,7 +835,7 @@ test('a fixer that finds the request cannot be met ends with Cannot: the line sh
   expect(s.notes).toEqual([])
   await (await fixKey(s.$, 'd'))!.later()
   rows = await fixLineRows(s.$, ELS, 110)
-  expect(textOf(rows.at(-2))).toBe(`    Changed     1 file · ${why}`)
+  expect(textOf(rows.at(-2))).toBe(`    Tried       1 file · ${why}`)
   expect(textOf(rows.at(-1))).toBe('    n dismiss')
   // a failure another try can mend: y tries it again, the person's own key, and the new fixer is told where the
   // earlier change is
@@ -864,6 +864,12 @@ test('a failed fix offers y try again and d what it tried, never r: y, or a clic
   expect(textOf(rows.at(-1))).toBe('    y try again · d what it tried · n dismiss')
   expect(textOf(rows)).not.toContain('redo')
   expect(await fixKey(s.$, 'r')).toBe(null)
+  // d: what it tried, its row named so, never Changed
+  await (await fixKey(s.$, 'd'))!.later()
+  const open = await fixLineRows(s.$, ELS, 110)
+  expect(textOf(open.find((r: Any) => r.props.key === 'fix-what-changed'))).toBe('    Tried       1 file · it needs the scan off')
+  expect(textOf(open)).not.toContain('Changed')
+  await (await fixKey(s.$, 'd'))!.later()
   // a click on `y try again` does what y does
   const buttons = (n: Any): Any[] => (n == null || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(buttons) : [...(n.type === 'Button' ? [n] : []), ...buttons(n.props?.children)])
   const again = buttons(rows).find(b => b.props.label === 'y try again')

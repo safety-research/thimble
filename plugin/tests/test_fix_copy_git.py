@@ -29,7 +29,7 @@ def test_a_copy_whose_git_link_points_at_the_persons_clone_fails_and_leaves_the_
     before = snapshot(clone)
     (Path(r["work"]) / ".git").write_text(f"gitdir: {clone / '.git'}\n")
     out = FX.done(r["id"], "Bar says read", "")
-    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "r starts it again" in out["error"]
+    assert out["state"] == "failed" and "no longer a git checkout" in out["error"] and "y starts it again" in out["error"]
     assert out["work"] is None and snapshot(clone) == before
 
 
