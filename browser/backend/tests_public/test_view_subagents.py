@@ -651,6 +651,57 @@ async def test_a_message_that_changes_the_built_view_is_a_change_with_its_attemp
     assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v2</p>"
     assert _prop(slug)["status"] == "built" and not _prop(slug).get("answering")
 
+
+async def _answer_changes(slug: str, html: str, bridge, monkeypatch) -> str:
+    """The builder of `slug`, built in two attempts, runs again for a message and writes `html` into the view without
+    calling finish_view: its agent id, the run still going."""
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Make the lanes taller.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert _prop(slug).get("answering")
+    _draft(slug, html)
+    return agent
+
+
+async def _settled_end(slug: str) -> dict:
+    await _until(lambda: (CORPUS, slug) not in dev._settling and not _prop(slug).get("answering"),
+                 "the run was not settled")
+    return _prop(slug)
+
+
+@pytest.mark.parametrize("html", ["<p>v2</p>", "<p>FAIL v2</p>"])
+async def test_a_message_s_run_that_changes_the_view_without_finish_view_is_gated_once_as_a_change(
+        board, bridge, gates, monkeypatch, html):
+    slug = _propose(asked=True)
+    agent = await _answer_changes(slug, html, bridge, monkeypatch)
+    subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
+    p = await _settled_end(slug)
+    passed = "FAIL" not in html
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == (html if passed else "<p>v1</p>")
+    assert p["status"] == "built" and not p.get("revision") and not p.get("change")
+    assert (CORPUS, slug) not in dev._view_runs
+    assert p.get("failed_change") == (None if passed else "Make the lanes taller."), "a failed change is kept for Retry"
+    views.message(CORPUS, slug, "Why is run 3 missing?")
+    assert _prop(slug)["status"] == "built" and not _prop(slug).get("changed"), "a later message is no build round"
+
+
+@pytest.mark.parametrize("end", ["quit", "error"])
+async def test_main_s_quit_and_an_error_end_a_message_s_run_that_changed_the_view_as_they_end_a_change(
+        board, bridge, gates, monkeypatch, end):
+    slug = _propose(asked=True)
+    agent = await _answer_changes(slug, "<p>v2</p>" if end == "quit" else "<p>FAIL v2</p>", bridge, monkeypatch)
+    if end == "quit":
+        subagents.close_running(CORPUS)
+    else:
+        subagents.run_ended(CORPUS, agent, "failed", "API Error: 500", source="notification")
+    p = await _settled_end(slug)
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>", "the view is as it was"
+    assert p["status"] == "built" and not p.get("revision") and p.get("failed_change") == "Make the lanes taller."
+    assert p.get("error") == (dev.MAIN_ENDED if end == "quit" else "problem: the page says FAIL")
+    assert p.get("stopped_by") == ("quit" if end == "quit" else None)
+
+
 async def test_an_extension_s_program_builds_the_view_turn_by_turn_in_place_of_a_builder(board, bridge, gates, heard,
                                                                                          monkeypatch):
     turns: list[str] = []

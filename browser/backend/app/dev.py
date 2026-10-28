@@ -3346,7 +3346,8 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
         _view_queue.remove(key)
     held = views.read_proposal(c, slug) or {}
     if held.get("message") and held.get("status") == "built":
-        views.update_proposal(c, slug, message=None, agent_id=run.agent_id, chat=run.chat, request=None,
+        # the pass its earlier build finished with is no finish of this run (_settle)
+        views.update_proposal(c, slug, message=None, agent_id=run.agent_id, chat=run.chat, request=None, finish=None,
                               answering={"agent": run.agent_id, "run": run.k, "text": str(held["message"])})
         return
     prop = views.update_proposal(c, slug, status="building", agent_id=run.agent_id, chat=run.chat, attempt=0,
@@ -3476,7 +3477,6 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
     prop = views.read_proposal(c, slug)
     if prop is None or prop.get("agent_id") != run.agent_id:
         return  # deleted, or a newer build took over
-    finish = prop.get("finish") if isinstance(prop.get("finish"), dict) and prop["finish"].get("agent") == run.agent_id else {}
     work = view_work_dir(c, slug)
     if answering(prop, run.agent_id) is not None:
         if views.unchanged_since_built(c, slug):  # it answered the message and left the view as it was built
@@ -3485,6 +3485,7 @@ async def _settle(c: str, slug: str, run: Any, status: str, report: str, why: st
             work_files.after_run(c, work, "done")
             return
         prop = message_changes(c, slug, run.agent_id) or prop  # it changed the view's files: a change, gated below
+    finish = prop.get("finish") if isinstance(prop.get("finish"), dict) and prop["finish"].get("agent") == run.agent_id else {}
     if finish.get("result") == "pass":
         regated = await views.regate(c, slug)
         if regated:
