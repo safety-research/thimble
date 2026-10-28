@@ -150,34 +150,27 @@ def test_a_kernel_client_starts_no_thread_whose_stop_could_hold_the_server(tmp_p
         notebook._close_client(kc)
 
 
-def test_a_kernel_client_the_garbage_collector_takes_unclosed_closes_without_a_wait(tmp_path):
-    """A start whose task the loop dropped leaves its client unclosed, in a cycle the garbage collector takes whole. On
-    a zmq context of the client's own, the context's finalizer closed none of the sockets (the collector had cleared
-    its list of them) and waited on them for good, wherever the collection ran; on the server's context
-    (notebook._context) the sockets just close. In a process of its own, which the hang would hold."""
-    import subprocess
-    import sys
-    from pathlib import Path
+def test_a_kernel_client_the_garbage_collector_takes_unclosed_has_its_sockets_closed_then_its_context(tmp_path):
+    """A start whose task the loop dropped leaves its client unclosed, in a cycle the garbage collector takes whole.
+    Left to themselves, the context's finalizer could run first, find none of the sockets (the collector clears its
+    list of them before any finalizer runs) and wait on them for good, wherever the collection ran. The client's closer,
+    which holds the sockets and the context apart from it, closes the sockets and then the context when the collector
+    takes the client."""
+    import gc
+    import weakref
 
     from jupyter_client.connect import write_connection_file
 
     conn = tmp_path / "k.conn.json"
     write_connection_file(str(conn), ip="127.0.0.1", key=b"k")
-    code = ("import asyncio, gc, sys\n"
-            "from pathlib import Path\n"
-            "from app import notebook\n"
-            "async def main():\n"
-            "    kc = notebook._client(Path(sys.argv[1]))\n"
-            "    notebook._kernel_info_nowait(kc, kc.shell_channel)\n"
-            "    held = [kc]\n"
-            "    held.append(held)\n"
-            "    del kc, held\n"
-            "    gc.collect()\n"
-            "    print('collected')\n"
-            "asyncio.run(main())\n")
-    r = subprocess.run([sys.executable, "-c", code, str(conn)], cwd=Path(notebook.__file__).resolve().parents[1],
-                       capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0 and r.stdout.strip() == "collected", r
+    kc = notebook._client(conn)
+    notebook._kernel_info_nowait(kc, kc.shell_channel)  # a message waits in the socket, as a start's kernel_info does
+    socks, ctx, gone = [getattr(kc, attr).socket for attr in notebook.CHANNELS], kc.context, weakref.ref(kc)
+    held: list = [kc]
+    held.append(held)
+    del kc, held
+    gc.collect()
+    assert gone() is None and all(sock.closed for sock in socks) and ctx.closed
 
 
 async def test_kernel_cwd_is_the_scratch_mirror_and_writes_never_reach_the_corpus(corpus):
