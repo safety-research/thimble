@@ -617,7 +617,7 @@ The card's code did not run yet. Run this command with Bash next: `{command}`. I
 
 ## card-tall
 
-card:{cid}'s body draws {height} px tall at the card's width, and the canvas shows {limit} px of a card's body at rest, so the analyst sees its first screen and Show all, never the whole card at once.
+card:{cid}'s body draws {height} px tall at the card's width, and about {limit} px of a card's body fit on the analyst's screen with its question and takeaway, so they never see the whole card at once.
 
 ## kind-mismatch
 

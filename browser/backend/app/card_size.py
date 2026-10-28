@@ -1,6 +1,7 @@
-"""A card's size. The canvas shows BODY_MAX px of a card's body at rest (frontend canvas/DataViz CARD_BODY_MAX); a body
-drawn taller shows that much and Show all. Two places measure a body at the card's width: the page, when it draws a
-custom card's page (POST /ws/{c}/cells/{cid}/drawn), and the card check's render (render.Rendered.body, card_check).
+"""A card's size. About BODY_MAX px of a card's body fit on one laptop screen with its question and takeaway (frontend
+canvas/DataViz CARD_BODY_MAX), and a custom card's page taller than that shows that much and Show all. Two places
+measure a body at the card's width: the page, when it draws a custom card's page (POST /ws/{c}/cells/{cid}/drawn), and
+the card check's render of a card of any kind (render.Rendered.body, card_check).
 A body past BODY_MAX is told to the card's author, once for each version of the card, with the author's next thimble
 tool result (tools.call, with_notes), in the words of prompts/tools.md `## card-tall`, as the terminal's card tool tells
 Claude that a card is taller than the screen. The author is the card's `created_by`, which is the cell_author of the
@@ -17,7 +18,7 @@ from pydantic import BaseModel
 
 log = logging.getLogger("thimble.card_size")
 
-BODY_MAX = 800  # px of a card's body the canvas shows at rest: frontend canvas/DataViz CARD_BODY_MAX
+BODY_MAX = 800  # px of a card's body that fit on a laptop screen with its question and takeaway: DataViz CARD_BODY_MAX
 HINT = "card-tall"
 BY_HAND = frozenset({"", "user"})  # created_by of a card the analyst made: no session to tell
 KEPT = 50  # notes kept for one author before its next call; the oldest go first
