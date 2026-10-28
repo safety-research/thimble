@@ -933,10 +933,13 @@ def unknown_agent_text(c: str, agent_id: str) -> str:
     return tools.hint("orient-continue-earlier-version")
 
 
-async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | None = None, route: str = CLICK) -> Answer:
+async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | None = None, route: str = CLICK,
+               quiet: bool = False) -> Answer:
     """A follow-up sent from the browser: the pending message request, then the module's SendMessage, after it
     registers the run's own values when they differ from the role's latest registration (V1). Refused, with the text
-    kept, when the module is not live, and for an agent that is not in the registry (unknown_agent_text)."""
+    kept, when the module is not live, and for an agent that is not in the registry (unknown_agent_text). `quiet`: the
+    text is thimble's own wrapping of words the agent's chat already shows where they were said, so the chat shows no
+    message for it (sent_quietly)."""
     a = agent(c, agent_id)
     if a is None:
         return refusal(EARLIER, unknown_agent_text(c, agent_id))
@@ -945,7 +948,7 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
         return before
     vals = dict(values or a.get("values") or {})
     rid = new_request(c, "message", a.get("key"), message_input(agent_id, text), vals, route, role=a.get("role"),
-                      agent=agent_id)
+                      agent=agent_id, **({"quiet": True} if quiet else {}))
     ans = await _bridge(c, "send", agent=agent_id, text=text, values=vals, role=a.get("role"), request=rid)
     if ans.started or (not ans.refused and "error" not in ans):
         _set(c, rid, state="done", at=files.now())
@@ -957,6 +960,21 @@ async def send(c: str, agent_id: str, text: str, *, values: dict[str, Any] | Non
     else:
         refuse(c, rid, ans.reason, ans.kind or ERROR)
     return Answer({**ans, "request": rid})
+
+
+def sent_quietly(c: str, agent_id: str, text: str) -> bool:
+    """Whether `text`, a prompt in the agent's transcript, is a message send(quiet) sent it that no prompt matched yet;
+    the request is then marked seen, so the same words sent again later are matched by their own request."""
+    want = str(text or "").strip()
+    if not agent_id or not want:
+        return False
+    with update(c) as state:
+        for r in files.requests(state).values():
+            if (isinstance(r, dict) and r.get("kind") == "message" and r.get("quiet") and not r.get("seen")
+                    and r.get("agent") == agent_id and str((r.get("input") or {}).get("message") or "").strip() == want):
+                r["seen"] = True
+                return True
+    return False
 
 
 def stop_done(text: str) -> bool:

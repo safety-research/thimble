@@ -87,8 +87,9 @@ const CRITIQUE_STOP = 'Stop the critique'
 
 /** The Stop the composer carries for the thread shown, while what it stops runs: main's while its turn runs, a side
  * thread's while its fork runs (none while its question waits for main to fork it), a session's (STOP_LABELS), its dev
- * ticket's, or, in a view's thread, the view's build while its proposal is queued or building and else its review's
- * while the review runs (`view`, the thread's proposal). A step, a part of its parent's session whose composer sends to
+ * ticket's, or, in a view's thread, the view's build while its proposal is queued or building or its builder's run
+ * takes a message about the built view (`answering`), and else its review's while the review runs (`view`, the
+ * thread's proposal). A step, a part of its parent's session whose composer sends to
  * that parent (threads.composerTarget), carries its parent's Stop (`parent`, the step's parent chat) while the parent
  * runs. The critique's thread, and a step of the critic's, stops only the critique, which the orientation then goes on
  * without. Null for a ticket that waits in the queue (its Discard is at the thread's foot) or that an older chat of a
@@ -98,7 +99,7 @@ export function composerStopOf(
   meta: StopMeta | null,
   ticket: Pick<Ticket, 'id' | 'n' | 'status' | 'chat'> | null,
   parent: (StopMeta & Pick<ChatMeta, 'role'>) | null = null,
-  view: Pick<Proposal, 'slug' | 'status' | 'chat' | 'review'> | null = null,
+  view: Pick<Proposal, 'slug' | 'status' | 'chat' | 'review' | 'answering'> | null = null,
 ): ComposerStop | null {
   if (!meta) return null
   if (kind === 'main') return meta.running ? { kind: 'session', chat: meta.id, role: 'main', label: STOP_MAIN } : null
@@ -109,7 +110,7 @@ export function composerStopOf(
   if (kind === 'step' && parent && parent.status === 'running' && STOP_LABELS[parent.role]) return { kind: 'session', chat: parent.id, role: parent.role, label: STOP_LABELS[parent.role] }
   if (kind === 'dev' && ticket && ticket.chat === meta.id && ticket.status === 'running') return { kind: 'ticket', ticket: ticket.id, label: `Stop ticket #${ticket.n}` }
   if (kind === 'dev' && view && view.chat === meta.id && meta.status === 'running') {
-    if (view.status === 'queued' || view.status === 'building') return { kind: 'view', slug: view.slug, review: false, label: 'Stop the build' }
+    if (view.status === 'queued' || view.status === 'building' || view.answering) return { kind: 'view', slug: view.slug, review: false, label: 'Stop the build' }
     if (view.review?.state === 'running') return { kind: 'view', slug: view.slug, review: true, label: 'Stop the review' }
   }
   return null

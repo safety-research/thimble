@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import types
 from pathlib import Path
 
 import pytest
@@ -657,6 +658,177 @@ async def test_a_change_goes_to_the_last_builder_when_it_can_be_reached_else_to_
     views.revise(CORPUS, slug, "a legend", asked=True)
     await _until(lambda: len(bridge.ops("spawn")) == 2, "an unreachable builder's change got no new builder")
     assert "a legend" in bridge.ops("spawn")[-1]["prompt"] and len(bridge.ops("send")) == 1
+
+
+
+async def _built_in_two_attempts(slug: str, monkeypatch) -> str:
+    """A builder of `slug` that passed at its second attempt and ended, reachable from main's session: its agent id. The
+    pool has room beside the view's review, which its pass starts."""
+    monkeypatch.setattr(dev, "VIEW_POOL", 2)
+    agent = await _started(slug)
+    _draft(slug, "<p>FAIL</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    _draft(slug, "<p>v1</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    subagents.run_ended(CORPUS, agent, "done", "Built.", source="handback")
+    await _until(lambda: _prop(slug).get("status") == "built" and (CORPUS, slug) not in dev._view_runs,
+                 "the view was not built")
+    monkeypatch.setattr(dev, "_reachable", lambda c, a: a == agent)
+    return agent
+
+
+def _thread_texts(slug: str) -> list[str]:
+    _, log = agents.paths(CORPUS, str(_prop(slug)["chat"]))
+    return [json.loads(ln).get("text") for ln in log.read_text().splitlines() if '"user"' in ln]
+
+
+async def test_a_message_about_a_built_view_shows_in_its_thread_as_written_not_in_thimble_s_wrapping(
+        board, bridge, gates, monkeypatch):
+    slug = _propose(asked=True)
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Why is run 3 missing? It may be a bug.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    sent = bridge.ops("send")[0]
+    assert sent["agent"] == agent and "Why is run 3 missing? It may be a bug." in sent["text"]
+    assert "finish_view" in sent["text"], "the builder gets the message with what a change asks of it"
+    # the mirror reads the builder's prompt: thimble's wrapping is no message in the thread, the analyst's words are
+    lv, sub = types.SimpleNamespace(c=CORPUS), session.Sub(CORPUS, str(_prop(slug)["chat"]), None, agent, role="dev")
+    sub.thimble = view_tools.BUILDER
+    line = json.dumps({"type": "user", "origin": {"kind": "coordinator"},
+                       "message": {"role": "user", "content": sent["text"]}})
+    assert session.translate_sub(lv, sub, line) == 0
+    assert _thread_texts(slug) == ["Why is run 3 missing? It may be a bug."]
+
+
+async def test_a_message_that_asks_for_no_change_is_answered_with_no_build_round_and_its_attempts_kept(
+        board, bridge, gates, monkeypatch):
+    slug = _propose(asked=True)
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    gated = len(gates)
+    views.message(CORPUS, slug, "Why is run 3 missing? It may be a bug.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert _prop(slug)["status"] == "built" and _prop(slug)["attempt"] == 2, "an answer starts no build round"
+    subagents.run_ended(CORPUS, agent, "done", "Run 3 has no tickets in March.", source="handback")
+    await _until(lambda: (CORPUS, slug) not in dev._settling and not _prop(slug).get("answering"),
+                 "the answer's run was not settled")
+    p = _prop(slug)
+    assert p["status"] == "built" and p["attempt"] == 2 and not p.get("revision") and not p.get("failed_change")
+    assert not p.get("error") and len(gates) == gated, "a message that asks for no change is gated never"
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>"
+
+
+async def test_a_message_that_changes_the_built_view_is_a_change_with_its_attempts_counted_afresh(
+        board, bridge, gates, monkeypatch):
+    slug = _propose(asked=True)
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Make the lanes taller.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    _draft(slug, "<p>v2</p>")
+    await _call("finish_view", {}, agent, view_tools.build_key(slug))
+    p = _prop(slug)
+    assert p["status"] == "built" and p["attempt"] == 1 and p.get("finish", {}).get("result") == "pass"
+    subagents.run_ended(CORPUS, agent, "done", "Taller lanes.", source="handback")
+    await _until(lambda: (CORPUS, slug) not in dev._settling, "the change's run was not settled")
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v2</p>"
+    assert _prop(slug)["status"] == "built" and not _prop(slug).get("answering")
+
+
+async def _answer_changes(slug: str, html: str, bridge, monkeypatch) -> str:
+    """The builder of `slug`, built in two attempts, runs again for a message and writes `html` into the view without
+    calling finish_view: its agent id, the run still going."""
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Make the lanes taller.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert _prop(slug).get("answering")
+    _draft(slug, html)
+    return agent
+
+
+async def _settled_end(slug: str) -> dict:
+    await _until(lambda: (CORPUS, slug) not in dev._settling and not _prop(slug).get("answering"),
+                 "the run was not settled")
+    return _prop(slug)
+
+
+@pytest.mark.parametrize("html", ["<p>v2</p>", "<p>FAIL v2</p>"])
+async def test_a_message_s_run_that_changes_the_view_without_finish_view_is_gated_once_as_a_change(
+        board, bridge, gates, monkeypatch, html):
+    slug = _propose(asked=True)
+    agent = await _answer_changes(slug, html, bridge, monkeypatch)
+    subagents.run_ended(CORPUS, agent, "done", "Done.", source="handback")
+    p = await _settled_end(slug)
+    passed = "FAIL" not in html
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == (html if passed else "<p>v1</p>")
+    assert p["status"] == "built" and not p.get("revision") and not p.get("change")
+    assert (CORPUS, slug) not in dev._view_runs
+    assert p.get("failed_change") == (None if passed else "Make the lanes taller."), "a failed change is kept for Retry"
+    views.message(CORPUS, slug, "Why is run 3 missing?")
+    assert _prop(slug)["status"] == "built" and not _prop(slug).get("changed"), "a later message is no build round"
+
+
+@pytest.mark.parametrize("end", ["quit", "error"])
+async def test_main_s_quit_and_an_error_end_a_message_s_run_that_changed_the_view_as_they_end_a_change(
+        board, bridge, gates, monkeypatch, end):
+    slug = _propose(asked=True)
+    agent = await _answer_changes(slug, "<p>v2</p>" if end == "quit" else "<p>FAIL v2</p>", bridge, monkeypatch)
+    if end == "quit":
+        subagents.close_running(CORPUS)
+    else:
+        subagents.run_ended(CORPUS, agent, "failed", "API Error: 500", source="notification")
+    p = await _settled_end(slug)
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>", "the view is as it was"
+    assert p["status"] == "built" and not p.get("revision") and p.get("failed_change") == "Make the lanes taller."
+    assert p.get("error") == (dev.MAIN_ENDED if end == "quit" else "problem: the page says FAIL")
+    assert p.get("stopped_by") == ("quit" if end == "quit" else None)
+
+
+@pytest.mark.parametrize("html", [None, "<p>v2</p>"])
+async def test_the_stop_in_the_thread_stops_a_message_s_run_and_leaves_the_view_as_it_was(
+        board, bridge, gates, monkeypatch, html):
+    slug = _propose(asked=True)
+    shown: list[tuple[str, str]] = []
+    real = views._emit
+    monkeypatch.setattr(views, "_emit", lambda c, s, st, **kw: shown.append((s, st)) or real(c, s, st, **kw))
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Make the lanes taller.")
+    await _until(lambda: bridge.ops("send"), "the message never reached the builder")
+    shown.clear()
+    subagents.run_again(CORPUS, agent, "coordinator")
+    assert shown == [(slug, "built")], "the thread hears of the run that answers, which its Stop stops"
+    if html:
+        _draft(slug, html)  # a change made before finish_view
+    assert views.stop_build(CORPUS, slug) == {"ok": True}
+    await _until(lambda: bridge.ops("stop"), "no TaskStop through the module")
+    subagents.run_ended(CORPUS, agent, "stopped", "", source="notification")
+    p = await _settled_end(slug)
+    assert (views.views_dir(CORPUS) / slug / views.VIEW_HTML).read_text() == "<p>v1</p>", "the view is as it was"
+    assert p["status"] == "built" and not p.get("revision")
+    if html:
+        assert p.get("error") == dev.VIEW_STOPPED and p.get("failed_change") == "Make the lanes taller."
+    else:
+        assert not p.get("error") and not p.get("failed_change") and p["attempt"] == 2
+
+
+@pytest.mark.parametrize("wait", [False, True])
+async def test_two_messages_before_the_builder_s_run_starts_reach_it_once_each(board, bridge, gates, monkeypatch, wait):
+    slug = _propose(asked=True)
+    agent = await _built_in_two_attempts(slug, monkeypatch)
+    views.message(CORPUS, slug, "Why is run 3 missing?")
+    if wait:  # the first is sent before the second is written
+        await _until(lambda: bridge.ops("send"), "the first message never reached the builder")
+    views.message(CORPUS, slug, "And where is run 4?")
+    await asyncio.sleep(0.1)
+    texts = " ".join(s["text"] for s in bridge.ops("send"))
+    assert texts.count("Why is run 3 missing?") == 1 and texts.count("And where is run 4?") == 1
+    subagents.run_again(CORPUS, agent, "coordinator")
+    await asyncio.sleep(0.1)
+    texts = " ".join(s["text"] for s in bridge.ops("send"))
+    assert texts.count("Why is run 3 missing?") == 1 and texts.count("And where is run 4?") == 1
+    assert _prop(slug)["answering"]["text"] == "Why is run 3 missing?\n\nAnd where is run 4?"
+    assert not _prop(slug).get("message"), "nothing is left to send"
 
 
 async def test_an_extension_s_program_builds_the_view_turn_by_turn_in_place_of_a_builder(board, bridge, gates, heard,

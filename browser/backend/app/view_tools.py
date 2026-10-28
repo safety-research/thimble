@@ -222,6 +222,10 @@ async def tool_finish_view(ctx: Any, args: dict[str, Any]) -> Any:
     prop = views.read_proposal(c, slug)
     if prop is None:
         return tools.err(f"finish_view: the view {slug} has no proposal any more")
+    if dev.answering(prop, agent_id) is not None:  # the run answers a message about the built view
+        if views.unchanged_since_built(c, slug):
+            return tools.ok(tools.hint("finish-view-unchanged"))
+        prop = dev.message_changes(c, slug, agent_id) or prop  # its earlier pass is no finish of this change
     done = _finished(prop, agent_id)
     if done is not None and done.get("result") == "pass":
         return tools.ok(tools.hint("finish-view-pass"))

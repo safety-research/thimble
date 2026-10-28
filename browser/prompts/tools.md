@@ -943,6 +943,10 @@ The checks failed, attempt {n} of {of}:
 
 Fix what failed, check the view again with `view_check`, then call `finish_view` again.
 
+## finish-view-unchanged
+
+The view's files are as they were built, so there is nothing to check, and the view stays as it is.
+
 ## finish-view-stop
 
 No attempt is left, so stop now. Change nothing more, and end with one line saying what still fails; thimble shows the failure to the analyst or starts a new build from it.
