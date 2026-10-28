@@ -1458,14 +1458,15 @@ def pair_code(api: str, name: str | None) -> str:
     return ""
 
 
-def ui_url(name: str | None, pair: bool = False) -> str:
+def ui_url(name: str | None, pair: bool = False, api: str | None = None) -> str:
     """The UI port in dev mode (its own Vite), else the API port where the built UI is served, and with `pair` a
     one-time sign-in code after `#p=` (hook_auth.mint, pair_code), which the page trades for the browser's cookie. The
-    URL without a code when the server gives none."""
+    URL without a code when the server gives none. `api`: the server to link to when it is not the one server.json
+    records (--link --port while another server of this install runs): its built UI and its code."""
     st = read_state()
-    base = str(st.get("url") or api_url())
+    base = api or str(st.get("url") or api_url())
     url = f"{base}/?ws={name}" if name else f"{base}/"
-    code = pair_code(str(st.get("api") or api_url()), name) if pair else ""
+    code = pair_code(api or str(st.get("api") or api_url()), name) if pair else ""
     return f"{url}#p={code}" if code else url
 
 
@@ -4700,7 +4701,10 @@ def cmd_link(args: argparse.Namespace) -> int:
         return 1
     known = known_corpus(cwd.resolve(), Path(resolve_env()["data_dir"]).resolve())
     pair = to_terminal()
-    link = ui_url(known[0] if known else None, pair=pair)
+    # a port asked for (--port) that is not the one server.json records: the link and its code are that server's
+    asked = explicit_port()
+    other = asked is not None and asked != int(read_state().get("port") or 0)
+    link = ui_url(known[0] if known else None, pair=pair, api=url if other else None)
     print(BROWSER_LINE.format(what=link), flush=True)
     if pair and "#p=" not in link:
         print(NO_CODE_LINE.format(log=log_path()))

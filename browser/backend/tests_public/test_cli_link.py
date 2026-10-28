@@ -67,6 +67,30 @@ def test_link_prints_a_fresh_sign_in_link_for_the_folder_and_starts_nothing(home
     assert started == [] and posted == []
 
 
+def test_link_with_a_port_links_to_that_server_not_the_one_server_json_names(home, data, monkeypatch, capsys, tmp_path):
+    """Two servers of one install: server.json names the one started last (8394), and --link --port 8393 (THIMBLE_PORT)
+    asks for the other. The link and its sign-in code are 8393's, never 8394's."""
+    cli.write_state({"port": 8394, "url": "http://127.0.0.1:8394", "api": "http://127.0.0.1:8394", "env": {}})
+    monkeypatch.setenv("THIMBLE_PORT", "8393")
+    monkeypatch.setattr(cli, "healthy", lambda url=None, timeout=1.0: True)
+    posted: list[str] = []
+
+    def request(m, u, b=None, timeout=5.0):
+        if m != "POST":
+            return 404, {"detail": "Not Found"}
+        posted.append(u)
+        return 200, {"code": "c1", "expires_s": 300}
+
+    monkeypatch.setattr(cli, "_request", request)
+    monkeypatch.setattr(cli, "to_terminal", lambda: True)
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    (data / "runs.corpus.json").write_text(json.dumps({"name": "runs", "root": str(runs), "path": str(runs)}))
+    assert cli.main(["link", "--cwd", str(runs)]) == 0
+    assert capsys.readouterr().out.splitlines() == ["thimble browser: http://127.0.0.1:8393/?ws=runs#p=c1"]
+    assert posted == ["http://127.0.0.1:8393/api/ui/pair"]
+
+
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
