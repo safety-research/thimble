@@ -58,7 +58,8 @@ Notices. A view whose build failed after the repairs it gets, a change to a view
 start, and a code ticket that failed are told in the foreground with their fix (notices.post, under the agent's key
 notices.agent_key: Retry on a view), since the analyst may be in another chat; a build that starts or passes, and a
 ticket that starts or is applied, clear it (_view_notice, _ticket_notice). Main's quit and the analyst's Stop tell
-nothing.
+nothing. A builder's start probes the sandbox its commands run in, and where it can't start on this machine one notice
+says so, why and the fix, with a row in the build's thread; the next start where it starts clears it (_box_notice).
 
 Permissions. A ticket's agent and a view builder are subagents of main: they run in main's permission mode, Bypass
 included, and ask as main does, in the analyst's terminal. Where the server runs its agents itself (runtime.py), no
@@ -3263,6 +3264,7 @@ def build_started(c: str, run: Any, req: dict[str, Any]) -> None:
     if prop is not None:
         views._emit(c, slug, "building", chat=run.chat)
     _view_cleared(c, slug)
+    _soon(lambda: _box_notice(c, slug, run.chat), f"view-box:{c}:{slug}")
 
 
 def build_refused(c: str, req: dict[str, Any]) -> None:
@@ -3642,6 +3644,60 @@ def _view_cleared(c: str, slug: str) -> None:
     from . import notices  # noqa: PLC0415
 
     notices.cleared(c, view_key(slug))
+
+
+# the notice that a build's commands can't run, since the sandbox they run in can't start on this machine (_box_notice):
+# one for the workspace, which says why and, where AppArmor restricts user namespaces, the fix the terminal plugin gives
+# (plugin/sandbox/setup.mjs)
+NO_BOX_KEY = "view-sandbox"
+NO_BOX_TEXT = "The view build can't run commands on this machine: its sandbox can't start"
+USERNS_WHY = "because the kernel restricts user namespaces"
+USERNS_FIX = "Allow them: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`"
+
+
+def no_box_text(said: str) -> str:
+    """The notice's words for a sandbox that said `said` as it failed to start: why, as the user namespaces the kernel
+    restricts (kernel_wrap.USERNS_SAID) with the plugin's fix while AppArmor's switch for them is on, else in the
+    sandbox's own last words."""
+    from . import cc_settings, kernel_wrap, notices  # noqa: PLC0415
+
+    if not kernel_wrap.USERNS_SAID.search(said):
+        last = (said.strip().splitlines() or [""])[-1]
+        return f"{NO_BOX_TEXT} ({notices.gist(last, notices.REASON_CHARS).rstrip('.')})."
+    try:
+        restricted = cc_settings.APPARMOR_USERNS.read_text().strip() == "1"
+    except OSError:
+        restricted = False
+    return f"{NO_BOX_TEXT}, {USERNS_WHY}." + (f" {USERNS_FIX}" if restricted else "")
+
+
+def _box_problem() -> str:
+    """What the sandbox of a build's commands said as it failed to start on this machine, probed afresh
+    (kernel_wrap.srt_problem: the Messages API's Bash runs in srt, and Claude Code's sandbox makes the same namespaces);
+    '' when it starts, or when the sandbox runtime is not installed or this Node cannot run it."""
+    from . import kernel_wrap, srt  # noqa: PLC0415
+
+    node, pkg = srt.node(), srt.package(config.REPO_ROOT)
+    if not node or pkg is None or srt.missing(config.REPO_ROOT, node):
+        return ""
+    return kernel_wrap.srt_problem(node, pkg)
+
+
+async def _box_notice(c: str, slug: str, chat: str | None) -> None:
+    """A builder's run started: when the sandbox of its commands can't start, the notice of it (no_box_text), with a row
+    in the build's thread; when it starts, the notice an earlier build left goes. Never raises."""
+    from . import notices, views  # noqa: PLC0415
+
+    try:
+        said = await asyncio.to_thread(_box_problem)
+        if not said:
+            notices.clear(c, NO_BOX_KEY)
+            return
+        name = str((views.read_proposal(c, slug) or {}).get("name") or slug)
+        notices.post(c, kind="sandbox", key=NO_BOX_KEY, text=no_box_text(said), agent=notices.who(_builder(), name)[0],
+                     chat=chat)
+    except Exception:  # noqa: BLE001 — the build runs either way
+        log.exception("%s: whether the sandbox of the build of %s starts was not told", c, slug)
 
 
 def _view_stopped(c: str, slug: str, chat: str | None = None) -> None:
