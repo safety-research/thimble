@@ -93,6 +93,19 @@ def test_a_server_that_runs_but_does_not_answer_is_named_with_the_command_that_r
     assert cli.stuck_server() is None and cli.start_failure(cli.api_url()) == ""
 
 
+def test_a_start_wait_that_is_not_a_number_of_seconds_leaves_the_default(monkeypatch):
+    """THIMBLE_START_WAIT_S is read where a command waits, so a value that is not a positive number of seconds leaves
+    the default wait rather than failing every command as the module loads."""
+    for bad in ("soon", "-5", "0", "nan", "inf"):
+        monkeypatch.setenv("THIMBLE_START_WAIT_S", bad)
+        assert cli.start_wait_s() == cli.WAIT_S, bad
+    monkeypatch.setenv("THIMBLE_START_WAIT_S", "100")
+    assert cli.start_wait_s() == 100.0
+    r = subprocess.run([sys.executable, "-c", "import app.cli"], cwd=BACKEND, env={**os.environ, "THIMBLE_START_WAIT_S": "soon"},
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+
+
 def test_two_concurrent_ups_start_one_uvicorn(fake, home):
     results: list[bool] = []
 
