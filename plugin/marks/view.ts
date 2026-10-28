@@ -15,21 +15,23 @@
 //   pending      the turn still runs: the text's own color, underlined; the citations' light purple tint on hover
 //   checking     as pending, and a turning glyph (purple) right after it, until its own verdict arrives
 //   verified     as pending
-//   corrected    the corrected words in place of the marked ones, as pending: once corrected it holds, so it
-//                looks as a verified one does (its tray card says it was corrected). A narrowed one (`narrowed`) keeps
-//                its words: only the part the check cited is the mark, the rest reads as the reply's plain words
+//   corrected    the corrected words in place of the marked ones, as pending, with ` *` (purple) after them: the
+//                person may have read the words Claude wrote before the check changed them, so a line under the row
+//                says what they were and why the check changed them (fixesEl). A narrowed one (`narrowed`) keeps its
+//                words and has no sign: only the part the check cited is the mark, the rest reads as the reply's
+//                plain words
 //   failed       the check could not confirm the words (it found them false and no right words, or its evidence
 //                did not show them), or it did not run or gave no answer: red (`error`), underlined, with ` ×`
 //                after it, a soft red tint on hover (a heads-up is an orange fill, so a failed citation is not). One
 //                look whatever the cause
-//   deferred     as pending: a citation whose check waits until the person opens it (the setting Citations: auto
-//                cite, or words the person asked about with c)
+//   deferred     as pending, with a dim ` ?` after it: a citation whose check waits until the person opens it (the
+//                setting Citations: auto cite, or words the person asked about with c), so it is not checked yet
 //   unchecked    as pending: words no check is for (a side thread's citations, or new ones in a version shown in
 //                place of Claude's words)
 //
-// The sign after a mark (the turning glyph, ×) takes two cells, and every other mark keeps those two cells when the
-// lines are cut (withLooks, a `gap` run that is not drawn), so the lines break at the same words whether a glyph shows
-// or not: no line wraps again when a check starts, nor as each verdict arrives.
+// The sign after a mark (the turning glyph, ×, *, ?) takes two cells, and every other mark keeps those two cells when
+// the lines are cut (withLooks, a `gap` run that is not drawn), so the lines break at the same words whether a glyph
+// shows or not: no line wraps again when a check starts, nor as each verdict arrives.
 //
 // A row may also carry spans (core/answerview.ts Span): words a feature draws as a press of its own, such as an
 // explainer highlighted teal or a heads-up orange (a fill behind the words); where a span and a mark share words they
@@ -47,6 +49,7 @@ import { askCell, passageLabel } from '../core/askcell.js'
 import { textWidth } from '../core/text.js'
 import { treeRows } from '../core/trail.mjs'
 import { accent, themeLast, type Theme } from '../core/theme'
+import { firstSentence } from '../tray/tray.mjs'
 import { blocks, cardRef, inline, marksWithin, runsText, tableOf, withoutCardLinks, wrapRuns } from './message.js'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -205,6 +208,8 @@ function withLooks(runs: Run[], o: MessageOpts): Run[] {
     if (look?.quiet) { k = e; continue }
     if (look?.status === 'checking') out.push({ s: ` ${o.spin || SPIN_CELL}`, mark: r.mark, tag: 'spin' })
     else if (look?.status === 'failed') out.push({ s: ' ×', mark: r.mark, tag: 'x' })
+    else if (look?.status === 'corrected' && !look.narrowed) out.push({ s: ` ${FIXED_SIGN}`, mark: r.mark, tag: 'fixed' })
+    else if (look?.status === 'deferred') out.push({ s: ' ?', mark: r.mark, tag: 'wait' })
     else out.push({ s: '  ', mark: r.mark, tag: 'gap' })
     k = e
   }
@@ -258,7 +263,8 @@ function markEl(els: Any, o: MessageOpts, r: Run, key: string) {
   // group of its own by its place, so the pointer over it lights it alone
   const id = look.n > 0 ? `${o.key}:${look.n}` : `${o.key}:at${r.mark as number}`
   const tint = citeHover(id, look.status)
-  if (r.tag === 'spin') p.color = accent()
+  if (r.tag === 'spin' || r.tag === 'fixed') p.color = accent()
+  else if (r.tag === 'wait') p.dimColor = true
   else if (r.tag) p.color = 'error'
   else if (!look.quiet) Object.assign(p, wordsLook(look.status, id))
   // a span on the mark's words (a heads-up, an explainer, inside them or around them): its fill at rest under the
@@ -442,6 +448,33 @@ export function messageEl(els: Any, o: MessageOpts): Any {
     i = j + 1
   }
   return Box({ flexDirection: 'column', marginTop: o.rule ? 0 : 1, children: rows })
+}
+
+/** The sign after a citation the check corrected, and before the line under the row that says what changed. */
+export const FIXED_SIGN = '*'
+
+/** A citation the check corrected after the person may have read it: its number, the words Claude wrote (a rewrite's,
+ *  the whole sentence), and the check's reason. */
+export type Fix = { n: number; was: string; rewrite?: boolean; reason?: string }
+
+/** What changed in a corrected citation and why, as its line under the row says it. */
+export function fixWords(f: Fix): string {
+  const was = f.was.replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim()
+  const why = f.reason ? firstSentence(f.reason) : ''
+  return `${f.rewrite ? 'rewritten' : 'corrected'} from “${was}”${why ? `: ${why}` : ''}`
+}
+
+/** One line under the row for each citation of it that the check corrected (` *` after its words): the sign, then what
+ *  Claude wrote and why the check changed it, dim; a press opens the citation, as a press on its words does. Nothing
+ *  when none was corrected. */
+export function fixesEl(els: Any, fixes: Fix[], key: string, onFix: (n: number) => unknown): Any | null {
+  if (!fixes.length) return null
+  const { Box, Button, Text } = els
+  // the sign in a column of its own, so the words that wrap stand under the words
+  return Box({ key, marginLeft: 2, flexDirection: 'column', children: fixes.map(f => Box({ key: `${key}-${f.n}`, flexDirection: 'row', children: [
+    Box({ key: 's', width: 2, flexShrink: 0, children: [Text({ color: accent(), children: FIXED_SIGN })] }),
+    Box({ key: 'w', flexShrink: 1, children: [Button({ key: `${key}-${f.n}-b`, plain: true, label: `${fixWords(f)} (citation ${f.n})`.slice(0, 120), hover: { inverse: false, underline: true }, onPress: () => onFix(f.n), children: [Text({ key: 't', dimColor: true, wrap: 'wrap', children: fixWords(f) })] })] }),
+  ] })) })
 }
 
 /** A span the features placed on the words Claude wrote that the check of the citations changed, so it stands on no

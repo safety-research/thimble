@@ -113,8 +113,8 @@ test('s opens the chips; ] writes a longer version in place, Claude hears it wit
   await t.clock.advance(1000)
   expect(t.asked.length).toBe(1)
   const back = textOf(await $.ui.render(answer('row-t1', LONG)))
-  // (citations are checked when opened, by default, so its citation draws as written)
-  expect(back).toContain('The nightly build failed on 3 of 12 runs')
+  // (citations are checked when opened, by default, so its citation draws as written, with ? after it: not checked yet)
+  expect(back).toContain('The nightly build failed on 3 of 12 ? runs')
   expect(back).not.toContain('fresh fetch')
 })
 
@@ -526,7 +526,7 @@ test('the rewrite starts from the corrected citations: the request holds the cor
     ] }),
     'answers/t1.json': JSON.stringify({ v: 1, turn: { turnId: 't1', n: 1, prompt: { text: 'why did it fail?', by: 'composer', row: 'row-q1' }, rows: ['row-t1'], answer: 'row-t1', reason: 'answer', startedAt: 0, endedAt: 1, labels: [], cards: [], seq: 0 }, msgs: [{ row: 'row-t1', turnId: 't1', text: LONG, at: 1 }] }),
   })
-  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('4 of 12 runs')
+  expect(textOf(await $.ui.render(answer('row-t1', LONG)))).toContain('4 of 12 * runs')
   await t.press('s')
   await t.press('[')
   await t.clock.advance(3000)

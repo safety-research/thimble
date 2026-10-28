@@ -208,16 +208,16 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   s.$.ui.focus = async (a: Any) => { focused.push(a.key); return {} }
   await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
   await draw(s)
-  // Minimal first, then Citations and Cards
+  // Minimal first, then Citations and Checker
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
   await draw(s)
   expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
-  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('cards')
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('checkerModel')
   await draw(s)
   expect(await scrollPane(s.$, { by: -1, origin: { kind: 'person' } })).toBe(true)
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('citations')
-  expect(focused).toEqual(['mode-citations-auto cite + verify', 'mode-cards-on', 'mode-citations-auto cite + verify'])
+  expect(focused).toEqual(['mode-citations-auto cite + verify', 'mode-checkerModel-same as Claude', 'mode-citations-auto cite + verify'])
   // the ring moving along the row picked (← →, tab) sets the choice it lands on; onto another row it lands on that
   // row's choice set, picks that row and changes nothing
   const set: Any[] = []
@@ -242,6 +242,31 @@ test('in the settings, ↑ and ↓ (sent as scrolls) pick the row above or below
   expect(set.at(-1)).toMatchObject({ key: 'thimble@inline.labels', value: false })
   expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('labels')
   expect(focused.at(-1)).toBe('mode-labels-off')
+  setOptions({})
+})
+
+test('in the settings, the Checker row shows while a checker can run: in every mode of Citations but off, where ↑ and ↓ pass over it', async () => {
+  const s = setup()
+  const held: Record<string, unknown> = { citations: 'off' }
+  s.$.config = { list: async () => Object.entries(held).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })), set: async () => ({}) }
+  s.$.ui.focus = async () => ({})
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const rows = async () => nodes(await draw(s)).map(n => n.props?.key).filter((k: Any) => typeof k === 'string' && k.startsWith('sw-'))
+  // Citations off: no citation is checked, so no Checker row; a step down from Citations lands on Cards
+  expect((await rows()).slice(0, 3)).toEqual(['sw-minimal', 'sw-citations', 'sw-cards'])
+  await s.$.state.set({ plugin: 'thimble', key: 'settingsRow' }, 'citations')
+  await draw(s)
+  expect(await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })).toBe(true)
+  expect((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value).toBe('cards')
+  // the Checker row picked before Citations went off: the tint stands on Citations, the row it belongs to
+  await s.$.state.set({ plugin: 'thimble', key: 'settingsRow' }, 'checkerModel')
+  const tinted = nodes(await draw(s)).filter(n => String(n.props?.key).startsWith('sw-') && n.props?.backgroundColor)
+  expect(tinted.map(n => n.props.key)).toEqual(['sw-citations'])
+  // every other mode checks citations (manual: the words c cites), so the row shows, after Citations
+  for (const mode of ['auto cite + verify', 'auto cite', 'manual']) {
+    held.citations = mode
+    expect((await rows()).slice(0, 3)).toEqual(['sw-minimal', 'sw-citations', 'sw-checkerModel'])
+  }
   setOptions({})
 })
 

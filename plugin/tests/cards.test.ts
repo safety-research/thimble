@@ -341,6 +341,32 @@ test('a new card waits while the run of calls above it is live and draws once it
   expect(await drawn('toolu_made_up_w2', second)).toBe(true)
 })
 
+test('a version drawn in a later answer than the one that showed the card is marked on it, with what Claude says it changes and why; a version of the same answer is not', async ($, on) => {
+  world(on)
+  on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$: unknown, e: Any) => ({ text: e.answer }))
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  await $.turn.start({ text: 'how did the runs score?', turnId: 't-1' } as never)
+  const input = { title: 'Scores', data: 'runs.json', view: VIEW }
+  const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_fx1', ...input } as never)) as Any
+  const id = /Its id is "(c[0-9a-f]+)"/.exec(String(r.result))![1]
+  // Claude fixes the card while it works, before its answer shows it: no mark
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_fx2', id, edits: [{ old: 'children: "x"', new: 'children: "y"' }], change: 'made-up: a fix while it works' } as never)
+  await $.turn.complete({ turnId: 't-1', reason: 'answer', answer: 'Two runs scored 3 and 5.', durationMs: 10, isAborted: false } as never)
+  const card = async () => textOf(await $.ui.render(callRow('toolu_made_up_fx1', input))) + textOf(await $.ui.render(callRow('toolu_made_up_fx3', { id })))
+  expect(await card()).not.toContain('changed in a later answer')
+  // a later answer corrects it: the card says so under its title, in Claude's words
+  await $.turn.start({ text: 'the scores count retried runs twice', turnId: 't-2' } as never)
+  const fixed = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_fx3', id, edits: [{ old: 'children: "y"', new: 'children: "z"' }], change: 'counts each run once; version 2 counted retried runs twice' } as never)) as Any
+  expect(String(fixed.result)).toContain('Version 3 of “Scores”')
+  expect(await card()).toContain('*changed in a later answer: counts each run once; version 2 counted retried runs twice')
+  // a version of that same answer keeps the mark, and adds its own words when it gives some
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_fx4', id, edits: [{ old: 'children: "z"', new: 'children: "w"' }] } as never)
+  expect(await card()).toContain('*changed in a later answer: counts each run once; version 2 counted retried runs twice')
+  await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_fx5', id, edits: [{ old: 'children: "w"', new: 'children: "v"' }], change: 'The legend fits on two lines.' } as never)
+  expect(await card()).toContain('*changed in a later answer: counts each run once; version 2 counted retried runs twice. The legend fits on two lines.')
+})
+
 test('a view that did not parse is fixed with edits, its rows kept; the card on screen stays meanwhile', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)

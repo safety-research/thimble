@@ -235,8 +235,9 @@ The terminal plugin:
   without the sandbox. The line says why and gives the fix: on Linux, the command that installs bubblewrap, socat or
   ripgrep, or, on a Linux whose AppArmor keeps bubblewrap from making namespaces, the command that allows it; when npm
   cannot reach its registry to install the sandbox, `npm ping` shows why. The next card tries again, with no new
-  session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, where
-  `<plugin>` is the installed plugin's folder, `~/.claude/plugins/cache/thimble/thimble/<version>`.
+  session. To test the sandbox by hand, run `node <plugin>/sandbox/setup.mjs --probe`, which draws a test card in it
+  (add `--repair` to install the sandbox again when that fixes it, as the install does), where `<plugin>` is the
+  installed plugin's folder, `~/.claude/plugins/cache/thimble/thimble/<version>`.
 - **The line above the prompt says your Node is too old, though a newer one is installed.** The plugin runs on the
   `node` that the terminal you start `claude` from finds first. A Node manager (nvm, fnm, asdf) that your shell's
   startup file does not load is not used, even when the install loaded it in its own commands, as Claude may when it

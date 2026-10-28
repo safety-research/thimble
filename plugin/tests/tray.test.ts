@@ -149,13 +149,16 @@ test('a corrected value computed by code: purple in the reply; the line that pri
     n: 1, row: 'row-t1', words: '12 of 40', start: 13, end: 26, sentence: TEXT, status: 'corrected', shown: '11 of 40', was: '12 of 40', reason: 'The output says 11. One run was retried.',
     evidence: { kind: 'computed', by: 'checker', code: 'import json\nprint("runs:", n)\nprint(f"failed: {bad}")\nprint("passed:", n - bad)', output: 'runs: 40\nfailed: 11\npassed: 29', highlight: [[17, 19]] },
   }, 's-tray-2')
-  // the corrected words draw as a settled citation: underlined, the purple tint on hover
+  // the corrected words draw as a settled citation: underlined, the purple tint on hover; a * after them, and a line
+  // under the row says what they were and why the check changed them
   const drawn = all(await $.ui.render(answer('row-t1', TEXT)))
   const corrected = drawn.find(n => n.type === 'Text' && textOf(n) === '11 of 40')
   expect(corrected?.props).toMatchObject({ underline: true })
   expect(corrected?.props?.backgroundColor).toBeUndefined()
   expect(corrected?.hover ?? corrected?.props?.hover).toMatchObject({ backgroundColor: citeTint() })
-  expect(textOf(drawn)).not.toContain('corrected')
+  expect(textOf(drawn)).toContain('11 of 40 * failed')
+  expect(textOf(drawn)).toContain('corrected from “12 of 40”: The output says 11.')
+  expect(textOf(drawn)).not.toContain('One run was retried')
   expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
   let drawnBand = all(await $.ui.render(above()))
   let band = textOf(drawnBand)
@@ -739,7 +742,7 @@ test("a double click on one of the bar's items selects its word, which is the ba
   selected = { text: 'as the evidence shows', requestId: 'row-t1' }
   expect(textOf(await $.ui.render(above()))).toContain('c cite')
   // the corrected words the row draws in place of the citation's
-  expect(textOf(await $.ui.render(answer('row-t1', 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.')))).toContain('11 of 40 failed')
+  expect(textOf(await $.ui.render(answer('row-t1', 'Of the runs, [12 of 40](#) failed on the p95 check, as the evidence shows.')))).toContain('11 of 40 * failed')
   selected = { text: 'runs, 11 of 40 failed', requestId: 'row-t1' }
   band = textOf(await $.ui.render(above()))
   expect(band).toContain('c cite')
@@ -904,7 +907,7 @@ test('a sentence the check rewrote draws as rewritten, its citation corrected, t
   const asked = { n: 2, row: 'row-t1', words: 'failed on the p95 check', start: 27, end: 50, sentence: 'Of the runs, [12 of 40] [failed on the p95 check].', status: 'deferred', shown: 'failed on the p95 check', asked: true }
   await resumed($, on, [fixed, asked], 's-tray-rewritten')
   const drawn = textOf(await $.ui.render(answer('row-t1', TEXT)))
-  expect(drawn).toContain('Of the runs, 11 of 40 failed on the p99 check.')
+  expect(drawn).toContain('Of the runs, 11 of 40 * failed on the p99 check.')
   expect(drawn).not.toContain('×')
 })
 

@@ -3,6 +3,7 @@
 and one refused value drops them all)."""
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -135,6 +136,151 @@ def test_what_does_not_work_yet_is_what_the_install_says_last(tmp_path):
     said = [n.strip() for n in "\n".join(notes).split("Note: ") if n.strip()]
     sandbox = next((n for n in said if "the made-up runner did not start." in n), "")
     assert sandbox.endswith("Install them: sudo made-up-get install bubblewrap socat"), said
+
+
+def install_with_login_shell(tmp_path, login_path):
+    """scripts/install.sh --no-browser with made-up commands, run from a shell whose node fails the card test (it says
+    the made-up sandbox does not work), for a person whose login shell (SHELL, a made-up one) starts with the PATH
+    `login_path`, where a made-up node passes it. Its output, and the arguments the login shell was started with."""
+    market = tmp_path / "market"
+    (market / ".claude-plugin").mkdir(parents=True)
+    (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
+    (market / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (market / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"userConfig": {}}))
+    stub(market / "plugin" / "sandbox" / "setup.mjs", "")
+    stub(market / "plugin" / "bin" / "thimble", "")
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"installLocation": str(market)}}))
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "node", 'case "$1" in --version) echo v22.20.0 ;;\n'
+         '*) echo "thimble: cards cannot run yet: the made-up node of this shell."; exit 1 ;; esac\n')
+    stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
+    stub(tmp_path / "new-terminal" / "node", 'echo "thimble: cards run in the made-up sandbox; the runner drew a test card in 5 ms ($*)."\n')
+    started = tmp_path / "login.log"
+    login = stub(tmp_path / "login-shell", f'echo "$@" > "{started}"\necho "made-up: welcome"\necho "PATH={login_path}"\n')
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "SHELL": str(login)}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-browser", "--bin-dir", str(tmp_path / "bin")],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, p.stdout + p.stderr
+    return p.stdout, started.read_text().split()
+
+
+def test_the_card_test_runs_on_the_node_a_new_terminal_finds(tmp_path):
+    """The install draws a test card as a session does: on the node a new terminal finds, from the PATH the person's
+    login shell starts with (a login shell, interactive, as a terminal starts it), and with --repair, which installs
+    the sandbox again when that repairs it. This shell's own node is not the one a session runs on."""
+    out, started = install_with_login_shell(tmp_path, f"{tmp_path / 'new-terminal'}:/usr/bin:/bin")
+    assert started == ["-lic", "env"]
+    market = tmp_path / "market" / "plugin" / "sandbox" / "setup.mjs"
+    assert f"thimble: cards run in the made-up sandbox; the runner drew a test card in 5 ms ({market} --probe --repair)." in out.splitlines()
+    assert "cards cannot run yet" not in out
+
+
+def test_a_new_terminal_that_finds_no_node_is_said(tmp_path):
+    """A new terminal that finds no node cannot start the card runner: a note says so, with the line that puts this
+    shell's node on its PATH, and the card test runs on this shell's node."""
+    out, _ = install_with_login_shell(tmp_path, str(tmp_path / "nothing"))
+    notes = [x for x in out.splitlines() if x.startswith("Note: a new terminal finds no node")]
+    assert notes == [f"Note: a new terminal finds no node, and the plugin's cards run on the node a new terminal finds. Add this line to your shell's startup file (~/.zshrc or ~/.bashrc): export PATH=\"{tmp_path / 'stubs'}:$PATH\""]
+    assert "the made-up node of this shell" in out
+
+
+# a terminal (a pty) whose shell runs a command as a person's shell does: in a process group of its own, which it puts
+# in the terminal's foreground; then it says how the command ended, or that it stopped. It answers the command's
+# question ("[Y/n]: ") with n, and prints what the terminal showed
+TERMINAL = r'''
+import os, pty, select, signal, sys, time
+pid, fd = pty.fork()
+if pid == 0:
+    signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+    job = os.fork()
+    if job == 0:
+        os.setpgid(0, 0)
+        os.tcsetpgrp(0, os.getpid())
+        signal.signal(signal.SIGTTOU, signal.SIG_DFL)
+        os.execv("/bin/bash", ["bash", sys.argv[1]])
+    try:
+        os.setpgid(job, job)
+    except OSError:
+        pass
+    _, status = os.waitpid(job, os.WUNTRACED)
+    if os.WIFSTOPPED(status):
+        print("stopped by " + signal.Signals(os.WSTOPSIG(status)).name, flush=True)
+        os.kill(job, signal.SIGKILL)
+        os.waitpid(job, 0)
+    else:
+        print("exit %d" % os.waitstatus_to_exitcode(status), flush=True)
+    os._exit(0)
+shown, answered, end = b"", False, time.time() + 90
+while time.time() < end:
+    if not select.select([fd], [], [], 1)[0]:
+        continue
+    try:
+        got = os.read(fd, 4096)
+    except OSError:
+        break
+    if not got:
+        break
+    shown += got
+    if not answered and b"[Y/n]: " in shown:
+        os.write(fd, b"n\n")
+        answered = True
+if time.time() >= end:
+    os.kill(pid, signal.SIGKILL)
+os.waitpid(pid, 0)
+sys.stdout.write(shown.decode(errors="replace"))
+'''
+
+
+def fresh_path_in_a_terminal(tmp_path, shell, startup):
+    """install.sh's fresh_path, in a terminal, as the install runs it there, for a person whose login shell is `shell`
+    with the startup files `startup` (name: text) in their home; then a question the install reads from the terminal
+    after it, as Keep it? [Y/n]. What the terminal showed: how long fresh_path took and what it said, the answer read,
+    and how the install ended."""
+    home = tmp_path / "home"
+    home.mkdir()
+    for name, text in startup.items():
+        (home / name).write_text(text)
+    fresh_path = re.search(r"^fresh_path\(\) \{\n.*?^\}\n", (ROOT / "scripts" / "install.sh").read_text(), re.S | re.M).group(0)
+    script = tmp_path / "install-part.sh"
+    script.write_text(f"set -euo pipefail\npy='{sys.executable}'\n{fresh_path}"
+                      'start=$SECONDS\nfound="$(fresh_path)"\necho "fresh_path: $((SECONDS - start)) s [$found]"\n'
+                      'printf "Keep it? [Y/n]: "\nread -r keep || keep="nothing"\necho "read: [$keep]"\n')
+    terminal = tmp_path / "terminal.py"
+    terminal.write_text(TERMINAL)
+    env = {"HOME": str(home), "USER": "analyst", "LOGNAME": "analyst", "SHELL": shell, "PATH": "/usr/bin:/bin",
+           "TERM": "xterm-256color", "LANG": "C.UTF-8"}
+    return subprocess.run([sys.executable, str(terminal), str(script)], capture_output=True, text=True, env=env,
+                          timeout=150).stdout
+
+
+@pytest.mark.parametrize("shell", ["bash", "zsh"])
+def test_a_new_terminals_path_is_read_and_the_install_still_reads_its_terminal(tmp_path, shell):
+    """The login shell that says a new terminal's PATH runs interactive, as a terminal starts it, and an interactive
+    shell takes the terminal it finds as its own: the install's next question would then stop it (suspended, tty
+    input). It runs without the terminal, and the install reads the answer typed after it."""
+    at = shutil.which(shell)
+    if not at:
+        pytest.skip(f"no {shell} on this machine")
+    startup = ({".bash_profile": ". ~/.bashrc\n", ".bashrc": "export PATH=/made-up/fast:$PATH\n"} if shell == "bash"
+               else {".zshrc": "export PATH=/made-up/fast:$PATH\n"})
+    shown = fresh_path_in_a_terminal(tmp_path, at, startup)
+    assert re.search(r"fresh_path: \d+ s \[/made-up/fast:", shown), shown
+    assert "read: [n]" in shown and "exit 0" in shown, shown
+
+
+def test_a_startup_file_that_takes_30_s_is_cut_at_20_s(tmp_path):
+    """A login shell whose startup file takes 30 s gives no PATH: it is stopped at 20 s, with what it started (an
+    interactive shell ignores SIGTERM), and the install goes on and reads its terminal."""
+    shown = fresh_path_in_a_terminal(tmp_path, shutil.which("bash") or "/bin/bash",
+                                     {".bash_profile": ". ~/.bashrc\n", ".bashrc": "sleep 30\nexport PATH=/made-up/slow:$PATH\n"})
+    took = re.search(r"fresh_path: (\d+) s \[(.*)\]", shown)
+    assert took and 18 <= int(took.group(1)) <= 26 and took.group(2) == "", shown
+    assert "read: [n]" in shown and "exit 0" in shown, shown
 
 
 def test_a_home_whose_fixes_claude_code_loads_is_left_to_thimble_update_and_the_rest_installs(tmp_path):

@@ -45,7 +45,7 @@ import { accent, themeNow, type Theme } from '../core/theme'
 import { mainTurn } from '../core/turn'
 import { ownKeys } from '../hooks/keys'
 import { cardRef } from '../marks/message.js'
-import { citeTint } from '../marks/view'
+import { citeTint, FIXED_SIGN } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
 import { ask } from './ask'
 import { artifactLine } from './head'
@@ -406,6 +406,12 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   ] }) : null
   const rows: Any[] = [
     askEl ? E.Box({ key: 'title-row', flexDirection: 'row', justifyContent: 'space-between', children: [E.Box({ key: 'title-l', flexShrink: 1, children: [titled] }), E.Box({ key: 'title-r', flexShrink: 0, marginLeft: 2, children: [askEl] })] }) : titled,
+    // a version that replaced one an earlier answer showed: under the title, what Claude said it changes and why, as a
+    // citation the check corrected is marked (marks/view.ts fixesEl)
+    ...(meta.fix ? [E.Box({ key: 'fixed', flexDirection: 'row', children: [
+      E.Box({ key: 's', width: 2, flexShrink: 0, children: [E.Text({ color: accent(), children: FIXED_SIGN })] }),
+      E.Box({ key: 'w', flexShrink: 1, children: [E.Text({ dimColor: true, wrap: 'wrap', children: `changed in a later answer${meta.fix.change ? `: ${meta.fix.change}` : ''}` })] }),
+    ] })] : []),
     // a drawing wider than the frame: its columns past the frame's edge are cut
     ...(fault ? [] : [width > inside ? E.Box({ key: 'cut', flexDirection: 'column', width: inside, overflow: 'hidden', children: [client] }) : client]),
   ]
