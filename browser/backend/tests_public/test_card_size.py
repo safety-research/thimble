@@ -13,7 +13,7 @@ from app import card_check, card_size, checkstore, notebook, render, tools
 
 CORPUS = "mini"
 TALL = "px tall at the card's width"
-WIDE = "px wide in the card's"
+WIDE = "px wide, and the card gives it"
 
 
 async def call(name: str, *, terminal: bool = True, **args):

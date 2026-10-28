@@ -621,7 +621,7 @@ card:{cid}'s body draws {height} px tall at the card's width, and about {limit} 
 
 ## card-wide
 
-card:{cid}'s page lays out {width} px wide in the card's {frame} px, so the analyst never sees the whole page at once.
+card:{cid}'s page lays out {width} px wide, and the card gives it {frame} px, so the analyst does not see all of it at the card's width.
 
 ## kind-mismatch
 
