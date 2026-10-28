@@ -15,7 +15,7 @@ import type { EngineInterface } from 'claude-code'
 import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { type Asker, liveFixer, screenNow, setAsker, startFixer } from './fixer'
-import { type Fix, fixingWord, fixLineNow, fixName, fixOf, isChange, jsonOf, kernelFix, refreshFixes, setFixLine } from './fixes'
+import { type Fix, fixingWord, fixLineNow, fixName, fixOf, formHead, isChange, jsonOf, kernelFix, ownWords, refreshFixes, setFixLine } from './fixes'
 
 type Engine = EngineInterface
 
@@ -27,13 +27,15 @@ export type Requested = { text: string; fix: Fix | null; failed: boolean; round:
 /** The fixes the words may change: any the person has in the list, at work or not. */
 const CHANGEABLE = ['on', 'off', 'ready', 'working', 'failed', 'redo']
 
+/** Whether fix N is one the person has that words may change. */
+const changeable = (fixes: Fix[]) => (n: number) => fixes.some(f => f.id === n && CHANGEABLE.includes(f.state))
+
 /** The explicit forms: `N <words>` for fix N, when N is a fix the person has, and `new <words>`, each with a mark after
- *  it or none (`2: …`, `new: …`), and a space before the words. */
+ *  it or none (`2: …`, `new: …`), and a space before the words (fixes.ts formHead). */
 export function formOf(words: string, fixes: Fix[]): { words: string; target: number | null; fresh: boolean } {
-  const n = /^#?(\d+)(?:\s*[:.)–—-])?\s+([\s\S]+)$/.exec(words)
-  if (n && fixes.some(f => f.id === Number(n[1]) && CHANGEABLE.includes(f.state))) return { words: n[2]!.trim(), target: Number(n[1]), fresh: false }
-  const fresh = /^new(?:\s*[:.)–—-])?\s+([\s\S]+)$/i.exec(words)
-  if (fresh) return { words: fresh[1]!.trim(), target: null, fresh: true }
+  const h = formHead(words)
+  if (h?.rest && h.n != null && changeable(fixes)(h.n)) return { words: h.rest, target: h.n, fresh: false }
+  if (h?.rest && h.fresh) return { words: h.rest, target: null, fresh: true }
   return { words, target: null, fresh: false }
 }
 
@@ -55,9 +57,12 @@ export function fixesContext(fixes: Fix[]): string {
  *  them). */
 export async function request($: Engine, said: string, by: Asker = 'person', tell = true, asked = ''): Promise<Requested> {
   const who = by === 'claude' ? 'Claude' : 'The person'
-  const form = formOf(said, (await refreshFixes($))?.fixes ?? [])
+  const fixes = (await refreshFixes($))?.fixes ?? []
+  const form = formOf(said, fixes)
   const words = form.words
-  const own = asked.trim() ? [`--asked=${asked.trim()}`] : []
+  // the person's own words, without the form's head (`2 …`); none left, and the fixer reads Claude's
+  const mine = ownWords(asked, changeable(fixes))
+  const own = mine ? [`--asked=${mine}`] : []
   // a fixer still works on the fix (the one named, or any without a form): the words go to it, as a round of its fix
   const live = form.fresh ? null : await liveFixer($, form.target)
   if (live) {
@@ -68,7 +73,7 @@ export async function request($: Engine, said: string, by: Asker = 'person', tel
     let sent: { isDelivered?: boolean; reason?: string } | undefined
     try {
       // the person's own words, as they typed them, where they typed any; else Claude's
-      sent = await $.session.send({ to: { agentId: live.agentId }, text: roundText(fix, who, asked.trim() || words) } as never) as never
+      sent = await $.session.send({ to: { agentId: live.agentId }, text: roundText(fix, who, mine || words) } as never) as never
     } catch (err) {
       sent = { isDelivered: false, reason: String((err as Error)?.message || err) }
     }

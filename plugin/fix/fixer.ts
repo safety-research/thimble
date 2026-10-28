@@ -39,7 +39,7 @@ import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { sessionKey } from '../hooks/conversation'
 import { promptText } from '../prompts/prompts'
-import { type Fix, type Refusal, fixesDir, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
+import { type Fix, type Refusal, fixesDir, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, ownWords, refreshFixes, sessionIdNow, setFixLine } from './fixes'
 import { screenCopy } from './screen'
 
 type Engine = EngineInterface
@@ -114,10 +114,10 @@ export function refusedText(r: Refusal, earlier: boolean): string {
 }
 
 /** The fixer's first message: the task (prompts/fixer.md), the words of each round (the person's own, as they typed
- *  them after /thimble-fix, where thimble has them; else Claude's), where it works, the fix these words change, what
- *  the check refused last time, and a text copy of what thimble shows now. */
+ *  them after /thimble-fix, without the form's head that names the fix, where thimble has them; else Claude's), where
+ *  it works, the fix these words change, what the check refused last time, and a text copy of what thimble shows now. */
 function firstMessage(fix: Fix, earlier: string | null, task: string, by: Asker, screen: string): string {
-  const words = (fix.words || []).map((w, i) => fix.asked?.[i] || w)
+  const words = (fix.words || []).map((w, i) => ownWords(fix.asked?.[i] ?? '', n => n === fix.id) || w)
   const asked = words.length > 1
     ? words.map((w, i) => `Round ${i + 1}: ${w}`).join('\n')
     : words[0] || fix.title

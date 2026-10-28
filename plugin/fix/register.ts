@@ -15,10 +15,10 @@
 //                          /thimble-fix <words>; else Claude did, on the person's yes to the fix it offered when it
 //                          saw thimble misbehave (skills/fix-thimble/SKILL.md, guidance.md). Claude reads what came
 //                          of it in the skill's place, and is told when the fix ends
-//   /thimble-fix           right after Claude offered a fix (its newest answer speaks of a fix, and started none): the
-//                          person's yes, so the prompt command runs with no words and Claude starts the fix it offered.
-//                          Else how to ask for a fix, and that fixes are listed and managed in a shell (thimble fix), at
-//                          once, without a turn of Claude's
+//   /thimble-fix           right after Claude offered a fix (its newest answer asks whether to start one, and started
+//                          none): the person's yes, so the prompt command runs with no words and Claude starts the fix
+//                          it offered. Else how to ask for a fix, and that fixes are listed and managed in a shell
+//                          (thimble fix), at once, without a turn of Claude's
 //   the fixer's calls      its shell runs in the sandbox runtime (no site but the package registries, reads only the
 //                          system, its tools and the copy, writes only the copy), at most 5 minutes a command, with no
 //                          dialog unless the person's rules deny the command, and never publishes to the registries;
@@ -140,16 +140,17 @@ const ASKED_WORDS = { plugin: 'thimble', key: 'fixAskedWords' } as const
 /** The turn of main's in which the fix-thimble skill last started a fix. */
 const STARTED_IN = { plugin: 'thimble', key: 'fixStartedIn' } as const
 
-/** Words that speak of a fix: Claude's offer of one names it. */
-const FIX_WORDS = /\bfix(?:es|ed|ing)?\b/i
+/** Claude's offer of a fix: a question that proposes one ("Want me to start a fix?", "Should I fix it?"). A statement
+ *  that speaks of a fix ("The agent fixed the parser", "Let me fix the jq filter first.", "Your thimble fix … is
+ *  ready", "I started a fix") offers none. */
+const FIX_OFFER = /\bfix\w*\b[^.!?\n]*\?/i
 
-/** Whether Claude just offered a fix: its newest answer speaks of a fix, and that turn started none. A bare
+/** Whether Claude just offered a fix: its newest answer asks whether to start one, and that turn started none. A bare
  *  /thimble-fix then is the person's yes. */
 export async function offeredFix($: Engine): Promise<boolean> {
   const t = (await turnsNow($)).at(-1)
   if (!t?.answer || t.turnId === (await $.state.get(STARTED_IN)).value) return false
-  for (const row of t.rows) if (FIX_WORDS.test((await messageOf($, row))?.text ?? '')) return true
-  return false
+  return FIX_OFFER.test((await messageOf($, t.answer))?.text ?? '')
 }
 
 async function knowFixers($: Engine): Promise<void> {

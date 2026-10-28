@@ -101,6 +101,23 @@ export function fixSlug(f: Pick<Fix, 'id' | 'title'>): string {
   return `fix-${slug || f.id}`
 }
 
+/** The head of a request's explicit form (request.ts formOf): `N` (a fix's number) or `new`, each with a mark after it
+ *  or none (`2: …`, `#2 - …`, `new: …`), and the words after it, '' when there are none. Null when the words have no
+ *  head. */
+export function formHead(words: string): { n: number | null; fresh: boolean; rest: string } | null {
+  const m = /^(?:#?(\d+)|(new))(?:\s*[:.)–—-])?(?:\s+([\s\S]*))?$/i.exec(words)
+  return m ? { n: m[1] ? Number(m[1]) : null, fresh: !!m[2], rest: (m[3] ?? '').trim() } : null
+}
+
+/** The person's own words after /thimble-fix, without the form's head that formOf takes off Claude's (`2 …`, `new: …`):
+ *  it says which fix the words are for, and is no words for the fixer. '' when the head is all they typed
+ *  (`/thimble-fix 2`), so that the fixer reads Claude's words. `named`: whether fix N is one a form may name. */
+export function ownWords(asked: string, named: (n: number) => boolean): string {
+  const a = asked.trim()
+  const h = formHead(a)
+  return h && (h.fresh || (h.n != null && named(h.n))) ? h.rest : a
+}
+
 /** Why the check did not use a fixer's change: the files it may not change (the way back, a binary file), or the end of
  *  the tests' output when they failed. */
 export type Refusal = { why: string; files: string[]; tests?: string }
