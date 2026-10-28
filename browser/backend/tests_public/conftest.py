@@ -148,6 +148,26 @@ def pytest_sessionfinish(session, exitstatus):
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    """A test with a time limit of its own longer than the suite's (pytest.mark.timeout) gets faulthandler's dump of
+    every thread's stack a little before its own limit, not at the suite's faulthandler_timeout (pyproject.toml), where
+    a long test that is still working would look stuck."""
+    import faulthandler
+
+    m = item.get_closest_marker("timeout")
+    limit = float(m.args[0]) if m is not None and m.args else 0.0
+    try:
+        suite = float(item.config.getini("timeout") or 0)  # pytest-timeout's
+        if limit <= suite or not float(item.config.getini("faulthandler_timeout") or 0):
+            return
+        from _pytest.faulthandler import fault_handler_stderr_fd_key
+
+        faulthandler.dump_traceback_later(limit - 10, file=item.config.stash[fault_handler_stderr_fd_key])
+    except (ValueError, ImportError, KeyError):  # no pytest-timeout, or another pytest: the suite's dump time stands
+        pass
+
+
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_call(item):
     """A test during which the audit hook refused a connection to a live thimble server's port fails, naming the port,
@@ -158,6 +178,35 @@ def pytest_runtest_call(item):
         pytest.fail(f"this test connected to a live thimble server's port (refused): {', '.join(dict.fromkeys(LIVE_CONNECTS[before:]))}",
                     pytrace=False)
     return out
+
+
+def _data_files() -> dict[str, tuple]:
+    """Each path under the suite's shared data folder (DATA: mini and the corpora tests make there) with its size and
+    modification time, a folder with neither."""
+    out: dict[str, tuple] = {}
+    for d, dirs, files in os.walk(DATA):
+        for n in dirs + files:
+            p = os.path.join(d, n)
+            try:
+                st = os.lstat(p)
+            except OSError:
+                continue
+            out[os.path.relpath(p, DATA)] = ("dir",) if n in dirs else (st.st_size, st.st_mtime_ns)
+    return out
+
+
+@pytest.fixture(autouse=True)
+def _shared_data_untouched():
+    """A test that leaves a change in the shared data folder fails: every later test in its worker would read it, as a
+    .claude/ left in mini once made test_runtime's sandbox test fail after test_agent_programs. A test that writes into
+    a corpus works on its own copy (data_tmp)."""
+    before = _data_files()
+    yield
+    after = _data_files()
+    if after != before:
+        changed = sorted(set(before) ^ set(after) | {k for k in set(before) & set(after) if before[k] != after[k]})
+        pytest.fail(f"the test changed the suite's shared data folder ({DATA}), which later tests read: "
+                    f"{', '.join(changed[:8])}; write into a copy (data_tmp)", pytrace=False)
 
 
 @pytest.fixture()
@@ -211,6 +260,97 @@ def _thimble_home_off_the_user(tmp_path, monkeypatch):
 PLUGIN_TOKEN = "t0ken-of-the-test-server"
 UI_COOKIE_VALUE = "cookie-of-the-test-browser"  # the cookie of a browser signed in to the test server (_record_paired)
 UI_KEY_VALUE = "key-of-the-test-browser"  # the key of that browser's path, /b/<key>/api/ (hook_auth.browser_path)
+
+
+# The ports of the servers the tests start, and of the ports they hold or look at: below the ports the system hands out
+# for port 0 (32768 and up on Linux, 49152 and up on macOS), where kernels' connection files and every client's
+# connection come and go, so none of those takes one between a test's look and its server's bind; away from the ports
+# the tests name (8300, 5301, 21101, 21240, 27755); and apart from 22000-26999, where earlier versions of these tests
+# took theirs without a block, so that a run of one of those beside this run takes none of its ports. A test takes them
+# from a block of PORT_BLOCK ports that it alone holds on this machine while it runs (_PortBlock): every other test, of
+# this run or of another run beside it, takes its own from another block, so none takes a port of this test's between
+# its look and its server's bind, nor the one `server up` picks among the 50 above a taken one (cli.PORT_SCAN), which
+# stay in the block.
+SERVER_PORTS = range(12000, 17000)
+PORT_BLOCK = 100
+PORT_BLOCK_WAIT_S = 120.0  # how long a test waits for a block while every block is held
+
+
+class _PortBlock:
+    """The block of SERVER_PORTS the running test holds: a socket of this process bound to the block's first port, which
+    no other process can bind while it is held, and so no other test takes the block. The ports after it are the
+    test's, handed out in turn (bound_port), each one nothing held then; those up to PORT_BLOCK - cli.PORT_SCAN, so
+    that `server up`'s look above one stays in the block. The block is let go when the test ends (_port_block_freed)."""
+
+    sock = None
+    first = 0  # the block's first port
+    next = 0  # the next port to hand out
+
+    @classmethod
+    def held(cls) -> range:
+        """The ports of the block this test holds, still to hand out, claiming a free block at the test's first call."""
+        import random
+        import socket
+        import time
+
+        from app import cli
+
+        if cls.sock is None:
+            firsts = list(range(SERVER_PORTS.start, SERVER_PORTS.stop - PORT_BLOCK + 1, PORT_BLOCK))
+            end = time.monotonic() + PORT_BLOCK_WAIT_S
+            while cls.sock is None:
+                for first in random.sample(firsts, len(firsts)):
+                    s = socket.socket()
+                    try:
+                        s.bind(("127.0.0.1", first))
+                    except OSError:  # held by another test, here or in another run
+                        s.close()
+                        continue
+                    cls.sock, cls.first, cls.next = s, first, first + 1
+                    break
+                else:
+                    assert time.monotonic() < end, f"every block of {SERVER_PORTS} was held for {PORT_BLOCK_WAIT_S:g} s"
+                    time.sleep(0.1)
+        return range(cls.next, cls.first + PORT_BLOCK - cli.PORT_SCAN)
+
+    @classmethod
+    def free(cls) -> None:
+        if cls.sock is not None:
+            cls.sock.close()
+            cls.sock = None
+
+
+@pytest.fixture(autouse=True)
+def _port_block_freed():
+    """The block of ports a test held (_PortBlock) is let go once the test and its fixtures ended."""
+    yield
+    _PortBlock.free()
+
+
+def bound_port(ports: range | None = None) -> "socket.socket":
+    """A socket bound to a port on the loopback that nothing held: the next of the block of SERVER_PORTS this test
+    holds (_PortBlock), or one of `ports` at random."""
+    import random
+    import socket
+
+    s = socket.socket()
+    for port in _PortBlock.held() if ports is None else random.sample(ports, len(ports)):
+        try:
+            s.bind(("127.0.0.1", port))
+        except OSError:
+            continue
+        if ports is None:
+            _PortBlock.next = port + 1
+        return s
+    s.close()
+    raise AssertionError(f"no port of {ports or 'the block this test holds'} is free")
+
+
+def free_port() -> int:
+    """A port of the block of SERVER_PORTS this test holds that nothing holds now, for a server the test starts on
+    it (_PortBlock)."""
+    with bound_port() as s:
+        return s.getsockname()[1]
 
 
 def card_wait(minutes: float | None) -> float:
@@ -678,8 +818,8 @@ def _kill_kernel_pid(pid: int, wait_s: float = 3.0) -> None:
 
 @pytest.fixture(autouse=True)
 def _kernels_left_by_the_test():
-    """After every test, a kernel still in notebook's tables is terminated through its recorded pid and its files
-    dropped."""
+    """After every test, a kernel still in notebook's tables has its channels closed, is terminated through its
+    recorded pid, and its files dropped."""
     yield
     nb = sys.modules.get("app.notebook")
     if nb is None or not hasattr(nb, "_kernels"):
@@ -688,6 +828,9 @@ def _kernels_left_by_the_test():
     nb._kernels.clear()
     nb._exec_kernels.clear()
     for k in left:
+        kc, k.kc = k.kc, None
+        if kc is not None:
+            nb._close_client(kc)
         pid, pgid = k.pid, k.pgid
         if pid is None:
             rec = nb._read_record(k.record) or {}

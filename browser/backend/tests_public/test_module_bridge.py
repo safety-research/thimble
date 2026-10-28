@@ -88,7 +88,9 @@ class Module:
         return await self._go("POST", "/api/module/hello", json={"cwd": _cwd(), "session": self.session,
                                                                  "version": "0.6.0", **more})
 
-    async def next(self, wait: float = 2.0) -> httpx.Response:
+    async def next(self, wait: float = module_bridge.POLL_WAIT_S) -> httpx.Response:
+        """The long poll, held until a request comes or the server's hold ends (a test that looks for none says how
+        long it looks): a request made just before may reach the queue a while later on a busy machine."""
         return await self._go("GET", "/api/module/next", params={"cwd": _cwd(), "session": self.session, "wait": wait})
 
     async def result(self, rid: str, answer: dict) -> httpx.Response:
@@ -275,9 +277,9 @@ async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_i
 
     def started(name: str, *args: str) -> int:
         running.append(_process(tmp_path, name, *args))
-        for _ in range(200):  # until /proc shows the command line the test gave it
-            if procs.argv(running[-1].pid)[-1:] == list(args[-1:]):
-                break
+        end = time.monotonic() + 30
+        while procs.argv(running[-1].pid)[-1:] != list(args[-1:]):  # until /proc shows the command line the test gave it
+            assert time.monotonic() < end, f"/proc never showed {name} {' '.join(args)}"
             time.sleep(0.01)
         return running[-1].pid
 
@@ -287,12 +289,21 @@ async def test_a_hello_at_session_start_is_accepted_when_launch_json_s_process_i
 
     try:
         main = started("claude", "--session-id", MAIN, "--", "/thimble")
-        # a long hold, so that a slow runner's "at once" is never read as held
-        monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 5.0)
+        # held, the hello would wait (module_bridge._wait) up to a hold far longer than any slow runner's "at once"
+        monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 60.0)
+        waits: list[float] = []
+        real_wait = module_bridge._wait
+
+        async def wait(c: str, timeout: float) -> None:
+            waits.append(timeout)
+            await real_wait(c, timeout)
+
+        monkeypatch.setattr(module_bridge, "_wait", wait)
         t0 = time.monotonic()
         r = await hello(main)
         assert r.status_code == 200 and r.json() == {"ok": True}
-        assert time.monotonic() - t0 < module_bridge.HELLO_HOLD_S / 2, "accepted at once, inside session.start"
+        assert not waits and time.monotonic() - t0 < module_bridge.HELLO_HOLD_S / 2, "accepted at once, inside session.start"
+        monkeypatch.setattr(module_bridge, "_wait", real_wait)
         monkeypatch.setattr(module_bridge, "HELLO_HOLD_S", 0.6)
         assert module_bridge._accepted(CORPUS, MAIN) and "idle" not in _registry()["module"]
         module_bridge._bridges.clear()
@@ -797,29 +808,58 @@ async def test_a_request_in_terminal_mode_goes_through_subagents_json_and_module
     assert list(held["roles"]) == ["orientation"], "roles.json written before the spawn"
 
 
+class _BridgeClock:
+    """module_bridge's time module with monotonic() `ahead` seconds ahead of the real one, which a test moves: a
+    request's time runs out when the test says, not when a busy machine lets it."""
+
+    def __init__(self) -> None:
+        self.ahead = 0.0
+
+    def monotonic(self) -> float:
+        return time.monotonic() + self.ahead
+
+    def __getattr__(self, name: str):
+        return getattr(time, name)
+
+
 async def test_a_request_the_module_does_not_answer_in_time_expires_and_a_late_spawn_is_stopped(terminal, monkeypatch):
-    monkeypatch.setattr(module_bridge, "REQUEST_TIMEOUT_S", 0.3)
-    late: list[str] = []
-    mod = FileModule(terminal, session=MAIN, answer=lambda op, args: None if op == "spawn" else {"agentId": args.get("agent")})
+    clock, taken = _BridgeClock(), threading.Event()
+    monkeypatch.setattr(module_bridge, "time", clock)
+    monkeypatch.setattr(module_bridge, "REQUEST_TIMEOUT_S", 60.0)
+
+    def answer(op: str, args: dict) -> dict | None:
+        if op == "spawn":  # taken, and not answered in time
+            taken.set()
+            return None
+        return {"agentId": args.get("agent")}
+
+    mod = FileModule(terminal, session=MAIN, answer=answer)
     mod.start()
     try:
-        got = await module_bridge.request(CORPUS, "spawn", role="writer", prompt="p", description="d", values={})
+        ask = asyncio.create_task(module_bridge.request(CORPUS, "spawn", role="writer", prompt="p", description="d",
+                                                        values={}))
+        assert await asyncio.to_thread(taken.wait, 60), "the module never took the request"
+        clock.ahead += module_bridge.REQUEST_TIMEOUT_S  # its time runs out once the module has taken it
+        got = await ask
         assert got == {"no-module": module_bridge.NOT_ANSWERING, "expired": True}
         [(rid, _, _)] = mod.seen
         r = module_bridge.sf.requests(module_bridge.sf.read(terminal))[rid]
         assert (r["module"], r["state"]) == ("expired", "expired")
-        mod.out["answers"][rid] = {"agentId": "aLate"}  # the module's answer comes after all
+        # the module's answer comes after all, written while its thread is stopped, so no write of the thread's own
+        # from before the answer lands after it
+        mod.stop()
+        mod.out["answers"][rid] = {"agentId": "aLate"}
         mod.write()
         assert module_bridge.reconcile(CORPUS) == ["aLate"]
         assert module_bridge.reconcile(CORPUS) == [], "stopped once"
-        for _ in range(100):
-            if mod.ops("stop"):
-                break
+        mod.start()
+        end = time.monotonic() + 60
+        while not mod.ops("stop"):  # until the module took the stop request
+            assert time.monotonic() < end, "the module never took the stop request"
             await asyncio.sleep(0.02)
         assert mod.ops("stop") == [{"agent": "aLate"}]
     finally:
         mod.stop()
-    assert not late
 
 
 async def test_without_a_live_module_a_request_in_terminal_mode_answers_no_module_and_writes_nothing(terminal):

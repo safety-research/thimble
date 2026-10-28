@@ -94,21 +94,43 @@ def fixing(on, monkeypatch, tmp_path):
     fixes._fixers.clear()
 
 
-async def _ended(fid: int = 1) -> None:
-    conv = fixes._fixers.get(fid)
-    if conv is not None and conv.task is not None:
-        await conv.task
-    await asyncio.sleep(0.4)  # the restart is called a moment after
+WAIT_S = 60.0  # the most a test waits for the event it waits on, which a busy machine delays but never skips
 
 
-async def _until(cond: Any, what: str, s: float = 10.0) -> None:
-    """Waits until cond() holds: an apply or an undo runs the kernel in a thread and starts the server again 0.3 s
-    later (fixes.restart, call_later), which a busy machine stretches past any fixed sleep. Fails with `what` after s."""
-    t0 = time.monotonic()
+async def _until(cond: Any, what: str) -> None:
+    """Waits until cond() holds: an apply or an undo runs the kernel in a thread and starts the server again a moment
+    later (fixes.restart, call_later), which a busy machine stretches past any fixed sleep. Fails with `what` after
+    WAIT_S."""
+    end = time.monotonic() + WAIT_S
     while not cond():
-        if time.monotonic() - t0 > s:
-            raise AssertionError(what)
+        assert time.monotonic() < end, f"{what} (waited {WAIT_S:g} s)"
         await asyncio.sleep(0.02)
+
+
+async def _ended(fid: int = 1) -> None:
+    """Fix `fid`'s fixer ended, and so did the kernel's checks after it (fixes.settle, which runs in the fixer's task):
+    no fixer of it runs and its phase is neither fixing nor testing."""
+    end = time.monotonic() + WAIT_S
+    while True:
+        conv = fixes._fixers.get(fid)
+        if conv is not None and conv.task is not None and not conv.task.done():
+            await asyncio.wait_for(asyncio.shield(conv.task), max(0.0, end - time.monotonic()))
+            continue
+        if fixes._phase.get(fid) not in ("fixing", "testing"):
+            return
+        assert time.monotonic() < end, f"fix {fid}'s fixer did not end within {WAIT_S:g} s"
+        await asyncio.sleep(0.02)
+
+
+async def _went_on(fid: int = 1) -> None:
+    """What a click on Use it started (fixes.apply's task): the page's build, then the undo or the restart's call."""
+    for task in [t for t in asyncio.all_tasks() if t.get_name() == f"fix-apply:{fid}"]:
+        await asyncio.wait_for(task, WAIT_S)
+
+
+async def _restarted(fixing: Any, after: str, n: int = 1) -> None:
+    """The n-th restart was called (fixes.restart calls dev._do_restart a moment after it returns)."""
+    await _until(lambda: len(fixing.restarts) >= n, f"the server never started again after {after}")
 
 
 def _log(c: str, chat: str = "main") -> list[dict[str, Any]]:
@@ -121,11 +143,12 @@ def _fixer_chats(c: str) -> list[dict[str, Any]]:
 
 async def _mirrored(c: str, chat: str, kind: str = "tool_use") -> list[dict[str, Any]]:
     """The fixer chat's records once the mirror wrote one of `kind`."""
-    for _ in range(50):
+    end = time.monotonic() + WAIT_S
+    while time.monotonic() < end:
         got = _log(c, chat)
         if any(r.get("type") == kind for r in got):
             return got
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
     return _log(c, chat)
 
 
@@ -187,7 +210,8 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
 
     # Use it now: the click's secret to the kernel's apply, then the server starts again from live
     assert (await fixes.apply_route(1, analyst))["restart"] is True
-    await _until(lambda: fixing.restarts, "the server never started again after Use it now")
+    await _went_on()
+    await _restarted(fixing, "Use it now")
     assert [c[0] for c in fixing.calls].count("apply") == 1
     assert fixing.restarts == [("fix 1: Card says how many rows", config.REPO_ROOT / "backend")]
     assert fixes.status()["fixes"][0]["phase"] == "restarting"
@@ -352,10 +376,7 @@ async def test_a_fix_whose_server_stopped_while_it_worked_is_taken_as_it_stands_
                       "work": str(fixing.home / "fixes" / "work" / "1"), "base": "HEAD"}
     monkeypatch.setattr(fixes, "_recovered", False)
     await fixes.status_route()  # the route reads the records in a worker thread; the recovery starts on the loop
-    for _ in range(50):
-        if fixing.recs[1]["state"] != "working":
-            break
-        await asyncio.sleep(0.1)
+    await _until(lambda: fixing.recs[1]["state"] != "working", "the recovery's checks never ended")
     assert ("done" in [c[0] for c in fixing.calls]) and fixing.recs[1]["state"] == "ready"
 
 
@@ -371,10 +392,29 @@ def test_main_reads_each_fix_the_words_may_change_by_its_number_name_and_state()
 
 async def test_words_in_the_fix_s_thread_go_to_its_fixer_while_it_works(fixing, monkeypatch, analyst):
     client = api_key(monkeypatch, [text("Working on it."), text("Title: Card counts rows\nWhat it does: Rows and columns.")])
+    # the fixer's first answer comes once the words are in, so they come while it works
+    words_in = asyncio.Event()
+    streams = client.stream
+
+    def stream(**body: Any) -> Any:
+        s = streams(**body)
+        if len(client.bodies) == 1:
+            answer = s.get_final_message
+
+            async def held() -> Any:
+                await words_in.wait()
+                return await answer()
+
+            s.get_final_message = held
+        return s
+
+    client.stream = stream
     await fixes.request(CORPUS, "count the rows", "")
     before = len(_log(CORPUS))
+    await _until(lambda: len(client.bodies) == 1, "the fixer never sent its first request")
     # typed in the fix's own thread while its fixer works: a round of the fix, for the same fixer
     got = await fixes.request_route(CORPUS, fixes.Asked(words="and the columns", fix=1), analyst)
+    words_in.set()
     assert got["fix"]["id"] == 1 and ("round", "1") in fixing.calls
     await _ended()
     assert "The person adds to this fix (round 2): and the columns" in json.dumps(client.bodies[-1]["messages"])
@@ -405,7 +445,8 @@ async def test_later_leaves_the_fix_ready_in_your_fixes_and_use_it_there_puts_it
     listed = fixes.status(every=True)["fixes"]
     assert [(r["id"], r["state"], r["kind"]) for r in listed] == [(1, "ready", None)]
     await fixes.apply_route(1, analyst)  # Use it, in Your fixes
-    await _until(lambda: fixing.restarts, "the server never started again after Use it")
+    await _went_on()
+    await _restarted(fixing, "Use it")
     assert fixing.recs[1]["state"] == "on" and fixing.restarts[-1][0] == "fix 1: Card counts rows"
 
 
@@ -469,7 +510,11 @@ async def test_a_page_that_does_not_build_takes_the_fix_off_again(fixing, monkey
     await fixes.request(CORPUS, "count the rows", "")
     await _ended()
     await fixes.apply_route(1, analyst)
+    await _went_on()
     await _until(lambda: (fixes.status()["fixes"][0]["said"] or "").endswith("it is off again"), "the failed fix never came off")
+    # a restart the click had scheduled would come RESTART_AFTER_S after it, so before this wait, which starts later,
+    # ends: the loop's timers fire in the order of their deadlines
+    await asyncio.sleep(fixes.RESTART_AFTER_S)
     verbs = [c[0] for c in fixing.calls]
     assert verbs.index("undo") > verbs.index("apply") and fixing.restarts == []
     assert fixes.status()["fixes"][0]["said"].endswith("error TS1005; it is off again")
@@ -480,9 +525,11 @@ async def test_undo_takes_the_fix_off_and_starts_the_server_again(fixing, monkey
     await fixes.request(CORPUS, "count the rows", "")
     await _ended()
     await fixes.apply_route(1, analyst)
-    await _until(lambda: fixing.restarts, "the server never started again after Use it now")
+    await _went_on()
+    await _restarted(fixing, "Use it now")
     assert (await fixes.undo_route(1, analyst))["restart"] is True
-    await _until(lambda: fixing.restarts[-1][0] == "undo of fix 1", "the server never started again after Undo")
+    await _restarted(fixing, "Undo", 2)
+    assert fixing.restarts[-1][0] == "undo of fix 1"
     fixes._phase.clear()
     assert fixes.status()["fixes"][0]["said"] == "thimble fix undone: Card counts rows"
     await fixes.dismiss_route(1, analyst)

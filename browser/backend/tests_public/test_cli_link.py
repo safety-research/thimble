@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import free_port
 
 from app import cli
 
@@ -114,9 +115,7 @@ def test_a_link_whose_output_is_not_a_terminal_says_on_stderr_why_it_has_no_code
 
 
 def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return free_port()  # conftest.SERVER_PORTS
 
 
 @pytest.mark.skipif(not VENV_PYTHON.exists(), reason="the launcher runs the server's .venv, which uv sync makes")

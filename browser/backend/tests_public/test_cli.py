@@ -8,7 +8,6 @@ import contextlib
 import json
 import os
 import re
-import socket
 import subprocess
 import sys
 import threading
@@ -18,6 +17,7 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+from conftest import free_port
 
 from app import cli, config, procs
 
@@ -91,6 +91,47 @@ def test_a_server_that_runs_but_does_not_answer_is_named_with_the_command_that_r
     assert cli.stuck_server() == 4242, "server.json names it though the port's holder cannot be seen"
     cli.write_state({"port": p, "pid": 4242, "started": cli._now()})
     assert cli.stuck_server() is None and cli.start_failure(cli.api_url()) == ""
+
+
+def test_a_start_wait_that_is_not_a_number_of_seconds_leaves_the_default(monkeypatch):
+    """THIMBLE_START_WAIT_S is read where a command waits, so a value that is not a positive number of seconds leaves
+    the default wait rather than failing every command as the module loads."""
+    for bad in ("soon", "-5", "0", "nan", "inf"):
+        monkeypatch.setenv("THIMBLE_START_WAIT_S", bad)
+        assert cli.start_wait_s() == cli.WAIT_S, bad
+    monkeypatch.setenv("THIMBLE_START_WAIT_S", "100")
+    assert cli.start_wait_s() == 100.0
+    r = subprocess.run([sys.executable, "-c", "import app.cli"], cwd=BACKEND, env={**os.environ, "THIMBLE_START_WAIT_S": "soon"},
+                       capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+
+
+def test_a_health_probe_waits_as_long_as_thimble_health_timeout_s_says_and_a_bad_value_leaves_the_default(monkeypatch):
+    """THIMBLE_HEALTH_TIMEOUT_S is read at each health probe, so the tests that start real servers on a busy machine
+    let every probe of theirs wait as long as their other waits; a value that is not a positive number of seconds
+    leaves the default."""
+    asked: list[float] = []
+
+    class Loopback:
+        @staticmethod
+        def open(url: str, timeout: float) -> None:
+            asked.append(timeout)
+            raise OSError("no server here")
+
+    def request(method: str, url: str, body: object = None, timeout: float = 5.0) -> tuple[int, dict]:
+        asked.append(timeout)
+        return 0, {}
+
+    monkeypatch.setattr(cli.config, "LOOPBACK", Loopback)
+    monkeypatch.setattr(cli, "_request", request)
+    for bad in ("soon", "-5", "0", "nan", "inf"):
+        monkeypatch.setenv("THIMBLE_HEALTH_TIMEOUT_S", bad)
+        assert cli.health_timeout_s() == cli.HEALTH_TIMEOUT_S, bad
+    monkeypatch.setenv("THIMBLE_HEALTH_TIMEOUT_S", "100")
+    assert not cli.healthy("http://127.0.0.1:9") and cli.health_leader("http://127.0.0.1:9") is None
+    assert cli.foreign_home("http://127.0.0.1:9") is None and asked == [100.0] * 3
+    monkeypatch.delenv("THIMBLE_HEALTH_TIMEOUT_S")
+    assert not cli.healthy("http://127.0.0.1:9") and asked[-1] == cli.HEALTH_TIMEOUT_S
 
 
 def test_two_concurrent_ups_start_one_uvicorn(fake, home):
@@ -367,9 +408,7 @@ def test_stop_kills_only_a_pid_whose_command_line_is_ours(home):
 
 
 def _free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    return free_port()  # conftest.SERVER_PORTS
 
 
 def _uvicorns_on(p: int) -> list[int]:
@@ -384,15 +423,19 @@ def _uvicorns_on(p: int) -> list[int]:
     return out
 
 
+# each step is a subprocess with a time limit of its own, so the test cannot hang; its time is a server's start, which a
+# machine its parallel runs keep busy makes several times longer
+@pytest.mark.timeout(300)
 def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, data, tmp_path, fake_claude):
-    probe = subprocess.run([sys.executable, "-c", "import app.main"], cwd=BACKEND, capture_output=True, text=True, timeout=120,
-                           env={**os.environ, "THIMBLE_SKIP_KEY": "1"})
-    if probe.returncode != 0:
-        pytest.skip("app.main does not import in this tree: " + probe.stderr.strip().splitlines()[-1][:200])
+    try:  # in this process, which runs the same Python on the same tree, rather than in a new one
+        import app.main  # noqa: F401, PLC0415
+    except Exception as e:  # noqa: BLE001
+        pytest.skip(f"app.main does not import in this tree: {type(e).__name__}: {e}"[:300])
     port = _free_port()
     # a session the launcher started, with the plugin's hooks on, so /thimble prints the URL alone
     env = {**os.environ, "THIMBLE_HOME": str(home), "THIMBLE_PORT": str(port),
-           "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws")}
+           "THIMBLE_DATA_DIR": str(data), "THIMBLE_WORKSPACES_DIR": str(tmp_path / "ws"), "THIMBLE_START_WAIT_S": "100",
+           "THIMBLE_HEALTH_TIMEOUT_S": "100"}
     env.pop("THIMBLE_DEV", None)
     for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE"):
         env.pop(k, None)
@@ -400,7 +443,7 @@ def test_real_up_starts_a_detached_server_idempotently_and_stop_ends_it(home, da
     pid = None
     try:
         t0 = time.monotonic()
-        out = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=90)
+        out = subprocess.run(cmd, cwd=BACKEND, env=env, capture_output=True, text=True, timeout=120)
         first = time.monotonic() - t0
         lines = out.stdout.splitlines()
         # the link's line alone: the workspace holds nothing from an earlier run, so there is nothing to resume

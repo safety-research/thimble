@@ -23,7 +23,7 @@ from app import config, view_calls, view_host, views
 CORPUS = "boards"
 
 READER = '''
-import json, time
+import json, os, time
 import thimble
 
 
@@ -37,6 +37,10 @@ def build_index(paths):
 
 def records(index, query):
     query = query or {}
+    if query.get("gate"):  # a test's gate: the call says it runs, then runs until the test makes the gate's file
+        open(query["gate"] + ".running", "w").close()
+        while not os.path.exists(query["gate"]):
+            time.sleep(0.01)
     steps = int(query.get("steps") or 0)
     for i in range(steps):
         thimble.progress(i, steps, "counting")
@@ -193,15 +197,38 @@ def ws(data, workspaces_tmp) -> Path:
     return config.workspace_dir(CORPUS)
 
 
-async def test_a_slow_call_holds_up_no_other_view_and_has_no_time_limit(ws, kernels):
-    slow = asyncio.create_task(views.reader_call(CORPUS, "count", "records", {"steps": 40}))
-    await asyncio.sleep(0.3)
-    t0 = time.monotonic()
-    fast = await views.reader_call(CORPUS, "other", "records", {})
+async def _until(cond, what: str, limit: float = 60.0) -> None:
+    """Wait for `cond()`, the event the test is about, looking every 10 ms; fail after `limit` seconds, which only a call
+    that never comes reaches."""
+    end = time.monotonic() + limit
+    while not cond():
+        assert time.monotonic() < end, f"{what} did not happen within {limit:g} s"
+        await asyncio.sleep(0.01)
+
+
+async def _slow_call(gate: Path, view: str = "count", steps: int = 0) -> asyncio.Task:
+    """A records call of `view` that runs until the test makes `gate`, once it runs in its kernel."""
+    task = asyncio.create_task(views.reader_call(CORPUS, view, "records", {"steps": steps, "gate": str(gate)}))
+    await _until(lambda: Path(f"{gate}.running").exists() or task.done(), "the slow call's start")
+    assert not task.done(), task
+    return task
+
+
+async def test_a_slow_call_holds_up_no_other_view_and_has_no_time_limit(ws, kernels, tmp_path, monkeypatch):
+    # no spare kernel (SPARE_AFTER_S): the other view's call starts the second kernel itself
+    monkeypatch.setattr(view_calls, "SPARE_AFTER_S", 600.0)
+    gate = tmp_path / "gate"
+    slow = await _slow_call(gate, steps=4)
+    try:
+        # the slow call runs until the gate opens, so the other view's call ends first or never
+        fast = await asyncio.wait_for(views.reader_call(CORPUS, "other", "records", {}), 60)
+        assert not slow.done()
+    except TimeoutError:
+        pytest.fail("the other view's call waited for the slow one")
+    finally:
+        gate.touch()
     assert fast == {"n": 3, "steps": 0}
-    assert time.monotonic() - t0 < 1.5, "the other view's call did not wait for the slow one"
-    assert not slow.done()
-    assert await slow == {"n": 5, "steps": 40}
+    assert await slow == {"n": 5, "steps": 4}
     names = {name for name, _ in kernels.ran}
     assert names == {"views", "views-2"}, "each call ran on a kernel of its own"
     assert all(t >= view_calls.NO_LIMIT_S for _, t in kernels.ran), "no call has a time limit"
@@ -225,18 +252,24 @@ def resolve(index, locator):
 """
 
 
-async def test_a_call_that_needs_no_index_runs_beside_a_busy_kernel(ws, kernels, tmp_path):
+async def test_a_call_that_needs_no_index_runs_beside_a_busy_kernel(ws, kernels, tmp_path, monkeypatch):
+    monkeypatch.setattr(view_calls, "SPARE_AFTER_S", 600.0)  # no spare kernel beside the busy one
     reader = tmp_path / "reader.py"
     reader.write_text(APPLIES)
     req = {"slug": "builtin-tally", "reader": str(reader), "fp": "applies", "paths": [], "cache": None,
            "thimble": str(views.KERNEL_THIMBLE)}
     assert (await views._call(CORPUS, req, "applies", ["a.jsonl"]))["found"] == 1
-    slow = asyncio.create_task(views.reader_call(CORPUS, "count", "records", {"steps": 40}))
-    await asyncio.sleep(0.2)
-    assert [w.busy for w in view_calls._pools[CORPUS]] == [True], "the slow call holds the kernel applies ran on"
-    t0 = time.monotonic()
-    assert (await views._call(CORPUS, req, "applies", ["a.jsonl", "b.jsonl"]))["found"] == 2
-    assert time.monotonic() - t0 < 1.0 and not slow.done(), "applies did not wait for the slow call"
+    gate = tmp_path / "gate"
+    slow = await _slow_call(gate)
+    try:
+        assert [w.busy for w in view_calls._pools[CORPUS]] == [True], "the slow call holds the kernel applies ran on"
+        try:
+            found = await asyncio.wait_for(views._call(CORPUS, req, "applies", ["a.jsonl", "b.jsonl"]), 60)
+        except TimeoutError:
+            pytest.fail("applies waited for the slow call")
+        assert found["found"] == 2 and not slow.done(), "applies did not wait for the slow call"
+    finally:
+        gate.touch()
     await slow
 
 
@@ -280,17 +313,19 @@ async def test_a_workspace_that_is_gone_gets_no_spare_kernel_and_its_kernels_are
     assert CORPUS not in view_calls._pools and CORPUS not in view_calls._spare_failed
 
 
-async def test_cancelling_a_call_interrupts_its_kernel_which_settles_before_its_next_call(ws, kernels):
-    slow = asyncio.create_task(views.reader_call(CORPUS, "count", "records", {"steps": 200}))
-    await asyncio.sleep(0.3)
-    slow.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await slow
-    assert kernels.interrupted == ["views"]
-    for _ in range(50):
-        if not any(w.busy for w in view_calls._pools[CORPUS]):
-            break
-        await asyncio.sleep(0.05)
+async def test_cancelling_a_call_interrupts_its_kernel_which_settles_before_its_next_call(ws, kernels, tmp_path,
+                                                                                          monkeypatch):
+    monkeypatch.setattr(view_calls, "SPARE_AFTER_S", 600.0)  # no spare kernel beside the busy one
+    gate = tmp_path / "gate"  # never made: only the interrupt ends the call
+    slow = await _slow_call(gate)
+    try:
+        slow.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await slow
+        assert kernels.interrupted == ["views"]
+        await _until(lambda: not any(w.busy for w in view_calls._pools[CORPUS]), "the interrupted kernel's settling")
+    finally:
+        gate.touch()  # a call the interrupt did not stop ends here rather than hold its thread
     assert [w.busy for w in view_calls._pools[CORPUS]] == [False], "the kernel is free once its interrupted call stopped"
     assert kernels.ran[-1] == ("views", view_calls.DRAIN_S), "the drain waits at most DRAIN_S"
     assert kernels.stopped == [], "a kernel that stopped at the interrupt is kept"

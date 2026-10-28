@@ -67,6 +67,110 @@ async def test_create_and_run_print(client, corpus, workspaces_tmp):
     assert (await client.get(f"/api/ws/{corpus}/notebooks/main")).json() == on_disk
 
 
+@pytest.mark.parametrize("wrap", ["none", "srt", "bwrap"])
+async def test_a_kernel_whose_port_another_process_took_first_starts_again_on_new_ports(wrap, client, corpus,
+                                                                                        monkeypatch):
+    """write_connection_file finds free ports and lets them go; a process that binds one before the kernel does keeps
+    it, and the kernel ends at its start. Here another process's zmq socket holds the first file's shell port, so the
+    server's socket also meets a peer that is not the kernel, after which zmq drops its only pipe and a blocking send
+    would never return. The start never waits on the socket: it sees the kernel end, also inside a sandbox that
+    outlives it a while, and starts it on new ports."""
+    import zmq
+    from test_kernel_sandbox import _wrap_works
+
+    if wrap != "none" and not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+
+    ctx, taken = zmq.Context(), []
+    real = notebook.write_connection_file
+
+    def first_port_taken(fname: str, **kw):
+        if taken:
+            return real(fname, **kw)
+        # the foreign socket holds its port before the file names it, so no other process can take it in between
+        sock = ctx.socket(zmq.PUB)
+        taken.append(sock)
+        return real(fname, **{**kw, "shell_port": sock.bind_to_random_port("tcp://127.0.0.1")})
+
+    monkeypatch.setattr(notebook, "write_connection_file", first_port_taken)
+    try:
+        cell = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells", json={"code": "print(6 * 7)"})).json()
+        ran = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells/{cell['id']}/run")).json()
+    finally:
+        ctx.destroy(linger=0)  # closes every socket it made first, so it never waits on one
+    assert taken and ran["status"] == "ok" and _text(ran) == "42\n", ran["outputs"]
+
+
+async def test_a_start_s_limit_holds_while_its_socket_has_no_pipe_to_send_to(tmp_path):
+    """A socket with no pipe that takes a message blocks jupyter_client's send for good: its one pipe full (a kernel
+    that reads nothing), or gone (zmq drops it once the peer turns out not to be the kernel, here a PUB socket on the
+    shell port, as another kernel's iopub). On the event loop that would hold the server and the start's own limit with
+    it. _wait_ready never blocks on its socket, so the limit holds."""
+    import zmq
+    from jupyter_client.connect import write_connection_file
+
+    class Alive:  # a kernel process that runs and never answers
+        log = tmp_path / "k.log"
+
+        def alive(self) -> bool:
+            return True
+
+    ctx = zmq.Context()
+    pub = ctx.socket(zmq.PUB)
+    conn = tmp_path / "k.conn.json"
+    write_connection_file(str(conn), ip="127.0.0.1", key=b"k", shell_port=pub.bind_to_random_port("tcp://127.0.0.1"))
+    kc = notebook._client(conn)
+    try:
+        # requests until none goes: the pipe is full (zmq's high-water mark is 1000) or gone, whichever comes first
+        assert not all(notebook._kernel_info_nowait(kc, kc.shell_channel) for _ in range(100_000))
+        with pytest.raises(TimeoutError, match="did not answer kernel_info within 1 s"):
+            await notebook._wait_ready(Alive(), kc, 1.0, control=False)
+    finally:
+        notebook._close_client(kc)
+        pub.close(linger=0)
+        ctx.term()
+
+
+def test_a_kernel_client_starts_no_thread_whose_stop_could_hold_the_server(tmp_path):
+    """The heartbeat's channel is a thread, and its stop joins it on the event loop: stopped before the thread had
+    begun, as a failed start on a busy machine did, it ran on and the join never returned. The server opens no
+    heartbeat channel (a kernel's liveness is its pid), so a client starts no thread and its close waits for none."""
+    from jupyter_client.connect import write_connection_file
+
+    conn = tmp_path / "k.conn.json"
+    write_connection_file(str(conn), ip="127.0.0.1", key=b"k")
+    before = set(threading.enumerate())
+    kc = notebook._client(conn)
+    try:
+        assert set(threading.enumerate()) - before == set()
+    finally:
+        notebook._close_client(kc)
+
+
+def test_a_kernel_client_the_garbage_collector_takes_unclosed_has_its_sockets_closed_then_its_context(tmp_path):
+    """A start whose task the loop dropped leaves its client unclosed, in a cycle the garbage collector takes whole.
+    Left to themselves, the context's finalizer could run first, find none of the sockets (the collector clears its
+    list of them before any finalizer runs) and wait on them for good, wherever the collection ran. The client's closer,
+    which holds the sockets and the context apart from it, closes the sockets and then the context when the collector
+    takes the client."""
+    import gc
+    import weakref
+
+    from jupyter_client.connect import write_connection_file
+
+    conn = tmp_path / "k.conn.json"
+    write_connection_file(str(conn), ip="127.0.0.1", key=b"k")
+    kc = notebook._client(conn)
+    notebook._kernel_info_nowait(kc, kc.shell_channel)  # a message waits in the socket, as a start's kernel_info does
+    socks, ctx, gone = [getattr(kc, attr).socket for attr in notebook.CHANNELS], kc.context, weakref.ref(kc)
+    held: list = [kc]
+    held.append(held)
+    del kc, held
+    gc.collect()
+    assert gone() is None and all(sock.closed for sock in socks) and ctx.closed
+
+
 async def test_kernel_cwd_is_the_scratch_mirror_and_writes_never_reach_the_corpus(corpus):
     """The kernel starts in workspaces/<c>/scratch, a symlink mirror of the corpus, so relative
     reads work while every file a cell creates lands in scratch — never in the corpus directory."""

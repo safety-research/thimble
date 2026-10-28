@@ -97,14 +97,38 @@ PORT_SCAN = 50  # the ports above a taken one that pick_port tries in turn, befo
 BACKEND_DIR = config.REPO_ROOT / "backend"
 FRONTEND_DIR = config.REPO_ROOT / "frontend"
 PLUGIN_DIR = config.REPO_ROOT / "plugin"
-WAIT_S = 20.0
+WAIT_S = 20.0  # how long a command waits for a server it started to answer (start_wait_s)
 LOCK_WAIT_S = 30.0
 STOP_WAIT_S = 6.0
 # how long the server has, after its SIGTERM, to stop its agents and end (runtime.stop_all) before what is left of its
 # session is signalled (_kill): uvicorn's graceful wait (3 s), the agents' (runtime.STOP_WAIT_S) and the modules' own
 SERVER_STOP_S = 15.0
-HEALTH_TIMEOUT_S = 1.0
+HEALTH_TIMEOUT_S = 1.0  # how long a health probe waits for the server's answer (health_timeout_s)
 LOG_TAIL = 15
+
+
+def start_wait_s() -> float:
+    """How long a command waits for a server it started to answer: THIMBLE_START_WAIT_S, as the tests that start real
+    servers set it for a machine their parallel runs keep busy, else WAIT_S, also when it is not a positive number."""
+    try:
+        got = float(os.environ.get("THIMBLE_START_WAIT_S") or WAIT_S)
+    except ValueError:
+        return WAIT_S
+    return got if 0 < got < float("inf") else WAIT_S
+
+
+def health_timeout_s() -> float:
+    """How long a health probe waits for the server's answer: THIMBLE_HEALTH_TIMEOUT_S, as the tests that start real
+    servers set it for a machine their parallel runs keep busy, where an answer can take longer than HEALTH_TIMEOUT_S
+    and a late one would read as no server or as this install's own; else HEALTH_TIMEOUT_S, also when it is not a
+    positive number."""
+    try:
+        got = float(os.environ.get("THIMBLE_HEALTH_TIMEOUT_S") or HEALTH_TIMEOUT_S)
+    except ValueError:
+        return HEALTH_TIMEOUT_S
+    return got if 0 < got < float("inf") else HEALTH_TIMEOUT_S
+
+
 FIX_INSTRUCTION = "File a `file_dev_ticket` titled 'fix: …' describing what broke; the dev agent runs it as a ticket."
 # `thimble fix` and `thimble revert` change thimble's own code, which only a development install (a git clone of thimble)
 # can do: a release install has no dev agent to repair it and no applied change to take back (dev.RELEASE_LINE)
@@ -386,9 +410,10 @@ def _server_environ(env: dict[str, Any], p: int, ui: int) -> dict[str, str]:
 # ----------------------------------------------------------------------------- probes
 
 
-def healthy(url: str | None = None, timeout: float = HEALTH_TIMEOUT_S) -> bool:
+def healthy(url: str | None = None, timeout: float | None = None) -> bool:
     try:
-        with config.LOOPBACK.open(f"{url or api_url()}/api/health", timeout=timeout) as r:
+        wait = health_timeout_s() if timeout is None else timeout
+        with config.LOOPBACK.open(f"{url or api_url()}/api/health", timeout=wait) as r:
             return r.status == 200 and bool(json.loads(r.read() or b"{}").get("ok"))
     except Exception:  # noqa: BLE001
         return False
@@ -505,7 +530,7 @@ def is_server(pid: Any, p: int, repo: str | None = None) -> bool:
 def health_leader(url: str | None = None) -> int | None:
     """The pid the server answering at `url` names as the leader of its process session (`leader` of /api/health). None
     when nothing answers or it names none. Seam for tests."""
-    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=HEALTH_TIMEOUT_S)
+    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=health_timeout_s())
     leader = body.get("leader") if status == 200 and isinstance(body, dict) else None
     return leader if isinstance(leader, int) and not isinstance(leader, bool) and leader > 0 else None
 
@@ -516,7 +541,7 @@ def foreign_home(url: str | None = None) -> str | None:
     names its home only to a request that proves its token (main's /api/health), so a healthy server that names none
     took this install's proof for no proof: another install's or another account's, whose home is FOREIGN_UNNAMED
     here."""
-    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=HEALTH_TIMEOUT_S)
+    status, body = _request("GET", f"{url or api_url()}/api/health", timeout=health_timeout_s())
     if status != 200 or not isinstance(body, dict) or body.get("ok") is not True:
         return None
     other = body.get("home")
@@ -2159,7 +2184,7 @@ def server_for_launch(c: str) -> list[str]:
             return [FOREIGN_LINE.format(port=port())]
         NOTICES.clear()
         try:
-            up: bool | None = ensure_running(WAIT_S)
+            up: bool | None = ensure_running(start_wait_s())
         except TimeoutError as e:
             _log(str(e))
             up = None
@@ -2172,7 +2197,7 @@ def server_for_launch(c: str) -> list[str]:
             _log(f"launch-args: no server answers at {url} for {c}")
             stuck = stuck_server(url)
             notes.append(f"thimble: {STUCK_LINE.format(pid=stuck)}" if stuck else
-                         LAUNCH_NO_SERVER_LINE.format(wait=WAIT_S, log=log_path()))
+                         LAUNCH_NO_SERVER_LINE.format(wait=start_wait_s(), log=log_path()))
         return notes
     except Exception as e:  # noqa: BLE001 — the launch goes on without it
         _log(f"launch-args: the server was not started: {type(e).__name__}: {e}")
@@ -3876,7 +3901,7 @@ def restart(*, keep_vite: bool = False) -> list[str]:
     with lock():
         if not serves():
             start()
-        up = wait_healthy(api_url(), WAIT_S)
+        up = wait_healthy(api_url(), start_wait_s())
     lines.append(f"server {'up' if up else 'did not come up'} at {api_url()}")
     if up:
         _request("POST", f"{api_url()}/api/dev/announce", {}, timeout=10.0)
@@ -4149,7 +4174,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
     NOTICES.clear()
     LAST_START.clear()
     try:
-        up: bool | None = ensure_running(WAIT_S)
+        up: bool | None = ensure_running(start_wait_s())
     except TimeoutError as e:
         _log(str(e))
         up = None
@@ -4168,7 +4193,7 @@ def cmd_ensure(args: argparse.Namespace) -> int:
         why = start_failure(url)
         _log(f"server up: no server answers at {url}" + (f" ({why})" if why else ""))
         print(f"thimble: no server answers: {why}; see {log_path()}" if why else
-              f"thimble: the server did not start within {WAIT_S:.0f} s; see {log_path()}")
+              f"thimble: the server did not start within {start_wait_s():.0f} s; see {log_path()}")
         print("Say `/thimble` again once that is fixed, or run `thimble doctor` in a shell.")
         print(REPORT_LINE)
         return 0
@@ -4662,7 +4687,7 @@ def cmd_browser(args: argparse.Namespace) -> int:
     if refuse_foreign(api_url()):
         return 1
     try:
-        up: bool | None = ensure_running(WAIT_S)
+        up: bool | None = ensure_running(start_wait_s())
     except TimeoutError as e:
         _log(str(e))
         up = None

@@ -87,15 +87,38 @@ async def test_requests_from_one_agent_at_once_are_all_on_its_card_and_each_answ
     assert agents.read_meta(CORPUS, chat)["permissions"] == []
 
 
-async def test_a_request_is_declined_unanswered_after_the_card_wait_rather_than_waiting_for_good():
+class _Waits:
+    """agent_session's asyncio module, whose wait_for() notes each wait it runs: its limit, and when it started and
+    ended on the loop's clock."""
+
+    def __init__(self) -> None:
+        self.waits: list[tuple[float, float, float]] = []
+
+    async def wait_for(self, aw, timeout):
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        try:
+            return await asyncio.wait_for(aw, timeout)
+        finally:
+            self.waits.append((timeout, t0, loop.time()))
+
+    def __getattr__(self, name: str):
+        return getattr(asyncio, name)
+
+
+async def test_a_request_is_declined_unanswered_after_the_card_wait_rather_than_waiting_for_good(monkeypatch):
     assert card_wait(0.004) == 0.24
     chat = _agent("orient", role="orient", title="Orientation")
+    waits = _Waits()
+    monkeypatch.setattr(agent_session, "asyncio", waits)
     call = asyncio.ensure_future(agent_session.hook_request(CORPUS, _body("orient", "venv")))
     [p] = await _pending(chat, 1)
     assert p["wait_s"] == 0.24
-    await asyncio.sleep(0.1)
-    assert not call.done(), "it waits the whole card wait"
-    got = await asyncio.wait_for(call, 5)
+    got = await asyncio.wait_for(call, 60)
+    # the request's own wait on the card, from its start to the decline, on the loop's clock (a timer fires at its
+    # deadline or later, never sooner than the clock's resolution allows)
+    [(limit, start, end)] = waits.waits
+    assert limit == 0.24 and end - start > 0.24 - 1e-6, "it waits the whole card wait"
     assert got == {"behavior": "deny", "message": agent_session.timed_out_line(0.24)}
     [p] = agents.read_meta(CORPUS, chat)["permissions"]
     assert p["expired"], "it stays on the card, declined, until dismissed"

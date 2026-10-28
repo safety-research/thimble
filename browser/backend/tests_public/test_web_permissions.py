@@ -65,14 +65,16 @@ async def test_an_unanswered_request_is_denied_after_the_wait_and_its_card_says_
     def asking() -> bool:
         run = agent_session.asker(CORPUS, KEY)
         return run is not None and any(not f.done() for f in run.waits.values())
+    # sent at once: each reaches the card in turn before the loop runs anything else, so the second comes while the
+    # first waits, however soon its wait runs out on a busy machine
     one = _request("WebFetch", PAGE)
-    await _waiting(chat)
     two = _request("WebFetch", OTHER_PAGE)
     long = _request("WebFetch", {"url": f"{PAGE['url']}?q={'x' * agent_session.ALSO_CHARS}"})
-    [first, own] = await _waiting(chat, 2)
-    assert first["also"] == [OTHER_PAGE["url"]] and "also" not in own, "a call the card cannot list whole asks on its own"
     denied = {"behavior": "deny", "message": agent_session.timed_out_line(wait)}
     assert await one == denied and await two == denied and await long == denied
+    [first, own] = _card(chat)  # both stay on the card, denied unanswered
+    assert first["also"] == [OTHER_PAGE["url"]] and "also" not in own, "a call the card cannot list whole asks on its own"
+    assert first["expired"] and own["expired"] and first["what"] == PAGE["url"]
     assert agent_session.answer(CORPUS, chat, own["id"], False)
     [p] = _card(chat)
     assert p["expired"] and p["what"] == PAGE["url"]

@@ -12,8 +12,11 @@ line written first, as the PreToolUse hook writes it, and its end is subagents.r
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -697,6 +700,82 @@ async def test_a_check_that_times_out_leaves_nothing_in_the_worktree(tmp_path):
     code, out = await ticket_box.run(box, ["sleep", "60"], cwd=tree, timeout=2)
     assert code == -1 and "timed out" in out
     assert sorted(p.name for p in tree.iterdir()) == ["a.txt"]
+
+
+@pytest.mark.skipif(not shutil.which("setsid") or not Path("/proc/self/stat").exists(), reason="needs setsid and /proc")
+async def test_a_run_stopped_at_its_timeout_ends_its_processes_outside_its_group(tmp_path):
+    """A process of the run in a session of its own, as bwrap's can be when srt starts it as the run is stopped, gets no
+    signal the run's group gets: once the group has ended, it is ended too, and the run leaves no process behind."""
+    from app import procs
+
+    pidfile = tmp_path / "left.pid"
+    proc = await asyncio.create_subprocess_exec(
+        "sh", "-c", f"setsid sh -c 'echo $$ > {pidfile}; exec sleep 60' & exec sleep 60", start_new_session=True)
+    try:
+        for _ in range(3000):  # until the process outside the group has started: 60 s at most
+            if pidfile.exists() and pidfile.read_text().strip():
+                break
+            await asyncio.sleep(0.02)
+        left = int(pidfile.read_text())
+        assert procs.pgid(left) != proc.pid, "the process is outside the run's group"
+        await ticket_box._end_group(proc)
+        assert proc.returncode is not None
+        for _ in range(500):  # SIGKILL is sent; until the process is gone: 10 s at most
+            if not procs.alive(left):
+                break
+            await asyncio.sleep(0.02)
+        assert not procs.alive(left), "the process outside the group was ended"
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+        if pidfile.exists() and pidfile.read_text().strip():
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(int(pidfile.read_text()), signal.SIGKILL)
+
+
+async def test_a_run_whose_first_sigterm_is_swallowed_still_cleans_up_before_its_kill(tmp_path):
+    """srt's sandbox manager takes a SIGTERM that comes while srt starts for its own cleanup, and srt goes on to start
+    the command, which never hears of it: the run is sent SIGTERM again while srt runs, so srt still ends the command,
+    removes its stand-ins and exits by itself before KILL_WAIT_S, rather than being killed with them left behind."""
+    stand_in = tmp_path / ".bashrc"
+    ready = tmp_path / "ready"
+    script = (f"n=0; trap 'n=$((n+1)); if [ $n -ge 2 ]; then rm -f {stand_in}; exit 0; fi' TERM; "
+              f"touch {stand_in} {ready}; while :; do sleep 0.05; done")
+    proc = await asyncio.create_subprocess_exec("sh", "-c", script, start_new_session=True)
+    try:
+        for _ in range(3000):  # until it has made its stand-in and set its trap: 60 s at most
+            if ready.exists():
+                break
+            await asyncio.sleep(0.02)
+        await ticket_box._end_group(proc)
+        assert proc.returncode == 0, "it exited by itself, at the second SIGTERM"
+        assert not stand_in.exists(), "its cleanup ran"
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, signal.SIGKILL)
+
+
+async def test_a_run_stopped_at_its_timeout_takes_away_the_stand_ins_srt_left(tmp_path, monkeypatch):
+    """srt sent SIGTERM while it starts leaves the empty stand-ins bwrap makes for the dotfiles srt protects in the
+    working directory: the run takes away each name new since it started that is still empty, and nothing else."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    (tree / "a.txt").write_text("a")
+    (tree / ".env").write_text("")  # the worktree's own, empty, there before the run
+
+    def argv(self, cmd):  # srt as that SIGTERM leaves it: bwrap's stand-ins made, and an exit with no cleanup
+        for name in (".bashrc", ".mcp.json"):
+            (tree / name).touch()
+        (tree / ".claude").mkdir()
+        (tree / ".made-by-the-check").write_text("kept")
+        (tree / "made.txt").touch()
+        return ["sh", "-c", "trap 'exit 0' TERM; while :; do sleep 0.05; done"]
+
+    monkeypatch.setattr(ticket_box.Box, "argv", argv)
+    box = ticket_box.Box(tree, tmp_path / "cache", tmp_path / "srt")
+    code, out = await ticket_box.run(box, ["sleep", "60"], cwd=tree, timeout=1)
+    assert code == -1 and "timed out" in out
+    assert sorted(p.name for p in tree.iterdir()) == [".env", ".made-by-the-check", "a.txt", "made.txt"]
 
 
 def test_a_preview_server_gets_a_private_server_json_so_a_local_tool_can_use_its_token_routes(tmp_path):

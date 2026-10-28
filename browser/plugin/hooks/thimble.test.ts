@@ -131,6 +131,14 @@ const until = async (ok: () => boolean, ms = 2000) => {
   }
 }
 
+/** The hellos of an activation wait, which the fake clock runs through as fast as the event loop goes: one at once, then
+ * one every RETRY_MS until ACTIVATE_WAIT_MS is over. Waited for by their number, since a busy machine can pause them for
+ * longer than any quiet spell a test could take for the wait's end; then a moment more, for one past the end. */
+const activationHellos = async (server: { hellos: unknown[] }) => {
+  await until(() => server.hellos.length >= ACTIVATE_WAIT_MS / RETRY_MS + 1, 8000)
+  await new Promise(r => setTimeout(r, 30))
+}
+
 /** thimble's server as the module sees it: the /api/module routes, each checking the hook's proof and proving back. */
 class Server {
   proofToken = TOKEN // the token answers are signed with: another one is a process that is not thimble's server
@@ -377,13 +385,8 @@ describe('turning on with /thimble, in a session the launcher did not start', ()
   const plain = (opts: Options = {}) => engine({ ...opts, env: { THIMBLE_LAUNCHED: undefined, ...(opts.env ?? {}) } })
   /** the number of hellos once one came and no other came for 20 ms (the fake clock moves only as the module sleeps) */
   const settled = async (server: Server): Promise<number> => {
-    await until(() => server.hellos.length > 0)
-    let n = -1
-    for (let i = 0; i < 400 && server.hellos.length !== n; i++) {
-      n = server.hellos.length
-      await new Promise(r => setTimeout(r, 20))
-    }
-    return n
+    await activationHellos(server)
+    return server.hellos.length
   }
 
   it('says hello and registers the roles once /thimble expands, and only then', async () => {
@@ -520,11 +523,7 @@ describe('turning on with /thimble where skill.prompt passes over the plugin (a 
     await e.start()
     marked(e)
     await e.complete(undefined)
-    await until(() => server.hellos.length > 0)
-    for (let n = -1, i = 0; i < 400 && server.hellos.length !== n; i++) {
-      n = server.hellos.length
-      await new Promise(r => setTimeout(r, 20))
-    }
+    await activationHellos(server)
     expect(server.hellos.length).toBe(ACTIVATE_WAIT_MS / RETRY_MS + 1)
   })
 
