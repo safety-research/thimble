@@ -271,6 +271,18 @@ def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
+    """Main's prompt asks for a diagram card when the steps of how something works branch or join, and its example of
+    such a question draws one for steps that branch, not for a straight line of steps."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    section = prompts.section("main", "Chat and cards", mode)
+    assert "a diagram card when the steps branch or join" in section
+    how = next(b for b in _examples(section) if b[0].startswith("Analyst") and "how does" in b[0].lower())
+    diagram = next(line for line in how if "diagram" in line)
+    assert "branch" in diagram or "join" in diagram
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
     """Main's prompt says where a fact comes from: what a project does from its code, which shows it now, in main's own
     words, since the checker finds words copied from a README in the README; and a README or a design note only for

@@ -24,8 +24,8 @@ Your cards are where your work goes, and the chat is where you talk with the ana
     Bad       a bold summary, then "What's in it:" with a bold label and a bullet for each subfolder, a paragraph on the empty days, a paragraph on each other thing that stands out, and two cards, a diagram of the files and a table of tickets per day
 
     Analyst   how does the deploy pipeline work?
-    Good      chat   A commit goes through four steps [[card:<id>]]. CI [builds and tests it](#). A passing build [goes to staging](#) and waits for one approval. Then the deploy job [rolls it out to 10% of the servers](#), and [to all of them an hour later](#) if the error rate stays the same.
-              card   diagram   commit, CI, staging, approval, 10% of the servers, all servers
+    Good      chat   A commit goes through four steps [[card:<id>]]. CI [builds and tests it](#). A passing build [goes to staging](#). The deploy job [rolls it out to 10% of the servers](#). It [goes to all of them an hour later](#) if the error rate holds, and [rolls back](#) if it rises.
+              card   diagram   commit, CI, staging, 10% of the servers, branching to all servers or a rollback
     Bad       chat   a table with a row per job and seven columns, trigger, inputs, outputs, script, timeout, retries and owner, then a second table of where the docs and the config disagree
 
 The bad replies answer with a report. The analyst reads past sections, cards and tables they did not ask for before they get the answer, and the table of jobs hides the order of the steps, which is what the question asks about.
