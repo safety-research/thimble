@@ -5,7 +5,7 @@
 import { expect, mock } from 'claude-code/testing'
 
 import Card from '../cards/client'
-import { cardWidth } from '../cards/draw'
+import { cardWidth, rowsCut, rowsWord } from '../cards/draw'
 import { callLine } from '../cards/register'
 import { treeRows } from '../core/trail.mjs'
 import { test } from './kit'
@@ -131,11 +131,15 @@ function world(on: Any, o: { crash?: string; ask?: boolean; sandbox?: Record<str
     if (o.wide && op !== 'load' && op !== 'copy' && op !== 'ping') return { value: { status: 200, ok: true, headers: {}, text: JSON.stringify({ ok: true, handled: body.key === 'o', tree: laidOut(), state: 'null', seq: ++seq }) } }
     // a view whose tree the terminal refuses: a Text whose bold is not a boolean
     const tall = String(body.view ?? '').includes('TALL')
-    const tree = String(body.view ?? '').includes('BOLD') ? { t: 'Text', p: { bold: 'yes' }, c: ['ada 3'] } : String(body.view ?? '').includes('SELECTED') ? PICKED : tall ? TALL : TREE
+    // a view of `// ROWS n`: n rows, one per run
+    const many = Number(/\/\/ ROWS (\d+)/.exec(String(body.view ?? ''))?.[1] ?? 0)
+    const runs = many ? Array.from({ length: many }, (_, i) => `run ${i + 1}  passed`) : null
+    const tree = String(body.view ?? '').includes('BOLD') ? { t: 'Text', p: { bold: 'yes' }, c: ['ada 3'] } : String(body.view ?? '').includes('SELECTED') ? PICKED
+      : runs ? { t: 'Box', p: { flexDirection: 'column' }, c: runs.map(l => ({ t: 'Text', p: {}, c: [l] })) } : tall ? TALL : TREE
     const answers: Record<string, unknown> = {
       ping: { ok: true },
       load: {
-        ok: true, tree, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: tall ? TALL_LINES : ['ada 3', 'bram 5'], cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
+        ok: true, tree, state: 'null', keys: /const keys = "([^"]*)"/.exec(String(body.view ?? ''))?.[1] ?? '', lines: runs ?? (tall ? TALL_LINES : ['ada 3', 'bram 5']), cut: [], summary: { rows: 2, read: '2 rows', columns: ['name', 'score'], first: '{"name":"ada","score":3}' },
         // a view with a row laid out for the card's width: it wraps at the narrower width a side pane leaves it
         ...(String(body.view ?? '').includes('WIDE_ROW') && body.beside > 0 && body.beside < body.width ? { beside: { width: body.beside, lines: ['ada 3 of 9', 'merged', 'bram 5'], cut: [], wrapped: [1] } } : {}),
       },
@@ -948,4 +952,28 @@ test("a border the view gives no color of its own draws dim, as the card's frame
   ] }
   const drawn = elements((Card as Any)({ tree: boxes, width: 60 }, surface)).filter(n => n.type === 'Box' && n.props.borderStyle)
   expect(drawn.map(n => [n.props.borderStyle, n.props.borderDimColor, n.props.borderColor])).toEqual([['round', true, undefined], ['single', undefined, '#80b2ea']])
+})
+
+test('a card one row past 30 draws whole, since a `+1 row` line would take the place of that row; two rows past, it shows 30 and `+2 rows`', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
+  const one = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// ROWS 31` }
+  const r1 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_53', ...one } as never)) as Any
+  expect(String(r1.result)).not.toContain('its frame shows its first')
+  const whole = elements(await $.ui.render(callRow('toolu_made_up_53', one)))
+  expect(whole.find(n => n.type === 'Client')?.props.props.cap).toBe(0)
+  expect(whole.some(n => n.props?.key === 'more')).toBe(false)
+  const two = { title: 'Every run', data: 'runs.json', view: `${VIEW}\n// ROWS 32` }
+  const r2 = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_54', ...two } as never)) as Any
+  expect(String(r2.result)).toContain('Note: the card is up to 32 rows tall, and its frame shows its first 30 rows with "+2 rows" under them')
+  const cut = elements(await $.ui.render(callRow('toolu_made_up_54', two)))
+  expect(cut.find(n => n.type === 'Client')?.props.props.cap).toBe(30)
+  const more = cut.find(n => n.type === 'Button' && n.props?.key === 'more')
+  expect(textOf(more)).toBe('+2 rows')
+  expect(more.props.label).toBe('show the other 2 rows of the card')
+})
+
+test('the line under a cut card says "row" for one', () => {
+  expect([rowsCut(30), rowsCut(31), rowsCut(32), rowsCut(42)]).toEqual([0, 0, 2, 12])
+  expect([rowsWord(1), rowsWord(2), rowsWord(12)]).toEqual(['1 row', '2 rows', '12 rows'])
 })

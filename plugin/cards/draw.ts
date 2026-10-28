@@ -7,7 +7,7 @@
 //   frame         the card's frame: its title (a click asks about the card) and, at its right, `a ask · p artifact`
 //                 (the question names the item selected, when one is), the Client (a click on an item selects it as
 //                 its key does; on other words, asks about them: client.tsx, runner.mjs pick; a drawing taller than
-//                 CARD_ROWS shows that many rows and `+N rows` under them, a click on which opens the rest), a failure; left of it, the
+//                 CARD_ROWS + 1 shows CARD_ROWS rows and `+N rows` under them, a click on which opens the rest), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
 //                 asked), beside the line a click selected (`▸`), about that part, else beside the title; nothing for a card the version of its answer shown now leaves out (core/answerview.ts
 //                 cardHidden)
@@ -68,6 +68,15 @@ const FRAME_ROWS = 5
  *  them, `+N rows`, whose click opens the rest. With the rows around a card, that fills a 44-row terminal. The card
  *  tool tells Claude when a version draws taller (tool.ts). */
 export const CARD_ROWS = 30
+
+/** The rows a frame leaves out of a drawing `n` rows tall, under a `+N rows` line: none when it fits, nor when it is one
+ *  row past CARD_ROWS, since the line would take the place of the row it opens. */
+export function rowsCut(n: number): number {
+  return n > CARD_ROWS + 1 ? n - CARD_ROWS : 0
+}
+
+/** `n` rows in words: `1 row`, `12 rows`. */
+export const rowsWord = (n: number): string => `${n} ${n === 1 ? 'row' : 'rows'}`
 // the versions of cards whose rows past CARD_ROWS the person opened (`<id>:<gen>`): a new version shows its first
 // CARD_ROWS again
 const opened = new Set<string>()
@@ -428,9 +437,9 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   // a drawing taller than CARD_ROWS: its first rows (the Client's `cap`), then the line that opens the rest
   const more = fault ? 0 : rowsMore(meta, current?.tree, width)
   if (more) {
-    rows.push(E.Button({ key: 'more', plain: true, label: `show ${more} more rows of the card`, hover: quiet(`card-more-${meta.id}`),
+    rows.push(E.Button({ key: 'more', plain: true, label: `show the other ${rowsWord(more)} of the card`, hover: quiet(`card-more-${meta.id}`),
       onPress: () => { opened.add(openKey(meta)); $.ui.invalidate('ui.render') },
-      children: [E.Text({ key: 'more-w', color: accent(), children: `+${more} rows` })] }))
+      children: [E.Text({ key: 'more-w', color: accent(), children: `+${rowsWord(more)}` })] }))
   }
   if (fault) rows.push(E.Text({ key: 'fault', color: 'error', wrap: 'wrap', children: `× Claude Code could not draw this card: ${fault}` }))
   if (meta.error && !failedElsewhere) rows.push(E.Text({ key: 'error', color: 'error', wrap: 'wrap', children: `× ${meta.error}` }))
@@ -459,10 +468,11 @@ function treeLines(tree: Any, width: number): number {
   return byWidth.get(width)!
 }
 
-/** The rows of a drawing past CARD_ROWS that its frame does not show yet (0 when it fits, or the person opened them). */
+/** The rows of a drawing past CARD_ROWS that its frame does not show yet (0 when it shows whole, or the person opened
+ *  them: rowsCut). */
 function rowsMore(meta: CardMeta, tree: Any, width: number): number {
-  const n = treeLines(tree, width)
-  return n > CARD_ROWS && !opened.has(openKey(meta)) ? n - CARD_ROWS : 0
+  const cut = rowsCut(treeLines(tree, width))
+  return cut && !opened.has(openKey(meta)) ? cut : 0
 }
 
 // the selected line of each drawing, worked out once for each tree

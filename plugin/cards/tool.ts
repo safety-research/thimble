@@ -38,7 +38,7 @@ import { promptText } from '../prompts/prompts'
 import { fill } from '../prompts/registry.mjs'
 import { record } from '../telemetry/telemetry'
 import { ask, sandboxNotice } from './ask'
-import { applyAnswer, askCard, CARD_ROWS, canRedraw, cardWidth, cardWidthBesidePane, screenRows } from './draw'
+import { applyAnswer, askCard, CARD_ROWS, canRedraw, cardWidth, cardWidthBesidePane, rowsCut, rowsWord, screenRows } from './draw'
 import { type CardCall, type CardMeta, cardIdOf, isCardId, metaOf, saveMeta, saveState, setFocus, setTree, treeOf, versionDir } from './store'
 
 type Engine = EngineInterface
@@ -333,7 +333,7 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
     } else out.push('', `The actions did not run: ${a?.error ?? 'no answer'}`)
   }
   const screen = screenRows()
-  if (tallest > CARD_ROWS) out.push('', `Note: the card is up to ${tallest} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${tallest - CARD_ROWS} rows" under them, which opens the rest, so the analyst never sees its top and bottom together.`)
+  if (rowsCut(tallest)) out.push('', `Note: the card is up to ${tallest} rows tall, and its frame shows its first ${CARD_ROWS} rows with "+${rowsWord(rowsCut(tallest))}" under them, which opens the rest, so the analyst never sees its top and bottom together.`)
   else if (screen && tallest + AROUND_ROWS > screen) out.push('', `Note: the card is up to ${tallest} rows tall, and the analyst's screen has ${screen} rows, which also hold its frame, the prompt and the bar, so they never see its top and bottom together.`)
   void record($, { kind: 'card', feature: forkOf(input.agentId)?.kind ?? 'main', card: id, version, rows: r.summary.rows, actions: actions.length, drawn_ms: drawnMs, ms: Date.now() - t0 })
   return { result: out.join('\n') }
