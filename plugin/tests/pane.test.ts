@@ -359,3 +359,14 @@ test('in the settings, the row picked and the line under it, with what its mode 
   expect(textOf(nodes(tree).find(n => n.props?.key === 'says-coverage'))).not.toContain('No model call')
   setOptions({})
 })
+
+test('in a narrow settings pane, a row whose choices wrap is measured on the lines it takes, so the row picked is brought into view whole', async () => {
+  const s = setup()
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const narrow = { ...DOCK(24), props: { ...DOCK(24).props, bodyColumns: 50 } }
+  const tree = await drawPane(s.$, narrow, await paneNow(s.$), els)
+  // Citations' four modes take two lines beside its name at 50 columns: `auto cite + verify · auto cite ·`, `manual · off`
+  const line = nodes(nodes(tree).find(n => n.props?.key === 'sw-citations')).find(n => n.props?.key === 'line')
+  expect(treeRows(line, 50)).toBe(2)
+  setOptions({})
+})
