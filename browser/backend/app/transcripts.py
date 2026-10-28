@@ -1531,19 +1531,25 @@ def _style_hits(lines: list[str], style: str) -> tuple[list[tuple[str, dict[str,
     """The lines of a head that start turns in `style`, as text_turns reads them, and how many lines its fenced blocks
     of code hold. A line inside a block starts a turn only for a speaker who spoke outside one before it (in a style
     of DISTINCT_STYLES, for anyone), which ends a block left open (a message cut inside its code); in aider's history,
-    only a line of the user's message (_aider_user), which ends a reply cut inside its code."""
+    as _aider_turns reads it, only a line of the user's message (_aider_user), and a session's head line ends a
+    block."""
     hits: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
     fence: str | None = None
     code = 0
     for ln in lines:
         got = _turn_match(ln, style)
-        if fence is not None and (got is None or (style == "aider" and not _aider_user(ln)) or (
-                style not in DISTINCT_STYLES and style != "aider" and got[0]["speaker"].lower() not in seen)):
-            code += 1
-            if _fence_closes(fence, ln):
-                fence = None
-            continue
+        if fence is not None:
+            if style == "aider":
+                ends = ln.startswith(AIDER_HEAD) or _aider_user(ln)
+            else:
+                ends = got is not None and (style in DISTINCT_STYLES or got[0]["speaker"].lower() in seen)
+            if not ends:
+                code += 1
+                if _fence_closes(fence, ln):
+                    fence = None
+                continue
+            fence = None
         if got is None:
             fence = _fence_opened(ln)
             code += fence is not None

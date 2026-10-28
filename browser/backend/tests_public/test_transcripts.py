@@ -739,6 +739,18 @@ def test_an_aider_reply_cut_inside_an_edit_ends_at_the_user_s_next_message(chats
     assert transcripts._lead_texts(p, hint, 30) == AIDER_CUT.split("\n")[23:29], "from line 24, the user's message"
 
 
+def test_an_aider_session_s_head_ends_a_block_left_open_in_the_sniff_too(chats):
+    """A reply cut inside its code at the end of a session: the next session's head line ends the block, in the sniff
+    as in the turns, so the user's messages after it count."""
+    log = ("\n# aider chat started at 2026-09-01 10:00:00\n\n#### Add an install section.\n\nREADME.md\n```markdown\n"
+           "<<<<<<< SEARCH\n# Range tools\n\n# aider chat started at 2026-09-01 11:00:00\n\n#### Fix the off-by-one.\n\n"
+           "I will edit range.py.\n")
+    (chats / "logs" / "quit.aider.chat.history.md").write_text(log)
+    got = transcripts.sniff(chats / "logs" / "quit.aider.chat.history.md", "logs/quit.aider.chat.history.md")
+    assert got == {"format": "text", "score": transcripts.STRONG, "style": "aider"}
+    assert chat_turns("quit.aider.chat.history.md") == [(4, "User"), (6, "Assistant"), (13, "User"), (15, "Assistant")]
+
+
 def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():
     """A harness that logs each tool call with its result on its own line, between the agent's spoken turns: the tool
     turns count toward the transcript, so it is strong (Transcript the default), with `tools` set for the view, even
