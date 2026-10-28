@@ -97,3 +97,31 @@ describe("a thread's frame the analyst moved", () => {
     expect(r.get('c')!.y).toBeGreaterThan(r.get('t')!.y + r.get('t')!.h)
   })
 })
+
+describe("a thread's frame about a loose card", () => {
+  // main's single cards stand loose, outside every frame: a thread on one of them keeps its frame beside the card, at
+  // the root, as a thread's frame inside a frame does
+  const loose = (threads: Group[], cells: Cell[]): CanvasResponse => ({
+    groups: [{ ...group('l'), kind: 'loose' }, group('q'), ...threads],
+    cells: [card('q1', 'q'), card('a', 'l'), card('b', 'l'), ...cells],
+  })
+  const on = (id: string, anchor: string) => thread(id, anchor, { parent: 'l' })
+
+  test('stands right of the card, its title level with the card, and the cards below stay in their column', () => {
+    const d = loose([on('t', 'a')], [card('t1', 't'), card('t2', 't')])
+    const r = lay(d, ['q', 't']).rects
+    const a = r.get('a')!
+    expect(a.x).toBe(ROOT_X)
+    expect(r.get('t')).toMatchObject({ x: a.x + CARD_W + GAP, y: a.y + TITLE })
+    expect(r.get('b')!).toMatchObject({ x: ROOT_X, y: a.y + H + GAP })
+    expect(overlapping(d, r)).toEqual([])
+  })
+
+  test('two that would overlap stack downward', () => {
+    const d = loose([on('t', 'a'), on('u', 'b')], [card('t1', 't'), card('t2', 't'), card('u1', 'u')])
+    const r = lay(d, ['q', 't', 'u']).rects
+    expect(r.get('u')!.x).toBe(r.get('t')!.x)
+    expect(r.get('u')!.y - TITLE).toBe(r.get('t')!.y + r.get('t')!.h + GAP)
+    expect(overlapping(d, r)).toEqual([])
+  })
+})

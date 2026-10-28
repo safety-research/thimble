@@ -7,8 +7,8 @@
 // of frames stands in one box (Canvas names the path in one title row). A collapsed frame shows its nested groups and
 // its first card, with the edges of the others stacked under it; a lone card folds to its question, and a frame with
 // no card of its own shows its title alone, with no box under it. Root frames sit at their `pos`, or below the root
-// before them; loose cards sit at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and
-// zoom.
+// before them; loose cards sit at their own `pos`, or below the roots, and a thread's frame about a loose card stands
+// right of it. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
@@ -137,9 +137,10 @@ export function boardOf(data: CanvasResponse): Board {
     // a stored width is the analyst's resize (only the resize grip writes one); none takes the default
     cells.push({ id: c.id, cell: c, parent, pos: c.pos ?? null, w: c.width ? clampWidth(c.width) : CARD_W, h: c.height ? clampHeight(c.height) : null })
   }
-  // a thread's frame that no one has placed stands beside its anchor card, when that card is in the frame around it
+  // a thread's frame that no one has placed stands beside its anchor card, when that card is in the frame around it, or
+  // loose with the frame at the root
   for (const g of groups) {
-    if (!g.thread || g.pos || g.order != null || !g.parent || !g.group.anchor) continue
+    if (!g.thread || g.pos || g.order != null || !g.group.anchor) continue
     if (cells.some((c) => c.id === g.group.anchor && c.parent === g.parent)) g.beside = g.group.anchor
   }
   return { groups, cells, group, cellById: new Map(cells.map((c) => [c.id, c] as const)) }
@@ -320,6 +321,7 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
   }
   let topY = ROOT_Y
   for (const g of roots) {
+    if (g.beside) continue
     const p = g.pos ?? { x: ROOT_X, y: topY }
     place(g, p.x, p.y, 0)
     topY = Math.max(topY, p.y + size.get(g.id)!.h + ROOT_GAP)
@@ -330,6 +332,19 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
     const h = cellHeight(c, heights)
     rects.set(c.id, { x: p.x, y: p.y, w: c.w, h })
     if (!c.pos) topY += h + GAP
+  }
+  // a thread's frame about a loose card: right of the card, its title level with the card's top, and moved down past
+  // what it would cover, so two such frames stack downward; in the order of their cards
+  const taken = [...rects].map(([k, r]) => (board.group.has(k) ? { x: r.x, y: r.y - TITLE, w: r.w, h: r.h + TITLE } : r))
+  const besides = roots.filter((g) => g.beside).map((g) => ({ g, card: rects.get(g.beside!) ?? null }))
+  besides.sort((a, b) => (a.card?.y ?? Infinity) - (b.card?.y ?? Infinity))
+  for (const { g, card } of besides) {
+    const s = size.get(g.id)!
+    const box = card ? { x: card.x + card.w + GAP, y: card.y, w: s.w, h: s.h + TITLE } : { x: ROOT_X, y: topY, w: s.w, h: s.h + TITLE }
+    box.y = clearBelow(box, taken)
+    place(g, box.x, box.y + TITLE, 0)
+    taken.push(box)
+    if (!card) topY = box.y + box.h + ROOT_GAP
   }
   return { rects, decks, folded, wraps, bare, depth }
 }
