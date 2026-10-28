@@ -3,7 +3,8 @@
 // agrees with itself: the ruler the step draws beside the transcript is drawn from the records it shows, a mark in a
 // lane per label over each run of records lit in one colour, at their place in the file, in their cells' colour; and
 // the Labels sidebar's legend names those colours and counts those records. The example shows one label, with few
-// values, and the step says what the colored bars beside the records and the minimap beside the transcript mean.
+// values, and the step says what the bars beside the records and the strip at the right of the transcript mean, in
+// words that hold for every record it shows.
 import { expect, test } from 'vitest'
 import { rulerWidth } from '../../src/files/Ruler.tsx'
 import { createTour, type Api, type Snaps } from '../../src/tour/engine.ts'
@@ -89,8 +90,22 @@ test('the example shows one label, with few values: one lane beside the records 
   expect(reader.querySelector<HTMLElement>('.reader-ruler-bar')!.style.width).toBe(`${rulerWidth(1)}px`)
 })
 
-test('the Labels step says what the colored bars and the minimap mean', () => {
+test('the Labels step says what the bars and the strip at the right mean, in words true of every record it shows', () => {
   const body = tourSteps('⌘').find((s) => s.title === 'Labels')!.body as string
-  expect(body).toMatch(/colored bar beside a record shows its value/)
-  expect(body).toMatch(/minimap at the right shows where those values fall in the whole file/)
+  // the strip beside the transcript is named by what it is: the Canvas has its own Minimap
+  expect(body).not.toMatch(/minimap/i)
+  expect(body).toMatch(/The bar beside a record is in the color of its value, or empty if its value has no color\./)
+  expect(body).toMatch(/The strip at the right shows where the colored bars are in the whole file\./)
+  // and so it is for every record of the example: its bar is lit in the color of a value with a color, or it is empty,
+  // and empty only where the label has a value with no color (a hollow swatch)
+  const values = [...html(snaps.labelsSide).querySelectorAll<HTMLElement>('.lside-value .lside-swatch')].map((s) => ({ colour: s.style.getPropertyValue('--sw'), hollow: s.classList.contains('is-hollow') }))
+  const coloured = new Set(values.filter((v) => !v.hollow).map((v) => v.colour))
+  const cells = [...html(snaps.txReader).querySelectorAll<HTMLElement>('.reader-record[data-line] .reader-gutter-cell')]
+  const lit = cells.filter((c) => c.classList.contains('is-lit'))
+  const empty = cells.filter((c) => !c.classList.contains('is-lit'))
+  expect(lit.length).toBeGreaterThan(0)
+  expect(empty.length).toBeGreaterThan(0)
+  expect(lit.every((c) => coloured.has(c.style.background))).toBe(true)
+  expect(empty.every((c) => !c.style.background)).toBe(true)
+  expect(values.some((v) => v.hollow)).toBe(true)
 })

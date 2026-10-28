@@ -13,7 +13,7 @@
 //     shows;
 //   - step 4: the step opens the real Labels sidebar with the top bar's Labels button and lays the example sidebar
 //     exactly over it, beside the transcript, which opens on records lit by the example's label; the ruler's marks
-//     stand at the records' lines in the colours of their bars; the step says what the bars and the minimap mean; the
+//     stand at the records' lines in the colours of their bars; the step says what the bars and the strip mean; the
 //     wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its height, the
 //     cutout and the example sidebar still and the ruler's thumb following, and the wheel over the ruler too;
 //   - step 5: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
@@ -667,8 +667,8 @@ async function walk(page: Page, tag: string, send = false) {
   assert.ok(litShown > 0, `${tag} 3: the transcript opens on records with lit bars (${litShown})`)
   assert.equal(
     await body(page),
-    'A label sorts records into values, by a rule or by Claude’s reading. The colored bar beside a record shows its value, and the minimap at the right shows where those values fall in the whole file. Labels, at the top, lists the labels. Open one to see its records and correct them.',
-    `${tag} 3: what a label is, and what its bars and the minimap mean`,
+    'A label sorts records into values, by a rule or by Claude’s reading. The bar beside a record is in the color of its value, or empty if its value has no color. The strip at the right shows where the colored bars are in the whole file. Labels, at the top, lists the labels. Open one to see its records and correct them.',
+    `${tag} 3: what a label is, and what its bars and the strip at the right mean`,
   )
   // the ruler shows the records' colours where they are: every lit cell of a record on line L has a mark in its lane,
   // in the colour its bar shows, over (L − 1)/76 to L/76 of the ruler, and no mark has a colour no bar shows
