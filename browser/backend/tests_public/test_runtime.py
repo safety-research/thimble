@@ -327,6 +327,71 @@ async def test_a_headless_session_s_bash_sandbox_gets_a_short_tmpdir_and_fails_c
     assert Path(opts.cwd).is_relative_to(data_tmp), "the test's own copy of the corpus"
 
 
+# bubblewrap on a host that lets it make its own namespaces but refuses the user namespace the sandbox's seccomp helper
+# makes inside them (as Ubuntu's AppArmor profile for bwrap can): bwrap's --disable-userns refuses it the same way
+NESTED_USERNS_REFUSED = """#!/bin/sh
+case " $* " in *" --unshare-user "*) exec {real} --disable-userns "$@";; esac
+exec {real} "$@"
+"""
+
+
+async def test_on_claude_code_sign_in_a_builder_gets_no_bash_where_the_sandbox_s_nested_namespace_is_refused(
+        data_tmp, on, monkeypatch, tmp_path):
+    """Claude Code's Bash sandbox runs each command in bubblewrap, inside which its seccomp helper makes a user
+    namespace of its own. Where bubblewrap runs but that second namespace is refused, every Bash call failed as its
+    sandbox started: the check that gives Bash sees it now, as srt's probe does for the Messages API, so a view's
+    builder gets no Bash there, and the build's notice says why. Where the sandbox starts, Bash runs in it as before."""
+    import os
+    import shutil
+
+    from claude_agent_sdk import ResultMessage
+
+    from app import cc_settings, dev, kernel_wrap, notices, srt, views
+
+    if why := srt.missing(config.REPO_ROOT, srt.node()):
+        pytest.skip(why)
+    real = shutil.which("bwrap")
+    if not real or not shutil.which("socat") or not kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT)):
+        pytest.skip("Claude Code's sandbox does not run on this machine")
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    (fake_bin / "bwrap").write_text(NESTED_USERNS_REFUSED.format(real=real))
+    (fake_bin / "bwrap").chmod(0o755)
+    path = os.environ.get("PATH", "")
+    monkeypatch.delenv("THIMBLE_SANDBOX", raising=False)
+    seen: dict[str, Any] = {}
+    fake_sdk(monkeypatch, [ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
+                                         num_turns=1, session_id="sess-1")], seen)
+    claude_access.save(claude_access.CLAUDE_CODE, consent=True)
+    runtime.ensure(CORPUS)
+
+    async def build(name: str, bin_path: str) -> Any:
+        monkeypatch.setenv("PATH", bin_path)
+        monkeypatch.setattr(cc_settings, "_sandbox", {})  # this host probed afresh, the real answers kept
+        monkeypatch.setattr(kernel_wrap, "_srt_works", {})
+        slug = views.propose(CORPUS, name, "to read the board", ["board.jsonl"], "one row per post", asked=True)["slug"]
+        ans = await dev.start_build(CORPUS, slug, subagents.CLICK)
+        assert ans.started, dict(ans)
+        await runtime._spaces[CORPUS].convs[str(ans.agent_id)].task
+        return seen.pop("options")
+
+    opts = await build("Posts", f"{fake_bin}{os.pathsep}{path}")
+    assert "Bash" not in opts.tools and "Bash" not in opts.allowed_tools and "Read" in opts.tools
+    assert "sandbox" not in json.loads(opts.settings)
+
+    def told() -> list[dict]:
+        return [n for n in notices.open_notices(CORPUS) if n.get("key") == dev.NO_BOX_KEY]
+
+    for _ in range(600):  # the build's start probes the sandbox beside its run
+        if told():
+            break
+        await asyncio.sleep(0.05)
+    assert told() and "because the kernel restricts user namespaces" in told()[0]["text"], told()
+
+    opts = await build("Threads", path)
+    assert "Bash" in opts.tools and json.loads(opts.settings)["sandbox"]["failIfUnavailable"] is True
+
+
 def test_short_tmp_stays_short_where_the_temp_folder_is_long(monkeypatch, tmp_path):
     """macOS's temp folder is /var/folders/<..>/T, about 49 characters; short_tmp keeps to /tmp where it exists, and
     never makes a folder longer than TMP_MAX."""
