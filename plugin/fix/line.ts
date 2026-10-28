@@ -17,18 +17,19 @@
 //               If thimble stops loading: sh …/off.sh       loads thimble with --plugin-dir, the restart that loads it)
 //   off       ○ <title> is off · thimble reloaded           (until the next prompt)
 //             ↺ <title> is back to its version before · thimble reloaded   (u after y on a changed fix)
-//   failed    × <title> did not pass · <why>                d what changed · r redo · n dismiss   (until the next
-//             prompt; the fix stays failed in thimble fixes)
+//   failed    × <title> did not pass · <why>                y try again · d what it tried · n dismiss   (until the
+//             next prompt; the fix stays failed in thimble fixes)
 //             (× The change to <title> did not pass, for a round of a fix the person has: n leaves the fix as it was;
 //             a <why> too long for the row, such as a refusal that names files, gets a row of its own; a fix whose
-//             fixer could not do without the files no fix may change (blocked) offers no r: d what changed · n dismiss)
+//             fixer could not do without the files no fix may change (blocked) offers no y: d what it tried · n dismiss)
 //   request   ◇ Saved as a request with no code: <title>    n ok · thimble fix list, in a shell, lists it   (until the
 //             ◇ Claude changed no code: <title> stays as it was   (a round of a fix the person has)    next prompt)
 //   update    ↑ thimble 0.10.3 · 3 fixes carried · 1 needs redo   (until the next prompt)
 //   release   ↑ thimble 0.10.3 is out (you have 0.10.2) · thimble update in a shell   (at session start)
 //   problem   × <what went wrong, with what to do>           (until the next prompt)
 //
-// y applies: from then on the fix's code runs as thimble, so only the person's key does it (fixes.ts). n leaves a ready
+// y applies a ready fix: from then on the fix's code runs as thimble, so only the person's key does it (fixes.ts); on a
+// failed fix, y tries it again in a new copy (request.ts redoFix). n leaves a ready
 // fix ready in the person's list (thimble fix list, in a shell), where thimble fix apply N turns it on later.
 import type { EngineInterface } from 'claude-code'
 
@@ -44,13 +45,13 @@ type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** The keys the line takes now, by its kind. A failed fix's r redoes it, except for a blocked one (keysOf). */
-const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['d', 'r', 'n'], request: ['n'] }
+/** The keys the line takes now, by its kind. A failed fix's y tries it again, except for a blocked one (keysOf). */
+const KEYS: Record<string, string[]> = { ready: ['y', 'd', 'n'], applied: ['u'], failed: ['y', 'd', 'n'], request: ['n'] }
 
 /** The keys the line takes for this fix: a failed fix whose fixer could not do without the files no fix may change
- *  (blocked) offers no r, which would fail the same way. */
+ *  (blocked) offers no y, which would fail the same way. */
 const keysOf = (kind: string, f: Pick<Fix, 'blocked'> | null): string[] =>
-  (KEYS[kind] ?? []).filter(k => !(kind === 'failed' && k === 'r' && f?.blocked?.length))
+  (KEYS[kind] ?? []).filter(k => !(kind === 'failed' && k === 'y' && f?.blocked?.length))
 
 /** What a key on the line does, once the word window closed (it cannot be undone). */
 export async function fixKey($: Engine, k: string): Promise<{ later: () => Promise<unknown> } | null> {
@@ -63,14 +64,13 @@ export async function fixKey($: Engine, k: string): Promise<{ later: () => Promi
 
 async function pressLine($: Engine, id: number, kind: string, k: string): Promise<void> {
   let said: string | null = null
-  if (k === 'y') said = await applyFix($, id)
+  if (k === 'y') said = kind === 'failed' ? await redoFix($, id) : await applyFix($, id)
   else if (k === 'u') said = await undoFix($, id)
   else if (k === 'd') {
     // what changed, in the line's place, or the line again
     const l = await fixLineNow($)
     if (l?.id === id) await setFixLine($, { ...l, open: !l.open })
-  } else if (k === 'r') said = await redoFix($, id)
-  else if (k === 'n') {
+  } else if (k === 'n') {
     // a ready fix stays ready in the person's list (thimble fix list), where thimble fix apply turns it on later; a failed
     // one stays failed there
     await setFixLine($, null)
@@ -106,8 +106,9 @@ function keysRow(els: Any, keys: [string, string][], press: (k: string) => unkno
 const filesWord = (f: Fix) => `${(f.files || []).length} file${(f.files || []).length === 1 ? '' : 's'}`
 
 /** What changed, in a few rows (d): the person's words (their own when thimble has them, else the request's), what
- *  Claude did, what it changed, and the files the person is told of (noticeText). */
-function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
+ *  Claude did, what it changed (`label`: `Tried` for a failed fix, whose d shows what it tried), and the files the person
+ *  is told of (noticeText). */
+function whatChanged(els: Any, f: Fix, width: number, changed: string, label = 'Changed'): Any[] {
   const { Box, Text } = els
   const room = Math.max(20, width - 16)
   const row = (key: string, label: string, text: string) => Box({ key, flexDirection: 'row', width, children: [
@@ -120,16 +121,16 @@ function whatChanged(els: Any, f: Fix, width: number, changed: string): Any[] {
     Box({ key: 'fix-what-head', flexDirection: 'row', width, children: [Text({ key: 'i', children: '  ' }), Text({ key: 't', bold: true, children: cut(f.title, Math.max(12, width - 4)) })] }),
     ...words.map((w, i) => row(`fix-what-asked-${i}`, i ? 'then' : 'You asked', cut(f.asked?.[i] || w, room * 2))),
     ...(f.summary ? [row('fix-what-did', 'Claude did', cut(f.summary, room * 3))] : []),
-    row('fix-what-changed', 'Changed', changed),
+    row('fix-what-changed', label, changed),
     ...(noticeText(f) ? [row('fix-what-notice', 'Note', noticeText(f))] : []),
   ]
 }
 
-/** A failed fix's keys: r redoes it, unless its fixer could not do without the files no fix may change (blocked).
- *  `open`: the keys under what changed. */
+/** A failed fix's keys: y tries it again, unless its fixer could not do without the files no fix may change
+ *  (blocked); d shows what it tried. `open`: the keys under what it tried. */
 function failedKeys(els: Any, f: Fix | null, open: boolean, press: (k: string) => unknown): Any[] {
   const blocked = !!f?.blocked?.length
-  const keys: [string, string][] = [...(open ? [] : [['d', 'what changed'] as [string, string]]), ...(blocked ? [] : [['r', 'redo'] as [string, string]]), ['n', 'dismiss']]
+  const keys: [string, string][] = [...(blocked ? [] : [['y', 'try again'] as [string, string]]), ...(open ? [] : [['d', 'what it tried'] as [string, string]]), ['n', 'dismiss']]
   return keysRow(els, keys, press)
 }
 
@@ -148,7 +149,7 @@ export async function fixLineRows($: Engine, els: Any, width: number): Promise<A
     return [...whatChanged(els, f, width, `${filesWord(f)} · ${testsWord(f)}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: keysRow(els, [['y', 'use it now'], ['n', 'later']], press) })]
   }
   if (l.kind === 'failed' && f && l.open) {
-    return [...whatChanged(els, f, width, `${filesWord(f)} · ${f.error || 'its tests failed'}`), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: failedKeys(els, f, true, press) })]
+    return [...whatChanged(els, f, width, `${filesWord(f)} · ${f.error || 'its tests failed'}`, 'Tried'), Box({ key: 'fix-line-2', flexDirection: 'row', width, children: failedKeys(els, f, true, press) })]
   }
   let first: Any[] = []
   let second: Any[] = []

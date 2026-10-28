@@ -51,7 +51,7 @@ export type Fix = {
   /** the conversation the fix was asked in (THIMBLE_CONVERSATION at new): a /resume keeps it, with a new session */
   conversation?: string | null
   /** the last check did not use the change, and why; kept until the next check, so that the next fixer in the copy
-   *  (another round, at once, or r) is told */
+   *  (another round, at once, or y on the failed line) is told */
   refused?: Refusal | null
   /** the files no fix may change that its fixer could not do without, when it ended with `Cannot:`: another try fails
    *  the same way, so its failed line offers none */
@@ -101,12 +101,29 @@ export function fixSlug(f: Pick<Fix, 'id' | 'title'>): string {
   return `fix-${slug || f.id}`
 }
 
+/** The head of a request's explicit form (request.ts formOf): `N` (a fix's number) or `new`, each with a mark after it
+ *  or none (`2: …`, `#2 - …`, `new: …`), and the words after it, '' when there are none. Null when the words have no
+ *  head. */
+export function formHead(words: string): { n: number | null; fresh: boolean; rest: string } | null {
+  const m = /^(?:#?(\d+)|(new))(?:\s*[:.)–—-])?(?:\s+([\s\S]*))?$/i.exec(words)
+  return m ? { n: m[1] ? Number(m[1]) : null, fresh: !!m[2], rest: (m[3] ?? '').trim() } : null
+}
+
+/** The person's own words after /thimble-fix, without the form's head that formOf takes off Claude's (`2 …`, `new: …`):
+ *  it says which fix the words are for, and is no words for the fixer. '' when the head is all they typed
+ *  (`/thimble-fix 2`), so that the fixer reads Claude's words. `named`: whether fix N is one a form may name. */
+export function ownWords(asked: string, named: (n: number) => boolean): string {
+  const a = asked.trim()
+  const h = formHead(a)
+  return h && (h.fresh || (h.n != null && named(h.n))) ? h.rest : a
+}
+
 /** Why the check did not use a fixer's change: the files it may not change (the way back, a binary file), or the end of
  *  the tests' output when they failed. */
 export type Refusal = { why: string; files: string[]; tests?: string }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
- *  u), failed (d what changed · r redo · n dismiss), request (no code), a new release with the fixes replayed on it
+ *  u), failed (y try again · d what it tried · n dismiss), request (no code), a new release with the fixes replayed on it
  *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
  *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
 export type FixLine = {

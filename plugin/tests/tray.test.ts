@@ -543,6 +543,95 @@ test('a tray taller than the rows the band has over the bar shows its body in a 
   expect(bandScrolls()).toBe(1)
 })
 
+test('a tray cut at a short height pages: ↓ N more lines is a click that moves its window a page, ↑ N lines above one back, and d and u do the same; a word that starts with d is typed', CITES, async ($, on) => {
+  const { clock } = await resumed($, on, TALL, 's-tray-page')
+  const drawn = async (maxRows = 8) => {
+    const band = await $.ui.render(above(maxRows))
+    const top = all(band).find(n => n.props?.key === 'tray-window-in')?.props?.top
+    return { band, text: textOf(band), top: typeof top === 'number' ? -top : 0, button: (id: string) => all(band).find(n => n.type === 'Button' && n.props?.key === `tray-page-${id}`) }
+  }
+  // a click on the row under the window, in the band as mounted at the same height
+  const click = async (id: string) => {
+    const band = await $.ui.mount(above(8))
+    await band.press({ key: `tray-page-${id}` })
+    await band.unmount()
+  }
+  // ] then +: all the code and its output
+  const open = async () => {
+    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+  }
+  await open()
+  await drawn(10)
+  // the failure line of the session's start goes with the next prompt, which closes the tray; opened again
+  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
+  await open()
+  let d = await drawn()
+  const below = Number(/↓ (\d+) more line/.exec(d.text)?.[1])
+  expect(below).toBeGreaterThan(5)
+  expect(d.top).toBe(0)
+  // a click on ↓ N more lines: a page further down, and ↑ N lines above under the window too
+  const down = d.button('down')
+  expect(textOf(down)).toBe(`d ↓ ${below} more lines`)
+  await click('down')
+  d = await drawn()
+  const page = d.top
+  expect(page).toBeGreaterThan(0)
+  expect(d.text).toContain(`↑ ${page} line${page === 1 ? '' : 's'} above`)
+  // ↑ N lines above: a page back up
+  await click('up')
+  expect((await drawn()).top).toBe(0)
+  // d at an empty prompt pages down, u back up
+  expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
+  expect((await drawn()).top).toBe(page)
+  await clock.advance(2000)
+  expect(await $.prompt.edit(key('u'))).toEqual({ text: '', cursor: 0 })
+  expect((await drawn()).top).toBe(0)
+  await clock.advance(2000)
+  // a word that starts with d: the page goes back, and the word is typed
+  expect(await $.prompt.edit(key('d'))).toEqual({ text: '', cursor: 0 })
+  const word = await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'o' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'o' } as never) as Any
+  expect(word.text).toBe('do')
+  expect((await drawn()).top).toBe(0)
+})
+
+// a value code computed, the citation's evidence three hundred lines of output
+const LONG_OUTPUT = ['runs: 300', ...Array.from({ length: 300 }, (_, i) => `run ${i + 1}: ok`), 'failed: 12'].join('\n')
+const LONG = { ...TALL, evidence: { ...TALL.evidence, output: LONG_OUTPUT, highlight: [[LONG_OUTPUT.length - 2, LONG_OUTPUT.length]] } }
+
+test('at the narrowest tray, with lines above and below in the hundreds, the row under the window shows both parts whole, each with its key, on its one row', CITES, async ($, on) => {
+  const { clock } = await resumed($, on, LONG, 's-tray-page-narrow')
+  // a band 40 columns wide: the tray at its narrowest, 36 columns inside its frame
+  const narrow = (maxRows: number) => { const a = above(maxRows) as Any; return { ...a, props: { ...a.props, bodyColumns: 40 }, viewport: { ...a.viewport, columns: 40 } } as never }
+  const open = async () => {
+    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+  }
+  await open()
+  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
+  await open()
+  await $.ui.render(narrow(8))
+  // the window in the middle of the body, with more than a hundred lines above it and below it
+  await $.ui.scroll({ component: 'AbovePrompt', requestId: 'above', offset: 0, by: 150, bodyRows: 7, contentRows: 8, origin: { kind: 'person' } } as never)
+  const band = await $.ui.render(narrow(8))
+  const row = all(band).find(n => n.props?.key === 'tray-scroll')
+  const text = textOf(row)
+  // both parts, each with its key, in the row's 36 columns
+  expect(text.length).toBeLessThanOrEqual(36)
+  const [, above_, below_] = /^u ↑ (\d+) above · d ↓ (\d+) more$/.exec(text) ?? []
+  expect(Number(above_)).toBeGreaterThanOrEqual(100)
+  expect(Number(below_)).toBeGreaterThanOrEqual(100)
+  // each part still a click named by its whole words
+  expect(all(row).filter(n => n.type === 'Button').map(n => n.props.label)).toEqual([`↑ ${above_} lines above`, `↓ ${below_} more lines`])
+  // a wider tray keeps the whole words
+  const wide = textOf(all(await $.ui.render(above(8))).find(n => n.props?.key === 'tray-scroll'))
+  expect(wide).toMatch(/^u ↑ \d+ lines above · d ↓ \d+ more lines$/)
+})
+
 // a heads-up whose words are a citation's words, or hold them
 const headsOn = (term: string) => ({ explain: { order: ['h1'], items: { h1: { id: 'h1', kind: 'heads', term, title: 'Names are typed in', bullets: ['Anyone who edits types a name.'] } } } })
 const filledOf = (drawn: Any[]) => drawn.filter(n => n.type === 'Text' && n.props?.backgroundColor).map(textOf)
@@ -794,6 +883,55 @@ test("a click on thimble's controls that slid a cell leaves a piece of their wor
   expect(await counts({ text: 'close', requestId: 'row-t1' })).toBe(true)
   expect(await counts({ text: 'ask', requestId: 'row-t1' })).toBe(true)
   expect(await counts({ text: 'as', requestId: 'row-t1' })).toBe(true)
+})
+
+test("a click that slid a cell on the row under a paged tray's window, or on copy after a card's artifact link, leaves a piece of their words selected: no answer's words, though the answer holds them whole", CITES, async ($, on) => {
+  let selected: Any
+  on('ui.selection', () => ({ value: selected }))
+  const text = 'Of the runs, [12 of 40](#) failed on the p95 check; more lines of its output follow, and you can copy them.'
+  const id = 'c0123456789af'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_7', agentId: 'a-made-up', anchorRow: 'row-t1', keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_7: { version: 1 } }, at: 1 }
+  // the card's artifact, published: its link under the card, and copy after it
+  const made = { card: id, status: 'done', agentId: 'agent-made-up-1', until: 0, url: 'https://claude.ai/artifact/made-up-7' }
+  on('state.get', async (_$: unknown, e: Any, next: Any) => (e.key === 'cardArtifacts' && e.id === id ? { value: { value: made, version: 1 } } : next(e)))
+  const { clock } = await resumed($, on, TALL, 's-tray-slid-page', { text, kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  const counts = async (sel: Any, maxRows: number) => {
+    // a selection made anew: none in between, as the click that makes it takes the one before down
+    selected = undefined
+    await $.ui.render(above(maxRows))
+    selected = sel
+    const band = textOf(await $.ui.render(above(maxRows)))
+    expect(band.includes('c cite')).toBe(band.includes('e explain'))
+    return band.includes('c cite')
+  }
+  // ] then +: all the code and its output, in a band of eight rows: the row under the window names the lines below
+  const open = async () => {
+    expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+    expect(await $.prompt.edit(key('+'))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+  }
+  await open()
+  await $.prompt.submit({ text: 'and the other runs?', origin: { kind: 'composer' } } as never)
+  await open()
+  expect(textOf(await $.ui.render(above(8)))).toMatch(/d ↓ \d+ more lines/)
+  // a click on it that slid a cell: its words, with its key and without
+  expect(await counts({ text: 'more' }, 8)).toBe(false)
+  expect(await counts({ text: 'lines' }, 8)).toBe(false)
+  expect(await counts({ text: 'd ↓' }, 8)).toBe(false)
+  // the answer's own words still count
+  expect(await counts({ text: 'failed on the p95 check', requestId: 'row-t1' }, 8)).toBe(true)
+  // the card under the answer, on screen, with its artifact's link: a click on copy, in the answer's row
+  const drawn = await $.ui.render(answer('row-t1', text))
+  expect(textOf(drawn)).toContain('Runs by status')
+  expect(all(drawn).some(n => n.type === 'Link' && n.props?.href === made.url)).toBe(true)
+  expect(textOf(drawn)).toContain('↗  · copy')
+  expect(await counts({ text: 'copy', requestId: 'row-t1' }, 40)).toBe(false)
+  expect(await counts({ text: 'op', requestId: 'row-t1' }, 40)).toBe(false)
+  // the card out of view: copy in the answer counts again
+  await $.ui.render({ ...(answer('row-t1', text) as Any), props: { text, isFirstOfReply: true, onScreen: null } } as never)
+  await clock.advance(10)
+  expect(await counts({ text: 'copy', requestId: 'row-t1' }, 40)).toBe(true)
 })
 
 test("a click that slid a cell on a card's title, a press that asks about the card, leaves a piece of it selected in the answer's row: the bar names neither c nor e; the card's body, a chart label and a word of the answer that the title holds too still count", CITES, async ($, on) => {

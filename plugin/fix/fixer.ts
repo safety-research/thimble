@@ -39,7 +39,7 @@ import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { sessionKey } from '../hooks/conversation'
 import { promptText } from '../prompts/prompts'
-import { type Fix, type Refusal, fixesDir, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
+import { type Fix, type Refusal, fixesDir, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, ownWords, refreshFixes, sessionIdNow, setFixLine } from './fixes'
 import { screenCopy } from './screen'
 
 type Engine = EngineInterface
@@ -101,9 +101,10 @@ export function changingText(f: Fix): string {
   return `These words change the fix the person already ${had}, "${f.prev?.title || f.title}"${f.prev?.summary || f.summary ? ` (${f.prev?.summary || f.summary})` : ''}; its change is in your copy, and your change becomes part of it.`
 }
 
-/** For the next fixer after the check did not use a change (another round in the same copy, or r in a new one): what
+/** For the next fixer after the check did not use a change (another round in the same copy, or y on the failed line in a new one): what
  *  was refused and why, so that it puts the change elsewhere or fixes the tests, or says why it cannot. The prompt does
- *  not list the files no fix may change; this names only the ones the change touched. `earlier`: r, whose copy is new. */
+ *  not list the files no fix may change; this names only the ones the change touched. `earlier`: y on the failed line,
+ *  whose copy is new. */
 export function refusedText(r: Refusal, earlier: boolean): string {
   const where = earlier ? 'The earlier change is not in your copy' : 'Your last change is in your copy'
   const fix = r.files?.length
@@ -112,10 +113,11 @@ export function refusedText(r: Refusal, earlier: boolean): string {
   return `thimble did not use the last change for this fix: ${r.why}. ${where}. ${fix} When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`
 }
 
-/** The fixer's first message: the task (prompts/fixer.md), the words of each round, where it works, the fix these
- *  words change, what the check refused last time, and a text copy of what thimble shows now. */
+/** The fixer's first message: the task (prompts/fixer.md), the words of each round (the person's own, as they typed
+ *  them after /thimble-fix, without the form's head that names the fix, where thimble has them; else Claude's), where
+ *  it works, the fix these words change, what the check refused last time, and a text copy of what thimble shows now. */
 function firstMessage(fix: Fix, earlier: string | null, task: string, by: Asker, screen: string): string {
-  const words = fix.words || []
+  const words = (fix.words || []).map((w, i) => ownWords(fix.asked?.[i] ?? '', n => n === fix.id) || w)
   const asked = words.length > 1
     ? words.map((w, i) => `Round ${i + 1}: ${w}`).join('\n')
     : words[0] || fix.title

@@ -1074,7 +1074,7 @@ def _size(p: Path) -> int:
 def _ended(fid: int, mark: dict[str, Any]) -> bool:
     """Whether the runner of the tests `mark` names is gone (its lock file is free, or gone). When the record still waits
     for it, the runner was stopped before it wrote what came of the tests: the fix fails, with no refusal, so that no new
-    round of its fixer starts from it (r starts it again)."""
+    round of its fixer starts from it (y on its line starts it again)."""
     import fcntl  # noqa: PLC0415
 
     try:
@@ -1179,7 +1179,7 @@ def again(fid: int | str, session: str | None = None) -> dict[str, Any]:
     if rec.get("state") != "failed" or not rec.get("refused"):
         raise FixError(f"fix {rec['id']} is {state_word(rec)}, with no refusal to answer")
     if not _is_checkout(rec.get("work")):
-        raise FixError(f"fix {rec['id']} has no copy any more; r starts it again in a new copy")
+        raise FixError(f"fix {rec['id']} has no copy any more; y starts it again in a new copy")
     # the same request, tried again: its time and its name go on; what came of the check before is no outcome to show
     rec.update(state="working", error=None, rounds=int(rec.get("rounds") or 1) + 1,
                **({"session": session} if session else {}))
@@ -1188,8 +1188,8 @@ def again(fid: int | str, session: str | None = None) -> dict[str, Any]:
 
 
 def _fresh(rec: dict[str, Any]) -> dict[str, Any]:
-    """A record that starts a round of its own (new words, or the person's r): its time starts now, and the block of the
-    round before goes."""
+    """A record that starts a round of its own (new words, or the person's y on a failed fix): its time starts now, and
+    the block of the round before goes."""
     out = {k: v for k, v in rec.items() if k != "blocked"}
     return {**out, "started": time.time()}
 
@@ -1351,7 +1351,7 @@ def _is_checkout(work: str | None) -> bool:
 
 
 # a fix whose copy git may not run in (_own_git): the copy is gone, or something in it changed its git link
-COPY_GONE = ("its copy of thimble was gone or no longer a git checkout, so thimble could not check it; r starts it again "
+COPY_GONE = ("its copy of thimble was gone or no longer a git checkout, so thimble could not check it; y starts it again "
              "in a new copy")
 
 
@@ -1729,7 +1729,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
     if rec.get("state") not in ("ready", "off", "redo", "pending") or not rec.get("commit"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}, so there is nothing to apply")
     if rec.get("state") == "redo":
-        raise FixError(f"fix {rec['id']} does not fit your thimble any more; r asks Claude to redo it")
+        raise FixError(f"fix {rec['id']} does not fit your thimble any more; /thimble-fix {rec['id']} tries it again")
     if rec.get("state") == "pending":
         raise FixError(f"thimble update set fix {rec['id']} aside at {release_name()}, so that nothing is fixed twice: "
                        "thimble reapply in a shell has Claude check it against the release and bring it back")
@@ -1759,7 +1759,7 @@ def apply(fid: int | str, secret: str | None) -> dict[str, Any]:
                 r = get(rec["id"])
                 r.update(state="redo", error="it does not fit the fixes you have on")
                 put(r)
-                raise FixError(f"fix {rec['id']} does not fit the fixes you have on; r asks Claude to redo it")
+                raise FixError(f"fix {rec['id']} does not fit the fixes you have on; /thimble-fix {rec['id']} tries it again")
             new_commit = git("rev-parse", "HEAD", cwd=live)
             git("update-ref", ref, new_commit, cwd=live)
         r = get(rec["id"])
@@ -1798,7 +1798,7 @@ def _swap(fid: int) -> dict[str, Any]:
         git("update-ref", f"refs/thimble/fixes/{fid}", old, cwd=live)
         _rebuild([i for i in order if p.get("state") == "on" or i != fid])
         _put_back(was)
-        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; r asks Claude to redo it")
+        raise FixError(f"the new version of fix {fid} does not fit the fixes you have on; /thimble-fix {fid} tries it again")
     for i in failed:
         x = get(i)
         x.update(state="redo", error=f"it did not fit once fix {fid} changed")
@@ -2056,9 +2056,9 @@ def not_now(fid: int | str) -> dict[str, Any]:
 
 
 def redo(fid: int | str, words: str = "", session: str | None = None, asked: str | None = None) -> dict[str, Any]:
-    """r: a new copy, cut from mine as it is now, for the same fix: the fixer gets the person's words again, and the
-    earlier change (tmp/<id>/earlier.patch) to start from. A fix whose fixer could not do without the files no fix may
-    change (blocked) starts again only with new words."""
+    """y on a failed fix's line: a new copy, cut from mine as it is now, for the same fix: the fixer gets the person's
+    words again, and the earlier change (tmp/<id>/earlier.patch) to start from. A fix whose fixer could not do without
+    the files no fix may change (blocked) starts again only with new words."""
     rec = get(fid)
     if rec.get("state") not in ("redo", "pending", "failed", "off", "ready", "request"):
         raise FixError(f"fix {rec['id']} is {rec.get('state')}")

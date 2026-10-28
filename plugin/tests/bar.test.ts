@@ -9,7 +9,9 @@ import { INTRO, INTRO_MS } from '../bar/intro'
 import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
 import { textWidth } from '../core/text.js'
-import { setOptions } from '../settings/features.mjs'
+import { themeLast } from '../core/theme'
+import { markColors } from '../explain/place.mjs'
+import { PRESET, setOptions } from '../settings/features.mjs'
 import { promptStub } from './stubs'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -428,6 +430,66 @@ test('the first session\'s hint says where the settings are, in the bar in place
   expect(band).toContain('thimble  Hint: click thimble for settings.')
   expect(band.split('click thimble for settings.').length).toBe(2)
 })
+
+test("the first session's hint comes with a legend above the bar, once: heads-up and explainer on the fills their marks have in answers, then select words for e and c; the first prompt takes it with the hint", async ($, on) => {
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  const find = (n: Any, key: string): Any => {
+    if (!n || typeof n !== 'object') return null
+    if (Array.isArray(n)) { for (const x of n) { const f = find(x, key); if (f) return f } return null }
+    if (n.props?.key === key) return n
+    return find(n.props?.children, key) ?? find(n.children, key)
+  }
+  const band = await $.ui.render(BAND)
+  const legend = find(band, 'intro-legend')
+  expect(textOf(legend)).toBe('         heads-up · explainer · select words for e and c')
+  const fills = markColors(themeLast())
+  // its words as the answer draws the marks: on their fills
+  const texts = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(texts) : [...(n.type === 'Text' ? [n] : []), ...texts(n.props?.children), ...texts(n.children)])
+  const said = (w: string) => texts(legend).find(t => textOf(t) === w)
+  expect(said('heads-up')?.props?.backgroundColor).toBe(fills.headsBg)
+  expect(said('explainer')?.props?.backgroundColor).toBe(fills.glossBg)
+  expect(said('e')?.props).toMatchObject({ bold: true })
+  expect(said('c')?.props).toMatchObject({ bold: true })
+  // above the bar, which keeps the hint where its keys stand
+  const rows = ((band as Any).children ?? (band as Any).props?.children) as Any[]
+  expect(rows.findIndex(r => r?.props?.key === 'intro-legend')).toBe(rows.findIndex(r => r?.props?.key === 'bar') - 1)
+  expect(textOf(band)).toContain('thimble  Hint: click thimble for settings.')
+  // the first prompt takes it with the hint, and no later session shows it
+  await $.prompt.submit({ text: 'which runs failed?', origin: { kind: 'composer' } } as never)
+  expect(find(await $.ui.render(BAND), 'intro-legend')).toBe(null)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  expect(textOf(await $.ui.render(BAND))).not.toContain('select words for')
+})
+
+// the first session's legend with a feature off, or Minimal on (whose heads-ups and explainers come only when asked
+// for): the options, and the legend that names only what is on (null: no legend)
+const LEGENDS: [string, Record<string, unknown>, string | null][] = [
+  ['Heads-ups off', { details: 'off' }, '         explainer · select words for e and c'],
+  ['Explainers off', { explain: 'off' }, '         heads-up · select words for c'],
+  ['Citations off', { citations: 'off' }, '         heads-up · explainer · select words for e'],
+  ['Minimal on', { minimal: true, ...PRESET }, '         select words for e and c'],
+  ['Heads-ups, Explainers and Citations off', { details: 'off', explain: 'off', citations: 'off' }, null],
+]
+for (const [what, options, legend] of LEGENDS) {
+  test(`the first session's legend names only what is on: ${what}`, { options }, async ($, on) => {
+    world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+    mock.store(on)
+    await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+    const find = (n: Any): Any => {
+      if (!n || typeof n !== 'object') return null
+      if (Array.isArray(n)) { for (const x of n) { const f = find(x); if (f) return f } return null }
+      if (n.props?.key === 'intro-legend') return n
+      return find(n.props?.children) ?? find(n.children)
+    }
+    const band = await $.ui.render(BAND)
+    const found = find(band)
+    expect(found ? textOf(found) : null).toBe(legend)
+    // the hint shows all the same
+    expect(textOf(band)).toContain('thimble  Hint: click thimble for settings.')
+  })
+}
 
 test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {
   world(on, { ok: true, out: JSON.stringify(COVERAGE) })
