@@ -2,7 +2,8 @@
 //
 //   registerBar  the bar (bar.tsx) in the AbovePrompt band, under what the features put above it (core/answerview.ts
 //                aboveBar). /thimble-settings and a click on `thimble` open the
-//                settings; the person's next prompt takes the failure line and the line at the first session's start (intro.ts); the counts at each load of the plugin and
+//                settings; the person's next prompt takes the failure line, the line at the first session's start and the
+//                legend of the marks in answers (intro.ts); the counts at each load of the plugin and
 //                after each of main's turns (counts.ts)
 //   barKey       r and l at an empty prompt (hooks/keys.ts asks), while the bar names them: coverage and the labels.
 //                Each pane takes the keys its key row names (coverage's j k ↵, the labels' number keys that check
@@ -18,7 +19,7 @@ import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
-import { introDone, introHint } from './intro'
+import { introDone, introHint, legendGone, legendNow } from './intro'
 import { remindAfterAnswer } from './hints'
 import { failNotice, promptTyped } from './notice'
 
@@ -106,6 +107,7 @@ export const registerBar: Register = on => {
   on('prompt.submit', { origin: { kind: /^(?:composer|bridge)$/ } }, async ($, e, next) => {
     if (!e.command) await promptTyped($).catch(() => undefined)
     await introDone($).catch(() => undefined)
+    await legendGone($).catch(() => undefined)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -119,7 +121,9 @@ export const registerBar: Register = on => {
       const width = Math.max(20, e.props.bodyColumns)
       // the hint at the first session's start that says where the settings are (intro.ts), in the bar
       const intro = await introHint($).catch(() => null)
-      const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
+      // the legend of the marks, with the first answer that shows heads-ups or explainers (intro.ts)
+      const legend = await legendNow($).catch(() => null)
+      const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}), ...(legend ? { legend } : {}) })
       // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
       // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off (the
       // bar's rows as drawn: a failure line or a hint wraps)

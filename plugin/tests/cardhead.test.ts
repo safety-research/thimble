@@ -7,7 +7,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import { busySteps, busyWhile } from '../bar/busy'
-import { artifactLine, launch, registerCardHead } from '../cards/head'
+import { failLineNow } from '../bar/notice'
+import { COPIED_MS, artifactLine, launch, registerCardHead } from '../cards/head'
 import { registerForks } from '../core/forks'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -151,6 +152,42 @@ test("the artifact's link has a copy button after it: a click puts the link on t
   expect(button.props.label).toBe('copy the link')
   await button.props.onPress({ surface: 'terminal' })
   expect(copied).toEqual([{ text: 'https://claude.ai/artifact/made-up-14', surface: 'terminal' }])
+})
+
+test("a good copy of the artifact's link says copied in place of copy for a moment; a failed one says so in the failure line, which a good copy takes away", async () => {
+  const { $, E, ended, clock } = setup()
+  let result: Any = { isCopied: true }
+  $.ui.copy = async () => result
+  await launch($, 'c-made-up-15', 'PROMPT artifact', 0).now()
+  await settle()
+  await ended('agent-made-up-1', 'https://claude.ai/artifact/made-up-15')
+  const line = async () => words(await artifactLine($, E, 'c-made-up-15'))
+  const press = async () => (await artifactLine($, E, 'c-made-up-15')).props.children.find((c: Any) => c.type === 'Button').props.onPress({ surface: 'terminal' })
+  expect(await line()).toBe('↗ https://claude.ai/artifact/made-up-15 · copy')
+  // a good copy: copied, in the place of copy, for a moment; no failure line
+  await press()
+  expect(await line()).toBe('↗ https://claude.ai/artifact/made-up-15 · copied')
+  expect(await failLineNow($)).toBe(null)
+  clock.now += COPIED_MS
+  await clock.tick()
+  expect(await line()).toBe('↗ https://claude.ai/artifact/made-up-15 · copy')
+  // a copy that reached no clipboard: copy stays, and one short line says the link was not copied, and why
+  result = { isCopied: false, reason: 'no-clipboard' }
+  await press()
+  await settle()
+  expect(await line()).toBe('↗ https://claude.ai/artifact/made-up-15 · copy')
+  expect(await failLineNow($)).toMatchObject({ kind: 'failed', text: 'The link was not copied: no clipboard was found.' })
+  // a copy that throws says so too
+  $.ui.copy = async () => { throw new Error('the clipboard tool exited with 1.') }
+  await press()
+  await settle()
+  expect((await failLineNow($))?.text).toBe('The link was not copied: the clipboard tool exited with 1.')
+  // a good copy takes the line away
+  $.ui.copy = async () => ({ isCopied: true })
+  await press()
+  await settle()
+  expect(await failLineNow($)).toBe(null)
+  expect(await line()).toBe('↗ https://claude.ai/artifact/made-up-15 · copied')
 })
 
 test('a fork that publishes nothing says why under the card; a card with no artifact has no line', async () => {
