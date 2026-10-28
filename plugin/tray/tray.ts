@@ -147,6 +147,19 @@ export async function closeTray($: Engine): Promise<void> {
   await setTray($, null)
 }
 
+/** The tray gives way to what takes the keys from it (the squeeze chips, s): it closes, and a card ] reached gives its
+ *  keys back. Returns what puts it back as it stood (the key undone: a letter right after it). */
+export async function giveWay($: Engine): Promise<() => Promise<void>> {
+  const was = await keptNow($)
+  if (!was.tray && !was.stand) return async () => undefined
+  await writeTray($, null)
+  await writeStand($, null)
+  return async () => {
+    await writeTray($, was.tray)
+    await writeStand($, was.stand)
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ marks of a row
 
 /** The text a row shows now (a squeezed version in its place), and its citations; null when it draws nothing. */

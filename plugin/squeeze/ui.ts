@@ -6,7 +6,9 @@
 // two or more replies since the person's last prompt not yet caught up on, the bar also names `b catch up on N
 // replies` (Catch-up): b writes one catch-up of them, drawn below the newest of them as one more answer, while the
 // replies still show as written (term.ts catchUp); the chips stay closed (s opens them on the catch-up). A letter right
-// after s or b undoes it (hooks/keys.ts word window).
+// after s or b undoes it (hooks/keys.ts word window). The chips that s opens take the keys: an open tray, which holds
+// them over the chips, gives way (tray/seam.ts trayGiveWay), and s with the tray open over open chips gives the keys back
+// to them.
 // While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey):
 //   [ shorter, ] longer on the picked chip (Length: short · as written · longer · much longer); < > , . the same, unnamed
 //   1–N pick a chip · 0 the original (on a catch-up: no catch-up)
@@ -37,6 +39,7 @@ import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
+import { trayGiveWay, trayHolds } from '../tray/seam'
 import { cardDid, cardHidden } from './cards'
 import { atOf, cardNotes, chipsOf, endsOf, isOriginal, levelWords, ownWords, revealCut, stepAt, withOwn } from './chips.mjs'
 import { catchUp, catchUpAt, catchUpOn, cuId, drawnAt, dismissCatchUp, partNow, pileUp, recOf, saveRec, seeView, setLevels, uiOf, wantLevels, type Rec } from './term'
@@ -108,6 +111,22 @@ export async function openChips($: Engine, id: string, focus = 'length'): Promis
 
 export async function closeChips($: Engine): Promise<void> {
   if (await openNow($)) await setOpen($, null)
+}
+
+/** The chips take the keys from the tray (an open tray, or a card ] reached), which holds them while it stands over
+ *  the chips: it gives way (tray/seam.ts trayGiveWay). Returns what puts it back as it stood. */
+async function takeKeys($: Engine): Promise<() => Promise<void>> {
+  try { return await trayGiveWay($) } catch { return async () => undefined }
+}
+
+/** s, or a press on `s rewrite`: the chips open on `id` and take the keys, the tray giving way; undone (a letter right
+ *  after s), they close and the tray stands as it was. */
+function openTake($: Engine, id: string): Take {
+  let back: (() => Promise<void>) | null = null
+  return {
+    now: async () => { back = await takeKeys($); await openChips($, id) },
+    undo: async () => { await setOpen($, null); await back?.() },
+  }
 }
 
 /** Where the chips of a record stand now: where a change on its way goes, else the levels shown. */
@@ -265,7 +284,14 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
     }
     if (key === '0') return { now: () => revert($, open) }
     if (key === '+') return { now: () => askOwn($) }
-    if (key === 's') return { now: () => setOpen($, null), undo: () => writeOpen($, open) }
+    if (key === 's') {
+      // the tray opened over the chips holds the keys: s gives them back to the chips, the tray giving way
+      if (await trayHolds($).catch(() => false)) {
+        let back: (() => Promise<void>) | null = null
+        return { now: async () => { back = await takeKeys($) }, undo: async () => { await back?.() } }
+      }
+      return { now: () => setOpen($, null), undo: () => writeOpen($, open) }
+    }
     if (key === CATCH_UP_KEY && (await pileUp($))) return catchUpTake($, open)
     return null
   }
@@ -273,8 +299,7 @@ export async function squeezeKeyTake($: Engine, key: string): Promise<Take | nul
   if (key !== 's' || !squeezing) return null
   const row = await latestAnswer($)
   if (!row) return null
-  const id = (await catchUpOn($, row)) ? cuId(row) : row
-  return { now: () => openChips($, id), undo: () => setOpen($, null) }
+  return openTake($, (await catchUpOn($, row)) ? cuId(row) : row)
 }
 
 /** A change of the prompt box (a key typed there, esc esc clearing it): the keys are the prompt's again, so words
@@ -358,7 +383,7 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
   const id = (await catchUpOn($, row)) ? cuId(row) : row
   const pile = await pileUp($, on)
   return [
-    ...(squeezing ? [{ id: 'squeeze', key: 's', words: 'rewrite', press: () => openChips($, id) }] : []),
+    ...(squeezing ? [{ id: 'squeeze', key: 's', words: 'rewrite', press: () => openTake($, id).now!() }] : []),
     ...(pile ? [{ id: 'catchup', key: CATCH_UP_KEY, words: `catch up on ${pile.n} replies`, press: () => catchUpNow($) }] : []),
   ]
 }
