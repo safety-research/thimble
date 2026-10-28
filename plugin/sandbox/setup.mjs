@@ -77,11 +77,12 @@ const again = `node ${join(HERE, 'setup.mjs')} --probe`
 const UNREACHABLE = /ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|ECONNRESET|EHOSTUNREACH|ENETUNREACH|FetchError|network|proxy|certificate|\b(E40[37]|E5\d\d)\b/i
 
 /** Install srt into its folder: `npm ci` in a new folder beside it, then moved into place, so a session that starts at
- *  the same time never reads half an install. null when it is installed, else why not and the fix. `anew`: the install
- *  there does not work, so the new one takes its place even though it looks installed. */
-function install(anew = false) {
+ *  the same time never reads half an install. null when it is installed, else why not and the fix, which ends in the
+ *  command `retry`. `anew`: the install there does not work, so the new one takes its place even though it looks
+ *  installed. */
+function install(anew = false, retry = again) {
   const npm = which('npm') || [join(dirname(process.execPath), 'npm')].find(p => fs.existsSync(p))
-  if (!npm) return { why: 'npm is not installed, and thimble installs the sandbox with it', fix: `Install npm (it comes with Node), then run: ${again}` }
+  if (!npm) return { why: 'npm is not installed, and thimble installs the sandbox with it', fix: `Install npm (it comes with Node), then run: ${retry}` }
   if (!flag('--json')) console.error(`thimble: installing Anthropic's sandbox runtime ${pin} with npm (a minute at most, unless npm cannot reach its registry)...`)
   const tmp = fs.mkdtempSync(join(home, 'srt', `.${pin}-`))
   try {
@@ -96,8 +97,8 @@ function install(anew = false) {
       const said = lines.find(l => !/^(code|syscall|errno|at |A complete log|[{}])/.test(l)) || lines[0] || r.error?.message || `exit ${r.status}`
       const why = `npm could not install the sandbox runtime ${pin}: ${said.slice(0, 200)}`
       return UNREACHABLE.test(said)
-        ? { why, fix: `npm cannot reach its registry. See why with \`npm ping\`, fix npm's proxy or registry setting, then run: ${again}` }
-        : { why, fix: `npm's message says what failed; once it is fixed, run: ${again}` }
+        ? { why, fix: `npm cannot reach its registry. See why with \`npm ping\`, fix npm's proxy or registry setting, then run: ${retry}` }
+        : { why, fix: `npm's message says what failed; once it is fixed, run: ${retry}` }
     }
     fs.writeFileSync(join(tmp, 'node_modules', '.thimble-lock.json'), lock)
     if (!anew && installed()) return null
@@ -110,7 +111,7 @@ function install(anew = false) {
     }
     return null
   } catch (e) {
-    return { why: `the sandbox runtime could not be installed in ${srt}: ${e.message}`, fix: `Make ${join(home, 'srt')} a folder you can write, then run: ${again}` }
+    return { why: `the sandbox runtime could not be installed in ${srt}: ${e.message}`, fix: `Make ${join(home, 'srt')} a folder you can write, then run: ${retry}` }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true })
     fs.rmSync(`${tmp}-old`, { recursive: true, force: true })
@@ -283,9 +284,11 @@ async function main() {
   }
   const first = await check()
   if (!first?.reinstall || !flag('--repair')) return first && { why: first.why, fix: first.fix }
-  // the install there may be damaged (a file of it gone or changed): a new one takes its place, and the check runs again
-  const failed = await locked(() => install(true))
-  if (failed) return failed
+  // the install there may be damaged (a file of it gone or changed): a new one takes its place, and the check runs again.
+  // When the new one cannot be installed, both are said: what it was to repair, and why it failed, whose fix ends in the
+  // command that repairs
+  const failed = await locked(() => install(true, `${again} --repair`))
+  if (failed) return { why: `${first.why}; then installing the sandbox runtime again failed: ${failed.why}`, fix: failed.fix }
   out.repaired = first.why
   const next = await check()
   return next && { why: next.why, fix: next.fix }
