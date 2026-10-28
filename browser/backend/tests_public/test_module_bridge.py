@@ -88,7 +88,9 @@ class Module:
         return await self._go("POST", "/api/module/hello", json={"cwd": _cwd(), "session": self.session,
                                                                  "version": "0.6.0", **more})
 
-    async def next(self, wait: float = 2.0) -> httpx.Response:
+    async def next(self, wait: float = module_bridge.POLL_WAIT_S) -> httpx.Response:
+        """The long poll, held until a request comes or the server's hold ends (a test that looks for none says how
+        long it looks): a request made just before may reach the queue a while later on a busy machine."""
         return await self._go("GET", "/api/module/next", params={"cwd": _cwd(), "session": self.session, "wait": wait})
 
     async def result(self, rid: str, answer: dict) -> httpx.Response:

@@ -6,6 +6,7 @@ that is not registered."""
 from __future__ import annotations
 
 import errno
+import gc
 import os
 import subprocess
 
@@ -84,10 +85,19 @@ async def test_kernel_starts_that_fail_leave_the_count_of_open_descriptors_flat(
         monkeypatch.setattr(notebook, "kernel_argv", dies)
     try:
         said = await _start_fails("fds")
-        before = open_fds()
-        for _ in range(TRIES):
-            assert await _start_fails("fds") == said
-        assert open_fds() == before, f"{open_fds() - before} descriptors left by {TRIES} failed starts ({said})"
+        # what earlier tests left to the garbage collector (an event loop, a client's sockets) gives its descriptors
+        # back when the collector runs: collected before the count, and no collection while it runs, so the failed
+        # starts' own garbage counts too
+        gc.collect()
+        gc.disable()
+        try:
+            before = open_fds()
+            for _ in range(TRIES):
+                assert await _start_fails("fds") == said
+            left = open_fds() - before
+        finally:
+            gc.enable()
+        assert left == 0, f"{left} descriptors left by {TRIES} failed starts ({said})"
         assert len(spawned) == TRIES + 1 and not _kernel_procs(spawned), "a failed start leaves no kernel running"
     finally:
         await notebook.shutdown_all()
