@@ -43,7 +43,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failNotice } from '../bar/notice'
+import { failNotice, reasonOf } from '../bar/notice'
 import type { MarkRef, Span } from '../core/answerview'
 import { actingRow, messageOf, partOf, pickAnswer, turnOfRow, turnsNow, type TurnRec } from '../core/answers'
 import { tellOpened } from '../core/engaged'
@@ -485,7 +485,7 @@ export async function trayKey($: Engine, key: string, until = 0): Promise<Any | 
       // the spawn is made while this key's hook runs (launchRepair's first call), and waits out the word window
       // (marks/register.ts); a word refuses it
       const hold = { until, cancelled: false }
-      const failed = (err: unknown) => failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Press x to try again.`, 'tray:repair')
+      const failed = (err: unknown) => failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')
       return {
         now: async () => { void launchRepair($, r, hold).then(why => { if (why) failNotice($, why, 'tray:repair') }, failed) },
         undo: async () => { hold.cancelled = true },
@@ -958,7 +958,7 @@ export const registerTray: Register = on => {
       if (!f || !(await repair($, f, { until: 0, cancelled: false }))) return next(e)
       return { element: e.element }
     } catch (err) {
-      failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Press x to try again.`, 'tray:repair')
+      failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'tray:repair')
       return { element: e.element }
     }
   }).catch(($, e, next) => next(e))

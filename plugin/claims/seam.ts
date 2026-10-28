@@ -29,7 +29,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
-import { failNotice } from '../bar/notice'
+import { failNotice, reasonOf } from '../bar/notice'
 import { closePane, paneShows } from '../core/pane'
 import { accent } from '../core/theme'
 import type { Take } from '../hooks/keys'
@@ -148,7 +148,7 @@ export const registerClaims: Register = (on, options) => {
       if (!(await repairShown($))) return next(e)
       return { element: e.element }
     } catch (err) {
-      failNotice($, `The repair did not start: ${String((err as Error)?.message || err).slice(0, 160)}. Press x to try again.`, 'claims:repair')
+      failNotice($, `The repair did not start: ${reasonOf(err)}. Press x to try again.`, 'claims:repair')
       return { element: e.element }
     }
   }).catch(($, e, next) => next(e))
