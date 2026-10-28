@@ -305,3 +305,15 @@ def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
     section = prompts.section("main", "Citing claims in the chat", mode)
     para = next(p for p in section.split("\n\n") if "README" in p)
     assert "out of date" in para and "read its code" in para and "words copied from a README" in para
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_keeps_the_runs_that_lead_to_an_answer_in_the_shell(mode, monkeypatch):
+    """Main's prompt says what a card is for: the numbers and records the answer rests on. The runs that lead there, such
+    as a first look at the files, run in the shell, which shows them folded as working steps; it no longer puts all of
+    main's analysis work in cards, which made a first look at the data a card on the canvas."""
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    section = prompts.section("main", "Chat and cards", mode)
+    assert "analysis work in cards" not in section and "never sees your shell output" not in section
+    bullet = next(p for p in section.split("\n- ") if "rests on in a card" in p)
+    assert "first look at the files" in bullet and "run them in the shell" in bullet and "folded" in bullet

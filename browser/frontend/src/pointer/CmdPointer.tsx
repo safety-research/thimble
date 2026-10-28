@@ -326,10 +326,23 @@ export function CmdPointer({ ws }: { ws: string }) {
         e.stopPropagation()
         return
       }
-      if (!held(e)) return
-      if (inBox(e.target)) return
+      pick(e)
+    }
+    // a disabled control, such as a button that cannot act yet, gets no mousedown, mouseup or click from the browser,
+    // only pointer events: a ⌘-press on one is picked at its pointerup, and a click that might still follow is swallowed
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.button !== 0 || press.current || !(e.target instanceof Element) || !e.target.closest(':disabled')) return
+      if (!pick(e)) return
+      swallowClick.current = true
+      window.setTimeout(() => (swallowClick.current = false), 0)
+    }
+    // a ⌘-click opens the box about what it is on: the report block, the card's part, the chunk of text or the element;
+    // false when it is no ⌘-click or is on nothing the box can be about
+    const pick = (e: MouseEvent): boolean => {
+      if (!held(e)) return false
+      if (inBox(e.target)) return false
       const a: Anchor | null = nearestAnchor(e.target)
-      if (!a) return
+      if (!a) return false
       e.preventDefault()
       e.stopPropagation()
       // a report block is picked whole, as a region
@@ -340,7 +353,7 @@ export function CmdPointer({ ws }: { ws: string }) {
         highlight.hold()
         track('pointer-open', { target: cell.anchor, detail: { cell: true } })
         openBox({ anchor: cell.anchor, anchors: [cell.anchor], text: cell.text, rect: cell.el.getBoundingClientRect(), span: false, ...pointAt(cell.el), el: cell.el, mark: 'region' })
-        return
+        return true
       }
       // a card's part is picked as a region, the card drawn around it
       const part = partOf(a, e.target, e.clientX, e.clientY)
@@ -350,7 +363,7 @@ export function CmdPointer({ ws }: { ws: string }) {
         highlight.hold()
         track('pointer-open', { target: part.anchor, detail: { part: true } })
         openBox({ anchor: part.anchor, anchors: [part.anchor], text: part.text, rect: part.rect ?? part.el.getBoundingClientRect(), span: false, ...pointAt(part.el, a.el), el: a.el, mark: 'box' })
-        return
+        return true
       }
       const t = textHitAt(e.clientX, e.clientY, a.el)
       // a click on text selects the chunk around the word, anchored to its element; a region carries its own text
@@ -362,6 +375,7 @@ export function CmdPointer({ ws }: { ws: string }) {
       track('pointer-open', { target: a.anchor })
       const at = { ...pointAt(a.el), el: a.el, mark: 'region' as const }
       openBox(chunk ? { anchor: a.anchor, anchors: [a.anchor], text: chunk.text, rect: lastLine(chunk.range) ?? t!.rect, span: true, ...at, range: chunk.range } : { anchor: a.anchor, anchors: [a.anchor], text: a.text, rect: a.el.getBoundingClientRect(), span: false, ...at })
+      return true
     }
     const onBlur = () => {
       unwait()
@@ -401,6 +415,7 @@ export function CmdPointer({ ws }: { ws: string }) {
     document.addEventListener('mousemove', onMouseMove, true)
     document.addEventListener('mouseup', onMouseUp, true)
     document.addEventListener('click', onClick, true)
+    document.addEventListener('pointerup', onPointerUp, true)
     return () => {
       offHover()
       offPoint()
@@ -412,6 +427,7 @@ export function CmdPointer({ ws }: { ws: string }) {
       document.removeEventListener('mousemove', onMouseMove, true)
       document.removeEventListener('mouseup', onMouseUp, true)
       document.removeEventListener('click', onClick, true)
+      document.removeEventListener('pointerup', onPointerUp, true)
       unwait()
       off()
       endPress()
