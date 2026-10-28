@@ -17,9 +17,10 @@
 //
 // A bar too narrow for its items gives way in this order: the words of an item that has shorter ones (`] next heads up`
 // to `] next`, then `]` alone), the busy step's other steps, then its words (whole words, down to its glyph and
-// seconds), then the labels' count, coverage's file counts and coverage. What gave way takes back the room left, the
-// busy step first. The keys stay: what still does not fit goes on more rows, each item whole, the right's items on a
-// row of their own when beside the first row they would take no fewer rows. The settings pane draws the same bar as
+// seconds), then coverage's file counts, and only then a whole count: the labels', then coverage. What gave way takes
+// back the room left: coverage's file counts first, then the busy step, then the words of such an item. The keys stay:
+// what still does not fit goes on more rows, each item whole, the right's items on a row of their own when beside the
+// first row they would take no fewer rows. The settings pane draws the same bar as
 // its switches would leave it (`preview`), on as many rows as its items take: nothing in it is a press, no work shows
 // and nothing gives way.
 import type { EngineInterface } from 'claude-code'
@@ -51,7 +52,7 @@ export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'l
  *  what holds the keys now (the open tray, the open chips); while any shows, the bar's left names only those, after
  *  the busy step. `color` and `bold`: words drawn lit (`s ● short`) or as a failure, not dim. `shorter`: the words in
  *  fewer cells, longest first, which a narrow bar draws before any count gives way; '' is the key alone, drawn as the
- *  words would be (lit in the item's color, else dim). */
+ *  bar's other keys are (in the item's color when it has one), never dim, as a dim key reads as one that does nothing. */
 type Item = { id: string; key?: string; words: string; shorter?: string[]; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean }
 /** An item a feature puts on the bar (core/answerview.ts barLeft, barRight). */
 export type BarItem = Item
@@ -59,9 +60,8 @@ export type BarItem = Item
 const len = textWidth
 /** How an item's words are drawn: dim, or in the item's own color. */
 const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
-/** How an item's key is drawn: in thimble's color, bold; a key alone as its words would be, so it still says whether
- *  the item is lit. */
-const keyLook = (x: Item) => (x.words ? { color: accent(), bold: true } : x.color ? { color: x.color, bold: true } : { dimColor: true })
+/** How an item's key is drawn: in thimble's color, bold; a key alone in the item's color when it has one. */
+const keyLook = (x: Item) => ({ color: !x.words && x.color ? x.color : accent(), bold: true })
 const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + (x.words ? 1 : 0) : 0) + len(x.words)
 /** The item in its shortest words. */
 const shortest = (x: Item): Item => (x.shorter?.length ? { ...x, words: x.shorter[x.shorter.length - 1]! } : x)
@@ -168,12 +168,16 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   let left = whole
   if (!preview) {
     // a narrow bar: the words of an item that has shorter ones give way first, then the busy step, down to its glyph and
-    // seconds, then the labels' count, coverage's file counts and coverage. What gave way takes back the room left: the
-    // busy step first, then each such item the longest of its words that fits
+    // seconds, then coverage's file counts, and only then a whole count: the labels', then coverage. What gave way takes
+    // back the room left: coverage's file counts (beside coverage alone), then the busy step, then each such item the
+    // longest of its words that fits
     const least = whole.map((x, i) => (b && !i ? busyItem(b, 0) : shortest(x)))
-    if (spare(least, right) < 0) right = right.filter(x => x.id !== 'labels' || !counted(x))
+    const all = right
     if (spare(least, right) < 0) right = right.map(x => (x.id === 'coverage' && counted(x) ? { ...x, words: x.words.replace(/ \(.*\)$/, '') } : x))
+    if (spare(least, right) < 0) right = right.filter(x => x.id !== 'labels' || !counted(x))
     if (spare(least, right) < 0) right = right.filter(x => x.id !== 'coverage' || !counted(x))
+    const back = right.map(x => all.find(y => y.id === x.id) ?? x)
+    if (spare(least, back) >= 0) right = back
     left = [...least]
     if (b) left[0] = busyItem(b, len(least[0]!.words) + spare(least, right))
     whole.forEach((x, i) => {
