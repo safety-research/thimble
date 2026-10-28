@@ -268,16 +268,21 @@ def test_two_thimble_homes_side_by_side_each_start_and_find_their_own_server(tmp
         assert out.returncode == 0, out
         return out.stdout.splitlines()
 
+    def log(name: str) -> str:  # the end of the server's log, which says why a start failed
+        p = homes[name] / "server.log"
+        return p.read_text(errors="replace")[-1500:] if p.exists() else ""
+
     ports: list[int] = []
     try:
         first = up("a")
         st_a = json.loads((homes["a"] / "server.json").read_text())
         ports.append(st_a["port"])
-        assert st_a["port"] == shared and first[0] == f"thimble: http://127.0.0.1:{shared}/?ws=mini", first
+        assert st_a["port"] == shared and first[0] == f"thimble: http://127.0.0.1:{shared}/?ws=mini", (first, log("a"))
         second = up("b")
         st_b = json.loads((homes["b"] / "server.json").read_text())
         ports.append(st_b["port"])
-        assert st_b["port"] != shared and second[0] == f"thimble: http://127.0.0.1:{st_b['port']}/?ws=mini", second
+        assert st_b["port"] != shared and second[0] == f"thimble: http://127.0.0.1:{st_b['port']}/?ws=mini", (
+            second, log("b"))
         assert not any("(set by THIMBLE_PORT)" in ln for ln in second), "no FOREIGN_LINE without THIMBLE_PORT"
         assert st_a["pid"] != st_b["pid"] and cli.pid_alive(st_a["pid"]) and cli.pid_alive(st_b["pid"])
         for name, st in (("a", st_a), ("b", st_b)):
