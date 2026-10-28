@@ -62,6 +62,7 @@ TERMINAL = "terminal"  # created_by of the terminal session's cells and notebook
 # Where the terminal session's cells land: the analyst's notebook, each cell stamped `created_by: terminal`. A workspace
 # holding a root notebook stamped `created_by: terminal` keeps writing into it (find_terminal_notebook). Groups the
 # session's add_card makes are not stamped `terminal` (_group_author).
+MAIN_GROUP_AUTHOR = "main"  # created_by of a group main makes for a sequence of cards, at the root (_group_author)
 BROWSER_AUTHOR = "user"  # a browser chat's comments, labels and report requests: the analyst asking through their chat
 # created_by of a cell the analyst's caller outside the terminal writes when the call names no chat (one that does
 # stamps `chat:<id>`, cell_author); never `user` or `terminal`.
@@ -492,11 +493,11 @@ def _own_root(r: dict) -> bool:
 
 
 def analyst_notebook(c: str) -> str:
-    """The human's notebook id, where browser-originated cells land and by default the terminal session's:
-    settings.active_notebook when it is theirs, else the newest of theirs with cells, else the newest, else a new
+    """The human's notebook id, where a card made where the analyst wrote (`request:<id>`) lands, and the own group of
+    the analyst's callers other than main (Ctx.nb_id): settings.active_notebook when it is theirs, else the newest of theirs with cells, else the newest, else a new
     "Your
     work", bound as settings.active_notebook. Theirs means a root group of role analyst that no thread owns
-    (_own_root)."""
+    (_own_root), and neither the loose group nor a group main made for a sequence of cards."""
     from . import notebook
     from .ledger import read_json, write_json
 
@@ -505,7 +506,7 @@ def analyst_notebook(c: str) -> str:
     own = [r for r in notebook.list_notebooks(ws)
            if (r.get("role") or notebook.DEFAULT_ROLE) == "analyst" and (term is None or r["id"] != term["id"])
            and r.get("kind") != notebook.LOOSE_KIND  # the cards dragged out of every frame are nobody's notebook
-           and _own_root(r)]
+           and r.get("created_by") != MAIN_GROUP_AUTHOR and _own_root(r)]
     settings = read_json(ws / "settings.json", {})
     settings = settings if isinstance(settings, dict) else {}
     active = settings.get("active_notebook")
@@ -1074,8 +1075,11 @@ def _group_name(rows: "builtins.list[dict]", row: dict) -> str:
 
 
 def _group_author(ctx: Ctx) -> str | None:
-    """created_by of a group a caller's add_card makes: the caller's name, but never `terminal`, which marks the
-    session's own notebook (find_terminal_notebook); the terminal's cards in it say who made them."""
+    """created_by of a group a caller's add_card makes: MAIN_GROUP_AUTHOR for main's, which is never the analyst's
+    notebook (analyst_notebook); else the caller's name, but never `terminal`, which marks the session's own notebook
+    (find_terminal_notebook); the terminal's cards in it say who made them."""
+    if _mains(ctx):
+        return MAIN_GROUP_AUTHOR
     author = ctx.cell_author
     return None if author == TERMINAL else author
 
@@ -1085,8 +1089,9 @@ def _group_id(ctx: Ctx, group: str, made: "builtins.list[str]") -> str:
     group for
     `thread:<id>`; the analyst's Your work for `request:<id>`; a path of titles (group_path); a group by id or title;
     else a
-    new group with that title under the caller's own group, its role by the title's last word. A session with its own
-    group (own_group_session) never reaches the analyst's groups. Titles made are appended to `made`."""
+    new group with that title, its role by the title's last word: main's at the root, since main names a group for a
+    sequence of cards, another caller's under its own group. A session with its own group (own_group_session) never
+    reaches the analyst's groups. Titles made are appended to `made`."""
     from . import notebook, threads
 
     if own_group_session(ctx.session):
@@ -1113,7 +1118,8 @@ def _group_id(ctx: Ctx, group: str, made: "builtins.list[str]") -> str:
     row = _find_notebook(ctx.ws, group)
     if row is not None:
         return str(row["id"])
-    nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), parent=ctx.nb_id(), created_by=_group_author(ctx))
+    parent = None if _mains(ctx) else ctx.nb_id()
+    nb = notebook.create_notebook(ctx.ws, group, role=_role_by_title(group), parent=parent, created_by=_group_author(ctx))
     made.append(group)
     return str(nb["id"])
 
@@ -1125,11 +1131,16 @@ def _group_role(ctx: Ctx, nb_id: str) -> str:
     return str((nb or {}).get("role") or notebook.DEFAULT_ROLE)
 
 
-# The group a card lands in when add_card or apply_label names none (default_group): the active group, else the last
-# one, else Your work.
-ACTIVE_GROUP_KEY = "active_group"  # settings.json: the frame the analyst last selected or worked in (active_group_route)
-# The group each caller last added a card to, by _caller, kept in memory.
+# The group a card lands in when add_card or apply_label names none (default_group): none for main's card, which stands
+# loose on the canvas, since a group is for a sequence of cards and main's call names it; for another caller the group
+# it last added a card to, else its own. The group each caller last added a card to, by _caller, kept in memory:
 _last_group: dict[tuple[str, ...], str] = {}
+
+
+def _mains(ctx: Ctx) -> bool:
+    """Whether a call is main's: the analyst's caller through main's shim with no notebook and no session of thimble's,
+    as main's forks and subagents call too."""
+    return ctx.actor == ANALYST and not ctx.notebook and not ctx.session
 
 
 def _caller(ctx: Ctx) -> tuple[str, ...]:
@@ -1152,27 +1163,15 @@ def _live_group(ws: Path, nb_id: object) -> str | None:
     return nb_id
 
 
-def active_group(c: str) -> str | None:
-    """The group the analyst has active on the canvas, as the browser last reported it (active_group_route), while that
-    group still exists; None when the browser has reported none."""
-    from .ledger import read_json
-
-    ws = config.workspace_dir(c)
-    settings = read_json(ws / "settings.json", {})
-    return _live_group(ws, settings.get(ACTIVE_GROUP_KEY) if isinstance(settings, dict) else None)
-
-
 def default_group(ctx: Ctx) -> str:
-    """The group a card lands in when the call names none. A caller with a notebook of its own uses it; the orientation
-    gets
-    its deck. Otherwise: the group active in the browser (main's session only), then the group this caller last added
-    a
-    card to, then the caller's own group (Ctx.nb_id)."""
+    """The group a card lands in when the call names none. Main's card stands loose on the canvas, outside every frame
+    (notebook.loose_group), never in the analyst's Your work. A caller with a notebook of its own uses it. Otherwise:
+    the group this caller last added a card to, then the caller's own group (Ctx.nb_id)."""
+    from . import notebook
+
+    if _mains(ctx):
+        return notebook.loose_group(ctx.ws)
     if not ctx.notebook:
-        if ctx.actor == ANALYST and not ctx.session:
-            hit = active_group(ctx.c)
-            if hit:
-                return hit
         hit = _live_group(ctx.ws, _last_group.get(_caller(ctx)))
         if hit:
             return hit
@@ -2622,11 +2621,11 @@ async def _h_apply_label(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
         target = None
     elif group:
         target = _group_id(ctx, group, [])
-    elif (prior is None or not concepts._label_cards(ctx.ws, prior["id"])) and GROUP_PATH_SEP not in name \
-            and request_of(name) is None and threads.group_of(ctx.c, name) is None:
-        # a new label's card with no group named gets a group of its own, named after the label (by its title alone,
-        # never read as a path or a thread), rather than the group of the last card the caller made (live check
-        # term-fix10, quirk 9: a label card landed in "Deletes per day, 18 to 26 June")
+    elif not _mains(ctx) and (prior is None or not concepts._label_cards(ctx.ws, prior["id"])) \
+            and GROUP_PATH_SEP not in name and request_of(name) is None and threads.group_of(ctx.c, name) is None:
+        # another caller's new label with no group named gets a group of its own, named after the label (by its title
+        # alone, never read as a path or a thread), rather than the group of the last card the caller made (live check
+        # term-fix10, quirk 9: a label card landed in "Deletes per day, 18 to 26 June"); main's stands loose
         target = _group_id(ctx, name, [])
     else:
         target = default_group(ctx)  # the card the label has already stays where it is (concepts.label_card)
@@ -3161,25 +3160,3 @@ async def until_dropped(receive: Callable[[], Awaitable[dict[str, Any]]], work: 
     with contextlib.suppress(asyncio.CancelledError, Exception):
         await task
     return None
-
-
-class ActiveGroupBody(BaseModel):
-    group: str  # a group's id
-
-
-@router.put("/ws/{c}/canvas/active-group")
-async def active_group_route(c: str, body: ActiveGroupBody) -> dict[str, Any]:
-    """The browser's report of the frame the analyst last selected, stored in settings.json (ACTIVE_GROUP_KEY) for
-    default_group. {group}; 404 for a group a card cannot land in."""
-    from .ledger import read_json, write_json, ws_dir
-
-    ws = ws_dir(c)
-    gid = _live_group(ws, body.group.strip())
-    if gid is None:
-        raise HTTPException(404, f"no group {body.group!r} a card can land in")
-    path = ws / "settings.json"
-    settings = read_json(path, {})
-    settings = settings if isinstance(settings, dict) else {}
-    if settings.get(ACTIVE_GROUP_KEY) != gid:
-        write_json(path, {**settings, ACTIVE_GROUP_KEY: gid})
-    return {"group": gid}

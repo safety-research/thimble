@@ -587,7 +587,7 @@ export function analystGroup(groups: readonly Group[]): Group | null {
 
 /**
  * The frame the analyst has active: the frame whose title is selected, else the frame of the selected cards when they
- * all sit in one; null otherwise. The server puts a model's card there when the call names no group.
+ * all sit in one; null otherwise.
  */
 export function activeFrame(board: Board, frame: string | null, cards: readonly string[]): string | null {
   if (frame) return board.group.has(frame) ? frame : null

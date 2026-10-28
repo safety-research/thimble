@@ -723,8 +723,6 @@ export const canvasApi = {
   patchCell: (c: string, id: string, patch: CellPatch) => j<Cell>(`${ws(c)}/cells/${enc(id)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   /** `POST /cells/move`: reorder cards, move them to another group, or place one free. */
   move: (c: string, body: CellMoveBody) => j<Cell[]>(`${ws(c)}/cells/move`, { method: 'POST', body: JSON.stringify(body) }),
-  /** `PUT /canvas/active-group`: the frame the analyst last selected or worked in, where a model's card goes when its call names no group. */
-  activeGroup: (c: string, group: string) => j<{ group: string }>(`${ws(c)}/canvas/active-group`, { method: 'PUT', body: JSON.stringify({ group }) }),
 }
 
 // --- the report editor ---

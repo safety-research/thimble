@@ -4042,9 +4042,9 @@ def _label_cards(ws: Path, concept_id: str) -> list[tuple[dict, dict]]:
 
 
 def label_card(c: str, concept: dict, group: str | None, created_by: str, question: str | None = None) -> dict:
-    """The concept's card on the canvas: a cell of kind `label` with payload {concept}, in `group` (the analyst's own group
-    by default), titled with `question`, else the label's name. An existing card is kept and takes a new question when one
-    is given, unless the analyst locked it."""
+    """The concept's card on the canvas: a cell of kind `label` with payload {concept}, in `group`, by default loose on
+    the canvas outside every frame (notebook.loose_group), titled with `question`, else the label's name. An existing
+    card is kept and takes a new question when one is given, unless the analyst locked it."""
     from . import notebook
 
     ws = _ws(c)
@@ -4058,9 +4058,7 @@ def label_card(c: str, concept: dict, group: str | None, created_by: str, questi
             return dict(cell)
     nb = notebook.read_notebook(ws, group) if group and ID_RE.match(group) else None
     if nb is None:
-        from . import tools
-
-        nb = notebook.read_notebook(ws, tools.analyst_notebook(c))
+        nb = notebook.read_notebook(ws, notebook.loose_group(ws))
     cell = notebook.new_cell("label", created_by, title or concept["name"], nb["id"], payload={"concept": concept["id"]})
     notebook.insert_cell(c, nb["id"], cell)
     _emit(c, {"type": "cell", "notebook": nb["id"], "cell": cell["id"], "kind": "note"})

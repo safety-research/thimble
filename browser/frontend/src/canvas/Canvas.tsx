@@ -466,16 +466,14 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     return () => ro.disconnect()
   }, [data != null])
 
-  // the frame the analyst last selected or worked in, reported to the server as it changes: a model's card whose call
-  // names no group goes there (tools.default_group). Clearing the selection reports nothing, so the last frame stays.
+  // the frame the analyst last selected or worked in, recorded as it changes (telemetry's notebook-switch). Clearing the
+  // selection records nothing, so the last frame stays.
   const workFrame = useMemo(() => (board ? activeFrame(board, gsel, sel) : null), [board, gsel, sel])
   const reported = useRef<{ ws: string; group: string } | null>(null)
   useEffect(() => {
     if (!workFrame || (reported.current?.ws === ws && reported.current.group === workFrame)) return
     reported.current = { ws, group: workFrame }
-    canvasApi.activeGroup(ws, workFrame).catch(() => {
-      reported.current = null
-    })
+    track('notebook-switch', { target: `group:${workFrame}` })
   }, [ws, workFrame])
 
   // the latest of everything, for the window listeners a press installs
