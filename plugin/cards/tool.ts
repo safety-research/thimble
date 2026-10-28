@@ -62,7 +62,6 @@ const SCHEMA = {
       items: { type: 'object', required: ['old', 'new'], properties: { old: { type: 'string' }, new: { type: 'string' } } },
     },
     id: { type: 'string', description: 'the id of a card you drew: alone, to move the card as it is to this call; with `edits`, `view` or `data`, for a new version in its place' },
-    change: { type: 'string', description: 'with `id`: what this version changes and why, in a few words, for the analyst; the card shows it when an earlier answer showed the card' },
     actions: {
       type: 'array',
       description: 'keys and clicks to try in order; each returns a text copy, then the card goes back',
@@ -155,13 +154,6 @@ async function readView($: Engine, last: string): Promise<{ text?: string; bad?:
 
 const baseName = (p: string) => String(p).split('/').filter(Boolean).pop() ?? String(p)
 const oneLine = (s: string, n: number) => { const t = String(s ?? '').replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f-\u009f]/g, '').trim(); return [...t].length > n ? `${[...t].slice(0, n - 1).join('')}…` : t }
-
-/** What a mark says changed, with what a later version adds: each in its own sentence, none twice. */
-function alsoSaid(was: string, now: string): string {
-  if (!now || was.includes(now)) return was
-  if (!was) return now
-  return `${was}${/[.!?]$/.test(was) ? '' : '.'} ${now}`
-}
 
 /** A text copy for Claude: at most COPY_LINES lines, and a note on the lines cut at the card's width. */
 function copyText(lines: string[], cut: number[], width: number): string[] {
@@ -279,16 +271,9 @@ export async function cardCall($: Engine, e: Any): Promise<{ result: string }> {
   // once main's turn that drew it ended), main's version stands at its own call
   const stays = meta.version > 0 && (!!fork || (await canRedraw($, meta.turn)))
   const home = stays ? { toolUseId: meta.toolUseId, anchorRow: meta.anchorRow, turn: meta.turn, inRow: meta.inRow ?? null } : { toolUseId, anchorRow, turn: fork ? meta.turn : await mainTurn($), inRow: null }
-  // a version that replaces one an earlier answer showed (another turn of main's, or another run of a fork) is marked
-  // on the card with what Claude says it changes and why (draw.ts frame); a later version of the same turn keeps the
-  // mark and adds its own words, so the mark says all that changed since the version that answer showed
-  const by = input.agentId ? `agent:${input.agentId}` : `turn:${await mainTurn($)}`
-  const said = oneLine(String(input.change ?? ''), 300)
-  const fix = meta.version > 0 && meta.by && meta.by !== by ? { version, was: meta.version, change: said }
-    : meta.fix ? { ...meta.fix, version, change: oneLine(alsoSaid(meta.fix.change, said), 600) } : undefined
   const next: CardMeta = {
     ...meta, ...home, version, last: version, lastFile: file, title, keys, read: String(r.summary.read), columns: r.summary.columns, file,
-    gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null, by, ...(fix ? { fix } : {}),
+    gen: meta.gen + 1, error: null, errorWidth: null, at: Date.now(), agentId: input.agentId ? String(input.agentId) : null,
   }
   await remember(next, { version, title, file, read: next.read })
   await setTree($, id, { gen: next.gen, width, tree: r.tree, seq: Number(r.seq) || 0 })

@@ -4,9 +4,10 @@
 // part under the pointer once it has been held alone for about 300 ms, or at once while the page's own pointer is on; a
 // ⌘-click asks about the part at once and selects no text, the page's bare background asks about the whole card, and a
 // key pressed with ⌘ lets go of it. A wheel turn nothing in the page scrolls goes to the page, a pinch always, with the
-// browser's own zoom stopped. On the page, what the frame says is about the card around the frame, at the frame's box as
-// the zoomed canvas draws it, and a wheel turn reaches the boxes around the frame as one over it. The frame half runs in a
-// jsdom window of its own.
+// browser's own zoom stopped. A page wider than the card does not scroll sideways, so a sideways turn over it goes to the
+// page too. On the page, what the frame says is about the card around the frame, at the frame's box as the zoomed canvas
+// draws it, and a wheel turn reaches the boxes around the frame as one over it. The frame half runs in a jsdom window of
+// its own.
 import { JSDOM } from 'jsdom'
 import { afterEach, describe, expect, test } from 'vitest'
 import { bridgeScript, cardBridge, fromCardPage } from '../../src/canvas/cardBridge.ts'
@@ -121,6 +122,20 @@ describe('the wheel over a custom card', () => {
     expect(of('wheel')).toEqual([])
     // at its top, a turn up is no longer the box's
     wheel(el('row'), { deltaY: -40 })
+    expect(of('wheel')).toHaveLength(1)
+  })
+
+  test('a page wider than the card does not scroll sideways: a sideways turn over it goes to the page, and it still scrolls up and down', async () => {
+    await load(`<div id="wide" style="width:1200px">steps</div>`)
+    const doc = dom.window.document
+    const page = doc.documentElement
+    // laid out 1200 px wide and 900 px tall in a frame 400 by 300 (jsdom lays out nothing, and has no scrollingElement)
+    Object.defineProperty(doc, 'scrollingElement', { value: page })
+    for (const [k, v] of Object.entries({ scrollWidth: 1200, clientWidth: 400, scrollHeight: 900, clientHeight: 300 })) Object.defineProperty(page, k, { value: v })
+    expect(dom.window.getComputedStyle(page).overflowX).toBe('hidden')
+    wheel(el('wide'), { deltaX: 40 })
+    expect(of('wheel')).toMatchObject([{ deltaX: 40 }])
+    wheel(el('wide'), { deltaY: 40 })
     expect(of('wheel')).toHaveLength(1)
   })
 

@@ -54,6 +54,11 @@ export function cardBridge(holdMs: number, mac: boolean): void {
   sheet.textContent = 'html[data-thimble-cmd],html[data-thimble-cmd] *{cursor:var(--thimble-cmd-cursor)!important}'
   ;(document.head || root).appendChild(sheet)
   const arrow = (on: boolean) => root.toggleAttribute('data-thimble-cmd', on && !!root.style.getPropertyValue('--thimble-cmd-cursor'))
+  // the page does not scroll sideways: a page wider than the card is cut at the card's edge, as a card's body is, and
+  // the card dragged wider shows more of it; a sideways turn over it is the canvas's (scrolls)
+  const noSideways = document.createElement('style')
+  noSideways.textContent = 'html{overflow-x:hidden!important}'
+  ;(document.head || root).appendChild(noSideways)
 
   // its text as it reads (an SVG element has no innerText)
   const textOf = (el: Element) =>
@@ -153,7 +158,8 @@ export function cardBridge(holdMs: number, mac: boolean): void {
     else if (!pageOn && !ownOn) point(null)
   })
 
-  // Whether a box under the pointer, or the page itself, can still scroll the way the wheel turns most.
+  // Whether a box under the pointer, or the page itself (only up and down), can still scroll the way the wheel turns
+  // most.
   const scrolls = (t: EventTarget | null, dx: number, dy: number) => {
     const across = Math.abs(dx) > Math.abs(dy)
     const d = across ? dx : dy
@@ -164,7 +170,7 @@ export function cardBridge(holdMs: number, mac: boolean): void {
       if ((o === 'auto' || o === 'scroll') && room(el)) return true
     }
     const page = document.scrollingElement
-    return !!page && room(page)
+    return !across && !!page && room(page)
   }
   // A turn the page did not take goes to the canvas. A pinch (ctrl) or a ⌘ turn always does, and the browser does not
   // also zoom or scroll here; any other turn the page's boxes cannot scroll still runs its course, so a page that holds
