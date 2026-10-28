@@ -6,8 +6,9 @@
 // about. A frame that holds no card of its own and one frame in its flow shares that frame's box, so a card in a path
 // of frames stands in one box (Canvas names the path in one title row). A collapsed frame shows its nested groups and
 // its first card, with the edges of the others stacked under it; a lone card folds to its question, and a frame with
-// no card of its own shows its title alone, with no box under it. Root frames sit at their `pos`, or below the root before them; loose cards
-// sit at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
+// no card of its own shows its title alone, with no box under it. Root frames sit at their `pos`, or below the root
+// before them; loose cards sit at their own `pos`. Empty thread groups are not drawn. `View` is the plane's pan and
+// zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
