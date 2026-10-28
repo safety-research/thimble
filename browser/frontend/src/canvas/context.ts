@@ -21,6 +21,9 @@ export interface CanvasCtx {
   /** open a card's details in the panel at the board's right (a label card's Definition and records); none where no
    * board holds the card, as in a report's figure and the card harness, where a label card offers no such button */
   openDetail?: (cellId: string) => void
+  /** a card's body drew taller than the canvas shows at rest (DataViz CARD_BODY_MAX): its height, px, which the server
+   * tells the card's author (backend card_size); none where no board holds the card, as in the card harness */
+  drawn?: (cellId: string, height: number) => void
 }
 
 export const CanvasContext = createContext<CanvasCtx>({

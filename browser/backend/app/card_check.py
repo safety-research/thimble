@@ -1,14 +1,16 @@
 """The card check: once a card has its takeaway, it is drawn offscreen, one model reading of the picture assesses it
 against five criteria (prompts/card-check.md) and gives the card that replaces it, and the replacement is applied in
 place, with Undo in the card's details. The card shows the check only for a real problem: a red ✕ for numbers its code
-types in, or for a replacement that would not run. Nothing of the check goes back to the card's author. Label cards
-are drawn from their label and get no reading.
+types in, or for a replacement that would not run. Of the check, only the drawing's size goes back to the card's
+author: a body drawn taller than the canvas shows at rest (card_size). Label cards are drawn from their label and get no
+reading.
 
 tools.call hands every thimble tool result to after_tool(); an add_card or edit_card result starts a check of its card
 when wants_check() holds and the workspace's automatic check is on (auto: thimble's config `agents.cardCheck.auto`). A
 new change to the card cancels a running check and starts the next. At most READ_CONCURRENCY readings run at once. Each check:
 1. Draw: render.render_card shoots the card with the app's own card face; a card that did not draw ends the check
-   `error`. Where no card can be drawn (render.down), no check begins, and one that began is taken off the card.
+   `error`. Where no card can be drawn (render.down), no check begins, and one that began is taken off the card. A body
+   drawn past card_size.BODY_MAX is told to the card's author with its next call (card_size.tell).
 2. Critique: the `verify` role's model reads the question, takeaway, resolved links, code, the work that led to the
    card (context.render) and the picture, names what fails each criterion, and gives the replacement card.
 3. Replace: the parts that differ and that the check may change (checkstore.fixable) are tried on a copy of the card
@@ -527,6 +529,9 @@ async def _check(run: _Run) -> None:
             return
         _end(run, "error", f"the card did not draw: {drawn.error}")
         return
+    from . import card_size  # noqa: PLC0415
+
+    card_size.tell(c, cell, drawn.body)
     typed = (typed_numbers(str(cell.get("code") or ""), shown_numbers(notebook.get_cell(c, cid, full_outputs=True) or cell))
              if cell.get("code") else [])
     if typed:

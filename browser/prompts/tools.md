@@ -615,6 +615,10 @@ The code was stopped after {limit}. Make it faster and run it again with `edit_c
 
 The card's code did not run yet. Run this command with Bash next: `{command}`. It runs the code and prints the card's result with the start of each output. thimble shows the card when its code has run.
 
+## card-tall
+
+card:{cid}'s body draws {height} px tall at the card's width, and the canvas shows {limit} px of a card's body at rest, so the analyst sees its first screen and Show all, never the whole card at once.
+
 ## kind-mismatch
 
 card:{cid} is a `{kind}` card but its output is {shape}. Change the code or the `kind` with `edit_card`.

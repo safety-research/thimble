@@ -543,7 +543,9 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
     setHistoryOf(null)
     setDetail(id)
   }, [])
-  const ctx: CanvasCtx = useMemo(() => ({ ws, filters, keep: kept, concepts, threadOf, unread, refresh, openThread, openDetail }), [ws, filters, kept, concepts, threadOf, unread, refresh, openThread, openDetail])
+  // a card drawn taller than the canvas shows at rest: the server tells its author (backend card_size)
+  const tall = useCallback((id: string, height: number) => void api.cardDrawn(ws, id, height).catch(() => undefined), [ws])
+  const ctx: CanvasCtx = useMemo(() => ({ ws, filters, keep: kept, concepts, threadOf, unread, refresh, openThread, openDetail, drawn: tall }), [ws, filters, kept, concepts, threadOf, unread, refresh, openThread, openDetail, tall])
   // the comments beside the cards: a check's while it is on, on a card that is drawn and that the filters keep
   const shownNotes = useMemo(() => (lay ? shownCanvasComments(notes.comments, checks.on, (id) => lay.rects.has(id), kept) : []), [notes.comments, checks.on, lay, kept])
   const cardEl = useCallback((id: string) => cardEls.current.get(id), [])

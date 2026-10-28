@@ -656,7 +656,8 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
     batch = None
     # a session thimble started (the orientation, a writer) owns the steps its calls make (undo, sessions)
     with undo.batching(batch), undo.acting_session(session):
-        with canvas_history.acting(Ctx(c, actor, notebook, terminal, anchor, chat, session).cell_author):  # who changed a card
+        author = Ctx(c, actor, notebook, terminal, anchor, chat, session).cell_author
+        with canvas_history.acting(author):  # who changed a card
             res = await _run(spec, c, name, args, actor, notebook, terminal, anchor, chat, session, tool_use_id)
         # the card check (card_check.py): a card add_card or edit_card wrote is drawn and read once it has its
         # takeaway; nothing of the check joins this result
@@ -668,6 +669,10 @@ async def call(c: str, name: str, args: dict[str, Any] | None, *, actor: str = A
             from . import marks  # noqa: PLC0415
 
             marks.card_written(c, card_check.card_of(name, args, res.text, anchor))
+    # a card of this caller's that drew taller than the canvas shows (card_size): told with this result
+    from . import card_size  # noqa: PLC0415
+
+    res = card_size.with_notes(c, author, res)
     return with_call_line(name, args, res)
 
 

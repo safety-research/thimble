@@ -37,7 +37,7 @@ import { entryParts, exampleEntries, type ExampleEntry } from './quotes'
 const fail = (e: unknown) => bus.emit('toast', { text: (e as Error)?.message || String(e), kind: 'error' })
 
 export function CardBody({ cell, width, label, big = false }: { cell: Cell; width: number; label: ConceptDetailState; big?: boolean }) {
-  const { ws, concepts } = useContext(CanvasContext)
+  const { ws, concepts, drawn } = useContext(CanvasContext)
   const kind = kindOf(cell)
   const payload = (cell.payload ?? {}) as Record<string, unknown>
   switch (kind) {
@@ -62,7 +62,7 @@ export function CardBody({ cell, width, label, big = false }: { cell: Cell; widt
     case 'custom': {
       const html = typeof payload.html === 'string' ? payload.html : ''
       const libs = Array.isArray(payload.libs) ? (payload.libs as unknown[]).filter((x): x is string => typeof x === 'string') : undefined
-      return html ? <CustomFrame html={html} title={cell.title} height={typeof payload.height === 'number' ? payload.height : undefined} ws={ws} libs={libs} /> : null
+      return html ? <CustomFrame html={html} title={cell.title} height={typeof payload.height === 'number' ? payload.height : undefined} ws={ws} libs={libs} onTall={drawn ? (h) => drawn(cell.id, h) : undefined} /> : null
     }
     case 'plan':
       return <PlanBody cell={cell} />

@@ -61,12 +61,14 @@ def enabled() -> bool:
 @dataclass
 class Rendered:
     """One card drawn: `png` the card at SCALE (None when the page failed), its box and its card-type frames' boxes in
-    CSS px, whether the fonts the card asks for were loaded, the API paths the page asked for that the request did not
-    answer, and the times in ms."""
+    CSS px, the height its body draws at the card's width (`body`, px: a custom card's page whole, past what the canvas
+    shows at rest; card_size), whether the fonts the card asks for were loaded, the API paths the page asked for that
+    the request did not answer, and the times in ms."""
 
     png: bytes | None = None
     box: dict[str, float] = field(default_factory=dict)
     frames: list[dict[str, float]] = field(default_factory=list)
+    body: float = 0.0
     fonts: bool = True
     requests: list[str] = field(default_factory=list)
     ms: dict[str, float] = field(default_factory=dict)
@@ -281,6 +283,7 @@ class Pool:
         t1 = time.perf_counter()
         res.box = out.get("box") or {}
         res.frames = [f for f in out.get("frames") or [] if isinstance(f, dict)]
+        res.body = float(out["body"]) if isinstance(out.get("body"), (int, float)) else 0.0
         res.fonts = bool(out.get("fonts", True))
         res.requests = list(out.get("requests") or [])
         res.error = str(out.get("error") or "")
