@@ -61,7 +61,9 @@ const len = textWidth
 /** How an item's words are drawn: dim, or in the item's own color. */
 const wordLook = (x: Item) => (x.color ? { color: x.color, ...(x.bold ? { bold: true } : {}) } : { dimColor: true, ...(x.bold ? { bold: true } : {}) })
 /** How an item's key is drawn: in thimble's color, bold; a key alone in the item's color when it has one. */
-const keyLook = (x: Item) => ({ color: !x.words && x.color ? x.color : accent(), bold: true })
+function keyLook(x: Item) {
+  return { color: !x.words && x.color ? x.color : accent(), bold: true }
+}
 const itemLen = (x: Item) => (x.glyph ? len(x.glyph) + 1 : 0) + (x.key ? len(x.key) + (x.words ? 1 : 0) : 0) + len(x.words)
 /** The item in its shortest words. */
 const shortest = (x: Item): Item => (x.shorter?.length ? { ...x, words: x.shorter[x.shorter.length - 1]! } : x)
