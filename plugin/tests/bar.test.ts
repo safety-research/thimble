@@ -431,63 +431,117 @@ test('the first session\'s hint says where the settings are, in the bar in place
   expect(band.split('click thimble for settings.').length).toBe(2)
 })
 
-test("the first session's hint comes with a legend above the bar, once: heads-up and explainer on the fills their marks have in answers, then select words for e and c; the first prompt takes it with the hint", async ($, on) => {
-  world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+/** The node of a drawing whose key is `key`, or null. */
+function byKey(n: Any, key: string): Any {
+  if (!n || typeof n !== 'object') return null
+  if (Array.isArray(n)) { for (const x of n) { const f = byKey(x, key); if (f) return f } return null }
+  if (n.props?.key === key) return n
+  return byKey(n.props?.children, key) ?? byKey(n.children, key)
+}
+
+/** What the observer's look answers after an answer: an explainer and a heads-up on words of MARKED (made up). */
+const marksReply = (o: { glosses?: boolean } = {}) => JSON.stringify({
+  glosses: o.glosses === false ? [] : [{ term: 'retry budget', body: 'How many times the client tries again.' }],
+  heads: { term: '30 seconds after a drop', title: 'Only one network', bullets: ['The log covers one office.'] },
+  claims: [],
+})
+const MARKED = 'Uploads fail after the retry budget runs out: 41 of the 44 failures came 30 seconds after a drop.'
+const answerRow = (requestId: string, text: string) => ({ plugin: 'thimble', component: 'AssistantMessage', surface: 'terminal', requestId, viewport: { columns: 100, rows: 40, isFullscreen: true }, props: { text, isFirstOfReply: true } }) as never
+
+/** The looks after main's answers, each answering the next of `replies` ('{}' once they ran out), and the turns'
+ *  starts (answered). */
+function looks(on: Any, replies: string[]) {
+  on('model.fork', () => ({ value: { isAnswered: true, text: replies.shift() ?? '{}' } }))
+  on('turn.start', (_$: unknown, e: Any) => ({ turnId: e.turnId }))
+}
+
+/** A turn of main's: the person's prompt, the answer `text` in the row `row-<id>`, the look after it, and the row
+ *  drawn, with the marks the look gave on its words. */
+async function answered($: Any, clock: Any, id: string, text: string) {
+  await $.prompt.submit({ text: `question ${id}`, origin: { kind: 'composer' } } as never)
+  await $.turn.start({ text: `question ${id}`, turnId: id } as never)
+  await $.session.append({ message: { type: 'assistant', role: 'assistant', content: [{ type: 'text', text }] }, door: 'response', origin: { kind: 'model', model: 'claude-made-up' }, uuid: `row-${id}` } as never)
+  await $.turn.complete({ turnId: id, reason: 'answer', answer: text, durationMs: 10, isAborted: false } as never)
+  await clock.advance(1000)
+  await $.ui.render(answerRow(`row-${id}`, text))
+  await clock.advance(100)
+}
+
+test("the legend stands above the bar with the first answer whose words show heads-ups or explainers, not with the first session's hint: heads-up and explainer on the fills their marks have in answers, click to open, then select words for e and c; the person's next prompt takes it, and no later answer shows it", async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
   mock.store(on)
+  // the looks after the two answers: each gives marks on its answer's words
+  looks(on, [marksReply(), JSON.stringify({ glosses: [{ term: 'cache key', body: 'What a build looks its cache up by.' }], heads: null, claims: [] })])
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  const find = (n: Any, key: string): Any => {
-    if (!n || typeof n !== 'object') return null
-    if (Array.isArray(n)) { for (const x of n) { const f = find(x, key); if (f) return f } return null }
-    if (n.props?.key === key) return n
-    return find(n.props?.children, key) ?? find(n.children, key)
-  }
+  // the first session's hint shows alone: no answer has marks yet
+  const first = await $.ui.render(BAND)
+  expect(textOf(first)).toContain('thimble  Hint: click thimble for settings.')
+  expect(byKey(first, 'intro-legend')).toBe(null)
+  // the first answer whose words show marks: the legend shows with it
+  await answered($, w.clock, 't1', MARKED)
+  const marked = await $.ui.render(answerRow('row-t1', MARKED))
+  const buttons = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(buttons) : [...(n.type === 'Button' ? [n] : []), ...buttons(n.props?.children), ...buttons(n.children)])
+  // (a click on a mark's words opens it, as `click to open` says)
+  expect(buttons(marked).map(b => String(b.props.label))).toEqual(expect.arrayContaining(['explain retry budget', 'heads up 30 seconds after a drop']))
   const band = await $.ui.render(BAND)
-  const legend = find(band, 'intro-legend')
-  expect(textOf(legend)).toBe('         heads-up · explainer · select words for e and c')
+  const legend = byKey(band, 'intro-legend')
+  expect(textOf(legend)).toBe('         heads-up · explainer · click to open · select words for e and c')
   const fills = markColors(themeLast())
   // its words as the answer draws the marks: on their fills
   const texts = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(texts) : [...(n.type === 'Text' ? [n] : []), ...texts(n.props?.children), ...texts(n.children)])
   const said = (w: string) => texts(legend).find(t => textOf(t) === w)
   expect(said('heads-up')?.props?.backgroundColor).toBe(fills.headsBg)
   expect(said('explainer')?.props?.backgroundColor).toBe(fills.glossBg)
+  expect(said('click to open')?.props).toMatchObject({ dimColor: true })
   expect(said('e')?.props).toMatchObject({ bold: true })
   expect(said('c')?.props).toMatchObject({ bold: true })
-  // above the bar, which keeps the hint where its keys stand
+  // above the bar
   const rows = ((band as Any).children ?? (band as Any).props?.children) as Any[]
   expect(rows.findIndex(r => r?.props?.key === 'intro-legend')).toBe(rows.findIndex(r => r?.props?.key === 'bar') - 1)
-  expect(textOf(band)).toContain('thimble  Hint: click thimble for settings.')
-  // the first prompt takes it with the hint, and no later session shows it
-  await $.prompt.submit({ text: 'which runs failed?', origin: { kind: 'composer' } } as never)
-  expect(find(await $.ui.render(BAND), 'intro-legend')).toBe(null)
+  // it stays while the person reads, until their next prompt, which takes it for good: a later answer with marks, or
+  // a later session, shows none
+  await w.clock.advance(60_000)
+  expect(textOf(byKey(await $.ui.render(BAND), 'intro-legend'))).toContain('click to open')
+  await answered($, w.clock, 't2', 'The cache key changed when the lockfile moved.')
+  expect(buttons(await $.ui.render(answerRow('row-t2', 'The cache key changed when the lockfile moved.'))).map(b => String(b.props.label))).toContain('explain cache key')
+  expect(byKey(await $.ui.render(BAND), 'intro-legend')).toBe(null)
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  expect(textOf(await $.ui.render(BAND))).not.toContain('select words for')
+  expect(textOf(await $.ui.render(BAND))).not.toContain('click to open')
 })
 
-// the first session's legend with a feature off, or Minimal on (whose heads-ups and explainers come only when asked
-// for): the options, and the legend that names only what is on (null: no legend)
+test('a legend that showed in an earlier session, which ended before the next prompt, shows in no later one', async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on, { introDone: true, legendAt: { session: 's-earlier', row: 'row-earlier' } })
+  looks(on, [marksReply()])
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await answered($, w.clock, 't1', MARKED)
+  expect(byKey(await $.ui.render(BAND), 'intro-legend')).toBe(null)
+})
+
+// the legend with a feature off, or Minimal on (whose heads-ups and explainers come only when asked for: here h asks
+// for heads-ups on the answer): the options, and the legend that names only what is on (null: no legend)
 const LEGENDS: [string, Record<string, unknown>, string | null][] = [
-  ['Heads-ups off', { details: 'off' }, '         explainer · select words for e and c'],
-  ['Explainers off', { explain: 'off' }, '         heads-up · select words for c'],
-  ['Citations off', { citations: 'off' }, '         heads-up · explainer · select words for e'],
-  ['Minimal on', { minimal: true, ...PRESET }, '         select words for e and c'],
+  ['Heads-ups off', { details: 'off' }, '         explainer · click to open · select words for e and c'],
+  ['Explainers off', { explain: 'off' }, '         heads-up · click to open · select words for c'],
+  ['Citations off', { citations: 'off' }, '         heads-up · explainer · click to open · select words for e'],
+  ['Minimal on, heads-ups asked for', { minimal: true, ...PRESET }, '         heads-up · click to open · select words for e and c'],
   ['Heads-ups, Explainers and Citations off', { details: 'off', explain: 'off', citations: 'off' }, null],
 ]
 for (const [what, options, legend] of LEGENDS) {
-  test(`the first session's legend names only what is on: ${what}`, { options }, async ($, on) => {
-    world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  test(`the legend names only what is on: ${what}`, { options }, async ($, on) => {
+    const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
     mock.store(on)
+    looks(on, [marksReply({ glosses: !options.minimal })])
     await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-    const find = (n: Any): Any => {
-      if (!n || typeof n !== 'object') return null
-      if (Array.isArray(n)) { for (const x of n) { const f = find(x); if (f) return f } return null }
-      if (n.props?.key === 'intro-legend') return n
-      return find(n.props?.children) ?? find(n.children)
+    await answered($, w.clock, 't1', MARKED)
+    if (options.minimal) {
+      await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'h' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'h' } as never)
+      await w.clock.advance(1000)
+      await $.ui.render(answerRow('row-t1', MARKED))
+      await w.clock.advance(100)
     }
-    const band = await $.ui.render(BAND)
-    const found = find(band)
+    const found = byKey(await $.ui.render(BAND), 'intro-legend')
     expect(found ? textOf(found) : null).toBe(legend)
-    // the hint shows all the same
-    expect(textOf(band)).toContain('thimble  Hint: click thimble for settings.')
   })
 }
 

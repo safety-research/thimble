@@ -1,12 +1,17 @@
-// intro.ts: the hint at the first session thimble runs in, which says where its settings are. The bar shows it as
-// its other hints (bar.tsx), in place of its keys, with a legend above it once: the colors of the heads-ups and the
-// explainers in answers, and the keys that act on selected words. It goes after INTRO_MS, at the next key thimble
-// takes, or at the person's first prompt, and no later session or reload shows it again.
+// intro.ts: the hint at the first session thimble runs in, which says where its settings are, and the legend of the
+// marks in answers. The bar shows the hint as its other hints (bar.tsx), in place of its keys. It goes after INTRO_MS,
+// at the next key thimble takes, or at the person's first prompt, and no later session or reload shows it again.
+// The legend stands above the bar (bar.tsx legendRow) once: from the first answer whose words show heads-ups or
+// explainers (explain/seam.ts explainSpans) until the person's next prompt, in that session alone.
 //
 //   introHint($)       the hint's words, or null once it went
 //   introDone($)       the person's first prompt or key: the hint goes
+//   legendFor($, row)  the answer `row` shows heads-ups or explainers: the legend shows with it, if it never showed
+//   legendNow($)       the answer the legend shows with, or null
+//   legendGone($)      the person's prompt: a legend that showed goes, and no later answer shows it again
 //
-//   store: introDone (true once the line went), introAt (when it first showed)
+//   store: introDone (true once the line went), introAt (when it first showed), legendAt (the session and the answer
+//   it showed with), legendDone (true once a prompt took it)
 import type { EngineInterface } from 'claude-code'
 
 type Engine = EngineInterface
@@ -53,4 +58,25 @@ export async function introDone($: Engine): Promise<void> {
     await $.store.set(DONE, true)
     $.ui.invalidate('ui.render')
   }
+}
+
+const LEGEND = 'legendAt'
+const LEGEND_DONE = 'legendDone'
+
+export async function legendFor($: Engine, row: string): Promise<void> {
+  if ((await $.store.get(LEGEND_DONE)) === true || (await $.store.get(LEGEND))) return
+  await $.store.set(LEGEND, { session: String(await $.session.id()), row })
+  $.ui.invalidate('ui.render')
+}
+
+export async function legendNow($: Engine): Promise<string | null> {
+  if ((await $.store.get(LEGEND_DONE)) === true) return null
+  const at = (await $.store.get(LEGEND)) as { session?: string; row?: string } | null | undefined
+  return at?.row && at.session === String(await $.session.id()) ? at.row : null
+}
+
+export async function legendGone($: Engine): Promise<void> {
+  if ((await $.store.get(LEGEND_DONE)) === true || !(await $.store.get(LEGEND))) return
+  await $.store.set(LEGEND_DONE, true)
+  $.ui.invalidate('ui.render')
 }
