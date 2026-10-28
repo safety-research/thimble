@@ -295,6 +295,89 @@ async def test_a_start_refused_otherwise_fails_the_view_with_its_refusal_and_sta
     assert ans.kind == "no-module" and _prop(slug2)["refused"]["kind"] == "no-module"
 
 
+# --------------------------------------------------------------------------- the sandbox of a build's commands
+
+# what srt's seccomp helper says when the user namespace it makes inside bubblewrap gets no capabilities, and what
+# bubblewrap says when it cannot make its own: a kernel that restricts unprivileged user namespaces (Ubuntu 24.04)
+NESTED_USERNS = ("apply-seccomp: write /proc/self/setgroups (nested userns is capability-restricted; caller must provide "
+                 "CAP_SYS_ADMIN)")
+UID_MAP = "bwrap: setting up uid map: Permission denied"
+SYSCTL_FIX = "sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0"
+
+
+def _bwrap(tmp_path: Path, monkeypatch, said: str, restricted: str) -> None:
+    """This machine, as the build's sandbox finds it: a bwrap first on PATH that says `said` and fails, and AppArmor's
+    switch for unprivileged user namespaces reading `restricted`."""
+    import os  # noqa: PLC0415
+    import shlex  # noqa: PLC0415
+
+    from app import cc_settings, kernel_wrap  # noqa: PLC0415
+
+    bin_ = tmp_path / "fake-bin"
+    if not bin_.is_dir():
+        bin_.mkdir()
+        monkeypatch.setenv("PATH", f"{bin_}{os.pathsep}{os.environ.get('PATH', '')}")
+    (bin_ / "bwrap").write_text(f"#!/bin/sh\necho {shlex.quote(said)} >&2\nexit 1\n")
+    (bin_ / "bwrap").chmod(0o755)
+    (tmp_path / "userns").write_text(f"{restricted}\n")
+    monkeypatch.setattr(cc_settings, "APPARMOR_USERNS", tmp_path / "userns")
+    monkeypatch.setattr(kernel_wrap, "_srt_works", {})  # probed afresh, and the real answers kept for the next tests
+
+
+async def test_a_build_whose_sandbox_cannot_start_tells_the_analyst_in_its_thread_and_in_main(board, bridge, gates,
+                                                                                            tmp_path, monkeypatch):
+    """The build's commands run in the sandbox (srt, or Claude Code's on its sign-in), which a kernel that restricts
+    user namespaces keeps from starting: one notice, in the foreground of every chat and as a row in the build's thread,
+    says that the view build can't run commands, why, and the sysctl the terminal plugin gives when AppArmor's switch is
+    on; a later build's start where the sandbox starts takes it away."""
+    from app import kernel_wrap, notices, srt  # noqa: PLC0415
+
+    if why := srt.missing(config.REPO_ROOT, srt.node()):
+        pytest.skip(why)
+    works = kernel_wrap.srt_works(srt.node(), srt.package(config.REPO_ROOT))
+
+    def box() -> list[dict]:
+        return [n for n in notices.open_notices(CORPUS) if n.get("key") == dev.NO_BOX_KEY]
+
+    def told(slug: str) -> bool:
+        return bool(box()) and box()[0]["chat"] == _prop(slug)["chat"]
+
+    _bwrap(tmp_path, monkeypatch, NESTED_USERNS, "1")
+    slug = _propose(asked=True)
+    await _started(slug)
+    await _until(lambda: told(slug), "no notice said the build can't run commands", tries=1000)
+    [n] = box()
+    assert n["text"] == ("The view build can't run commands on this machine: its sandbox can't start, because the "
+                         f"kernel restricts user namespaces. Allow them: `{SYSCTL_FIX}`"), n["text"]
+    assert (n["agent"], n["kind"]) == ("View build: Posts", "sandbox")
+    rows = [r for r in agents.read_events(agents.paths(CORPUS, n["chat"])[1]) if r["type"] == notices.TYPE]
+    assert [r["text"] for r in rows] == [n["text"]], "a row in the build's thread"
+
+    # bubblewrap's own words where AppArmor's switch is off: the why without the sysctl, in the same one notice
+    _bwrap(tmp_path, monkeypatch, UID_MAP, "0")
+    slug = _propose("Threads", asked=True)
+    await _started(slug)
+    await _until(lambda: told(slug), "the second build's start told nothing", tries=1000)
+    [n] = box()
+    assert n["text"].endswith("because the kernel restricts user namespaces.") and SYSCTL_FIX not in n["text"]
+
+    # another cause: the sandbox's own words, as the plugin says them
+    _bwrap(tmp_path, monkeypatch, "bwrap: execvp /made-up/bash: No such file or directory", "1")
+    slug = _propose("Boards", asked=True)
+    await _started(slug)
+    await _until(lambda: told(slug), "the third build's start told nothing", tries=1000)
+    [n] = box()
+    assert n["text"] == ("The view build can't run commands on this machine: its sandbox can't start (bwrap: execvp "
+                         "/made-up/bash: No such file or directory)."), n["text"]
+
+    # the sandbox starts again: the next build's start takes the notice away
+    if works:
+        (tmp_path / "fake-bin" / "bwrap").unlink()
+        kernel_wrap._srt_works.clear()
+        await _started(_propose("Replies", asked=True))
+        await _until(lambda: not box(), "the notice stayed after a build whose sandbox started", tries=1000)
+
+
 # --------------------------------------------------------------------------- the gate tools
 
 

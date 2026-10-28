@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -90,8 +91,15 @@ SRT_NO_WRITE = {"linux": (), "darwin": ("/tmp/claude", "/private/tmp/claude")}
 
 PROBE_S = 10.0
 SRT_PROBE_S = 30.0
+SAID_CHARS = 2000  # the end of what the probe's sandbox said that srt_problem keeps
 _works: dict[str, bool] = {}  # works' answer, probed once per process
-_srt_works: dict[tuple[str, str], bool] = {}  # srt_works' answers, probed once per process
+_srt_works: dict[tuple[str, str], bool] = {}  # srt_works' answers, probed once per process and again by srt_problem
+# what keeps the sandbox from starting where the kernel restricts unprivileged user namespaces (Ubuntu 23.10 and later,
+# through AppArmor): bubblewrap's words when it cannot make its own namespaces, as the terminal plugin reads them
+# (plugin/sandbox/setup.mjs), and the words of srt's seccomp helper, which runs inside bubblewrap and makes a user
+# namespace of its own, when that one cannot be made or gets no capabilities
+USERNS_SAID = re.compile(r"bwrap: .*(uid map|namespace|RTM_NEWADDR|Operation not permitted|Permission denied)"
+                         r"|apply-seccomp: (unshare|write /proc/self/(setgroups|uid_map|gid_map))", re.I)
 
 
 def works() -> bool:
@@ -118,21 +126,34 @@ def srt_argv(argv: Sequence[str], *, node: str, srt_dir: Path, rules: dict) -> l
 def srt_works(node: str | None, srt_dir: Path | None) -> bool:
     """Whether srt can sandbox a process on this machine, probed once per (node, package): `node` is recent enough
     (srt.NODE_MIN) and kernel_srt.mjs runs `true` in it (on Linux that needs bubblewrap and user namespaces; on macOS
-    /usr/bin/sandbox-exec)."""
+    /usr/bin/sandbox-exec). A later srt_problem probes again."""
     if not node or srt_dir is None:
         return False
     key = (node, str(srt_dir))
     if key not in _srt_works:
-        ok = False
-        if (srt.node_version(node) or ()) >= srt.NODE_MIN:
-            rules = {"filesystem": {"denyRead": [], "allowWrite": [], "denyWrite": []}}
-            try:
-                ok = subprocess.run(srt_argv(["true"], node=node, srt_dir=srt_dir, rules=rules), capture_output=True,
-                                    stdin=subprocess.DEVNULL, timeout=SRT_PROBE_S, check=False).returncode == 0
-            except (OSError, subprocess.SubprocessError):
-                ok = False
-        _srt_works[key] = ok
+        srt_problem(node, srt_dir)
     return _srt_works[key]
+
+
+def srt_problem(node: str, srt_dir: Path) -> str:
+    """'' when srt sandboxes a process on this machine now, else why not: srt_works' probe, run again, whose answer
+    srt_works keeps from then on. The why is the end of what the sandbox said (bubblewrap's or srt's own words, which
+    USERNS_SAID reads), else how the probe ended."""
+    have = srt.node_version(node) or ()
+    why = f"Node {'.'.join(map(str, have)) or '?'} is older than the sandbox runtime needs"
+    if have >= srt.NODE_MIN:
+        rules = {"filesystem": {"denyRead": [], "allowWrite": [], "denyWrite": []}}
+        try:
+            done = subprocess.run(srt_argv(["true"], node=node, srt_dir=srt_dir, rules=rules), capture_output=True,
+                                  text=True, errors="replace", stdin=subprocess.DEVNULL, timeout=SRT_PROBE_S, check=False)
+            said = (done.stderr or "").strip()[-SAID_CHARS:]
+            why = "" if done.returncode == 0 else said or f"the sandbox ended with exit code {done.returncode}"
+        except subprocess.TimeoutExpired:
+            why = f"the sandbox did not answer in {SRT_PROBE_S:g} s"
+        except (OSError, subprocess.SubprocessError) as e:
+            why = f"the sandbox did not start: {e}"
+    _srt_works[(node, str(srt_dir))] = not why
+    return why
 
 
 def interpreter_dirs(python: str | Path) -> list[Path]:
