@@ -4,16 +4,14 @@
 import { expect, mock } from 'claude-code/testing'
 
 import { barRows } from '../bar/bar'
-import { busyNow, busyWhile, SPIN } from '../bar/busy'
+import { busyNow, busyWhile } from '../bar/busy'
 import { recount } from '../bar/counts'
 import { noteViewport } from '../cards/draw'
 import { INTRO, INTRO_MS } from '../bar/intro'
 import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
 import { textWidth } from '../core/text.js'
-import { accent, themeLast } from '../core/theme'
-import { markColors } from '../explain/place.mjs'
-import { PRESET, setOptions } from '../settings/features.mjs'
+import { setOptions } from '../settings/features.mjs'
 import { test } from './kit'
 import { promptStub } from './stubs'
 
@@ -571,136 +569,36 @@ async function answered($: Any, clock: Any, id: string, text: string) {
   await clock.advance(100)
 }
 
-test("the legend stands above the bar with the first answer whose words show heads-ups or explainers, not with the first session's hint: heads-up and explainer on the fills their marks have in answers, click to open, then select words for e and c; the person's next prompt takes it, and no later answer shows it", async ($, on) => {
-  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
-  mock.store(on)
-  // the looks after the two answers: each gives marks on its answer's words
-  looks(on, [marksReply(), JSON.stringify({ glosses: [{ term: 'cache key', body: 'What a build looks its cache up by.' }], heads: null, claims: [] })])
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  // the first session's hint shows alone: no answer has marks yet
-  const first = await $.ui.render(BAND)
-  expect(textOf(first)).toContain('thimble  Hint: click thimble for settings.')
-  expect(byKey(first, 'intro-legend')).toBe(null)
-  // the first answer whose words show marks: the legend shows with it
-  await answered($, w.clock, 't1', MARKED)
-  const marked = await $.ui.render(answerRow('row-t1', MARKED))
-  const buttons = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(buttons) : [...(n.type === 'Button' ? [n] : []), ...buttons(n.props?.children), ...buttons(n.children)])
-  // (a click on a mark's words opens it, as `click to open` says)
-  expect(buttons(marked).map(b => String(b.props.label))).toEqual(expect.arrayContaining(['explain retry budget', 'heads up 30 seconds after a drop']))
-  const band = await $.ui.render(BAND)
-  const legend = byKey(band, 'intro-legend')
-  expect(textOf(legend)).toBe('         heads-up · explainer · click to open · select words for e and c')
-  const fills = markColors(themeLast())
-  // its words as the answer draws the marks: on their fills
-  const texts = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(texts) : [...(n.type === 'Text' ? [n] : []), ...texts(n.props?.children), ...texts(n.children)])
-  const said = (w: string) => texts(legend).find(t => textOf(t) === w)
-  expect(said('heads-up')?.props?.backgroundColor).toBe(fills.headsBg)
-  expect(said('explainer')?.props?.backgroundColor).toBe(fills.glossBg)
-  expect(said('click to open')?.props).toMatchObject({ dimColor: true })
-  expect(said('e')?.props).toMatchObject({ bold: true })
-  expect(said('c')?.props).toMatchObject({ bold: true })
-  // above the bar
-  const rows = ((band as Any).children ?? (band as Any).props?.children) as Any[]
-  expect(rows.findIndex(r => r?.props?.key === 'intro-legend')).toBe(rows.findIndex(r => r?.props?.key === 'bar') - 1)
-  // it stays while the person reads, until their next prompt, which takes it for good: a later answer with marks, or
-  // a later session, shows none
-  await w.clock.advance(60_000)
-  expect(textOf(byKey(await $.ui.render(BAND), 'intro-legend'))).toContain('click to open')
-  await answered($, w.clock, 't2', 'The cache key changed when the lockfile moved.')
-  expect(buttons(await $.ui.render(answerRow('row-t2', 'The cache key changed when the lockfile moved.'))).map(b => String(b.props.label))).toContain('explain cache key')
-  expect(byKey(await $.ui.render(BAND), 'intro-legend')).toBe(null)
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  expect(textOf(await $.ui.render(BAND))).not.toContain('click to open')
-})
-
-test('a legend that showed in an earlier session, which ended before the next prompt, shows in no later one', async ($, on) => {
-  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
-  mock.store(on, { introDone: true, legendAt: { session: 's-earlier', row: 'row-earlier' } })
-  looks(on, [marksReply()])
-  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-  await answered($, w.clock, 't1', MARKED)
-  expect(byKey(await $.ui.render(BAND), 'intro-legend')).toBe(null)
-})
-
-// the legend with a feature off, or Minimal on (whose heads-ups and explainers come only when asked for: here h asks
-// for heads-ups on the answer): the options, and the legend that names only what is on (null: no legend)
-const LEGENDS: [string, Record<string, unknown>, string | null][] = [
-  ['Heads-ups off', { details: 'off' }, '         explainer · click to open · select words for e and c'],
-  ['Explainers off', { explain: 'off' }, '         heads-up · click to open · select words for c'],
-  ['Citations off', { citations: 'off' }, '         heads-up · explainer · click to open · select words for e'],
-  ['Minimal on, heads-ups asked for', { minimal: true, ...PRESET }, '         heads-up · click to open · select words for e and c'],
-  ['Heads-ups, Explainers and Citations off', { details: 'off', explain: 'off', citations: 'off' }, null],
-]
-for (const [what, options, legend] of LEGENDS) {
-  test(`the legend names only what is on: ${what}`, { options }, async ($, on) => {
-    const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
-    mock.store(on)
-    looks(on, [marksReply({ glosses: !options.minimal })])
-    await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-    await answered($, w.clock, 't1', MARKED)
-    if (options.minimal) {
-      await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: 'h' }, text: '', cursor: 0, start: 0, end: 0, inputText: 'h' } as never)
-      await w.clock.advance(1000)
-      await $.ui.render(answerRow('row-t1', MARKED))
-      await w.clock.advance(100)
-    }
-    const found = byKey(await $.ui.render(BAND), 'intro-legend')
-    expect(found ? textOf(found) : null).toBe(legend)
-  })
-}
-
 /** MARKED with one of its claims cited, as Claude cites (made up). */
 const CITED = 'Uploads fail after the retry budget runs out: [41 of the 44 failures](#) came 30 seconds after a drop.'
 /** An answer's row drawn in Claude Code's fullscreen layout, or in its default one, which sends thimble no click. */
 const answerIn = (requestId: string, text: string, isFullscreen: boolean) => ({ ...(answerRow(requestId, text) as Any), viewport: { columns: 100, rows: 40, isFullscreen } }) as never
-const SPINS = new RegExp(`^[${SPIN}]$`)
 
-// the legend with the first answer that has citations: the options, the layout the answer is drawn in, and the
-// legend, `@` where the turning glyph stands (the same glyph the answer draws after the cited words while their check
-// runs; the first frame when none runs)
-const CITED_LEGENDS: [string, Record<string, unknown>, boolean, string][] = [
-  ['Citations auto cite + verify', {}, true, '         heads-up · explainer · cited claim · click to open · @ a second Claude checks it · select words for e and c'],
-  ['Citations auto cite + verify, default layout', {}, false, '         heads-up · explainer · cited claim · @ a second Claude checks it · select words for e and c'],
-  ['Citations auto cite', { citations: 'auto cite' }, true, '         heads-up · explainer · cited claim · click to open · @ a second Claude checks it · select words for e and c'],
-  // Claude's citations, quiet while Citations is manual, read as plain words: the legend does not name them
-  ['Citations manual', { citations: 'manual' }, true, '         heads-up · explainer · click to open · select words for e and c'],
-  ['Citations off', { citations: 'off' }, true, '         heads-up · explainer · click to open · select words for e'],
-  ['Citations off, default layout', { citations: 'off' }, false, '         heads-up · explainer · select words for e'],
-]
-for (const [what, options, fullscreen, legend] of CITED_LEGENDS) {
-  test(`the legend names an answer's citations while Citations is on, and says click to open only where a click reaches thimble: ${what}`, { options }, async ($, on) => {
-    const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
-    mock.store(on)
-    looks(on, [marksReply()])
-    // the check of the answer's citations starts, and runs
-    on('agent.spawn', () => ({ model: 'claude-made-up', agentId: 'agent-check-1' }) as never)
-    await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
-    await answered($, w.clock, 't1', CITED)
-    try {
-      const drawn = await $.ui.render(answerIn('row-t1', CITED, fullscreen))
-      const texts = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(texts) : [...(n.type === 'Text' ? [n] : []), ...texts(n.props?.children), ...texts(n.children)])
-      // the turning glyph after the answer's cited words, while their check runs
-      const turning = texts(drawn).map(t => textOf(t).trim()).find(s => SPINS.test(s))
-      const found = byKey(await $.ui.render(BAND), 'intro-legend')
-      const glyph = texts(found).map(t => textOf(t)).find(s => SPINS.test(s))
-      expect(textOf(found).replace(glyph ?? '@', '@')).toBe(legend)
-      if (!legend.includes('cited claim')) return
-      // auto cite + verify: the glyph the answer turns after its cited words while their check runs; auto cite, whose
-      // citations wait to be opened: none turns, and the legend's is the first frame
-      if (options.citations) expect([turning, glyph]).toEqual([undefined, SPIN[0]])
-      else expect(turning).toBe(glyph)
-      const said = (s: string) => texts(found).find(t => textOf(t) === s)
-      // drawn as the answer draws its citations: underlined, in the text's own color, no fill; the glyph purple
-      expect(said('cited claim')?.props).toMatchObject({ underline: true })
-      expect(said('cited claim')?.props?.backgroundColor).toBeUndefined()
-      expect(said('cited claim')?.props?.dimColor).toBeUndefined()
-      expect(said(glyph!)?.props?.color).toBe(accent())
-      expect(said(' a second Claude checks it')?.props).toMatchObject({ dimColor: true })
-    } finally {
-      noteViewport({ isFullscreen: true })
+test("an answer whose words show a heads-up, an explainer and a citation brings no row above the bar that names them, in Claude Code's fullscreen layout or its default one: its marks show what they are when opened", async ($, on) => {
+  const w = world(on, { ok: true, out: JSON.stringify(COVERAGE) })
+  mock.store(on)
+  looks(on, [marksReply()])
+  // the check of the answer's citations starts, and runs
+  on('agent.spawn', () => ({ model: 'claude-made-up', agentId: 'agent-check-1' }) as never)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  await answered($, w.clock, 't1', CITED)
+  const buttons = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(buttons) : [...(n.type === 'Button' ? [n] : []), ...buttons(n.props?.children), ...buttons(n.children)])
+  try {
+    for (const isFullscreen of [true, false]) {
+      const labels = buttons(await $.ui.render(answerIn('row-t1', CITED, isFullscreen))).map(b => String(b.props.label))
+      expect(labels).toEqual(expect.arrayContaining(['explain retry budget', 'heads up 30 seconds after a drop']))
+      expect(labels.some(l => l.startsWith('citation 1'))).toBe(true)
+      const band = await $.ui.render({ ...(BAND as Any), viewport: { columns: 100, rows: 40, isFullscreen } } as never)
+      expect(byKey(band, 'intro-legend')).toBe(null)
+      for (const said of ['heads-up · explainer', 'cited claim', 'click to open', 'a second Claude checks it', 'select words for']) expect(textOf(band)).not.toContain(said)
     }
-  })
-}
+    // nor after the next prompt and answer
+    await answered($, w.clock, 't2', MARKED)
+    expect(byKey(await $.ui.render(BAND), 'intro-legend')).toBe(null)
+  } finally {
+    noteViewport({ isFullscreen: true })
+  }
+})
 
 test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {
   world(on, { ok: true, out: JSON.stringify(COVERAGE) })

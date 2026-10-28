@@ -12,12 +12,10 @@
 // module keeps in the conversation's folder (explain.json).
 //
 //   explainSpans($, row, text, marks)  the explainers and heads-ups on the words of a row as it shows now (`text`, a
-//                                      squeezed version too: a term is found again there in another form); the first
-//                                      row that shows one brings the legend of the marks (bar/intro.ts legendFor)
+//                                      squeezed version too: a term is found again there in another form)
 //   explainSpansOf($, rows, text)      the explainers and heads-ups of those messages on the words of a text that stands
 //                                      for them (a catch-up), where it says their terms as written, each opening on its
 //                                      own message
-//   markKinds($, row)                  the kinds of a row's marks its switches show (the legend, bar/bar.tsx)
 //   explainState($)                    what the lenses' digests read: {glossed, headsGiven}
 //   explainMerge($, look)              what one look gave for the explain and heads lenses, placed and kept
 //   tellComments($, rows)              Claude hears the explainers and heads-ups shown on these answers with the next
@@ -44,7 +42,6 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { BarItem } from '../bar/bar'
 import { howTo, hintUsed } from '../bar/hints'
-import { legendFor } from '../bar/intro'
 import { failCleared, failNotice, hintLine } from '../bar/notice'
 import { fullscreenNow } from '../cards/draw'
 import { actingRow, answerRows, messageOf, partOf, setPart, textRows } from '../core/answers'
@@ -106,10 +103,7 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
   const own = (await messageOf($, row))?.text ?? ''
   const original = text !== own && text !== withoutMarks(own)
   const c = markColors(await themeNow($))
-  const placed = placeGlosses(text, { items: part.items, order }, original) as { id: string; start: number; end: number }[]
-  // the first answer whose words show a mark: the legend shows with it (bar/intro.ts)
-  if (placed.length) void legendFor($, row).catch(() => undefined)
-  return placed.map(p => {
+  return (placeGlosses(text, { items: part.items, order }, original) as { id: string; start: number; end: number }[]).map(p => {
     const g = part.items[p.id]!
     const heads = g.kind === 'heads'
     const kind = heads ? 'heads' as const : 'explain' as const
@@ -126,12 +120,6 @@ export async function explainSpans($: Engine, row: string, text: string, _marks:
       },
     }
   })
-}
-
-/** The kinds of the marks a row has that their switches show: `heads` for a heads-up, `explain` for an explainer. */
-export async function markKinds($: Engine, row: string): Promise<string[]> {
-  const part = await partOf<ExplainPart>($, row, 'explain')
-  return [...new Set(Object.values(part?.items ?? {}).filter(shown).map(g => (g.kind === 'heads' ? 'heads' : 'explain')))]
 }
 
 /** The explainers and heads-ups of the messages `rows` on the words of a text that stands for them (a catch-up of

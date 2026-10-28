@@ -12,13 +12,7 @@
 //                  Coverage and Labels are on, each by its own setting (a click or the key opens the pane; register.ts says how each closes).
 //                  While a hint shows (bar/notice.ts hintNow, or the first session's, bar/intro.ts), `Hint: …` stands
 //                  in place of the left's keys, after the busy step, while it fits there whole; the right stays, so a
-//                  hint can point at it. The first answer whose words show heads-ups or explainers has the legend above
-//                  the bar, once, until the person's next prompt (bar/intro.ts): the marks' looks in answers
-//                  (`heads-up` on the heads-ups' orange, `explainer` on the explainers' teal, `cited claim` underlined
-//                  when that answer has citations), that a click opens one (`click to open`, in Claude Code's fullscreen
-//                  layout alone, the only one that sends clicks), the citations' turning glyph (`⠋ a second Claude
-//                  checks it`), and the keys that act on selected words (`select words for e and c`), each while its
-//                  feature is on
+//                  hint can point at it
 //
 // A bar too narrow for its items gives way in this order: the busy step's other steps, then its words (whole words,
 // down to its glyph and seconds), then the labels' count, coverage's file counts and coverage. The keys stay: what
@@ -31,17 +25,13 @@ import { barLeft, barRight } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { controlWords } from '../core/selection'
 import { cutWords, textWidth } from '../core/text.js'
-import { accent, themeLast, themeNow } from '../core/theme'
-import { cardKeyWords, fullscreenNow } from '../cards/draw'
-import { turnOfRow } from '../core/answers'
+import { accent } from '../core/theme'
+import { cardKeyWords } from '../cards/draw'
 import { vReady } from '../designer/v'
-import { markColors } from '../explain/place.mjs'
-import { markKinds } from '../explain/seam'
 import { fixLineRows } from '../fix/line'
 import { pressKey } from '../hooks/keys'
-import { rowMarks } from '../marks/store'
-import { featureOn, lensesAfterReply } from '../settings/features.mjs'
-import { busyNow, SPIN } from './busy'
+import { featureOn } from '../settings/features.mjs'
+import { busyNow } from './busy'
 import { countsNow, keptCounts } from './counts'
 import { failLineNow, hintNow } from './notice'
 
@@ -139,7 +129,7 @@ export async function barKeys($: Engine): Promise<Set<string>> {
 
 /** The bar's rows: the failure line (or a hint the bar has no room for) when there is one, and the bar, `width` cells
  *  wide, on as many rows as its items need. */
-export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string; legend?: string } = {}): Promise<Any[]> {
+export async function barRows($: Engine, els: Any, width: number, o: { on?: (key: string) => boolean; presses?: BarPresses; preview?: boolean; intro?: string } = {}): Promise<Any[]> {
   const { Box, Button, Text } = els
   const on = o.on ?? featureOn
   const preview = !!o.preview
@@ -159,12 +149,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   // a hint: in place of the left's keys, after the busy step, while it fits there whole beside what the bar keeps (the
   // busy step's glyph and seconds, the right's keys); an item it names (“a ask”) stays after it, on the right too.
   // Longer, it stands above the bar, and the bar keeps its keys
-  const shownHint = preview ? null : await hintNow($).catch(() => null)
-  const hint = preview ? null : (shownHint ?? o.intro ?? null)
-  // the legend of the marks, with the first answer that shows some (o.legend, that answer's row; intro.ts), above the
-  // bar, while it names something on
-  const legendEl = !preview && !!o.legend ? await legendRow($, els, width, on, o.legend, b?.glyph ?? SPIN[0]!) : null
-  const legend = legendEl ? [legendEl] : []
+  const hint = preview ? null : ((await hintNow($).catch(() => null)) ?? o.intro ?? null)
   const named = (x: Item) => !!hint && !!x.key && hint.includes(`“${x.key} ${x.words}”`)
   const counted = (x: Item) => (x.id === 'coverage' || x.id === 'labels') && !named(x)
   const hinted: Item[] = hint ? [{ id: 'hint', glyph: 'Hint:', words: hint }, ...keys.filter(named)] : []
@@ -218,52 +203,7 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const top = preview ? [] : hint && !hintIn ? [hintRow] : await lineRows($, els, width, pressOf)
   // a fix's line keeps one blank row between it and the bar, so its keys do not read as the bar's
   const fixRows = preview ? [] : await fixLineRows($, els, width).catch(() => [])
-  return [...top, ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), ...legend, ...bar, ...below]
-}
-
-/** The legend of the marks in answers, over the bar's first row where `Hint:` stands, naming only what is on: the
- *  words that name a heads-up and an explainer drawn on their fills, as an answer draws the words they mark
- *  (explain/place.mjs markColors), while those marks come after each answer (Heads-ups and Explainers auto) or the
- *  answer it shows with (`row`) shows one (Minimal leaves them to be asked for); `cited claim` drawn as an answer draws
- *  a citation's words (marks/view.ts citeLook: underlined, no fill), while Citations is on and that answer has
- *  citations; after them `click to open`, as a click on a mark's words opens it (an explainer or a heads-up in the
- *  tray, explain/seam.ts explainSpans; a citation's evidence, marks/register.ts), while clicks reach thimble: only
- *  Claude Code's fullscreen layout sends them (cards/draw.ts fullscreenNow); then, with the citations, the turning
- *  glyph (`glyph`, the busy step's, as the answer draws it after cited words while their check runs) and that a second
- *  Claude checks it; then the keys that act on words the person selects: e while Explainers, and c while Citations,
- *  are not off. Null when it would name nothing. */
-async function legendRow($: Engine, els: Any, width: number, on: (key: string) => boolean, row: string, glyph: string): Promise<Any | null> {
-  const { Box, Text } = els
-  const shown = await markKinds($, row).catch(() => [] as string[])
-  const heads = lensesAfterReply('details') || shown.includes('heads')
-  const explainer = lensesAfterReply('explain') || shown.includes('explain')
-  const cited = on('citations') && (await answerCited($, row).catch(() => false))
-  const keys = [...(on('explain') ? ['e'] : []), ...(on('cite') ? ['c'] : [])]
-  if (!heads && !explainer && !cited && !keys.length) return null
-  await themeNow($).catch(() => undefined)
-  const fills = markColors(themeLast())
-  const dim = (key: string, children: string) => Text({ key, dimColor: true, children })
-  const key = (k: string) => Text({ key: `legend-${k}`, color: accent(), bold: true, children: k })
-  const parts: Any[][] = [
-    ...(heads ? [[Text({ key: 'legend-heads', backgroundColor: fills.headsBg, children: 'heads-up' })]] : []),
-    ...(explainer ? [[Text({ key: 'legend-explain', backgroundColor: fills.glossBg, children: 'explainer' })]] : []),
-    ...(cited ? [[Text({ key: 'legend-cited', underline: true, children: 'cited claim' })]] : []),
-    ...((heads || explainer || cited) && fullscreenNow() === true ? [[dim('open', 'click to open')]] : []),
-    // one Text, so a wrap never parts the glyph from its words
-    ...(cited ? [[Text({ key: 'legend-check', children: [Text({ key: 'glyph', color: accent(), children: glyph }), dim('checks', ' a second Claude checks it')] })]] : []),
-    ...(keys.length ? [[dim('select', 'select words for '), ...keys.flatMap((k, i) => [...(i ? [dim('and', ' and ')] : []), key(k)])]] : []),
-  ]
-  return Box({ key: 'intro-legend', flexDirection: 'row', flexWrap: 'wrap', width, children: [
-    Text({ key: 'indent', children: ' '.repeat(9) }),
-    ...parts.flatMap((p, i) => [...(i ? [dim(`s${i}`, ' · ')] : []), ...p]),
-  ] })
-}
-
-/** Whether the answer `row` stands in holds citations the check keeps (marks/store.ts), on any of its turn's text rows:
- *  Claude's while it cites (Citations auto cite + verify or auto cite), and words the person cited with c. */
-async function answerCited($: Engine, row: string): Promise<boolean> {
-  for (const r of (await turnOfRow($, row))?.rows ?? [row]) if ((await rowMarks($, r))?.items.length) return true
-  return false
+  return [...top, ...fixRows, ...(fixRows.length ? [Text({ key: 'fix-gap', children: ' ' })] : []), ...bar, ...below]
 }
 
 /** The failure line: what failed, whole, in red, or a notice. A key it names (`Press x to try again`) is a click
