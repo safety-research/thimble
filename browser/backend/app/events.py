@@ -1049,9 +1049,10 @@ def _hold(c: str, request_id: str, tool: str, what: str, preview: str, agent: st
                 if offer else {})}
     pending.append(entry)
     meta["permissions"] = pending
+    # logged before the card shows it, so whatever answers it, from any thread, is logged after it
+    agents.log_permission(c, "asked", **{"chat": agents.MAIN_ID, **entry})
     agents.write_meta(c, meta)
     agents.notify(c, agents.MAIN_ID)
-    agents.log_permission(c, "asked", **{"chat": agents.MAIN_ID, **entry})
 
 
 GONE_ANSWER = "none: answered in the terminal, or the session moved on"  # the permission log's word for a dropped request

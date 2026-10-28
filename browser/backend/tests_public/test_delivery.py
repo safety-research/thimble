@@ -188,6 +188,22 @@ def test_a_queued_message_leaves_the_statusline_on_the_monitor_route_and_when_an
     assert (CORPUS, SID) not in events._notices
 
 
+def test_a_request_answered_the_moment_its_card_shows_is_logged_before_its_answer(workspaces_tmp, monkeypatch):
+    """The permission log has a request's line before its answer's, even when the answer comes from another thread the
+    moment the card shows the request (here, as main's meta is written)."""
+    real = agents.write_meta
+
+    def write_then_answer(c, meta):
+        real(c, meta)
+        for p in meta.get("permissions") or []:
+            agents.log_permission(c, "answered", id=p["id"], chat=agents.MAIN_ID, answer="allow")
+
+    monkeypatch.setattr(agents, "write_meta", write_then_answer)
+    events._hold(CORPUS, "ask-1", "Bash", "Create x", '{"command": "touch x"}')
+    log = [json.loads(ln) for ln in (config.workspace_dir(CORPUS) / agents.PERMISSIONS_LOG).read_text().splitlines()]
+    assert [(r["event"], r.get("id")) for r in log] == [("asked", "ask-1"), ("answered", "ask-1")]
+
+
 def test_the_permission_hook_waits_on_main_s_meta_until_the_browser_answers(monkeypatch, tmp_path):
     monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "thome"))
     _record_token(tmp_path / "thome")
