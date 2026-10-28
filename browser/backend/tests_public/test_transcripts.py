@@ -768,6 +768,53 @@ def test_an_aider_session_s_head_ends_a_block_left_open_in_the_sniff_too(chats):
     assert chat_turns("quit.aider.chat.history.md") == [(4, "User"), (6, "Assistant"), (13, "User"), (15, "Assistant")]
 
 
+def aider_readme_session(i: int, ask: str, gap: str) -> str:
+    """Session `i` of aider's chat history as aider writes it: its head, aider's `> ` lines (`> Main model: ...` reads
+    as a `Word:` line too), the user's message `ask`, and a reply whose edit adds `#### ` headings to a README."""
+    return (f"\n# aider chat started at 2026-09-0{i} 10:00:00\n\n> Aider v0.60.0  \n"
+            "> Main model: claude with diff edit format  \n> Weak model: haiku  \n> Git repo: .git with 12 files  \n"
+            f"> Repo-map: using 1024 tokens, auto refresh  \n\n#### {ask}  \n\nI will edit README.md.\n\nREADME.md\n"
+            "```markdown\n<<<<<<< SEARCH\n# Tools\n=======\n# Tools\n\n#### Install\n\nRun pip.\n\n#### Usage\n\n"
+            f"Run it.\n{gap}>>>>>>> REPLACE\n```\n\n> Applied edit to README.md  \n")
+
+
+# aider histories whose edits add `#### ` headings to a README, and the turns their pages mark
+AIDER_README = {
+    "three.aider.chat.history.md": (
+        "".join(aider_readme_session(i, f"Update the docs, part {i}.", "\n") for i in (1, 2, 3)),
+        [(4, "Aider"), (10, "User"), (12, "Assistant"), (32, "Aider"), (36, "Aider"), (42, "User"), (44, "Assistant"),
+         (64, "Aider"), (68, "Aider"), (74, "User"), (76, "Assistant"), (96, "Aider")]),
+    "two.aider.chat.history.md": (
+        "".join(aider_readme_session(i, "Add install and usage sections to the README.", "") for i in (1, 2)),
+        [(4, "Aider"), (10, "User"), (12, "Assistant"), (31, "Aider"), (35, "Aider"), (41, "User"), (43, "Assistant"),
+         (62, "Aider")]),
+}
+
+
+@pytest.mark.parametrize("name", sorted(AIDER_README))
+def test_an_aider_history_whose_edits_add_headings_stays_aider_s(chats, name):
+    """The sniff reads the head again without the lines of the blocks in its turns in the style it chose first, and
+    ranks no other: an aider history whose edits add `#### ` headings to a README stays aider's, so the user's messages,
+    the replies and aider's own output keep their turns, and aider's `> Main model:` lines start none."""
+    log, want = AIDER_README[name]
+    (chats / "logs" / name).write_text(log)
+    got = transcripts.sniff(chats / "logs" / name, f"logs/{name}")
+    assert got == {"format": "text", "score": transcripts.STRONG, "style": "aider"}
+    assert chat_turns(name) == want
+
+
+def test_a_chat_whose_blocks_hold_another_style_s_lines_keeps_the_style_0_10_5_reads(chats):
+    """A `## User` chat whose tool blocks hold `Host:` and `Model:` lines reads in the colon style and with the turns
+    thimble 0.10.5 reads: the second read leaves the `Model:` lines of the blocks inside a turn out of the sniff (which
+    so is no longer sure), but ranks no other style."""
+    log = ("## User\n\nCheck it.\n\n## Assistant\n\n```\nHost: a\nHost: b\n```\n\n## User\n\nAgain.\n\n## Assistant\n\n"
+           "```\nModel: x\n```\n\n```\nModel: y\n```\n\n```\nModel: z\n```\n")
+    (chats / "logs" / "tools.md").write_text(log)
+    got = transcripts.sniff(chats / "logs" / "tools.md", "logs/tools.md")
+    assert got == {"format": "text", "score": transcripts.WEAK, "style": "colon", "speakers": ["host"]}
+    assert chat_turns("tools.md") == [(8, "Host"), (9, "Host"), (19, "Model"), (23, "Model"), (27, "Model")]
+
+
 def test_a_label_that_opens_a_block_of_code_opens_it_in_the_turns_too(chats):
     """A label that names no speaker (`Command:`) can open a block of code with its words; the turns open it as the
     sniff does, so a header line of the output after it (`Host:`) starts no turn, on the page or in Color by."""

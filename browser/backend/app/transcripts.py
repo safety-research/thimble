@@ -1615,8 +1615,10 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     lines are at least a fifth of the head's lines, so a document quoting an example exchange keeps Rendered first. A
     front matter's lines are no turns, nor are `Word:` lines indented deeper than others (a YAML file's nested keys).
     When the chat log so read has fenced blocks of code inside its turns (_head_code: a tool call's code or output), the
-    head is read again without their lines, which start no turn in any style; in markdown, the code between the first
-    turn line and the last is then the turns' own and leaves the share (I100)."""
+    head is read again without their lines, which so start no turn; in markdown, the code between the first turn line
+    and the last is then the turns' own and leaves the share (I100). The second read keeps the style the first read
+    chose and ranks no other: leaving the blocks' lines out never hands the head to another style (an aider history
+    whose edits add `#### ` headings to a README stays aider's)."""
     raw = text.split("\n")
     lines = [ln for ln in raw[front_matter_lines(raw):] if ln.strip()][:TEXT_HEAD_LINES]
     if len(lines) < 2:
@@ -1625,13 +1627,16 @@ def sniff_text(text: str, markdown: bool = False) -> dict[str, Any] | None:
     if got is None:
         return None
     code = _head_code(lines, got)
-    return _read_head(lines, markdown, code) if any(code) else got
+    return _read_head(lines, markdown, code, got["style"]) if any(code) else got
 
 
-def _read_head(lines: list[str], markdown: bool, code: list[bool]) -> dict[str, Any] | None:
-    """sniff_text's reading of a head whose lines of code (`code`, per line) start no turn."""
+def _read_head(lines: list[str], markdown: bool, code: list[bool], style: str | None = None) -> dict[str, Any] | None:
+    """sniff_text's reading of a head whose lines of code (`code`, per line) start no turn: in the style whose turn
+    lines rank highest, or only in `style`."""
     best: tuple[float, str, int, dict[str, int], int] | None = None
     for name, _ in STYLES:
+        if style is not None and name != style:
+            continue
         counts: dict[str, int] = {}
         turns = 0
         hits = [(i, t) for i, ln in enumerate(lines) if not code[i] and (t := turn_of(ln, name)) is not None]
