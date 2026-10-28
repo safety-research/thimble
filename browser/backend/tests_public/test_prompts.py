@@ -3,6 +3,7 @@ every hint the code names is a section of prompts/tools.md with the placeholders
 Heads up and Explainers checks say what the terminal plugin's lenses say."""
 
 import ast
+import itertools
 import re
 import string
 from pathlib import Path
@@ -317,3 +318,31 @@ def test_main_keeps_the_runs_that_lead_to_an_answer_in_the_shell(mode, monkeypat
     assert "analysis work in cards" not in section and "never sees your shell output" not in section
     bullet = next(p for p in section.split("\n- ") if "rests on in a card" in p)
     assert "first look at the files" in bullet and "run them in the shell" in bullet and "folded" in bullet
+
+
+def _grouped(blocks: list[list[str]]) -> list[int]:
+    """How many cards each group of an example holds: the numbered lines under each `group` line."""
+    counts: list[int] = []
+    for block in blocks:
+        for i, line in enumerate(block):
+            if re.match(r"^(Good|Bad)?\s*group\b", line):
+                counts.append(len(list(itertools.takewhile(lambda ln: re.match(r"^\d+\s", ln), block[i + 1:]))))
+    return counts
+
+
+@pytest.mark.parametrize("mode", prompts.MODES)
+def test_main_names_a_group_only_for_a_sequence_of_cards(mode, monkeypatch):
+    """The canvas has no group by default, and a card added without one stands loose on it. add_card's `group` says what
+    a group is for, a sequence of cards that answer one question together, and that a single card leaves it out; main's
+    examples agree: a single card with no group, and each group a sequence of cards. Before, the description said only
+    how to name a group, and two examples put one card in a group."""
+    from app import tools
+
+    monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
+    group = tools.tool_sections(["add_card"])["add_card"][1]["properties"]["group"]["description"]
+    assert "sequence of cards" in group and "single card" in group
+    blocks = _examples(prompts.section("main", "Cards", mode)) + _examples(prompts.load("card-types", mode))
+    counts = _grouped(blocks)
+    assert counts and min(counts) >= 2, counts
+    single = [b for b in blocks if any(line.startswith("question") for line in b)]
+    assert single and not _grouped(single), "a card that answers a question alone has no group"
