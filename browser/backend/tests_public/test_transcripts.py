@@ -795,6 +795,55 @@ def test_a_fence_before_the_first_turn_that_no_line_closes_hides_no_turns(chats)
         assert [w for _, w in chat_turns(name)] == ["User", "Assistant", "User", "Assistant"], name
 
 
+FORTY = "".join(f"User: question {i}?\nAssistant: answer {i}.\n" for i in range(20))  # a chat log of 40 turns
+SURE = {"format": "text", "score": transcripts.STRONG, "style": "colon", "speakers": ["assistant", "user"]}
+
+
+def test_a_fence_left_open_above_a_chat_whose_code_closes_it_hides_no_turns(chats):
+    """A fence left open above a chat log, whose closer is the end of a block of code inside the chat, would hold the
+    chat: it opens no block, so every turn counts. A block of code above a chat (a config) holds fewer turn lines than
+    the chat after it and stays a block."""
+    tail = "User: show the code\nAssistant: Here:\n```python\nprint(1)\n```\nUser: ok\nAssistant: ok\n"
+    for name, log, turns in (("pasted.txt", "```\n" + FORTY + tail, 44),
+                             ("config.txt", "```\nserver: alpha\nport: 80\n```\n\n" + FORTY, 40)):
+        (chats / "logs" / name).write_text(log)
+        assert transcripts.sniff(chats / "logs" / name, f"logs/{name}") == SURE, name
+        assert [w for _, w in chat_turns(name)] == ["User", "Assistant"] * (turns // 2), name
+
+
+def test_a_title_s_line_of_tildes_in_restructuredtext_opens_no_block(chats):
+    """A title's line of tildes underlines it: a chat under one section's title, before a later section's longer line
+    of tildes, keeps its turns."""
+    doc = "Support chat\n~~~~~~~~~~~~\n\n" + FORTY + "\nFollow-up notes\n~~~~~~~~~~~~~~~\n\nThe customer was satisfied.\n"
+    (chats / "logs" / "support.rst").write_text(doc)
+    assert transcripts.sniff(chats / "logs" / "support.rst", "logs/support.rst") == SURE
+    assert [w for _, w in chat_turns("support.rst")] == ["User", "Assistant"] * 20
+
+
+def test_a_chat_between_two_banners_keeps_its_turns(chats):
+    """Two equal banners of tildes around a chat log, in a text or a markdown file, would hold it as a block of code:
+    the first opens none, so the turns count, as they do between two people named by name (a weak sniff, as without
+    the banners)."""
+    banner = "~~~~~~~~~~\n"
+    for name in ("banners.txt", "banners.md"):
+        (chats / "logs" / name).write_text(banner + FORTY + banner)
+        assert transcripts.sniff(chats / "logs" / name, f"logs/{name}") == SURE, name
+        assert [w for _, w in chat_turns(name)] == ["User", "Assistant"] * 20, name
+    named = "Else: Did you get the tickets?\nMarta: Yes, two.\nElse: See you at eight.\nMarta: See you.\n"
+    (chats / "logs" / "named.txt").write_text(banner + named + banner)
+    got = transcripts.sniff(chats / "logs" / "named.txt", "logs/named.txt")
+    assert got == {"format": "text", "score": transcripts.WEAK, "style": "colon", "speakers": ["else", "marta"]}
+    assert [w for _, w in chat_turns("named.txt")] == ["Else", "Marta", "Else", "Marta"]
+
+
+def test_a_banner_under_a_label_above_a_chat_opens_no_block(chats):
+    """A banner of tildes right under a label line (`From: support desk`) underlines it, so the chat after it keeps its
+    turns."""
+    (chats / "logs" / "desk.txt").write_text("From: support desk\n~~~~~~~~~~~~~~~~~~~~\n" + FORTY)
+    assert transcripts.sniff(chats / "logs" / "desk.txt", "logs/desk.txt") == SURE
+    assert [w for _, w in chat_turns("desk.txt")] == ["User", "Assistant"] * 20
+
+
 def test_a_page_deep_in_a_long_turn_reads_back_a_few_mb_at_most(chats, monkeypatch):
     """A page inside a tool's long output reads back to the turn it is in through at most about LOOKBACK_BYTES bytes
     of lines, and keeps only the lines from that turn's first line on; when the turn starts further back, it keeps none
