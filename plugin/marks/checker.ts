@@ -14,6 +14,8 @@
 //   resumeChecks($)           at session start: the checks a reload of the plugin left running, on the busy line again;
 //                             a check whose fork is gone gives up, and says so
 //   checkerDenial(e)          why the checker may not make a call: it reads files, and runs code only as one Python script
+//   cannotStart(deny)         the line a check that Claude Code refused gives: the permission mode that refused it
+//                             (refusingMode) and the key that changes it, or why in one sentence
 //   awaitsCheck($, row)       whether a row of main's is in the turn that runs or the one whose check starts now
 //   repairOf($, row, n)       x on a failed citation (tray): what a check of that one mark again needs; for a mark
 //                             whose check did not run, the check itself
@@ -33,7 +35,14 @@
 // wait `deferred` until the tray opens them, as one Claude made.
 //
 // Every way a fork's check ends (an answer, a refusal, an error, a validator that fails, a fork that is gone) leaves no
-// mark of its share `checking`: a mark it gave no answer for is failed, as the person sees it (store.ts notRun). When a reply's last mark settles, main is told what changed (tellText), once; when a
+// mark of its share `checking`: a mark it gave no answer for is failed, as the person sees it (store.ts notRun). A check
+// that cannot start at all (Claude Code refused the fork, or thimble cannot read the checker's text) judged nothing: its
+// marks wait, not checked (`deferred`, a dim ? after each), opening one checks it, and one line says why (cannotStart):
+// once a session for each cause while the replies' own checks run into it, and each time a check the person asked for
+// (opening a citation, x) cannot start. Claude Code decides the fork's spawn as the session's permission mode decides a
+// call: in auto mode its classifier may give no verdict for a call that no reply of the model's made, as a hook's is,
+// and refuses it; no call of the plugin API starts the fork past that, so the line names the mode and the key that
+// changes it. When a reply's last mark settles, main is told what changed (tellText), once; when a
 // repair ends, main is told how that one mark ended (repairTellText): who started it, the person (x) or thimble (auto).
 //
 // state: marksRows (main's text rows of the turn that runs), marksRunning (the checks that run, by the fork's agent);
@@ -42,7 +51,7 @@ import { update, type EngineInterface } from 'claude-code'
 
 import { busyWhile } from '../bar/busy'
 import { cardsDir } from '../cards/store'
-import { failNotice, noticeLine } from '../bar/notice'
+import { failCleared, failNotice, noticeLine, reasonOf } from '../bar/notice'
 import { startDir } from '../core/env'
 import { spawnFork } from '../core/forks'
 import { tempDir } from '../core/home'
@@ -244,6 +253,47 @@ async function giveUp($: Engine, c: Check, why: string, now: number): Promise<vo
   await edit($, c, r => settle(r, now, r.items.map(m => (mine.has(m.n) && m.status === 'checking' ? notRun(m, why) : m))))
 }
 
+/** Every mark of a check that is still checked waits to be checked (`deferred`, drawn with a dim ? after it): the check
+ *  could not start, so it judged none of them, and opening one checks it (checkOpened). */
+async function notChecked($: Engine, c: Check, now: number): Promise<void> {
+  const mine = new Set(c.marks)
+  if (!((await replyOf($, c.key))?.items ?? []).some(m => mine.has(m.n) && m.status === 'checking')) return
+  await edit($, c, r => settle(r, now, r.items.map(m => (mine.has(m.n) && m.status === 'checking' ? { ...m, status: 'deferred' as MarkStatus } : m))))
+}
+
+/** The permission mode of Claude Code's that a refusal names, as it names it (`auto mode`), or null. In auto mode Claude
+ *  Code's classifier decides each call, and where it judges only the calls of the model's own replies it gives none
+ *  for a call a hook makes, so it refuses the checker's fork; in don't ask mode a call nobody approved is refused. */
+export function refusingMode(deny: string): string | null {
+  const m = /\b(auto|don't ask)[- ]mode\b/i.exec(String(deny))
+  return m ? `${m[1]!.toLowerCase()} mode` : null
+}
+
+/** The line a check of citations that could not start gives (Claude Code's refusal, `deny`): in a permission mode that
+ *  refuses it, that mode and the key that changes it (shift+tab, as Claude Code says it); else why, in the refusal's
+ *  first sentence, and that opening a citation checks it. A mode is the person's choice, not thimble's failure, so its
+ *  line is a notice. */
+export function cannotStart(deny: string | undefined): { text: string; notice: boolean } {
+  const mode = refusingMode(deny ?? '')
+  if (mode) return { notice: true, text: `Claude Code's ${mode} does not let thimble start a check of citations, so they are not checked. Press shift+tab to switch modes, then open a citation to check it.` }
+  return { notice: false, text: `The check of the citations could not start (${reasonOf(deny || 'no reason given')}), so they are not checked. ${OPEN_ONE}` }
+}
+
+/** What the failure line of a check that could not start is about: a check that starts takes it away. */
+const START = 'marks:start'
+const REFUSED = { plugin: 'thimble', key: 'checksRefused' } as const
+
+/** The line of a check that could not start (cannotStart's, or thimble's own failure): a reply's check says it once a
+ *  session, as the same cause stops each check after it; a check the person asked for (`asked`: opening a citation, x)
+ *  says it each time, since it answers the press. */
+async function sayCannotStart($: Engine, line: { text: string; notice: boolean }, asked = false): Promise<void> {
+  const said = ((await $.state.get(REFUSED)).value ?? []) as string[]
+  if (!said.includes(line.text)) await $.state.set(REFUSED, [...said, line.text])
+  else if (!asked) return
+  if (line.notice) noticeLine($, line.text, START)
+  else failNotice($, line.text, START)
+}
+
 /** The marks split into the forks' shares, in order: one share up to PER_FORK marks, else as many as PER_FORK gives
  *  (at most MAX_FORKS), of about equal size. The marks of one sentence stay in one share up to a share's size, since a
  *  fork writes the notes on its sentences; each run of a sentence's marks goes to the share its middle falls in. */
@@ -317,20 +367,23 @@ async function spawnChecks($: Engine, whole: Check, items: MarkItem[], reply = L
   try {
     template = await promptText($, 'checker')
   } catch (err) {
-    await giveUp($, whole, 'thimble could not read its checker text.', now)
-    failNotice($, `thimble could not read its checker text (${String((err as Error)?.message || err).slice(0, 80)}), so the citations are not checked. Reinstall thimble.`)
+    await notChecked($, whole, now)
+    await sayCannotStart($, { notice: false, text: `thimble could not read its checker text (${reasonOf(err)}), so the citations are not checked. Reinstall thimble.` })
     return
   }
   const started: string[] = []
   const cards = await cardsIndex($)
-  for (const share of splitMarks(items)) {
+  const shares = splitMarks(items)
+  for (const [k, share] of shares.entries()) {
     const c: Check = { ...whole, marks: share.map(m => m.n) }
     const fork = await spawnFork($, { kind: 'checker', prompt: checkerPrompt(template, share, whole.cwd, whole.root, cards, reply), description: 'checking citations' })
     if (!fork.agentId) {
-      await giveUp($, c, 'Claude Code did not start it.', now)
-      failNotice($, `The check of the citations could not start (${String(fork.deny || 'no reason given').slice(0, 80)}), so they are not checked. ${CHECK_ONE}`)
-      continue
+      // what refused this share refuses the next ones too: they wait with it, and no more forks are asked for
+      await notChecked($, { ...whole, marks: shares.slice(k).flat().map(m => m.n) }, now)
+      await sayCannotStart($, cannotStart(fork.deny))
+      break
     }
+    await failCleared($, START)
     const agentId = fork.agentId
     const spawnedAt = Number(await $.clock.now())
     await update($, RUNNING, cur => ({ ...(cur ?? {}), [agentId]: { ...c, agentId, spawnedAt } }))
@@ -401,7 +454,7 @@ export async function repairOf($: Engine, row: string, n: number): Promise<Repai
   try {
     template = await promptText($, 'checker')
   } catch (err) {
-    return `thimble could not read its checker text (${String((err as Error)?.message || err).slice(0, 80)}). Reinstall thimble.`
+    return `thimble could not read its checker text (${reasonOf(err)}). Reinstall thimble.`
   }
   const cwd = String(await $.session.cwd())
   const root = await startDir($)
@@ -420,7 +473,12 @@ export async function launchRepair($: Engine, r: Repair, hold: RepairHold): Prom
     const fork = await spawnFork($, { kind: 'checker', prompt: r.prompt, description: REPAIR_DESCRIPTION })
     if (held === hold) held = null
     if (hold.cancelled) return ''
-    if (!fork.agentId) return `The repair did not start (${String(fork.deny || 'no reason given').slice(0, 80)}). Press x on the citation to try again.`
+    if (!fork.agentId) {
+      // a mode that refuses checks: its line, as any check the person asked for says it
+      if (refusingMode(fork.deny ?? '')) { await sayCannotStart($, cannotStart(fork.deny), true); return '' }
+      return `The repair did not start (${reasonOf(fork.deny || 'no reason given')}). Press x on the citation to try again.`
+    }
+    await failCleared($, START)
     const agentId = fork.agentId
     const now = Number(await $.clock.now())
     // the mark is checked again: its earlier result goes, its place and words stay
@@ -461,9 +519,10 @@ export async function checkOpened($: Engine, row: string, n: number): Promise<vo
     const prompt = `${checkerPrompt(template, [m], cwd, root, lastIndex, reply)}\n\nThe analyst opened citation ${n} to read its evidence. It may stand in an earlier reply than your last.`
     const fork = await spawnFork($, { kind: 'checker', prompt, description: 'checking a citation' })
     if (!fork.agentId) {
-      failNotice($, `The check of citation ${n} could not start (${String(fork.deny || 'no reason given').slice(0, 80)}). Open it again to try again.`)
+      await sayCannotStart($, refusingMode(fork.deny ?? '') ? cannotStart(fork.deny) : { notice: false, text: `The check of citation ${n} could not start (${reasonOf(fork.deny || 'no reason given')}). Open it again to try again.` }, true)
       return
     }
+    await failCleared($, START)
     const agentId = fork.agentId
     const now = Number(await $.clock.now())
     await editReply($, key, rep => ({ ...rep, settledAt: null, items: rep.items.map(x => (x.n === n ? { ...x, status: 'checking' as MarkStatus } : x)) }))
@@ -514,6 +573,9 @@ function bashCalls(msgs: Any, by: 'checker' | 'main'): { command: string; output
 
 /** What the person can do about citations whose check did not run: each shows as failed, and x starts its check. */
 const CHECK_ONE = 'Press x on one in the tray to check it.'
+/** What the person can do about citations whose check could not start: each waits, not checked, and opening one checks
+ *  it. */
+const OPEN_ONE = 'Open one to check it.'
 
 /** The person's line when a check gave no answer, by why its turn ended. */
 function giveUpLine(reason: string): string {
@@ -533,7 +595,7 @@ async function validate($: Engine, c: Check, e: { agentId: string; answer: strin
   })
   let out: { parsed: boolean; results: Any[] } | null = null
   try { out = JSON.parse(String(ran.stdout || '')) } catch { out = null }
-  if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${String(ran.stderr || 'no output').trim().split('\n').pop()?.slice(0, 80)}), so they are not checked. ${CHECK_ONE}` }
+  if (!out || ran.exitCode !== 0) return { problem: `thimble could not validate the check of the citations (${reasonOf(String(ran.stderr || 'no output').trim().split('\n').pop())}), so they are not checked. ${CHECK_ONE}` }
   if (!out.parsed) return { problem: `The check of the citations gave no answer thimble could read, so they are not checked. ${CHECK_ONE}` }
   return { results: out.results }
 }
@@ -558,7 +620,7 @@ export async function endCheck($: Engine, e: { agentId: string; reason: string; 
     try {
       v = await validate($, c, e, items)
     } catch (err) {
-      v = { problem: `thimble could not validate the check of the citations (${String((err as Error)?.message || err).slice(0, 80)}), so they are not checked. ${CHECK_ONE}` }
+      v = { problem: `thimble could not validate the check of the citations (${reasonOf(err)}), so they are not checked. ${CHECK_ONE}` }
     }
     if (!v.results) {
       await giveUp($, c, 'thimble could not validate its answer.', forkEnd)

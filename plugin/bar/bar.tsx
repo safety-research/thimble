@@ -259,24 +259,52 @@ async function lineRows($: Engine, els: Any, width: number, named: Map<string, (
   const parts = pressedWords(words, named)
   if (!parts.some(p => p.key || p.press)) return [Box({ key: 'fail-line', flexDirection: 'row', flexWrap: 'wrap', width, children: [Text({ key: 'fail-text', ...look, wrap: 'wrap', children: words })] })]
   // with a key to press: wrapped here, word by word, so its press stands among the words (a Text holds no Button)
-  const lines: Any[][] = [[]]
+  const rows = wordRows(parts, width)
+  const text = Box({ key: 'fail-text', flexDirection: 'column', children: rows.map((l, k) => Box({ key: `fail-row-${k}`, flexDirection: 'row', children: l.map(({ w, p, i, j }) => (p.press
+    ? Button({ key: `fail-item-${i}`, plain: true, label: p.s.replace(/[“”]/g, ''), hover: quiet(`fail-item-${i}`), onPress: p.press, children: [Text({ ...look, bold: true, underline: true, children: w })] })
+    : p.key
+    ? Button({ key: `fail-key-${i}`, plain: true, label: `press ${p.key}`, hover: quiet(`fail-key-${i}`), onPress: () => pressKey($, p.key!), children: [Text({ ...look, bold: true, underline: true, children: w })] })
+    : Text({ key: `fail-w-${i}-${j}`, ...look, children: w }))) })) })
+  return [Box({ key: 'fail-line', flexDirection: 'row', width, children: [text] })]
+}
+
+/** A line's parts (pressedWords) on rows of at most `width` cells, each row its words in order (`w`, the words of part
+ *  `i`, piece `j`). A row breaks between words, and the space before the break is not drawn, so no row is wider than
+ *  `width`: a row a cell too wide would shrink one of its words, which then wraps onto a blank row of its own and
+ *  leaves no space before the next. A word wider than a row is cut where each row ends; a press stays whole. */
+export function wordRows<P extends { s: string; key?: string; press?: unknown }>(parts: P[], width: number): { w: string; p: P; i: number; j: number }[][] {
+  const rows: { w: string; p: P; i: number; j: number }[][] = [[]]
   let used = 0
   parts.forEach((p, i) => {
-    const pieces = p.key || p.press ? [p.s] : p.s.split(/(?<= )/)
-    pieces.forEach((w, j) => {
-      if (used && used + len(w.trimEnd()) > width) { lines.push([]); used = 0 }
-      if (!used && !p.key && !p.press) w = w.trimStart()
+    const whole = !!(p.key || p.press)
+    // the words of a line: one paragraph, its spaces and breaks one space each
+    const pieces = whole ? [p.s] : p.s.replace(/\s+/g, ' ').split(/(?<= )/).flatMap(w => cutWide(w, width))
+    pieces.forEach((piece, j) => {
+      let w = piece
+      if (used && used + len(w.trimEnd()) > width) { rows.push([]); used = 0 }
+      if (!used && !whole) w = w.trimStart()
       if (!w) return
       used += len(w)
-      lines[lines.length - 1]!.push(p.press
-        ? Button({ key: `fail-item-${i}`, plain: true, label: p.s.replace(/[“”]/g, ''), hover: quiet(`fail-item-${i}`), onPress: p.press, children: [Text({ ...look, bold: true, underline: true, children: w })] })
-        : p.key
-        ? Button({ key: `fail-key-${i}`, plain: true, label: `press ${p.key}`, hover: quiet(`fail-key-${i}`), onPress: () => pressKey($, p.key!), children: [Text({ ...look, bold: true, underline: true, children: w })] })
-        : Text({ key: `fail-w-${i}-${j}`, ...look, children: w }))
+      rows[rows.length - 1]!.push({ w, p, i, j })
     })
   })
-  const text = Box({ key: 'fail-text', flexDirection: 'column', children: lines.map((l, k) => Box({ key: `fail-row-${k}`, flexDirection: 'row', children: l })) })
-  return [Box({ key: 'fail-line', flexDirection: 'row', width, children: [text] })]
+  for (const row of rows) {
+    const last = row[row.length - 1]
+    if (last && !(last.p.key || last.p.press)) last.w = last.w.trimEnd()
+  }
+  return rows.map(row => row.filter(x => x.w)).filter(row => row.length)
+}
+
+/** A word (and the space after it) in pieces of at most `width` cells: the word whole when it fits a row. */
+function cutWide(w: string, width: number): string[] {
+  if (len(w.trimEnd()) <= width) return [w]
+  const out: string[] = []
+  let cur = ''
+  for (const ch of w) {
+    if (cur && len(cur + ch) > width) { out.push(cur); cur = '' }
+    cur += ch
+  }
+  return cur ? [...out, cur] : out
 }
 
 /** A line's words cut at each item of the bar it quotes (“r coverage”, a press in `named`, or an item whose words
