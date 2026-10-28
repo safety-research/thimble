@@ -1756,9 +1756,16 @@ def _or_put_back(fid: int):
 
 
 def _misfit(fid: int, commit: str) -> str:
-    """What fix `fid`'s change (`commit`) does not fit, in its error: the one fix in mine that changes a file the change
-    changes, when the change was made on those files as the release has them (so that only that fix's lines can be in
-    its way); else the person's other fixes."""
+    """What fix `fid`'s change (`commit`) does not fit, in its error. The release (thimble 0.10.6), when it changed a
+    file the change changes since the release the change was made on, with "and your other fixes" when a fix in mine
+    changes such a file too. Else the one fix in mine that changes such a file, when the change was made on those files
+    as the release has them (so that only that fix's lines can be in its way); else the person's other fixes.
+
+    The release the change was made on is the newest commit under the change that the release's history holds too (git
+    merge-base), so that the lines of the fixes it was made on are not the release's. It comes from the commit the
+    change sits on, which a y picks: the record's base stays mine as it was when the fix was made, also after thimble
+    update --continue or a dev install's update put the change on a newer release. A live whose history does not join
+    the two (a shallow clone) compares that commit itself."""
     live, base = live_dir(), str(release().get("base") or "")
 
     def files(a: str, b: str, paths: list[str]) -> list[str]:
@@ -1766,13 +1773,21 @@ def _misfit(fid: int, commit: str) -> str:
                   check=False)
         return [x for x in out.split("\0") if x]
 
+    def same(a: str, b: str, paths: list[str]) -> bool:
+        return run(["git", "--literal-pathspecs", "diff", "--quiet", a, b, "--", *paths], cwd=live,
+                   check=False).returncode == 0
+
     paths = files(f"{commit}^", commit, [])
-    if base and paths and run(["git", "--literal-pathspecs", "diff", "--quiet", base, f"{commit}^", "--", *paths],
-                              cwd=live, check=False).returncode == 0:
-        hits = [i for i in _on_ids(records())
-                if i != fid and files(f"refs/thimble/fixes/{i}^", f"refs/thimble/fixes/{i}", paths)]
-        if len(hits) == 1:
-            return f"fix {hits[0]}"
+    if not (base and paths):
+        return "your other fixes"
+    hits = [i for i in _on_ids(records())
+            if i != fid and files(f"refs/thimble/fixes/{i}^", f"refs/thimble/fixes/{i}", paths)]
+    made_on = git("merge-base", f"{commit}^", base, cwd=live, check=False) or f"{commit}^"
+    if not same(made_on, base, paths):
+        name = f"thimble {release_name()}"
+        return f"{name} and your other fixes" if hits else name
+    if same(base, f"{commit}^", paths) and len(hits) == 1:
+        return f"fix {hits[0]}"
     return "your other fixes"
 
 
