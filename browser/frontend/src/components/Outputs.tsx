@@ -19,7 +19,7 @@ import { DatasetView } from '../canvas/DataViz'
 import { FrameTable } from '../canvas/FrameTable'
 import { FRAME_MIME, asFrame } from '../lib/dataFrame'
 import { inlineSvg } from '../lib/svg'
-import { mendInk, paperInks, unmendInk } from '../lib/ink'
+import { mendInk, paperInks, unmendInk, type Inks } from '../lib/ink'
 import { purifyHtml } from '../lib/sanitize'
 import { specObject } from '../lib/vegaLoader'
 import { drawChart, NOTHING_DRAWN, refitChart, type DrawnChart, type NothingDrawn } from '../lib/vegaDraw'
@@ -360,23 +360,28 @@ function InlineSvg({ svg }: { svg: string }) {
   const inner = useMemo(() => ({ __html: fig?.markup ?? '' }), [fig])
   const box = useRef<HTMLDivElement>(null)
   const { key } = useTheme()
-  // a text the paper made hard to read on what is drawn under it takes the ink that reads, after the figure draws and
-  // again when its size or the paper changes
+  // the inks a pass gives, read when the paper or the accent changes; as text, so a change that leaves them as they
+  // were runs no pass
+  const inks = useMemo(() => JSON.stringify(paperInks(token)), [key])
+  // a text the paper made hard to read on what is drawn under it takes the ink that reads, once the figure is drawn and
+  // again when the inks change. A pass reads the figure as drawn, so a figure with no box yet (in a hidden part of the
+  // page) is mended when it gets one; a new size changes nothing a pass reads
   useLayoutEffect(() => {
     const el = box.current
     if (!el) return
+    unmendInk(el)
     const mend = () => {
-      unmendInk(el)
-      mendInk(el, paperInks(token))
+      if (!el.offsetWidth || !el.offsetHeight) return false
+      mendInk(el, JSON.parse(inks) as Inks)
+      return true
     }
-    mend()
-    const sized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(mend)
-    sized?.observe(el)
-    return () => {
-      sized?.disconnect()
-      unmendInk(el)
-    }
-  }, [fig, key])
+    if (mend() || typeof ResizeObserver === 'undefined') return
+    const sized = new ResizeObserver(() => {
+      if (mend()) sized.disconnect()
+    })
+    sized.observe(el)
+    return () => sized.disconnect()
+  }, [fig, inks])
   if (!fig) return <Raster src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`} />
   return <div ref={box} className="outputs-svg" style={fig.width ? { maxWidth: fig.width } : undefined} data-body="" data-settled="true" dangerouslySetInnerHTML={inner} />
 }

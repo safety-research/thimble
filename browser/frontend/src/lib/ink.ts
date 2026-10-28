@@ -87,21 +87,95 @@ export function mendInk(root: Element, o: Inks): number {
   // the fill of the topmost shape drawn under an SVG text's middle: a color, 'unknown' (a picture, a gradient), or
   // null when nothing is drawn under it
   const SHAPES = 'rect,circle,ellipse,path,polygon,polyline,line,use,image'
-  // each drawn shape of an svg once per pass: its computed style and the inverse of its place
-  const drawn = new Map<SVGSVGElement, { s: SVGGraphicsElement; cs: CSSStyleDeclaration; inv: DOMMatrix }[]>()
+  // a shape of an svg, read once per pass: its place; its computed style, the inverse of its place and, for a use, what
+  // it draws are read when a text's middle is first in its box
+  type Shape = { s: SVGGraphicsElement; m: DOMMatrix; cs?: CSSStyleDeclaration; inv?: DOMMatrix; use?: { shape: Element | null; own: DOMMatrix | null } }
+  // an svg's shapes in the order it draws them; the box each covers where the svg places its texts (x0, y0, x1, y1, four
+  // numbers a shape, a little wide so a middle on an edge is in), which a text's middle must be in before the shape's
+  // fill is asked; the box each block of 32 shapes covers, so a walk passes over a block whose box does not hold the
+  // middle; and for each of its texts how many shapes it draws before it
+  type Drawn = { shapes: Shape[]; boxes: number[]; blocks: number[]; before: Map<Element, number> }
+  const drawn = new Map<SVGSVGElement, Drawn>()
   const shapesOf = (svg: SVGSVGElement) => {
     let got = drawn.get(svg)
     if (got) return got
-    got = []
-    for (const s of Array.from(svg.querySelectorAll<SVGGraphicsElement>(SHAPES))) {
-      if (s.closest('defs,clipPath,mask,marker,pattern,symbol')) continue
-      const cs = getComputedStyle(s)
-      const sm = s.getCTM()
-      if (cs.display === 'none' || cs.visibility === 'hidden' || !sm) continue
-      got.push({ s, cs, inv: sm.inverse() })
+    got = { shapes: [], boxes: [], blocks: [], before: new Map() }
+    for (const s of Array.from(svg.querySelectorAll<SVGGraphicsElement>(`${SHAPES},text`))) {
+      if (s.tagName === 'text') {
+        got.before.set(s, got.shapes.length)
+        continue
+      }
+      const m = s.closest('defs,clipPath,mask,marker,pattern,symbol') ? null : s.getCTM()
+      if (!m) continue
+      let b: DOMRect | null
+      try {
+        b = s.getBBox()
+      } catch {
+        b = null
+      }
+      const xs: number[] = []
+      const ys: number[] = []
+      if (b)
+        for (const px of [b.x, b.x + b.width])
+          for (const py of [b.y, b.y + b.height]) {
+            xs.push(m.a * px + m.c * py + m.e)
+            ys.push(m.b * px + m.d * py + m.f)
+          }
+      got.shapes.push({ s, m })
+      // a box that cannot be read holds every middle
+      got.boxes.push(...(b ? [Math.min(...xs) - 0.01, Math.min(...ys) - 0.01, Math.max(...xs) + 0.01, Math.max(...ys) + 0.01] : [-Infinity, -Infinity, Infinity, Infinity]))
+    }
+    for (let k = 0; k < got.boxes.length; k += 128) {
+      const part = got.boxes.slice(k, k + 128)
+      const side = (n: number) => part.filter((_, j) => j % 4 === n)
+      got.blocks.push(Math.min(...side(0)), Math.min(...side(1)), Math.max(...side(2)), Math.max(...side(3)))
     }
     drawn.set(svg, got)
     return got
+  }
+  // what shape `i` of an svg shows at (x, y): its fill's color, 'unknown' (a picture, a gradient), or undefined when its
+  // fill does not hold the point or is clear there
+  const shows = (svg: SVGSVGElement, d: Drawn, i: number, x: number, y: number): RGBA | 'unknown' | undefined => {
+    const boxes = d.boxes
+    if (x < boxes[4 * i] || y < boxes[4 * i + 1] || x > boxes[4 * i + 2] || y > boxes[4 * i + 3]) return undefined
+    const it = d.shapes[i]
+    const s = it.s
+    if (!it.cs) it.cs = getComputedStyle(s)
+    const cs = it.cs
+    if (cs.display === 'none' || cs.visibility === 'hidden') return undefined
+    if (!it.inv) it.inv = it.m.inverse()
+    let q = new DOMPoint(x, y).matrixTransform(it.inv)
+    let shape: Element | null = s
+    if (s.tagName === 'use') {
+      const use = s as SVGUseElement
+      if (!it.use) {
+        const id = (use.href?.baseVal || use.getAttribute('xlink:href') || '').replace(/^#/, '')
+        const target = id ? svg.querySelector(`[id="${id.replace(/["\\]/g, '')}"]`) : null
+        const own = target && (target as SVGGraphicsElement).transform?.baseVal?.consolidate()
+        it.use = { shape: target, own: own ? own.matrix.inverse() : null }
+      }
+      shape = it.use.shape
+      // the use's x and y place what it draws; its own place (getCTM) leaves them out
+      q = new DOMPoint(q.x - use.x.baseVal.value, q.y - use.y.baseVal.value)
+      if (it.use.own) q = q.matrixTransform(it.use.own)
+    }
+    if (s.tagName === 'image') {
+      const ib = (s as SVGImageElement).getBBox()
+      return q.x >= ib.x && q.x <= ib.x + ib.width && q.y >= ib.y && q.y <= ib.y + ib.height ? 'unknown' : undefined
+    }
+    if (!shape || typeof (shape as SVGGeometryElement).isPointInFill !== 'function') return undefined
+    let inside = false
+    try {
+      inside = (shape as SVGGeometryElement).isPointInFill(q)
+    } catch {
+      inside = false
+    }
+    if (!inside) return undefined
+    const fill = cs.fill
+    if (/url\(/i.test(fill)) return 'unknown'
+    const f = rgba(fill)
+    const a = (f ? f[3] : 0) * parseFloat(cs.fillOpacity || '1') * parseFloat(cs.opacity || '1')
+    return f && a >= 0.5 ? [f[0], f[1], f[2], 1] : undefined
   }
   const under = (t: SVGGraphicsElement): RGBA | 'unknown' | null => {
     const svg = t.ownerSVGElement
@@ -113,62 +187,50 @@ export function mendInk(root: Element, o: Inks): number {
     } catch {
       return null
     }
-    const p = new DOMPoint(box.x + box.width / 2, box.y + box.height / 2).matrixTransform(m)
-    let hit: RGBA | 'unknown' | null = null
-    for (const { s, cs, inv } of shapesOf(svg)) {
-      if (!(t.compareDocumentPosition(s) & Node.DOCUMENT_POSITION_PRECEDING)) continue
-      let q = p.matrixTransform(inv)
-      let shape: Element | null = s
-      if (s.tagName === 'use') {
-        const use = s as SVGUseElement
-        const id = (use.href?.baseVal || use.getAttribute('xlink:href') || '').replace(/^#/, '')
-        shape = id ? svg.querySelector(`[id="${id.replace(/["\\]/g, '')}"]`) : null
-        // the use's x and y place what it draws; its own place (getCTM) leaves them out
-        q = new DOMPoint(q.x - use.x.baseVal.value, q.y - use.y.baseVal.value)
-        const own = shape && (shape as SVGGraphicsElement).transform?.baseVal?.consolidate()
-        if (own) q = q.matrixTransform(own.matrix.inverse())
-      }
-      let inside = false
-      if (s.tagName === 'image') {
-        const b = (s as SVGImageElement).getBBox()
-        inside = q.x >= b.x && q.x <= b.x + b.width && q.y >= b.y && q.y <= b.y + b.height
-        if (inside) hit = 'unknown'
+    const cx = box.x + box.width / 2
+    const cy = box.y + box.height / 2
+    const x = m.a * cx + m.c * cy + m.e
+    const y = m.b * cx + m.d * cy + m.f
+    const d = shapesOf(svg)
+    // from the shape drawn last before the text back to the first: the first that shows a color at the text's middle,
+    // a picture or a gradient is the topmost; a clear fill shows what is drawn under it
+    let i = (d.before.get(t) ?? 0) - 1
+    while (i >= 0) {
+      const lo = i - (i % 32)
+      const k = lo / 8
+      if (x < d.blocks[k] || y < d.blocks[k + 1] || x > d.blocks[k + 2] || y > d.blocks[k + 3]) {
+        i = lo - 1
         continue
       }
-      if (!shape || typeof (shape as SVGGeometryElement).isPointInFill !== 'function') continue
-      try {
-        inside = (shape as SVGGeometryElement).isPointInFill(q)
-      } catch {
-        inside = false
+      for (; i >= lo; i--) {
+        const got = shows(svg, d, i, x, y)
+        if (got) return got
       }
-      if (!inside) continue
-      if (/url\(/i.test(cs.fill)) {
-        hit = 'unknown'
-        continue
-      }
-      const f = rgba(cs.fill)
-      const a = (f ? f[3] : 0) * parseFloat(cs.fillOpacity || '1') * parseFloat(cs.opacity || '1')
-      if (f && a >= 0.5) hit = [f[0], f[1], f[2], 1]
     }
-    return hit
+    return null
   }
 
-  const mend = (el: HTMLElement | SVGElement, prop: 'color' | 'fill', c: RGBA, b: Behind) => {
+  // the ink a text of color `c` on `b` takes, or null when it reads there or would read no better on a light page
+  const inkFor = (c: RGBA, b: Behind): string | null => {
     const now = flat(b, paper)
     const seen = ratio(over(c, now), now)
-    if (seen >= MIN) return 0
+    if (seen >= MIN) return null
     // the same text on a light page: a color that follows the paper is its dark ink there, and the paper is light
     const page = flat(b, light.c!)
     const ref = follows(c) ? dark.c! : c
-    if (ratio(over(ref, page), page) <= seen) return 0
-    const ink = ratio(dark.c!, now) >= ratio(light.c!, now) ? dark.s : light.s
+    if (ratio(over(ref, page), page) <= seen) return null
+    return ratio(dark.c!, now) >= ratio(light.c!, now) ? dark.s : light.s
+  }
+  const put = (el: HTMLElement | SVGElement, prop: 'color' | 'fill', ink: string) => {
     // MENDED, written out: this body is written into a frame alone
     if (!el.hasAttribute('data-thimble-ink')) el.setAttribute('data-thimble-ink', JSON.stringify([prop, el.style.getPropertyValue(prop), el.style.getPropertyPriority(prop)]))
     el.style.setProperty(prop, ink, 'important')
-    return 1
   }
 
   let n = 0
+  // an SVG text's ink is written once every text is read, since a write would have the browser lay the figure out
+  // again before the next text's place is read; one text's fill changes nothing another is read on
+  const fills: [SVGElement, string][] = []
   const all = [root, ...Array.from(root.querySelectorAll('*'))]
   for (const el of all) {
     if (!(el instanceof HTMLElement || el instanceof SVGElement) || /^(?:script|style|noscript|template|title|desc|defs|metadata)$/i.test(el.tagName)) continue
@@ -176,11 +238,13 @@ export function mendInk(root: Element, o: Inks): number {
       if (el.tagName !== 'text') continue
       const cs = getComputedStyle(el)
       const c = rgba(cs.fill)
-      if (!c || c[3] * parseFloat(cs.fillOpacity || '1') < 0.3) continue
+      const alpha = c ? c[3] * parseFloat(cs.fillOpacity || '1') : 0
+      if (!c || alpha < 0.3) continue
       const u = under(el as SVGGraphicsElement)
       if (u === 'unknown') continue
       const b = u ? { layers: [], base: u } : behind(el.ownerSVGElement)
-      if (b) n += mend(el, 'fill', [c[0], c[1], c[2], c[3] * parseFloat(cs.fillOpacity || '1')], b)
+      const ink = b && inkFor([c[0], c[1], c[2], alpha], b)
+      if (ink) fills.push([el, ink])
       continue
     }
     if (el.closest('svg') || !Array.from(el.childNodes).some((k) => k.nodeType === 3 && /\S/.test(k.nodeValue ?? ''))) continue
@@ -189,9 +253,13 @@ export function mendInk(root: Element, o: Inks): number {
     const fill = (cs as CSSStyleDeclaration & { webkitTextFillColor?: string }).webkitTextFillColor
     if (!c || c[3] < 0.3 || (fill && rgba(fill)?.join() !== c.join())) continue
     const b = behind(el)
-    if (b) n += mend(el, 'color', c, b)
+    const ink = b && inkFor(c, b)
+    if (!ink) continue
+    put(el, 'color', ink)
+    n++
   }
-  return n
+  for (const [el, ink] of fills) put(el, 'fill', ink)
+  return n + fills.length
 }
 
 /** Puts back what mendInk changed under `root`. */
