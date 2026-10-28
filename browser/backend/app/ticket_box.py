@@ -227,18 +227,23 @@ async def _end_group(proc: asyncio.subprocess.Process) -> None:
     the empty files it puts in the working directory for the box's run only when it gets to exit, so a SIGKILL first
     would leave them in the worktree. A SIGTERM that comes while srt starts goes to the cleanup handler its sandbox
     manager registers first, which does not end it, and the command it then starts never hears of it: the next SIGTERM
-    reaches srt's own handler, which ends the command, so srt cleans up and exits. A process of the run in a session of
-    its own, which the group's signals miss, gets SIGKILL once the group has ended: a bwrap that srt started as the run
-    was stopped could outlive srt before its --die-with-parent took hold."""
+    reaches srt's own handler, which ends the command, so srt cleans up and exits. Once srt has ended, what is left of
+    the run gets SIGKILL and is waited for: a process in its group the SIGTERMs did not end, such as a bwrap still
+    setting up its mounts (which makes stand-ins after srt's cleanup), and one in a session of its own, which the
+    group's signals miss."""
     from . import procs  # noqa: PLC0415
 
-    left: set[tuple[int, str]] = set()  # (pid, start time) of the run's processes outside its group
+    seen: set[tuple[int, str]] = set()  # (pid, start time) of the run's processes
 
     def look() -> None:
         for pid in procs.descendants(proc.pid):
             st = procs._stat_fields(pid)
-            if st is not None and len(st) > 19 and st[2] != str(proc.pid):
-                left.add((pid, st[19]))
+            if st is not None and len(st) > 19:
+                seen.add((pid, st[19]))
+
+    def running(pid: int, started: str) -> bool:  # that process still, not a new one with its pid, and no zombie
+        st = procs._stat_fields(pid)
+        return st is not None and len(st) > 19 and st[19] == started and st[0] not in ("Z", "X")
 
     look()
     _signal_group(proc, signal.SIGTERM)
@@ -255,11 +260,15 @@ async def _end_group(proc: asyncio.subprocess.Process) -> None:
     if proc.returncode is None:
         _signal_group(proc, signal.SIGKILL)
         await proc.wait()
-    for pid, started in left:
-        st = procs._stat_fields(pid)
-        if st is not None and len(st) > 19 and st[19] == started:  # that process still, not a new one with its pid
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL)  # the group outlives srt while any process of it runs
+    for pid, started in seen:
+        if running(pid, started):
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.kill(pid, signal.SIGKILL)
+    gone_by = time.monotonic() + KILL_WAIT_S
+    while any(running(pid, started) for pid, started in seen) and time.monotonic() < gone_by:
+        await asyncio.sleep(0.05)
 
 
 async def run(box: Box, cmd: Sequence[str], *, cwd: Path, timeout: float,
