@@ -363,10 +363,11 @@ def _ask(prompt: str, default: str = "") -> str:
 
 def setup(argv: list[str] | None = None) -> int:
     """`python -m app.claude_access setup [--how H] [--key-file F] [--wif-file F] [--yes] [--find-wif]`: ask how to
-    reach Claude (1 API key, the default; 2 Claude Code sign-in, after the consent text; 3 WIF, its config file), check
-    it, and save it. The key is read from --key-file, else without echo, or from stdin when it is not a terminal; it is
-    never printed. --find-wif lists the WIF config files found (find_wif) and saves nothing. Exit 0 when saved and
-    checked, 1 when not saved, 2 when saved and the check failed."""
+    reach Claude (1 API key, the default; 2 Claude Code sign-in, recommended to a person with a Claude subscription,
+    after the consent text; 3 WIF, its config file), check it, and save it. The key is read from --key-file, else
+    without echo, or from stdin when it is not a terminal; it is never printed. --find-wif lists the WIF config files
+    found (find_wif) and saves nothing. Exit 0 when saved and checked, 1 when not saved, 2 when saved and the check
+    failed."""
     ap = argparse.ArgumentParser(prog="thimble-browser --setup")
     ap.add_argument("--how", choices=CHOICES)
     ap.add_argument("--key-file", help="a file that holds the Anthropic API key alone (implies --how api-key)")
@@ -393,7 +394,8 @@ def setup(argv: list[str] | None = None) -> int:
     if not choice:
         print("How should thimble browser reach Claude?")
         print("  1  an Anthropic API key (default)")
-        print("  2  your Claude Code sign-in (launches headless Claude Code sessions)")
+        print("  2  your Claude Code sign-in (recommended if you have a Claude subscription; launches headless Claude "
+              "Code sessions)")
         print("  3  Workload Identity Federation (a config file)")
         choice = {"1": API_KEY, "2": CLAUDE_CODE, "3": WIF}.get(_ask("Choose 1, 2 or 3 [1]: ", "1"))
         if not choice:

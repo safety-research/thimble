@@ -104,9 +104,9 @@ until you fix it and run it again. Then it:
 3. writes a `thimble-browser` launcher in `~/.local/bin` (`--bin-dir DIR` puts it elsewhere), and says when that folder
    is not on your `PATH`.
 4. asks how the browser workbench reaches Claude: 1 an Anthropic API key (the default; you paste it, and it is kept in
-   `~/.thimble-browser` readable by you alone), 2 your Claude Code sign-in (it shows that this launches headless Claude
-   Code sessions in the background and asks you to confirm), or 3 Workload Identity Federation (the path of its config
-   file). It checks the choice with one small call.
+   `~/.thimble-browser` readable by you alone), 2 your Claude Code sign-in, recommended if you have a Claude
+   subscription (it shows that this launches headless Claude Code sessions in the background and asks you to
+   confirm), or 3 Workload Identity Federation (the path of its config file). It checks the choice with one small call.
 5. says how much disk space the browser workbench takes, and, last, what does not work yet or is left to do, such as a
    card sandbox that cannot start here, with its fix.
 

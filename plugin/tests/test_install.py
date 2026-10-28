@@ -503,3 +503,61 @@ def test_install_md_says_how_a_plugin_without_a_clone_updates_after_its_first_fi
             "`~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place of "
             "`~/.thimble`).") in update
     assert (ROOT / "plugin" / "bin" / "thimble").is_file()
+
+
+def whole_install(tmp_path, *args):
+    """scripts/install.sh with made-up commands, both products, no terminal and no question how the workbench reaches
+    Claude (--no-setup, as Claude runs it): the run. The made-up claude installs a plugin with no sandbox to check."""
+    market = tmp_path / "market"
+    (market / ".claude-plugin").mkdir(parents=True)
+    (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps({"plugins": [{"name": "thimble", "source": "./plugin"}]}))
+    (market / "plugin" / ".claude-plugin").mkdir(parents=True)
+    (market / "plugin" / ".claude-plugin" / "plugin.json").write_text(json.dumps({"userConfig": {}}))
+    cc = tmp_path / "cc"
+    (cc / "plugins").mkdir(parents=True)
+    (cc / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thimble": {"installLocation": str(market)}}))
+    bin_ = tmp_path / "stubs"
+    stub(bin_ / "node", "echo v22.20.0\n")
+    stub(bin_ / "claude", 'case "$1" in --version) echo "2.1.311 (Claude Code)" ;; plugin) [ "$2" = list ] && echo "[]" ;; esac\nexit 0\n')
+    stub(bin_ / "uv", '[ "$1" = --version ] && echo "uv 0.9.0"\nexit 0\n')
+    stub(bin_ / "npm", "exit 0\n")
+    stub(bin_ / "bwrap", "exit 0\n")
+    home = tmp_path / "home"
+    home.mkdir()
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "HOME": str(home), "THIMBLE_PYTHON": sys.executable, "CLAUDE_CONFIG_DIR": str(cc),
+           "THIMBLE_HOME": str(tmp_path / "thimble"), "THIMBLE_BROWSER_HOME": str(tmp_path / "browser-home")}
+    p = subprocess.run([str(ROOT / "scripts" / "install.sh"), "--no-setup", "--bin-dir", str(tmp_path / "bin"), *args],
+                       capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
+    assert p.returncode == 0, p.stdout + p.stderr
+    return p
+
+
+def test_the_install_recommends_the_workbench_s_claude_code_sign_in_to_a_subscriber(tmp_path):
+    """Claude, when it asks how the workbench reaches Claude (CLAUDE.md, step 4), and the install's note when no terminal
+    asked it (an agent runs the script, or --no-setup), recommend the Claude Code sign-in to a person with a Claude
+    subscription. The question in a terminal (claude_access.setup) is the browser's server tests'."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    ask = text.split(" 4. When the workbench was installed", 1)[1].split(" Then: ", 1)[0]
+    sign_in = ask.split("Claude Code sign-in", 1)[1].split(", an Anthropic API key", 1)[0]
+    assert "recommended" in sign_in and "Claude subscription" in sign_in, ask
+    note = next(line for line in whole_install(tmp_path).stdout.splitlines()
+                if line.startswith("Note: Claude access is not set up yet."))
+    assert "Their Claude Code sign-in, recommended when they have a Claude subscription, only after they accept" in note
+
+
+def test_the_readme_and_the_install_summary_say_when_to_use_each_product(tmp_path):
+    """The README's usage, the install's last lines when it installed both products, and the reply Claude ends an install
+    with (CLAUDE.md, step 5) say when to use the terminal plugin and when the browser workbench. An install of one
+    product has no choice to explain."""
+    plugin, web = "Use the terminal plugin when you work in Claude Code", "Use the browser workbench when you want"
+    readme = " ".join((ROOT / "README.md").read_text().replace("**", "").split())
+    usage = readme.split("## Usage", 1)[1].split(" ### ", 1)[0]
+    assert plugin in usage and web in usage, usage
+    out = " ".join(whole_install(tmp_path / "both").stdout.split())
+    summary = out.split("== The browser workbench", 1)[1].split("To start the browser workbench", 1)[0]
+    assert plugin in summary and web in summary, summary
+    alone = whole_install(tmp_path / "plugin", "--no-browser").stdout
+    assert "Use the terminal plugin when" not in alone and "Use the browser workbench when" not in alone
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    reply = text.split(" 5. While something the user chose", 1)[1].split(" 6. ", 1)[0]
+    assert "- The plugin, when they work in Claude Code:" in reply and "- The workbench, when they want" in reply, reply

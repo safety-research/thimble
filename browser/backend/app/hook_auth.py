@@ -141,7 +141,7 @@ ANALYST_ONLY = ("only the analyst's own thimble page can do this (start, message
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 WRITE_REFUSED = "open thimble from the link `thimble-browser` printed in your terminal, to make changes"
 # the page's own words for it are lib/notices CODE_GONE_TEXT
-CODE_GONE = "This sign-in link was already used or has expired. Run `thimble-browser` again for a new one."
+CODE_GONE = "This sign-in link was already used or has expired. Run `thimble-browser --link` for a new one."
 # A read of the local API (GET or HEAD) needs a signed-in browser's cookie or a hook proof too (LocalReadGuard), except
 # these: the supervisor's, the plugin's and the page's health check, and the page's question whether it is signed in
 OPEN_READS = frozenset({"/api/health", "/api/ui/paired"})

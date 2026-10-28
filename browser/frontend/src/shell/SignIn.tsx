@@ -11,12 +11,12 @@ import { claimRefused, signedIn } from '../lib/api'
 import { bus } from '../lib/bus'
 
 /** The way in, which ends the line; a span in backticks is drawn as code. */
-export const WAY_IN = 'Open the link `thimble-browser` printed in your terminal, or run `thimble-browser` again.'
+export const WAY_IN = 'Open the link `thimble-browser` printed in your terminal, or run `thimble-browser --link` for a new one.'
 /** The line a browser that is not signed in sees. */
 export const SIGN_IN_LINE = `This browser isn't signed in. ${WAY_IN}`
 /** The line when the server refused the link's code with 410 (used, replaced by a newer one, or expired). It does not
  * send the analyst to the link printed in the terminal, which is the link whose code is gone. */
-export const CODE_GONE_LINE = "This link was used or has expired, so this browser isn't signed in. Run `thimble-browser` again for a new one."
+export const CODE_GONE_LINE = "This link was used or has expired, so this browser isn't signed in. Run `thimble-browser --link` for a new one."
 
 type State = 'wait' | 'in' | 'out'
 
