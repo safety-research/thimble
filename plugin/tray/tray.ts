@@ -57,7 +57,7 @@ import { accent, themeLast, themeNow } from '../core/theme'
 import { treeRows } from '../core/trail.mjs'
 import { markColors } from '../explain/place.mjs'
 import { anchoredAt, metaOf, setFocus } from '../cards/store'
-import { explainSpans, type ExplainPart, type Gloss } from '../explain/seam'
+import { explainSpans, pendingGloss, type ExplainPart, type Gloss } from '../explain/seam'
 import { placeLines } from '../explain/expand'
 import { citeLinks } from '../explain/place.mjs'
 import { checkOpened, launchRepair, repairOf } from '../marks/checker'
@@ -255,8 +255,10 @@ async function itemOf($: Engine, row: string, n: number): Promise<MarkItem | nul
   return (await rowMarks($, row))?.items.find(x => x.n === n) ?? null
 }
 
+/** An explainer or a heads-up of the row; an explainer still being written (explain/seam.ts pendingGloss) is its words
+ *  alone. */
 async function glossOf($: Engine, row: string, id: string): Promise<Gloss | null> {
-  return (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id] ?? null
+  return (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id] ?? pendingGloss(row, id)
 }
 
 /** What the tray and the side thread read of a frame. */
@@ -278,8 +280,9 @@ function engagedMark(f: Frame, info: Info): Any {
   return f.kind === 'heads' ? { kind: 'heads', row: f.row, term: g?.term ?? '', title: g?.title ?? '' } : { kind: 'explain', row: f.row, term: g?.term ?? '' }
 }
 
-/** The person opened a mark: main hears it with their next prompt. */
+/** The person opened a mark: main hears it with their next prompt (an explainer still being written, once written). */
 async function told($: Engine, f: Frame): Promise<void> {
+  if (f.kind === 'explain' && pendingGloss(f.row, f.id)) return
   const info = await infoOf($, f)
   await tellOpened($, engagedMark(f, info), info.begins).catch(() => undefined)
 }
