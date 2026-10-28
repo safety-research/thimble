@@ -236,13 +236,16 @@ const sideExample = (api: Api, section: SideSection) => {
   return { wrap, aside, layout }
 }
 
-// ---------- Labels: one agent's transcript in the Transcript view with two labels on it, each in colours of its own:
-// what each step does (four values) and whether it coordinates with other agents (yes/no); the ruler beside it shows
-// both down the whole file. Captured, with the Labels sidebar that lists them, over the real one, which the step opens.
+// ---------- Labels: one agent's transcript in the Transcript view with one label on it, of few values: whether each
+// step coordinates with other agents (yes/no), yes in its colour; the ruler beside it shows the label down the whole
+// file. Captured, with the Labels sidebar that lists it, over the real one, which the step opens.
 
 /** the transcript's lines (agent-05.jsonl, as the Labels sidebar counts its records), which its ruler stands for, the
  * records the example leaves out included */
 const TX_LINES = 76
+/** the line the transcript opens at, just before the agent asks another agent about a force-push: records the label
+ * lights are on screen */
+const TX_OPEN = 47
 
 /** The labels' marks on the example transcript's ruler, drawn from the records it shows as thimble's ruler draws them
  * (files/Ruler.tsx Marks): a lane per label, in the order of a record's gutter cells, with its stripe, and on it a mark
@@ -294,7 +297,7 @@ const labelsExample = (api: Api): Example => {
   const putBack = holdSide('labels')
   const status = statusExample(api, 'agent-05.jsonl · Transcript')
   api.ex.append(rd, side.wrap, status.wrap)
-  // the transcript opens at line 22 and stays there while the panel's size changes, until anything else scrolls it
+  // the transcript opens at TX_OPEN and stays there while the panel's size changes, until anything else scrolls it
   let pinned = true,
     setTo: number | null = null
   const layout = () => {
@@ -314,7 +317,7 @@ const labelsExample = (api: Api): Example => {
     if (!sc || !sc.clientHeight) return
     if (pinned && setTo != null && Math.abs(sc.scrollTop - setTo) > 1) pinned = false
     if (pinned) {
-      const row = rd.querySelector('[data-line="22"]')
+      const row = rd.querySelector(`[data-line="${TX_OPEN}"]`)
       if (row) {
         sc.scrollTop += row.getBoundingClientRect().top - sc.getBoundingClientRect().top - 6
         setTo = sc.scrollTop
@@ -586,7 +589,7 @@ export function tourSteps(key: string, chat = true): Step[] {
       scroll: (api) => api.els.reader?.querySelector('.reader-body') ?? null,
       scrollOver: (api) => api.els.reader?.querySelector('.reader-main') ?? null,
       title: 'Labels',
-      body: 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.',
+      body: 'A label sorts records into values, by a rule or by Claude’s reading. The colored bar beside a record shows its value, and the minimap at the right shows where those values fall in the whole file. Labels, at the top, lists the labels. Open one to see its records and correct them.',
     },
     {
       tab: 'files', example: viewsExample, leave: releaseBrowser, anchor: filesPanel, place: 'left', align: 'start', pad: 0, radius: 12,
@@ -723,9 +726,9 @@ export function tourSteps(key: string, chat = true): Step[] {
         const parts = [...document.querySelectorAll('.pointer-hl, .pointer-hl-line')].filter((e) => !e.closest('.tour-root')).concat([real])
         return api.unionOf([api.els.card, ...parts].map(api.rectOf))
       },
-      // moving on closes the ask box, which would otherwise stay open over the next surface
+      // moving on closes the ask box, which would otherwise stay open over the next surface; its question is kept
       leave: (api) => {
-        if (api.realBox()) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        api.closeBox()
         api.closeMock()
       },
       title: `${key}-click to ask`,

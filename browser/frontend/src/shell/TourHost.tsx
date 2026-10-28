@@ -2,9 +2,11 @@
 // own home), once the shell is drawn with its session attached, a welcome asks whether to take the tour, and says that
 // the tour uses example data. The offer is recorded as it shows, whatever the answer. Settings'
 // Take the tour (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While it runs,
-// telemetry records nothing and the chat shows no view proposal (lib/touring). When it closes, the focused pane shows
-// the surface it showed before; a session that ends while it runs closes it.
+// telemetry records nothing and the chat shows no view proposal (lib/touring). A question typed in its ask box goes to
+// main's composer when the tour closes the box. When it closes, the focused pane shows the surface it showed before; a
+// session that ends while it runs closes it.
 import { useEffect } from 'react'
+import { offerDraft } from '../chat/pending'
 import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { hold } from '../lib/telemetry'
@@ -52,6 +54,7 @@ export function TourHost() {
           welcome,
           chat: chatOn(),
           showTab: (tab) => bus.emit('showTab', { tab, from: null }),
+          keep: (question) => offerDraft('main', question),
           onEnd: () => {
             running = false
             watch.disconnect()

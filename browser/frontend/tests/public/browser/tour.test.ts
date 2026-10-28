@@ -12,20 +12,21 @@
 //     sits 8 px or more inside its cutout, which lies inside the chat panel; step 3, Files, says what the files browser
 //     shows;
 //   - step 4: the step opens the real Labels sidebar with the top bar's Labels button and lays the example sidebar
-//     exactly over it, beside the transcript; the ruler's marks stand at the records' lines in the colours of their
-//     bars; the wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its
-//     height, the cutout and the example sidebar still and the ruler's thumb following, and the wheel over the ruler
-//     too;
+//     exactly over it, beside the transcript, which opens on records lit by the example's label; the ruler's marks
+//     stand at the records' lines in the colours of their bars; the step says what the bars and the minimap mean; the
+//     wheel scrolls the labels' transcript in steps with every record moving by exactly the scroll, its height, the
+//     cutout and the example sidebar still and the ruler's thumb following, and the wheel over the ruler too;
 //   - step 5: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
 //     another or anything of the view, nothing of the tour (a badge, the popover, the views bar) meets it, there is no
 //     label control (the page draws its own), the line under the name starts where the name does, the unreadable line
 //     is counted in the line's ink, and the page's Only these shows as thimble's filter chip with how many events it
 //     hides, which the chip clears;
 //   - step 6: the card is in plain words; on its first entry the demo plays once the card is in place, comes to rest on
-//     08:04 as its source shows and the card holds still;
+//     08:04 as its source shows, headed by the printed output it is a line of, and the card holds still;
 //   - step 7: in the ⌘-click demo the key badge stands inside the card and over none of its text; then "⌘-click here"
 //     points at the end of an entry and covers no text and not the popover, until the first try; a real ⌘-drag on the
-//     example card picks only the words dragged over and its ask box lies inside the cutout;
+//     example card picks only the words dragged over and its ask box lies inside the cutout; the question typed in the box
+//     is in main's composer once Enter closed the box and the tour moved on, and stays there after the tour;
 //   - step 8: the report's first figure is the small table, every chart and table is as wide as its figure, and with no
 //     check made there is no comment margin, so its text column is as wide as thimble's own Report draws it, also after
 //     Back from step 9; step 9: the demo makes the check, the margin stands at Run and not before, the comments appear
@@ -226,6 +227,8 @@ const realGates = (page: Page) => page.evaluate(() => [...document.querySelector
 /** How many view proposal cards the chat draws. */
 const realOffers = (page: Page) => page.evaluate(() => [...document.querySelectorAll('.chat-offer')].filter((g) => !g.closest('.tour-root')).length)
 const next = (page: Page) => page.click('.tour-pop [data-tour="next"]')
+/** What main's composer holds. */
+const composerText = (page: Page) => page.evaluate(() => document.querySelector<HTMLTextAreaElement>('.chat-composer textarea')?.value ?? null)
 
 // in the page: what a cutout shows lies inside it. Every element drawn in an example container (a size, visible, and
 // clipped by its ancestors' boxes) that meets the cutout must lie inside it; a container whose background only covers
@@ -653,7 +656,20 @@ async function walk(page: Page, tag: string, send = false) {
     return { open: real?.getAttribute('data-section') ?? null, same, inside, apart: rd.right <= side.left + 0.5, pressed: document.querySelector('.shell-side-btn[data-side="labels"]')?.getAttribute('aria-pressed') ?? null }
   })
   assert.ok(lay.open === 'labels' && lay.same && lay.inside && lay.apart && lay.pressed === 'true', `${tag} 3: the Labels sidebar is open with the example over it, beside the transcript ${JSON.stringify(lay)}`)
-  assert.equal(await body(page), 'A label sorts records into values, by a rule or by Claude’s reading. Labels, at the top, lists them. Open one to see its records and correct them.', `${tag} 3: what a label is`)
+  // the transcript opens on records the label lights: some lit bars show in the part of it on screen
+  const litShown = await page.evaluate(() => {
+    const b = document.querySelector('.tour-ex-reader .reader-body')!.getBoundingClientRect()
+    return [...document.querySelectorAll('.tour-ex-reader .reader-gutter-cell.is-lit')].filter((c) => {
+      const r = c.getBoundingClientRect()
+      return r.height > 0 && r.bottom > b.top && r.top < b.bottom
+    }).length
+  })
+  assert.ok(litShown > 0, `${tag} 3: the transcript opens on records with lit bars (${litShown})`)
+  assert.equal(
+    await body(page),
+    'A label sorts records into values, by a rule or by Claude’s reading. The colored bar beside a record shows its value, and the minimap at the right shows where those values fall in the whole file. Labels, at the top, lists the labels. Open one to see its records and correct them.',
+    `${tag} 3: what a label is, and what its bars and the minimap mean`,
+  )
   // the ruler shows the records' colours where they are: every lit cell of a record on line L has a mark in its lane,
   // in the colour its bar shows, over (L − 1)/76 to L/76 of the ruler, and no mark has a colour no bar shows
   const ruler = await page.evaluate(() => {
@@ -826,6 +842,7 @@ async function walk(page: Page, tag: string, send = false) {
   // 5 Cards: the demo shows the source of 08:04; the card is in plain words; a real hover on a value shows its source
   await onStep(page, 5, 'Cards on the Canvas')
   await page.waitForFunction(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .hl')?.textContent === '08:04', null, { timeout: 8000 })
+  assert.equal(await page.evaluate(() => document.querySelector('.tour-fx .refchip-pop[data-demo] .refchip-pop-head')?.textContent), 'printed output · line 8', `${tag} 5: the source names the printed output its line is from`)
   // on its first entry the demo plays once the card is in place: the pointer shows soon after Next, glides and comes to
   // rest on 08:04 as its source shows, and the card holds still
   const r7 = judge7(await takeLog7(page))
@@ -944,9 +961,11 @@ async function walk(page: Page, tag: string, send = false) {
   await page.keyboard.type('What happened here?')
   if (send) {
     // Enter sends nothing while the tour runs (the walk's writes are checked after it): the box closes and the tour
-    // moves on
+    // moves on, and the question waits in main's composer
     await page.keyboard.press('Enter')
     await page.waitForFunction(() => ![...document.querySelectorAll('.pointer-box')].some((b) => !b.closest('.tour-root')))
+    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('.chat-composer textarea')?.value === 'What happened here?', null, { timeout: 5000 }).catch(() => null)
+    assert.equal(await composerText(page), 'What happened here?', `${tag} 6: the question typed in the ask box is in main's composer once the tour moved on`)
   } else {
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => ![...document.querySelectorAll('.pointer-box')].some((b) => !b.closest('.tour-root')))
@@ -1081,6 +1100,7 @@ async function walk(page: Page, tag: string, send = false) {
   await page.click('.tour-pop [data-tour="done"]')
   await sleep(500)
   assert.equal(await page.evaluate(() => !!document.querySelector('.tour-root, .tour-host')), false, `${tag}: Done removes the tour and its examples`)
+  if (send) assert.equal(await composerText(page), 'What happened here?', `${tag}: the question typed in the tour's ask box is still in main's composer after the tour`)
   // main opens on an empty chat: no Start card after the tour either; the waiting view proposal shows again
   assert.equal(await realGates(page), 0, `${tag}: no Start card after the tour`)
   await page.waitForFunction(() => document.querySelectorAll('.chat-offer').length === 1, null, { timeout: 3000 })

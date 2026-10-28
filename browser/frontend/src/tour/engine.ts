@@ -5,8 +5,9 @@
 // reach the page; on a step with `scroll`, the wheel over the element it names scrolls it; on a step with `interact`,
 // the frame it names takes the pointer and the wheel; on a step marked `try`, holding ⌘ (Ctrl off a Mac) and moving
 // over its cutout highlights what is under the pointer, a ⌘-click or ⌘-drag there reaches the page, and once the ask box
-// is open, typing in it does; on a step with `chips`, hovering an underlined value in its card shows that value's
-// source. Esc closes the tour; while an ask box or a source is open, Esc closes only that.
+// is open, typing in it does; a question typed there outlasts the box when the tour closes it (closeBox, `keep`); on a
+// step with `chips`, hovering an underlined value in its card shows that value's source. Esc closes the tour; while an
+// ask box or a source is open, Esc closes only that.
 //
 // Examples are the tour's own markup (./examples.json, ./steps), laid over the page under the dim and removed when
 // their step ends. Nothing the tour shows reaches the server.
@@ -128,6 +129,8 @@ export interface StartOptions {
   showTab?: (tab: 'files' | 'canvas' | 'report') => void
   /** called once the tour has closed, however it closed */
   onEnd?: () => void
+  /** a question typed in the page's ask box, which the tour closed (closeBox): it outlasts the box */
+  keep?: (question: string) => void
 }
 
 export interface Snaps {
@@ -157,6 +160,8 @@ export interface Api {
   mockAsk: (target: Element, opts?: { live?: boolean; region?: boolean; text?: string | null }) => Mock | null
   mockAskRange: (range: Range, opts?: { text?: boolean }) => Mock | null
   closeMock: () => void
+  /** close the page's ask box as Esc does; a question typed in it goes to StartOptions `keep` */
+  closeBox: () => void
   showSource: (chip: Element, opts?: { demo?: boolean }) => HTMLElement | null
   closeSource: () => void
   type: (input: HTMLInputElement | HTMLTextAreaElement, text: string, ms?: number) => Promise<void>
@@ -796,6 +801,15 @@ export function createTour(snaps: Snaps): Tour {
     return { hl, box, input, remove: () => (hl.remove(), box.remove()) }
   }
   const closeMock = () => fx.querySelectorAll('.tour-mock:not([data-demo])').forEach((e) => e.remove())
+  // the page's ask box, closed by the tour as Esc closes it: Enter in it, or a step that moves on. What was typed in it
+  // goes to `keep`, so the question outlasts the box
+  const closeBox = () => {
+    const box = realBox()
+    if (!box) return
+    const question = box.querySelector('textarea')?.value.trim() ?? ''
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    if (question) opts.keep?.(question)
+  }
 
   const api: Api = {
     MAC,
@@ -847,6 +861,7 @@ export function createTour(snaps: Snaps): Tour {
     mockAsk,
     mockAskRange,
     closeMock,
+    closeBox,
     showSource: (chip, o) => showSource(chip, o),
     closeSource: () => closeSource(),
     async type(input, text, ms = 55) {
@@ -1160,10 +1175,10 @@ export function createTour(snaps: Snaps): Tour {
         return
       }
       if (inTour) return
-      // while the tour runs the page's ask box sends nothing: Enter closes it, and the tour moves on
+      // while the tour runs the page's ask box sends nothing: Enter closes it, its question kept, and the tour moves on
       if (inReal && ke.key === 'Enter' && !ke.shiftKey) {
         stop(ev)
-        if (ev.type === 'keydown') document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        if (ev.type === 'keydown') closeBox()
         return
       }
       if (inReal) return
