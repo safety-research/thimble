@@ -337,11 +337,14 @@ def test_main_keeps_the_short_reply_for_a_casual_question(mode, monkeypatch):
 def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
     """Main's prompt says where a fact comes from: what a project does from its code, which shows it now, in main's own
     words, since the checker finds words copied from a README in the README; and a README or a design note only for
-    what its authors wrote, since it can be out of date."""
+    what its authors wrote, since it can be out of date. Main names a disagreement with the code in one sentence when it
+    is on what the analyst asked about; before, it named one in almost every answer, also where it did not touch the
+    question."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     section = prompts.section("main", "Citing claims in the chat", mode)
     para = next(p for p in section.split("\n\n") if "README" in p)
     assert "out of date" in para and "read its code" in para and "words copied from a README" in para
+    assert "disagrees with the code on what the analyst asked about, tell them in one sentence" in para
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
