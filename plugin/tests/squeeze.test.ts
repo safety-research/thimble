@@ -569,3 +569,58 @@ test('the chips draw in one color: the frame, the keys, the picked chip, its dot
   const texts = all.filter(n => n.type === 'Text')
   for (const words of ['1 ', 'Length ', '●', ' · as written', '+ for a manager▏']) expect(texts.find(n => n.props.children === words)?.props.color).toBe('merged')
 })
+
+// s works from an open tray: the chips take the keys, and the tray gives way (it held them over the chips)
+test('s with the tray open closes it and opens the chips with their keys; over open chips s gives the keys back to them; s that starts a word leaves the tray as it was', { options: { citations: 'auto cite' } }, async ($, on) => {
+  const text = 'Of the [12 runs](#), [3 failed](#) on the [slow mirror](#).'
+  const t = await setup($, on, [])
+  await t.turn('t1', text)
+  const cite = nodes(await $.ui.render(answer('row-t1', text))).find(n => n.type === 'Button' && /^citation 2/.test(String(n.props.label)))
+  const openCite = async () => { const ui = await $.ui.mount(answer('row-t1', text)); await ui.press({ key: cite.props.key }); await ui.unmount() }
+  await openCite()
+  expect(await t.bar()).toContain('0 close')
+  // s: the tray closes, and the chips open under the answer with their keys on the bar
+  await t.press('s')
+  const chips = await t.bar()
+  expect(chips).not.toContain('0 close')
+  expect(chips).toContain('thimble  s close · ')
+  expect(chips).toContain('] longer')
+  // a citation opened over the open chips takes the keys; s gives them back to the chips, which stay open
+  await openCite()
+  expect(await t.bar()).not.toContain('] longer')
+  await t.press('s')
+  const back = await t.bar()
+  expect(back).not.toContain('0 close')
+  expect(back).toContain('] longer')
+  // s typed as the first letter of a word: the word goes into the box, the tray stands open, the chips stay closed
+  await t.press('s')
+  await openCite()
+  await $.prompt.edit(key('s'))
+  await t.clock.advance(50)
+  expect(await $.prompt.edit(key('o'))).toEqual({ text: 'so', cursor: 2 })
+  await t.clock.advance(400)
+  const word = await t.bar()
+  expect(word).toContain('0 close')
+  expect(word).not.toContain('s close')
+})
+
+test('s while an answer is being written waits for it: the bar says rewrite opens when the answer finishes, and the chips open on that answer, never on the one before', async ($, on) => {
+  const t = await setup($, on, [])
+  await t.turn('t1', LONG)
+  // the next turn runs: its answer is being written
+  await t.ask('and the retries?')
+  await $.turn.start({ text: 'and the retries?', turnId: 't2' } as never)
+  expect(await t.bar()).toContain('s rewrite')
+  await t.press('s')
+  expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
+  expect(await t.bar()).toContain('rewrite opens when the answer finishes')
+  // the answer finishes: the chips open on it
+  const two = 'The retries passed on the second try.'
+  await t.say('row-t2', two)
+  await $.turn.complete({ turnId: 't2', reason: 'answer', answer: two, durationMs: 10, isAborted: false } as never)
+  expect((await chipsDrawn($, 'row-t2', two)).client).toBeTruthy()
+  expect((await chipsDrawn($, 'row-t1', LONG)).client).toBeFalsy()
+  const bar = await t.bar()
+  expect(bar).toContain('s close')
+  expect(bar).not.toContain('when the answer finishes')
+})

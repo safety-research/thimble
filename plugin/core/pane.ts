@@ -197,8 +197,16 @@ let arrows: ((dir: number) => unknown) | null = null
 export function arrowsOwn(fn: ((dir: number) => unknown) | null): void {
   arrows = fn
 }
-/** How far the drawing above the input bar is scrolled, in the pane it was scrolled in. */
-let scrolled = { id: '', by: 0, conv: 0 }
+/** Such a drawing names, while it draws, where the part picked stands in it (`key`: what is picked; `top`: its first
+ *  row; `rows`: how many it takes): the docked pane shows that part whole, as far as its rows allow, when the pane
+ *  opens and each time the pick moves; the wheel moves the window freely in between. */
+type Picked = { key: string; top: number; rows: number }
+let picked: Picked | null = null
+export function keepsInView(part: Picked | null): void {
+  picked = part
+}
+/** How far the drawing above the input bar is scrolled, in the pane it was scrolled in, and the pick it last showed. */
+let scrolled: { id: string; by: number; conv: number; pick?: string } = { id: '', by: 0, conv: 0 }
 
 /** The pane's columns at its last drawing, or 0 before one: the width a copy of it is drawn at (paneDrawing). */
 let paneColumns = 0
@@ -263,6 +271,7 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     const kels = noting(els, keys)
     own = null
     arrows = null
+    picked = null
     // the top row names the pane esc goes back to: one the trail can still show, as paneBack finds it
     const live: PaneEntry[] = []
     for (const x of now.trail ?? []) if (await canShow($, x)) live.push(x)
@@ -301,6 +310,15 @@ export async function drawPane($: Engine, e: Any, now: PaneNow | null, els: Any)
     // a pane opened again, or a conversation that grew (a question, an answer), shows its end, as a chat does
     if (scrolled.id !== id) scrolled = { id, by: C ? over : 0, conv: C }
     else if (C !== scrolled.conv) scrolled = { id, by: over, conv: C }
+    // the part the drawing picked, shown when the pane opens and when the pick moves: its end on the window's last row
+    // when it stands below the window, its start on the first when above (its start first, when it is taller)
+    if (picked && over > 0 && scrolled.pick !== picked.key) {
+      const rows = space - 1
+      let by = scrolled.by
+      if (picked.top + picked.rows > by + rows) by = picked.top + picked.rows - rows
+      if (picked.top < by) by = picked.top
+      scrolled = { ...scrolled, by, pick: picked.key }
+    }
     scrolled.by = Math.max(0, Math.min(over, scrolled.by))
     laid = { id, pinned: true, over, keys, own, arrows }
     const left = over - scrolled.by

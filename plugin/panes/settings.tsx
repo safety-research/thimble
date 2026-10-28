@@ -5,7 +5,9 @@
 // set green and bold, the others gray), and under them, gray, what the one set gives (its `says`). Minimal reads
 // `MINIMAL MODE  on · off`, and under it what it does (its `says.on`, whichever is set); turning it on sets the rows
 // it changes to its modes (settings/features.mjs PRESET), which they show, and off puts back theirs. The row picked is
-// tinted across the pane, with no mark of its own (a `›` there read as a row that opens). A setting that changes the
+// tinted across the pane, with no mark of its own (a `›` there read as a row that opens); its line also says what its
+// mode costs, where it costs anything to say (its `cost`), and the pane keeps that row and its line in view at any
+// height (core/pane.ts keepsInView), as the pick moves with ↑ and ↓. A setting that changes the
 // work of another feature (`under`: Checker, the checks of Citations) shows only while that feature is on, as nothing
 // it sets runs otherwise; ↑ and ↓ pass over it then. One that names first-party model ids (`firstParty`: Checker) shows
 // only where Claude Code reaches Claude through Anthropic's first-party API (settings/term.ts firstPartyApi).
@@ -19,14 +21,15 @@
 import type { EngineInterface } from 'claude-code'
 
 import { barRows } from '../bar/bar'
-import { arrowsOwn, PANE_ID } from '../core/pane'
+import { arrowsOwn, keepsInView, PANE_ID } from '../core/pane'
+import { treeRows } from '../core/trail.mjs'
 import { SWITCHES, switchesFrom } from '../settings/features.mjs'
 import { firstPartyApi, heldValues, settingsAction } from '../settings/term'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 type Engine = EngineInterface
-type Switch = { key: string; title: string; group?: string; under?: string; firstParty?: boolean; choices?: string[]; says?: Record<string, string> }
+type Switch = { key: string; title: string; group?: string; under?: string; firstParty?: boolean; choices?: string[]; says?: Record<string, string>; cost?: Record<string, string> }
 
 /** The row picked, kept across the plugin's loads (each change loads it again). */
 const PICKED = { plugin: 'thimble', key: 'settingsRow' } as const
@@ -126,9 +129,10 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
         Text({ key: 'w', ...(c === set ? { bold: true, color: 'success' } : { dimColor: true }), children: c }),
       ] }),
     ])
-    // Minimal stands over the rows as a heading would, what it does under it
+    // Minimal stands over the rows as a heading would, what it does under it; the row picked adds what its mode costs
     const minimal = s.key === 'minimal'
-    const says = minimal ? s.says?.on : s.says?.[set]
+    const cost = here ? s.cost?.[set] : undefined
+    const says = [minimal ? s.says?.on : s.says?.[set], cost].filter(Boolean).join(' ')
     const at = minimal ? 2 + MINIMAL_TITLE.length + 1 : IN
     return [...head, Box({ key: `sw-${s.key}`, flexDirection: 'column', width, ...(here ? { backgroundColor: SEL_TINT } : {}), children: [
       Box({ key: 'line', flexDirection: 'row', children: [
@@ -137,15 +141,20 @@ export async function drawSettings($: Engine, e: Any, _args: unknown, els: Any):
           Text({ key: 'title', bold: true, children: minimal ? MINIMAL_TITLE : s.title.padEnd(NAME) }),
         ] }),
         Text({ key: 'gap', children: ' ' }),
-        Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, children: [
+        // the choices take the rest of the line, named, so the pane measures the rows they wrap onto as drawn
+        Box({ key: 'choices', flexDirection: 'row', flexWrap: 'wrap', flexShrink: 1, width: Math.max(1, width - at), children: [
           ...choices,
         ] }),
       ] }),
       ...(says ? [Box({ key: `says-${s.key}`, marginLeft: at, width: width - at, children: [Text({ dimColor: true, wrap: 'wrap', children: says })] })] : []),
     ] })]
   })
+  const preview = Box({ key: 'preview', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1, width, children: bar })
+  // the row picked and the line under it stay in view in a pane of any height (core/pane.ts keepsInView)
+  const mine = rows.findIndex((r: Any) => r?.props?.key === `sw-${picked}`)
+  keepsInView(mine < 0 ? null : { key: `${picked}:${shownOf(shown[at]!, values[picked])}`, top: treeRows([preview, ...rows.slice(0, mine)], width), rows: treeRows(rows[mine], width) })
   return Box({ flexDirection: 'column', width, children: [
-    Box({ key: 'preview', flexDirection: 'column', borderStyle: 'round', borderDimColor: true, paddingX: 1, width, children: bar }),
+    preview,
     ...rows,
     Box({ key: 'foot', marginTop: 1, children: [Text({ dimColor: true, children: '↑↓ setting · ←→ choice' })] }),
   ] })

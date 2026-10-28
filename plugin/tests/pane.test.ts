@@ -7,6 +7,7 @@ import { keyedWords, pressedWords } from '../bar/bar'
 import { barKey, registerBar } from '../bar/register'
 import { noteViewport } from '../cards/draw'
 import { closePane, drawPane, narrowNotice, openPane, paneNow, registerPanes, scrollPane } from '../core/pane'
+import { treeRows } from '../core/trail.mjs'
 import { setOptions } from '../settings/features.mjs'
 import { resetThreads } from '../threads/thread'
 
@@ -350,4 +351,44 @@ test('an item of the bar a failure line quotes is a part of its own with that it
   expect(pressedWords('t needs a wider terminal: widen the window to show the side pane, or click “t 2 threads”.', named).some(p => p.press)).toBe(false)
   // a key the line names is still a press of its own
   expect(pressedWords('“r coverage” failed. Press x to try again.', named).map(p => p.key ?? (p.press ? 'item' : ''))).toEqual(['item', '', 'x', ''])
+})
+
+test('in the settings, the row picked and the line under it, with what its mode costs, stay in view at any height: ↓ to a row below the window brings it in', async () => {
+  const s = setup()
+  s.$.ui.focus = async () => ({})
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const H = 16
+  await draw(s, H)
+  // ↓ down to Evidence, far below the first window
+  while ((await s.$.state.get({ plugin: 'thimble', key: 'settingsRow' })).value !== 'claimsMode') {
+    await scrollPane(s.$, { by: 1, origin: { kind: 'person' } })
+    await draw(s, H)
+  }
+  const tree = await draw(s, H)
+  const inner = nodes(tree).find(n => n.props?.key === 'pane-body-in')
+  const by = -(inner.props.top ?? 0)
+  const rows: Any[] = inner.props.children[0].props.children
+  const k = rows.findIndex(n => n.props?.key === 'sw-claimsMode')
+  const top = treeRows(rows.slice(0, k), 70)
+  // the window: the pane's rows less its top row and the line that says how much more there is
+  expect(top).toBeGreaterThanOrEqual(by)
+  expect(top + treeRows(rows[k], 70)).toBeLessThanOrEqual(by + H - 2)
+  // the line under it says what its mode gives and what it costs
+  const says = textOf(nodes(rows[k]).find(n => n.props?.key === 'says-claimsMode'))
+  expect(says).toContain('Claims are found after each answer.')
+  expect(says).toContain('The largest part of the call after each answer.')
+  // a row not picked says what its mode gives alone
+  expect(textOf(nodes(tree).find(n => n.props?.key === 'says-coverage'))).not.toContain('No model call')
+  setOptions({})
+})
+
+test('in a narrow settings pane, a row whose choices wrap is measured on the lines it takes, so the row picked is brought into view whole', async () => {
+  const s = setup()
+  await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
+  const narrow = { ...DOCK(24), props: { ...DOCK(24).props, bodyColumns: 50 } }
+  const tree = await drawPane(s.$, narrow, await paneNow(s.$), els)
+  // Citations' four modes take two lines beside its name at 50 columns: `auto cite + verify · auto cite ·`, `manual · off`
+  const line = nodes(nodes(tree).find(n => n.props?.key === 'sw-citations')).find(n => n.props?.key === 'line')
+  expect(treeRows(line, 50)).toBe(2)
+  setOptions({})
 })

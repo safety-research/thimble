@@ -23,7 +23,7 @@
 //               citation spins while it runs and shows its new status when it ends; a click on `x repair` in the
 //               card too (this module's ui.press hook, so the fork starts inside a hook)
 //   0 close     back to the mark under it, or close
-//   ] [         the next mark or card, and the one before
+//   ] [         the next mark or card after the one it shows, and the one before, named by what they are
 //   d u         a body taller than the tray's rows: a page further down, a page back up, while no other key holder (the
 //               fix line, a card on screen) takes the letter; the row under the window names them
 //
@@ -147,6 +147,19 @@ export async function closeTray($: Engine): Promise<void> {
   await setTray($, null)
 }
 
+/** The tray gives way to what takes the keys from it (the squeeze chips, s): it closes, and a card ] reached gives its
+ *  keys back. Returns what puts it back as it stood (the key undone: a letter right after it). */
+export async function giveWay($: Engine): Promise<() => Promise<void>> {
+  const was = await keptNow($)
+  if (!was.tray && !was.stand) return async () => undefined
+  await writeTray($, null)
+  await writeStand($, null)
+  return async () => {
+    await writeTray($, was.tray)
+    await writeStand($, was.stand)
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ marks of a row
 
 /** The text a row shows now (a squeezed version in its place), and its citations; null when it draws nothing. */
@@ -230,10 +243,16 @@ async function allStops($: Engine): Promise<Stop[]> {
   return out
 }
 
-/** Where ] and [ stand now: the tray's first mark, else the card ] reached (-1: neither). */
+/** Where ] and [ stand now: the mark the tray shows, where ] and [ pass it (a heads-up h opened over a citation stands
+ *  where it does, before that citation), so the header names what follows the mark it shows, whichever way it was
+ *  opened; else the tray's first mark (lines of a file an explainer cites stand on it), else the card ] reached (-1:
+ *  none). */
 async function stepPlace($: Engine): Promise<{ list: Stop[]; at: number }> {
   const list = await allStops($)
-  const b = base(await trayNow($)) as Frame | null
+  const tray = await trayNow($)
+  const shown = indexOf(list, top(tray))
+  if (shown >= 0) return { list, at: shown }
+  const b = base(tray) as Frame | null
   const stand = b ? null : await standNow($)
   return { list, at: indexOf(list, b ?? stand) }
 }
