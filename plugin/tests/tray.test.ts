@@ -1065,3 +1065,26 @@ test("with Citations manual, ] passes the citations Claude wrote (they draw as p
   await reply.unmount()
   expect(textOf(await $.ui.render(above()))).toContain('failed: 12')
 })
+
+test('the header names what ] goes to from the mark the tray shows: a heads-up opened with h over its citation names the citation after it, as when ] reached it, and ] goes there', CITES, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-steps', { parts: HEADS })
+  const head = async () => textOf(all(await $.ui.render(above(40))).find(n => n.props?.key === 'tray-head'))
+  // ] reaches the heads-up on the citation's words, then the citation, then the explainer
+  await $.prompt.edit(key(']'))
+  expect(await head()).toContain('] next citation')
+  await clock.advance(2000)
+  await $.prompt.edit(key(']'))
+  expect(await head()).toContain('] next explainer')
+  // h on the citation opens the heads-up over it: the same box, the same header
+  await clock.advance(2000)
+  await $.prompt.edit(key('h'))
+  await clock.advance(2000)
+  expect(textOf(await $.ui.render(above(40)))).toContain('Retried runs count twice')
+  expect(await head()).toContain('] next citation')
+  // ] goes to the citation, as the header says
+  await $.prompt.edit(key(']'))
+  await clock.advance(2000)
+  const band = textOf(await $.ui.render(above(40)))
+  expect(band).toContain('failed: 12')
+  expect(band).not.toContain('Retried runs count twice')
+})
