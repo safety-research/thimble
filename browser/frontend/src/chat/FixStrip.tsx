@@ -9,7 +9,8 @@
 //               above them, as the terminal's line does (`notice`). Nothing goes on by itself: Use it now is the
 //               person's click. The server then starts again from the fixed code,
 //               the row says "Reloading thimble…", and the page loads the new build by itself when nothing typed would
-//               be lost. A fix that did not pass says why, with Redo. An earlier row, or one the person answered, is a
+//               be lost. A fix that did not pass says why, with Try again (not when it needs a file no fix may change, as
+//               the terminal's line). An earlier row, or one the person answered, is a
 //               quiet line of what it said.
 //   FixPage     what the page does for every fix: the reload after the server started again, and Your fixes
 //               (`/thimble-fix` alone: every fix with its state, Use it on a ready one, Undo on one that is on).
@@ -24,7 +25,7 @@ import { track } from '../lib/telemetry'
 import { changedLines, fixActions, fixText, reloading, STATE_WORDS, working, workingText, type FixAction, type FixRow } from './fix'
 
 const ICON = { ready: 'check', fixed: 'check', undone: 'undo', request: 'flag', failed: 'warning', problem: 'warning' } as const
-const LABEL: Record<FixAction, string> = { use: 'Use it now', what: 'What changed', later: 'Later', undo: 'Undo', redo: 'Redo' }
+const LABEL: Record<FixAction, string> = { use: 'Use it now', what: 'What changed', later: 'Later', undo: 'Undo', redo: 'Try again' }
 const FIXED = 'thimble fixed:'
 
 /** Whether the page holds typed text a reload would lose. */

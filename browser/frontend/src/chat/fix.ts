@@ -38,6 +38,8 @@ export interface FixRow {
   /** the sentence that names what it changes of the sandbox, the launcher, dependencies and such, before the person
    * uses it, in the terminal's words: `This fix changes the sandbox (plugin/cards/argv.mjs).`; '' when nothing */
   notice?: string
+  /** it needs a change to a file no fix may change, so another try fails the same way (the kernel's `blocked`) */
+  blocked?: boolean
   tests: string | null
   error: string | null
   created?: number
@@ -73,12 +75,12 @@ export function fixText(r: FixRow): string {
 export type FixAction = 'use' | 'what' | 'later' | 'undo' | 'redo'
 
 /** The buttons a fix's row offers: Use it now, What changed and Later on a ready fix, Undo on a fix that is on,
- * Redo on one that did not pass. Pure. */
+ * Try again on one that did not pass, unless it needs a file no fix may change (as the terminal's line). Pure. */
 export function fixActions(r: FixRow): FixAction[] {
   if (r.phase) return []
   if (r.kind === 'ready' && r.state === 'ready') return ['use', 'what', 'later']
   if (r.kind === 'fixed' && r.state === 'on') return ['undo']
-  if ((r.kind === 'failed' || r.kind === 'problem') && ['failed', 'off', 'redo', 'ready', 'request'].includes(r.state)) return ['redo']
+  if ((r.kind === 'failed' || r.kind === 'problem') && ['failed', 'off', 'redo', 'ready', 'request'].includes(r.state)) return r.blocked ? [] : ['redo']
   return []
 }
 

@@ -678,3 +678,13 @@ def test_the_files_a_copy_changed_are_read_by_git_on_its_own_entry_never_through
     _git("config", "core.fsmonitor", str(work / "made-up-monitor"), cwd=work)
     assert fixes.changed(work, "HEAD") == []
     assert not ran.exists()
+
+
+async def test_a_fix_that_needs_a_file_no_fix_may_change_says_so_so_the_page_offers_no_try_again(fixing, monkeypatch):
+    api_key(monkeypatch, [text("Title: Cards draw on Node 26\nWhat it does: The card runner starts with --allow-net.")])
+    await fixes.request(CORPUS, "cards should draw on Node 26", "")
+    await _ended()
+    assert fixes.status()["fixes"][0]["blocked"] is False
+    # the kernel's record names the protected files the fixer could not do without (kernel fixes.py, `blocked`)
+    fixing.recs[1]["blocked"] = ["plugin/sandbox/setup.mjs"]
+    assert fixes.status()["fixes"][0]["blocked"] is True
