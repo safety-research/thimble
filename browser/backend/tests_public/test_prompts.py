@@ -240,60 +240,74 @@ def _examples(text: str) -> list[list[str]]:
     return blocks
 
 
+def _what_to_make(mode: str) -> tuple[str, list[list[str]]]:
+    """The guidance's What to make (shared.md), as main's prompt includes it: its paragraph, and its example's turns,
+    each an `Analyst` line with the lines under it."""
+    section = prompts.section("main", "What to make", mode)
+    para = next(p for p in section.split("\n\n") if p.strip() and not p.startswith("    "))
+    turns: list[list[str]] = []
+    for line in (ln for block in _examples(section) for ln in block):
+        if line.startswith("Analyst"):
+            turns.append([line])
+        elif turns:
+            turns[-1].append(line)
+    return para, turns
+
+
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_takes_a_request_for_a_dashboard_as_a_view(mode, monkeypatch):
-    """Main's prompt says what a view is for, a page the analyst keeps and comes back to, and pairs a request for a
-    dashboard with propose_view and a question about the records with add_card; propose_view's description takes the
-    request in the analyst's own words, such as a dashboard, so main does not answer it with cards."""
+    """The guidance says a page the analyst comes back to, such as a dashboard, is a view whatever they call it, and its
+    example answers a request for a dashboard with propose_view and a question about the records with a card;
+    propose_view's description says what a view is in the same words, so main does not answer it with cards."""
     from app import tools
 
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    agents = prompts.section("main", "thimble's agents", mode)
-    pairs = [b for b in _examples(agents) if all(line.startswith("Analyst") for line in b)]
-    assert any("dashboard" in line and line.endswith("propose_view") for b in pairs for line in b)
-    assert any(line.endswith("add_card") for b in pairs for line in b)
+    para, turns = _what_to_make(mode)
+    assert "dashboard" in para and "is a view, whatever they call it" in para
+    dashboard = next(t for t in turns if "dashboard" in t[0])
+    assert any("propose_view" in line for line in dashboard[1:])
+    assert any(line.startswith("card") for t in turns for line in t[1:])
     assert "dashboard" in tools.descriptions()["propose_view"]
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_fits_the_reply_to_the_question(mode, monkeypatch):
-    """Main's prompt shows a reply sized to its question, each beside a bad reply: a casual question answered in a few
-    sentences without a card, and a question about how something works answered with its steps in order and a diagram
-    card, where the bad reply is a table."""
+    """The guidance's example sizes each answer to its question: a casual question answered in a few sentences in the
+    chat with no card, and a question about how something works answered with its steps in order and a diagram card,
+    with no table."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    blocks = _examples(prompts.section("main", "Chat and cards", mode))
-    casual = next(b for b in blocks if b[0].startswith("Analyst") and "folder" in b[0])
-    good = next(line for line in casual if line.startswith("Good"))
-    assert "card:" not in good and good.count(". ") <= 2
-    assert any(line.startswith("Bad") for line in casual)
-    how = next(b for b in blocks if b[0].startswith("Analyst") and "how does" in b[0].lower())
-    assert any(line.startswith("Good") for line in how) and any("diagram" in line for line in how)
-    assert any(line.startswith("Bad") and "table" in line for line in how)
+    _, turns = _what_to_make(mode)
+    casual = next(t for t in turns if "folder" in t[0])
+    chat = next(line for line in casual if line.startswith("chat"))
+    assert "card:" not in chat and chat.count(". ") <= 2
+    assert not any(line.startswith(("card", "group", "view")) for line in casual)
+    how = next(t for t in turns if "how does" in t[0].lower())
+    assert any(line.startswith("chat") for line in how) and any("diagram" in line for line in how)
+    assert not any("table" in line for line in how)
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_draws_a_diagram_for_steps_that_branch(mode, monkeypatch):
-    """Main's prompt asks for a diagram card when the steps of how something works branch or join, and its example of
-    such a question draws one for steps that branch, not for a straight line of steps."""
+    """The card kinds say a diagram is for how things branch and connect, and steps in a straight line read better as a
+    timeline; the guidance's example of how something works draws a diagram for steps that branch."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    section = prompts.section("main", "Chat and cards", mode)
-    assert "a diagram card when the steps branch or join" in section
-    how = next(b for b in _examples(section) if b[0].startswith("Analyst") and "how does" in b[0].lower())
+    kinds = prompts.section("main", "Cards", mode)
+    assert "`diagram` for how things branch" in kinds and "Steps in a straight line read better as a timeline" in kinds
+    _, turns = _what_to_make(mode)
+    how = next(t for t in turns if "how does" in t[0].lower())
     diagram = next(line for line in how if "diagram" in line)
     assert "branch" in diagram or "join" in diagram
 
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_keeps_the_short_reply_for_a_casual_question(mode, monkeypatch):
-    """Main's prompt answers a casual question or a first look at a folder in a few sentences without a card, and not a
+    """The guidance answers a casual question, such as what a folder holds, in a few sentences in the chat, and not a
     broad question: a broad question about the data, such as the main ways the runs fail, asks for analysis, whose work
     goes in cards."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    para = next(line for line in prompts.section("main", "Chat and cards", mode).splitlines()
-                if line.startswith("- Fit the reply"))
-    sentences = para.split(". ")
-    short = next(i for i, s in enumerate(sentences) if s.startswith("Answer it in two to four plain sentences"))
-    assert "casual question" in sentences[short - 1] and "first look at a folder" in sentences[short - 1]
+    para, _ = _what_to_make(mode)
+    casual = next(s for s in para.split(". ") if "casual question" in s)
+    assert "folder" in casual and "few plain sentences in the chat" in casual
     assert "broad" not in para
 
 
@@ -310,14 +324,16 @@ def test_main_takes_how_a_project_works_from_its_code(mode, monkeypatch):
 
 @pytest.mark.parametrize("mode", prompts.MODES)
 def test_main_keeps_the_runs_that_lead_to_an_answer_in_the_shell(mode, monkeypatch):
-    """Main's prompt says what a card is for: the numbers and records the answer rests on. The runs that lead there, such
-    as a first look at the files, run in the shell, which shows them folded as working steps; it no longer puts all of
-    main's analysis work in cards, which made a first look at the data a card on the canvas."""
+    """The guidance keeps the runs that lead to an answer, such as a first look at the files, in the shell, which shows
+    them folded, and puts only what answers on the canvas; main's prompt no longer puts all of its analysis work in
+    cards, which made a first look at the data a card on the canvas."""
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
-    section = prompts.section("main", "Chat and cards", mode)
-    assert "analysis work in cards" not in section and "never sees your shell output" not in section
-    bullet = next(p for p in section.split("\n- ") if "rests on in a card" in p)
-    assert "first look at the files" in bullet and "run them in the shell" in bullet and "folded" in bullet
+    main = prompts.load("main", mode)
+    assert "analysis work in cards" not in main and "never sees your shell output" not in main
+    para, turns = _what_to_make(mode)
+    runs = next(s for s in para.split(". ") if "in the shell" in s)
+    assert "first look at the files" in runs and "folded" in runs and "Only what answers goes on the canvas" in para
+    assert any(line.startswith("shell") for line in turns[0])
 
 
 def _grouped(blocks: list[list[str]]) -> list[int]:
@@ -341,8 +357,11 @@ def test_main_names_a_group_only_for_a_sequence_of_cards(mode, monkeypatch):
     monkeypatch.delenv("THIMBLE_PROMPTS_DIR", raising=False)
     group = tools.tool_sections(["add_card"])["add_card"][1]["properties"]["group"]["description"]
     assert "sequence of cards" in group and "single card" in group
-    blocks = _examples(prompts.section("main", "Cards", mode)) + _examples(prompts.load("card-types", mode))
+    blocks = [*_examples(prompts.section("main", "What to make", mode)), *_examples(prompts.section("main", "Cards", mode)),
+              *_examples(prompts.load("card-types", mode))]
     counts = _grouped(blocks)
     assert counts and min(counts) >= 2, counts
+    own = [ln for b in _examples(prompts.section("main", "What to make", mode)) for ln in b if ln.startswith("group")]
+    assert own and all(re.search(r'"[^"]+\?"', ln) for ln in own), "the guidance's group is named by its question"
     single = [b for b in blocks if any(line.startswith("question") for line in b)]
     assert single and not _grouped(single), "a card that answers a question alone has no group"
