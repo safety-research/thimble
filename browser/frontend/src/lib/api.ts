@@ -105,10 +105,11 @@ function setHash(params: URLSearchParams): void {
  * it holds stands. 410 (or any other refusal): the code was used, replaced by a newer one, or expired, which
  * shell/SignIn's line and a notice this page makes say (claimRefused, lib/notices showCodeGone; a later sign-in takes
  * the notice away). The key an earlier version's link carried (`k` in the hash)
- * is taken out of the address and never sent. After the claim the page asks which browser it is (GET /ui/paired), so
- * it leaves out the notice of its own sign-in (lib/notices setBrowserId). Memoised: with no code in the link the
- * cookie the browser already holds stands; a claim the server never answered leaves the code in the address and is
- * tried again by the next call. `j` awaits it, so a write never races the claim. */
+ * is taken out of the address and never sent. After the claim the page asks which browser it is and when it signed in
+ * (GET /ui/paired), so it leaves out the notices of its own sign-in and of those before it (lib/notices setBrowserId).
+ * Memoised: with no code in the link the cookie the browser already holds stands; a claim the server never answered
+ * leaves the code in the address and is tried again by the next call. `j` awaits it, so a write never races the
+ * claim. */
 export function claimKey(): Promise<void> {
   if (keyReady) return keyReady
   if (typeof window === 'undefined') return (keyReady = Promise.resolve())
@@ -158,16 +159,16 @@ async function claim(code: string): Promise<boolean> {
   return false
 }
 
-type Paired = { paired: boolean; id: string }
+type Paired = { paired: boolean; id: string; at?: string }
 // what GET /ui/paired answered after the last claim the server answered; null before one, or when the read failed
 let afterClaim: Promise<Paired | null> = Promise.resolve(null)
 
-/** This browser's id (GET /ui/paired), for lib/notices; a read that fails leaves it unknown. The answer, or null when
- * the read failed. */
+/** This browser's id and when it signed in (GET /ui/paired), for lib/notices; a read that fails leaves them unknown.
+ * The answer, or null when the read failed. */
 async function learnBrowser(): Promise<Paired | null> {
   try {
     const got = await api.paired()
-    setBrowserId(typeof got?.id === 'string' ? got.id : '')
+    setBrowserId(typeof got?.id === 'string' ? got.id : '', typeof got?.at === 'string' ? got.at : '')
     return got ?? null
   } catch {
     return null // unknown: every sign-in notice shows
@@ -548,9 +549,9 @@ export const api = {
   notices: (c: string) => j<unknown[]>(`${ws(c)}/notices`),
   /** × on a notice, or a fix of the analyst's that went through: the server forgets it (backend notices.dismiss_route). */
   dismissNotice: (c: string, id: string) => j<{ dismissed: boolean }>(`${ws(c)}/notices/${enc(id)}/dismiss`, { method: 'POST' }),
-  /** Whether this browser is signed in, and its id: the first 12 hex digits of its cookie's hash, '' when not signed in
-   * (backend main.ui_paired). */
-  paired: () => j<{ paired: boolean; id: string }>(`${apiBase()}/ui/paired`),
+  /** Whether this browser is signed in, its id (the first 12 hex digits of its cookie's hash) and when it signed in, ''
+   * when not signed in (backend main.ui_paired). */
+  paired: () => j<{ paired: boolean; id: string; at?: string }>(`${apiBase()}/ui/paired`),
   /** A sign-in notice's Sign it out: the server signs the browser `id` out and clears its notice in workspace `c`
    * (backend main.ui_signout). */
   signOut: (id: string, c?: string) => j<{ signed_out: boolean }>(`${apiBase()}/ui/signout`, { method: 'POST', body: JSON.stringify(c ? { id, ws: c } : { id }) }),
