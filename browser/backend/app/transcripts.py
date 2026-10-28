@@ -1496,14 +1496,15 @@ def _utf16_len(text: str) -> int:
 
 def _speaker_ok(speaker: str) -> bool:
     """Whether the words before a line's colon can name who speaks: not a label of a log or a document (NOT_SPEAKERS),
-    at most four words, no address, and no line of code or of an error (CODE_OPENERS, an error's name)."""
+    at most four words, no address, and no line of code or of an error (CODE_OPENERS, as code writes them, in lowercase:
+    a person named Else speaks; an error's name)."""
     low = speaker.lower().strip()
-    words = low.split()
+    words = speaker.split()
     if not low or low in NOT_SPEAKERS or len(words) > 4 or low.startswith(("http", "www.")):
         return False
-    if words[0] in CODE_OPENERS and (len(words) > 1 or low in CODE_ALONE):
+    if words[0] in CODE_OPENERS and (len(words) > 1 or words[0] in CODE_ALONE):
         return False
-    return not _ERROR_NAME.fullmatch(speaker.split()[-1])
+    return not _ERROR_NAME.fullmatch(words[-1])
 
 
 def _fence_opened(words: str) -> str | None:

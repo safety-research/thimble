@@ -699,6 +699,22 @@ def test_a_markdown_transcript_whose_turns_hold_tool_calls_opens_in_transcript(c
                        "speakers": ["assistant", "user"]}, name
 
 
+def chat_turns(name: str, **params) -> list[tuple[int, str]]:
+    """The turns a source page of logs/<name> marks: (line, who speaks)."""
+    page = client.get(f"{CHATS}/source", params={"path": f"logs/{name}", **params}).json()
+    return [(r["line"], r["meta"]["turn"]["speaker"]) for r in page["records"] if r["meta"].get("turn")]
+
+
+def test_a_person_named_like_a_word_of_python_still_speaks(chats):
+    """Python's words that open a block of code are lowercase (`else:`, `try:`): a person named Else starts turns."""
+    (chats / "logs" / "else.txt").write_text("Else: Did you get the tickets?\nMarta: Yes, two.\nElse: See you at eight.\n"
+                                             "Marta: See you.\n")
+    got = transcripts.sniff(chats / "logs" / "else.txt", "logs/else.txt")
+    assert got and got["speakers"] == ["else", "marta"]
+    assert [w for _, w in chat_turns("else.txt")] == ["Else", "Marta", "Else", "Marta"]
+    assert transcripts.turn_of("else:", "colon") is None and transcripts.turn_of("Try: it", "colon") is not None
+
+
 def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():
     """A harness that logs each tool call with its result on its own line, between the agent's spoken turns: the tool
     turns count toward the transcript, so it is strong (Transcript the default), with `tools` set for the view, even
