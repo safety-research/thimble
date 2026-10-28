@@ -855,3 +855,40 @@ def test_the_finish_tools_stop_their_gate_when_their_caller_drops_the_call_and_m
         spec = tools.REGISTRY[name]
         assert spec.drop_stops and spec.sessions == kinds, name
     assert all(n in tools.tool_sections() for n in ("view_check", "finish_view", "view_pictures", "finish_review"))
+
+
+def test_a_later_probe_that_fails_never_takes_the_sandbox_away_and_one_that_works_gives_it_back(monkeypatch):
+    """A build's start probes srt again (srt_problem). A probe that fails says why for the notice but leaves srt_works as
+    it was, so what runs in srt keeps its sandbox; one that works makes srt_works True (the sysctl fixed, no restart);
+    one that does not answer in time says nothing (a busy machine)."""
+    import subprocess
+    from pathlib import Path
+
+    from app import kernel_wrap, srt
+
+    monkeypatch.setattr(srt, "node_version", lambda node: (99, 0, 0))
+    monkeypatch.setattr(kernel_wrap, "srt_argv", lambda argv, **kw: ["true"])
+    monkeypatch.setattr(kernel_wrap, "_srt_works", {})
+    answers: list = []
+
+    def run(*a, **kw):
+        a = answers.pop(0)
+        if isinstance(a, BaseException):
+            raise a
+        return subprocess.CompletedProcess(["true"], a[0], "", a[1])
+
+    monkeypatch.setattr(kernel_wrap.subprocess, "run", run)
+    node, box = "/usr/bin/node", Path("/x/srt")
+    answers[:] = [(0, "")]
+    assert kernel_wrap.srt_works(node, box) is True
+    answers[:] = [(1, "apply-seccomp: unshare(CLONE_NEWUSER): No space left on device")]
+    assert "apply-seccomp" in kernel_wrap.srt_problem(node, box)
+    assert kernel_wrap.srt_works(node, box) is True  # never taken away by a later probe
+    answers[:] = [subprocess.TimeoutExpired(["true"], 30)]
+    assert kernel_wrap.srt_problem(node, box) == ""  # a busy machine says nothing about the sandbox
+    monkeypatch.setattr(kernel_wrap, "_srt_works", {})
+    answers[:] = [(1, "bwrap: setting up uid map: Permission denied")]
+    assert kernel_wrap.srt_works(node, box) is False
+    answers[:] = [(0, "")]
+    assert kernel_wrap.srt_problem(node, box) == ""
+    assert kernel_wrap.srt_works(node, box) is True  # given back once a probe works
