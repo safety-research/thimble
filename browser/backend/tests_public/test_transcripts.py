@@ -764,6 +764,20 @@ def test_a_label_that_opens_a_block_of_code_opens_it_in_the_turns_too(chats):
     assert {v["value"] for v in keys[0]["values"]} == {"User", "Assistant"}
 
 
+def test_a_fence_before_the_first_turn_that_no_line_closes_hides_no_turns(chats):
+    """A banner of tildes, a title's line of tildes (reStructuredText) or a fence left open before a chat log's first
+    turn line opens no block of code, so the log's turns count; a block closed before the first turn line hides only
+    its own lines."""
+    chat = "User: My order is late.\nAssistant: What is its number?\nUser: 4411.\nAssistant: It ships today.\n"
+    for name, head in (("banner.txt", "~~~~~~~~\n"), ("support.rst", "Support chat\n~~~~~~~~~~~~\n\n"),
+                       ("pasted.txt", "```\n"), ("config.txt", "```yaml\nserver: alpha\nport: 80\n```\n\n")):
+        (chats / "logs" / name).write_text(head + chat)
+        got = transcripts.sniff(chats / "logs" / name, f"logs/{name}")
+        assert got == {"format": "text", "score": transcripts.STRONG, "style": "colon",
+                       "speakers": ["assistant", "user"]}, name
+        assert [w for _, w in chat_turns(name)] == ["User", "Assistant", "User", "Assistant"], name
+
+
 def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():
     """A harness that logs each tool call with its result on its own line, between the agent's spoken turns: the tool
     turns count toward the transcript, so it is strong (Transcript the default), with `tools` set for the view, even

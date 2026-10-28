@@ -1527,17 +1527,35 @@ def _aider_user(text: str) -> bool:
     return text.startswith("#### ") and text.rstrip("\r").endswith("  ")
 
 
+def _closers_after(lines: list[str]) -> list[tuple[int, int]]:
+    """Per line, the longest run of backticks and the longest run of tildes that a line after it holds alone: a fence
+    of the line has a line after it that closes its block (_fence_closes) when its run is no longer."""
+    out: list[tuple[int, int]] = [(0, 0)] * len(lines)
+    ticks = tildes = 0
+    for i in range(len(lines) - 1, -1, -1):
+        out[i] = (ticks, tildes)
+        m = _FENCE.match(lines[i])
+        if m and not m.group(2).strip():
+            if m.group(1)[0] == "`":
+                ticks = max(ticks, len(m.group(1)))
+            else:
+                tildes = max(tildes, len(m.group(1)))
+    return out
+
+
 def _style_hits(lines: list[str], style: str) -> tuple[list[tuple[str, dict[str, Any]]], int]:
     """The lines of a head that start turns in `style`, as text_turns reads them, and how many lines its fenced blocks
     of code hold. A line inside a block starts a turn only for a speaker who spoke outside one before it (in a style
     of DISTINCT_STYLES, for anyone), which ends a block left open (a message cut inside its code); in aider's history,
     as _aider_turns reads it, only a line of the user's message (_aider_user), and a session's head line ends a
-    block."""
+    block. A fence before the first turn line that no line after it closes (a banner of tildes, a title's line of
+    tildes, a fence left open) opens no block, so it hides no turns."""
     hits: list[tuple[str, dict[str, Any]]] = []
     seen: set[str] = set()
     fence: str | None = None
     code = 0
-    for ln in lines:
+    closers: list[tuple[int, int]] | None = None
+    for i, ln in enumerate(lines):
         got = _turn_match(ln, style)
         if fence is not None:
             if style == "aider":
@@ -1552,6 +1570,10 @@ def _style_hits(lines: list[str], style: str) -> tuple[list[tuple[str, dict[str,
             fence = None
         if got is None:
             fence = _fence_opened(ln)
+            if fence is not None and not hits and style != "aider":
+                closers = closers or _closers_after(lines)
+                if closers[i][fence[0] == "~"] < len(fence):
+                    fence = None
             code += fence is not None
             continue
         hits.append((ln, got[0]))
