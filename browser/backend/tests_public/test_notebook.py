@@ -67,6 +67,77 @@ async def test_create_and_run_print(client, corpus, workspaces_tmp):
     assert (await client.get(f"/api/ws/{corpus}/notebooks/main")).json() == on_disk
 
 
+@pytest.mark.parametrize("wrap", ["none", "srt", "bwrap"])
+async def test_a_kernel_whose_port_another_process_took_first_starts_again_on_new_ports(wrap, client, corpus,
+                                                                                        monkeypatch):
+    """write_connection_file finds free ports and lets them go; a process that binds one before the kernel does keeps
+    it, and the kernel ends at its start. Here another process's zmq socket takes the first file's shell port, so the
+    server's socket also meets a peer that is not the kernel, after which zmq drops its only pipe and a blocking send
+    would never return. The start never waits on the socket: it sees the kernel end, also inside a sandbox that
+    outlives it a while, and starts it on new ports."""
+    import zmq
+    from test_kernel_sandbox import _wrap_works
+
+    if wrap != "none" and not _wrap_works(wrap):
+        pytest.skip(f"{wrap} can't sandbox a process here")
+    monkeypatch.setenv(config.KERNEL_WRAP_ENV, wrap)
+
+    ctx, taken = zmq.Context(), []
+    real = notebook.write_connection_file
+
+    def first_port_taken(fname: str, **kw):
+        out = real(fname, **kw)
+        if not taken:
+            sock = ctx.socket(zmq.PUB)
+            sock.bind(f"tcp://127.0.0.1:{json.loads(open(fname).read())['shell_port']}")
+            taken.append(sock)
+        return out
+
+    monkeypatch.setattr(notebook, "write_connection_file", first_port_taken)
+    try:
+        cell = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells", json={"code": "print(6 * 7)"})).json()
+        ran = (await client.post(f"/api/ws/{corpus}/notebooks/main/cells/{cell['id']}/run")).json()
+    finally:
+        for sock in taken:
+            sock.close(linger=0)
+        ctx.term()
+    assert taken and ran["status"] == "ok" and _text(ran) == "42\n", ran["outputs"]
+
+
+async def test_a_start_s_limit_holds_while_its_socket_has_no_pipe_to_send_to(tmp_path):
+    """A socket whose peer turned out not to be the kernel (here a PUB socket on the shell port, as another kernel's
+    iopub) loses its only pipe, and jupyter_client's send then blocks for good: on the event loop it would hold the
+    server and the start's own limit with it. _wait_ready never blocks on its socket, so the limit holds."""
+    import asyncio
+    import time
+
+    import zmq
+    from jupyter_client.connect import write_connection_file
+
+    class Alive:  # a kernel process that runs and never answers
+        log = tmp_path / "k.log"
+
+        def alive(self) -> bool:
+            return True
+
+    ctx = zmq.Context()
+    pub = ctx.socket(zmq.PUB)
+    conn = tmp_path / "k.conn.json"
+    write_connection_file(str(conn), ip="127.0.0.1", key=b"k", shell_port=pub.bind_to_random_port("tcp://127.0.0.1"))
+    kc = notebook._client(conn)
+    try:
+        end = time.monotonic() + 60
+        while notebook._kernel_info_nowait(kc, kc.shell_channel):  # until zmq dropped the pipe to the PUB socket
+            assert time.monotonic() < end, "the socket kept its pipe"
+            await asyncio.sleep(0.05)
+        with pytest.raises(TimeoutError, match="did not answer kernel_info within 1 s"):
+            await notebook._wait_ready(Alive(), kc, 1.0, control=False)
+    finally:
+        notebook._close_client(kc)
+        pub.close(linger=0)
+        ctx.term()
+
+
 async def test_kernel_cwd_is_the_scratch_mirror_and_writes_never_reach_the_corpus(corpus):
     """The kernel starts in workspaces/<c>/scratch, a symlink mirror of the corpus, so relative
     reads work while every file a cell creates lands in scratch — never in the corpus directory."""

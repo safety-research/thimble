@@ -37,6 +37,7 @@ from pathlib import Path
 from queue import Empty
 from typing import Any, Literal
 
+import zmq
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse, Response
 from jupyter_client import AsyncKernelClient
@@ -2463,6 +2464,39 @@ def _close_client(kc: AsyncKernelClient) -> None:
         log.debug("destroying a kernel client's zmq context failed", exc_info=True)
 
 
+def _kernel_info_nowait(kc: AsyncKernelClient, ch: Any) -> bool:
+    """A kernel_info_request on the channel `ch`, without blocking; False when it could not be queued now.
+    jupyter_client's own send blocks while the socket has no pipe to queue to: one at its high-water mark, or none,
+    when zmq dropped it after a handshake with a process that is not this kernel (one that took a port of the
+    connection file first). On the event loop that would hold the whole server, and _wait_ready's limit with it."""
+    try:
+        sock = zmq.Socket.shadow(ch.socket.underlying)
+        sock.send_multipart(kc.session.serialize(kc.session.msg("kernel_info_request")), flags=zmq.DONTWAIT)
+    except zmq.Again:
+        return False
+    return True
+
+
+KERNEL_LOG_TAIL = 4096  # bytes of a kernel's log read for the line that says why it ended
+
+
+def _log_lines(k: _Kernel) -> list[str]:
+    """The last lines of the kernel's log (its stdout and stderr, and its wrapper's), up to KERNEL_LOG_TAIL bytes."""
+    try:
+        with k.log.open("rb") as f:
+            f.seek(max(0, f.seek(0, os.SEEK_END) - KERNEL_LOG_TAIL))
+            return [ln.strip() for ln in f.read().decode("utf-8", "replace").splitlines() if ln.strip()]
+    except OSError:
+        return []
+
+
+# What a kernel's log says when a port of its connection file was taken before it bound it: write_connection_file
+# finds free ports and lets them go, and a process that binds one before the kernel starts (another kernel, or a server)
+# keeps it. The kernel ends at once; started again on new ports, it starts.
+PORT_TAKEN = "Address already in use"
+LAUNCH_TRIES = 3
+
+
 async def _wait_ready(k: _Kernel, kc: AsyncKernelClient, timeout: float, *, control: bool) -> None:
     """kernel_info until the reply arrives and iopub has delivered something: on the shell channel for a fresh kernel,
     on the control channel for a recorded one (which answers there even while the shell runs a cell). Liveness is the
@@ -2470,7 +2504,7 @@ async def _wait_ready(k: _Kernel, kc: AsyncKernelClient, timeout: float, *, cont
     ch = kc.control_channel if control else kc.shell_channel
     deadline = time.monotonic() + timeout
     while True:
-        ch.send(kc.session.msg("kernel_info_request"))
+        _kernel_info_nowait(kc, ch)  # never waits: the checks below run each round, whatever the socket does
         try:
             reply = await ch.get_msg(timeout=1)
         except Empty:
@@ -2490,8 +2524,13 @@ async def _wait_ready(k: _Kernel, kc: AsyncKernelClient, timeout: float, *, cont
                 except Exception:  # noqa: BLE001 — protocol adaptation only
                     pass
                 break
-        if not k.alive():
-            raise RuntimeError("the kernel died before answering kernel_info")
+        ended = not k.alive()
+        # a fresh kernel whose port was taken ends at once, while the sandbox around it may run on a while
+        lines = _log_lines(k) if ended or not control else []
+        taken = next((ln for ln in reversed(lines) if PORT_TAKEN in ln), "")
+        if ended or taken:
+            why = (taken or (lines[-1] if lines else ""))[:300]
+            raise RuntimeError("the kernel died before answering kernel_info" + (f": {why}" if why else ""))
         if time.monotonic() > deadline:
             raise TimeoutError(f"the kernel did not answer kernel_info within {timeout:g} s")
     while True:  # what iopub caught meanwhile belongs to no run
@@ -2642,6 +2681,21 @@ async def _launch(k: _Kernel, workspace: str) -> None:
         argv = wrapped_argv(argv, workspace=workspace, corpus=corpus, connection_file=k.conn, source=source)
     elif wrap == config.KERNEL_WRAP_SRT:
         argv = sandboxed_argv(argv, workspace=workspace, corpus=corpus, source=source)
+    for tries_left in range(LAUNCH_TRIES - 1, -1, -1):
+        try:
+            k.kc = await _launch_process(k, workspace, cwd, corpus, argv, wrap, source)
+            return
+        except RuntimeError as e:
+            if PORT_TAKEN not in str(e) or not tries_left:
+                raise
+            log.warning("kernel %s of %s ended at its start: a port of its connection file was taken (%s); starting "
+                        "it again on new ports", k.key, workspace, e)
+
+
+async def _launch_process(k: _Kernel, workspace: str, cwd: Path, corpus: Path, argv: list[str], wrap: str,
+                          source: str) -> AsyncKernelClient:
+    """_launch's kernel process on new ports, and its client once it answers."""
+    wrapped = wrap in config.KERNEL_WRAPPED
     kc: AsyncKernelClient | None = None
     try:  # from the first file written: a failure anywhere leaves no process, channels, lease or file behind (_kill)
         await asyncio.to_thread(write_connection_file, str(k.conn), ip="127.0.0.1", key=secrets.token_hex(16).encode())
@@ -2671,7 +2725,7 @@ async def _launch(k: _Kernel, workspace: str) -> None:
             _close_client(kc)
         await _kill(k)
         raise
-    k.kc = kc
+    return kc
 
 
 async def _attach(k: _Kernel) -> bool:
