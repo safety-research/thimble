@@ -101,6 +101,16 @@ async def _ended(fid: int = 1) -> None:
     await asyncio.sleep(0.4)  # the restart is called a moment after
 
 
+async def _until(cond: Any, what: str, s: float = 10.0) -> None:
+    """Waits until cond() holds: an apply or an undo runs the kernel in a thread and starts the server again 0.3 s
+    later (fixes.restart, call_later), which a busy machine stretches past any fixed sleep. Fails with `what` after s."""
+    t0 = time.monotonic()
+    while not cond():
+        if time.monotonic() - t0 > s:
+            raise AssertionError(what)
+        await asyncio.sleep(0.02)
+
+
 def _log(c: str, chat: str = "main") -> list[dict[str, Any]]:
     return agents.read_events(agents.paths(c, chat)[1])
 
@@ -177,7 +187,7 @@ async def test_a_fix_is_a_fork_of_main_on_its_copy_and_asks_the_person_when_its_
 
     # Use it now: the click's secret to the kernel's apply, then the server starts again from live
     assert (await fixes.apply_route(1, analyst))["restart"] is True
-    await asyncio.sleep(0.4)
+    await _until(lambda: fixing.restarts, "the server never started again after Use it now")
     assert [c[0] for c in fixing.calls].count("apply") == 1
     assert fixing.restarts == [("fix 1: Card says how many rows", config.REPO_ROOT / "backend")]
     assert fixes.status()["fixes"][0]["phase"] == "restarting"
@@ -395,7 +405,7 @@ async def test_later_leaves_the_fix_ready_in_your_fixes_and_use_it_there_puts_it
     listed = fixes.status(every=True)["fixes"]
     assert [(r["id"], r["state"], r["kind"]) for r in listed] == [(1, "ready", None)]
     await fixes.apply_route(1, analyst)  # Use it, in Your fixes
-    await asyncio.sleep(0.4)
+    await _until(lambda: fixing.restarts, "the server never started again after Use it")
     assert fixing.recs[1]["state"] == "on" and fixing.restarts[-1][0] == "fix 1: Card counts rows"
 
 
@@ -459,7 +469,7 @@ async def test_a_page_that_does_not_build_takes_the_fix_off_again(fixing, monkey
     await fixes.request(CORPUS, "count the rows", "")
     await _ended()
     await fixes.apply_route(1, analyst)
-    await asyncio.sleep(0.4)
+    await _until(lambda: (fixes.status()["fixes"][0]["said"] or "").endswith("it is off again"), "the failed fix never came off")
     verbs = [c[0] for c in fixing.calls]
     assert verbs.index("undo") > verbs.index("apply") and fixing.restarts == []
     assert fixes.status()["fixes"][0]["said"].endswith("error TS1005; it is off again")
@@ -470,10 +480,9 @@ async def test_undo_takes_the_fix_off_and_starts_the_server_again(fixing, monkey
     await fixes.request(CORPUS, "count the rows", "")
     await _ended()
     await fixes.apply_route(1, analyst)
-    await asyncio.sleep(0.4)
+    await _until(lambda: fixing.restarts, "the server never started again after Use it now")
     assert (await fixes.undo_route(1, analyst))["restart"] is True
-    await asyncio.sleep(0.4)
-    assert fixing.restarts[-1][0] == "undo of fix 1"
+    await _until(lambda: fixing.restarts[-1][0] == "undo of fix 1", "the server never started again after Undo")
     fixes._phase.clear()
     assert fixes.status()["fixes"][0]["said"] == "thimble fix undone: Card counts rows"
     await fixes.dismiss_route(1, analyst)
