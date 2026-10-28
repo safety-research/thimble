@@ -2028,7 +2028,8 @@ def text_turns(texts: Iterable[Any], hint: dict[str, Any]) -> Iterator[dict[str,
     None: only for the speakers the sniff names when it names them, or a role such as `System` that first speaks past
     the head. A line inside a fenced block of code (a tool call's code or output) starts none, unless it starts a turn
     of a speaker the sniff names (of anyone, when it names none), which ends a block left open (a message cut inside
-    its code)."""
+    its code). As in the sniff (_style_hits), a turn line opens a block with its words, also one of a label that names
+    no speaker (`Command: ```bash`)."""
     if hint.get("style") == "aider":
         yield from _aider_turns(texts)
         return
@@ -2039,17 +2040,16 @@ def text_turns(texts: Iterable[Any], hint: dict[str, Any]) -> Iterator[dict[str,
         got = _turn_match(text, style) if isinstance(text, str) else None
         if got is not None:
             low = got[0]["speaker"].lower()
-            if not (speakers is None or low in speakers or (fence is None and low in ROLE_WORDS)):
-                got = None
-        if got is None:
+            if speakers is None or low in speakers or (fence is None and low in ROLE_WORDS):
+                fence = _fence_opened(text[got[1]:])
+                yield got[0]
+                continue
+        if isinstance(text, str):
             if fence is None:
-                fence = _fence_opened(text) if isinstance(text, str) else None
-            elif isinstance(text, str) and _fence_closes(fence, text):
+                fence = _fence_opened(text[got[1]:] if got else text)
+            elif _fence_closes(fence, text):
                 fence = None
-            yield None
-            continue
-        fence = _fence_opened(text[got[1]:])
-        yield got[0]
+        yield None
 
 
 def _resets(text: str, hint: dict[str, Any]) -> bool:

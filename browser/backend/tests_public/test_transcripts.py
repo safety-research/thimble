@@ -751,6 +751,19 @@ def test_an_aider_session_s_head_ends_a_block_left_open_in_the_sniff_too(chats):
     assert chat_turns("quit.aider.chat.history.md") == [(4, "User"), (6, "Assistant"), (13, "User"), (15, "Assistant")]
 
 
+def test_a_label_that_opens_a_block_of_code_opens_it_in_the_turns_too(chats):
+    """A label that names no speaker (`Command:`) can open a block of code with its words; the turns open it as the
+    sniff does, so a header line of the output after it (`Host:`) starts no turn, on the page or in Color by."""
+    log = ("User: Is the export up?\nAssistant: I will fetch its head.\nCommand: ```bash\n"
+           "curl -I http://exports.example.test/orders\n```\nOutput:\n```\nHTTP/1.1 200 OK\nHost: exports.example.test\n"
+           "```\nAssistant: The export is up.\nUser: thanks\nAssistant: ok\n")
+    (chats / "logs" / "label.txt").write_text(log)
+    assert transcripts.sniff(chats / "logs" / "label.txt", "logs/label.txt")["speakers"] == ["assistant", "user"]
+    assert chat_turns("label.txt") == [(1, "User"), (2, "Assistant"), (11, "Assistant"), (12, "User"), (13, "Assistant")]
+    keys = client.get(f"{CHATS}/source/keys", params={"path": "logs/label.txt"}).json()["keys"]
+    assert {v["value"] for v in keys[0]["values"]} == {"User", "Assistant"}
+
+
 def test_an_agent_transcript_with_tool_records_is_a_strong_transcript():
     """A harness that logs each tool call with its result on its own line, between the agent's spoken turns: the tool
     turns count toward the transcript, so it is strong (Transcript the default), with `tools` set for the view, even
