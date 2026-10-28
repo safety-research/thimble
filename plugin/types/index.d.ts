@@ -152,6 +152,8 @@ declare module 'claude-code' {
       squeezeOpen: { id: string; focus: string; edge: string | null; typing: string | null; held: boolean; hint: boolean } | null
       /** the chips the person typed this session, newest last */
       squeezeOwn: string[]
+      /** s pressed while main's turn ran: the turn whose answer the chips open on once it ends (squeeze/ui.ts) */
+      squeezeWait: { turn: string } | null
       /** the cards a squeeze changed: the copy each shows and the version it drew, the cards left out of the version
        *  shown, what the version shown did to each (squeeze/cards.ts) */
       squeezeCards: { shown: Record<string, { copy: string; v: number }>; hidden: string[]; did: Record<string, string> }
