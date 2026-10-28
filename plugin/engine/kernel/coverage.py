@@ -99,6 +99,18 @@ def shares(o: dict[str, Any]) -> tuple[float, float]:
     return read, min(1.0, over / units)
 
 
+class _Scripts(dict):
+    """The scripts the session's commands wrote (shellcmd.shows keeps them), with a number that changes with each new
+    text, so a command run again over the same scripts is read once."""
+
+    version = 0
+
+    def __setitem__(self, key: str, text: str) -> None:
+        if self.get(key) != text:
+            self.version += 1
+        super().__setitem__(key, text)
+
+
 def _program(cmd: str) -> str:
     """A command's first program past `cd`, as coverage names what touched a file."""
     for pipe in SH.pipelines(cmd):
@@ -161,18 +173,21 @@ def amounts(units: list[dict[str, Any]], key: str = "seen") -> str:
     return bits[0] if len(bits) == 1 else ", ".join(bits[:-1]) + " and " + bits[-1] if bits else ""
 
 
-def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PER_FOLDER) -> dict[str, Any]:
+def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PER_FOLDER,
+             until: float | None = None) -> dict[str, Any]:
     """What this session (or `session`, or all sessions for None) did with every file of the folder. `files` holds
     each touched file with its status, its two measures, the lines seen (`ranges`) and the lines a search showed
     (`hit_lines`); `groups` and `types` count every file by folder and by file type; `untouched` names at most
-    `per_folder` of each folder's files not touched, as columns of path, unit, size and the programs that listed it."""
+    `per_folder` of each folder's files not touched, as columns of path, unit, size and the programs that listed it.
+    `until` (time.monotonic()): when to stop counting the files' rows (sources.counts), which then raises
+    sources.Unfinished and keeps what it counted for the next count."""
     from . import labels as LB
 
     files = S.list_files(st.root)
     known = SH.Known(files)
     # rows are counted only for the sources and PDFs: one test per extension, and a name with none tested alone
     cnt = S.counts(st.root, [f for ext, fs in known.by_ext.items() if not ext or S.counted("x" + ext) for f in fs],
-                   st.cache / "counts.json")
+                   st.cache / "counts.json", until)
 
     def count(f: str) -> dict[str, Any]:
         return cnt.get(f) or S.whole_file(f)
@@ -181,10 +196,16 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
         c = cnt.get(f)
         return S.UNIT_OF_KIND.get(c["kind"] or "", "file") if c else "file"
 
+    searchable_in: dict[str, list[str]] = {}
+
     def searchable(folder: str) -> list[str]:
         """The files a search into a folder (`runs/`, `./`) goes over: its text files, since a search skips a binary
-        file, an image or a PDF. The folder's files are one range of the sorted names (Known.under)."""
-        return [f for f in known.under("." if folder == "./" else folder.rstrip("/")) if f in cnt and unit_of(f) not in ("pages", "file")]
+        file, an image or a PDF. The folder's files are one range of the sorted names (Known.under), found once."""
+        fs = searchable_in.get(folder)
+        if fs is None:
+            fs = searchable_in[folder] = [f for f in known.under("." if folder == "./" else folder.rstrip("/"))
+                                          if f in cnt and unit_of(f) not in ("pages", "file")]
+        return fs
 
     per: dict[str, dict[str, Any]] = {}  # the touched files
 
@@ -229,7 +250,14 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
             if ruled:
                 x["computed"] = max(x["computed"], ruled)
     root = str(st.root)
-    scripts: dict[str, str] = {}  # the scripts the session's commands wrote, for the commands after them (shellcmd)
+    scripts = _Scripts()  # the scripts the session's commands wrote, for the commands after them (shellcmd)
+    # what a search or a command did to a file or a folder, once: done again, it changes nothing. A long session searches
+    # the same folders and runs the same code again and again, and each search of a folder goes over each of its files,
+    # so a count of a big folder took minutes per thousand calls of the session
+    done: set[tuple[Any, ...]] = set()
+    # each command as shellcmd read it, by its words, its folder and the scripts written before it: run again, only
+    # the lines it printed count again (what reached Claude is cut to each run's own output)
+    printed: dict[tuple[str, str | None, int], list[tuple[str, str, tuple[int, int] | None, str]]] = {}
     for s in st.seen(session):
         tool = s.get("tool")
         if tool == "Read":
@@ -254,15 +282,17 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
             # a search that showed lines leaves its files searched (the lines it showed are seen); one that showed only
             # names or counts computed over them
             lines = s.get("mode") == "content" or (s.get("mode") is None and bool(s.get("lines")))
-            for f in [scope] if scope in known.set else searchable("./" if scope == "." else scope.rstrip("/") + "/"):
-                if unit_of(f) in ("pages", "file"):
-                    continue
-                if not glob or fnmatch.fnmatch(Path(f).name, glob) or fnmatch.fnmatch(f, glob):
-                    if lines:
-                        at(f)["searched"] = True
-                        at(f)["searched_by"].add("Grep")
-                    else:
-                        computed(f, None, "Grep")
+            if ("Grep", scope, glob, lines) not in done:
+                done.add(("Grep", scope, glob, lines))
+                for f in [scope] if scope in known.set else searchable("./" if scope == "." else scope.rstrip("/") + "/"):
+                    if unit_of(f) in ("pages", "file"):
+                        continue
+                    if not glob or fnmatch.fnmatch(f[f.rfind("/") + 1:], glob) or fnmatch.fnmatch(f, glob):
+                        if lines:
+                            at(f)["searched"] = True
+                            at(f)["searched_by"].add("Grep")
+                        else:
+                            computed(f, None, "Grep")
             for fp, ns in (s.get("lines") or {}).items():
                 f = st.rel(fp)
                 if f in known.set:
@@ -281,7 +311,16 @@ def coverage(st: Store, session: str | None = "", per_folder: int = UNTOUCHED_PE
                     listed[f].add(_program(cmd))
             # what reached Claude is at most the lines the command printed (a long output is cut)
             left = s.get("out_lines")
-            for f, how, span, prog in SH.shows(cmd, known, root, s.get("cwd"), lambda f: count(f).get("lines") or 0, scripts):
+            key = (cmd, s.get("cwd"), scripts.version)
+            shown = printed.get(key)
+            if shown is None:
+                shown = SH.shows(cmd, known, root, s.get("cwd"), lambda f: count(f).get("lines") or 0, scripts)
+                printed[key] = [x for x in shown if x[1] == "read"]
+            for f, how, span, prog in shown:
+                if how != "read":
+                    if (f, how, span, prog) in done:
+                        continue
+                    done.add((f, how, span, prog))
                 if f.endswith("/"):  # a folder, for its files
                     if how == "searched":
                         for g in searchable(f):
