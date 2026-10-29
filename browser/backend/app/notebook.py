@@ -1,11 +1,13 @@
 """Canvas groups and cells: storage, kernels, execution, bounded outputs, SSE.
 
 A group is a notebook file, workspaces/<c>/notebooks/<id>.json, carrying tree fields (parent, kind, anchor, chat), its
-role and its cells. Runnable cells carry code and outputs and run on a kernel; data cells carry a payload. Kernels are
-detached processes the workspace owns (see the kernels section): one shared kernel for exploration groups, one per group
-for everything else (_kernel_for). Oversized stream outputs are bounded to a head and tail with the full text in a side
-file. The in-memory notebook cache is used by the event-loop thread only, and is trusted only while the file is
-unchanged (mtime_ns, size and inode).
+role and its cards. A card stands in a group only when someone put it there (a frame the analyst made, a sequence of
+cards a call named); every other card stands loose on the board, in the loose group, which draws no frame. Runnable
+cells carry code and outputs and run on a kernel; data cells carry a payload. Kernels are detached processes the
+workspace owns (see the kernels section): one shared kernel for exploration groups, one per group for everything else,
+and one per agent session for that agent's cards (_kernel_for). Oversized stream outputs are bounded to a head and tail
+with the full text in a side file. The in-memory notebook cache is used by the event-loop thread only, and is trusted
+only while the file is unchanged (mtime_ns, size and inode).
 
 Every change holds the store's lock (editing: ledger.locked on the notebooks folder) from its read to its write, and a
 run, which cannot hold it while the code runs, saves its cell into the group as the file holds it then (_merge_cell).
@@ -313,10 +315,10 @@ def _new_id() -> str:
     return secrets.token_hex(4)
 
 
-MAIN = "main"  # the group a workspace's first cells land in when none is bound; created on demand
+MAIN = "main"  # the id of the analyst's group in a workspace from before groups had random ids (notebooks_dir)
 ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 DEFAULT_TITLE = "Notebook"
-ANALYST_NOTEBOOK_TITLE = "Your work"  # the analyst's own group; tools.ANALYST_NOTEBOOK_TITLE repeats it
+ANALYST_NOTEBOOK_TITLE = "Your work"  # the title `main` reads as (_title), from a workspace that had one
 UNNAMED_MAIN_TITLES = ("", DEFAULT_TITLE, "Your notebook")  # stored defaults of `main` the analyst never typed
 
 # A group's role: `exploration` is the orientation's deck, `analyst` the analyst's own group and every thread's;
@@ -1174,7 +1176,7 @@ def summary(nb: dict) -> dict:
            "order": nb.get("order")}
     if nb.get("created_by"):
         out["created_by"] = nb["created_by"]
-    if nb.get("session"):  # the THIMBLE_SESSION whose own group it is (tools.SESSION_GROUP_KEY), such as `writer:report`
+    if nb.get("session"):  # the THIMBLE_SESSION of the agent whose group it is (tools.SESSION_KEY): `writer:report`
         out["session"] = nb["session"]
     return out
 
@@ -1404,19 +1406,6 @@ def get_cell(workspace: str, cell_id: str, *, full_outputs: bool = False) -> dic
     if full_outputs and any(isinstance(b, dict) and "truncated" in b for b in cell.get("outputs") or []):
         return {**cell, "outputs": hydrate_outputs(ws, cell["outputs"])}
     return dict(cell)  # a copy: the stored cell is the cached object, which later runs and edits mutate in place
-
-
-@_changes
-def active_notebook_id(workspace: str) -> str:
-    """settings.active_notebook when it names an existing notebook; else `main`, created if it does not exist yet."""
-    ws = _ws(workspace)
-    settings = read_json(ws / "settings.json", {})
-    nb_id = settings.get("active_notebook") if isinstance(settings, dict) else None
-    if isinstance(nb_id, str) and ID_RE.match(nb_id) and _nb_file(ws, nb_id).is_file():
-        return nb_id
-    if not _nb_file(ws, MAIN).is_file():
-        write_notebook(ws, read_notebook(ws, MAIN))
-    return MAIN
 
 
 def load_notebook(workspace: str, nb_id: str = MAIN) -> dict:
@@ -1774,8 +1763,8 @@ def delete_cell(workspace: str, cell_id: str) -> None:
 
 @_changes
 def loose_group(ws: Path) -> str:
-    """The id of the workspace's loose group (LOOSE_KIND), made on first use: a card dragged out of every group lives
-    there, at its own place on the board."""
+    """The id of the workspace's loose group (LOOSE_KIND), made on first use: every card that stands on the board
+    outside a frame lives there, one made with no group and one dragged out of every group alike."""
     for nb_id, nb in _stored(ws):
         if nb.get("kind") == LOOSE_KIND:
             return nb_id
@@ -3184,13 +3173,15 @@ async def _execute(k: _Kernel, code: str, timeout: float | None = None,
 
 
 def _kernel_for(nb: dict, kernel: str | None, cell: dict | None = None, ws: Path | None = None) -> str | None:
-    """The kernel a cell of `nb` executes on: an explicit `kernel` wins; a card moved from another group keeps the
-    kernel it ran on (`cell.kernel`). Otherwise exploration groups run on the shared kernel (None) and every other group
-    on a dedicated kernel named after it. The terminal's own cells run on its dedicated kernel wherever they land."""
+    """The kernel a cell of `nb` executes on: an explicit `kernel` wins; a card that names its own (`cell.kernel`) runs
+    there, as one moved from another group keeps the kernel it ran on, an agent's card the kernel of its session and a
+    thread's card the thread's kernel. Otherwise exploration groups run on the shared kernel (None) and every other
+    group on a dedicated kernel named after it. The terminal's own cells run on its dedicated kernel wherever they
+    land."""
     if kernel:
         return kernel
     kept = (cell or {}).get("kernel")
-    if isinstance(kept, str):  # a card moved out of the group it ran in keeps that kernel (move_cells); '' is shared
+    if isinstance(kept, str):  # move_cells and tools._maker_fields set it; '' is shared
         return kept or None
     if nb.get("role", DEFAULT_ROLE) == "exploration" and nb.get("created_by") != TERMINAL_CREATOR \
             and (cell or {}).get("created_by") != TERMINAL_CREATOR:
@@ -3692,14 +3683,16 @@ async def run_code(
     timeout_s: float | None = None,
     default_timeout_s: float | None = None,
     kind: str | None = None,
+    fields: dict | None = None,
 ) -> dict:
     """Create a runnable cell at the end of a group and run it, or with `replace` re-run that cell with the new code,
-    its stale takeaway cleared. `notebook` defaults to the bound group, else `main`. `created_at_event` is the index of
-    the tool_use record that made the cell. `timeout_s` is stored as the cell's allowance; `default_timeout_s` applies
-    when none is named and is never stored. Returns the cell with complete outputs; the group stores the bounded
-    version."""
+    its stale takeaway cleared. With no `notebook` the card stands loose on the canvas (loose_group). `created_at_event`
+    is the index of the tool_use record that made the cell. `timeout_s` is stored as the cell's allowance;
+    `default_timeout_s` applies when none is named and is never stored. `fields` are stored on a new cell before it
+    runs, such as the session of the agent that made it and that session's kernel (tools._maker_fields). Returns the
+    cell with complete outputs; the group stores the bounded version."""
     _, full = await _run_code(workspace, code, created_by, title, notebook, created_at_event, replace, kernel, timeout_s,
-                              default_timeout_s, kind)
+                              default_timeout_s, kind, fields)
     return dict(full)  # a copy: the stored cell is the cached object, which later runs and edits mutate in place
 
 
@@ -3715,6 +3708,7 @@ async def _run_code(
     timeout_s: float | None = None,
     default_timeout_s: float | None = None,
     kind: str | None = None,
+    fields: dict | None = None,
 ) -> tuple[dict, dict]:
     """run_code returning (the cell as stored, the cell with its complete outputs). One load, one save."""
     timeout_s = positive_timeout(timeout_s)  # reject a bad value before anything is written
@@ -3736,9 +3730,10 @@ async def _run_code(
             _emit(workspace, cell)
             return await _execute_cell(workspace, nb, cell, kernel, timeout_s, default_timeout_s)
         # the target is gone: append a fresh cell
-    nb_id = notebook or active_notebook_id(workspace)
+    nb_id = notebook or loose_group(_ws(workspace))
     nb = load_notebook(workspace, nb_id)
     cell = new_cell(kind or DEFAULT_KIND, created_by, title, nb_id, code=code, created_at_event=created_at_event)
+    cell.update(fields or {})
     _name_cell(_ws(workspace), cell)
     nb["cells"].append(cell)
     _emit(workspace, cell)
@@ -3826,10 +3821,15 @@ class NotebookMeta(BaseModel):
 @router.get("/ws/{c}/canvas")
 async def canvas_route(c: str) -> dict:
     """The canvas as the browser shows it, the orientation's cards among them as it adds them. A Scratch group is marked
-    first (migrate_scratch), so canvas() leaves it out."""
+    first (migrate_scratch), so canvas() leaves it out. `threads` gives the anchor of each thread that made a card
+    here (threads.anchors_of)."""
+    from . import threads  # noqa: PLC0415 — threads' modules import this one
+
     migrate_scratch(c)
     migrate_writer_groups(c)
-    return canvas(_ws(c))
+    out = canvas(_ws(c))
+    out["threads"] = threads.anchors_of(c, out["cells"])
+    return out
 
 
 # Scratch: a working group of role `working` in stored workspaces. Its cards are kept, since their ids are cited: on
@@ -3910,7 +3910,7 @@ def migrate_writer_groups(c: str) -> list[str]:
     if str(ws) in _writer_groups_migrated:  # by folder, as migrate_scratch
         return []
     _writer_groups_migrated.add(str(ws))
-    session_key = "session"  # tools.SESSION_GROUP_KEY; tools imports this module lazily
+    session_key = "session"  # tools.SESSION_KEY; tools imports this module lazily
     rows = list_notebooks(ws, figures=False)
     nbs = {r["id"]: read_notebook(ws, r["id"]) for r in rows}
     kids: dict[str, list[str]] = {}
@@ -4062,8 +4062,7 @@ def _update_notebook(c: str, nb: str, body: NotebookMeta) -> dict:
 @_changes
 def trash_notebook(ws: Path, nb_id: str) -> bool:
     """Remove a group from the workspace's list: its file moves to TRASH_DIR whole (its cells' side files stay where
-    the file names them), the read cache forgets it, and settings.active_notebook is cleared when it named it. False
-    when there is no such file."""
+    the file names them) and the read cache forgets it. False when there is no such file."""
     p = _nb_file(ws, nb_id)
     if not p.is_file():
         return False
@@ -4071,9 +4070,6 @@ def trash_notebook(ws: Path, nb_id: str) -> bool:
     trash.mkdir(parents=True, exist_ok=True)
     p.replace(trash / p.name)
     _cache.pop(p, None)
-    settings = read_json(ws / "settings.json", {})
-    if isinstance(settings, dict) and settings.get("active_notebook") == nb_id:
-        write_json(ws / "settings.json", {**settings, "active_notebook": None})
     return True
 
 

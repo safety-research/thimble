@@ -174,7 +174,7 @@ export interface Group {
   role: string
   n_cells?: number
   ts?: string
-  /** the session thimble ran beside main whose own group this is, such as `writer:report` (backend tools.SESSION_GROUP_KEY) */
+  /** the session of the agent of thimble's that made this group, such as `writer:report` (backend tools.SESSION_KEY) */
   session?: string
 }
 
@@ -215,6 +215,8 @@ export interface Cell {
   /** the citation check of the takeaway's marks, `[words](#)`, for the takeaway `text` (backend marks.py) */
   takeaway_marks?: { text?: string; items?: import('../marks/marks').MarkItem[] }
   created_by: string
+  /** the session of the agent of thimble's that made this card, such as `writer:report` (backend tools.SESSION_KEY) */
+  session?: string
   created_at_event?: number | null
   created_ts?: string
   ts: string
@@ -278,6 +280,8 @@ export interface CanvasResponse {
   cells: Cell[]
   /** the ids of the cards the route leaves out: a legacy orientation Scratch (backend notebook.canvas) */
   hidden?: string[]
+  /** the anchor of each thread that made a card here, by the thread's chat id (backend threads.anchors_of) */
+  threads?: Record<string, string>
 }
 
 export interface NewCellBody {

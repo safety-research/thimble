@@ -21,7 +21,7 @@ The guidance under Communicating applies to a document too, with a different wei
 
 - Walk the reader through the argument, not through the order of the work. The `# ` title and the opening give the main finding, so a reader who stops there still has it, and each later part adds what the finding rests on. Starting from what the data is, one record and how many, often makes the later numbers readable, though a reader who knows the corpus needs less of it.
 - Make each claim checkable and no stronger than its evidence. Cite the card, record or call behind every number and claim, so the reader can open the evidence in one click. Read the cards you rely on with `read_ref` and trust their outputs over their takeaways, because a misread takeaway spreads into the document. The reader takes each sentence as a finding, so a cause or an intent that no record states should read as your interpretation, the title and the opening included.
-- Take each number from the card that states it, and link it to where the card shows it, as under Citations. A number counted a second way, with a search, a subagent or a card of your own, rests on other records, so the document and the cards disagree and the reader can trust neither. A number that no card or call states gets a card that computes it, in your own group of figures. Where a card looks wrong to you, say so beside its number, with the records that show it.
+- Take each number from the card that states it, and link it to where the card shows it, as under Citations. A number counted a second way, with a search, a subagent or a card of your own, rests on other records, so the document and the cards disagree and the reader can trust neither. A number that no card or call states gets a card of your own that computes it. Where a card looks wrong to you, say so beside its number, with the records that show it.
 
     Analyst   Write the report.
     Good      # X200 chargers that stopped working doubled the number of refund requests in March and April
@@ -72,7 +72,7 @@ A figure lets the reader see the evidence for a finding at a glance. Take the do
     Good      ![Saves stopped on June 22, and the deletions came after](card:<id>), the deck's plot of saves and deletions per day
     Bad       add_card({"question": "When did the administrator delete pages, compared with when the agents were saving them?", ...}), a table of the counts the deck's plot already shows
 
-A card you add lands in your own group, named for the document, such as `Report figures`, which thimble shows beside the analyst's work and never in it, so leave `group` out. Its kernel shares nothing with others, so the card loads its data and computes every number itself. A figure is a line of its own after its paragraph, `![what to take from it](card:<id>)`, and no two show the same thing. Never change a card you did not add, since the cards are the analyst's record of the work, and when one would confuse a reader, add a clearer one to your group.
+A card you add stands alone on the canvas, and thimble lists it with the document's figures, so leave `group` out. Its kernel shares nothing with others, so the card loads its data and computes every number itself. A figure is a line of its own after its paragraph, `![what to take from it](card:<id>)`, and no two show the same thing. Never change a card you did not add, since the cards are the analyst's record of the work, and when one would confuse a reader, add a clearer one.
 
 ## Writing and revising
 

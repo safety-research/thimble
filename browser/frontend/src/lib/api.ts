@@ -656,8 +656,8 @@ export const api = {
     j<StartAnswer>(`${ws(c)}/write`, { method: 'POST', body: JSON.stringify({ doc: slug, ...body }) }).then(startAnswer),
   /** Send the analyst's session what the analyst wrote at one place (`POST /ws/{c}/events {kind: card}`, the `card`
    * bullet of prompts/main.md): a request sent with ⌘↵ (lib/agentKey) or /card, made in document `doc` after the
-   * passage `after` names, or on card `card`. A card main makes for it with add_card in the group
-   * `request:<request>` lands in the analyst's Your work, and the stream's `card-request {request, card}` names it. */
+   * passage `after` names, or on card `card`. A card main makes for it with add_card, whose group is
+   * `request:<request>`, stands loose on the canvas, and the stream's `card-request {request, card}` names it. */
   askCard: (c: string, body: { text: string; request: string; doc?: string; after?: string; card?: string }) =>
     j<EventPosted>(`${ws(c)}/events`, {
       method: 'POST',

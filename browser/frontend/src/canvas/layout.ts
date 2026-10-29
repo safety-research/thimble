@@ -7,8 +7,9 @@
 // of frames stands in one box (Canvas names the path in one title row). A collapsed frame shows its nested groups and
 // its first card, with the edges of the others stacked under it; a lone card folds to its question, and a frame with
 // no card of its own shows its title alone, with no box under it. Root frames and loose cards sit at their `pos`, or in
-// one column in the order they were made, and a thread's frame about a loose card stands right of it. Empty thread
-// groups are not drawn. `View` is the plane's pan and zoom.
+// one column in the order they were made. What a thread made and no one has placed, a loose card or a frame of its
+// cards, stands right of the card the thread is about (or of the collapsed frame that card is folded in), as does a
+// thread's frame about a loose card. Empty thread groups are not drawn. `View` is the plane's pan and zoom.
 import type { ChipTone } from '../components/Chip'
 import { isUnread, type SeenMap } from '../chat/seen'
 import type { CanvasResponse, Cell, ChatMeta, Filters, FilterScope, Group, LabelRow, Pos } from '../lib/types'
@@ -50,7 +51,7 @@ export type Flow = 'col' | 'row'
 export const clampWidth = (w: number): number => Math.min(MAX_W, Math.max(MIN_W, Math.round(w)))
 export const clampHeight = (h: number): number => Math.max(MIN_H, Math.round(h))
 
-/** A group that belongs to a thread: its chat's cards land in it, beside its anchor card. */
+/** A thread's own group, from a workspace where each thread had one: it holds the thread's cards, beside its anchor card. */
 export const isThreadGroup = (g: Pick<Group, 'anchor' | 'chat'>): boolean => !!(g.anchor || g.chat)
 
 /** A split group is a row; every other group a column. */
@@ -82,6 +83,8 @@ export interface BoardCell {
   w: number
   /** its own height; null for the content's */
   h: number | null
+  /** the card it stands beside, right of it: a loose card a thread made, about that card, that no one has placed */
+  beside?: string | null
 }
 
 export interface Board {
@@ -91,9 +94,14 @@ export interface Board {
   cellById: ReadonlyMap<string, BoardCell>
 }
 
+/** The chat a card was made in, from its maker (`chat:<id>`); null for a card made by hand or by the terminal. */
+const chatOf = (createdBy: string | null | undefined): string | null => /^chat:([A-Za-z0-9_-]+)$/.exec(createdBy ?? '')?.[1] ?? null
+
 /**
  * The board from the canvas route: a frame per group (the loose group draws none: its cards are loose, at the root),
- * a nested group whose parent is not drawn at the root, and a thread's group only while something is in it.
+ * a nested group whose parent is not drawn at the root, and a thread's group only while something is in it. What a
+ * thread made stands beside the card its anchor names (`threads`), from the route's answer alone, so the first draw
+ * after a load is already where it stays.
  */
 export function boardOf(data: CanvasResponse): Board {
   const loose = new Set(data.groups.filter((g) => g.kind === 'loose').map((g) => g.id))
@@ -142,6 +150,38 @@ export function boardOf(data: CanvasResponse): Board {
   for (const g of groups) {
     if (!g.thread || g.pos || g.order != null || !g.group.anchor) continue
     if (cells.some((c) => c.id === g.group.anchor && c.parent === g.parent)) g.beside = g.group.anchor
+  }
+  // what a thread made that no one has placed stands beside the card the thread is about: a loose card, and a frame at
+  // the root whose cards all came from that thread
+  const drawnCard = new Set(cells.map((c) => c.id))
+  const aboutOf = (chat: string | null): string | null => (chat ? anchorCellId(data.threads?.[chat]) : null)
+  for (const c of cells) {
+    const card = c.parent || c.pos ? null : aboutOf(chatOf(c.cell.created_by))
+    if (card && card !== c.id && drawnCard.has(card)) c.beside = card
+  }
+  const rootOf = (id: string | null): string | null => {
+    const seen = new Set<string>()
+    let g = id ? group.get(id) : undefined
+    while (g?.parent && !seen.has(g.id)) {
+      seen.add(g.id)
+      g = group.get(g.parent)
+    }
+    return g?.id ?? null
+  }
+  const under = new Map<string, BoardCell[]>()
+  for (const c of cells) {
+    const r = rootOf(c.parent)
+    if (!r) continue
+    const list = under.get(r)
+    if (list) list.push(c)
+    else under.set(r, [c])
+  }
+  for (const g of groups) {
+    if (g.parent || g.pos || g.order != null || g.thread || g.beside) continue
+    const its = under.get(g.id) ?? []
+    const chats = new Set(its.map((c) => chatOf(c.cell.created_by)))
+    const card = its.length && chats.size === 1 ? aboutOf([...chats][0]) : null
+    if (card && drawnCard.has(card) && !its.some((c) => c.id === card)) g.beside = card
   }
   return { groups, cells, group, cellById: new Map(cells.map((c) => [c.id, c] as const)) }
 }
@@ -330,7 +370,7 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
   const frames = roots.filter((g) => !g.beside)
   let fi = 0
   for (const c of board.cells) {
-    if (c.parent) continue
+    if (c.parent || c.beside) continue
     const made = madeAt(c.cell.created_ts ?? c.cell.ts)
     while (fi < frames.length && !(made < madeAt(frames[fi].group.ts))) column.push({ t: 'g', it: frames[fi++] })
     column.push({ t: 'c', it: c })
@@ -353,16 +393,38 @@ export function layoutBoard(board: Board, open: ReadonlySet<string>, heights: Re
     topY += h + GAP
     cardFoot = p.y + h
   }
-  // a thread's frame about a loose card: right of the card, its title level with the card's top, and moved down past
-  // what it would cover, so two such frames stack downward; in the order of their cards
+  // what stands beside a card at the root, a thread's frame or a loose card a thread made: right of the card and of the
+  // frames around it, its top (a frame's title) level with the card's top, and moved down past what it would cover, so
+  // two of them stack downward; in the order of their cards, each once its card stands somewhere. A card a collapse
+  // folds away stands where the innermost frame drawn around it stands.
   const taken = [...rects].map(([k, r]) => (board.group.has(k) ? { x: r.x, y: r.y - TITLE, w: r.w, h: r.h + TITLE } : r))
-  const besides = roots.filter((g) => g.beside).map((g) => ({ g, card: rects.get(g.beside!) ?? null }))
-  besides.sort((a, b) => (a.card?.y ?? Infinity) - (b.card?.y ?? Infinity))
-  for (const { g, card } of besides) {
-    const s = size.get(g.id)!
-    const box = card ? { x: card.x + card.w + GAP, y: card.y, w: s.w, h: s.h + TITLE } : { x: ROOT_X, y: topY, w: s.w, h: s.h + TITLE }
+  const standing = (id: string): Rect | null => {
+    if (rects.has(id)) return rects.get(id)!
+    const seen = new Set<string>()
+    for (let g = board.cellById.get(id)?.parent ?? null; g && !seen.has(g); g = board.group.get(g)?.parent ?? null) {
+      if (rects.has(g)) return rects.get(g)!
+      seen.add(g)
+    }
+    return null
+  }
+  let besides: { k: Kid; card: string }[] = [
+    ...roots.filter((g) => g.beside).map((g) => ({ k: { t: 'g', it: g } as Kid, card: g.beside! })),
+    ...board.cells.filter((c) => !c.parent && c.beside).map((c) => ({ k: { t: 'c', it: c } as Kid, card: c.beside! })),
+  ]
+  while (besides.length) {
+    const at = new Map(besides.map((b) => [b, standing(b.card)] as const))
+    const ready = besides.filter((b) => at.get(b)).sort((a, b) => at.get(a)!.y - at.get(b)!.y)
+    const next = ready[0] ?? besides[0]
+    besides = besides.filter((b) => b !== next)
+    const card = at.get(next) ?? null
+    const outer = card ? (rects.get(rootFrameOf(board, next.card) ?? '') ?? card) : null
+    const k = next.k
+    const s = k.t === 'g' ? size.get(k.it.id)! : { w: k.it.w, h: cellHeight(k.it, heights) }
+    const head = k.t === 'g' ? TITLE : 0
+    const box = card && outer ? { x: outer.x + outer.w + GAP, y: card.y, w: s.w, h: s.h + head } : { x: ROOT_X, y: topY, w: s.w, h: s.h + head }
     box.y = clearBelow(box, taken)
-    place(g, box.x, box.y + TITLE, 0)
+    if (k.t === 'g') place(k.it, box.x, box.y + head, 0)
+    else rects.set(k.it.id, { x: box.x, y: box.y, w: s.w, h: s.h })
     taken.push(box)
     if (!card) topY = box.y + box.h + ROOT_GAP
   }
@@ -500,7 +562,7 @@ export function moveLocal(data: CanvasResponse, ids: readonly string[], group: s
     at = after === null ? mine[0] ?? rest.length : mine.length ? mine[mine.length - 1] + 1 : rest.length
   }
   if (at <= 0 && after) at = rest.length
-  return { groups, cells: [...rest.slice(0, at), ...moved, ...rest.slice(at)] }
+  return { ...data, groups, cells: [...rest.slice(0, at), ...moved, ...rest.slice(at)] }
 }
 
 /** The canvas with a group's fields changed. */
@@ -518,7 +580,7 @@ export function removeLocal(data: CanvasResponse, cells: readonly string[], grou
     for (const g of data.groups) if (g.parent === id) drop(g.id)
   }
   for (const g of groups) drop(g)
-  return { groups: data.groups.filter((g) => !gone.has(g.id)), cells: data.cells.filter((c) => !cells.includes(c.id) && !gone.has(c.notebook)) }
+  return { ...data, groups: data.groups.filter((g) => !gone.has(g.id)), cells: data.cells.filter((c) => !cells.includes(c.id) && !gone.has(c.notebook)) }
 }
 
 // ---- where a dropped card stands: cards never cover each other ----
