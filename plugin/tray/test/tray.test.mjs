@@ -3,7 +3,8 @@
 //   node --test plugin/tray/test/tray.test.mjs
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { aboutOf, back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printLine, push, stepFrom, stopWhat, stopsOfRow, top } from '../tray.mjs'
+import { partsAround } from '../../core/text.js'
+import { aboutOf, back, base, evidenceLine, firstSentence, hiddenOutput, indexOf, lineWindow, moreLines, open, printLine, push, restWords, stepFrom, stepWords, stopKind, stopWhat, stopsOfRow, top } from '../tray.mjs'
 
 const C1 = { row: 'r2', kind: 'citation', n: 1 }
 const G1 = { row: 'r2', kind: 'explain', id: 'g1' }
@@ -37,6 +38,22 @@ test('an explainer or a heads-up on a citation\'s words, or over them, stops bef
   const stops = stopsOfRow('r2', cites, [{ id: 'g1', kind: 'explain', start: 11, end: 22 }, { id: 'h1', kind: 'heads', start: 44, end: 70 }], ['c9'])
   assert.deepEqual(stops.map(s => s.card ?? (s.kind === 'citation' ? `c${s.n}` : s.id)), ['g1', 'c1', 'h1', 'c2', 'c9'])
   assert.deepEqual(stops.map(stopWhat).slice(0, 2), ['explainer', 'citation'])
+})
+
+test('the bar names the mark ] opens by its kind, the words that name it apart to draw in its look: show the answer\'s first mark, next a later one; a narrow bar keeps the name before the verb', () => {
+  const stops = stopsOfRow('r2', [{ n: 1, start: 30 }], [{ id: 'g1', kind: 'explain', start: 5 }, { id: 'h1', kind: 'heads', start: 50 }], ['c9'])
+  assert.deepEqual(stops.map(stopKind), ['explain', 'citation', 'heads', null])
+  assert.deepEqual(restWords(stops[0], true), { words: 'show explainer', what: 'explainer', kind: 'explain', shorter: ['explainer', 'show', ''] })
+  assert.deepEqual(restWords(stops[1], false), { words: 'next citation', what: 'citation', kind: 'citation', shorter: ['citation', 'next', ''] })
+  assert.deepEqual(restWords(stops[2], false), { words: 'next heads up', what: 'heads up', kind: 'heads', shorter: ['heads up', 'next', ''] })
+  // the tray's header: what ] and [ go to, by name and kind; a card has no kind
+  assert.deepEqual(stepWords({ next: true, prev: true, nextWhat: 'heads up', nextKind: 'heads' }), [{ key: ']', words: 'next heads up', what: 'heads up', kind: 'heads' }])
+  assert.deepEqual(stepWords({ next: false, prev: true, prevWhat: 'card', prevKind: null }), [{ key: '[', words: 'previous card', what: 'card', kind: null }])
+  // the words around the name, which the bar and the header draw in their own looks
+  assert.deepEqual(partsAround(' show explainer', 'explainer'), [{ s: ' show ', marked: false }, { s: 'explainer', marked: true }])
+  assert.deepEqual(partsAround(' heads up', 'heads up'), [{ s: ' ', marked: false }, { s: 'heads up', marked: true }])
+  assert.deepEqual(partsAround(' show', 'explainer'), [{ s: ' show', marked: false }])
+  assert.deepEqual(partsAround(' next card', undefined), [{ s: ' next card', marked: false }])
 })
 
 test('a citation\'s card: why in one sentence, and the one line of evidence that holds the value, cut around it', () => {

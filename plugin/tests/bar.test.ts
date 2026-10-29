@@ -11,7 +11,8 @@ import { INTRO, INTRO_MS } from '../bar/intro'
 import { hintUsed, howTo, remindAfterAnswer } from '../bar/hints'
 import { failLineNow, failNotice, HINT_MS, hintLine, hintsGone, noticeLine, promptTyped } from '../bar/notice'
 import { textWidth } from '../core/text.js'
-import { accent } from '../core/theme'
+import { accent, themeLast } from '../core/theme'
+import { markColors } from '../explain/place.mjs'
 import { setOptions } from '../settings/features.mjs'
 import { test } from './kit'
 import { promptStub } from './stubs'
@@ -651,14 +652,14 @@ test("the bar's ] is lit while the answer the keys act on shows a mark the perso
   await $.ui.render(BAND)
   await w.clock.advance(HINT_MS)
   await $.ui.render(answerRow('row-t1', CITED))
-  expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
+  expect(await restKey($)).toEqual({ words: '] show explainer', lit: true })
   // ] opens the explainer, the answer's first mark; its citation is not opened yet, and ] names it
   await press(']')
   await press('0')
   expect(await restKey($)).toEqual({ words: '] next citation', lit: true })
   // ] from rest opens the citation: each mark the answer shows was opened, and ] names its first mark again
   for (const k of [']', '0']) await press(k)
-  expect(await restKey($)).toEqual({ words: '] next explainer', lit: false })
+  expect(await restKey($)).toEqual({ words: '] show explainer', lit: false })
   // a heads-up asked for on the same answer comes after: lit, until the person opens it too
   await press('h')
   await $.ui.render(answerRow('row-t1', CITED))
@@ -668,13 +669,13 @@ test("the bar's ] is lit while the answer the keys act on shows a mark the perso
   expect(await restKey($)).toEqual({ words: '] next heads up', lit: true })
   // ] from rest opens the heads-up, the one mark not opened
   for (const k of [']', '0']) await press(k)
-  expect(await restKey($)).toEqual({ words: '] next explainer', lit: false })
+  expect(await restKey($)).toEqual({ words: '] show explainer', lit: false })
   // the next answer, with marks of its own
   await answered($, w.clock, 't2', 'The cache key changed when the lockfile moved.')
   // (the reminder of s after it, as after the first)
   await $.ui.render(BAND)
   await w.clock.advance(HINT_MS)
-  expect(await restKey($)).toEqual({ words: '] next explainer', lit: true })
+  expect(await restKey($)).toEqual({ words: '] show explainer', lit: true })
 })
 
 /** The band above the prompt as Claude Code draws it in a terminal `term` columns wide: 5 columns narrower than the
@@ -732,7 +733,7 @@ async function markedAnswer($: Any, on: Any, o: { selection?: string; counting?:
   return { clock: w.clock, end }
 }
 
-test("in a terminal 80 or 100 columns wide (the band 5 narrower), after an answer with marks, the bar gives way in order: the words of ], the busy step, coverage's file counts, and only then a whole count; while a count runs and after", async ($, on) => {
+test("in a terminal 80 or 100 columns wide (the band 5 narrower), after an answer with marks, the bar gives way in order: the busy step, coverage's file counts, the words of ] (its verb, then the mark's name), and only then a whole count; while a count runs and after", async ($, on) => {
   const { end } = await markedAnswer($, on, { counting: true })
   const at = async (term: number) => {
     const bar = barIn(await $.ui.render(bandIn(term)))
@@ -740,20 +741,22 @@ test("in a terminal 80 or 100 columns wide (the band 5 narrower), after an answe
     expect(bar.widest).toBeLessThanOrEqual(term - 5)
     return bar
   }
-  // while the count runs: its glyph and seconds; at 80 coverage's file counts give way, and both counts stay
+  // while the count runs: its glyph and seconds; at 80 coverage's file counts give way, and both counts stay; at 100 ]
+  // keeps its words whole before coverage's file counts come back
   let bar = await at(80)
   expect(bar.left).toMatch(/^thimble {2}\S \d+s · v visualize · \] · s rewrite$/)
   expect(bar.right).toBe('r coverage 43% · l 2 labels')
   bar = await at(100)
-  expect(bar.left).toMatch(/^thimble {2}\S (counting… )?\d+s · v visualize · \] · s rewrite$/)
-  expect(bar.right).toBe('r coverage 43% (3/7 files) · l 2 labels')
+  expect(bar.left).toMatch(/^thimble {2}\S \d+s · v visualize · \] show explainer · s rewrite$/)
+  expect(bar.right).toBe('r coverage 43% · l 2 labels')
   await end()
-  // after it: at 80 ] takes back `next` once coverage's file counts gave way; at 100 its words are whole
+  // after it: at 80 coverage's file counts give way first, then ]'s verb, and ] keeps the mark's name; at 100 all of
+  // it is whole
   bar = await at(80)
-  expect(bar.left).toBe('thimble  v visualize · ] next · s rewrite')
+  expect(bar.left).toBe('thimble  v visualize · ] explainer · s rewrite')
   expect(bar.right).toBe('r coverage 43% · l 2 labels')
   bar = await at(100)
-  expect(bar.left).toBe('thimble  v visualize · ] next explainer · s rewrite')
+  expect(bar.left).toBe('thimble  v visualize · ] show explainer · s rewrite')
   expect(bar.right).toBe('r coverage 43% (3/7 files) · l 2 labels')
 })
 
@@ -772,7 +775,7 @@ for (const c of [
   })
 }
 
-test("with words of an answer with marks selected, in a terminal 80 or 100 columns wide (the band 5 narrower), the bar names e and c, and gives way in order: the words of ], the busy step, coverage's file counts, then a whole count; in Claude Code's fullscreen layout and its default one, while a count runs and after", async ($, on) => {
+test("with words of an answer with marks selected, in a terminal 80 or 100 columns wide (the band 5 narrower), the bar names e and c, and gives way in order: the busy step, coverage's file counts, the words of ], then a whole count; in Claude Code's fullscreen layout and its default one, while a count runs and after", async ($, on) => {
   const { end } = await markedAnswer($, on, { selection: 'the retry budget runs out', counting: true })
   const seen: Record<string, ReturnType<typeof barIn>> = {}
   const all = async (when: string) => {
@@ -794,15 +797,17 @@ test("with words of an answer with marks selected, in a terminal 80 or 100 colum
     noteViewport({ isFullscreen: true })
   }
   for (const layout of ['fullscreen', 'default']) {
-    // while the count runs, at 80 neither count has room beside the keys; at 100 both stay, coverage's file counts gone
-    expect(seen[`counting ${layout} 80`]!.left).toMatch(/^thimble {2}\S (counting… )?\d+s · v visualize · \] · s rewrite · e explain · c cite$/)
+    // while the count runs, at 80 neither count has room beside the keys, and ] takes the mark's name in the room they
+    // leave; at 100 both stay, coverage's file counts gone
+    expect(seen[`counting ${layout} 80`]!.left).toMatch(/^thimble {2}\S \d+s · v visualize · \] explainer · s rewrite · e explain · c cite$/)
     expect(seen[`counting ${layout} 80`]!.right).toBe('')
     expect(seen[`counting ${layout} 100`]!.left).toMatch(/^thimble {2}\S \d+s · v visualize · \] · s rewrite · e explain · c cite$/)
     expect(seen[`counting ${layout} 100`]!.right).toBe('r coverage 43% · l 2 labels')
-    // after it: at 80 the labels' count gives way after coverage's file counts; at 100 both counts stay beside `] next`
+    // after it: at 80 the labels' count gives way after coverage's file counts and ]'s words; at 100 both counts stay
+    // beside `] show`, where the mark's name does not fit
     expect(seen[`after ${layout} 80`]!.left).toBe('thimble  v visualize · ] · s rewrite · e explain · c cite')
     expect(seen[`after ${layout} 80`]!.right).toBe('r coverage 43%')
-    expect(seen[`after ${layout} 100`]!.left).toBe('thimble  v visualize · ] next · s rewrite · e explain · c cite')
+    expect(seen[`after ${layout} 100`]!.left).toBe('thimble  v visualize · ] show · s rewrite · e explain · c cite')
     expect(seen[`after ${layout} 100`]!.right).toBe('r coverage 43% · l 2 labels')
   }
 })
@@ -817,34 +822,48 @@ function lookOf(band: Any, id: string): { key: Any; words: Any } | null {
   return { key: props(texts.find(n => /^\S$/.test(textOf(n)))), words: props(texts.find(n => textOf(n).startsWith(' '))) }
 }
 
-test("once each of the answer's marks was opened, the bar's ] looks like its other keys, `]` alone too, never dimmer; while one is not opened its words are lit, in a terminal 80 or 100 columns wide and a wide one", async ($, on) => {
+/** The look of the words `what` in a bar item (the props of their Text), in a drawing of the band; null when the item
+ *  does not draw them apart. */
+function namedLook(band: Any, id: string, what: string): Any {
+  const b = byKey(band, `bar-${id}`)
+  const kids = (n: Any): Any[] => (!n || typeof n !== 'object' ? [] : Array.isArray(n) ? n.flatMap(kids) : [n, ...kids(n.props?.children), ...kids(n.children)])
+  const t = kids(b).find(n => n.type === 'Text' && textOf(n) === what)
+  if (!t) return null
+  const { key: _key, children: _children, ...rest } = t.props
+  return rest
+}
+
+test("once each of the answer's marks was opened, the bar's ] looks like its other keys, `]` alone too, never dimmer, but for the mark's name, which keeps the mark's look; while one is not opened its verb is lit, in a terminal 80 or 100 columns wide and a wide one", async ($, on) => {
   const { clock } = await markedAnswer($, on, { selection: 'the retry budget runs out' })
   const looks = async () => {
-    const out: Record<number, { rest: string | null; it: Any; v: Any }> = {}
+    const out: Record<number, { rest: string | null; it: Any; v: Any; named: Any }> = {}
     for (const term of [80, 100, 160]) {
       const band = await $.ui.render(bandIn(term))
-      out[term] = { rest: barIn(band).rest, it: lookOf(band, 'tray-next'), v: lookOf(band, 'v') }
+      out[term] = { rest: barIn(band).rest, it: lookOf(band, 'tray-next'), v: lookOf(band, 'v'), named: namedLook(band, 'tray-next', 'explainer') }
     }
     return out
   }
-  // with words selected the band 75 wide keeps `]` alone, 95 wide `] next`
+  // with words selected the band 75 wide keeps `]` alone, 95 wide `] show`
   const lit = await looks()
-  expect([80, 100, 160].map(t => lit[t]!.rest)).toEqual([']', '] next', '] next explainer'])
+  expect([80, 100, 160].map(t => lit[t]!.rest)).toEqual([']', '] show', '] show explainer'])
   for (const t of [80, 100, 160]) expect(lit[t]!.it.key).toEqual(lit[t]!.v.key)
   for (const t of [100, 160]) expect(lit[t]!.it.words).toEqual({ color: accent() })
+  // the mark's name on the explainers' teal, in the text's own color, as an explainer's words in the reply
+  expect(lit[160]!.named).toEqual({ backgroundColor: markColors(themeLast()).glossBg })
   // ] from rest, then on to the citation and the heads-up: each mark of the answer opened
   for (const k of [']', ']', ']', '0']) {
     await $.prompt.edit({ origin: { kind: 'composer' }, key: { key: k }, text: '', cursor: 0, start: 0, end: 0, inputText: k } as never)
     await clock.advance(1000)
   }
   const seen = await looks()
-  expect([80, 100, 160].map(t => seen[t]!.rest)).toEqual([']', '] next', '] next explainer'])
+  expect([80, 100, 160].map(t => seen[t]!.rest)).toEqual([']', '] show', '] show explainer'])
   for (const t of [80, 100, 160]) {
     expect(seen[t]!.it.key).toEqual(seen[t]!.v.key)
     expect(seen[t]!.it.key).toMatchObject({ color: accent(), bold: true })
     expect(seen[t]!.it.key.dimColor).toBeUndefined()
   }
   for (const t of [100, 160]) expect(seen[t]!.it.words).toEqual(seen[t]!.v.words)
+  expect(seen[160]!.named).toEqual({ backgroundColor: markColors(themeLast()).glossBg })
 })
 
 test('a session after the one whose first prompt took the line starts without it, and the bar is the only row with keys', async ($, on) => {

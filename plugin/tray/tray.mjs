@@ -16,7 +16,7 @@
 //   stopsOfTurn(rows, stopsOf, inline)     a turn's stops: its rows' and the cards Claude drew between them
 //   rowsOf(line, width)                    the rows a line takes when it wraps
 //   indexOf(list, at), stepFrom(list, k, dir), restStop(pool, dir)   where ] and [ go next, and from rest
-//   stopWhat(stop), stepWords(ends), cutTitle(s, n)
+//   stopWhat(stop), stopKind(stop), stepWords(ends), restWords(next, first), cutTitle(s, n)
 //   aboutOf(frame, info)                   the words a side thread and the person read for a mark
 //   canRepair(item)                        whether x repairs a citation: it failed (the check could not confirm it, or
 //                                          did not run: x starts it)
@@ -136,12 +136,28 @@ export function stopWhat(p) {
   return p.kind === 'heads' ? 'heads up' : p.kind === 'explain' ? 'explainer' : 'citation'
 }
 
+/** The kind of mark a stop is, by the look the reply gives it: 'explain', 'heads' or 'citation'; null for a card. */
+export function stopKind(p) {
+  if (!p || p.card) return null
+  return p.kind === 'heads' ? 'heads' : p.kind === 'explain' ? 'explain' : 'citation'
+}
+
 /** The bar's words for ] and [: `] next citation` while there is a next, else `[ previous card` where there is one
- *  before. */
+ *  before; `what`, the words that name the stop, and `kind`, its kind (stopKind), so they can draw in its look. */
 export function stepWords(ends) {
   const what = w => (w ? ` ${w}` : '')
   if (!ends) return []
-  return ends.next ? [{ key: ']', words: `next${what(ends.nextWhat)}` }] : ends.prev ? [{ key: '[', words: `previous${what(ends.prevWhat)}` }] : []
+  if (ends.next) return [{ key: ']', words: `next${what(ends.nextWhat)}`, what: ends.nextWhat, kind: ends.nextKind ?? null }]
+  return ends.prev ? [{ key: '[', words: `previous${what(ends.prevWhat)}`, what: ends.prevWhat, kind: ends.prevKind ?? null }] : []
+}
+
+/** The bar's words for ] at rest, which opens `next` of the answer's marks (`first`: its first mark): `show` the first,
+ *  `next` a later one, then what it is (`] show explainer`, `] next citation`); on a narrow bar the words that name it
+ *  alone, then the verb alone, then none (`shorter`, longest first). */
+export function restWords(next, first) {
+  const verb = first ? 'show' : 'next'
+  const what = stopWhat(next)
+  return { words: `${verb} ${what}`, what, kind: stopKind(next), shorter: [what, verb, ''] }
 }
 
 /** A title cut to `n` characters: a place (`engine/lineage.py:463`) loses the start of its path first, so its line
