@@ -261,6 +261,21 @@ async def test_a_path_of_titles_makes_one_group_never_a_chain():
     assert len(frames()) == 4
 
 
+async def test_the_model_reads_a_loose_card_as_in_no_group():
+    """What a model reads of a loose card says it is in no group, so a thread's fork, which reads the card it is about,
+    does not name the loose group to put its card by it: read_ref's head line and list_cards' heading. A card in a
+    group keeps its group's id and name."""
+    loose = await card("How many runs failed?")
+    seq = await card("When did they start?", group="Why did the runs fail?")
+    assert f"card:{loose} (no group, note)" in (await main("read_ref", ref=f"card:{loose}")).text
+    assert f"card:{seq} (group {group_of(seq)['id']}, note)" in (await main("read_ref", ref=f"card:{seq}")).text
+    listed = (await main("list_cards", group="all")).text
+    assert "Cards in no group (1 card)" in listed and 'Group "Why did the runs fail?"' in listed
+    assert notebook.LOOSE_TITLE not in listed
+    missing = await tools.call(CORPUS, "list_cards", {"group": "Nothing"})
+    assert missing.is_error and "'Why did the runs fail?'" in missing.text and notebook.LOOSE_TITLE not in missing.text
+
+
 @pytest.fixture()
 async def client():
     a = FastAPI()

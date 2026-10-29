@@ -1971,7 +1971,9 @@ def _read_cell(ctx: Ctx, ref: str) -> ToolResult:
     nb_id = str(cell.get("notebook") or "")
     kind = cell.get("kind", notebook.DEFAULT_KIND)
     run = notebook.runnable(cell)
-    head = (f"card:{cid} (group {nb_id}, {kind}" + (f", status {cell.get('status', 'idle')}" if run else "")
+    loose = (notebook.read_notebook(ctx.ws, nb_id) or {}).get("kind") == notebook.LOOSE_KIND if nb_id else False
+    where = "no group" if loose else f"group {nb_id}"  # a loose card stands outside every group
+    head = (f"card:{cid} ({where}, {kind}" + (f", status {cell.get('status', 'idle')}" if run else "")
             + (", locked" if cell.get("locked") is True else "") + ")")
     lines = [head, f"question: {str(cell.get('title') or '').strip() or '(untitled)'}"]
     if run:
@@ -2062,7 +2064,7 @@ async def _h_list_cards(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
     which = " ".join(str(args.get("group") or "").split())
     rows = notebook.list_notebooks(ctx.ws, figures=False)
-    names = ", ".join(f"{_group_name(rows, r)!r}" for r in rows) or "(none yet)"
+    names = ", ".join(f"{_group_name(rows, r)!r}" for r in rows if r["kind"] != notebook.LOOSE_KIND) or "(none yet)"
     if not which:
         return err(f"list_cards: `group` is required, a group's title or id or all; the groups are {names}")
     if which.casefold() in ("all", "*"):
@@ -2090,7 +2092,9 @@ async def _h_list_cards(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     for nb, cells in targets:
         row = next((r for r in rows if r["id"] == nb["id"]), None)
         name = _group_name(rows, row) if row is not None else nb.get("title") or nb["id"]
-        out.append(f'Group "{name}" ({nb["id"]}, {nb.get("role", "analyst")}, {len(cells)} card{"" if len(cells) == 1 else "s"})')
+        n = f'{len(cells)} card{"" if len(cells) == 1 else "s"}'
+        out.append(f"Cards in no group ({n})" if nb.get("kind") == notebook.LOOSE_KIND
+                   else f'Group "{name}" ({nb["id"]}, {nb.get("role", "analyst")}, {n})')
         out.extend(_cell_line(cell, kept is not None and cell.get("id") in shown and cell.get("id") not in kept) for cell in cells)
         out.append("")
     return ok("\n".join(out).rstrip() or "(no groups yet)")
