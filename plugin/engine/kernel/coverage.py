@@ -313,15 +313,16 @@ def _coverage(st: Store, session: str | None, per_folder: int, until: float | No
     def grepped(scope: str, glob: str) -> set[str]:
         """The files a Grep of `scope` (a file or a folder) with `glob` goes over. The glob matches a file's name or its
         path (fnmatch), and it is tried only on the files that can match it (Known.candidates): a glob no call used
-        before costs a test of the files that hold its rarest literal part, not of every file of the folder."""
+        before costs a test of the files that hold its rarest literal part, or of the folder's own files when they are
+        fewer. A name or a path the glob matches ends as the glob ends (`*.json`: `.json`), so only those are tried."""
         if not glob:
             if scope in known.set:
                 return {scope} if unit_of(scope) not in ("pages", "file") else set()
             return searchable("./" if scope == "." else scope.rstrip("/") + "/")
-        match = re.compile(fnmatch.translate(glob)).match
+        match, end = re.compile(fnmatch.translate(glob)).match, re.split(r"[*?\]]", glob)[-1]
         fs = [scope] if scope in known.set else known.candidates(glob, scope.rstrip("/"))
         text = texts()
-        return {f for f in fs if f in text and (match(f[f.rfind("/") + 1:]) or match(f))}
+        return {f for f in fs if f.endswith(end) and f in text and (match(f[f.rfind("/") + 1:]) or match(f))}
 
     per: dict[str, dict[str, Any]] = {}  # what each file's own calls did
 

@@ -498,3 +498,55 @@ def test_a_glob_is_tried_only_on_the_files_that_can_match_it_and_names_what_a_te
     two, _ = SH.named("import glob, json\njson.load(open('r0002/meta.json'))\nglob.glob('*/e*.jsonl')", K, "/data")
     assert one.globs == two.globs and one.globs[0] is two.globs[0] is K.glob("*/e*.jsonl") and len(one.globs[0]) == 1500
     assert one.files == {"r0001/meta.json"} and two.files == {"r0002/meta.json"}
+
+
+def test_greps_into_many_folders_and_a_glob_through_every_folder_count_in_about_the_time_of_one_grep(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A Grep into one run's folder with a glob (`*.json`) looked for the glob's files among every name in the root
+    that holds `.json`, and a glob whose parts name any folder (`runs/*/*/*.json`) looked its last part up once for
+    each folder above it: 1,000 such Greps over 150,000 files took two minutes, and the glob over 140,000 files half a
+    minute, where r106-int took seconds. A lookup by name now stops once it costs more than the folder's own files, and
+    a glob looks a name up once, so 1,000 Greps, one into each of 1,000 folders that hold 6,000 files, and the glob
+    over those files each count in about the time of one Grep. (The folder is made up, listed and counted in memory:
+    the time measured is the session's pass.)"""
+    import time
+
+    from kernel import sources as S
+
+    files = sorted([f"runs/r{i:04d}/steps/{i:04d}-{j}.json" for i in range(1000) for j in range(5)]
+                   + [f"runs/r{i:04d}/meta.json" for i in range(1000)])
+    monkeypatch.setattr(S, "list_files", lambda root: files)
+    monkeypatch.setattr(S, "counts", lambda root, rels, cache, until=None: {f: {"kind": "json", "rows": 1, "lines": 1} for f in rels})
+    d = tmp_path / "data"
+    d.mkdir()
+    monkeypatch.setenv("THIMBLE_HOME", str(tmp_path / "th"))
+    monkeypatch.delenv("THIMBLE_ROOT", raising=False)
+
+    def grep(i: int) -> str:
+        return json.dumps({"cwd": str(d), "tool": "Grep", "path": str(d / "runs" / f"r{i:04d}"), "glob": "*.json",
+                           "mode": "content", "lines": {}}) + "\n"
+
+    seen = tmp_path / "th" / "seen"
+    seen.mkdir(parents=True)
+    (seen / "s-one.jsonl").write_text(grep(0))
+    (seen / "s-greps.jsonl").write_text("".join(grep(i) for i in range(1000)))
+    (seen / "s-glob.jsonl").write_text(grep(0) + json.dumps({"cwd": str(d), **bash("wc -l runs/*/*/*.json | tail -1", 1)}) + "\n")
+
+    def timed(session: str) -> tuple[dict, float]:
+        took = []
+        for _ in range(2):
+            t = time.monotonic()
+            cov = CV.coverage(Store(d, session=session))
+            took.append(time.monotonic() - t)
+        return cov, min(took)
+
+    one, one_s = timed("s-one")
+    greps, greps_s = timed("s-greps")
+    glob, glob_s = timed("s-glob")
+    assert (one["total"]["touched_files"], greps["total"]["touched_files"], glob["total"]["touched_files"]) == (6, 6000, 5001)
+    step = next(o for o in glob["files"] if o["path"] == "runs/r0999/steps/0999-4.json")
+    assert step["computed_by"] == ["wc"]
+    # each Grep went over every name that holds `.json`, and the glob over them again for each run's folder:
+    # 219567533 took 2 to 4 s more for each; r106-int 0.1 s more; now 0.03 s more
+    assert greps_s - one_s < 0.5, (one_s, greps_s)
+    assert glob_s - one_s < 0.5, (one_s, glob_s)
