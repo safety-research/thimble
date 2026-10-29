@@ -104,7 +104,23 @@ test('the tree holds only what Claude Code draws: a Button of words, and strings
   const ctrl = 'function view(p, s) { const { Text } = s.elements; return Text({ children: "a\\u0080b\\u0007c\\td" }) }'
   const r3 = (await load(ctrl)).r
   assert.equal(r3.ok, true)
-  assert.deepEqual(r3.tree.c[0].c, ['abc d'])
+  assert.deepEqual(r3.tree.c[0].c, ['a\\x80b\\x07c d'])
+})
+
+test('bytes of binary data that do not print show as their escapes, as Python writes them, in the drawing and its copy; a line break, also as \\r\\n, and a character of two halves stay', async () => {
+  // a field read from a binary file: the start of a PNG as Latin-1, then bytes of a file name decoded with
+  // surrogateescape, which leaves each byte that is no UTF-8 as a lone half
+  writeFileSync(join(dir, 'bytes.json'), JSON.stringify([{ name: 'logo.png', head: '\u0089PNG\r\n\u001a\n\u0000\u0000\u0000\rIHDR\u007f' }, { name: 'run-\udc89.log', head: 'ok 🎉' }]))
+  const view = 'function view(p, s) { const { Box, Text } = s.elements; return Box({ flexDirection: "column", children: p.rows.map(r => Text({ children: r.name + " " + r.head })) }) }'
+  const r = await ask('load', { id: 'c0000bbbb', version: 1, title: 'Files', view, rows: join(dir, 'bytes.json'), width: 60 })
+  assert.equal(r.ok, true)
+  const strings = []
+  const walk = n => (typeof n === 'string' ? strings.push(n) : (n.c || []).forEach(walk))
+  walk(r.tree)
+  assert.deepEqual(strings, ['logo.png \\x89PNG\n\\x1a\n\\x00\\x00\\x00\\rIHDR\\x7f', 'run-\\udc89.log ok 🎉'])
+  assert.deepEqual(r.lines, ['logo.png \\x89PNG', '\\x1a', '\\x00\\x00\\x00\\rIHDR\\x7f', 'run-\\udc89.log ok 🎉'])
+  // nothing a terminal acts on is left, and no lone half
+  for (const s of strings) assert.doesNotMatch(s, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/)
 })
 
 test('on the light theme a shade glyph draws as █ in a mixed color, and the text copy keeps the glyph the view wrote', async () => {
