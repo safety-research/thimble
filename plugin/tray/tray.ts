@@ -345,6 +345,10 @@ async function glossOf($: Engine, row: string, id: string): Promise<Gloss | null
   return (await partOf<ExplainPart>($, row, 'explain'))?.items?.[id] ?? pendingGloss(row, id)
 }
 
+/** Whether the frame is an explainer still being written: the tray stands on its words until it is (explain/seam.ts
+ *  pendingGloss). */
+const beingWritten = (f: Frame): boolean => f.kind === 'explain' && !!pendingGloss(f.row, f.id)
+
 /** What the tray and the side thread read of a frame. */
 async function infoOf($: Engine, f: Frame): Promise<Info> {
   const begins = (await shownOf($, f.row))?.text ?? (await messageOf($, f.row))?.text ?? ''
@@ -981,6 +985,9 @@ export async function trayBand($: Engine, els: Any, width: number, room = 0): Pr
     const heads = f.kind === 'heads'
     title = String(g?.term || g?.title || (heads ? 'heads-up' : 'explainer'))
     if (!g) units = [{ h: 1, el: Text({ key: 'gone', dimColor: true, wrap: 'wrap', children: `This ${heads ? 'heads-up' : 'explainer'} is no longer in the session.` }) }]
+    // an explainer still being written (explain/seam.ts pendingGloss): its box is an explainer's, and where its words
+    // will stand the turning glyph turns with the bar's and a citation's being checked (bar/busy.ts spinNow), no words
+    else if (beingWritten(f)) units = [{ h: 1, el: Text({ key: 'writing', color: accent(), children: await spinNow($) }) }]
     else words = { text: explainerText(g) }
   }
   let body: Any[]
