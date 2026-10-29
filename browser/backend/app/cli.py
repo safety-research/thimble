@@ -23,7 +23,8 @@ the command main's Monitor runs (cc_plugin.route, monitor_lines).
 <home> is `~/.thimble` or THIMBLE_HOME. <home>/server.json records {port, pid, url, repo, env, token}, readable by its
 owner alone; `token` is new at each start and is what the plugin's hooks and this CLI prove they hold (hook_auth.py). A
 browser signs in with a one-time code from ui_url(pair=True), never with a value from this file. Only a terminal gets a
-link with a code: `up` from a shell prints one, and /thimble prints LINK_LINE for main's Stop hook to show the link,
+link with a code: thimble-browser prints one at its start and a new one for each browser that is not signed in and opens
+the page (new_links), `up` from a shell prints one, and /thimble prints LINK_LINE for main's Stop hook to show the link,
 which gets its code as the hook shows it (leave_link). `thimble unpair` signs every browser out. Its `pid` is trusted
 only while it is a thimble server on its port (is_server checks the command line and working folder, since a pid
 recorded inside a sandbox's pid namespace can name an unrelated host process). reconcile makes the record true before
@@ -177,7 +178,7 @@ PRECACHED_LINE = ("thimble: opening the orientation that ran in advance on these
                   "from its cards and report; `/thimble fresh` starts over")
 # what /thimble prints in place of the link: main's Stop hook shows the link under the reply with a sign-in code it gets
 # as it shows it (leave_link, plugin/bin/.thimble-watch link_lines), outside the model's context
-LINK_LINE = "thimble: the dashboard link is under this reply (or run `thimble-browser --link` in a shell)"
+LINK_LINE = "thimble: the dashboard link is under this reply (or in the terminal where `thimble-browser` runs)"
 LINKS_DIR = "links"  # under <home>: the link each session's Stop hook shows once
 FRESH_LINE = ("thimble: Cleared the session at {cwd}. The last run is archived at {path}. To bring it back, run: "
               "/thimble restore {name}")
@@ -1465,8 +1466,8 @@ PAIR_TIMEOUT_S = 3.0
 PAIRED_FILE = "paired.json"  # in <home>: the hashes of the browsers signed in (hook_auth.PAIRED_FILE)
 NO_CODE_LINE = ("thimble: the server gave no sign-in code, so this link opens thimble read-only in a browser that is "
                 "not signed in yet; see {log}.")
-UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. To sign one in again, open the link "
-                 "`thimble-browser --link` prints.")
+UNPAIRED_LINE = ("thimble: every browser is signed out of thimble. A browser that opens the page gets a new link in the "
+                 "terminal where `thimble-browser` runs.")
 UNPAIR_FAILED_LINE = ("thimble: the server did not sign the browsers out ({why}), so they stay signed in until it "
                       f"restarts. To restart it, {config.RESTART_HOW}.")
 
@@ -1483,15 +1484,14 @@ def pair_code(api: str, name: str | None) -> str:
     return ""
 
 
-def ui_url(name: str | None, pair: bool = False, api: str | None = None) -> str:
+def ui_url(name: str | None, pair: bool = False) -> str:
     """The UI port in dev mode (its own Vite), else the API port where the built UI is served, and with `pair` a
     one-time sign-in code after `#p=` (hook_auth.mint, pair_code), which the page trades for the browser's cookie. The
-    URL without a code when the server gives none. `api`: the server to link to when it is not the one server.json
-    records (--link --port while another server of this install runs): its built UI and its code."""
+    URL without a code when the server gives none."""
     st = read_state()
-    base = api or str(st.get("url") or api_url())
+    base = str(st.get("url") or api_url())
     url = f"{base}/?ws={name}" if name else f"{base}/"
-    code = pair_code(api or str(st.get("api") or api_url()), name) if pair else ""
+    code = pair_code(str(st.get("api") or api_url()), name) if pair else ""
     return f"{url}#p={code}" if code else url
 
 
@@ -4540,8 +4540,8 @@ def _failed_up(what: str, e: BaseException) -> int:
 
 
 BROWSER_LINE = "thimble browser: {what}"
-# `thimble-browser --link` (cmd_link) when no server of this install answers: no page to sign in to
-LINK_NO_SERVER_LINE = "no server answers. Start one with thimble-browser in a folder of files."
+NEW_LINK_LINE = "new sign-in link: {link}"  # new_links: a browser that is not signed in opened the page
+LINK_RETRY_S = 2.0  # how long new_links waits before it asks again a server that did not answer
 
 
 SESSION_NONE_LINE = {"continue": "no earlier session in {cwd} to continue.",
@@ -4664,7 +4664,8 @@ def cmd_browser(args: argparse.Namespace) -> int:
     until Ctrl-C, which stops the server. No Claude Code session starts here: the server runs main and every agent
     itself (runtime.py). `--session` says which session of the folder the page opens (pick_session, open_session): a
     new one, as each `claude` starts a new session, as empty as the folder's first; the latest (`--continue`); one
-    picked from a list (`--resume`); or the one that holds a chat of main by id. With `--detach` it returns once the
+    picked from a list (`--resume`); or the one that holds a chat of main by id. While it holds the terminal, a browser
+    that is not signed in and opens the page gets a new link there (watch_links). With `--detach` it returns once the
     link is printed and the server keeps running."""
     from . import claude_access, llm  # noqa: PLC0415
 
@@ -4709,35 +4710,47 @@ def cmd_browser(args: argparse.Namespace) -> int:
     if getattr(args, "detach", False):
         return 0
     print(BROWSER_LINE.format(what="the server runs until you press Ctrl-C here."), flush=True)
-    hold_until_quit()
+    stop = watch_links(name)
+    try:
+        hold_until_quit()
+    finally:
+        stop.set()
     return 0
 
 
-def cmd_link(args: argparse.Namespace) -> int:
-    """`thimble-browser --link [FOLDER]`: a new sign-in link to the server that runs, in the form cmd_browser prints it,
-    for the folder's workspace (known_corpus), or for the start page, which lists the server's workspaces, when the
-    server holds none for the folder. It starts no server, opens no session and registers nothing, so the page keeps
-    its chat. The new code voids the last one made for that workspace (hook_auth.mint), and only a terminal gets one
-    (to_terminal), as at the start. 1, with LINK_NO_SERVER_LINE, when no server of this install answers (none runs, or
-    one runs but does not answer), and with NO_CODE_LINE when the server gives the terminal no code."""
-    cwd = Path(args.cwd or os.environ.get("THIMBLE_CALLER_CWD") or os.getcwd())
-    url = api_url()
-    if refuse_foreign(url):
-        return 1
-    if not serves(url):
-        print(BROWSER_LINE.format(what=LINK_NO_SERVER_LINE))
-        return 1
-    known = known_corpus(cwd.resolve(), Path(resolve_env()["data_dir"]).resolve())
-    pair = to_terminal()
-    # a port asked for (--port) that is not the one server.json records: the link and its code are that server's
-    asked = explicit_port()
-    other = asked is not None and asked != int(read_state().get("port") or 0)
-    link = ui_url(known[0] if known else None, pair=pair, api=url if other else None)
-    print(BROWSER_LINE.format(what=link), flush=True)
-    if pair and "#p=" not in link:
-        print(NO_CODE_LINE.format(log=log_path()))
-        return 1
-    return 0
+def watch_links(name: str) -> threading.Event:
+    """new_links for workspace `name`, in a thread of its own, when stdout is the terminal (to_terminal), which alone
+    gets a code, as with the start's link. The event that ends it."""
+    stop = threading.Event()
+    if to_terminal():
+        threading.Thread(target=new_links, args=(name, stop), name="thimble-new-links", daemon=True).start()
+    return stop
+
+
+def new_links(name: str, stop: threading.Event) -> None:
+    """Until `stop` is set: each time a browser that is not signed in opens the page (hook_auth.want_link, at most once
+    a minute), a new sign-in link for workspace `name` with a new code (ui_url), printed as at the start
+    (NEW_LINK_LINE). It waits for one at GET /api/ui/link-wanted, which answers once the count or the server's start
+    differs from the last answer; a server that started again counts from 0. A server that does not answer is asked
+    again LINK_RETRY_S later, and a link the server gives no code for is not printed (pair_code logs why)."""
+    from . import hook_auth  # noqa: PLC0415
+
+    seen: dict[str, Any] = {}
+    while not stop.is_set():
+        api = str(read_state().get("api") or api_url())
+        status, got = _request("GET", f"{api}/api/ui/link-wanted?{urllib.parse.urlencode(seen)}",
+                               timeout=hook_auth.LINK_WAIT_S + 10)
+        wanted = got.get("wanted") if status == 200 and isinstance(got, dict) else None
+        if not isinstance(wanted, int) or isinstance(wanted, bool):
+            stop.wait(LINK_RETRY_S)
+            continue
+        boot = str(got.get("boot") or "")
+        before = seen["wanted"] if seen and seen["boot"] == boot else 0
+        if seen and wanted > before and not stop.is_set():
+            link = ui_url(name, pair=True)
+            if "#p=" in link:
+                _say(BROWSER_LINE.format(what=NEW_LINK_LINE.format(link=link)))
+        seen = {"boot": boot, "wanted": wanted}
 
 
 class Quit(Exception):
@@ -4851,9 +4864,6 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--session", default="new",
                    help="new | continue | pick | a chat's id: the session of the folder to open (pick_session)")
     b.set_defaults(fn=cmd_browser)
-    lk = sub.add_parser("link", help="thimble-browser --link: a new sign-in link for the workbench that runs")
-    lk.add_argument("--cwd")
-    lk.set_defaults(fn=cmd_link)
     e = sub.add_parser("up", aliases=["ensure"], help="start the server if needed, open this directory, print the URL")
     e.add_argument("--cwd")
     e.add_argument("--session")

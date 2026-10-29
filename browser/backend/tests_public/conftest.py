@@ -464,17 +464,19 @@ def analyst():
 
 @pytest.fixture(autouse=True)
 def _pairing_fresh():
-    """Every test starts with no sign-in code and reads the signed-in browsers from its own home, as a server does at
-    its start (hook_auth keeps both in memory)."""
+    """Every test starts with no sign-in code and no browser that wanted a link, and reads the signed-in browsers from
+    its own home, as a server does at its start (hook_auth keeps them in memory)."""
     from app import hook_auth
 
     hook_auth._codes.clear()
     hook_auth._shots.clear()
     hook_auth._paired = None
+    hook_auth._wanted, hook_auth._wanted_at = 0, None
     yield
     hook_auth._codes.clear()
     hook_auth._shots.clear()
     hook_auth._paired = None
+    hook_auth._wanted, hook_auth._wanted_at = 0, None
 
 
 def pytest_configure(config):
