@@ -456,6 +456,16 @@ export function Canvas({ ws, active, focused = active }: { ws: string; active: b
   useLayoutEffect(() => {
     if (active) measure()
   }, [active, measure])
+  // a card drawn for the first time is measured before the page paints, so the cards under it and beside it stand
+  // where they stay from the first draw after a load
+  const measured = useRef(new Set<string>())
+  useLayoutEffect(() => {
+    if (!active) return
+    const fresh = [...cardEls.current.keys()].filter((id) => !measured.current.has(id))
+    if (!fresh.length) return
+    for (const id of fresh) measured.current.add(id)
+    measure()
+  })
   useEffect(() => {
     const el = vp.current
     if (!el || typeof ResizeObserver === 'undefined') return

@@ -41,6 +41,21 @@ const where = (el: HTMLElement): Record<string, [number, number]> =>
     [...el.querySelectorAll<HTMLElement>('.bcell')].map((b) => [b.querySelector('[data-cell]')!.getAttribute('data-cell')!, [parseFloat(b.style.left), parseFloat(b.style.top)]]),
   )
 
+test('the cards are measured as they are first drawn, so the column under them stands where it stays', async () => {
+  // jsdom lays nothing out: each card's box is taken to be 300 px tall, and no ResizeObserver reports it
+  const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get(this: HTMLElement) { return this.classList.contains('bcell') ? 300 : 0 } })
+  try {
+    const el = await mount(<Canvas ws="ws" active={true} />)
+    await settle()
+    const first = where(el)
+    expect(first.b).toEqual([first.a[0], first.a[1] + 300 + GAP])
+    expect(first.t1).toEqual([first.a[0] + CARD_W + GAP, first.a[1]])
+  } finally {
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', own)
+  }
+})
+
 test("the first draw puts a thread's card beside the card it is about, before the chats arrive, and it stays there", async () => {
   const el = await mount(<Canvas ws="ws" active={true} />)
   await settle()
