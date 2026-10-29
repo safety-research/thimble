@@ -12,10 +12,11 @@
 //   shorter ○●○○ longer`), each dot a press that sets its level and each end a press that moves the chip one level
 //   toward it; the picked chip's ends with the keys that do the same (`[ shorter ○●○○ ] longer`), and its level in
 //   words where it stands away from the original or is picked (` · as written`), the picked chip in thimble's color, as
-//   its frame and its keys are. The last row: `s close`; `+ your own`, which adds a chip of the person's own (while its
-//   words are typed: `+ <words>▏ ↵ adds it · tab lets it go`, and close without its key, s being a letter there); `0
-//   revert` while there is a version to take back; `esc back to the prompt` while they hold the keyboard. While the
-//   tray holds the keys, the same with no key.
+//   its frame and its keys are. The last row: `s close`; `+ your own`, which adds a chip of the person's own, its words
+//   typed in the prompt box as + there does (while the chips hold the keyboard, + typed there types them in the chips:
+//   `+ <words>▏ ↵ adds it · tab lets it go`, and close without its key, s being a letter there); `0 revert` while there
+//   is a version to take back; `esc back to the prompt` while they hold the keyboard. While the tray holds the keys, the
+//   same with no key.
 //   Each part keeps its place while the chips are open, so a click lands where it was aimed: the names, the ends and
 //   the dots stand in columns, a key the chips do not name now leaves its cells blank, a chip's level in words ends its
 //   row, and a part of the last row that shows for a while (0 revert, esc) has a place of its own after the ones that

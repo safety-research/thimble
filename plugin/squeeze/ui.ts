@@ -21,13 +21,15 @@
 // comes back at once. The bar says what the chips cannot show: a chip that goes no further, a rewrite that failed or
 // left something out, and what the prompt box asks for after + there (`rewrite for…`). While the tray holds the keys
 // over the chips, the chips name no key (s gives the keys back to them).
-// A click on the chips hands them the keyboard (their Client, chips.tsx): the keys that act there are the ones that act
-// at the prompt, each thimble's own, and + types the chip's words in the chips (`↵ adds it · tab lets it go`), until esc
-// gives the keys back. No arrow and no tab moves a chip or picks one: Claude Code takes those at the prompt (← there
-// moves the conversation away), so a key pressed once the keys went back would act there. ↵ does nothing there: a level
-// shows once it is picked, so a ↵ pressed to pick one keeps them open. The chips' parts keep their places while they are
-// open, whatever the levels, the pick, the rewrite and the keys (chips.tsx), so a click lands where it was aimed; a
-// close, by s, a press or the person's prompt, keeps the version the answer shows and stops a rewrite on its way.
+// A click on the chips leaves the keys at the prompt (Claude Code 2.1.307 gives the chips no keyboard for a click), so
+// a press on + your own fills the prompt box with /rewrite, as + does there. A key that does reach the chips
+// (their Client, chips.tsx, while Claude Code gives them the keyboard) acts as at the prompt, each thimble's own, and +
+// there types the chip's words in the chips (`↵ adds it · tab lets it go`), until esc gives the keys back. No arrow and
+// no tab moves a chip or picks one: Claude Code takes those at the prompt (← there moves the conversation away). ↵ does
+// nothing there: a level shows once it is picked, so a ↵ pressed to pick one keeps them open. The chips' parts keep
+// their places while they are open, whatever the levels, the pick, the rewrite and the keys (chips.tsx), so a click
+// lands where it was aimed; a close, by s, a press or the person's prompt, keeps the version the answer shows and stops
+// a rewrite on its way.
 //
 //   state squeezeOpen: {id, focus, edge, typing, held, hint} | null   the record the chips are open on (term.ts ids)
 //   state squeezeWait: {turn} | null                                   s pressed while main's turn ran: its answer was
@@ -446,7 +448,8 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
     if (!open || open.id !== id) continue
     if (typeof ev.key === 'string') { await heldKey($, open, ev.key); continue }
     const r = String(ev.press ?? '')
-    if (r === 'add') { await setOpen($, { typing: '', held: true, edge: null }); continue }
+    // + your own does what + does at the prompt: the prompt box takes the words, as a click gives the chips no keyboard
+    if (r === 'add') { await askOwn($); continue }
     if (r === 'close') { await shut($, open); continue }
     // the presses that do what a key named in the chips does: ↵ and tab after the typed words, 0, esc
     if (r === 'own-add' || r === 'own-drop') {

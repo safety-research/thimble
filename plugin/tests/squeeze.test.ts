@@ -59,7 +59,8 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
   on('command.register', () => ({ value: { command: 'x' } }))
   on('ui.toast', () => ({ value: undefined }))
   on('ui.scroll', () => ({ value: undefined }))
-  on('prompt.fill', () => ({ isFilled: true }) as never)
+  const fills: Any[] = []
+  on('prompt.fill', (_$: unknown, e: Any) => { fills.push(e); return { isFilled: true } as never })
   on('prompt.edit', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   on('prompt.change', (_$: unknown, e: Any) => ({ text: e.text, cursor: e.cursor }))
   const forks: Any[] = []
@@ -83,7 +84,7 @@ async function setup($: Any, on: Any, replies: (string | Promise<string>)[], kep
   }
   const press = async (k: string) => { const r = await $.prompt.edit(key(k)); await clock.advance(400); return r }
   const bar = async () => textOf(await $.ui.render(above))
-  return { clock, asked, forks, ask, say, turn, press, bar, files }
+  return { clock, asked, forks, ask, say, turn, press, bar, files, fills }
 }
 
 const LONG = 'The nightly build failed on [3 of 12](#) runs. The cache key changed when the lockfile moved, so every run fetched again, and the slow mirror timed out.'
@@ -791,12 +792,20 @@ test('the rewrite starts from the corrected citations: the request holds the cor
   expect(prompt).not.toContain('Corrections in the original')
 })
 
-test('+ in the chips types a chip, and a key at the prompt (esc gave it the keys) or esc esc clearing it lets the words go', async ($, on) => {
+test('a click on + your own does what + does at the prompt: the prompt box takes the words, and nothing names ↵ or tab; + typed while the chips hold the keyboard types a chip in them, and a key at the prompt (esc gave it the keys) or esc esc clearing it lets the words go', async ($, on) => {
   const t = await setup($, on, [])
   await t.turn('t1', LONG)
   await t.press('s')
   const ui = await $.ui.mount(answer('row-t1', LONG))
   await ui.press({ key: 'add' })
+  // the box takes /rewrite, which the person's words follow, and the bar asks what for; the chips name no ↵ or tab
+  expect(t.fills.map((f: Any) => f.text)).toEqual(['/rewrite '])
+  expect(await t.bar()).toContain('rewrite for…')
+  const asked = await chipsDrawn($, 'row-t1', LONG)
+  expect(asked.client.props.props.plus).toBe(null)
+  for (const k of ['↵', 'tab']) expect(textOf(asked.tree)).not.toContain(k)
+  // + typed in the chips, where a key reached them: the words are typed in the chips
+  await ui.key({ key: '+' })
   await ui.unmount()
   const typing = await chipsDrawn($, 'row-t1', LONG)
   expect(typing.client.props.props.plus).toBe('')
