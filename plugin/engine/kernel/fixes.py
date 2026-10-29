@@ -5,7 +5,9 @@ Under $THIMBLE_HOME/fixes:
     live/            the checkout Claude Code loads thimble from once the first fix is on: branch `mine`, the release
                      commit plus one commit per fix that is on, in the order they went on. A GitHub install's live is
                      a clone of Claude Code's own clone of the marketplace, at the installed commit (no download); a
-                     clone install's (scripts/install.sh --local) is a worktree of that clone, so `mine` shows there.
+                     clone install's (scripts/install.sh --local) is a worktree of that clone, so `mine` shows there;
+                     a release's zip, unpacked, has no git, so its live comes from thimble's repository, at the release
+                     whose files the zip's folder has (_zip_release), and the folder stays as it is.
     release/         the release commit (base) as it is, never changed by a fix: a detached worktree of live's
                      repository, made with live, moved when base moves, made again when it is missing, and put back as
                      the release commit has it before the way back runs from it (place_release, the launcher), never
@@ -338,31 +340,132 @@ def find_source() -> dict[str, Any]:
 
     github: Claude Code's marketplace clone (a GitHub or git marketplace); live is cloned from it. clone: the person's
     own clone, a directory marketplace (scripts/install.sh --local) or the checkout a --plugin-dir session loads; live
-    is a worktree of it."""
+    is a worktree of it. zip: a release with no git of its own, as a release's zip unpacks (the folder of a directory
+    marketplace or of a --plugin-dir session, a folder inside another repository too, else the plugin's own folder,
+    whose files are those under `prefix` plugin/): its history is in thimble's repository, where its updates come from,
+    and live is made from there at the release whose files it has (_zip_release), so commit is '' until then."""
     m = _marketplace()
     src = m.get("source") if isinstance(m.get("source"), dict) else {}
     loc = m.get("installLocation")
     sha = _installed_sha()
-    if src.get("source") == "directory" and src.get("path"):
-        repo = Path(src["path"])
-        top = git("rev-parse", "--show-toplevel", cwd=repo, check=False) if repo.is_dir() else ""
-        if top:
-            ok = sha and run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=repo, check=False).returncode == 0
-            return {"kind": "clone", "repo": top, "commit": sha if ok else git("rev-parse", "HEAD", cwd=repo),
+    named = Path(src["path"]) if src.get("source") == "directory" and src.get("path") else None
+    if named:
+        if _own_checkout(named):
+            ok = sha and run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=named, check=False).returncode == 0
+            top = git("rev-parse", "--show-toplevel", cwd=named)
+            return {"kind": "clone", "repo": top, "commit": sha if ok else git("rev-parse", "HEAD", cwd=named),
                     "url": top, "entry": src}
-    if src and loc and Path(loc).is_dir() and git("rev-parse", "--git-dir", cwd=loc, check=False):
+    elif src and loc and Path(loc).is_dir() and git("rev-parse", "--git-dir", cwd=loc, check=False):
         ok = sha and run(["git", "cat-file", "-e", sha + "^{commit}"], cwd=loc, check=False).returncode == 0
         url = git("remote", "get-url", "origin", cwd=loc, check=False) or (
             f"https://github.com/{src['repo']}.git" if src.get("repo") else str(src.get("url") or ""))
         return {"kind": "github", "repo": str(loc), "commit": sha if ok else git("rev-parse", "HEAD", cwd=loc),
                 "url": url, "entry": src}
     repo = PLUGIN.parent
-    top = git("rev-parse", "--show-toplevel", cwd=repo, check=False)
-    if top and Path(top).resolve() == repo.resolve():
+    if _own_checkout(repo):
         return {"kind": "clone", "repo": str(repo), "commit": git("rev-parse", "HEAD", cwd=repo), "url": str(repo),
                 "entry": None}
+    zipped = {"kind": "zip", "commit": "", "url": update_url(), "entry": src or None}
+    for folder in (named, repo):
+        if folder is not None and (folder / PLUGIN_JSON).is_file():
+            return {**zipped, "repo": str(folder), "prefix": ""}
+    if (PLUGIN / ".claude-plugin" / "plugin.json").is_file():
+        return {**zipped, "repo": str(PLUGIN), "prefix": "plugin/"}
     raise FixError("this thimble was not installed from a git repository, so there is no copy of its code to change. "
                    "Install it again with scripts/install.sh, then ask again")
+
+
+def _own_checkout(p: Path) -> bool:
+    """Whether the folder `p` is the top of a git checkout of its own; a folder inside another repository is not."""
+    top = git("rev-parse", "--show-toplevel", cwd=p, check=False) if p.is_dir() else ""
+    return bool(top) and Path(top).resolve() == p.resolve()
+
+
+def _json_of(data: bytes) -> Any:
+    try:
+        return json.loads(data)
+    except ValueError:
+        return None
+
+
+def _blob_id(data: bytes, width: int) -> str:
+    """git's id of a file's content, in the hash of the repository whose ids are `width` long (sha1, or sha256)."""
+    return (hashlib.sha256 if width == 64 else hashlib.sha1)(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def _differs(repo: Path, commit: str, root: Path, prefix: str = "", memo: dict | None = None) -> tuple[list[str], int]:
+    """The files of `commit` (those under `prefix`, with it left out of their path in `root`) that the folder `root`
+    does not have as the commit has them, changed or missing, and how many files the commit has there: from git's
+    trees, so the files' contents need not be in the repository. Files the folder has besides (an install's
+    packages, what a session writes) do not count, nor a version that an install wrote in the plugin's manifest.
+    `memo`: the folder's ids read before, by path."""
+    memo = {} if memo is None else memo
+    out = run(["git", "ls-tree", "-r", "-z", "--full-tree", commit, *([prefix] if prefix else [])], cwd=repo).stdout
+    off: list[str] = []
+    n = 0
+    for entry in filter(None, out.split("\0")):
+        meta, _, path = entry.partition("\t")
+        mode, kind, sha = meta.split()
+        if kind != "blob":
+            continue
+        n += 1
+        if (path, mode, len(sha)) not in memo:
+            p = root / path[len(prefix):]
+            try:
+                data = os.readlink(p).encode() if mode == "120000" else None if p.is_symlink() else p.read_bytes()
+            except OSError:
+                data = None
+            ids = set()
+            if data is not None:
+                ids.add(_blob_id(data, len(sha)))
+                d = _json_of(data) if path == PLUGIN_JSON else None
+                if isinstance(d, dict) and "version" in d:
+                    d.pop("version")
+                    ids.add(_blob_id((json.dumps(d, indent=2, ensure_ascii=False) + "\n").encode(), len(sha)))
+            memo[(path, mode, len(sha))] = ids
+        if sha not in memo[(path, mode, len(sha))]:
+            off.append(path)
+    return off, n
+
+
+def _zip_release(root: Path, prefix: str = "") -> tuple[str, str]:
+    """(tag, commit) of the release whose files the folder `root` has (find_source's zip), among thimble's releases
+    at update_url(): their trees alone are fetched, with no file contents, into a scratch repository, and each is
+    compared with the folder (_differs). The release the folder has whole wins: of several, the one with the most files
+    (a release that only removed files), then the one the folder's name gives (GitHub names a release's archive
+    thimble-0.10.6), then the newest. A folder that no release matches stops, with the nearest release and its files
+    that differ."""
+    latest = latest_release(then="try again")
+    m = re.search(r"(\d+\.\d+\.\d+)$", root.name)
+    named = f"v{m.group(1)}" if m else ""
+    home().mkdir(parents=True, exist_ok=True)
+    seen: list[tuple[str, str, list[str], int]] = []
+    memo: dict = {}
+    with tempfile.TemporaryDirectory(prefix="zip-", dir=home()) as d:
+        git("init", "-q", "--bare", d, cwd=home())
+        git("remote", "add", "origin", latest["url"], cwd=d)
+        git("config", "remote.origin.promisor", "true", cwd=d)
+        run(["git", "fetch", "-q", "--depth", "1", "--filter=blob:none", "--no-tags", "origin",
+             *[f"+refs/tags/{t}:refs/tags/{t}" for t in latest["tags"]]], cwd=d, timeout=600)
+        for t in latest["tags"]:
+            commit = git("rev-parse", f"refs/tags/{t}^{{commit}}", cwd=d)
+            seen.append((t, commit, *_differs(Path(d), commit, root, prefix, memo)))
+    whole = [s for s in seen if not s[2]]
+    if whole:
+        t, commit, _, _ = max(whole, key=lambda s: (s[3], s[0] == named, _vtuple(s[0])))
+        return t, commit
+    t, _, off, _ = min(seen, key=lambda s: (len(s[2]), s[0] != named, tuple(-x for x in _vtuple(s[0]))))
+    more = off[:2] + ([f"{len(off) - 2} more"] if len(off) > 2 else [])
+    raise FixError(f"the files in {_tilde(str(root))} are not those of a thimble release (the nearest, {t[1:]}, differs "
+                   f"in {_and(more)}), so thimble cannot tell which release to keep your fixes and updates on. Put "
+                   f"those files back as {t[1:]} has them, or install thimble from a git clone (INSTALL.md), then try "
+                   "again")
+
+
+def _zip_fetch(live: Path, tag: str) -> None:
+    """The release `tag` in live, from thimble's repository (live's origin), with no more history."""
+    run(["git", "fetch", "-q", "--depth", "1", "--no-tags", "origin", f"+refs/tags/{tag}:refs/tags/{tag}"], cwd=live,
+        timeout=600)
 
 
 OFF_SH = """#!/bin/sh
@@ -416,7 +519,13 @@ def ensure_live() -> dict[str, Any]:
     home().mkdir(parents=True, exist_ok=True)
     if live.exists():
         shutil.rmtree(live)
-    if src["kind"] == "github":
+    if src["kind"] == "zip":
+        tag, commit = _zip_release(repo, src["prefix"])
+        git("init", "-q", str(live), cwd=home())
+        git("remote", "add", "origin", src["url"], cwd=live)
+        _zip_fetch(live, tag)
+        git("checkout", "-q", "-b", "mine", commit, cwd=live, hooks=False)
+    elif src["kind"] == "github":
         git("clone", "-q", "--no-checkout", str(repo), str(live), cwd=home())
         if src.get("url"):
             git("remote", "set-url", "origin", src["url"], cwd=live)
@@ -502,14 +611,19 @@ def _follow(rel: dict[str, Any]) -> dict[str, Any]:
     when Claude Code's installed plugin (installed_plugins.json), or this kernel's own checkout when it is the clone
     live came from, is a commit after the release commit (base), as after scripts/install.sh, `claude plugin update`
     or Claude Code's own update, base moves to it (fetched into live from that clone when live lacks it), and mine with
-    it while mine holds no fix. The release as it is then."""
+    it while mine holds no fix; on a zip install, when the folder of Claude Code's marketplace has a later release's
+    files (_zip_moved). The release as it is then."""
     if rel.get("pointed"):
         return rel
     live, base = live_dir(), str(rel["base"])
     src = Path(rel["repo"]) if rel.get("repo") and Path(rel["repo"]).is_dir() else None
-    own = git("rev-parse", "HEAD", cwd=src, check=False) if src and PLUGIN.parent.resolve() == src.resolve() else ""
+    if rel.get("kind") == "zip":
+        src, codes = None, [_zip_moved(rel)]
+    else:
+        own = git("rev-parse", "HEAD", cwd=src, check=False) if src and PLUGIN.parent.resolve() == src.resolve() else ""
+        codes = [_installed_sha(), own]
     new = base
-    for c in dict.fromkeys(x for x in (_installed_sha(), own) if x and x != base):
+    for c in dict.fromkeys(x for x in codes if x and x != base):
         if not _has(live, c) and src:
             # a shallow live (a clone of Claude Code's shallow clone) takes it as a shallow commit; a whole live takes it
             # only with its history (a commit whose parents it lacks is no candidate)
@@ -538,6 +652,23 @@ def _follow(rel: dict[str, Any]) -> dict[str, Any]:
     write_json(home() / "release.json", rel)
     _write_off_sh(rel)
     return rel
+
+
+def _zip_moved(rel: dict[str, Any]) -> str:
+    """A zip install's release before its first fix goes on, when the folder that Claude Code's marketplace names no
+    longer has base's files, as after the person unzipped another release and installed it from there: the release it
+    has now (_zip_release), fetched into live. '' while the folder has base's files, and when the marketplace names no
+    such folder."""
+    m = _marketplace()
+    src = m.get("source") if isinstance(m.get("source"), dict) else {}
+    root = Path(src["path"]) if src.get("source") == "directory" and src.get("path") else None
+    if root is None or not (root / PLUGIN_JSON).is_file() or _own_checkout(root):
+        return ""
+    if not _differs(live_dir(), str(rel["base"]), root)[0]:
+        return ""
+    tag, commit = _zip_release(root)
+    _zip_fetch(live_dir(), tag)
+    return commit
 
 
 def _later(repo: Path, a: str, b: str) -> bool:
@@ -2417,16 +2548,16 @@ def _vtuple(tag: str) -> tuple[int, ...]:
     return tuple(int(x) for x in m.groups()) if m else ()
 
 
-def latest_release() -> dict[str, Any]:
+def latest_release(then: str = "run thimble update again") -> dict[str, Any]:
     """The newest release, {tag, version, commit, url, tags}: the highest vX.Y.Z tag of thimble's repository, and each
     release tag's commit (tags), which names a release that a clone without tags has. A tag with more after the numbers
-    (v0.11.0-rc1) is not a release."""
+    (v0.11.0-rc1) is not a release. `then`: what the person does after the network works again."""
     url = update_url()
     p = run(["git", "ls-remote", "--tags", url, "refs/tags/v*"], check=False, timeout=120)
     if p.returncode != 0:
         err = (p.stderr or p.stdout).strip().splitlines()
         raise FixError(f"thimble could not read its releases from {url} ({err[-1] if err else 'no message'}); "
-                       "check the network, then run thimble update again")
+                       f"check the network, then {then}")
     tags: dict[str, str] = {}
     for line in p.stdout.splitlines():
         sha, _, ref = line.partition("\t")
@@ -2463,6 +2594,8 @@ def _own_name() -> str:
         src = find_source()
     except FixError:
         return ""
+    if not src["commit"]:
+        return ""  # a release's zip: its release is known once live is made from it
     tag = git("describe", "--tags", "--exact-match", "--match", "v*", src["commit"], cwd=src["repo"], check=False)
     return tag[1:] if RELEASE_TAG.match(tag) else ""
 
@@ -2632,6 +2765,22 @@ def _link_copy(src: Path, dest: Path) -> None:
         run(["cp", "-al", str(src), str(dest)], timeout=900)
     else:
         shutil.copytree(src, dest, symlinks=True, copy_function=os.link)
+
+
+def _browser_behind(repo: Path, base: str) -> str:
+    """The release tag of the folder the browser workbench runs from, when it runs from the folder its install built it
+    in (no browser-ready) and that folder holds another release's files than base's (in `repo`). '' when the workbench
+    is not installed, runs from live or has base's files, and when its folder's files are no release's (a checkout with
+    changes of its own stays as it is)."""
+    seed = _browser_seed()
+    if seed is None or (home() / "browser-ready").exists() or not (seed.parent / PLUGIN_JSON).is_file():
+        return ""
+    if not _differs(repo, base, seed.parent)[0]:
+        return ""
+    try:
+        return _zip_release(seed.parent)[0]
+    except FixError:
+        return ""
 
 
 def browser_on_live() -> dict[str, Any]:
@@ -2829,10 +2978,15 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
     set aside. With check, only whether a newer release is out.
 
     A dev install (the person's own clone, kind clone) has no releases to wait for: the target is what the person
-    checked out (_update_dev). once: the session's check, which says a new commit once."""
+    checked out (_update_dev). A release's zip has no git of its own: live, from thimble's repository at the release
+    the zip holds (ensure_live), is its git checkout first, and then it updates as a GitHub install does. once: the
+    session's check, which says a new commit once."""
     rel = release()
     has_live = bool(rel) and (live_dir() / ".git").exists()
     src = None if has_live else find_source()
+    if src and src["kind"] == "zip":
+        with Lock():
+            rel, has_live = ensure_live(), True
     if (rel.get("kind") if has_live else src["kind"]) == "clone":
         return _update_dev(check, once, rel if has_live else None, src)
     latest = latest_release()
@@ -2858,6 +3012,11 @@ def update(check: bool = False, once: bool = False) -> dict[str, Any]:
                     "reload": True, "said": f"thimble {latest['version']}"})
         out["lines"] = _summary(out)
         return out
+    behind = _browser_behind(repo, base) if not check and not out["newer"] and base == latest["commit"] else None
+    if behind:
+        # the plugin has the release, and the browser workbench runs an older one from the folder its install built it
+        # in (a release's zip, or a clone not pulled, with the plugin from GitHub): both go to the release
+        out.update({"from": behind[1:], "newer": True})
     if check or not out["newer"]:
         same = now == latest["version"]
         line = (f"thimble {now} is the newest release." if same else
