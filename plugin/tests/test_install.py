@@ -506,13 +506,15 @@ def test_install_md_updates_with_thimble_update():
 def test_install_md_says_when_each_way_updates_the_plugin():
     """INSTALL.md says what the code does: scripts/install.sh and claude plugin update reach the plugin until Claude Code
     loads it from the fixes, and thimble update after; --local is an option of scripts/install.sh, not of thimble
-    update; the first fix asked for, or thimble update, sets a leftover mine aside only when the code does."""
+    update, and a dev install is one in a git clone (a release's zip installed with --local follows the releases); the
+    first fix asked for, or thimble update, sets a leftover mine aside only when the code does."""
     text = " ".join((ROOT / "INSTALL.md").read_text().split())
     install = text.split("## Install", 1)[1].split(" ## ", 1)[0]
     assert ("From the first fix you use, or the first update by `thimble update`, Claude Code loads the plugin from your "
             "fixes, and the script leaves the plugin to `thimble update`.") in install
     update = text.split("## Update and uninstall", 1)[1].split(" ## ", 1)[0]
-    assert "after an install with `scripts/install.sh --local`, it moves them to the commit your checkout has" in update
+    assert ("after an install with `scripts/install.sh --local` in a git clone, it moves them to the commit your checkout "
+            "has") in update
     assert "`claude plugin update thimble@thimble` until you use its first fix" in update
     assert ("the first fix you ask for, or a `thimble update` that moves to a new commit of your checkout, sets them aside"
             in update and "it tracks no upstream" in update)
