@@ -71,8 +71,9 @@ test("unset, or same as Claude, the checker's requests keep the conversation's m
   // a value that is no choice of the setting is its default
   setOptions({ checkerModel: 'claude-made-up-tiny' })
   expect(await sent(checker)).toBe('claude-made-up-opus')
+  // an alias, as the 0.10.6 test branch saved it, is that model (settings/features.mjs RENAMED)
   setOptions({ checkerModel: 'haiku' })
-  expect(await sent(checker)).toBe('claude-made-up-opus')
+  expect(await sent(checker)).toBe('claude-haiku-5-5')
   setOptions({})
 })
 
