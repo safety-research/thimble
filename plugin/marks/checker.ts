@@ -54,8 +54,8 @@
 // their own (autoMode soft_deny or hard_deny): then the classifier must judge it. Where auto mode classifies on
 // Anthropic's server, that classifier judges only the calls in Claude's own replies, so it gives no verdict on the
 // check, and Claude Code refuses it each time (`unreviewed`; Claude Code's own toast: `fork denied by auto mode ·
-// Classifier unavailable`). Claude Code takes no allow rule for a subagent in auto mode, so no setting of the person's
-// lets the check start there; a plugin's answer at tool.check does. So the line names what refused the check and
+// Classifier unavailable`). Claude Code takes no allow rule for a subagent in auto mode, so no permission rule of the
+// person's lets the check start there; a plugin's answer at tool.check does. So the line names what refused the check and
 // offers y: the person's OK lets thimble answer Claude Code's ask on its own checks with allow this session
 // (checksAllowed, allowsCheck), never its deny (a deny rule wins), and the check the line is about starts again. A
 // classifier that judged the check, or could not answer for now, is said as such; the mode stays the person's.

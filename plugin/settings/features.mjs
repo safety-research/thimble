@@ -29,9 +29,9 @@ const NAMED_MODELS = listed(ALIASES.map(a => `${a} (${shownName(a)})`))
  *  choice as the pane shows it, where that is not its value (Checker's `haiku` as `Haiku 5.5`). `under`: the
  *  feature whose work this setting changes (Checker and its Effort: the checks of Citations); the pane shows its row
  *  only while that feature is on. `firstParty`: the setting names models by the ids of Anthropic's first-party API
- *  (core/models.js), or sets the effort of those models' requests, which Bedrock, Vertex and Foundry do not take from
- *  thimble: where Claude Code runs on one of them (settings/term.ts firstPartyApi), neither the pane nor /config shows
- *  its row, and what it holds does nothing. */
+ *  (core/models.js), which Bedrock, Vertex and Foundry do not take, or the effort of the checker Checker names: where
+ *  Claude Code runs on one of them (settings/term.ts firstPartyApi), neither the pane nor /config shows its row, and
+ *  what it holds does nothing. */
 export const SWITCHES = [
   {
     key: 'minimal', title: 'Minimal', default: false,
