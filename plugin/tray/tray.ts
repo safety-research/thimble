@@ -13,7 +13,8 @@
 // words that name a mark, there and in the tray's header (`] next heads up`), are in that mark's own look (kindLook:
 // an explainer's teal, a heads-up's orange, a citation's underline), so the bar shows what each look is. While it is
 // open, ] and [ stay on the bar, named by the mark they reach, and its other keys are in its header, at the right, each
-// where it acts (the bar keeps its own):
+// where it acts (the bar keeps its own, less any key the tray takes, as h; a card's header names no a: core/answerview.ts
+// heldKeys):
 //
 //   a ask       a side thread about the mark (threads/seam.ts openThread); 1 too, unnamed. With a thread about it
 //               already, a opens that thread
@@ -149,6 +150,25 @@ async function writeStand($: Engine, stand: Stand): Promise<void> {
 export async function trayHolds($: Engine): Promise<boolean> {
   const k = await keptNow($)
   return !!k.tray || !!k.stand
+}
+
+/** The keys the tray takes now, which nothing else names (core/answerview.ts heldKeys), so each key shows once, where
+ *  it acts: while it is open, its header's (] [ h a 0), its body's (x, + or −, d and u as the row under its window
+ *  names them) and 1 and 2–9, unnamed; on a card ] reached, a, ] [ and 0, which the bar names. `ask`: the keys asked
+ *  about, when not all (a key of a citation's body reads the citation). Read from the state, so a drawing that asks
+ *  draws again when the tray opens or closes. */
+export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
+  const tray = await trayNow($)
+  const f = top(tray) as Frame | null
+  if (!tray || !f) return (await standNow($)) ? [']', '[', 'a', '0'] : []
+  const out = [']', '[', '0', 'a', '1', ...[paging.down, paging.up].filter((k): k is string => !!k)]
+  if (f.kind === 'citation' && (!ask || ['h', 'x', '+', '-'].some(k => ask.includes(k)))) {
+    if (await innerOf($, f)) out.push('h')
+    const m = await itemOf($, f.row, f.n)
+    if (m?.evidence?.kind === 'computed') out.push(f.open === 'code' ? '-' : '+')
+    if (canRepair(m)) out.push('x')
+  } else if (f.kind === 'explain' || f.kind === 'heads') out.push('2', '3', '4', '5', '6', '7', '8', '9')
+  return out
 }
 
 /** The tray as it stands now; an open tray gives back the keys of a card ] reached. */

@@ -1234,6 +1234,54 @@ test("while the bar's ] is lit, ] from rest opens the first of the answer's mark
   expect(await shows()).toContain('Retried runs count twice')
 })
 
+test('each key shows once, where it acts: a card on screen names a in its header only while a reaches it; the open tray names a in its header, and on a card ] reached the bar names it', CITES, async ($, on) => {
+  const id = 'c0123456789af'
+  const meta = { id, version: 1, title: 'Runs by status', toolUseId: 'toolu_made_up_7', agentId: 'a-made-up', anchorRow: 'row-t1', keys: [], read: '2 rows', columns: [], file: 'runs.json', gen: 1, error: null, calls: { toolu_made_up_7: { version: 1 } }, at: 1 }
+  const { clock } = await resumed($, on, QUOTED, 's-tray-head-a', { kept: { [`cards/${id}/meta.json`]: JSON.stringify(meta) } })
+  // the card's Client says it is on screen, as it does once drawn
+  const shown = await $.ui.mount(answer('row-t1', TEXT))
+  await shown.unmount()
+  const head = async () => textOf(all(await $.ui.render(answer('row-t1', TEXT))).find(n => n.props?.key === 'head-keys'))
+  const band = async () => textOf(await $.ui.render(above(40)))
+  expect(await head()).toBe('a ask · p artifact')
+  // ]: the tray on the citation names a in its header, and a goes there, so the card's header names ask without it
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await band()).toContain('] next card · a ask · 0 close')
+  expect(await head()).toBe('ask · p artifact')
+  // ] again reaches the card: the bar names a, which asks about it, and the card's header still names ask without it
+  expect(await $.prompt.edit(key(']'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  const stand = await band()
+  expect(stand).toContain('a ask · [ previous citation · 0 back')
+  expect(stand.match(/a ask/g)).toEqual(['a ask'])
+  expect(await head()).toBe('ask · p artifact')
+  // 0 gives the keys back: a reaches the card again, and its header names it
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await band()).not.toContain('a ask')
+  expect(await head()).toBe('a ask · p artifact')
+})
+
+test('each key shows once, where it acts: with Heads-ups on demand, the tray on a citation with a heads-up on its words names h in its header, and the bar leaves its h heads-ups out until the tray closes', { options: { citations: 'auto cite + verify', details: 'on demand' } }, async ($, on) => {
+  const { clock } = await resumed($, on, QUOTED, 's-tray-h-once', { parts: HEADS })
+  const band = async () => textOf(await $.ui.render(above(40)))
+  expect(await band()).toContain('h heads-ups')
+  // ] reaches the heads-up on the citation's words, and ] again the citation: h opens that heads-up over it, which the
+  // tray's header names alone
+  for (const k of [']', ']']) {
+    expect(await $.prompt.edit(key(k))).toEqual({ text: '', cursor: 0 })
+    await clock.advance(2000)
+  }
+  const open = await band()
+  expect(open).toContain('failed: 12')
+  expect(open.match(/h heads-ups?/g)).toEqual(['h heads-up'])
+  // closed: h asks for heads-ups on the answer again, and the bar names it
+  expect(await $.prompt.edit(key('0'))).toEqual({ text: '', cursor: 0 })
+  await clock.advance(2000)
+  expect(await band()).toContain('h heads-ups')
+})
+
 test('an answer that shows no marks: the bar names no ]', CITES, async ($, on) => {
   await resumed($, on, [], 's-tray-rest-none', { text: 'Of the runs, 12 of 40 failed on the p95 check.' })
   const band = await $.ui.render(above(40))

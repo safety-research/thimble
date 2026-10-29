@@ -5,9 +5,11 @@
 // person's keys and clicks go to the runner, and its new tree is drawn.
 //
 //   frame         the card's frame: its title (a click asks about the card) and, at its right, `a ask · p artifact`
-//                 (the question names the item selected, when one is), the Client (a click on an item selects it as
-//                 its key does; on other words, asks about them: client.tsx, runner.mjs pick; a drawing taller than
-//                 CARD_ROWS + 1 shows CARD_ROWS rows and `+N rows` under them, a click on which opens the rest), a failure; left of it, the
+//                 (the question names the item selected, when one is; a letter only where its key reaches the card:
+//                 none while what holds the keys takes it, core/answerview.ts heldKeys), the Client (a click on an
+//                 item selects it as its key does; on other words, asks about them: client.tsx, runner.mjs pick; a
+//                 drawing taller than CARD_ROWS + 1 shows CARD_ROWS rows and `+N rows` under them, a click on which
+//                 opens the rest), a failure; left of it, the
 //                 margin that asks a side thread about the card (core/askcell.js: a ? under the pointer, ↳ once
 //                 asked), beside the line a click selected (`▸`), about that part, else beside the title; nothing for a card the version of its answer shown now leaves out (core/answerview.ts
 //                 cardHidden)
@@ -37,7 +39,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import { failCleared, failNotice } from '../bar/notice'
-import { cardAsk, cardHidden, textView, underCard } from '../core/answerview'
+import { cardAsk, cardHidden, heldKeys, textView, underCard } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { controlWords, titleWords } from '../core/selection'
 import { cut } from '../core/text.js'
@@ -413,9 +415,13 @@ export async function frame($: Engine, e: Any, meta: CardMeta, o: { layout?: num
   titleWords(meta.id, row, whole && shown.get(meta.id) !== false ? meta.title : '')
   // at the title's right, in thimble's color, its header's keys: ask (a side thread about the card, whose question
   // names the item selected, when one is) and artifact (head.ts). Their letters show on the card the keys reach now
-  // alone; every card's words are clicks
-  const lettered = (await headOwner($))?.id === meta.id
-  const word = (key: string, words: string) => [...(lettered ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
+  // alone, each while its key reaches the card: what holds the keys before the card's header takes a while the tray is
+  // open (a ask in its header) or stands on a card (a ask on the bar), and every key while a click gave the squeeze
+  // chips the keyboard, so each key shows once, where it acts. Every card's words are clicks
+  const owner = (await headOwner($))?.id === meta.id
+  const held = owner ? await heldKeys($, ['a', 'p']) : new Set<string>()
+  const lettered = (key: string) => owner && !held.has('*') && !held.has(key)
+  const word = (key: string, words: string) => [...(lettered(key) ? [E.Text({ key: `${key}-k`, color: accent(), bold: true, children: `${key} ` })] : []), E.Text({ key: `${key}-w`, color: accent(), children: words })]
   // their words, which a click on one leaves selected: no answer's words while the card is on screen
   // (core/selection.ts)
   controlWords(`card ${meta.id}`, shown.get(meta.id) === false ? [] : ['a ask', 'ask', 'p artifact', 'artifact'], { inRow: true })

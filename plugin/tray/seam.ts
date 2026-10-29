@@ -8,6 +8,7 @@
 //                                      explainers at rest; while it is open, its own (a taker as hooks/keys.ts takes it)
 //   trayHolds($)                       whether it holds the keys now (open, or a card ] reached stands): its keys then
 //                                      come before every other feature's
+//   trayHeld($, ask)                   the keys it takes now, which nothing else names (core/answerview.ts heldKeys)
 //   trayBand($, els, width, room, spare)  the tray, drawn above the bar while it is open, in at most `room` rows; once
 //                                      the person asked for the rest of its body, the band's blank rows (`spare`) too
 //   trayTight()                        whether the tray as last drawn took those blank rows: the band leaves them out
@@ -28,7 +29,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { closeTray, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayHolds as holds, trayKey as key, trayNow, trayTight as tightNow } from './tray'
+import { closeTray, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayHeld as held, trayHolds as holds, trayKey as key, trayNow, trayTight as tightNow } from './tray'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,6 +41,10 @@ export async function trayKey($: Engine, k: string, until: number): Promise<Take
 
 export async function trayHolds($: Engine): Promise<boolean> {
   return holds($)
+}
+
+export async function trayHeld($: Engine, ask?: string[]): Promise<string[]> {
+  return held($, ask)
 }
 
 export async function trayBand($: Engine, els: Any, width: number, room = 0, spare = 0): Promise<Any[]> {

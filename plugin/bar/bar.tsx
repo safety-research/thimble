@@ -27,7 +27,7 @@
 // and nothing gives way.
 import type { EngineInterface } from 'claude-code'
 
-import { barLeft, barRight } from '../core/answerview'
+import { barLeft, barRight, heldKeys, keyFree } from '../core/answerview'
 import { quiet } from '../core/askcell.js'
 import { controlWords } from '../core/selection'
 import { cutWords, partsAround, textWidth } from '../core/text.js'
@@ -51,13 +51,15 @@ type Any = any
 export type BarPresses = { settings: () => unknown; pane: (kind: 'coverage' | 'labels') => unknown }
 
 /** One item of the bar: an optional key and its words, and the press that does what the key does. `focus`: a key of
- *  what holds the keys now (the open tray, the open chips); while any shows, the bar's left names only those, after
- *  the busy step. `color` and `bold`: words drawn lit (`s ● short`) or as a failure, not dim. `shorter`: the words in
- *  fewer cells, longest first, which a narrow bar draws after coverage's file counts gave way: the first of them it
- *  keeps longer than the busy step's words, and before any count gives way (the order at the top of this file); '' is
- *  the key alone, drawn as the bar's other keys are (in the item's color when it has one), never dim, as a dim key reads
- *  as one that does nothing. `marked`: words of it drawn in a look of their own wherever they stand in the words shown
- *  (the kind of mark ] opens, in that mark's look: `] show explainer`, explainer on the explainers' teal). */
+ *  what holds the keys now (a card ] reached), or what the prompt box asks for (`rewrite for…`); while any shows, the
+ *  bar's left names only those, after the busy step. (The open tray's keys are in its header and the open chips' in the
+ *  chips, so the bar leaves those keys out: core/answerview.ts heldKeys.) `color` and `bold`: words drawn lit (`s ●
+ *  short`) or as a failure, not dim. `shorter`: the words in fewer cells, longest first, which a narrow bar draws after
+ *  coverage's file counts gave way: the first of them it keeps longer than the busy step's words, and before any count
+ *  gives way (the order at the top of this file); '' is the key alone, drawn as the bar's other keys are (in the item's
+ *  color when it has one), never dim, as a dim key reads as one that does nothing. `marked`: words of it drawn in a look
+ *  of their own wherever they stand in the words shown (the kind of mark ] opens, in that mark's look: `] show
+ *  explainer`, explainer on the explainers' teal). */
 type Item = { id: string; key?: string; words: string; shorter?: string[]; glyph?: string; press?: () => unknown; focus?: boolean; color?: string; bold?: boolean; marked?: { words: string; look: Record<string, unknown> } }
 /** An item a feature puts on the bar (core/answerview.ts barLeft, barRight). */
 export type BarItem = Item
@@ -121,17 +123,19 @@ function fill(xs: Item[], first: number, rest: number): Item[][] {
   return rows
 }
 
-/** The bar's items at its left, after `thimble` and the busy step: v, then the features' items. */
-async function leftItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<Item[]> {
+/** The bar's items at its left, after `thimble` and the busy step: v, then the features' items; each while what holds
+ *  the keys (`held`: core/answerview.ts heldKeys) does not take its key. */
+async function leftItems($: Engine, on: (key: string) => boolean, preview: boolean, held: Set<string>): Promise<Item[]> {
   const out: Item[] = []
-  const features = await barLeft($, on, preview)
+  const features = await barLeft($, on, preview, held)
   if (features.some(x => x.focus)) return features.filter(x => x.focus)
+  const free = keyFree(held)
   // the keys of the card on screen that takes them, each a click that presses it
   if (!preview && on('cards')) {
-    for (const k of await cardKeyWords($).catch(() => [])) out.push({ id: `card-key-${k.key}`, key: k.key, words: k.words, ...(k.key.length === 1 ? { press: () => pressKey($, k.key) } : {}) })
+    for (const k of await cardKeyWords($).catch(() => [])) if (free(k)) out.push({ id: `card-key-${k.key}`, key: k.key, words: k.words, ...(k.key.length === 1 ? { press: () => pressKey($, k.key) } : {}) })
   }
   // a click on `v card` starts the designer fork as v does, in the ui.press hook that answers it (designer/v.ts)
-  if (on('cards') && (preview || (await vReady($)))) out.push({ id: 'v', key: 'v', words: 'visualize', ...(preview ? {} : { press: () => undefined }) })
+  if (on('cards') && (preview || (await vReady($))) && free({ key: 'v' })) out.push({ id: 'v', key: 'v', words: 'visualize', ...(preview ? {} : { press: () => undefined }) })
   out.push(...features)
   return out
 }
@@ -152,8 +156,10 @@ export async function barRows($: Engine, els: Any, width: number, o: { on?: (key
   const preview = !!o.preview
   const presses = preview ? null : o.presses ?? null
   const b = preview ? null : await busyNow($)
-  const keys = await leftItems($, on, preview)
-  let right = [...(await barRight($, on, preview)), ...(await countItems($, on, presses, preview))]
+  // the keys what holds them takes now, which the bar leaves to it: each key shows once, where it acts
+  const held = preview ? new Set<string>() : await heldKeys($)
+  const keys = await leftItems($, on, preview, held)
+  let right = [...(await barRight($, on, preview, held)), ...(await countItems($, on, presses, preview))]
   // the presses of the bar's items by their words (`r coverage`), before any is cut: an item the failure line names
   // is a click there too
   const pressOf = new Map([...keys, ...right].filter(x => x.press && x.key).map(x => [`${x.key} ${x.words}`, x.press!] as const))

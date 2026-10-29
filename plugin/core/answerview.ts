@@ -16,7 +16,8 @@
 //   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the
 //                                         band has left over the bar
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`,
-//                                         `c cite`)
+//                                         `c cite`); heldKeys: the keys what holds them takes now, which the bar and a
+//                                         card's header leave unnamed (cards/draw.ts too)
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
 //                                         no card may take; keysReady, as the plugin loads, what the keys read
 //   core/pane.ts       the side pane      the kinds `claims`, `threads` and `thread` (the seams' draws)
@@ -33,9 +34,9 @@ import type { Take } from '../hooks/keys'
 import { labelsUnderAnswer, labelsUnderCard } from '../labels/use'
 import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
-import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
+import { SQUEEZE_KEYS, squeezeBar, squeezeHeld, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey, trayTight } from '../tray/seam'
+import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHeld, trayHolds, trayKey, trayTight } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { askOnce } from './rowhook'
 
@@ -177,32 +178,52 @@ export function aboveTight(): boolean {
   try { return trayTight() } catch { return false }
 }
 
+/** The keys taken now by what holds them, which every other surface leaves unnamed, so each key shows once, where it
+ *  acts: the open tray's, or a card's ] reached (tray/seam.ts trayHeld), then the open chips' (squeeze/seam.ts
+ *  squeezeHeld; '*', every key, while a click gave them the keyboard). `ask`: the keys asked about, when not all. Read
+ *  from the state, so a drawing that asks draws again when what holds the keys changes. */
+export async function heldKeys($: Engine, ask?: string[]): Promise<Set<string>> {
+  return new Set([...(await safe(trayHeld($, ask), [] as string[])), ...(await safe(squeezeHeld($), [] as string[]))])
+}
+
+/** Whether an item's key is free of what holds the keys (`held`, heldKeys): an item with no key always is; a key of
+ *  several (`j k`) is free when each is. */
+export const keyFree = (held: Set<string>) => (x: { key?: string }): boolean => !x.key || (!held.has('*') && !x.key.split(' ').some(k => held.has(k)))
+
 /** A seam's bar items, checked; in the settings pane's preview none is a press. */
 const items = (xs: unknown, preview: boolean): BarItem[] => (Array.isArray(xs) ? xs : [])
   .filter((x): x is BarItem => !!x && typeof x.id === 'string' && typeof x.words === 'string')
   .map(x => (preview ? { id: x.id, words: x.words, ...(x.key ? { key: x.key } : {}), ...(x.glyph ? { glyph: x.glyph } : {}), ...(x.focus ? { focus: true } : {}) } : x))
 
 /** The features' items at the bar's left, after v: the tray's steps (at rest its ]), s, b, e, then c cite. While an
- *  item of what holds the keys shows (`focus`: the open tray's keys, the open chips'), the left names only those. */
-export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+ *  item of what holds the keys shows (`focus`: the keys of a card ] reached, `rewrite for…` while the prompt box holds
+ *  /rewrite), the left names only those. An item whose key what holds the keys takes now (`held`, heldKeys: the open
+ *  tray's keys are in its header, the open chips' in the chips) is left out: each key shows once, where it acts. */
+export async function barLeft($: Engine, on: (key: string) => boolean, preview: boolean, held?: Set<string>): Promise<BarItem[]> {
   const tray = items(await safe(trayBar($, on, preview), []), preview)
-  // while the tray holds the keys (its own in its header), the open chips' keys (0 [ ]) wait: each key shows once
+  const free = keyFree(preview ? new Set() : held ?? (await heldKeys($)))
+  // while the tray holds the keys, what the open chips say waits with their keys
   const holds = tray.some(x => x.focus) || (!preview && (await safe(trayHolds($), false)))
   return [
-    ...tray,
-    ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => !(holds && x.focus)),
-    ...items(await safe(explainBar($, on, preview), []), preview),
-    ...items(await safe(headsBar($, on, preview), []), preview),
-    ...items(await safe(citeBar($, on, preview), []), preview),
+    // the keys of a card ] reached are the tray's own; at rest, its ] gives way to the chips', which take ]
+    ...tray.filter(x => x.focus || free(x)),
+    ...items(await safe(squeezeBar($, on, preview), []), preview).filter(x => (x.key ? free(x) : !holds)),
+    ...items(await safe(explainBar($, on, preview), []), preview).filter(free),
+    ...items(await safe(headsBar($, on, preview), []), preview).filter(free),
+    ...items(await safe(citeBar($, on, preview), []), preview).filter(free),
   ]
 }
 
 /** The features' items at the bar's right, before coverage and the labels: what holds for the whole session, the
- *  claims and the side threads (the left names what acts on an answer). */
-export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
+ *  claims and the side threads (the left names what acts on an answer), each while what holds the keys does not take
+ *  its key (`held`, as barLeft). */
+export async function barRight($: Engine, on: (key: string) => boolean, preview: boolean, held?: Set<string>): Promise<BarItem[]> {
+  const taken = preview ? new Set<string>() : held ?? (await heldKeys($))
+  // a click that gave the chips the keyboard leaves the right as it stands: what holds for the whole session
+  const free = keyFree(new Set([...taken].filter(k => k !== '*')))
   return [
-    ...items(await safe(claimsBar($, on, preview), []), preview),
-    ...items(await safe(threadsBar($, on, preview), []), preview),
+    ...items(await safe(claimsBar($, on, preview), []), preview).filter(free),
+    ...items(await safe(threadsBar($, on, preview), []), preview).filter(free),
   ]
 }
 

@@ -9,17 +9,22 @@
 // after s or b undoes it (hooks/keys.ts word window). The chips that s opens take the keys: an open tray, which holds
 // them over the chips, gives way (tray/seam.ts trayGiveWay), and s with the tray open over open chips gives the keys back
 // to them.
-// While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey):
-//   [ shorter, ] longer on the picked chip (Length: short · as written · longer · much longer); < > , . the same, unnamed
-//   1–N pick a chip · 0 the original (on a catch-up: no catch-up)
-// Each chip names its two ends either side of its dots (`Length shorter ○●○○ longer`); a press on a dot sets that
-// level, and a press on an end moves the chip one level toward it, as [ and ] do. While a rewrite is on its way the old
-// text dims, and the bar's busy line says `rewriting` (term.ts); a version seen before comes back at once.
-//   · s close · + a chip in the person's own words (typed as `/rewrite <words>`, with the earlier ones offered as it is typed)
-// The bar names `s close` first while the chips are open, and the chips' row ends with it too (a press there closes them).
+// While the chips are open their keys come first, after an open tray's (core/answerview.ts restoredKey). The chips name
+// each where it acts (chips.tsx), as the tray names its keys in its header, and the bar names none of them, so each key
+// shows once (heldKeys there):
+//   1–N pick a chip, each digit before its chip's name · [ and ] on the picked chip's ends move it a level (`[ shorter
+//   ○●○○ ] longer`; Length: short · as written · longer · much longer); < > , . the same, unnamed · + your own, a chip in
+//   the person's own words (typed as `/rewrite <words>`, with the earlier ones offered as it is typed) · 0 revert, the
+//   original (on a catch-up: no catch-up) · s close
+// A press on a dot sets that level, and a press on an end moves the chip one level toward it, as [ and ] do. While a
+// rewrite is on its way the old text dims, and the bar's busy line says `rewriting` (term.ts); a version seen before
+// comes back at once. The bar says what the chips cannot show: a chip that goes no further, a rewrite that failed or
+// left something out, and what the prompt box asks for after + there (`rewrite for…`). While the tray holds the keys
+// over the chips, the chips name no key (s gives the keys back to them).
 // A click on the chips hands them the keyboard (their Client, chips.tsx): then tab and shift+tab move between the chips,
-// ← and → between the levels, s closes them, and + types the chip's words in the chips, until esc gives the keys back.
-// ↵ does nothing there: a level shows once it is picked, so a ↵ pressed to pick one keeps them open.
+// ← and → between the levels (the picked chip's ends name them in place of [ and ]), s closes them, and + types the
+// chip's words in the chips (`↵ adds it · tab lets it go`), until esc gives the keys back. ↵ does nothing there: a level
+// shows once it is picked, so a ↵ pressed to pick one keeps them open.
 //
 //   state squeezeOpen: {id, focus, edge, typing, held, hint} | null   the record the chips are open on (term.ts ids)
 //   state squeezeWait: {turn} | null                                   s pressed while main's turn ran: its answer was
@@ -42,7 +47,7 @@ import { looksByWords } from '../marks/register'
 import { rowMarks, type MarkItem } from '../marks/store'
 import { messageEl } from '../marks/view'
 import { featureOn } from '../settings/features.mjs'
-import { trayGiveWay, trayHolds } from '../tray/seam'
+import { trayGiveWay, trayHeld, trayHolds } from '../tray/seam'
 import { cardDid, cardHidden } from './cards'
 import { atOf, cardNotes, chipsOf, endsOf, isOriginal, levelWords, ownWords, revealCut, stepAt, withOwn } from './chips.mjs'
 import { catchUp, catchUpAt, catchUpOn, cuId, drawnAt, dismissCatchUp, partNow, pileUp, recOf, saveRec, seeView, setLevels, uiOf, wantLevels, type Rec } from './term'
@@ -61,9 +66,6 @@ type Wait = { turn: string }
 const OPEN = { plugin: 'thimble', key: 'squeezeOpen' } as const
 const OWN = { plugin: 'thimble', key: 'squeezeOwn' } as const
 const WAIT = { plugin: 'thimble', key: 'squeezeWait' } as const
-/** What [ and ] do to each chip, in its words: the way down, then the way up. */
-const WAYS: Record<string, [string, string]> = { length: ['shorter', 'longer'], familiarity: ['more novice', 'more expert'] }
-
 const same = (a: unknown, b: unknown) => JSON.stringify(a || {}) === JSON.stringify(b || {})
 
 // ------------------------------------------------------------------------------------------------ the chips' state
@@ -312,6 +314,17 @@ export async function chipsHold($: Engine): Promise<boolean> {
   return featureOn('squeezeAnswers') && !!(await keptOpen($))
 }
 
+/** The keys the open chips take now, which nothing else names (core/answerview.ts heldKeys): [ ] (and < > , .), 1–9,
+ *  0, + and s; every key ('*') while a click gave them the keyboard. None while they are closed. Read from the state,
+ *  so a drawing that asks draws again when they open or close. */
+export async function chipsHeld($: Engine): Promise<string[]> {
+  if (!featureOn('squeezeAnswers')) return []
+  const open = await openNow($)
+  if (!open || !(await recOf($, open.id))) return []
+  if (open.held || open.typing != null) return ['*']
+  return ['[', ']', '<', '>', ',', '.', '0', '+', 's', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+}
+
 /** A key at an empty prompt: the chips' keys while they are open; s at rest opens them, and b writes a catch-up. */
 export async function squeezeKeyTake($: Engine, key: string): Promise<Take | null> {
   const squeezing = featureOn('squeezeAnswers')
@@ -410,6 +423,16 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
     const r = String(ev.press ?? '')
     if (r === 'add') { await setOpen($, { typing: '', held: true, edge: null }); continue }
     if (r === 'close') { await setOpen($, null); continue }
+    // the presses that do what a key named in the chips does: ↵ and tab after the typed words, 0, tab, esc
+    if (r === 'own-add' || r === 'own-drop') {
+      const typed = open.typing
+      await setOpen($, { typing: null })
+      if (r === 'own-add' && typed && ownWords(typed)) await addOwn($, open.id, typed)
+      continue
+    }
+    if (r === 'revert') { await revert($, open); continue }
+    if (r === 'next') { await nextChip($, open); continue }
+    if (r === 'esc') { await setOpen($, { held: false, typing: null }); continue }
     const dot = /^lvl-(.+)-(\d+)$/.exec(r)
     if (dot) { await setLevel($, open, dot[1]!, Number(dot[2])); continue }
     const end = /^step-(.+)-(down|up)$/.exec(r)
@@ -422,10 +445,12 @@ export async function chipsPost($: Engine, id: string, data: Any): Promise<Any> 
 
 // ------------------------------------------------------------------------------------------------ the bar
 
-/** The chips' keys and lines on the bar while they are open; at rest, s: `s rewrite`, the same words whether the
- *  answer shows its original or a squeezed version (the chips name the levels), and `b catch up on N replies` while
- *  replies piled up since the person's last prompt. While main's turn runs, s waits for the answer it writes: while it
- *  waits, `s rewrite` is lit (its words in thimble's color), and a press ends the wait, as s again does. */
+/** What the bar says while the chips are open, which the chips cannot show (their keys are in the chips): a chip that
+ *  goes no further, a rewrite that failed or left something out, `rewrite for…` while the prompt box holds /rewrite; at
+ *  rest, s: `s rewrite`, the same words whether the answer shows its original or a squeezed version (the chips name the
+ *  levels), and `b catch up on N replies` while replies piled up since the person's last prompt. While main's turn
+ *  runs, s waits for the answer it writes: while it waits, `s rewrite` is lit (its words in thimble's color), and a
+ *  press ends the wait, as s again does. */
 export async function barItems($: Engine, on: (key: string) => boolean, preview: boolean): Promise<BarItem[]> {
   const squeezing = on('squeezeAnswers')
   if (preview) return [...(squeezing ? [{ id: 'squeeze', key: 's', words: 'rewrite' }] : []), ...(on('catchUp') ? [{ id: 'catchup', key: CATCH_UP_KEY, words: 'catch up' }] : [])]
@@ -449,72 +474,71 @@ export async function barItems($: Engine, on: (key: string) => boolean, preview:
 }
 
 async function openItems($: Engine, open: Open, rec: Rec): Promise<BarItem[]> {
-  const ui = await uiOf($, open.id)
-  const { at, pending } = await levelsNow($, rec)
-  const row = rowOf(rec, at)
-  const focus = row.find((c: Any) => c.id === open.focus) ?? row[0]
-  const orig = isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at } })) && typeof rec.shown !== 'string'
-  const [down, up] = WAYS[focus.id] || (String(focus.id).startsWith('x-') ? ['less', 'more'] : ['down', 'up'])
-  // the next chip, from the picked one (a press on `1–N chip` or `tab next chip`)
-  const nextChip = () => setOpen($, { focus: row[(Math.max(0, row.findIndex((c: Any) => c.id === focus.id)) + 1) % row.length].id, edge: null })
-  const out: BarItem[] = []
-  const say = (id: string, words: string, color?: string) => out.push({ id, words, focus: true, ...(color ? { color } : {}) })
-  const key = (id: string, k: string, words: string, press?: () => unknown) => out.push({ id, key: k, words, focus: true, ...(press ? { press } : {}) })
-  if (open.typing != null) { say('sq-typing', `+ ${open.typing}▏ ↵ adds it · tab lets it go`, accent()); return out }
+  // the words being typed after + in the chips: the chips say what ↵ and tab do there
+  if (open.typing != null) return []
+  // + at the prompt: the box holds /rewrite and the person's words follow it, so the bar says only what it asks for
   if (open.hint) {
     const dims = await ownEarlier($)
-    say('sq-hint', `rewrite for…${dims.length ? ` · earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, accent())
-    return out
+    return [{ id: 'sq-hint', words: `rewrite for…${dims.length ? ` · earlier: ${dims.slice(-3).reverse().join(' · ')}` : ''}`, focus: true, color: accent() }]
   }
-  // s close comes first, so leaving is the first thing the bar names while the chips hold the keys
-  key('sq-close', 's', 'close', () => setOpen($, null))
-  if (ui.error) say('sq-error', `× ${ui.error}`, 'error')
-  else if (open.edge && focus) say('sq-edge', `${focus.name} goes no further than ${focus.levels[focus.level]}`, accent())
-  else if ((rec.squeeze?.problems ?? [])[0] && typeof rec.shown === 'string') say('sq-problem', `! ${rec.squeeze.problems[0]}`, accent())
-  const revertable = !!rec.catchup || !orig || pending
-  if (open.held) {
-    key('sq-tab', 'tab', 'next chip', nextChip)
-    key('sq-left', '←', down, () => step($, open, focus.id, -1, null))
-    key('sq-right', '→', up, () => step($, open, focus.id, 1, null))
-    if (revertable) key('sq-revert', '0', 'revert', () => revert($, open))
-    key('sq-own', '+', 'your own', () => setOpen($, { typing: '', edge: null }))
-    key('sq-esc', 'esc', 'back to the prompt', () => setOpen($, { held: false, typing: null }))
-    return out
-  }
-  key('sq-down', '[', down, () => step($, open, focus.id, -1, '['))
-  key('sq-up', ']', up, () => step($, open, focus.id, 1, ']'))
-  const n = row.length
-  key('sq-pick', n > 1 ? `1–${Math.min(9, n)}` : '1', 'chip', nextChip)
-  if (revertable) key('sq-revert', '0', 'revert', () => revert($, open))
-  key('sq-own', '+', 'your own', () => askOwn($))
-  return out
+  const ui = await uiOf($, open.id)
+  const row = rowOf(rec, (await levelsNow($, rec)).at)
+  const focus = row.find((c: Any) => c.id === open.focus) ?? row[0]
+  if (ui.error) return [{ id: 'sq-error', words: `× ${ui.error}`, color: 'error' }]
+  if (open.edge && focus) return [{ id: 'sq-edge', words: `${focus.name} goes no further than ${focus.levels[focus.level]}`, color: accent() }]
+  if ((rec.squeeze?.problems ?? [])[0] && typeof rec.shown === 'string') return [{ id: 'sq-problem', words: `! ${rec.squeeze.problems[0]}`, color: accent() }]
+  return []
+}
+
+/** The next chip after the picked one (tab, or a press on `tab next chip`). */
+async function nextChip($: Engine, open: Open): Promise<void> {
+  const rec = await recOf($, open.id)
+  if (!rec) return
+  const row = rowOf(rec, (await levelsNow($, rec)).at)
+  const at = Math.max(0, row.findIndex((c: Any) => c.id === open.focus))
+  await setOpen($, { focus: row[(at + 1) % row.length].id, edge: null })
 }
 
 // ------------------------------------------------------------------------------------------------ the drawing
 
-/** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +. */
+/** The chips' props: each chip with its digit, its levels and where it stands, the picked one, what is typed after +;
+ *  whether they name their keys (not while the tray holds the keys over them), whether a click gave them the keyboard,
+ *  and whether 0 has a version to take back (a squeezed version shown or on its way; on a catch-up, the catch-up). */
 async function chipsProps($: Engine, id: string, width: number): Promise<Any> {
   const open = await openNow($)
   const rec = await recOf($, id)
   if (!open || !rec) return { items: [], plus: null, width, color: accent() }
-  const row = rowOf(rec, (await levelsNow($, rec)).at)
+  const { at, pending } = await levelsNow($, rec)
+  const row = rowOf(rec, at)
   const focus = row.some((c: Any) => c.id === open.focus) ? open.focus : row[0].id
+  const orig = isOriginal(chipsOf({ ...rec, squeeze: { ...rec.squeeze, at } })) && typeof rec.shown !== 'string'
+  const trayHas = (await trayHeld($, []).catch(() => [] as string[])).length > 0
   return {
     items: row.map((c: Any, i: number) => ({ id: c.id, n: i + 1, name: c.name, levels: c.levels, level: c.level, level0: c.level0, ends: endsOf(c), word: levelWords(c), picked: c.id === focus && open.typing == null })),
     plus: open.typing, width, color: accent(),
+    keys: !trayHas, held: !!open.held, revert: !!rec.catchup || !orig || pending,
   }
 }
 
-/** What the chips draw from their props, each a press (chips.tsx): each chip's digit and name, its ends, its dots,
- *  the words of its level, its levels; + with what is typed after it; s close. */
+/** What the chips draw from their props, each a press (chips.tsx): each chip's digit and name, its ends (with their
+ *  keys on the picked chip), its dots, the words of its level, its levels; + your own, or what is typed after + and what
+ *  ↵ and tab do then; 0 revert; tab next chip and esc back to the prompt; s close; each with its key and without. */
 function chipsWords(props: Any): string[] {
   const items: Any[] = Array.isArray(props?.items) ? props.items : []
-  const typed = typeof props?.plus === 'string' ? `+ ${props.plus}▏` : '+'
-  return ['s close', 'close', typed, ...items.flatMap(c => {
-    const levels: unknown[] = Array.isArray(c.levels) ? c.levels : []
-    const dots = levels.map((_, i) => (i === c.level ? '●' : '○')).join('')
-    return [`${c.n} ${c.name}`, c.name, ...(c.ends ?? []), dots, `· ${c.word}`, c.word, ...levels]
-  })].filter((x: unknown): x is string => typeof x === 'string')
+  const typing = typeof props?.plus === 'string'
+  const held = !!props?.held && !typing
+  const [down, up] = props?.held ? ['←', '→'] : ['[', ']']
+  return [
+    ...(typing ? [`+ ${props.plus}▏`, '↵ adds it', 'adds it', 'tab lets it go', 'lets it go'] : ['+ your own', 'your own', '+', 's close', 'close']),
+    ...(props?.revert && !typing ? ['0 revert', 'revert'] : []),
+    ...(held ? ['tab next chip', 'next chip', 'esc back to the prompt', 'back to the prompt'] : []),
+    ...items.flatMap(c => {
+      const levels: unknown[] = Array.isArray(c.levels) ? c.levels : []
+      const dots = levels.map((_, i) => (i === c.level ? '●' : '○')).join('')
+      const ends: string[] = (Array.isArray(c.ends) ? c.ends : []).filter((e: unknown) => typeof e === 'string')
+      return [`${c.n} ${c.name}`, c.name, ...ends, ...(ends[0] ? [`${down} ${ends[0]}`] : []), ...(ends[1] ? [`${up} ${ends[1]}`] : []), dots, `· ${c.word}`, c.word, ...levels]
+    }),
+  ].filter((x: unknown): x is string => typeof x === 'string')
 }
 
 /** The chips under the record `id`, when they are open on it: their Client, keyed so a click keeps the keyboard in
