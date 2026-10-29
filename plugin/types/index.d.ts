@@ -16,13 +16,14 @@ declare module 'claude-code' {
       /** the checks that run, by the checker fork's agent: the reply's key and the marks this fork checks; `repair`: a
        *  check of one mark again, which x in the tray started, or thimble when the check failed it (`auto`) */
       marksRunning: Record<string, { agentId: string; key: string; turnId: string; marks: number[]; cwd: string; root: string; replyEnd: number; spawnedAt: number; repair?: boolean; auto?: boolean; thread?: string }>
-      /** the lines of checks that could not start that this session showed, so a reply's check says each once
-       *  (marks/checker.ts sayCannotStart) */
+      /** the lines of checks that could not start that this session showed, so a reply's check says each once, but
+       *  for a line that offers the person's OK (marks/checker.ts sayCannotStart) */
       checksRefused: string[]
-      /** the person's OK (y) for thimble to start its checks of citations this session, which auto mode's classifier
-       *  gave no verdict on: thimble answers Claude Code's ask on them with allow (marks/checker.ts allowsCheck) */
+      /** the person's OK (g) for thimble to start its checks of citations this session, which Claude Code refused where
+       *  nobody was asked (auto mode's classifier gave no verdict, don't ask mode): thimble answers Claude Code's own ask
+       *  on them with allow (marks/checker.ts allowsCheck) */
       checksAllowed: boolean | null
-      /** the check the line that offers y is about, which y starts again: { kind: 'check', whole, reply, note? } or
+      /** the check the line that offers g is about, which g starts again: { kind: 'check', whole, reply, note? } or
        *  { kind: 'repair', repair } (marks/checker.ts Held) */
       checksHeld: unknown
 

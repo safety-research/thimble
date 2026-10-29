@@ -16,10 +16,11 @@
 //                    autoRepair), as x does
 //   tool.call        the checker's calls: Read, Grep, Glob, and Bash for one Python script
 //   turn.step        the checker's requests: the model and the effort the setting Checker names
-//   agent.spawn      a repair's fork (x in the tray), and a check y starts again: waits out the key's word window,
+//   agent.spawn      a repair's fork (x in the tray), and a check g starts again: waits out the key's word window,
 //                    refused when a word came (a repair thimble starts itself has no word window)
-//   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (y): Claude Code's
-//                    ask answered allow, where auto mode's classifier gives no verdict on it (checker.ts allowsCheck)
+//   tool.check       a checker's spawn of thimble's own, once the person allowed thimble's checks (g): Claude Code's
+//                    own ask answered allow, where auto mode's classifier gives no verdict on it or don't ask mode
+//                    would refuse it (checker.ts allowsCheck)
 //   ui.render        AssistantMessage: a text block with marks, drawn here; with marks switched off, its words alone.
 //                    The features that act on answers draw here too (core/answerview.ts): the text a row shows in
 //                    place of Claude's (a squeezed version), their spans on its words (explainers, heads-ups), the
@@ -49,7 +50,7 @@ type Any = any
 
 const BUSY = { plugin: 'thimble', key: 'busy' } as const
 
-/** The spawns a key started that wait out its word window: x's repair, and a check y starts again. */
+/** The spawns a key started that wait out its word window: x's repair, and a check g starts again. */
 const HELD_SPAWN = new RegExp(`^(?:${[REPAIR_DESCRIPTION, AGAIN_DESCRIPTION].map(d => d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
 /** Why thimble answers allow to Claude Code at tool.check on a check of its own. */
 const CHECKS_ALLOWED = "thimble's check of citations, which the person allowed this session"
@@ -200,7 +201,7 @@ export const registerMarks: Register = on => {
     return yield* next({ ...e, ...(model ? { model } : {}), ...(effort ? { effort } : {}) })
   })
 
-  // x's repair, and a check y starts again, wait out the word window, and are refused when a letter came in it
+  // x's repair, and a check g starts again, wait out the word window, and are refused when a letter came in it
   // (hooks/keys.ts undoes the key)
   on('agent.spawn', { description: HELD_SPAWN }, async ($, e, next) => {
     const h = heldRepair()
@@ -211,8 +212,9 @@ export const registerMarks: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // a checker's spawn of thimble's own, once the person let thimble start its checks (y, checker.ts allowsCheck):
-  // Claude Code's ask, which auto mode's classifier would settle, is answered allow; its deny and any other verdict stand
+  // a checker's spawn of thimble's own, once the person let thimble start its checks (g, checker.ts allowsCheck):
+  // Claude Code's own ask, which auto mode's classifier would settle or don't ask mode refuse, is answered allow; a deny,
+  // and an ask a rule, a hook, a setting or another plugin made, stand
   on('tool.check', { tool: 'Agent' }, async ($, e, next) => {
     const v = await next(e)
     return (await allowsCheck($, e, next.origin, v)) ? { ...v, decision: 'allow', reason: CHECKS_ALLOWED } : v

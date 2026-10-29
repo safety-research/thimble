@@ -1,9 +1,11 @@
 // thimble's answer at tool.check on a spawn (marks/register.ts, marks/checker.ts allowsCheck). Once the person let
-// thimble start its checks of citations (y on the line of a check auto mode's classifier gave no verdict on), thimble
-// answers Claude Code's ask on a checker's spawn of its own with allow: an ask auto mode's classifier would settle. A
-// deny (a deny rule), an ask a rule, a classic hook, the person or the organization's ceiling holds, Claude's own call
-// of a subagent however it is worded, another plugin's, and thimble's other forks stay as Claude Code decides. All data
-// is made up. `claude plugin test plugin`.
+// thimble start its checks of citations (g on the line of a check Claude Code refused where nobody was asked: auto
+// mode's classifier gave no verdict, or don't ask mode), thimble answers Claude Code's own ask on a checker's spawn of
+// its own with allow. A deny (a deny rule), an ask a rule, a classic hook, a setting or another plugin made, Claude's
+// own call of a subagent however it is worded, another plugin's call, and thimble's other forks stay as Claude Code
+// decides. An ask another plugin made reaches thimble's hook as Claude Code 2.1.307 settles it, naming that plugin: its
+// own ask, and one only the person may answer (`decider: 'person'`) alike. All data is made up. `claude plugin test
+// plugin`.
 import { expect } from 'claude-code/testing'
 
 import { failLineNow } from '../bar/notice'
@@ -44,28 +46,35 @@ function setup(allowed: boolean) {
 }
 
 const spawn = (description: string, subagent_type: string | undefined = 'fork') => ({ prompt: 'Check the citations of your last reply.', description, ...(subagent_type ? { subagent_type } : {}) })
-const ASK = { decision: 'ask' }
+/** Claude Code's own ask on a subagent it has no rule for, as a tool.check hook reads it: no plugin, rule or hook. */
+const ASK = { decision: 'ask', reason: "Claude requested permissions to use Agent, but you haven't granted it yet." }
 
-test("with the person's OK, Claude Code's ask on each kind of thimble's checks (a reply's, an opened citation's, x's repair, y's again) is answered allow", async () => {
+test("with the person's OK, Claude Code's own ask on each kind of thimble's checks (a reply's, an opened citation's, x's repair, g's again) is answered allow", async () => {
   const { check } = setup(true)
   for (const d of ['checking citations', 'checking a citation', REPAIR_DESCRIPTION, AGAIN_DESCRIPTION]) {
     const v = await check(spawn(d), ASK)
     expect(v.decision).toBe('allow')
     expect(String(v.reason)).toContain('allowed this session')
   }
-  // a fork, named as one or by Claude Code's default
+  // a fork, named as one or by Claude Code's default; Claude Code's ask with no reason
   expect((await check(spawn('checking citations', undefined), ASK)).decision).toBe('allow')
+  expect((await check(spawn('checking citations'), { decision: 'ask' })).decision).toBe('allow')
 })
 
-test("thimble's allow never overrides the person's rules or Claude Code's other deciders, nor answers another's call", async () => {
+test("thimble's allow never overrides the person's rules, a setting, another plugin's ask, nor answers another's call", async () => {
   const { check } = setup(true)
   const ours = spawn('checking citations')
-  // a deny rule, and an ask a rule, a classic hook, the person or the organization's ceiling holds
+  // a deny rule, and an ask a rule, a classic hook or a setting made
   expect((await check(ours, { decision: 'deny', reason: "Agent type 'fork' has been denied", rule: 'Agent(fork)' })).decision).toBe('deny')
   expect((await check(ours, { decision: 'ask', rule: 'Agent' })).decision).toBe('ask')
   expect((await check(ours, { decision: 'ask', hook: 'PreToolUse' })).decision).toBe('ask')
-  expect((await check(ours, { decision: 'ask', decider: 'person' })).decision).toBe('ask')
-  expect((await check(ours, { decision: 'ask', ceiling: 'ask' })).decision).toBe('ask')
+  expect((await check(ours, { decision: 'ask', setting: 'permissions.blockReadsOutsideWorkingDirectories' })).decision).toBe('ask')
+  // an ask another plugin's hook made, as Claude Code settles it for the hooks above (the kit's test below): its own ask,
+  // and one only the person may answer, each naming the plugin
+  expect((await check(ours, { decision: 'ask', reason: 'made-up-guard holds new agents', plugin: 'made-up-guard' })).decision).toBe('ask')
+  expect((await check(ours, { decision: 'ask', plugin: 'made-up-guard' })).decision).toBe('ask')
+  // Claude Code's mark of a person-only ask before it names the plugin that made it: an empty name
+  expect((await check(ours, { decision: 'ask', plugin: '' })).decision).toBe('ask')
   // an allow stays one
   expect((await check(ours, { decision: 'allow' })).decision).toBe('allow')
   // Claude's own call of a subagent, worded as a check; another plugin's; thimble's other forks; another agent type
@@ -125,7 +134,7 @@ function engine(refused: () => string | null) {
 /** What runs on after a key's answer: the forks it asked for, and what their start changes. */
 const settled = () => new Promise(r => setTimeout(r, 20))
 
-test("y on the line of a check auto mode's classifier gave no verdict on: the person's OK, so thimble answers allow on its checks, and the check the line is about starts again, every share at once, its citations checked; the line goes", async () => {
+test("g on the line of a check auto mode's classifier gave no verdict on: the person's OK, so thimble answers allow on its checks, and the check the line is about starts again, every share at once, its citations checked; the line goes", async () => {
   setOptions({ citations: 'auto cite + verify' })
   try {
     let refuse = true
@@ -136,12 +145,13 @@ test("y on the line of a check auto mode's classifier gave no verdict on: the pe
     expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['deferred', 'deferred', 'deferred', 'deferred', 'deferred'])
     const verdict = () => allowsCheck($, { input: { description: AGAIN_DESCRIPTION, subagent_type: 'fork' } }, THIMBLE, ASK)
     expect(await verdict()).toBe(false)
-    // another key, or y with no such line, is no key of this line's
+    // another key, y among them (a fix's line takes it), is no key of this line's
     expect(await checkKey($, 'n', 0)).toBeNull()
+    expect(await checkKey($, 'y', 0)).toBeNull()
     refuse = false
-    const y = await checkKey($, 'y', 0)
-    expect(y).not.toBeNull()
-    await y!.now()
+    const g = await checkKey($, 'g', 0)
+    expect(g).not.toBeNull()
+    await g!.now()
     await settled()
     expect(await verdict()).toBe(true)
     // the five citations again, in their two shares, each with its marks filled in
@@ -150,31 +160,31 @@ test("y on the line of a check auto mode's classifier gave no verdict on: the pe
     for (const words of ['[40]', '[12 of 40]', '[p95 latency check]', '[slow mirror]', '[3 nights]']) expect(asked).toContain(words)
     expect((await rowMarks($, 'row-1'))!.items.map(m => m.status)).toEqual(['checking', 'checking', 'checking', 'checking', 'checking'])
     expect(await failLineNow($)).toBeNull()
-    expect(await checkKey($, 'y', 0)).toBeNull()
+    expect(await checkKey($, 'g', 0)).toBeNull()
   } finally {
     setOptions({})
   }
 })
 
-test('y then a letter: the person typed a word, so thimble has no OK, and the line still offers y for the same check', async () => {
+test('g then a letter: the person typed a word, so thimble has no OK, and the line still offers g for the same check', async () => {
   setOptions({ citations: 'auto cite + verify' })
   try {
     const { $ } = engine(() => AUTO)
     await noteRow($, 'row-1', REPLY)
     await startCheck($, { turnId: 't-1', reason: 'answer' })
-    const y = await checkKey($, 'y', 0)
-    await y!.now()
-    await y!.undo()
+    const g = await checkKey($, 'g', 0)
+    await g!.now()
+    await g!.undo()
     await settled()
     expect(await allowsCheck($, { input: { description: AGAIN_DESCRIPTION } }, THIMBLE, ASK)).toBe(false)
     expect((await failLineNow($))?.text).toBe(UNREVIEWED_LINE)
-    expect(await checkKey($, 'y', 0)).not.toBeNull()
+    expect(await checkKey($, 'g', 0)).not.toBeNull()
   } finally {
     setOptions({})
   }
 })
 
-test('x on a failed citation refused the same way: the line offers y, and y starts that repair again', async () => {
+test('x on a failed citation refused the same way: the line offers g, and g starts that repair again', async () => {
   let refuse = true
   const { $, spawned } = engine(() => (refuse ? AUTO : null))
   await newReply($, { key: 'row-1', turnId: 't-1', rows: ['row-1'], startedAt: 1000, settledAt: 1100, items: [
@@ -184,10 +194,68 @@ test('x on a failed citation refused the same way: the line offers y, and y star
   expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
   expect((await failLineNow($))?.text).toBe(UNREVIEWED_LINE)
   refuse = false
-  await (await checkKey($, 'y', 0))!.now()
+  await (await checkKey($, 'g', 0))!.now()
   await settled()
   expect(spawned.map(a => a.description)).toEqual([REPAIR_DESCRIPTION, REPAIR_DESCRIPTION])
   expect(String(spawned[1].prompt)).toContain('The analyst pressed x to repair citation 1.')
   expect((await rowMarks($, 'row-1'))!.items[0]!.status).toBe('checking')
   expect(await failLineNow($)).toBeNull()
+})
+
+/** Claude Code 2.1.307's refusal in don't ask mode, of a call no rule allows. */
+const DONT_ASK = "Permission to use Agent has been denied because Claude Code is running in don't ask mode. IMPORTANT: You *may* attempt to accomplish this action using other tools that might naturally be used to accomplish this goal. "
+
+test("x on a failed citation in don't ask mode: the line names the mode and offers g, not x again, which would be refused the same way; g starts that repair", async () => {
+  let refuse = true
+  const { $, spawned } = engine(() => (refuse ? DONT_ASK : null))
+  await newReply($, { key: 'row-1', turnId: 't-1', rows: ['row-1'], startedAt: 1000, settledAt: 1100, items: [
+    { n: 1, row: 'row-1', words: '40', start: 7, end: 14, sentence: REPLY, status: 'failed', failedBy: 'check', shown: '40', reason: 'The log counts 39 runs.' },
+  ] } as never)
+  const r = await repairOf($, 'row-1', 1)
+  expect(await launchRepair($, r as Any, { until: 0, cancelled: false })).toBe('')
+  const line = await failLineNow($)
+  expect(line).toMatchObject({ kind: 'notice', text: "Claude Code's don't ask mode refused thimble's check of citations. Press g to allow thimble's checks this session." })
+  expect(line!.text).not.toContain('Press x')
+  refuse = false
+  await (await checkKey($, 'g', 0))!.now()
+  await settled()
+  expect(spawned.map(a => a.description)).toEqual([REPAIR_DESCRIPTION, REPAIR_DESCRIPTION])
+  expect((await rowMarks($, 'row-1'))!.items[0]!.status).toBe('checking')
+  expect(await allowsCheck($, { input: { description: REPAIR_DESCRIPTION, subagent_type: 'fork' } }, THIMBLE, ASK)).toBe(true)
+})
+
+/** A made-up plugin beneath thimble whose hook asks about every new agent: as one only the person may answer
+ *  (`person`), as its own ask (`own`), or passes Claude Code's verdict on unchanged (any other description). */
+const GUARD: Any = { name: 'made-up-guard', tier: 'builtin', register(on: Any) {
+  on('tool.check', { tool: 'Agent' }, async ($: Any, e: Any, next: Any) => {
+    const how = String(e.input?.description ?? '')
+    if (how === 'person') return { decision: 'ask', decider: 'person', reason: 'made-up-guard holds new agents' }
+    if (how === 'own') return { decision: 'ask', reason: 'made-up-guard holds new agents' }
+    return next(e)
+  })
+} }
+/** A made-up plugin between it and thimble that says, in its reason, the verdict its hook read: what a hook above the
+ *  guard reads, as thimble's does. */
+const READER: Any = { name: 'made-up-reader', tier: 'append', register(on: Any) {
+  on('tool.check', { tool: 'Agent' }, async ($: Any, e: Any, next: Any) => {
+    const v = await next(e)
+    return { ...v, reason: JSON.stringify(v) }
+  })
+} }
+
+test("the verdict a tool.check hook reads, as Claude Code settles a plugin's answer beneath it: another plugin's ask, its own or the person's only, names that plugin, and thimble's allow takes none of them; Claude Code's own ask names none, and is thimble's to answer", { plugins: [GUARD, READER], options: { citations: 'auto cite + verify' } }, async ($, on) => {
+  on('tool.check', () => ({ decision: 'ask', reason: "Claude requested permissions to use Agent, but you haven't granted it yet." }) as never)
+  const read = async (description: string): Promise<Any> => JSON.parse(String((await $.tool.check({ tool: 'Agent', input: { description, prompt: 'Check these.', subagent_type: 'fork' } } as never)).reason))
+  const person = await read('person')
+  const own = await read('own')
+  const engines = await read('checking citations')
+  expect(person).toEqual({ decision: 'ask', reason: 'made-up-guard holds new agents', plugin: 'made-up-guard' })
+  expect(own).toEqual({ decision: 'ask', reason: 'made-up-guard holds new agents', plugin: 'made-up-guard' })
+  expect(engines).toEqual({ decision: 'ask', reason: "Claude requested permissions to use Agent, but you haven't granted it yet." })
+  // with the person's OK given, on a checker's spawn of thimble's own: each verdict as read
+  const ok: Any = { state: { get: async (k: Any) => ({ value: k.key === 'checksAllowed' ? true : undefined }) } }
+  const ours = { input: { description: 'checking citations', subagent_type: 'fork' } }
+  expect(await allowsCheck(ok, ours, THIMBLE, person)).toBe(false)
+  expect(await allowsCheck(ok, ours, THIMBLE, own)).toBe(false)
+  expect(await allowsCheck(ok, ours, THIMBLE, engines)).toBe(true)
 })

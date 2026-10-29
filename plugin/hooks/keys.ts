@@ -1,8 +1,8 @@
 // keys.ts: thimble's keys at an empty prompt, in one hook. A key goes to the first of these that takes it now:
 //
-//   y        marks/checker.ts checkKey   the line of a check of citations that auto mode's classifier gave no
-//                                    verdict on, while it shows: thimble's checks are allowed this session, and that
-//                                    check starts again
+//   g        marks/checker.ts checkKey   the line of a check of citations that Claude Code refused where nobody was
+//                                    asked (auto mode's classifier gave no verdict, don't ask mode), while it shows:
+//                                    thimble's checks are allowed this session, and that check starts again
 //   y d n u  fix/line.ts fixKey      the line of a fix above the bar, while it shows: y use it now, d what
 //                                    changed, n later, u undo (a failed fix: y try again, d what it tried, n dismiss)
 //   v        designer/v.ts vKey      a card of the last answer
@@ -13,7 +13,8 @@
 //   letters  cards/draw.ts cardTake  the card on screen that lists the key
 //   r l      bar/register.ts barKey  coverage and the labels, while the bar names them
 //
-// Anything no one takes is typed as usual. A card never gets thimble's own keys (ownKeys); the card tool says so.
+// Anything no one takes is typed as usual. A card never gets thimble's own keys (ownKeys); the card tool says so. g, the
+// person's OK, is one of them, so that no line or card shown with its line offers it too.
 //
 // The word window. Each of these keys is a letter, and a letter also starts a word. So a letter typed within WORD_MS
 // after keys thimble took means the person types a word: the keys are undone and the word goes into the box whole, the
@@ -38,7 +39,7 @@ import { HEAD_KEYS, headKey } from '../cards/head'
 import { keysReady, restoredKey, restoredKeys } from '../core/answerview'
 import { vKey } from '../designer/v'
 import { fixKey } from '../fix/line'
-import { checkKey } from '../marks/checker'
+import { ALLOW_KEY, checkKey } from '../marks/checker'
 import { promptHasKeys } from '../squeeze/ui'
 
 type Engine = EngineInterface
@@ -50,7 +51,7 @@ export const WORD_MS = 350
  *  core/answerview.ts, import the card tool, which reads them, so a list made as this module loads would read the
  *  features' keys before their modules set them.) */
 export function ownKeys(): string[] {
-  return ['v', ...restoredKeys(), ...HEAD_KEYS, ...BAR_KEYS]
+  return ['v', ...restoredKeys(), ...HEAD_KEYS, ...BAR_KEYS, ALLOW_KEY]
 }
 
 /** How a taker takes a key: `card` (a card's own key: its keys typed quickly are not a word), `now` with its `undo`

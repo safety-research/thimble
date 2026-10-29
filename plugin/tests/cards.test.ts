@@ -612,19 +612,19 @@ test('a data file whose real path leaves this folder (a symlink out) is refused,
 test('keys at an empty prompt: letters only, never a slash command; a word that starts with a card key and v goes back whole', async ($, on) => {
   const w = world(on)
   await $.session.start({ cwd: DATA, surface: 'terminal', isInteractive: true } as never)
-  // the view asks for "g" and "/"; the card gets the letter only
-  const view = 'const keys = "g/"\nfunction onKey(k, s) {}\nfunction view(p, s) { return s.elements.Text({ children: "x" }) }'
+  // the view asks for "n" and "/"; the card gets the letter only
+  const view = 'const keys = "n/"\nfunction onKey(k, s) {}\nfunction view(p, s) { return s.elements.Text({ children: "x" }) }'
   const r = (await $.tool.call({ tool: TOOL, tool_use_id: 'toolu_made_up_6', title: 'Scores', data: 'runs.json', view } as never)) as Any
   expect(String(r.result)).toContain('a card takes letters only, so it does not get /')
   await shown($, callRow('toolu_made_up_6', { title: 'Scores', data: 'runs.json', view }))
   const edit = (key: string) => ($.prompt as Any).edit({ origin: { kind: 'composer' }, key: { key }, text: '', cursor: 0, start: 0, end: 0, inputText: key } as never) as Any
   const meta = JSON.parse(Object.entries(w.files).find(([p]) => p.endsWith('/meta.json'))![1])
-  expect(meta.keys).toEqual(['g'])
+  expect(meta.keys).toEqual(['n'])
   expect((await edit('/')).text).toBe('/')
   await w.clock.advance(1000)
-  // "g" then "v" straight after (the person types "gvisor"): a word, and v starts nothing
-  expect(await edit('g')).toEqual({ text: '', cursor: 0 })
-  expect((await edit('v')).text).toBe('gv')
+  // "n" then "v" straight after (the person types "nvim"): a word, and v starts nothing
+  expect(await edit('n')).toEqual({ text: '', cursor: 0 })
+  expect((await edit('v')).text).toBe('nv')
   expect(w.asked).toContain('undo')
 })
 
