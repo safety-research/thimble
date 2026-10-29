@@ -48,7 +48,7 @@ describe('which rows a comment is on', () => {
 
 describe("a check's comment on Claude's answer, in main's chat", () => {
   let posts: string[] = []
-  async function chat(chatId = 'main', recs = records): Promise<HTMLElement> {
+  async function chat(chatId = 'main', recs = records, list?: AnswerComment[]): Promise<HTMLElement> {
     posts = []
     let open = true
     vi.stubGlobal('fetch', async (url: unknown, init: RequestInit = {}) => {
@@ -57,7 +57,7 @@ describe("a check's comment on Claude's answer, in main's chat", () => {
         posts.push(u)
         open = false
       }
-      const body = u.endsWith('/answer-comments') ? { comments: [comment({ status: open ? 'open' : 'dismissed' })], running: [] } : u.includes('/answer-comments/') ? { id: 'ac1' } : {}
+      const body = u.endsWith('/answer-comments') ? { comments: list ?? [comment({ status: open ? 'open' : 'dismissed' })], running: [] } : u.includes('/answer-comments/') ? { id: 'ac1' } : {}
       return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
     })
     const el = await mount(<Rows rows={foldRecords(recs)} ws="mini" chat={chatId} />)
@@ -139,5 +139,24 @@ describe("a check's comment on Claude's answer, in main's chat", () => {
     expect(document.querySelector('.answer-cm-pop')).not.toBeNull()
     await act(async () => void inCitation[0].dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
     expect(document.querySelector('.answer-cm-pop')).toBeNull()
+  })
+
+  test('an explainer and a heads-up never share a sentence: the one there first keeps it, and each tint opens the pop-up of its own kind', async () => {
+    // stored on one sentence, the heads-up first, as a store from before the backend kept the two apart may hold them
+    const heads = comment({ id: 'h1', check: 'heads-up', check_name: 'Heads up', color: 2 })
+    const gloss = comment({ id: 'g1', check: 'explainers', check_name: 'Explainers', color: 6, text: 'agents: the programs that post on the board.' })
+    const board = comment({ id: 'g2', check: 'explainers', check_name: 'Explainers', color: 6, ref: `answer:${TURN}#s1`, start: 0, end: 26, quote: 'The board holds 412 posts.', text: 'board: the page the agents post on.' })
+    const el = await chat('main', records, [heads, gloss, board])
+    // no tint stands inside another
+    expect(el.querySelector('mark.answer-tint mark.answer-tint')).toBeNull()
+    expect([...new Set([...el.querySelectorAll<HTMLElement>('mark.answer-tint')].map((m) => m.dataset.answerComment))].sort()).toEqual(['g2', 'h1'])
+    // a click on a tint's words, where the innermost element over them takes it, opens its own comment
+    for (const [words, id, name] of [['After 19 June there are ', 'h1', 'Heads up'], ['The board holds 412 posts.', 'g2', 'Explainers']]) {
+      const hit = [...el.querySelectorAll<HTMLElement>('mark.answer-tint')].filter((m) => m.textContent === words).at(-1)!
+      await click(hit)
+      const pop = document.querySelector<HTMLElement>('.answer-cm-pop')!
+      expect([pop.dataset.answerCommentPop, pop.querySelector('.wu-cm-name')?.textContent]).toEqual([id, name])
+      await act(async () => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    }
   })
 })

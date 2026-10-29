@@ -3,7 +3,8 @@
 // …/{id}/dismiss, the stream's `answer-comments` record). Each open comment tints its passage in main's chat in its
 // check's color, as the report tints a commented passage; the first piece of the passage carries the anchor
 // `answer:<turn>#s<n>` (Go to it in the Comments sidebar scrolls to it), and a click opens the comment beside the passage
-// as the comment card the canvas and the report's margin draw (AnswerComment.tsx AnswerCommentPop).
+// as the comment card the canvas and the report's margin draw (AnswerComment.tsx AnswerCommentPop). An explainer and a
+// heads-up never share a sentence, so each of their tints opens its own comment (marksOf).
 //
 // A comment names the turn it is on (`turn`, the id the turn's `done` record names, chat/model.ts TextRow.turn) and
 // quotes its passage raw, as Claude wrote it. The chat draws the answer as markdown, so the passage is found in the drawn
@@ -78,9 +79,16 @@ export function commentsOfRow(row: { text: string; turn?: string }, comments: re
   })
 }
 
-/** The marks of one row's comments, `active` the open one. Pure. */
+/** The checks whose comments never share a sentence, each with the other: the explainers and the heads-ups (backend
+ * answer_comments.APART). */
+const APART: Readonly<Record<string, string>> = { 'heads-up': 'explainers', explainers: 'heads-up' }
+
+/** The marks of one row's comments, `active` the open one. An explainer and a heads-up never share a sentence: of two
+ * stored on one before the backend kept them apart, the one there first is drawn, so each tint opens its own. Pure. */
 export function marksOf(comments: readonly AnswerComment[], active: string | null): AnswerMark[] {
-  return comments.map((c) => ({ id: c.id, quote: c.quote, colour: tintOf(c), ref: c.ref, active: c.id === active }))
+  const drawn: AnswerComment[] = []
+  for (const c of comments) if (!drawn.some((d) => d.ref === c.ref && APART[d.check] === c.check)) drawn.push(c)
+  return drawn.map((c) => ({ id: c.id, quote: c.quote, colour: tintOf(c), ref: c.ref, active: c.id === active }))
 }
 
 // the last `answer:` ref Go to it asked for and no chat has opened yet: main's chat may mount after the ask, when the

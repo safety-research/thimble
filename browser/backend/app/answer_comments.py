@@ -22,6 +22,10 @@ A comment keeps its passage's raw text as `quote` and its offsets, so the chat f
 answer (chat/answerComments.ts). `status` is `open`, `dismissed` (the analyst's dismiss, `resolution` done) or
 dismissed with `resolution` superseded (a later run of its check covered its passage). Each change emits
 `answer-comments` on the workspace's stream, and the chat and the sidebar read the comments again.
+
+An explainer and a heads-up (the Explainers and Heads up checks, APART) never share a sentence, as in the terminal: the
+comment already there keeps it, so a new comment of the other check on that sentence is not stored (add), and a
+dismissed one does not open again there (set_status). Each tint in the chat then opens its own comment.
 """
 from __future__ import annotations
 
@@ -51,6 +55,8 @@ RESOLUTION_DONE = "done"
 RESOLUTION_SUPERSEDED = "superseded"
 TEXT_CHARS = 20_000  # of a row's text, kept
 DETAILS_CHARS = 2_000
+# the checks whose comments never share a sentence, each with the other: the explainers and the heads-ups (module note)
+APART = {"heads-up": "explainers", "explainers": "heads-up"}
 UUID_RE = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 REF_RE = re.compile(r"^answer:([A-Za-z0-9_-]{1,80})#s([0-9]{1,5})$")
 # the heading of the answer in a check's task file (checks.task_text), then the answer's sentences, each with its ref
@@ -262,10 +268,20 @@ def _new_id(used: set[str]) -> str:
             return i
 
 
+def _held(items: list[dict[str, Any]], check: Any, ref: str) -> dict[str, Any] | None:
+    """The open comment of the check APART from `check` on the passage `ref`, which keeps it; None when none does."""
+    other = APART.get(str(check or ""))
+    if other is None:
+        return None
+    return next((x for x in items if x.get("check") == other and x.get("ref") == ref
+                 and (x.get("status") or "open") == "open"), None)
+
+
 def add(c: str, *, passage: dict[str, Any], text: str, author: str, details: str = "", check: str | None = None,
         run: str | None = None, evidence: str = "") -> tuple[dict[str, Any], bool]:
     """Store a comment on one passage of an answer, with the passage's raw text as `quote` and its offsets, or find
-    the same open one. (the comment, whether it is new)."""
+    the same open one. (the comment, whether it is new). On a passage that an open comment of the check APART from
+    `check` holds, nothing is stored: (that comment, False)."""
     text = _collapse(text)
     details = str(details or "").strip()[:DETAILS_CHARS]
 
@@ -275,6 +291,9 @@ def add(c: str, *, passage: dict[str, Any], text: str, author: str, details: str
                      and _collapse(x.get("text")) == text and str(x.get("details") or "") == details), None)
         if same is not None:
             return same, False
+        held = _held(items, check, passage["ref"])
+        if held is not None:
+            return held, False
         cm = {"id": _new_id({str(x["id"]) for x in items}), "turn": passage["turn"], "row": passage["row"],
               "ref": passage["ref"], "start": passage["start"], "end": passage["end"], "quote": passage["text"],
               "check": check, "run": run, "author": author, "text": text, "details": details, "evidence": evidence,
@@ -290,12 +309,16 @@ def add(c: str, *, passage: dict[str, Any], text: str, author: str, details: str
 
 def set_status(c: str, cid: str, status: str) -> dict[str, Any]:
     """Dismiss a comment (`dismissed`, resolution done) or open it again (`open`). The comment; 404 for no comment of
-    that id."""
+    that id, 409 for one whose passage an open comment of the check APART from its own holds now."""
 
     def fn(items: list[dict[str, Any]]) -> dict[str, Any] | None:
         for x in items:
             if str(x["id"]) != cid:
                 continue
+            if status == "open" and (x.get("status") or "open") != "open" and (
+                    held := _held(items, x.get("check"), str(x.get("ref") or ""))) is not None:
+                raise HTTPException(409, f"comment {cid!r} does not open again: its sentence holds comment "
+                                         f"{held['id']!r} of {held.get('check')}, and the two never share one")
             if status == "open":
                 x["status"] = "open"
                 for k in ("resolution", "resolved_ts", "superseded_by"):
