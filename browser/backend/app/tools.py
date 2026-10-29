@@ -217,7 +217,7 @@ REGISTRY: dict[str, Spec] = {
         Spec("stop_check", (ANALYST,), "app.comments:tool_stop_check", sessions=MAIN_ONLY),
         Spec("file_dev_ticket", (ANALYST,), _H + "file_dev_ticket"),
         # the person's /thimble-fix, which main reads with their fixes beside it (fixes.ask): a round of a fix of theirs
-        # or a new fix, as the terminal's fix-thimble skill starts it
+        # or a new fix, in their words, as the terminal's fix-thimble skill starts it
         Spec("fix_thimble", (ANALYST,), _H + "fix_thimble"),
         # a view's builder and reviewer check the view as often as they want, and finish once, where the server runs the
         # gates of record (view_tools.py); a gate stops when its caller drops the call (the agent was stopped)
@@ -2994,7 +2994,7 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
     from . import fixes  # noqa: PLC0415
 
     if not fixes.problem():
-        # a change to thimble's code is a fix of the person's thimble, which fix_thimble starts once they ask for it
+        # a change to thimble's code is a fix of the person's thimble, which they ask for with /thimble-fix
         return ok(hint("file_dev_ticket-fix"))
     fn = _optional("dev", "file_ticket")
     if fn is None:
@@ -3020,15 +3020,13 @@ async def _h_file_dev_ticket(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
 
 
 async def _h_fix_thimble(ctx: Ctx, args: dict[str, Any]) -> ToolResult:
-    """The fix the person asked for with /thimble-fix (fixes.from_tool), and what came of it in main's words, by the
-    fix's name (plugin/fix/register.ts startFromSkill)."""
+    """The fix the person asked for with /thimble-fix (fixes.from_tool), in their words, which main's `words` name the
+    fix of (`N`, or `new`), and what came of it in main's words, by the fix's name (plugin/fix/register.ts
+    startFromSkill)."""
     from . import fixes  # noqa: PLC0415
 
-    words = str(args.get("words") or "").strip()
-    if not words:
-        return err("fix_thimble: `words` is required: what thimble does wrong and what it should do")
     try:
-        got = await fixes.from_tool(ctx.c, words)
+        got = await fixes.from_tool(ctx.c, str(args.get("words") or "").strip())
     except HTTPException as e:
         return ok(hint("fix_thimble-failed", why=_detail_text(e.detail)))
     rec = got["fix"]

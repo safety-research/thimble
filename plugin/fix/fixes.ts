@@ -65,8 +65,8 @@ export type Fix = {
   testing?: { since: number; lock: string } | null
   /** what came of the tests, written by the kernel's runner, which no line has shown yet (thimble fix shown clears it) */
   unshown?: boolean
-  /** the person's own words of each round, beside `words` (Claude's, for the fixer), when they typed /thimble-fix
-   *  <words>; null for a round without them */
+  /** a record from before the fixer read only the person's words: their own words of each round, beside `words`
+   *  (Claude's then); null for a round without them. A request now keeps the person's words in `words` */
   asked?: (string | null)[]
 }
 /** A fix as the person and Claude read it in a session: its name (its title), cut to `n` cells. The number is the
@@ -109,21 +109,26 @@ export function formHead(words: string): { n: number | null; fresh: boolean; res
   return m ? { n: m[1] ? Number(m[1]) : null, fresh: !!m[2], rest: (m[3] ?? '').trim() } : null
 }
 
-/** The person's own words after /thimble-fix, without the form's head that formOf takes off Claude's (`2 …`, `new: …`):
- *  it says which fix the words are for, and is no words for the fixer. '' when the head is all they typed
- *  (`/thimble-fix 2`), so that the fixer reads Claude's words. `named`: whether fix N is one a form may name. */
+/** The person's own words after /thimble-fix, without the form's head (`2 …`, `new: …`): it says which fix the words
+ *  are for, and is no words for the fixer. '' when the head is all they typed. `named`: whether fix N is one a form may
+ *  name. */
 export function ownWords(asked: string, named: (n: number) => boolean): string {
   const a = asked.trim()
   const h = formHead(a)
   return h && (h.fresh || (h.n != null && named(h.n))) ? h.rest : a
 }
 
+/** The person's words of each round of a fix: `words`, or on a record from before, their own words kept beside them
+ *  (`asked`), without the form's head. */
+export const askedWords = (f: Pick<Fix, 'id' | 'words' | 'asked'>): string[] =>
+  (f.words || []).map((w, i) => ownWords(f.asked?.[i] ?? '', n => n === f.id) || w)
+
 /** Why the check did not use a fixer's change: the files it may not change (the way back, a binary file), or the end of
  *  the tests' output when they failed. */
 export type Refusal = { why: string; files: string[]; tests?: string }
 export type FixList = { fixes: Fix[]; on: boolean; live: string; version: string; count_on: number; pointed: boolean; pending?: string | null; gen: number }
 /** The line above the bar for one fix: ready (y use it now · d what changed · n later), applied (u undo), off (after
- *  u), failed (y try again · d what it tried · n dismiss), request (no code), a new release with the fixes replayed on it
+ *  u), failed (y try again · d ask Claude · n dismiss), request (no code), a new release with the fixes replayed on it
  *  (update), a newer release is out (release), or a problem with what to do. `open`: d shows what changed under it. `reload` (applied): `pending` while
  *  the reload waits for Claude's turn to end, `restart` in a session that loads thimble with --plugin-dir. */
 export type FixLine = {
@@ -323,11 +328,8 @@ export async function notNow($: Engine, id: number): Promise<string | null> {
   return r.ok ? null : `× ${cut(r.err || 'thimble fix notnow gave nothing', 220)}`
 }
 
-/** /thimble-fix alone: how to ask, and where the fixes are listed and managed (a shell: they act across sessions). */
-export const FIX_ALONE = [
-  'Ask for a change to thimble with /thimble-fix <what should work differently>.',
-  'Your fixes are listed and managed in a shell: thimble fix list (thimble fix --help shows the rest).',
-].join('\n')
+/** /thimble-fix with no words that say what should change (alone, or a fix's number alone): how to ask. */
+export const FIX_ALONE = 'Ask for a change to thimble with /thimble-fix <what should work differently>.'
 
 /** /thimble-fix update: thimble update runs in a shell, not in this session, because it changes the thimble the session
  *  runs. The reply says so, with the commands. */

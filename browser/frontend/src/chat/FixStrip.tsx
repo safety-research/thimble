@@ -4,14 +4,12 @@
 //               where main started it (Rows, AgentCard), whose thread shows its whole run.
 //   FixResult   how the fix ended, a row of main's chat and of the fix's thread at the time it ended (the server's `fix`
 //               chip). The newest row of a fix shows its state now: a fix that passed its checks asks "✓ thimble
-//               fixed: <title> · tests pass" with Use it now, What changed (a few lines, not a diff) and Later; one
-//               that changes the sandbox, the launcher, dependencies or another such file says which in one sentence
-//               above them, as the terminal's line does (`notice`). Nothing goes on by itself: Use it now is the
-//               person's click. The server then starts again from the fixed code,
+//               fixed: <title> · tests pass" with Use it now, What changed (a few lines, not a diff) and Later. Nothing
+//               goes on by itself: Use it now is the person's click. The server then starts again from the fixed code,
 //               the row says "Reloading thimble…", and the page loads the new build by itself when nothing typed would
 //               be lost. A fix that did not pass says why, with Try again (not when it needs a file no fix may change, as
-//               the terminal's line). An earlier row, or one the person answered, is a
-//               quiet line of what it said.
+//               the terminal's line) and Ask Claude, which shows what it tried and puts its failure in main's composer
+//               for the person to send. An earlier row, or one the person answered, is a quiet line of what it said.
 //   FixPage     what the page does for every fix: the reload after the server started again, and Your fixes
 //               (`/thimble-fix` alone: every fix with its state, Use it on a ready one, Undo on one that is on).
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -22,10 +20,11 @@ import { api } from '../lib/api'
 import { bus } from '../lib/bus'
 import { servedBuild, thisBuild } from '../lib/chunkRecovery'
 import { track } from '../lib/telemetry'
-import { changedLines, fixActions, fixText, reloading, STATE_WORDS, working, workingText, type FixAction, type FixRow } from './fix'
+import { askClaudeText, changedLines, fixActions, fixText, reloading, STATE_WORDS, triedLines, working, workingText, type FixAction, type FixRow } from './fix'
+import { offerDraft } from './pending'
 
 const ICON = { ready: 'check', fixed: 'check', undone: 'undo', request: 'flag', failed: 'warning', problem: 'warning' } as const
-const LABEL: Record<FixAction, string> = { use: 'Use it now', what: 'What changed', later: 'Later', undo: 'Undo', redo: 'Try again' }
+const LABEL: Record<FixAction, string> = { use: 'Use it now', what: 'What changed', later: 'Later', undo: 'Undo', redo: 'Try again', ask: 'Ask Claude' }
 const FIXED = 'thimble fixed:'
 
 /** Whether the page holds typed text a reload would lose. */
@@ -145,6 +144,13 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
       setWhat((w) => !w)
       return
     }
+    if (a === 'ask') {
+      // what it tried shows under the row, and main's composer takes its failure; nothing goes until the person sends it
+      setWhat(true)
+      offerDraft('main', askClaudeText(r))
+      bus.emit('openChat', { chatId: 'main' })
+      return
+    }
     setBusy(a)
     const call = a === 'use' ? api.applyFix(r.id) : a === 'undo' ? api.undoFix(r.id) : a === 'redo' ? api.redoFix(ws, r.id) : api.dismissFix(r.id)
     call
@@ -212,11 +218,10 @@ export function FixResult({ ws, fid, text, kind, latest }: { ws: string; fid: nu
         </span>
         {!ask && buttons}
       </div>
-      {ask && row.notice && <p className="chat-fix-notice">{row.notice}</p>}
       {ask && <div className="chat-fix-acts">{buttons}</div>}
-      {ask && what && (
+      {what && (
         <dl className="chat-fix-what">
-          {changedLines(row).map((l) => (
+          {(ask ? changedLines(row) : triedLines(row)).map((l) => (
             <div key={l.label}>
               <dt>{l.label}:</dt>
               <dd>{l.text}</dd>

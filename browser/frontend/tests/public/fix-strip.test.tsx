@@ -4,11 +4,13 @@
 // fixes. How the fix ended is a row of the chat, where it ended: the newest row of a fix asks, when it passed its
 // checks, Use it now (the person's click puts it on), What changed (a few lines, not a diff) and Later. After Use it
 // now: "Reloading thimble…", then the row says what it said, with nothing left to ask (Your fixes offers Undo). A fix
-// that did not pass says why, with Try again. An earlier row of a fix is a quiet line of what it said.
+// that did not pass says why, with Try again and Ask Claude, which shows what it tried and puts its failure in main's
+// composer for the person to send. An earlier row of a fix is a quiet line of what it said.
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { changedLines, fixActions, fixText, fixWords, pageText, workingText, type FixRow } from '../../src/chat/fix.ts'
+import { askClaudeText, changedLines, fixActions, fixText, fixWords, pageText, triedLines, workingText, type FixRow } from '../../src/chat/fix.ts'
 import { FixPage, FixResult, FixWorking } from '../../src/chat/FixStrip.tsx'
+import { takeDrafts } from '../../src/chat/pending.ts'
 import { bus } from '../../src/lib/bus.ts'
 import { dispatch } from '../../src/lib/events.ts'
 import { mount, settle, unmountAll } from './mount.tsx'
@@ -50,12 +52,12 @@ describe('the row and the notice', () => {
     expect(fixText(row())).toBe('Card says how many rows is on')
   })
 
-  test('a ready fix asks; Undo on a fix that is on, Try again on one that did not pass, nothing while it works', () => {
+  test('a ready fix asks; Undo on a fix that is on, Try again and Ask Claude on one that did not pass, nothing while it works', () => {
     expect(fixActions(ready())).toEqual(['use', 'what', 'later'])
     expect(fixActions(row())).toEqual(['undo'])
-    expect(fixActions(row({ state: 'failed', kind: 'failed' }))).toEqual(['redo'])
-    // one that needs a file no fix may change: another try fails the same way, so none is offered
-    expect(fixActions(row({ state: 'failed', kind: 'failed', blocked: true }))).toEqual([])
+    expect(fixActions(row({ state: 'failed', kind: 'failed' }))).toEqual(['redo', 'ask'])
+    // one that needs a file no fix may change: another try fails the same way, so only Ask Claude is offered
+    expect(fixActions(row({ state: 'failed', kind: 'failed', blocked: true }))).toEqual(['ask'])
     expect(fixActions(row({ state: 'off', kind: 'undone' }))).toEqual([])
     expect(fixActions(row({ phase: 'testing' }))).toEqual([])
   })
@@ -66,6 +68,22 @@ describe('the row and the notice', () => {
       { label: 'Claude did', text: "The card's title ends with its row count." },
       { label: 'Changed', text: '2 files · tests pass' },
     ])
+  })
+
+  const failed = (over: Partial<FixRow> = {}) => row({ state: 'failed', kind: 'failed', said: '“Card says how many rows” did not pass: its tests failed in the sandbox', error: 'its tests failed in the sandbox', paths: ['browser/frontend/src/canvas/Focus.tsx'], copy: '~/.thimble/fixes/work/3', ...over })
+
+  test('what a fix that did not pass tried, and its failure as a message to Claude in one paragraph', () => {
+    expect(triedLines(failed())).toEqual([
+      { label: 'You asked', text: "make this card's title say how many rows" },
+      { label: 'Claude did', text: "The card's title ends with its row count." },
+      { label: 'Tried', text: 'browser/frontend/src/canvas/Focus.tsx' },
+      { label: 'Why', text: 'its tests failed in the sandbox' },
+    ])
+    expect(askClaudeText(failed())).toBe("My thimble fix 3, “Card says how many rows”, did not pass: its tests failed in the sandbox. I asked: “make this card's title say how many rows”. Its fixer, which works in a sandbox, tried this: The card's title ends with its row count. Its copy of thimble, with its change, is ~/.thimble/fixes/work/3. Find why it failed, and make the change if you can.")
+    // a fix that went off again after the page did not build: what the row says, since the kernel gives no reason
+    const off = failed({ state: 'off', error: null, summary: '', copy: '', said: '“Card says how many rows” did not go on: the page did not build: error TS1005; it is off again' })
+    expect(askClaudeText(off)).toBe("My thimble fix 3: “Card says how many rows” did not go on: the page did not build: error TS1005; it is off again. I asked: “make this card's title say how many rows”. Its fixer works in a sandbox. Find why it failed, and make the change if you can.")
+    expect(triedLines(off).map((l) => l.label)).toEqual(['You asked', 'Tried'])
   })
 
   let fixes: FixRow[] = []
@@ -137,25 +155,12 @@ describe('the row and the notice', () => {
     expect(el.querySelector('button')).toBeNull()
   })
 
-  test("a ready fix that changes the sandbox or dependencies says which in one sentence above Use it now, in the terminal's words", async () => {
-    const notice = 'This fix changes the sandbox (plugin/cards/argv.mjs) and dependencies (browser/frontend/package-lock.json).'
-    fixes = [ready({ notice })]
+  test('a ready fix asks with its words and its buttons under them, and nothing between', async () => {
+    fixes = [ready()]
     const el = await mount(result())
     await settle()
-    expect(el.querySelector('.chat-fix-notice')?.textContent).toBe(notice)
-    // under the row's words, above its buttons, before the person clicks Use it now
-    expect([...el.querySelector('.chat-fix')!.children].map((c) => c.className)).toEqual(['chat-fix-line', 'chat-fix-notice', 'chat-fix-acts'])
+    expect([...el.querySelector('.chat-fix')!.children].map((c) => c.className)).toEqual(['chat-fix-line', 'chat-fix-acts'])
     expect(sent).toEqual([])
-    unmountAll()
-    // a fix that changes no such file says nothing more; nor does a row that asks nothing
-    fixes = [ready({ notice: '' })]
-    const plain = await mount(result())
-    await settle()
-    expect(plain.querySelector('.chat-fix-notice')).toBeNull()
-    fixes = [row({ notice })]
-    const on = await mount(result(true, 'Card says how many rows is on', 'fixed'))
-    await settle()
-    expect(on.querySelector('.chat-fix-notice')).toBeNull()
   })
 
   test('an earlier row of a fix is a quiet line of what it said, with no clicks', async () => {
@@ -197,14 +202,37 @@ describe('the row and the notice', () => {
     expect(sent).toEqual(['POST /fixes/3/undo'])
   })
 
-  test('a fix that did not pass says why, with Try again', async () => {
+  test('a fix that did not pass says why, with Try again and Ask Claude', async () => {
     fixes = [row({ state: 'failed', kind: 'failed', said: '“Card says how many rows” did not pass: its tests failed in the sandbox' })]
     const el = await mount(result(true, '“Card says how many rows” did not pass: its tests failed in the sandbox', 'failed'))
     await settle()
     expect(el.querySelector('.chat-fix-text')?.textContent).toContain('its tests failed in the sandbox')
-    expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Try again'])
+    expect([...el.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Try again', 'Ask Claude'])
     await click(button(el, 'Try again'))
     expect(sent).toEqual(['POST /ws/mini/fixes/3/redo'])
+  })
+
+  test("Ask Claude shows what the fix tried under its row and puts its failure in main's composer, in main; nothing is sent", async () => {
+    takeDrafts()
+    const opened: unknown[] = []
+    const off = bus.on('openChat', (e) => void opened.push(e))
+    fixes = [failed()]
+    const el = await mount(result(true, failed().said ?? '', 'failed'))
+    await settle()
+    expect(el.querySelector('.chat-fix-what')).toBeNull()
+    await click(button(el, 'Ask Claude'))
+    off()
+    expect([...el.querySelectorAll('.chat-fix-what dt')].map((d) => d.textContent)).toEqual(['You asked:', 'Claude did:', 'Tried:', 'Why:'])
+    expect(el.querySelector('.chat-fix-what')?.textContent).toContain('browser/frontend/src/canvas/Focus.tsx')
+    expect(takeDrafts()).toEqual([{ thread: 'main', text: askClaudeText(failed()) }])
+    expect(opened).toEqual([{ chatId: 'main' }])
+    expect(sent).toEqual([])
+    // one that needs a file no fix may change asks Claude the same way
+    unmountAll()
+    fixes = [failed({ blocked: true })]
+    const blocked = await mount(result(true, failed().said ?? '', 'failed'))
+    await settle()
+    expect([...blocked.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Ask Claude'])
   })
 
   test('back from the restart with something typed: the row offers Reload', async () => {

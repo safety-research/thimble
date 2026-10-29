@@ -3,22 +3,21 @@
 //   /thimble-fix <words>   a prompt to Claude: the plugin's prompt command /thimble:thimble-fix (commands/
 //                          thimble-fix.md, left out of the menu) runs with the words, so the transcript shows them as
 //                          typed, and Claude reads the person's fixes beside it (fixesContext: number, name, state).
-//                          Claude starts the fix with the fix-thimble skill, `N <words>` when the words follow up on
-//                          fix N, `new <words>` when they are about something else, or first asks one short question.
-//                          The kernel keeps the person's own words beside Claude's (--asked). Typed mid-turn, it
-//                          waits for the turn's end
-//   the fix-thimble skill  a request: the kernel makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer
-//                          (fixer.ts) works in it in the background; N <words> is a round of fix N itself (its fixer's,
-//                          or in place: the version the person has stays until y), new <words> a new fix; words with
-//                          neither go to the fixer that works, else the fix the line shows, else a new fix
-//                          (request.ts). The person asked for it after their
-//                          /thimble-fix <words>; else Claude did, on the person's yes to the fix it offered when it
-//                          saw thimble misbehave (skills/fix-thimble/SKILL.md, guidance.md). Claude reads what came
-//                          of it in the skill's place, and is told when the fix ends
-//   /thimble-fix           right after Claude offered a fix (its newest answer asks whether to start one, and started
-//                          none): the person's yes, so the prompt command runs with no words and Claude starts the fix
-//                          it offered. Else how to ask for a fix, and that fixes are listed and managed in a shell
-//                          (thimble fix), at once, without a turn of Claude's
+//                          Claude names the fix the words change with the fix-thimble skill, `N` when they follow up on
+//                          fix N, `new` when they are about something else, or first asks one short question. Typed
+//                          mid-turn, it waits for the turn's end
+//   the fix-thimble skill  a request in the person's own words, as they typed them after /thimble-fix: the kernel
+//                          makes a scratch copy (~/.thimble/fixes/work/<id>), and the fixer (fixer.ts) works in it in
+//                          the background; N is a round of fix N itself (its fixer's, or in place: the version the
+//                          person has stays until y), new a new fix; with neither, the words go to the fixer that
+//                          works, else the fix the line shows, else a new fix (request.ts). The person's own `N …` or
+//                          `new …` names the fix before Claude's does. Claude's words never reach the fix: with no
+//                          /thimble-fix of the person's, no fix starts, and Claude reads that the person asks for one
+//                          with /thimble-fix (skills/fix-thimble/SKILL.md). Claude reads what came of it in the
+//                          skill's place
+//   /thimble-fix           alone, or a fix's number alone: how to ask for a fix, at once, without a turn of Claude's.
+//                          The number of a fix that failed or no longer fits tries it again, in the person's words of
+//                          before, as y on its failed line does (request.ts redoFix)
 //   the fixer's calls      its shell runs in the sandbox runtime (no site but the package registries, reads only the
 //                          system, its tools and the copy, writes only the copy), at most 5 minutes a command, with no
 //                          dialog unless the person's rules deny the command, and never publishes to the registries;
@@ -41,24 +40,22 @@
 // thimble's or of Claude Code's.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { messageOf, turnsNow } from '../core/answers'
 import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
-import { mainTurn } from '../core/turn'
 import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
-import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
+import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen } from './line'
-import { fixesContext, request } from './request'
+import { fixesContext, redoFix, request } from './request'
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any
 
-/** The lead before the words in the skill's text (skills/fix-thimble/SKILL.md), as Claude Code filled in its argument. */
-const SKILL_LEAD = 'What thimble does wrong, and what it should do:'
+/** The lead before the argument in the skill's text (skills/fix-thimble/SKILL.md), as Claude Code filled it in. */
+const SKILL_LEAD = "The fix the person's words change:"
 
-/** The words Claude gave the fix-thimble skill, or '' when it gave none. */
+/** What Claude gave the fix-thimble skill (`N`, or `new`), or '' when it gave nothing. */
 export function wordsOfSkill(text: string): string {
   const i = text.indexOf(SKILL_LEAD)
   const words = i < 0 ? '' : text.slice(i + SKILL_LEAD.length).split(/\n\s*\n/)[0]!.trim()
@@ -76,20 +73,18 @@ export function notStarted(error: { kind?: string; message?: string } | undefine
   return `thimble started no fix: its fix-thimble hook failed: ${cut(why, 240)}. Tell the person in one short line, with that reason.`
 }
 
-/** The fix-thimble skill with Claude's words: the request, and what Claude reads of it in the skill's place. */
-async function startFromSkill($: Engine, words: string): Promise<string> {
-  if (!words) return 'thimble started no fix: the skill needs, as its argument, what thimble does wrong and what it should do. Call it again with those words.'
-  // after the person's /thimble-fix <words>, the request is theirs: the fixer reads their words as theirs, and the
-  // kernel keeps the words they typed beside Claude's, which restate them
+/** What Claude reads when it starts the skill with no /thimble-fix of the person's to answer. */
+export const NOT_ASKED = 'thimble started no fix: a fix starts from the person\'s own words, which they type after /thimble-fix. Tell them in one short line that /thimble-fix <what should work differently> asks for one.'
+
+/** The fix-thimble skill after the person's /thimble-fix <words>: the request in their words, as they typed them, and
+ *  what Claude reads of it in the skill's place. Claude's `form` names only the fix the words change (`N`, or `new`). */
+async function startFromSkill($: Engine, form: string): Promise<string> {
   const asked = Number((await $.state.get(ASKED)).value ?? 0) > 0
-  const said = asked ? String((await $.state.get(ASKED_WORDS)).value ?? '') : ''
-  if (asked) {
-    await $.state.set(ASKED, 0 as never)
-    await $.state.set(ASKED_WORDS, '' as never)
-  }
-  const r = await request($, words, asked ? 'person' : 'claude', false, said)
-  // the turn that started a fix: its words about the fix are no offer that a bare /thimble-fix takes up (offeredFix)
-  if (r.fix) await $.state.set(STARTED_IN, (await mainTurn($)) as never)
+  const words = asked ? String((await $.state.get(ASKED_WORDS)).value ?? '').trim() : ''
+  if (!words) return NOT_ASKED
+  await $.state.set(ASKED, 0 as never)
+  await $.state.set(ASKED_WORDS, '' as never)
+  const r = await request($, form, words)
   if (r.failed || !r.fix) return `${r.text.replace(/^×\s*/, '')} Tell the person in one short line.`
   // the fix by its name, never its number: a round changes the fix in place, a new fix is one of its own
   const then = 'Tell the person in one short line, then go on with their request.'
@@ -137,20 +132,24 @@ const fixerAgents = new Set<string>()
  *  (the turn of the command, and the one after Claude's question), and the words they typed. */
 const ASKED = { plugin: 'thimble', key: 'fixAsked' } as const
 const ASKED_WORDS = { plugin: 'thimble', key: 'fixAskedWords' } as const
-/** The turn of main's in which the fix-thimble skill last started a fix. */
-const STARTED_IN = { plugin: 'thimble', key: 'fixStartedIn' } as const
 
-/** Claude's offer of a fix: a question that proposes one ("Want me to start a fix?", "Should I fix it?"). A statement
- *  that speaks of a fix ("The agent fixed the parser", "Let me fix the jq filter first.", "Your thimble fix … is
- *  ready", "I started a fix") offers none. */
-const FIX_OFFER = /\bfix\w*\b[^.!?\n]*\?/i
+/** The states of a fix that its number alone tries again: it failed, or it no longer fits (y on a failed line does the
+ *  same; the kernel's line for a fix that does not fit names /thimble-fix N). */
+const TRY_AGAIN = ['failed', 'redo']
 
-/** Whether Claude just offered a fix: its newest answer asks whether to start one, and that turn started none. A bare
- *  /thimble-fix then is the person's yes. */
-export async function offeredFix($: Engine): Promise<boolean> {
-  const t = (await turnsNow($)).at(-1)
-  if (!t?.answer || t.turnId === (await $.state.get(STARTED_IN)).value) return false
-  return FIX_OFFER.test((await messageOf($, t.answer))?.text ?? '')
+/** /thimble-fix with a fix's number and no words: a fix that failed or no longer fits starts again in a new copy, in the
+ *  person's words of before, a moment after the command's hook, as y on its failed line does after the key; any other
+ *  gets how to ask. The command's answer, or null when there is none. */
+async function numberAlone($: Engine, n: number | null): Promise<string | null> {
+  const f = n == null ? null : (await refreshFixes($))?.fixes.find(x => x.id === n)
+  if (!f || !TRY_AGAIN.includes(f.state)) return FIX_ALONE
+  $.clock.after(0, () => {
+    void (async () => {
+      const bad = await redoFix($, f.id)
+      if (bad) await setFixLine($, { id: f.id, kind: 'problem', said: bad })
+    })().catch(err => $.ui.toast(`thimble could not try “${fixName(f)}” again: ${cut(String((err as Error)?.message || err), 160)}`))
+  })
+  return null
 }
 
 async function knowFixers($: Engine): Promise<void> {
@@ -189,7 +188,7 @@ export const registerFix: Register = on => {
     const r = await next(e)
     // not immediate: words typed mid-turn wait for the turn's end, as a prompt does
     try {
-      await $.command.register({ name: 'thimble-fix', description: 'Change thimble for yourself: say what should work differently. Alone: the fix Claude just offered, else your fixes.', argumentHint: '[what should work differently]' })
+      await $.command.register({ name: 'thimble-fix', description: 'Change thimble for yourself: say what should work differently.', argumentHint: '[what should work differently]' })
     } catch {
       // the command is missing in this session; the shell's `thimble fix list` still works
     }
@@ -225,18 +224,21 @@ export const registerFix: Register = on => {
     return r
   }).catch(($, e, next) => next(e))
 
-  // /thimble-fix alone and /thimble-fix update answer here, without a turn; words, and /thimble-fix alone right after
-  // Claude offered a fix, become the prompt command's run (commands/thimble-fix.md), whose row in the transcript shows
-  // them, a moment after this hook (a run from inside it would wait on it)
+  // /thimble-fix alone, a fix's number alone and /thimble-fix update answer here, without a turn; words become the
+  // prompt command's run (commands/thimble-fix.md), whose row in the transcript shows them, a moment after this hook (a
+  // run from inside it would wait on it)
   on('command.run', { command: /^(?:thimble:)?thimble-fix$/ }, async ($, e, next) => {
     const words = String(e.args || '').trim()
     if (/^update$/i.test(words)) return { text: UPDATE_IN_SHELL }
-    // alone: the person's yes to the fix Claude just offered, which Claude starts as its own offer; else how to ask
-    if (!words && e.command === 'thimble-fix' && !(await offeredFix($).catch(() => false))) return { text: FIX_ALONE }
-    if (words) {
-      await $.state.set(ASKED, 2 as never)
-      await $.state.set(ASKED_WORDS, words as never)
+    if (!words) return { text: FIX_ALONE }
+    // a fix's number (or new) and no words: nothing says what should change
+    const head = formHead(words)
+    if (head && !head.rest) {
+      const said = await numberAlone($, head.n)
+      return said ? { text: said } : {}
     }
+    await $.state.set(ASKED, 2 as never)
+    await $.state.set(ASKED_WORDS, words as never)
     if (e.command !== 'thimble-fix') {
       // the prompt command: Claude reads the person's fixes beside it, to tell a follow-up from a new fix
       const r = await next(e)

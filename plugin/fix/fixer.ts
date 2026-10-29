@@ -18,17 +18,15 @@
 //   liveFixer($, N)             the fix whose fixer still works, and its agent: more words for it go to that fixer
 //   fixerEnded($, e)            its end: thimble commits the change in the copy and runs the tests (`thimble fix done`),
 //                               then the line above the bar asks whether to use it (y; the person's key applies it), and
-//                               Claude Code sends a notification. When Claude started the fix, Claude is told, so that it
-//                               can tell the person. When the check does not use the change (a file no fix may change,
-//                               a binary file, failing tests), a new fixer gets another round in the same copy at once
-//                               (`thimble fix again`), told why; the person sees a failure only when a fixer ends with
-//                               `Cannot: <why>`. What came of a check that no session waited for is shown the same way
-//                               at the session's start (`checked`), and the kernel told it was shown (`thimble fix shown`).
-//                               An end that comes while another check of the same fix waits (a new round's fixer) is
-//                               kept, and checked once that check returns.
+//                               Claude Code sends a notification. When the check does not use the change (a file no fix
+//                               may change, a binary file, failing tests), a new fixer gets another round in the same
+//                               copy at once (`thimble fix again`), told why; the person sees a failure only when a fixer
+//                               ends with `Cannot: <why>`. What came of a check that no session waited for is shown the
+//                               same way at the session's start (`checked`), and the kernel told it was shown (`thimble
+//                               fix shown`). An end that comes while another check of the same fix waits (a new round's
+//                               fixer) is kept, and checked once that check returns.
 //
-//   state: fixers (agentId → the fix's id), fixBy (the fixes Claude started, by their id), fixerBox (the sandbox
-//          command's start, by the fix's id)
+//   state: fixers (agentId → the fix's id), fixerBox (the sandbox command's start, by the fix's id)
 import type { EngineInterface } from 'claude-code'
 
 import { busy, busyWhile } from '../bar/busy'
@@ -39,7 +37,7 @@ import { tellAtNextPrompt } from '../core/tell'
 import { cut } from '../core/text.js'
 import { sessionKey } from '../hooks/conversation'
 import { promptText } from '../prompts/prompts'
-import { type Fix, type Refusal, fixesDir, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, ownWords, refreshFixes, sessionIdNow, setFixLine } from './fixes'
+import { type Fix, type Refusal, askedWords, fixesDir, fixingWord, fixName, fixOf, fixSlug, jsonOf, kernelFix, refreshFixes, sessionIdNow, setFixLine } from './fixes'
 import { screenCopy } from './screen'
 
 type Engine = EngineInterface
@@ -47,22 +45,7 @@ type Engine = EngineInterface
 type Any = any
 
 const FIXERS = { plugin: 'thimble', key: 'fixers' } as const
-const BY = { plugin: 'thimble', key: 'fixBy' } as const
 const BOX = { plugin: 'thimble', key: 'fixerBox' } as const
-
-/** Who asked for a fix: the person (/thimble-fix), or Claude (the fix-thimble skill). */
-export type Asker = 'person' | 'claude'
-
-export async function askerOf($: Engine, id: number): Promise<Asker> {
-  return (((await $.state.get(BY)).value ?? {}) as Record<string, string>)[String(id)] === 'claude' ? 'claude' : 'person'
-}
-
-export async function setAsker($: Engine, id: number, by: Asker): Promise<void> {
-  const all = { ...(((await $.state.get(BY)).value ?? {}) as Record<string, 'claude'>) }
-  if (by === 'claude') all[String(id)] = 'claude'
-  else delete all[String(id)]
-  await $.state.set(BY, all as never)
-}
 
 async function fixers($: Engine): Promise<Record<string, number>> {
   return ((await $.state.get(FIXERS)).value ?? {}) as Record<string, number>
@@ -113,20 +96,18 @@ export function refusedText(r: Refusal, earlier: boolean): string {
   return `thimble did not use the last change for this fix: ${r.why}. ${where}. ${fix} When the request truly cannot be met without that, end with one line \`Cannot: <why, in plain words for the person>\` in place of the Title line; thimble shows that line to the person.`
 }
 
-/** The fixer's first message: the task (prompts/fixer.md), the words of each round (the person's own, as they typed
- *  them after /thimble-fix, without the form's head that names the fix, where thimble has them; else Claude's), where
- *  it works, the fix these words change, what the check refused last time, and a text copy of what thimble shows now. */
-function firstMessage(fix: Fix, earlier: string | null, task: string, by: Asker, screen: string): string {
-  const words = (fix.words || []).map((w, i) => ownWords(fix.asked?.[i] ?? '', n => n === fix.id) || w)
+/** The fixer's first message: the task (prompts/fixer.md), the person's words of each round, as they typed them after
+ *  /thimble-fix (a record from before keeps them beside Claude's, without the form's head that names the fix), where it
+ *  works, the fix these words change, what the check refused last time, and a text copy of what thimble shows now. */
+function firstMessage(fix: Fix, earlier: string | null, task: string, screen: string): string {
+  const words = askedWords(fix)
   const asked = words.length > 1
     ? words.map((w, i) => `Round ${i + 1}: ${w}`).join('\n')
     : words[0] || fix.title
   return [
     task.trim(),
     '',
-    by === 'claude'
-      ? `Claude, in the conversation above, saw thimble misbehave and offered this change to the person's thimble, and the person said yes:`
-      : `The person asked for this change to their thimble:`,
+    'The person asked for this change to their thimble:',
     '',
     asked,
     '',
@@ -174,7 +155,7 @@ async function start($: Engine, fix: Fix, earlier: boolean, screen: string): Pro
   const box = await sandboxOf($, fix.id)
   if (typeof box === 'string') return `The fixer did not start: ${box}`
   // no type: a fork of the session, which sees the conversation; named after the fix, never its number
-  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier ? `${fixesDir(await thimbleHome($))}/tmp/${fix.id}/earlier.patch` : null, task, await askerOf($, fix.id), screen), description: fixingWord(fix), cwd: fix.work || undefined, name: fixSlug(fix) })
+  const r = await spawnFork($, { kind: 'fixer', prompt: firstMessage(fix, earlier ? `${fixesDir(await thimbleHome($))}/tmp/${fix.id}/earlier.patch` : null, task, screen), description: fixingWord(fix), cwd: fix.work || undefined, name: fixSlug(fix) })
   if (r.deny !== undefined || !r.agentId) return `The fixer did not start (${cut(String(r.deny || 'no agent started'), 200)}).`
   await $.state.set(FIXERS, { ...(await fixers($)), [r.agentId]: fix.id } as never)
   busyFixer($, fix)
@@ -415,9 +396,9 @@ async function ended($: Engine, e: Any, id: number): Promise<Fix | null> {
   return afterCheck($, id, done, fix, !!end.cannot)
 }
 
-/** What came of a fix's check, shown: the line, Claude Code's notification, and Claude told when Claude asked for the
- *  fix; or the fix again when the check did not use its change and a new round should answer it. An outcome that the
- *  kernel's runner marked as not shown yet is no longer so once the line shows it, or a new round answers it. */
+/** What came of a fix's check, shown: the line, Claude Code's notification, and Claude told of a ready fix; or the fix
+ *  again when the check did not use its change and a new round should answer it. An outcome that the kernel's runner
+ *  marked as not shown yet is no longer so once the line shows it, or a new round answers it. */
 async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | null, cannot: boolean): Promise<Fix | null> {
   // before the round that may answer it, so that no later start shows a dismissed line again, or tells Claude again
   if (done?.unshown) await kernelFix($, ['shown', String(id)], { timeoutMs: 60000 })
@@ -437,14 +418,6 @@ async function afterCheck($: Engine, id: number, done: Fix | null, fix: Fix | nu
   if (kind === 'ready') {
     // the person may be in another window: Claude Code's own notification, with the line's words
     try { await $.ui.notify(`thimble ${changed ? 'changed' : 'fixed'}: ${title} · ${testsWord(done)}`, { title: 'thimble' }) } catch { /* the line says it */ }
-  }
-  if ((await askerOf($, id)) === 'claude') {
-    const said = `The thimble ${changed ? 'change to the fix' : 'fix'} you started, "${title}", ${kind === 'ready'
-      ? `is ready and ${testsWord(done)}; the person turns it on with y${changed ? ' (the version they have stays until then)' : ''}`
-      : done?.unchanged ? 'changed no code; the fix stays as it was'
-        : kind === 'request' ? 'changed no code; it is kept as a request in the person\'s list of fixes' : `did not pass its checks (${cut(done?.error || 'its tests failed', 200)})`}.`
-    await tellAtNextPrompt($, `fix-${id}`, `${said} Tell the person in one short line.`)
-  } else if (kind === 'ready') {
     await tellAtNextPrompt($, `fix-${id}`, changed
       ? `thimble's fixer changed the person's fix "${title}"; the new version waits for the person's y, and the one they have stays until then. Nothing for you to do.`
       : `thimble's fixer finished the fix "${title}"; it waits for the person's y. Nothing for you to do.`)

@@ -17,8 +17,9 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
     ask(c, words, page)      the person's `/thimble-fix <words>` in main's chat, as the terminal's /thimble-fix: main's
                              chat shows the message, and main reads prompts/thimble-fix.md with the words and the
                              person's fixes beside it (fixes_context), so that main decides whether the words follow up
-                             on a fix. Main starts the fix with its fix_thimble tool (from_tool), `N <words>` for a round
-                             of fix N or `new <words>` for a new fix, or first asks the person one short question
+                             on a fix. Main starts the fix with its fix_thimble tool (from_tool), `N` for a round of fix
+                             N or `new` for a new fix, or first asks the person one short question. The fix takes the
+                             person's words as they typed them, never main's
     request(c, words, page)  a new fix (`fix new --made-in browser`) and its fixer
     change(c, fid, words)    more words for a fix the person has (fix_thimble's `N <words>`, or a message in the fix's
                              thread): a round of that fix (`fix round`), never a new fix. A fixer that still works gets
@@ -35,15 +36,14 @@ This module calls it as `thimble fix VERB`, with THIMBLE_HOME set to that home, 
                              scan) or a binary file, and runs the tests of what the change touched (`fix done`), one fix
                              at a time; a fix that passes is ready. How it ended is a row
                              in main's chat and in the fix's thread, at the time it ended (note: a `fix` chip): a ready
-                             fix asks the person there, Use it now, What changed, Later. Nothing goes on by itself. A
-                             fix that changes the sandbox, the launcher, dependencies or another such file says which
-                             in one sentence above its clicks, as the terminal's line does (notice_said)
+                             fix asks the person there, Use it now, What changed, Later. Nothing goes on by itself
     the person's clicks      Use it now, or Use it in Your fixes (`fix apply`, with a secret made at the click as the
                              terminal's key press makes one; then the page of live's browser/ is built and the server
                              starts again from live, dev._do_restart; a page that does not build takes the fix off
                              again; once it is on, a row says so), Later (the row asks no more, the fix stays ready in
-                             Your fixes), Undo (`fix undo`, then a restart) and Redo (`fix redo`, a new fixer with the
-                             earlier change) (FixStrip.tsx)
+                             Your fixes), Undo (`fix undo`, then a restart), Try again (`fix redo`, a new fixer with the
+                             earlier change) and, on a fix that did not pass, Ask Claude, which shows what it tried and
+                             puts its failure in main's composer for the person to send (FixStrip.tsx)
 
 What the last row of each fix says lives in the browser's home (fixes.json, by fix id), so it is still there after the
 restart; the newest row of a fix shows its state now, with the clicks it takes.
@@ -91,6 +91,7 @@ PAGE_CHARS = 8000  # of the text copy of the page
 PROMPT = "thimble-fix"  # what main reads of the person's /thimble-fix (prompts/thimble-fix.md)
 _phase: dict[int, str] = {}  # fix id → fixing | testing | applying | restarting, while this server works on it
 _pages: dict[str, str] = {}  # workspace → the text copy of the page when the person last typed /thimble-fix there
+_asked: dict[str, str] = {}  # workspace → the words the person typed after their last /thimble-fix there
 _since: dict[int, float] = {}  # fix id → when this server's work on it began (a new fix, a round, a redo)
 _fixers: dict[int, Any] = {}  # fix id → its fixer's conversation (runtime.Conv)
 _where: dict[int, tuple[str, str]] = {}  # fix id → (workspace, chat) of its fixer's chat (fixer_chat)
@@ -139,6 +140,12 @@ def notes_path() -> Path:
     return cli.home().expanduser() / "fixes.json"
 
 
+def _tilde(p: str) -> str:
+    """A path as the person reads it: ~ for their home folder."""
+    home = str(Path.home())
+    return "~" + p[len(home):] if p.startswith(home + os.sep) else p
+
+
 def _cut(text: str, n: int) -> str:
     t = re.sub(r"\s+", " ", text or "").strip()
     return t if len(t) <= n else t[: n - 1].rstrip() + "…"
@@ -153,21 +160,6 @@ def fixing_word(rec: dict[str, Any]) -> str:
     """The fixer's chat in the thread tree: `fixing <name>` for a new fix, `changing <name>` for a round of a fix the
     person has (plugin/fix/fixes.ts fixingWord)."""
     return f"{'changing' if rec.get('prev') else 'fixing'} {fix_name(rec, 40)}"
-
-
-def notice_said(rec: dict[str, Any]) -> str:
-    """The sentence that tells the person what such files a fix changes before they use it, from the kinds and files
-    the kernel's record names (notice): `This fix changes the sandbox (plugin/cards/argv.mjs).`, or ''. The terminal
-    says the same (plugin/engine/kernel/fixes.py notice_said, plugin/fix/fixes.ts noticeText)."""
-    kinds = rec.get("notice")
-    if not isinstance(kinds, dict) or not kinds:
-        return ""
-
-    def joined(xs: list[str]) -> str:
-        return " and ".join(xs) if len(xs) < 3 else ", ".join(xs[:-1]) + ", and " + xs[-1]
-
-    named = [f"{k} ({joined([str(p) for p in (ps if isinstance(ps, list) else [ps])])})" for k, ps in kinds.items()]
-    return f"This fix changes {joined(named)}."
 
 
 # ------------------------------------------------------------------ the kernel
@@ -373,7 +365,9 @@ def status(every: bool = False) -> dict[str, Any]:
                      "kind": n.get("kind") if shown else None, "said": n.get("said") if shown else None,
                      "tests": r.get("tests"), "error": r.get("error"), "words": (r.get("words") or [""])[-1],
                      "summary": r.get("summary") or "", "files": len(files), "change": bool(r.get("prev")),
-                     "notice": notice_said(r),
+                     # what it tried, for a fix that did not pass: the files it changed, and its copy of thimble
+                     "paths": [str(f.get("path") or "") for f in files if isinstance(f, dict)][:20],
+                     "copy": _tilde(str(r.get("work") or "")),
                      # it needs a change to a file no fix may change: another try without new words fails the same way
                      "blocked": bool(r.get("blocked")),
                      "workspace": conv.c if conv is not None else n.get("workspace"),
@@ -867,14 +861,38 @@ async def request(c: str, words: str, page: str = "", *, title: str | None = Non
 CHANGEABLE = ("on", "off", "ready", "working", "failed", "redo")  # the fixes more words can change (plugin/fix/request.ts)
 
 
+def head_of(words: str) -> tuple[int | None, bool, str] | None:
+    """The head of the explicit form: `N` (a fix's number) or `new`, each with a mark after it or none (`2: …`, `#2 -
+    …`, `new: …`), and the words after it, '' when there are none; None when the words have no head
+    (plugin/fix/fixes.ts formHead)."""
+    m = re.match(r"^(?:#?(\d+)|(new))(?:\s*[:.)\u2013\u2014-])?(?:\s+([\s\S]*))?$", words.strip(), re.I)
+    return (int(m.group(1)) if m.group(1) else None, bool(m.group(2)), (m.group(3) or "").strip()) if m else None
+
+
+def _changeable(n: int | None, recs: list[dict[str, Any]]) -> bool:
+    return n is not None and any(int(r.get("id") or 0) == n and r.get("state") in CHANGEABLE for r in recs)
+
+
 def form_of(words: str, recs: list[dict[str, Any]]) -> tuple[str, int | None]:
     """The words of `/thimble-fix N <words>` and fix N, when N is a fix the person has that words can change; `new
     <words>` and any other words: the words, for a new fix (plugin/fix/request.ts formOf)."""
-    n = re.match(r"^#?(\d+)\s+([\s\S]+)$", words)
-    if n and any(int(r.get("id") or 0) == int(n.group(1)) and r.get("state") in CHANGEABLE for r in recs):
-        return n.group(2).strip(), int(n.group(1))
-    fresh = re.match(r"^new\s+([\s\S]+)$", words, re.I)
-    return (fresh.group(1).strip() if fresh else words), None
+    h = head_of(words)
+    if h and h[2] and _changeable(h[0], recs):
+        return h[2], h[0]
+    if h and h[2] and h[1]:
+        return h[2], None
+    return words.strip(), None
+
+
+def named_fix(asked: str, form: str, recs: list[dict[str, Any]]) -> int | None:
+    """The fix the person's words change: their own `N …` (a fix of theirs that words can change), else main's form
+    (`N`, with or without words after it); None for a new fix, as their own `new …` or main's `new` asks
+    (plugin/fix/request.ts namedFix)."""
+    mine = head_of(asked)
+    if mine and mine[2] and (mine[1] or _changeable(mine[0], recs)):
+        return mine[0] if not mine[1] else None
+    main = head_of(form)
+    return main[0] if main and _changeable(main[0], recs) else None
 
 
 def round_text(rec: dict[str, Any], words: str) -> str:
@@ -949,7 +967,9 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     from . import agents, events, prompts  # noqa: PLC0415
 
     words = (words or "").strip()
-    if not words:
+    # alone, or a fix's number (or new) with no words after it: nothing says what should change
+    head = head_of(words)
+    if not words or (head is not None and not head[2]):
         raise HTTPException(400, EMPTY)
     if why := problem():
         raise HTTPException(409, why)
@@ -959,21 +979,29 @@ async def ask(c: str, words: str, page: str = "") -> dict[str, Any]:
     said = f"{COMMAND} {words}"
     eid = secrets.token_hex(4)
     _pages[c] = page or ""
+    _asked[c] = words
     agents.mirror(c, "user", by=agents.BROWSER, text=said, event=eid)
     out = events.post(c, events.MAIN, {"text": text}, mirror=False, line=said, event_id=eid)
     return {"event": out.get("id")}
 
 
-async def from_tool(c: str, words: str) -> dict[str, Any]:
-    """Main's fix_thimble: `N <words>` a round of fix N (change), `new <words>` or any other words a new fix (request),
-    with the page as the person's last /thimble-fix here sent it. Main's chat gets the line that opens the fix's
-    thread; main heard of it in the tool's result. {fix, kind: new | round | live}."""
-    words = (words or "").strip()
-    if not words:
-        raise HTTPException(400, EMPTY)
+NOT_ASKED = "a fix starts from the person's own words, which they type after /thimble-fix <what should work differently>."
+
+
+async def from_tool(c: str, form: str) -> dict[str, Any]:
+    """Main's fix_thimble after the person's /thimble-fix <words> here: their words, as they typed them, go to the fix,
+    never main's; main's `form` names the fix they change, `N` a round of fix N (change), `new` or none a new fix
+    (request), and the person's own `N …` or `new …` names it first. The page is as their /thimble-fix sent it. Main's
+    chat gets the line that opens the fix's thread; main heard of it in the tool's result. With no /thimble-fix of the
+    person's to answer, no fix starts. {fix, kind: new | round | live}."""
+    asked = _asked.pop(c, "")
+    if not asked:
+        raise HTTPException(409, NOT_ASKED)
     if why := problem():
         raise HTTPException(409, why)
-    said, target = form_of(words, await asyncio.to_thread(records))
+    recs = await asyncio.to_thread(records)
+    target = named_fix(asked, form or "", recs)
+    said = form_of(asked, recs)[0]
     page = _pages.pop(c, "")
     if target is not None:
         got = await change(c, target, said, page, tell=False)

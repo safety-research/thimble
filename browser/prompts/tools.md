@@ -455,7 +455,7 @@ Turn a report check off, {{if:browser}}as the switch in the Comments pane does, 
 
 ## file_dev_ticket
 
-File a ticket for thimble's developer agent to change a view it built for this corpus, named in `view`. A change to thimble itself is a fix of the person's thimble, which `fix_thimble` starts.
+File a ticket for thimble's developer agent to change a view it built for this corpus, named in `view`. A change to thimble itself is a fix of the person's thimble, which they ask for with /thimble-fix.
 
 ```json
 {
@@ -472,13 +472,13 @@ File a ticket for thimble's developer agent to change a view it built for this c
 
 ## fix_thimble
 
-Start a fix of thimble itself when the person asks for one, with /thimble-fix or with a yes to your offer of a fix. thimble is the person's own tool, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, offer a fix and start it only when they say yes. A copy of you then changes thimble in the background, in a copy of its code, and the person decides with a click whether to use the fix.
+Start the fix the person asks for with /thimble-fix. A copy of you changes thimble in the background, in a copy of its code, from their words as they typed them, and the person decides with a click whether to use the fix. `words` names the fix their words change. thimble is the person's own tool, so when it misbehaves in this session, such as a card, a pane or a button of thimble's that draws or acts wrong, you may tell them that /thimble-fix <what should work differently> asks for a fix.
 
 ```json
 {
   "type": "object",
   "properties": {
-    "words": {"type": "string", "description": "`N <words>` to change the person's fix N, or `new <words>` for a new fix: what thimble does wrong, and what it should do."}
+    "words": {"type": "string", "description": "`N` to change the person's fix N, or `new` for a new fix."}
   },
   "required": ["words"]
 }
@@ -897,7 +897,7 @@ Filed {label}: {title}. {start}
 
 ## file_dev_ticket-fix
 
-This call filed nothing: a change to thimble itself is a fix of the person's thimble, which `fix_thimble` starts when they ask for it.
+This call filed nothing: a change to thimble itself is a fix of the person's thimble, which they ask for with /thimble-fix <what should work differently>.
 
 ## fix_thimble-new
 
