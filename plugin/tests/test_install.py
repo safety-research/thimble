@@ -721,3 +721,56 @@ def test_what_claude_reads_about_the_version_says_where_it_comes_from():
     fixes = " ".join((ROOT / "plugin" / "engine" / "kernel" / "fixes.py").read_text().split('"""', 2)[1].split())
     assert "when the release's plugin.json has a version" in fixes and "names its version by its tag alone" in fixes
 
+
+# the docs an install reads: the README, which sends Claude to CLAUDE.md, and the two it names
+INSTALL_DOCS = ("README.md", "CLAUDE.md", "INSTALL.md", "browser/README.md")
+
+
+def named_paths(doc):
+    """The repository's paths a doc names, in its code spans, code blocks and links: a relative path under an entry of
+    the doc's folder or of the repository's top, or a file name (README.md's `docs/assets/thimble-term.png` and
+    `INSTALL.md`, browser/README.md's `backend/app/wif.py` and `scripts/install.sh`, "at the top of the repository").
+    Not URLs, paths in a home (~/) or from the root, placeholders (<plugin>), globs, or a path under no such entry
+    (`refs/thimble/`, a data folder's `thimble/`)."""
+    at = (ROOT / doc).parent
+    text = (ROOT / doc).read_text()
+    spans = re.findall(r"```[a-z]*\n(.*?)```", text, re.S)
+    text = re.sub(r"```[a-z]*\n.*?```", "", text, flags=re.S)
+    spans += re.findall(r"`([^`\n]+)`", text) + re.findall(r"\]\(([^)\s]+)\)", text)
+    out = []
+    for word in " ".join(spans).split():
+        p = word.strip("'\",;:()").rstrip("/.")
+        if not p or "://" in p or p[0] in "~$/-@" or set(p) & set("<>*=$#"):
+            continue
+        top = p.split("/")[0]
+        if ("/" in p and ((at / top).exists() or (ROOT / top).exists())) or re.fullmatch(r"[\w.-]+\.(md|sh|py|mjs|json|csv)", p):
+            out.append(p)
+    return out
+
+
+def test_every_path_the_install_docs_name_is_in_the_repository():
+    """The docs an install reads name only files that are in the repository, beside the doc or at its top, or that its
+    build makes there (git ignores those), so that Claude, which reads them first when it installs thimble, never looks
+    for one that is not there."""
+    names = {doc: named_paths(doc) for doc in INSTALL_DOCS}
+    assert "examples/sample/runs.csv" in names["CLAUDE.md"] and "INSTALL.md" in names["README.md"]
+    for doc, paths in names.items():
+        at = (ROOT / doc).parent
+        for p in paths:
+            if (at / p).exists() or (ROOT / p).exists():
+                continue
+            # a file or a folder of the build (frontend/dist), which git ignores
+            ignored = any(subprocess.run(["git", "check-ignore", "-q", q], cwd=ROOT).returncode == 0
+                          for q in (str(at / p), f"{at / p}/"))
+            assert ignored, f"{doc} names {p}, which is not in the repository"
+
+
+def test_claude_knows_0_9_by_what_the_install_script_finds():
+    """Claude's install steps (CLAUDE.md, step 2) know thimble 0.9 by what scripts/install.sh finds and says, and name
+    no file in the person's home as its sign for Claude to look for first: on a machine without 0.9 that look ends the
+    install's first steps in a red "Exit code 1", and the install of 0.10 makes ~/.local/bin/thimble too (a link to its
+    own command), which the script tells from 0.9's."""
+    text = " ".join((ROOT / "CLAUDE.md").read_text().split())
+    step = text.split(" 2. thimble 0.9 is here", 1)[1].split(" 3. ", 1)[0]
+    when = step.split("Before you remove anything", 1)[0]
+    assert "`scripts/install.sh` (step 3) stops with what it found" in when and "~/" not in when, when
