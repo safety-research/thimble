@@ -32,8 +32,8 @@ const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms))
 /** Whether the person answered the offer, in this page or another (backend tour.py); false while that cannot be read. */
 const answered = () => api.tour().then(({ seen }) => seen, () => false)
 
-/** The welcome of `tour` goes once the person answers the offer in another page: asked every ANSWER_CHECK_MS, and when
- * this page comes back into view, while the welcome waits for its answer. Returns the stop. */
+/** The welcome of `tour` goes once the person answers the offer in another page: asked every ANSWER_CHECK_MS while this
+ * page is in view, and when it comes back into view, while the welcome waits for its answer. Returns the stop. */
 function watchAnswer(tour: Tour): () => void {
   let on = true
   const check = () =>
@@ -41,7 +41,7 @@ function watchAnswer(tour: Tour): () => void {
       if (seen && on && tour.state().welcome) tour.end()
     })
   const shown = () => document.visibilityState === 'visible' && check()
-  const timer = window.setInterval(check, ANSWER_CHECK_MS)
+  const timer = window.setInterval(shown, ANSWER_CHECK_MS)
   document.addEventListener('visibilitychange', shown)
   window.addEventListener('focus', check)
   return () => {
