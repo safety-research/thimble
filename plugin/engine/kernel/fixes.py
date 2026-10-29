@@ -2470,11 +2470,20 @@ def _own_name() -> str:
     return tag[1:] if RELEASE_TAG.match(tag) else ""
 
 
+def running_name(rel: dict[str, Any] | None = None) -> str:
+    """The thimble that runs, as the person reads it. Claude Code loads thimble from live only once release.json says
+    pointed (the first fix that went on pointed its marketplace there): then the release live is on (release_name).
+    Before that, the copy Claude Code installed (_own_name), also when a request made live already: live's release
+    can be older than that copy (thimble was installed again since)."""
+    rel = release() if rel is None else rel
+    return release_name(rel) if rel.get("pointed") else _own_name()
+
+
 def version_name() -> str:
-    """`thimble --version`: the thimble that runs, as the person reads it (release_name), else the commit of the
-    checkout it came from; '' when nothing names it (a folder with no git whose plugin.json has no version)."""
+    """`thimble --version`: the thimble that runs (running_name), else the commit Claude Code installed; '' when
+    nothing names it (a folder with no git whose plugin.json has no version)."""
     try:
-        return release_name() or str(find_source()["commit"])[:7]
+        return running_name() or str(find_source()["commit"])[:7]
     except (FixError, OSError, subprocess.SubprocessError):
         return ""
 
@@ -3265,7 +3274,9 @@ def listing() -> dict[str, Any]:
     recs.sort(key=lambda r: (ORDER.get(str(r.get("state")), 6), r["id"]))
     rel = release()
     on = is_on()
-    return {"fixes": recs, "on": on, "live": str(live_dir()), "version": release_name(rel),
+    # the thimble that runs; when nothing names it, live's release
+    version = running_name(rel) or (release_name(rel) if rel else "")
+    return {"fixes": recs, "on": on, "live": str(live_dir()), "version": version,
             "base": rel.get("base") or "", "kind": rel.get("kind") or "", "pointed": bool(rel.get("pointed")),
             "count_on": sum(r.get("state") == "on" for r in recs),
             "aside": [r["id"] for r in recs if r.get("state") == "pending"], "folded": folded, "carried": carried}

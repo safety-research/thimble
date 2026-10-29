@@ -1708,9 +1708,10 @@ def test_two_sessions_check_only_their_own_fixes_and_a_copy_that_is_no_checkout_
 
 
 def test_thimble_version_names_the_thimble_that_runs(world, tmp_path, monkeypatch, capsys):
-    """thimble --version, in a shell or in Claude's Bash tool: the version the installed copy's plugin.json carries
-    (scripts/install.sh writes the release's there), else the release tag of the commit Claude Code installed, else that
-    commit; with fixes, the release they are on."""
+    """thimble --version, in a shell or in Claude's Bash tool: the copy Claude Code installed, by the version its
+    plugin.json carries (scripts/install.sh writes the release's there), else by the release tag of its commit, else by
+    that commit, also after a request made live on an older release; once a fix is on, Claude Code loads thimble from
+    live: the release the fixes are on. The head of thimble fix names the same thimble."""
     from kernel import cli  # noqa: PLC0415
 
     def version() -> str:
@@ -1728,11 +1729,19 @@ def test_thimble_version_names_the_thimble_that_runs(world, tmp_path, monkeypatc
     assert version() == f"thimble {world['base'][:7]}"
     sh("git", "tag", "v0.10.6", cwd=world["rel"])
     assert version() == "thimble 0.10.6"
-    # with fixes, Claude Code loads thimble from live: the release they are on
+    # a request that never went on makes live at 0.10.6, and then 0.10.7 is installed: Claude Code loads the copy it
+    # installed, not live, so that copy is the thimble that runs
     r = made(world)
+    manifest.write_text(json.dumps({"name": "thimble", "version": "0.10.7"}) + "\n")
+    assert FX.release()["tag"] == "v0.10.6" and not FX.release()["pointed"]
+    assert version() == "thimble 0.10.7"
+    assert FX.list_lines()[0].startswith("Your thimble fixes · thimble 0.10.7 with ")
+    # with a fix on, Claude Code loads thimble from live: the release the fixes are on, whatever a copy says
     FX.done(r["id"], "Bar says read", "")
     FX.apply(r["id"], press(r["id"]))
+    assert FX.release()["pointed"]
     assert version() == "thimble 0.10.6"
+    assert FX.list_lines()[0] == "Your thimble fixes · thimble 0.10.6 with 1 on"
 
 
 def test_thimble_version_of_a_folder_with_no_git_and_no_version_says_so(tmp_path, monkeypatch, capsys):
