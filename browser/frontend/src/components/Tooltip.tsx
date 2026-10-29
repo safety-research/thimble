@@ -162,6 +162,10 @@ export function markTips(show: (mark: Element, x: number, y: number) => boolean,
     away(false)
     on = mark
   }
+  const reset = () => {
+    away(false)
+    on = null
+  }
   return {
     /** a move of the pointer, `e`, over `mark` (null for none) */
     point(mark: Element | null, e: PointerAt) {
@@ -185,11 +189,12 @@ export function markTips(show: (mark: Element, x: number, y: number) => boolean,
     key(e: { key: string }) {
       if (e.key === 'Escape' || isPointKey(e.key, mac)) drop(on)
     },
-    /** the tip gone, and the mark under the pointer waits its moment again (a scroll moved the marks, the pointer left) */
-    reset() {
-      away(false)
-      on = null
+    /** the pointer going out of an element, `e`: out of the page (to no element), it takes the tip with it */
+    out(e: { relatedTarget: EventTarget | null }) {
+      if (!e.relatedTarget) reset()
     },
+    /** the tip gone, and the mark under the pointer waits its moment again (a scroll moved the marks, the pointer left) */
+    reset,
   }
 }
 
@@ -223,10 +228,7 @@ export function HoverTips() {
       tips.point(markAt(e.target), e)
     }
     const press = (e: MouseEvent) => tips.press(markAt(e.target))
-    // the pointer left the page
-    const out = (e: MouseEvent) => {
-      if (!e.relatedTarget) tips.reset()
-    }
+    const out = (e: MouseEvent) => tips.out(e)
     const scroll = () => tips.reset()
     const key = (e: KeyboardEvent) => tips.key(e)
     document.addEventListener('pointermove', move, { capture: true, passive: true })

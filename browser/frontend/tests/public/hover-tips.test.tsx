@@ -2,11 +2,11 @@
 // The one tooltip for marks that name a value (src/components/Tooltip.tsx HoverTips, drawn once by the shell, by the
 // rules of markTips): the mark under the pointer with `data-tip` (a record's labels and their values, a label's cell
 // beside a record) shows its text under the pointer after a moment, as a control's tip does, at once when the pointer has
-// just left a tip; the pointer leaving it, a press, the ask key, a scroll or Escape takes the tip away. None shows while
-// a button is held (a selection or a drag over the records) or while the ask key is held (the key Settings picks), the
-// pointer still or moving: the key going down takes a tip away at once, and a tip waiting its moment with it. A tip taken
-// away by a press, the ask key or Escape stays away from its mark until the pointer reaches another, which waits its
-// moment. Where it stands is placeAtPointer's.
+// just left a tip; the pointer leaving it or the page, a press, the ask key, a scroll or Escape takes the tip away. None
+// shows while a button is held (a selection or a drag over the records) or while the ask key is held (the key Settings
+// picks), the pointer still or moving: the key going down takes a tip away at once, and a tip waiting its moment with it.
+// A tip taken away by a press, the ask key or Escape stays away from its mark until the pointer reaches another, which
+// waits its moment. Where it stands is placeAtPointer's.
 import { act } from 'react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import { HoverTips, placeAtPointer, TIP_DELAY_MS, TIP_WARM_MS } from '../../src/components/Tooltip.tsx'
@@ -100,6 +100,24 @@ test('a press, a scroll or Escape takes the name away', async () => {
     await act(async () => void away())
     expect(tips()).toEqual([])
   }
+})
+
+test('the pointer going out of the page takes the name away, and the mark it comes back to waits its moment; going out of an element into another does not', async () => {
+  const [tested] = await page()
+  await point(document.body)
+  await wait(TIP_WARM_MS + 50)
+  await point(tested)
+  await wait(TIP_DELAY_MS)
+  // out of the mark's words into the mark itself: an element to go to
+  await act(async () => void tested.querySelector('.words')!.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: tested })))
+  expect(tips()).toHaveLength(1)
+  // out of the page: no element to go to
+  await act(async () => void tested.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse' })))
+  expect(tips()).toEqual([])
+  await point(tested)
+  expect(tips()).toEqual([])
+  await wait(TIP_DELAY_MS)
+  expect(tips()).toHaveLength(1)
 })
 
 test('a held button shows no name: across the marks while it is held, nor on the mark it was let go over, and the next mark waits its moment', async () => {

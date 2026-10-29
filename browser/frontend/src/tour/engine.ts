@@ -1171,6 +1171,10 @@ export function createTour(snaps: Snaps): Tour {
     if (i >= 0 && steps[i]?.tips) tips.point(tipAt(e.clientX, e.clientY), e)
     else hideTip()
   }
+  // the pointer going out of the page takes the analyst's name with it
+  const onOut = (e: PointerEvent) => {
+    if (e.isTrusted) tips.out(e)
+  }
   /** the demo's name for `mark`, the demo's last one going */
   const showTip = (mark: Element, x: number, y: number): HTMLElement | null => {
     fx.querySelectorAll('.tip[data-demo]').forEach((e) => e.remove())
@@ -1350,6 +1354,7 @@ export function createTour(snaps: Snaps): Tour {
     setGuard(guard)
     window.addEventListener('mousemove', onHover, { capture: true, passive: true })
     window.addEventListener('pointermove', onPoint, { capture: true, passive: true })
+    window.addEventListener('pointerout', onOut, { capture: true, passive: true })
     welcome = !!o.welcome
     replay = !!o.replay
     if (welcome) {
@@ -1377,6 +1382,7 @@ export function createTour(snaps: Snaps): Tour {
     setGuard(null)
     window.removeEventListener('mousemove', onHover, { capture: true })
     window.removeEventListener('pointermove', onPoint, { capture: true })
+    window.removeEventListener('pointerout', onOut, { capture: true })
     root.remove()
     host.remove()
     root = null

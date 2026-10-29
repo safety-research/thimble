@@ -21,8 +21,8 @@
 //     thimble's tooltip, then on another's; the analyst's pointer resting on a record's bar shows its label and value
 //     too, a record of another value at once, off the transcript nothing, and while a button is held across the records
 //     nothing, nor on the record it is let go over; as in Files, the ask key going down with the pointer still takes the
-//     name away, and none shows while it is held, pressed the moment the pointer stops too, nor once it is let go; the
-//     wheel scrolls the labels' transcript in steps with every record
+//     name away, and none shows while it is held, pressed the moment the pointer stops too, nor once it is let go, and the
+//     pointer going out of the page takes it too; the wheel scrolls the labels' transcript in steps with every record
 //     moving by exactly the scroll, its height, the cutout and the example sidebar still and the strip's thumb
 //     following, and the wheel over the strip too;
 //   - step 5: inside the example view the wheel and a click work and reach nothing else; in its head no item meets
@@ -893,6 +893,21 @@ async function walk(page: Page, tag: string, send = false) {
   await page.keyboard.up('Meta')
   await look(700, 'let go after')
   assert.deepEqual([...keyed], [], `${tag} 3: no name while the ask key is held, the pointer still, nor once it is let go`)
+  // the pointer going out of the page takes the name with it, as in Files; back on the record, it waits its moment
+  await page.mouse.move(onPop.x, onPop.y, { steps: 4 })
+  await sleep(700)
+  await page.mouse.move(p1.x, p1.y, { steps: 4 })
+  await sleep(700)
+  assert.deepEqual(await ownTip(), ['what the step does: runs tests'], `${tag} 3: the name shows before the pointer goes out`)
+  // straight out and straight back, over nothing else on the way, so the name goes by the pointer leaving the page alone
+  await page.mouse.move(-5, p1.y)
+  await sleep(100)
+  assert.deepEqual(await ownTip(), [], `${tag} 3: out of the page, the name goes`)
+  await page.mouse.move(p1.x, p1.y)
+  await sleep(100)
+  assert.deepEqual(await ownTip(), [], `${tag} 3: back on the record, nothing at once`)
+  await sleep(500)
+  assert.deepEqual(await ownTip(), ['what the step does: runs tests'], `${tag} 3: back on the record, the name after a moment`)
   // in wheel steps of 100 px down and back up, every record on screen moves by exactly the scroll, and the transcript's
   // height, the cutout and the Labels pane hold still while the strip's thumb follows
   const look5 = () =>

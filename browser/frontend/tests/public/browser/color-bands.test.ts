@@ -266,3 +266,29 @@ test(`the ask key takes a record's name away the moment it goes down with the po
     await page.close()
   }
 }, 120_000)
+
+test(`the pointer going out of the page takes a record's name with it, and back on the record the name waits its moment`, async (ctx) => {
+  if (!browser) return ctx.skip()
+  const page = await open(`?mode=transcript`)
+  await page.waitForFunction(() => document.querySelectorAll('.reader-band').length > 20)
+  const p = await page.evaluate(() => {
+    const b = document.querySelector<HTMLElement>(`.reader-card[data-line="6"]`)!.querySelectorAll('.reader-band')[1].getBoundingClientRect()
+    return { x: b.left + b.width / 2, y: b.top + Math.min(12, b.height / 2) }
+  })
+  const tips = () => page.evaluate(() => [...document.querySelectorAll('.tip')].map((t) => String(t.textContent)))
+  await page.mouse.move(500, 690, { steps: 2 })
+  await page.waitForTimeout(700)
+  await page.mouse.move(p.x, p.y, { steps: 4 })
+  await page.waitForTimeout(600)
+  assert.deepEqual(await tips(), ['tactic: tactic'], 'the name shows')
+  // straight out and straight back, over nothing else on the way, so the name goes by the pointer leaving the page alone
+  await page.mouse.move(-5, p.y)
+  await page.waitForTimeout(100)
+  assert.deepEqual(await tips(), [], 'out of the page, the name goes')
+  await page.mouse.move(p.x, p.y)
+  await page.waitForTimeout(100)
+  assert.deepEqual(await tips(), [], 'back on the record, nothing at once')
+  await page.waitForTimeout(500)
+  assert.deepEqual(await tips(), ['tactic: tactic'], 'back on the record, the name after a moment')
+  await page.close()
+}, 60_000)
