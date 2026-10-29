@@ -999,8 +999,8 @@ export function groupState(tools: readonly ToolRow[], pending: boolean): ToolSta
 
 export interface MadeCell {
   id: string
-  /** the canvas group the call named, as its last part in lower case (orientation, a group of the analyst's); '' when it
-   * named none */
+  /** the canvas group the call named, whole and in lower case (orientation, a group of the analyst's, a path of titles
+   * such as `analysis / spike`); '' when it named none */
   group: string
 }
 /** What a log's calls made, nested calls included, in order and once each: the cards (made or edited), the views
@@ -1040,9 +1040,12 @@ export function orientMade(made: Made): Made {
   }
 }
 
+/** Whether a group a call named is the orientation's deck or a frame in it: its first title names the deck. */
+const inDeck = (g: string): boolean => DECK_GROUPS.has(g.split(' / ')[0])
+
 /** The cards an orientation left in its deck, its labels' cards among them; 0 when it wrote no deck. Pure. */
 export function deckCards(made: Made): number {
-  return made.cells.filter((c) => DECK_GROUPS.has(c.group)).length + made.labelCards.filter((l) => DECK_GROUPS.has(l.group)).length
+  return made.cells.filter((c) => inDeck(c.group)).length + made.labelCards.filter((l) => inDeck(l.group)).length
 }
 
 const CELL_HEAD_RE = /^(?:card|cell):([A-Za-z0-9_-]+)\s*$/m
@@ -1059,9 +1062,11 @@ export function madeCell(t: ToolRow): string | null {
 
 /** A request's `request:<id>` and a thread's `thread:<id>` name no group: the card stands loose (backend tools._group_id). */
 const NO_GROUP_RE = /^(?:request|thread):[A-Za-z0-9_-]+$/
+/** The group a call named, whole and on one line, as the server takes it (a slash is part of a title, and a path of
+ * titles keeps each); '' for none. */
 const groupName = (g: unknown): string => {
-  const s = typeof g === 'string' ? g.trim() : ''
-  return s && !NO_GROUP_RE.test(s) ? (s.split('/').pop() ?? s).trim() : ''
+  const s = typeof g === 'string' ? g.trim().replace(/\s+/g, ' ') : ''
+  return s && !NO_GROUP_RE.test(s) ? s : ''
 }
 const groupPart = (g: unknown): string => groupName(g).toLowerCase()
 
