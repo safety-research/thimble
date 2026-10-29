@@ -183,8 +183,9 @@ The browser workbench:
 ## Update and uninstall
 
 To update both products, run `thimble update` in a shell (not inside Claude Code). It moves the plugin and the browser
-workbench to the newest release, keeps your fixes, and says what to do next; after an install with
-`scripts/install.sh --local`, it moves them to the commit your checkout has, so pull it first. A plugin installed
+workbench to the newest release, keeps your fixes, and says what to do next: each fix that still fits the release stays
+on, and one that does not is off, kept in `thimble fixes`, until `thimble reapply` has Claude fit it. After an install
+with `scripts/install.sh --local`, it moves them to the commit your checkout has, so pull it first. A plugin installed
 without a clone updates with `claude plugin update thimble@thimble` until you use its first fix: from then on, Claude
 Code loads it from your fixes, and only `thimble update` moves it to a new release. Without a clone, your shell does
 not find `thimble`: run `~/.thimble/fixes/live/plugin/bin/thimble update` (if you set `THIMBLE_HOME`, use it in place
