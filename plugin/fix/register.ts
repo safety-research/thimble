@@ -35,7 +35,8 @@
 //   session start          a newer release is out: one line says so (thimble update, in a shell, moves to it); a
 //                          fixer that works on across a reload keeps its step on the bar, and its time; what came of
 //                          a check that no session waited for (the session ended, or the plugin reloaded, while the
-//                          tests ran) gets its line then, as at the fixer's end
+//                          tests ran) gets its line then, as at the fixer's end; the fixes an update set aside that the
+//                          kernel put back as it read the list get one line, and the plugins load them
 //
 // A newer release comes with `thimble update` in a shell, never inside Claude Code.
 //
@@ -47,7 +48,7 @@ import { startDir } from '../core/env'
 import { thimbleHome } from '../core/home'
 import { cut } from '../core/text.js'
 import { busyFixer, fixerCall, fixerCallDone, fixerCheck, fixerEnded, fixOfAgent, outcomesHere, ownFixes, recoverFixers, watch } from './fixer'
-import { type Fix, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, triesAgain, UPDATE_IN_SHELL, updateRan } from './fixes'
+import { type Fix, carriedLine, fixesDir, fixesNow, fixingWord, fixLineNow, fixName, formHead, refreshFixes, reloaded, reloadIfDue, setFixLine, checkUpdate, FIX_ALONE, triesAgain, UPDATE_IN_SHELL, updateRan } from './fixes'
 import { lineSeen, redrawFor } from './line'
 import { fixesContext, redoFix, request } from './request'
 
@@ -232,6 +233,8 @@ export const registerFix: Register = on => {
         await $.state.set(UPDATED, true as never)
         await checkUpdate($)
       }
+      // the fixes an update set aside, which the kernel put back as it read the list: their line, and the load, last
+      await carriedLine($, list)
     })().catch(() => undefined)
     return r
   }).catch(($, e, next) => next(e))
