@@ -4,11 +4,9 @@
 // answer is recorded, so a welcome no one answered, on a page opened before the person's own, leaves the offer to the
 // next page. Settings'
 // Take the tour (the bus's `tour`) runs it again at any time. The tour itself (../tour) loads only then. While it runs,
-// telemetry records nothing and the chat shows no view proposal (lib/touring). A question typed in its ask box goes to
-// main's composer when the tour closes the box. When it closes, the focused pane shows the surface it showed before; a
-// session that ends while it runs closes it.
+// telemetry records nothing and the chat shows no view proposal (lib/touring). When it closes, the focused pane shows
+// the surface it showed before; a session that ends while it runs closes it.
 import { useEffect } from 'react'
-import { offerDraft } from '../chat/pending'
 import { api } from '../lib/api'
 import { bus, type Tab } from '../lib/bus'
 import { hold } from '../lib/telemetry'
@@ -55,7 +53,6 @@ export function TourHost() {
           welcome,
           chat: chatOn(),
           showTab: (tab) => bus.emit('showTab', { tab, from: null }),
-          keep: (question) => offerDraft('main', question),
           onAnswer: welcome ? () => void api.tourSeen().catch(() => undefined) : undefined,
           onEnd: () => {
             running = false

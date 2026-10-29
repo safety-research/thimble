@@ -26,8 +26,9 @@
 //     08:04 as its source shows, headed by its line, and the card holds still;
 //   - step 7: in the ⌘-click demo the key badge stands inside the card and over none of its text; then "⌘-click here"
 //     points at the end of an entry and covers no text and not the popover, until the first try; a real ⌘-drag on the
-//     example card picks only the words dragged over and its ask box lies inside the cutout; the question typed in the box
-//     is in main's composer once Enter closed the box and the tour moved on, and stays there after the tour;
+//     example card picks only the words dragged over and its ask box lies inside the cutout; Enter closes the box and
+//     the tour moves on, and the question typed in it goes with it: main's composer stays empty, then and after the
+//     tour;
 //   - step 8: the report's first figure is the small table, every chart and table is as wide as its figure, and with no
 //     check made there is no comment margin, so its text column is as wide as thimble's own Report draws it, also after
 //     Back from step 9; step 9: the demo makes the check, the margin stands at Run and not before, the comments appear
@@ -962,11 +963,11 @@ async function walk(page: Page, tag: string, send = false) {
   await page.keyboard.type('What happened here?')
   if (send) {
     // Enter sends nothing while the tour runs (the walk's writes are checked after it): the box closes and the tour
-    // moves on, and the question waits in main's composer
+    // moves on, and the question goes with the box
     await page.keyboard.press('Enter')
     await page.waitForFunction(() => ![...document.querySelectorAll('.pointer-box')].some((b) => !b.closest('.tour-root')))
-    await page.waitForFunction(() => document.querySelector<HTMLTextAreaElement>('.chat-composer textarea')?.value === 'What happened here?', null, { timeout: 5000 }).catch(() => null)
-    assert.equal(await composerText(page), 'What happened here?', `${tag} 6: the question typed in the ask box is in main's composer once the tour moved on`)
+    await sleep(600)
+    assert.equal(await composerText(page), '', `${tag} 6: nothing of the question typed in the ask box is in main's composer once the tour moved on`)
   } else {
     await page.keyboard.press('Escape')
     await page.waitForFunction(() => ![...document.querySelectorAll('.pointer-box')].some((b) => !b.closest('.tour-root')))
@@ -1101,7 +1102,7 @@ async function walk(page: Page, tag: string, send = false) {
   await page.click('.tour-pop [data-tour="done"]')
   await sleep(500)
   assert.equal(await page.evaluate(() => !!document.querySelector('.tour-root, .tour-host')), false, `${tag}: Done removes the tour and its examples`)
-  if (send) assert.equal(await composerText(page), 'What happened here?', `${tag}: the question typed in the tour's ask box is still in main's composer after the tour`)
+  if (send) assert.equal(await composerText(page), '', `${tag}: main's composer is empty after the tour, which kept nothing of its ask box`)
   // main opens on an empty chat: no Start card after the tour either; the waiting view proposal shows again
   assert.equal(await realGates(page), 0, `${tag}: no Start card after the tour`)
   await page.waitForFunction(() => document.querySelectorAll('.chat-offer').length === 1, null, { timeout: 3000 })

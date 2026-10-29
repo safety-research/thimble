@@ -726,7 +726,7 @@ export function tourSteps(key: string, chat = true): Step[] {
         const parts = [...document.querySelectorAll('.pointer-hl, .pointer-hl-line')].filter((e) => !e.closest('.tour-root')).concat([real])
         return api.unionOf([api.els.card, ...parts].map(api.rectOf))
       },
-      // moving on closes the ask box, which would otherwise stay open over the next surface; its question is kept
+      // moving on closes the ask box, which would otherwise stay open over the next surface
       leave: (api) => {
         api.closeBox()
         api.closeMock()
