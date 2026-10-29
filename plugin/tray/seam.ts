@@ -8,7 +8,8 @@
 //                                      explainers at rest; while it is open, its own (a taker as hooks/keys.ts takes it)
 //   trayHolds($)                       whether it holds the keys now (open, or a card ] reached stands): its keys then
 //                                      come before every other feature's
-//   trayBand($, els, width, room)      the tray, drawn above the bar while it is open, in at most `room` rows
+//   trayBand($, els, width, room)      the tray, drawn above the bar while it is open, in at most the rows of the
+//                                      window Claude Code shows the band in (`room`)
 //   trayBar($, on, preview)            its items at the bar's left while a card ] reached holds the keys (an open
 //                                      tray's keys are in its header); at rest, ] while the answer shows marks
 //   trayFocus($, row)                  what the tray shows on this row, so the row draws it in focus: a citation by its
@@ -26,7 +27,9 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { BarItem } from '../bar/bar'
 import type { MarkRef } from '../core/answerview'
 import type { Take } from '../hooks/keys'
-import { closeTray, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayHolds as holds, trayKey as key, trayNow } from './tray'
+import { closeTray, giveWay, markPressed as pressed, openTray as openOn, registerTray as register, trayBand as band, trayBar as bar, trayFocus as focus, trayHolds as holds, trayKey as key, trayNow, type BandRoom } from './tray'
+
+export type { BandRoom }
 
 type Engine = EngineInterface
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,7 +43,7 @@ export async function trayHolds($: Engine): Promise<boolean> {
   return holds($)
 }
 
-export async function trayBand($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
+export async function trayBand($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
   return band($, els, width, room)
 }
 

@@ -120,12 +120,15 @@ export const registerBar: Register = on => {
       // the hint at the first session's start that says where the settings are (intro.ts), in the bar
       const intro = await introHint($).catch(() => null)
       const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
-      // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
-      // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off (the
-      // bar's rows as drawn: a failure line or a hint wraps)
-      const room = Number(e.props.maxRows) > 0 ? Math.max(4, Number(e.props.maxRows) - treeRows(rows, width) - 2) : 0
-      const above = await aboveBar($, els, width, room)
-      return els.Box({ flexDirection: 'column', children: [...(above.length ? [els.Text({ key: 'above-gap', children: ' ' }), ...above] : []), els.Text({ key: 'gap', children: ' ' }), ...rows] })
+      // what the features put above the bar (the tray), then a blank row and the bar. Claude Code shows the band whole
+      // while it has at most maxRows rows, and a taller one in a window of maxRows − 1 rows that its wheel scrolls, its
+      // own row under the window counting the rest: a tray taller than the rows over the bar takes that window, and the
+      // bar follows below it (the bar's rows as drawn: a failure line or a hint wraps)
+      const maxRows = Number(e.props.maxRows)
+      const above = await aboveBar($, els, width, maxRows > 0 ? { rows: maxRows - 1, at: Number(e.props.scroll?.offset) || 0, id: String(e.requestId) } : null)
+      // a blank row above it too while all of it fits with the bar
+      const gap = above.length > 0 && !(maxRows > 0 && treeRows(above, width) + treeRows(rows, width) + 2 > maxRows)
+      return els.Box({ flexDirection: 'column', children: [...(gap ? [els.Text({ key: 'above-gap', children: ' ' })] : []), ...above, els.Text({ key: 'gap', children: ' ' }), ...rows] })
     } catch {
       // a drawing that throws is drawn as Claude Code draws it: the person never sees the error itself
       return next(e)

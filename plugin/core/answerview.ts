@@ -13,8 +13,8 @@
 //   squeeze/ui.ts      a catch-up         spansOver: the explainers and heads-ups of its replies on its words
 //   cards/draw.ts      a card's frame     underCard: lines under one card (its label row); cardAsk (what its
 //                                         margin asks: a side thread about it)
-//   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in the rows the
-//                                         band has left over the bar
+//   bar/register.ts    AbovePrompt        aboveBar: what stands above the bar (the tray), in at most the rows of
+//                                         the window Claude Code shows the band in
 //   bar/bar.tsx        the bar            barLeft, barRight: the features' items, in the bar's order (`e explain`,
 //                                         `c cite`)
 //   hooks/keys.ts      prompt.edit        restoredKey: the features' keys, in their order; restoredKeys() are letters
@@ -35,7 +35,7 @@ import { CITE_KEYS, citeBar, citeKey } from '../marks/cite'
 import { featureOn } from '../settings/features.mjs'
 import { SQUEEZE_KEYS, squeezeBar, squeezeHidesCard, squeezeHolds, squeezeKey, squeezeUnder, squeezeUnderCard, squeezeView } from '../squeeze/seam'
 import { THREADS_KEYS, threadOnCard, threadPassages, threadsBar, threadsKey } from '../threads/seam'
-import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey } from '../tray/seam'
+import { markPressed as trayMarkPressed, trayBand, trayBar, trayFocus, trayHolds, trayKey, type BandRoom } from '../tray/seam'
 import { answerStepKey, pickedRow } from './answers'
 import { askOnce } from './rowhook'
 
@@ -165,10 +165,10 @@ export async function underCard($: Engine, els: Any, id: string, cols: number): 
 
 // ------------------------------------------------------------------------------------------------ above the prompt
 
-/** What stands above the bar: the tray while it is open. `room`: the rows it may take, so the bar under it stays on
- *  screen (0: no limit). */
-export async function aboveBar($: Engine, els: Any, width: number, room = 0): Promise<Any[]> {
-  return els0(await safe(trayBand($, els, width, room > 0 ? Math.max(1, room) : 0), []))
+/** What stands above the bar: the tray while it is open. `room`: the window Claude Code shows the band in (tray/tray.ts
+ *  BandRoom), whose rows it takes at most; null: no limit. */
+export async function aboveBar($: Engine, els: Any, width: number, room: BandRoom | null = null): Promise<Any[]> {
+  return els0(await safe(trayBand($, els, width, room), []))
 }
 
 /** A seam's bar items, checked; in the settings pane's preview none is a press. */
