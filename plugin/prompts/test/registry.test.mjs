@@ -59,3 +59,16 @@ test("each section that guidance/guidance.ts leaves out with its feature off is 
   const text = readFileSync(join(ROOT, fileOf('guidance')), 'utf8')
   for (const h of headings) assert.match(text, new RegExp(`^## ${h}$`, 'm'), `guidance.md has ## ${h}`)
 })
+
+test("guidance.md's Citing claims says where a fact comes from, in the words of the browser's main prompt", () => {
+  // the record that shows it; a README, a comment or a report shows only what someone wrote about it; a disagreement
+  // on what the analyst asked about gets one sentence (without that line, live replies told the analyst not to rely on
+  // the README)
+  const text = readFileSync(join(ROOT, fileOf('guidance')), 'utf8')
+  const citing = /^## Citing claims\n([\s\S]*?)^## /m.exec(text)?.[1] ?? ''
+  const principle = 'A fact comes from the record that shows it, such as the code, the config, the data or the logs. ' +
+    'A README, a comment or a report shows only what someone wrote about it. ' +
+    'When it disagrees with the code on what the analyst asked about, tell them in one sentence.'
+  assert.ok(citing.split('\n\n').map(p => p.trim()).includes(principle), 'a paragraph of its own in Citing claims')
+  assert.equal(text.split('README').length, 2, 'guidance.md names a README once')
+})
