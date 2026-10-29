@@ -270,7 +270,7 @@ test("/config hides Checker and its Effort on Bedrock, Vertex or Foundry (a vari
     const run = (i: number, ev: Any): Any => (i < chain.length ? chain[i]($, ev, (x: Any) => run(i + 1, x)) : ev)
     return (await run(0, { key, label: 'x', isHidden: false })).isHidden
   }
-  registerSettings(on, { checkerModel: 'haiku' } as never)
+  registerSettings(on, { checkerModel: 'Haiku 5.5' } as never)
   const cases: [Record<string, string>, boolean][] = [
     [{ CLAUDE_CODE_USE_BEDROCK: '1' }, true], [{ CLAUDE_CODE_USE_VERTEX: 'yes' }, true], [{ CLAUDE_CODE_USE_FOUNDRY: 'TRUE' }, true],
     [{ CLAUDE_CODE_USE_BEDROCK: '0' }, false], [{}, false],

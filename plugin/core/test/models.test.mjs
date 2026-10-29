@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ALIASES, EFFORTS, aboutDollars, dollars, modelById, modelOf, shownName } from '../models.js'
+import { ALIASES, EFFORTS, aboutDollars, dollars, modelById, modelNamed, modelOf, shownName } from '../models.js'
 
 test('an alias names its model and prices its tokens; a rough price reads in plain dollars', () => {
   assert.equal(modelOf('sonnet').name, 'Claude Sonnet 5.5')
@@ -24,4 +24,9 @@ test("Claude Code's four aliases, Fable among them: each model as Claude Code sh
   assert.equal(modelById('claude-opus-5-5[1m]'), modelOf('opus'))
   assert.equal(modelById('claude-made-up-7'), null)
   assert.equal(shownName('made-up'), 'made-up')
+  // a model by the name Claude Code shows it by, which the setting Checker saves
+  for (const a of ALIASES) assert.equal(modelNamed(shownName(a)), modelOf(a))
+  assert.equal(modelNamed('Fable 5.1').id, 'claude-fable-5-1')
+  assert.equal(modelNamed('haiku'), null)
+  assert.equal(modelNamed('Haiku 9.9'), null)
 })

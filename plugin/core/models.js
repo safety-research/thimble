@@ -10,6 +10,7 @@
 //   modelById(id)                  -> the model a request names by its id (a context window's suffix, `[1m]`, aside),
 //                                     or null
 //   shownName(alias)               -> the model's name as Claude Code shows it (`Haiku 5.5`), or the alias itself
+//   modelNamed(name)               -> the model by that name (`Haiku 5.5`: the setting Checker saves it so), or null
 //   dollars(alias, input, output)  -> the list price of `input` and `output` tokens, or null
 //   aboutDollars(x)                -> a rough price in words: 'about $4', 'about $0.30', 'under $0.01'
 //   firstParty(flags)              -> whether Claude Code reaches Claude through Anthropic's first-party API, which
@@ -38,6 +39,11 @@ export function modelById(id) {
 
 export function shownName(alias) {
   return modelOf(alias)?.name.replace(/^Claude /, '') ?? String(alias)
+}
+
+export function modelNamed(name) {
+  const a = ALIASES.find(x => shownName(x) === String(name ?? '').trim())
+  return a ? modelOf(a) : null
 }
 
 export function dollars(alias, input, output) {

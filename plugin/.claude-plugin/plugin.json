@@ -30,13 +30,13 @@
     "checkerModel": {
       "type": "string",
       "title": "Checker",
-      "description": "The model of the second Claude that checks citations. same as Claude: the model of the conversation. haiku (Haiku 5.5), sonnet (Sonnet 5.5), opus (Opus 5.5) or fable (Fable 5.1): that model, which reads the conversation without the cache of the conversation's model.",
+      "description": "The model of the second Claude that checks citations. same as Claude: the model of the conversation. Haiku 5.5, Sonnet 5.5, Opus 5.5 or Fable 5.1: that model, which reads the conversation without the cache of the conversation's model.",
       "options": [
         "same as Claude",
-        "haiku",
-        "sonnet",
-        "opus",
-        "fable"
+        "Haiku 5.5",
+        "Sonnet 5.5",
+        "Opus 5.5",
+        "Fable 5.1"
       ],
       "default": "same as Claude"
     },

@@ -280,7 +280,7 @@ test("in the settings on Bedrock, Vertex or Foundry, no Checker row, whatever it
   for (const [env, shows] of cases) {
     const s = setup()
     s.$.env = { get: async (name: string) => env[name] }
-    const held: Record<string, unknown> = { citations: 'auto cite + verify', checkerModel: 'haiku' }
+    const held: Record<string, unknown> = { citations: 'auto cite + verify', checkerModel: 'Haiku 5.5' }
     s.$.config = { list: async () => Object.entries(held).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })), set: async () => ({}) }
     s.$.ui.focus = async () => ({})
     await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
@@ -298,7 +298,7 @@ test('in the settings, Checker names each model with its version, as Claude Code
   for (const [env, citations, shows] of [[{}, 'auto cite + verify', true], [{}, 'off', false], [{ CLAUDE_CODE_USE_BEDROCK: '1' }, 'auto cite + verify', false], [{ CLAUDE_CODE_USE_FOUNDRY: 'on' }, 'manual', false]] as [Record<string, string>, string, boolean][]) {
     const s = setup()
     s.$.env = { get: async (name: string) => env[name] }
-    const held: Record<string, unknown> = { citations, checkerModel: 'fable', checkerEffort: 'xhigh' }
+    const held: Record<string, unknown> = { citations, checkerModel: 'Fable 5.1', checkerEffort: 'xhigh' }
     s.$.config = { list: async () => Object.entries(held).map(([k, v]) => ({ key: `thimble@inline.${k}`, value: v, isLocked: false })), set: async () => ({}) }
     s.$.ui.focus = async () => ({})
     await openPane(s.$, 'settings', {}, 'Settings', { focus: true })
@@ -320,11 +320,11 @@ test('in the settings, Checker names each model with its version, as Claude Code
     expect(textOf(effort.find(n => n.props?.key === 'choices'))).toBe('same as Claude · low · medium · high · xhigh · max')
     expect(lit(effort)).toEqual(['xhigh'])
     expect(textOf(effort.find(n => n.props?.key === 'says-checkerEffort'))).toBe('The second Claude checks citations at xhigh effort.')
-    // a press on a model sets it by its alias, which Claude Code keeps
+    // a press on a model sets it by the words the pane shows, which Claude Code keeps, and /config shows too
     const set: Any[] = []
     s.$.config.set = async (e: Any) => { set.push(e); return {} }
-    await tree.find(n => n.props?.key === 'mode-checkerModel-haiku').props.onPress()
-    expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.checkerModel', value: 'haiku' })])
+    await tree.find(n => n.props?.key === 'mode-checkerModel-Haiku 5.5').props.onPress()
+    expect(set).toEqual([expect.objectContaining({ key: 'thimble@inline.checkerModel', value: 'Haiku 5.5' })])
   }
   setOptions({})
 })
