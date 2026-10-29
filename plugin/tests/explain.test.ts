@@ -12,7 +12,7 @@ import { registerTell } from '../core/tell'
 import { registerTurn } from '../core/turn'
 import { resetTheme } from '../core/theme'
 import { failLineNow } from '../bar/notice'
-import { explainBar, explainKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
+import { explainBar, explainKey, headsKey, registerExplain, explainState, explaining, explainTerm, glossFor, pendingSpans, pickedWords, resetExplain, sessionGlosses, type ExplainPart } from '../explain/seam'
 import { trayBand, trayNow } from '../tray/tray'
 import { drawEvidence } from '../marks/evidence'
 import { inline, marksIn, readText, rewritesIn, runsText, withAsked } from '../marks/message.js'
@@ -633,6 +633,40 @@ test("an explainer asked for on a heads-up's words, as the evidence pane's e ask
   const [h] = await spansFor(s.$, 't1-row', ANSWER, marksIn(ANSWER))
   await h!.onPress!()
   expect((await trayNow(s.$))!.stack[0]).toMatchObject({ row: 't1-row', kind: 'heads', id: 'h1' })
+})
+
+test('only what the analyst sees keeps its words: h gives no heads-up on the words of an explainer shown there, and gives one on the words of an explainer Explainers hides', async () => {
+  // Heads-ups on demand: the look after each answer gives explainers alone, and h asks for the heads-up
+  setOptions({ details: 'on demand' })
+  try {
+    const s = setup([
+      reply({ glosses: [{ term: 'network drop', body: 'A moment the office network went down.' }] }),
+      reply({ heads: { term: '30 seconds after a network drop', title: 'One office', bullets: ['The log covers one office.'] } }),
+      reply({ glosses: [{ term: 'power cut', body: 'The building lost its power.' }] }),
+      reply({ heads: { term: '20 seconds after a power cut', title: 'One building', bullets: ['Only one building lost power.'] } }),
+    ])
+    s.$.ui = { invalidate: () => undefined }
+    const h = async () => {
+      await (await headsKey(s.$, 'h', 0))!.later!()
+      await settle()
+      await drainNow(s.$)
+      await settle()
+    }
+    const drawn = async (row: string, text: string) => (await spansFor(s.$, row, text, [])).map(x => [x.id, text.slice(x.start, x.end)])
+    const one = 'Uploads fail when the retry budget runs out: 41 of the 44 failures came 30 seconds after a network drop.'
+    await answered(s, { id: 'k1', prompt: 'Why do uploads fail?', text: one })
+    await h()
+    expect(await drawn('k1-row', one)).toEqual([['g1', 'network drop']])
+    // Explainers off: the analyst sees no explainer on the next answer, so h's heads-up takes its words
+    const two = 'The second office lost 12 uploads 20 seconds after a power cut.'
+    await answered(s, { id: 'k2', prompt: 'And the second office?', text: two })
+    setOptions({ details: 'on demand', explain: 'off' })
+    await h()
+    expect((await partOf<ExplainPart>(s.$, 'k2-row', 'explain'))!.order).toEqual(['g1', 'h1'])
+    expect(await drawn('k2-row', two)).toEqual([['h1', '20 seconds after a power cut']])
+  } finally {
+    setOptions({})
+  }
 })
 
 // ------------------------------------------------------------------------------------------------ c: cite

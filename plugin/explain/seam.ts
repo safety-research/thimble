@@ -7,6 +7,7 @@
 // newest message that holds them (place.mjs mergeLook) and keeps it as that message's part `explain`. An explainer
 // and a heads-up never share words: the one already there keeps them, so a look's new one that would take words of
 // the other kind is not added, and an explainer the analyst asks for is drawn only on words no heads-up stands on.
+// Only what the analyst sees keeps words: one a switch hides keeps none.
 // The row draws each as a press on its words: an explainer highlighted teal, a heads-up orange (place.mjs
 // markColors); a press opens the tray on it (tray/seam.ts openTray). Claude hears with the next prompt the words of
 // each one shown on its answer (tellComments), and which ones the analyst opened (core/engaged.ts). A term is
@@ -183,7 +184,7 @@ export async function explainMerge($: Engine, look: Look): Promise<void> {
     const shownText = (await textView($, x.row, x.text)).text
     msgs.push({ row: x.row, text: shownText === x.text ? x.text : `${x.text}\n\n${shownText}`, part })
   }
-  const r = mergeLook(msgs, look.out, { glossed: m.glossed }) as { parts: Record<string, ExplainPart>; placed: string[]; heads: string[] }
+  const r = mergeLook(msgs, look.out, { glossed: m.glossed }, shown) as { parts: Record<string, ExplainPart>; placed: string[]; heads: string[] }
   for (const [row, part] of Object.entries(r.parts)) await setPart($, row, 'explain', part)
   if (r.placed.length) m.glossed = [...m.glossed, ...r.placed].slice(-GLOSSED_KEEP)
   if (r.heads.length) m.headsGiven = [...m.headsGiven, ...r.heads].slice(-HEADS_KEEP)
