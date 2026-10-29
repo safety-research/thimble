@@ -1212,16 +1212,27 @@ def _in_copy(rec: dict[str, Any], words: list[str], session: str | None, asked: 
 
 
 def _unchecked(rec: dict[str, Any]) -> bool:
-    """Whether the fix's copy holds work that no check of thimble's took: a file changed, added or removed there after
-    the fixer's end, such as the change Claude makes in the person's session for a fix that did not pass, or what a fixer
-    that ended with `Cannot:` left. (A check commits all that the copy holds, so a copy that was checked holds nothing
-    beside its commit.) git reads the copy on its own entry (_own_git), and not when the copy holds a repository of its
-    own (_nested_git)."""
+    """Whether the fix's copy holds work that no check of thimble's took, such as the change Claude makes in the
+    person's session for a fix that did not pass, or what a fixer that ended with `Cannot:` left: a file changed, added
+    or removed there, or a commit made there. A check commits all that the copy holds, and thimble leaves the copy's
+    HEAD at the commit the copy was cut from (base) or at the commit of a check (commit, or round_commit once a round of
+    a fix changed in place settled); so a HEAD at another commit that has base in its history is one made in the copy
+    since, such as a commit on the last check's, or that check's commit amended. git reads the copy on its own entry
+    (_own_git), and not when the copy holds a repository of its own (_nested_git)."""
     g = _own_git(rec.get("work"))
     if g is None or _nested_git(rec["work"]):
         return False
-    p = run(["git", "status", "--porcelain"], cwd=rec["work"], check=False, env={**os.environ, **g})
-    return p.returncode == 0 and bool(p.stdout.strip())
+    env = {**os.environ, **g}
+    p = run(["git", "status", "--porcelain"], cwd=rec["work"], check=False, env=env)
+    if p.returncode != 0:
+        return False
+    if p.stdout.strip():
+        return True
+    base = str(rec.get("base") or "")
+    now = run(["git", "rev-parse", "-q", "--verify", "HEAD"], cwd=rec["work"], check=False, env=env).stdout.strip()
+    if not base or not now or now in (base, rec.get("commit"), rec.get("round_commit")):
+        return False
+    return run(["git", "merge-base", "--is-ancestor", base, now], cwd=rec["work"], check=False, env=env).returncode == 0
 
 
 def round_(fid: int | str, words: str, session: str | None = None, asked: str | None = None) -> dict[str, Any]:

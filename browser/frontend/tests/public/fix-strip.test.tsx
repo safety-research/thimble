@@ -35,6 +35,8 @@ describe('the command and the page', () => {
       text: "thimble fix did not start: thimble's fixes are off on this server (THIMBLE_FIXES=off)",
       kind: 'error',
     })
+    // another 400, such as one whose body is no JSON (lib/api gives the status text then), is no line on how to ask
+    expect(notStartedToast(new Error('400 Bad Request'))).toEqual({ text: 'thimble fix did not start: Bad Request', kind: 'error' })
   })
 
   test('the text copy names the card open in focus, a dialog, and each pane by its surface', () => {

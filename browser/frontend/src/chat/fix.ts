@@ -20,12 +20,16 @@ export function fixWords(text: string): string | null {
   return m ? (m[1] ?? '').trim() : null
 }
 
-/** The toast when the server started nothing for a /thimble-fix (lib/api's `<status> <detail>`): a 400 is its line on
- * how to ask, as the terminal answers a fix's number alone that has nothing to try again, shown on its own; anything
- * else is why no fix started. Pure. */
+/** The server's line on how to ask for a fix (backend fixes.py EMPTY), as the terminal answers `/thimble-fix` with
+ * nothing to try again (plugin/fix/fixes.ts FIX_ALONE). */
+export const FIX_ALONE = 'Ask for a change to thimble with /thimble-fix <what should work differently>.'
+
+/** The toast when the server started nothing for a /thimble-fix (lib/api's `<status> <detail>`): its line on how to ask
+ * (FIX_ALONE), shown on its own, as the terminal shows it; anything else, another 400 too, is why no fix started.
+ * Pure. */
 export function notStartedToast(e: Error): { text: string; kind?: 'error' } {
   const said = e.message.replace(/^\d{3}\s+/, '')
-  return /^400\s/.test(e.message) ? { text: said } : { text: `thimble fix did not start: ${said}`, kind: 'error' }
+  return said === FIX_ALONE ? { text: said } : { text: `thimble fix did not start: ${said}`, kind: 'error' }
 }
 
 /** One fix the row can show (backend fixes.status). */

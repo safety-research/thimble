@@ -539,6 +539,44 @@ def test_after_cannot_a_try_again_keeps_what_claude_changed_in_the_copy_and_a_bl
     assert got["same_copy"] is True and got["state"] == "working" and "blocked" not in got
 
 
+def _claude_commits(rec: dict, *args: str) -> None:
+    """Claude commits what it changed in the fix's copy, with git in that folder, as it may in the person's session."""
+    sh("git", "add", "-A", cwd=Path(rec["work"]))
+    sh("git", "commit", "-q", *args, "-m", "Wrap the legend", cwd=Path(rec["work"]))
+
+
+def test_a_try_again_goes_on_in_the_copy_when_claude_committed_its_change_there(world, monkeypatch):
+    # the tests fail; Claude changes the copy and commits the change there, so git sees no changed file in the copy: the
+    # person's /thimble-fix 1 alone still goes on in that copy, and the check takes the change, as one commit on the
+    # commit the copy was cut from
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    r = made(world)
+    r = FX.done(r["id"], "Bar says read", "")
+    edit = _claude_changes(r)
+    _claude_commits(r)
+    assert sh("git", "status", "--porcelain", cwd=Path(r["work"])) == ""
+    got = FX.redo(r["id"])
+    assert got["same_copy"] is True and got["work"] == r["work"] and edit.exists()
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "true")
+    done = FX.done(r["id"], "Bar says read", "The bar says read, and the legend wraps.")
+    assert done["state"] == "ready" and sorted(f["path"] for f in done["files"]) == ["plugin/bar/bar.tsx",
+                                                                                      "plugin/bar/legend.ts"]
+    assert sh("git", "rev-parse", f"{done['commit']}^", cwd=FX.live_dir()) == r["base"]
+    # Claude amends the check's commit instead: the same
+    monkeypatch.setenv("THIMBLE_FIX_TESTS", "false")
+    t = made(world, "make the bar bold")
+    t = FX.done(t["id"], "Bar bold", "")
+    _claude_changes(t)
+    _claude_commits(t, "--amend")
+    assert FX.redo(t["id"])["same_copy"] is True
+    # after Cannot, which commits nothing, Claude commits on the commit the copy was cut from: the same
+    n = made(world, "make the legend wrap", edit=False)
+    n = FX.done(n["id"], cannot="it needs a newer node")
+    _claude_changes(n)
+    _claude_commits(n)
+    assert FX.redo(n["id"])["same_copy"] is True
+
+
 def test_export_saves_files_and_sends_nothing(world, tmp_path):
     r = made(world)
     FX.done(r["id"], "Bar says read", "")
