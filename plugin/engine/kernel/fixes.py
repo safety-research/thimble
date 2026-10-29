@@ -59,7 +59,8 @@ a shared fix goes through. Binary files are refused too. It may change the rest 
 file and its command hooks, the launcher, thimble's scripts and lock files (a package added from REGISTRIES): its record
 names the kinds and the files (notice), and the line that asks whether to use it says them in one sentence, as thimble
 fix show does; a fix that thimble update --continue turns on again, with no key press, may change only those it changed
-before (continue_). A file moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
+before (continue_), and one that an update puts back on its own (carry) is the very change the person had on. A file
+moved counts as both its names. thimble checks this when the fixer ends (done); the fixer's
 prompt does not list these files. A check that refuses a change (these files, a binary file, failing tests) keeps the
 refusal on the record (refused: why, the files, the tests' output) until the next check, and the plugin gives it back
 to a fixer in the same copy (again): the fixer puts the change elsewhere or fixes the tests, or ends saying why it
@@ -3386,7 +3387,7 @@ def show_lines(fid: int | str, width: int | None = None, paint: Paint | None = N
     p = r.get("pending") or {}
     if r.get("state") == "pending" and r.get("error"):
         # it did not fit the release when the update put the fixes back on it
-        out += _wrapped("Set aside", f"at the update to {p.get('version') or release_name()}: {r['error']}", width)
+        out += _wrapped("Set aside", str(r["error"]), width)
     elif r.get("state") == "pending":
         out += _wrapped("Set aside", f"at the update to {p.get('version') or release_name()}, so that nothing is fixed "
                         "twice", width)

@@ -803,7 +803,7 @@ def test_update_puts_back_the_fixes_that_fit_and_reapply_brings_back_the_one_tha
     assert f"  fix {c} is off: it does not fit thimble 0.10.3" in rows
     nxt = rows[rows.index("What next") + 1]
     assert nxt.split()[:2] == ["thimble", "reapply"] and "the 1 fix thimble update set aside" in nxt
-    assert "  Set aside     at the update to 0.10.3: it does not fit thimble 0.10.3" in FX.show_lines(c, 100)
+    assert "  Set aside     it does not fit thimble 0.10.3" in FX.show_lines(c, 100)
     with pytest.raises(FX.FixError, match="thimble reapply"):
         FX.apply(c, press(c))
     # thimble reapply: Claude Code in live, with the prompt made from the records of the fix still set aside
