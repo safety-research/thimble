@@ -48,9 +48,14 @@ function textOf(n: Any): string {
 
 /** A made-up session: the folder's coverage counts as `coverage` says (a JSON text, or a failure), with two labels.
  *  `ran`: each command's argv. `o.count`: answers each run of `thimble coverage` instead, when it comes; `o.disk`: the
- *  files the plugin writes and reads back, by path. */
-function world(on: Any, coverage: { ok: boolean; out: string }, o: { count?: (argv: string[]) => Promise<{ code: number; out: string }>; disk?: Map<string, string> } = {}) {
-  mock.env(on, { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' })
+ *  files the plugin writes and reads back, by path; `o.env`: more of the environment, which the test may change as it
+ *  goes. */
+function world(on: Any, coverage: { ok: boolean; out: string }, o: { count?: (argv: string[]) => Promise<{ code: number; out: string }>; disk?: Map<string, string>; env?: Record<string, string | undefined> } = {}) {
+  const env = { THIMBLE_HOME: '/made-up/.thimble', HOME: '/made-up/home', TMPDIR: '/made-up/tmp', PATH: '/usr/bin', THIMBLE_ROOT: '/made-up/data' }
+  if (o.env) {
+    const more = o.env
+    on('env.get', (_$: unknown, e: { name: string }) => ({ value: e.name in more ? more[e.name] : (env as Record<string, string>)[e.name] }))
+  } else mock.env(on, env)
   const clock = mock.clock(on, { now: 0 })
   const submitted: string[] = []
   const opened: string[] = []
@@ -472,6 +477,33 @@ test('the first session starts with one plain line above the bar that says where
   // a reload or a new session keeps it gone: it is kept for the install, not the session
   await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
   expect(textOf(await $.ui.render(BAND))).not.toContain(INTRO)
+})
+
+test("where no click reaches thimble (Claude Code's classic layout, CLAUDE_CODE_DISABLE_MOUSE, CLAUDE_CODE_DISABLE_MOUSE_CLICKS), the first session's line names /thimble-settings in place of the click; elsewhere the click", async ($, on) => {
+  const env: Record<string, string | undefined> = {}
+  world(on, { ok: true, out: JSON.stringify(COVERAGE) }, { env })
+  mock.store(on)
+  await $.session.start({ cwd: '/made-up/data', surface: 'terminal', isInteractive: true } as never)
+  const band = async (isFullscreen: boolean, vars: Record<string, string> = {}) => {
+    for (const k of ['CLAUDE_CODE_DISABLE_MOUSE', 'CLAUDE_CODE_DISABLE_MOUSE_CLICKS']) delete env[k]
+    Object.assign(env, vars)
+    return textOf(await $.ui.render({ ...(BAND as Any), viewport: { columns: 100, rows: 40, isFullscreen } } as never))
+  }
+  const click = 'click thimble for settings.'
+  const typed = 'type /thimble-settings for settings.'
+  // the fullscreen layout asks the terminal for clicks
+  expect(await band(true)).toContain(click)
+  // the classic layout asks for none; nor does Claude Code with CLAUDE_CODE_DISABLE_MOUSE set, and with
+  // CLAUDE_CODE_DISABLE_MOUSE_CLICKS set it drops the clicks, read as Claude Code reads them
+  for (const [isFullscreen, vars] of [[false, {}], [true, { CLAUDE_CODE_DISABLE_MOUSE: '1' }], [true, { CLAUDE_CODE_DISABLE_MOUSE: 'TRUE' }], [true, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' }], [true, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'yes' }]] as [boolean, Record<string, string>][]) {
+    const b = await band(isFullscreen, vars)
+    expect([isFullscreen, vars, b.includes(typed), b.includes(click)]).toEqual([isFullscreen, vars, true, false])
+  }
+  // a variable set to a false value, or one Claude Code does not read as either, leaves the clicks; and
+  // CLAUDE_CODE_DISABLE_MOUSE set either way decides alone
+  for (const vars of [{ CLAUDE_CODE_DISABLE_MOUSE: '0' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'off' }, { CLAUDE_CODE_DISABLE_MOUSE_CLICKS: 'maybe' }, { CLAUDE_CODE_DISABLE_MOUSE: 'false', CLAUDE_CODE_DISABLE_MOUSE_CLICKS: '1' }]) {
+    expect([vars, (await band(true, vars)).includes(click)]).toEqual([vars, true])
+  }
 })
 
 test('the line at the first session goes by itself after a few seconds, and stays gone after a reload', async ($, on) => {

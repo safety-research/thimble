@@ -18,7 +18,7 @@ import { treeRows } from '../core/trail.mjs'
 import { openLabels } from '../labels/pane'
 import { barKeys, barRows, type BarPresses } from './bar'
 import { countsNow, needCounts, recount } from './counts'
-import { introDone, introHint } from './intro'
+import { clicksReach, introDone, introHint } from './intro'
 import { remindAfterAnswer } from './hints'
 import { failNotice, promptTyped } from './notice'
 
@@ -117,8 +117,9 @@ export const registerBar: Register = on => {
       const shows = (await paneNow($).catch(() => null))?.kind ?? null
       drawnPane = shows && (await paneShows($, shows).catch(() => false)) ? shows : null
       const width = Math.max(20, e.props.bodyColumns)
-      // the hint at the first session's start that says where the settings are (intro.ts), in the bar
-      const intro = await introHint($).catch(() => null)
+      // the hint at the first session's start that says where the settings are (intro.ts), in the bar: the click on
+      // `thimble`, or the command where no click reaches it
+      const intro = await introHint($, await clicksReach($, e).catch(() => true)).catch(() => null)
       const rows = await barRows($, els, width, { presses, ...(intro ? { intro } : {}) })
       // what the features put above the bar (the tray, a label run's ask), a blank row above it, as above the bar
       // in the rows the band has left over the bar and the two blank rows, so a tall tray never pushes the bar off (the
